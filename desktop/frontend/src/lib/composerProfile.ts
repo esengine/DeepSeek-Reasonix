@@ -10,10 +10,11 @@ import {
   type Meta,
   type Mode,
   type TabMeta,
+  type QualityFloor,
   type ToolApprovalMode,
 } from "./types";
 
-export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "goal";
+export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "goal" | "qualityFloor";
 
 export type ComposerProfilePending = Partial<Record<ComposerProfileField, true>>;
 
@@ -22,19 +23,21 @@ export interface ComposerProfile {
   goalDraftMode: boolean;
   toolApprovalMode: ToolApprovalMode;
   goal: string;
+  qualityFloor: QualityFloor;
   pending: ComposerProfilePending;
 }
 
 export type ComposerProfilesByTab = Record<string, ComposerProfile>;
 export type UserPlanModeIntents = Record<string, true>;
 
-const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "goal"];
+const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "goal", "qualityFloor"];
 
 export const defaultComposerProfile: ComposerProfile = Object.freeze({
   collaborationMode: "normal",
   goalDraftMode: false,
   toolApprovalMode: "ask",
   goal: "",
+  qualityFloor: "standard",
   pending: {},
 });
 
@@ -68,6 +71,7 @@ export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolAppr
       fallbackToolApprovalMode(tab.toolApprovalMode, fallback),
     ),
     goal,
+    qualityFloor: tab.qualityFloor ?? "standard",
   });
 }
 
@@ -86,6 +90,7 @@ export function composerProfileFromMeta(meta?: Meta | null, legacyMode?: Mode, f
     goalDraftMode: false,
     toolApprovalMode,
     goal,
+    qualityFloor: meta.qualityFloor ?? "standard",
   });
 }
 
@@ -104,6 +109,9 @@ function assignField(profile: ComposerProfile, field: ComposerProfileField, valu
     case "goal":
       profile.goal = value;
       return;
+    case "qualityFloor":
+      profile.qualityFloor = value as QualityFloor;
+      return;
   }
 }
 
@@ -113,6 +121,7 @@ function profilesEqual(a: ComposerProfile | undefined, b: ComposerProfile | unde
     && a.goalDraftMode === b.goalDraftMode
     && a.toolApprovalMode === b.toolApprovalMode
     && a.goal === b.goal
+    && a.qualityFloor === b.qualityFloor
     && profileFields.every((field) => Boolean(a.pending[field]) === Boolean(b.pending[field]));
 }
 

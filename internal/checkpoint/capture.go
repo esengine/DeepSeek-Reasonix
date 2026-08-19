@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"reasonix/internal/evidence"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
@@ -54,6 +55,13 @@ func CapturePath(path string, opts CaptureOptions) (Fingerprint, *CoverageGap, e
 	}
 	abs = filepath.Clean(abs)
 
+	if evidence.ClassifyWriteScope(abs, opts.WorkspaceRoot, nil) == evidence.WriteScopeScratch {
+		return Fingerprint{}, &CoverageGap{
+			Reason: GapScratch,
+			Detail: "scratch path is not a project file",
+			Path:   path,
+		}, nil
+	}
 	if opts.WorkspaceRoot != "" {
 		if _, err := safePath(opts.WorkspaceRoot, abs); err != nil {
 			reason := GapOutsideWorkspace

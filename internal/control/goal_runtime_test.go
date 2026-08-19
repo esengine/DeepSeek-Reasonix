@@ -701,8 +701,9 @@ func TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard(t *testing
 		textTurn("premature final"),
 		textTurn("still incomplete"),
 	}}
-	// "implement main" is an unanchored mutation: the standard policy derives
-	// closed-loop evidence without any selectable delivery profile.
+	// "implement main" is an unanchored mutation. The delivery floor is what
+	// turns its closed-loop evidence gap into a pause; the standard floor lets
+	// the answer stand (TestStandardFloorNeverPausesOnReadinessGap).
 	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	c := New(Options{
@@ -715,6 +716,9 @@ func TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard(t *testing
 		}),
 	})
 
+	if err := c.SetQualityFloor(QualityFloorDelivery); err != nil {
+		t.Fatalf("SetQualityFloor: %v", err)
+	}
 	c.Submit("implement main")
 	ev := <-done
 	if ev.Readiness == nil || len(ev.Readiness.Missing) == 0 {

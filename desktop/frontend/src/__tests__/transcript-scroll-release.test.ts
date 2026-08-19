@@ -2,6 +2,7 @@
 
 import {
   INITIAL_TRANSCRIPT_SCROLL_STATE,
+  isSubstantialTranscriptDisplacement,
   isTranscriptContentShrink,
   reduceTranscriptScroll,
   type TranscriptScrollEvent,
@@ -128,7 +129,7 @@ const jump = run([
   { type: "JUMP_TO_BOTTOM", behavior: "smooth" },
 ]);
 check(jump.state.mode === "tail-follow", "jump-bottom explicitly owns the tail");
-check(jump.commands.join(",") === "SCROLL_TO_LAST", "jump-bottom uses Virtuoso scrollToIndex only");
+check(jump.commands.join(",") === "SCROLL_TO_LAST", "jump-bottom emits only the tail command");
 
 const repeatedJump = run([
   { type: "JUMP_TO_BOTTOM" },
@@ -172,9 +173,39 @@ check(
   "delivered displacement and later growth both reconverge while tail-follow owns the viewport",
 );
 
+const repeatedDisplacement = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+]);
+check(
+  repeatedDisplacement.commands.join(",") === "AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM",
+  "repeated non-bottom deliveries do not loop tail writes, while a layout change can reconverge",
+);
+
 check(isTranscriptContentShrink(-48), "a fold-sized height drop is a shrink");
 check(!isTranscriptContentShrink(-8), "measurement jitter is not a shrink");
 check(!isTranscriptContentShrink(80), "content growth is not a shrink");
+
+check(isSubstantialTranscriptDisplacement(1200), "a thumb-drop-sized gap is a substantial displacement");
+check(!isSubstantialTranscriptDisplacement(4), "bottom-adjacent jitter is not substantial");
+
+// A misread shrink (native-thumb release remeasure seen as a height drop)
+// leaves layout convergence inert; a later substantial displacement delivery
+// must still reconverge the tail instead of stranding the viewport.
+const strandedAfterMisreadShrink = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true, substantial: true },
+  { type: "CONTENT_SHRANK" },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true, substantial: true },
+  { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true, substantial: true },
+]);
+check(
+  strandedAfterMisreadShrink.commands.join(",") === "AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM",
+  "substantial displacements keep reconverging after a misread shrink",
+);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

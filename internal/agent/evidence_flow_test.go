@@ -983,7 +983,7 @@ func TestEvidenceFlowAcceptsTodoCompletionAfterCompleteStep(t *testing.T) {
 	}
 }
 
-func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
+func TestEvidenceFlowAcceptsTodoCompletionWithoutCompleteStep(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {
 		t.Fatal("todo_write builtin not registered")
@@ -1005,7 +1005,6 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 				"result":"parser added",
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
-			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -1017,12 +1016,15 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 	}
 
 	results := toolResults(a.sess.conversation, "todo_write")
-	if len(results) < 2 {
-		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
+	if len(results) < 2 || !strings.Contains(results[1], "1 completed") {
+		t.Fatalf("todo_write results = %v, want progress accepted without complete_step", results)
 	}
-	got := results[1]
-	if !strings.Contains(got, "complete_step") {
-		t.Fatalf("todo_write result = %q, want completion rejected until complete_step", got)
+	got := a.CanonicalTodoState()
+	if len(got) != 1 || got[0].Status != "completed" {
+		t.Fatalf("canonical todos = %+v, want the item completed by todo_write", got)
+	}
+	if step := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(step, "signed off") {
+		t.Fatalf("complete_step result = %q, want a later optional receipt", step)
 	}
 }
 
@@ -1140,7 +1142,7 @@ func TestEvidenceFlowAllowsBatchCompleteStepSignoffs(t *testing.T) {
 	}
 }
 
-func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing.T) {
+func TestEvidenceFlowTodoCompletionSurvivesFailedCompleteStep(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {
 		t.Fatal("todo_write builtin not registered")
@@ -1162,12 +1164,6 @@ func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
 			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
-			toolCallChunk("c4", "complete_step", `{
-				"step":"Add parser",
-				"result":"parser added",
-				"evidence":[{"kind":"manual","summary":"checked manually"}]
-			}`),
-			toolCallChunk("c5", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -1178,17 +1174,20 @@ func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing
 		t.Fatalf("Run: %v", err)
 	}
 
-	results := toolResults(a.sess.conversation, "todo_write")
-	if len(results) < 2 {
-		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
+	if step := lastToolResult(a.sess.conversation, "complete_step"); strings.Contains(step, "signed off") {
+		t.Fatalf("complete_step result = %q, want the mismatched sign-off to fail", step)
 	}
-	got := results[1]
-	if !strings.Contains(got, "complete_step") {
-		t.Fatalf("todo_write result = %q, want failed complete_step not to authorize completion", got)
+	results := toolResults(a.sess.conversation, "todo_write")
+	if len(results) < 2 || !strings.Contains(results[1], "1 completed") {
+		t.Fatalf("todo_write results = %v, want progress after a failed sign-off", results)
+	}
+	got := a.CanonicalTodoState()
+	if len(got) != 1 || got[0].Status != "completed" {
+		t.Fatalf("canonical todos = %+v, want completed despite failed complete_step", got)
 	}
 }
 
-func TestEvidenceFlowRejectsReplacedTodoAfterNumericCompleteStep(t *testing.T) {
+func TestEvidenceFlowRejectsReplacingCompletedTodoAfterNumericCompleteStep(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {
 		t.Fatal("todo_write builtin not registered")
@@ -1210,24 +1209,23 @@ func TestEvidenceFlowRejectsReplacedTodoAfterNumericCompleteStep(t *testing.T) {
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
 			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Ship parser","status":"completed"}]}`),
-			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(withNoClosedLoop(context.Background()), "try to reuse a numeric sign-off for another todo"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "replace the completed todo after a numeric sign-off"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
 	results := toolResults(a.sess.conversation, "todo_write")
-	if len(results) < 2 {
-		t.Fatalf("todo_write results = %v, want the rejected replacement result", results)
+	if len(results) < 2 || !strings.Contains(results[1], "completed prefix") {
+		t.Fatalf("todo_write results = %v, want completed history preserved", results)
 	}
-	got := results[1]
-	if !strings.Contains(got, "Ship parser") || !strings.Contains(got, "complete_step") {
-		t.Fatalf("todo_write result = %q, want replaced todo rejected", got)
+	got := a.CanonicalTodoState()
+	if len(got) != 1 || got[0].Content != "Add parser" || got[0].Status != "completed" {
+		t.Fatalf("canonical todos = %+v, want the signed-off item kept", got)
 	}
 }
 

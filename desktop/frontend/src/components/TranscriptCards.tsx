@@ -2,9 +2,10 @@
 // decision receipts, and compaction cards.
 
 import { useState } from "react";
-import { ChevronRight, CirclePlay, FileSearch, Info, TriangleAlert } from "lucide-react";
+import { CheckCheck, ChevronRight, CirclePlay, ClipboardCheck, FileSearch, Info, TriangleAlert } from "lucide-react";
 import { useT } from "../lib/i18n";
 import type { CompactionItem, NoticeItem } from "../lib/transcriptRows";
+import type { WireCompletionSummary } from "../lib/types";
 import { STEER_NOTICE_PREFIX } from "../lib/useController";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
@@ -64,10 +65,12 @@ function DecisionReceiptLine({ receipt }: { receipt: NonNullable<NoticeItem["dec
   );
 }
 
-export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
+export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; onAccept?: () => void; onOpenVerification?: (summary: WireCompletionSummary) => void; actionDisabled?: boolean }) {
   const t = useT();
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
   const ActionIcon = item.action === "open_changes" ? FileSearch : CirclePlay;
+  const showVerification = item.variant === "completion" && Boolean(item.completionSummary && onOpenVerification);
+  const showActions = Boolean((item.action && onAction) || onAccept || showVerification);
   return (
     <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id}>
       <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
@@ -80,12 +83,26 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
             <div className="notice-line__body">{item.text}</div>
           </>
         )}
-        {item.action && onAction ? (
+        {showActions ? (
           <div className="notice-line__actions">
-            <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
-              <ActionIcon size={13} aria-hidden="true" />
-              <span>{item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
-            </button>
+            {item.action && onAction ? (
+              <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
+                <ActionIcon size={13} aria-hidden="true" />
+                <span>{item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
+              </button>
+            ) : null}
+            {showVerification ? (
+              <button className="btn btn--small" type="button" onClick={() => item.completionSummary && onOpenVerification?.(item.completionSummary)}>
+                <ClipboardCheck size={13} aria-hidden="true" />
+                <span>{t("notice.completionViewVerification")}</span>
+              </button>
+            ) : null}
+            {onAccept ? (
+              <button className="btn btn--small" type="button" onClick={onAccept}>
+                <CheckCheck size={13} aria-hidden="true" />
+                <span>{t("notice.deliveryIncompleteAccept")}</span>
+              </button>
+            ) : null}
           </div>
         ) : null}
         {item.detail ? (

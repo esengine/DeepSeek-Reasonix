@@ -2084,9 +2084,10 @@ func (a *App) SetDefaultModel(ref string) error {
 		if err != nil {
 			return err
 		}
-		c.DefaultModel = resolved
+		ref = resolved
+		c.DefaultModel = ref
 		a.mu.Lock()
-		tab.model = resolved
+		tab.model = ref
 		a.mu.Unlock()
 		return nil
 	}); err != nil {
@@ -2095,7 +2096,7 @@ func (a *App) SetDefaultModel(ref string) error {
 		a.mu.Unlock()
 		return err
 	}
-	return nil
+	return a.persistTabModelIfCurrent(tab, ref)
 }
 
 // SetPlannerModel sets (or, with "", clears) the two-model planner.

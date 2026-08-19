@@ -69,6 +69,9 @@ const (
 )
 
 func classifyWriter(profile evidence.EffectProfile, workspaceRoot string) writerClass {
+	if isScratchWriter(profile, workspaceRoot) {
+		return writerNone
+	}
 	// MCP/unknown tools carry ReasonOpaqueWriter. Unproven bash is fail-closed
 	// at permission and the shell contract, not as an MCP-style opaque writer.
 	if profile.Reason == evidence.ReasonOpaqueWriter {
@@ -120,6 +123,31 @@ func classifyWriter(profile evidence.EffectProfile, workspaceRoot string) writer
 		return writerMulti
 	}
 	return writerSingle
+}
+
+func workspaceProofTarget(profile evidence.EffectProfile, workspaceRoot string) bool {
+	if isScratchWriter(profile, workspaceRoot) {
+		return false
+	}
+	return profile.WorkspaceWrite || profile.RepoMetadata
+}
+
+func isScratchWriter(profile evidence.EffectProfile, workspaceRoot string) bool {
+	if profile.Reason == evidence.ReasonScratch {
+		return true
+	}
+	if len(profile.Targets) == 0 {
+		return false
+	}
+	for _, target := range profile.Targets {
+		if target.Path == "" {
+			return false
+		}
+		if evidence.ClassifyWriteScope(target.Path, workspaceRoot, nil) != evidence.WriteScopeScratch {
+			return false
+		}
+	}
+	return true
 }
 
 func writerDuties(class writerClass) (pre []ObligationKind, verify ObligationKind, origin ReasonCode, verifyEnf Enforcement, reviews []ObligationKind) {

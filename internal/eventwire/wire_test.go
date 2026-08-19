@@ -66,6 +66,21 @@ func TestToWireWorkspaceChangedKeepsBoundedEmptyArrays(t *testing.T) {
 	}
 }
 
+func TestToWireCompletionSummaryCarriesTurnTimeAttention(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.CompletionSummary, Completion: &event.CompletionSummaryInfo{
+		Verdict: "partial", ChecksSuppressed: 1, Floor: "delivery", Attention: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind":"completion_summary"`, `"floor":"delivery"`, `"attention":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("completion JSON = %s, missing %s", b, want)
+		}
+	}
+}
+
 func TestToWireContextMaintenanceJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: "applied", Action: "prune", SavedTokens: 4096, ProjectionVersion: 3, CacheBreak: true,

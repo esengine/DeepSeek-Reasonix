@@ -151,6 +151,8 @@ type CompletionSummaryInfo struct {
 	Review             string // none | passed | warned | failed | unavailable
 	GapKinds           []string
 	ConstraintDegraded bool
+	Floor              string // standard | delivery; empty on legacy events
+	Attention          bool   // authoritative when Floor is non-empty
 }
 
 // StreamAttemptAction is the lifecycle phase of a local sampling attempt.

@@ -579,7 +579,6 @@ func TestMetaForTabConcurrentWithBuildSwap(t *testing.T) {
 			tab.StartupErr = ""
 			tab.model = fmt.Sprintf("provider/m%d", i)
 			tab.goal = fmt.Sprintf("goal-%d", i)
-			tab.tokenMode = "full"
 			app.mu.Unlock()
 		}
 	}()

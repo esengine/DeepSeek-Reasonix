@@ -127,7 +127,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 6723
+      "file-size": 6755
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 43
@@ -878,7 +878,7 @@
       "essay": 7
     },
     "internal/config/provider_presets.go": {
-      "file-size": 262
+      "file-size": 604
     },
     "internal/config/render.go": {
       "complexity": 252,
@@ -1266,10 +1266,10 @@
     },
     "internal/provider/responses/responses_test.go": {
       "essay": 6,
-      "test-file-size": 399
+      "test-file-size": 440
     },
     "internal/provider/responses/vendor.go": {
-      "essay": 16
+      "essay": 20
     },
     "internal/provider/schema_canonicalize.go": {
       "essay": 4
@@ -1528,6 +1528,9 @@
     },
     "workers/crash-report/src/stats.ts": {
       "file-size": 76
+    },
+    "internal/config/provider_presets_test.go": {
+      "test-file-size": 80
     }
   }
 }

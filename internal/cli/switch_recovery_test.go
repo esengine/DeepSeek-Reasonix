@@ -317,13 +317,13 @@ func TestWorkModeSwitchUpdatesInPlaceWithoutRebuildOrLeaseMove(t *testing.T) {
 
 	cmd := m.runWorkModeCommand("/preset delivery")
 	if cmd != nil {
-		t.Fatal("deprecated /preset must not queue a controller rebuild")
+		t.Fatal("/preset must not queue a controller rebuild")
 	}
 	if m.ctrl != oldCtrl {
 		t.Fatal("controller instance must stay the same")
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
+		t.Fatalf("controller preset = %q, want delivery", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("unexpected rebuilds: %d", builds)

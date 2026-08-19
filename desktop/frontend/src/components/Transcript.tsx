@@ -1,7 +1,7 @@
 import { forwardRef, memo, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent as ReactTouchEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type WheelEvent as ReactWheelEvent } from "react";
 import { Virtuoso, type Components, type ItemProps, type ListItem, type ListProps } from "react-virtuoso";
 import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
-import type { CheckpointMeta } from "../lib/types";
+import type { CheckpointMeta, WireCompletionSummary } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
@@ -233,7 +233,9 @@ export function Transcript({
   footerHeight = 0,
   onPrompt,
   onDeliveryContinue,
+  onAcceptDelivery,
   onOpenChanges,
+  onOpenVerification,
   onEditPrompt,
   onRewind,
   checkpoints = EMPTY_CHECKPOINTS,
@@ -261,7 +263,9 @@ export function Transcript({
   footerHeight?: number;
   onPrompt: (text: string) => void;
   onDeliveryContinue?: () => void;
+  onAcceptDelivery?: () => void;
   onOpenChanges?: () => void;
+  onOpenVerification?: (summary: WireCompletionSummary) => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
@@ -292,7 +296,6 @@ export function Transcript({
     [liveProp, liveStore, tabId],
   );
   const live = useSyncExternalStore(subscribeLive, getLiveSnapshot, getLiveSnapshot);
-  const liveTailActiveRef = useRef(false);
   const {
     virtuosoRef,
     scrollRef,
@@ -324,7 +327,7 @@ export function Transcript({
     retryRecoveryRequest,
     lastGoodAnchorRef,
     captureStateSnapshot,
-  } = useTranscriptScrollArbiter({ liveTailActiveRef, onRecoveryTerminal: noteTranscriptRecoveryTerminal });
+  } = useTranscriptScrollArbiter({ onRecoveryTerminal: noteTranscriptRecoveryTerminal });
   const virtuosoReadyRef = useRef(false);
   const layoutSurfaceKey = `${tabId ?? ""}:${revealSignal}`;
 
@@ -624,8 +627,8 @@ export function Transcript({
     document.getSelection()?.removeAllRanges();
     clearTranscriptSelection("question-navigation");
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index, "smooth");
-  }, [clearTranscriptSelection, firstItemIndex, invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
+    scrollToDataIndex(index, "smooth");
+  }, [clearTranscriptSelection, invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
 
   // The jump-bottom click is explicit user intent: it outranks any in-flight
   // recovery anchor restore and ends a stale selection gesture whose
@@ -644,7 +647,7 @@ export function Transcript({
     const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
     if (index == null) return;
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index);
+    scrollToDataIndex(index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewindSignal]);
 
@@ -758,6 +761,8 @@ export function Transcript({
               : row.item.action === "open_changes"
                 ? onOpenChanges
                 : undefined}
+            onOpenVerification={row.item.variant === "completion" ? onOpenVerification : undefined}
+            onAccept={row.item.action === "continue_delivery" ? onAcceptDelivery : undefined}
           />
         );
       case "extension":
@@ -794,9 +799,11 @@ export function Transcript({
     loadingOlderHistory,
     olderHistoryCount,
     onDeliveryContinue,
+    onAcceptDelivery,
     onEditPrompt,
     onLoadOlderHistory,
     onOpenChanges,
+    onOpenVerification,
     onPrompt,
     onRewind,
     openAction,
@@ -862,7 +869,6 @@ export function Transcript({
   }, [holdingLiveRegion]);
   const heldLiveRows = heldSurfaceRef.current === layoutSurfaceKey ? heldLiveRowsRef.current : NO_HELD_ROWS;
   const showLiveRegion = liveSplit.liveActive || (holdingLiveRegion && heldLiveRows.length > 0);
-  liveTailActiveRef.current = showLiveRegion;
 
   const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
     noteTranscriptRowCounts(rendered.length, virtualRows.length);

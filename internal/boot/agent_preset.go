@@ -4,33 +4,42 @@ import (
 	"reasonix/internal/agentpreset"
 )
 
-// Deprecated execution-mode vocabulary re-exported for old frontends.
-// Runtime constraints live in internal/runtimepolicy; these names only parse compat inputs.
+// Role vocabulary re-exported for old frontends. Runtime constraints live in
+// internal/runtimepolicy; these names only parse compat inputs.
 
-// Deprecated AgentPreset label constants — one compatibility version.
+// AgentPreset label constants; light and its aliases fold to standard.
 const (
-	AgentPresetLight    = string(agentpreset.Light)
-	AgentPresetBalanced = string(agentpreset.Balanced)
+	AgentPresetStandard = string(agentpreset.Standard)
 	AgentPresetDelivery = string(agentpreset.Delivery)
 )
 
-// Deprecated TokenMode constants — one compatibility version.
+// Deprecated compat aliases for one-version-old callers.
 const (
-	TokenModeFull     = "full"
-	TokenModeEconomy  = "economy"
-	TokenModeDelivery = "delivery"
+	AgentPresetBalanced = AgentPresetStandard
+	TokenModeFull       = "full"
+	TokenModeDelivery   = "delivery"
 )
 
-// NormalizeAgentPreset maps free-form and legacy values to a canonical
-// agent role setting. Empty/unknown → balanced.
+// NormalizeAgentPreset maps free-form and legacy values to the canonical
+// role label. Light folds to standard; unknown values return the input
+// unchanged so callers can surface an error.
 func NormalizeAgentPreset(raw string) string {
-	return string(agentpreset.Normalize(raw))
+	if p, err := agentpreset.Normalize(raw); err == nil {
+		return string(p)
+	}
+	return raw
+}
+
+// NormalizeAgentPresetErr is NormalizeAgentPreset reporting parse errors.
+func NormalizeAgentPresetErr(raw string) (string, error) {
+	p, err := agentpreset.Normalize(raw)
+	return string(p), err
 }
 
 // NormalizeTokenMode is the deprecated alias that returns legacy tokenMode
-// names (economy/full/delivery) for dual-write and older clients.
+// names (full/delivery) for dual-write and older clients.
 func NormalizeTokenMode(mode string) string {
-	return agentpreset.LegacyTokenMode(agentpreset.Normalize(mode))
+	return agentpreset.LegacyTokenMode(agentpreset.FromLegacyTokenMode(mode))
 }
 
 // AgentPresetFromTokenMode maps a legacy tokenMode onto a role setting.
@@ -40,7 +49,7 @@ func AgentPresetFromTokenMode(mode string) string {
 
 // TokenModeFromAgentPreset maps a role setting onto the dual-write tokenMode.
 func TokenModeFromAgentPreset(preset string) string {
-	return agentpreset.LegacyTokenMode(agentpreset.Normalize(preset))
+	return agentpreset.LegacyTokenMode(agentpreset.FromLegacyTokenMode(preset))
 }
 
 // CoreProviderToolNames is the stable top-level tool surface shared by every

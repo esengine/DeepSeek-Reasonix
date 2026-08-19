@@ -16,6 +16,7 @@ const (
 	ReasonUnknown         EffectReason = "unknown"
 	ReasonHintReadOnly    EffectReason = "annotation_read_only"
 	ReasonHintDestructive EffectReason = "annotation_destructive"
+	ReasonScratch         EffectReason = "scratch_write"
 )
 
 // TargetKind classifies one concrete action target.
@@ -141,6 +142,8 @@ func (p EffectProfile) displayReason() string {
 		return "opaque writer"
 	case ReasonDestructive:
 		return "destructive write"
+	case ReasonScratch:
+		return "scratch write"
 	case ReasonUnknown:
 		return "unknown command"
 	default:
@@ -167,4 +170,6 @@ type EffectInput struct {
 	StaticReadOnly bool
 	Hint           CallHint
 	ActualPaths    []string
+	WorkspaceRoot  string
+	ScratchRoots   []string
 }

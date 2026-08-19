@@ -11,7 +11,7 @@ import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
-import { completionSummaryNeedsAttention, completionSummaryNotice, normalizeCompletionSummary } from "./completionSummary";
+import { completionSummaryPresentation, normalizeCompletionSummary, sessionQualityFloor } from "./completionSummary";
 import { invalidateSharedQuery } from "./queryCoalesce";
 import { replayPendingPromptsForActiveTab } from "./promptReplay";
 import { createRafBatch } from "./rafBatch";
@@ -31,7 +31,7 @@ import { useStaleTurnWatchdog } from "./useStaleTurnWatchdog";
 import type { SearchSource } from "./searchSources";
 import { attachWebSearchOutput, historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, parseTodos, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
-import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
+import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode, type QualityFloor } from "./types";
 import type {
   BalanceInfo,
   CheckpointMeta,
@@ -136,9 +136,8 @@ function tailPreview(text: string, limit: number): string {
 }
 // --- Sub-agent progress reducer helpers --------------------------------------
 // Applies one reserved ToolProgress event to the target card's in-memory
-// preview. The card must exist (its dispatch always precedes progress events)
-// and have been initialized by the dispatch. Never writes tool.output, never
-// touches the parent LiveStream, and never produces history data.
+// preview. The card must exist and be dispatch-initialized; never writes
+// tool.output, the parent LiveStream, or history data.
 function applySubagentProgress(s: State, t: WireTool): State {
   if (!t.id) return s;
   const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === t.id);
@@ -239,7 +238,7 @@ export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
       kind: "compaction";
       id: string;
@@ -410,12 +409,9 @@ interface State {
   lastRequestTps?: number | null;
   pendingRequestModelMs?: number;
   promptWaitStartedAt?: number;
-  // promptEventClock() reading taken when the CURRENT pending prompt first
-  // arrived. Orders the prompt against reconciliation snapshots so a snapshot
-  // fetched before the event cannot clear the prompt it never knew about
-  // (#6429). Anchored to the prompt's first arrival and NOT advanced by a
-  // same-id replay, so an authoritative idle snapshot taken after the user
-  // answered is never mistaken for stale (#6432 reverse race).
+  // promptEventClock() at the CURRENT prompt's first arrival; not advanced by
+  // a same-id replay. Orders the prompt against reconciliation snapshots so a
+  // snapshot cannot clear a prompt it never knew about (#6429, #6432).
   promptArrivedAt?: number;
   // Id of the prompt promptArrivedAt is anchored to. A replay re-emitting the
   // same id keeps the original arrival time; only a genuinely new prompt id
@@ -592,6 +588,9 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     collaborationMode: tab.collaborationMode ?? existing?.collaborationMode ?? "normal",
     toolApprovalMode,
     tokenMode: tab.tokenMode ?? existing?.tokenMode ?? "full",
+    agentPreset: tab.agentPreset ?? existing?.agentPreset,
+    qualityFloor: tab.qualityFloor ?? existing?.qualityFloor,
+    floorInferred: tab.floorInferred ?? existing?.floorInferred,
     goal: tab.goal ?? existing?.goal,
     goalStatus: tab.goalStatus ?? existing?.goalStatus,
     canonicalTodos: existing?.canonicalTodos, dismissedTodoBatches: (tab.sessionPath !== undefined ? tab.sessionPath : existing?.sessionPath) === existing?.sessionPath ? existing?.dismissedTodoBatches : undefined,
@@ -632,6 +631,9 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.toolApprovalMode === b.toolApprovalMode &&
 
     a.tokenMode === b.tokenMode &&
+    a.agentPreset === b.agentPreset &&
+    a.qualityFloor === b.qualityFloor &&
+    a.floorInferred === b.floorInferred &&
     a.goal === b.goal &&
     a.goalStatus === b.goalStatus &&
     sameTodoList(a.canonicalTodos, b.canonicalTodos) && sameStringList(a.dismissedTodoBatches, b.dismissedTodoBatches)
@@ -1445,22 +1447,13 @@ function applyEvent(s: State, e: WireEvent): State {
     case "completion_summary": {
       if (!e.completion) return s;
       const completionSummary = normalizeCompletionSummary(e.completion);
-      if (!completionSummaryNeedsAttention(completionSummary)) {
-        return { ...s, completionSummary };
-      }
-      const notice = completionSummaryNotice(completionSummary, t);
+      const presentation = completionSummaryPresentation(completionSummary, sessionQualityFloor(s.meta), t);
+      if (!presentation) return { ...s, completionSummary };
       return {
-        ...s,
-        completionSummary,
-        seq: s.seq + 1,
+        ...s, completionSummary, seq: s.seq + 1,
         items: [...s.items, {
-          kind: "notice",
-          id: `q${s.seq}`,
-          level: "warn",
-          variant: "completion",
-          title: notice.title,
-          text: notice.body,
-          action: "open_changes",
+          kind: "notice", id: `q${s.seq}`, level: presentation.level, variant: "completion",
+          title: presentation.title, text: presentation.body, action: "open_changes", completionSummary,
         }],
       };
     }
@@ -3862,9 +3855,7 @@ export function useController() {
   const setToolApprovalModeForTab = useCallback(async (tabId: string, mode: ToolApprovalMode): Promise<void> => {
     if (!tabId) return;
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
-    // Same contract as setControllerMode: the backend reports which pending
-    // approvals the new posture auto-allowed; anything else is still pending
-    // there (fresh prompts; ask-rule approvals under auto) and stays visible.
+    // Backend reports auto-allowed pending approvals; the rest stay visible.
     const drained = await app.SetToolApprovalModeForTab(tabId, mode).catch(() => undefined);
     const ids = Array.isArray(drained) ? drained : [];
     if (ids.length) dispatchTo(tabId, { type: "approval_drained", ids, epoch });
@@ -3875,6 +3866,12 @@ export function useController() {
     if (!activeTabId) return;
     await setToolApprovalModeForTab(activeTabId, mode);
   }, [activeTabId, setToolApprovalModeForTab]);
+
+  const setQualityFloor = useCallback(async (floor: QualityFloor): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetQualityFloorForTab(activeTabId, floor).catch(() => undefined);
+    await refreshMetaForTab(activeTabId);
+  }, [activeTabId, refreshMetaForTab]);
 
   const setComposerProfileForTab = useCallback(async (
     tabId: string,
@@ -4773,7 +4770,7 @@ export function useController() {
     activeTabId,
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolvePlanDecision, resolveRecovery, answerQuestion, setControllerMode,
     dismissExtensionForm, drainExtensionNotifications,
-    setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
+    setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setQualityFloor, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, retrySessionHistory, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
     requestHistoryFullContent,

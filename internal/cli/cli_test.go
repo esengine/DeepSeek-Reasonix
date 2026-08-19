@@ -2195,12 +2195,9 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 
 func TestParseRuntimeProfile(t *testing.T) {
 	for input, want := range map[string]string{
-		"":         "balanced",
-		"balanced": "balanced",
-		"full":     "balanced",
-		"economy":  "light",
-		"light":    "light",
-		"delivery": "delivery",
+		"": "standard", "balanced": "standard", "standard": "standard", "full": "standard",
+		"economy": "standard", "light": "standard", "lite": "standard", "eco": "standard",
+		"delivery": "delivery", "deliver": "delivery", "quality": "delivery",
 	} {
 		got, err := parseRuntimeProfile(input)
 		if err != nil || got != want {

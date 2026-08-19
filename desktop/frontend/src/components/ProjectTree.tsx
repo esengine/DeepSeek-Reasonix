@@ -12,6 +12,8 @@ import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
 import { isRuntimeSessionNode, isTopicNode, loadWorkbenchOrganizeMode, loadWorkbenchSortMode, mergeIncompleteProjectTopicPage, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeTopicPageIsFresh, projectTreeTopicPageSignature, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, WORKBENCH_ORGANIZE_KEY, WORKBENCH_SORT_KEY, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant, type WorkbenchOrganizeMode, type WorkbenchSortMode } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
+import { arrangeClassicProjectTree, arrangeWorkbenchTree, classicTopicWindow, CLASSIC_TOPIC_PREVIEW_LIMIT, splitPinnedProjectTree, type PinnedTreeSections } from "../lib/projectTreePresentation";
+export * from "../lib/projectTreePresentation";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { useT, type Translator } from "../lib/i18n";
@@ -24,7 +26,7 @@ import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
 import { useProjectCreation } from "./useProjectCreation";
 import { useProjectTreeRuntimeProjection } from "../lib/useProjectTreeRuntimeProjection";
-import { GLOBAL_PROJECT_ORDER_KEY, ProjectTreeFolderActivity, ProjectTreeGroupRows, applyProjectOrder, manualTopicOrder, projectTreeProjectRoots, reorderedProjectRoots, useProjectTreeOrganization, type ProjectDropPosition } from "./ProjectTreeOrganization";
+import { GLOBAL_PROJECT_ORDER_KEY, ProjectTreeFolderActivity, ProjectTreeGroupRows, applyProjectOrder, projectTreeProjectRoots, reorderedProjectRoots, useProjectTreeOrganization, type ProjectDropPosition } from "./ProjectTreeOrganization";
 
 interface ProjectTreeProps {
   activeScope?: string;
@@ -65,11 +67,6 @@ type WorkbenchHeaderMenu = "more" | "add" | null;
 type CollapseSnapshot = {
   expanded: Set<string>;
   manuallyCollapsed: Set<string>;
-};
-
-type PinnedTreeSections = {
-  pinned: ProjectNode[];
-  projects: ProjectNode[];
 };
 
 const READ_ACTIVITY_KEY = "projectTree:readActivity";
@@ -172,108 +169,6 @@ export function defaultExpandedProjectTreeKeys(
   activeSessionPath?: string,
 ): string[] {
   return activeSessionAncestorKeys(nodes, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
-}
-
-function topicSortValue(node: ProjectNode, sortMode: WorkbenchSortMode): number {
-  if (sortMode === "created") return node.createdAt || node.lastActivityAt || 0;
-  return topicActivityTime(node);
-}
-
-function projectSortValue(node: ProjectNode, sortMode: WorkbenchSortMode): number {
-  return asArray(node.children).reduce((max, child) => {
-    if (!isTopicNode(child)) return max;
-    return Math.max(max, topicSortValue(child, sortMode));
-  }, 0);
-}
-
-function sortWorkbenchChildren(children: ProjectNode[], sortMode: WorkbenchSortMode): ProjectNode[] {
-  return [...children].sort((a, b) => {
-    if (!isTopicNode(a) || !isTopicNode(b)) return 0;
-    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-    const manualOrder = manualTopicOrder(a, b);
-    if (manualOrder !== 0) return manualOrder;
-    const activityOrder = topicSortValue(b, sortMode) - topicSortValue(a, sortMode);
-    if (activityOrder !== 0) return activityOrder;
-    const aKey = a.topicId || a.key;
-    const bKey = b.topicId || b.key;
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-  });
-}
-
-function arrangeWorkbenchTree(nodes: ProjectNode[], organizeMode: WorkbenchOrganizeMode, sortMode: WorkbenchSortMode): ProjectNode[] {
-  const arranged = nodes.map((node) => {
-    if (node.kind !== "project" && node.kind !== "global_folder") return node;
-    return { ...node, children: sortWorkbenchChildren(asArray(node.children), sortMode) };
-  });
-  if (organizeMode === "project") return arranged;
-  const mode = organizeMode === "recent" ? "updated" : sortMode;
-  return [...arranged].sort((a, b) => {
-    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-    return projectSortValue(b, mode) - projectSortValue(a, mode);
-  });
-}
-
-// Classic keeps the user's manual project order but sorts topics inside each
-// folder, so row order matches the activity time shown in the meta line
-// instead of the persisted insertion order.
-export function arrangeClassicProjectTree(nodes: ProjectNode[], sortMode: WorkbenchSortMode): ProjectNode[] {
-  return arrangeWorkbenchTree(nodes, "project", sortMode);
-}
-
-// Classic folders preview only the first few topics; the rest sit behind a
-// show-more toggle so one busy project cannot push the others out of view.
-export const CLASSIC_TOPIC_PREVIEW_LIMIT = 5;
-
-export function classicTopicWindow(children: ProjectNode[], showAll: boolean): { visible: ProjectNode[]; hiddenCount: number } {
-  if (showAll || children.length <= CLASSIC_TOPIC_PREVIEW_LIMIT) return { visible: children, hiddenCount: 0 };
-  return {
-    visible: children.slice(0, CLASSIC_TOPIC_PREVIEW_LIMIT),
-    hiddenCount: children.length - CLASSIC_TOPIC_PREVIEW_LIMIT,
-  };
-}
-
-export function splitPinnedProjectTree(
-  nodes: ProjectNode[],
-  sortMode: WorkbenchSortMode,
-  includePinnedProjects = true,
-): PinnedTreeSections {
-  const pinnedTopics: ProjectNode[] = [];
-  const pinnedProjects: ProjectNode[] = [];
-  const projects: ProjectNode[] = [];
-
-  for (const node of nodes) {
-    if (!node) continue;
-    const isFolder = node.kind === "project" || node.kind === "global_folder";
-    if (!isFolder) {
-      if (node.pinned) pinnedTopics.push(node);
-      else projects.push(node);
-      continue;
-    }
-
-    if (includePinnedProjects && node.pinned && node.kind === "project") {
-      pinnedProjects.push(node);
-      continue;
-    }
-
-    const children = asArray(node.children);
-    const nextChildren: ProjectNode[] = [];
-    for (const child of children) {
-      if (isTopicNode(child) && child.pinned) {
-        pinnedTopics.push(child);
-        continue;
-      }
-      nextChildren.push(child);
-    }
-    projects.push({ ...node, children: nextChildren });
-  }
-
-  pinnedTopics.sort((a, b) => topicSortValue(b, sortMode) - topicSortValue(a, sortMode));
-  pinnedProjects.sort((a, b) => projectSortValue(b, sortMode) - projectSortValue(a, sortMode));
-
-  return {
-    pinned: [...pinnedTopics, ...pinnedProjects],
-    projects,
-  };
 }
 
 // Global rows use the same project tree recipe; the fallback supplies their non-workspace accent.

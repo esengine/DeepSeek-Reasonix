@@ -1239,7 +1239,7 @@ Ordinary requests always stay with the executor. The dedicated planner runs
 only for an explicit `plan first` / `先规划` request, an explicit wait-for-
 approval boundary, an explicit `plan only` / `不要执行` request, or Goal
 start. Wording such as "complex refactor" or "fix login" does not start the
-planner. There is no automatic light / full planning depth. Explicit Plan Mode
+planner. There is no automatic planning depth. Explicit Plan Mode
 remains a separate host workflow on the executor and is never planned twice.
 `just do it` / `直接改` also stays with the executor. Execution boundaries are
 recognized across the request, not only at its beginning, while quoted
@@ -1401,7 +1401,7 @@ non-destructive MCP, while a strict child requires an explicit reader hint and
 never exposes writers at all.
 
 Reasonix uses **fact-driven execution**. Ordinary requests always enter the
-executor. There is no automatic simple / light / full task mode. Planner,
+executor. There is no automatic task mode. The one session role is the quality floor: standard (default) or delivery; facts can still raise it. Planner,
 Goal, permission, sandbox, and the task contract are independent states.
 
 Every task shares the same provider-visible core tool surface: direct

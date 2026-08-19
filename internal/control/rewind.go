@@ -23,7 +23,13 @@ var ErrRewindCoverageConfirmationRequired = errors.New("partial checkpoint cover
 // files but cannot guarantee that every workspace mutation was captured.
 func RewindPlanRequiresConfirmation(plan checkpoint.RewindPlan) bool {
 	wantsFiles := plan.Scope == checkpoint.RewindCode || plan.Scope == checkpoint.RewindBoth
-	return wantsFiles && plan.CanFiles && (plan.Coverage == checkpoint.CoveragePartial || len(plan.CoverageGaps) > 0)
+	if !wantsFiles || !plan.CanFiles {
+		return false
+	}
+	if plan.ExpiredFilePayload || plan.Legacy {
+		return true
+	}
+	return checkpoint.HasProjectCoverageGap(plan.CoverageGaps)
 }
 
 // conversationApplier bridges checkpoint transactions to controller session state.

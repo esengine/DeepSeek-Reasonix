@@ -50,6 +50,50 @@ async function moveToOuterReaderGutter(page, transcript) {
   await page.mouse.move(point.x, point.y);
 }
 
+async function waitForStableTranscriptGeometry(
+  page,
+  { timeout = 15_000, frames = 8, requireTail = false } = {},
+) {
+  await page.evaluate(({ timeout, frames, requireTail }) => new Promise((resolve, reject) => {
+    const startedAt = performance.now();
+    let previous = null;
+    let stableFrames = 0;
+    const sample = () => {
+      const element = document.querySelector(".transcript");
+      if (element instanceof HTMLElement) {
+        const current = {
+          mode: element.dataset.scrollMode,
+          height: element.scrollHeight,
+          top: element.scrollTop,
+          clientHeight: element.clientHeight,
+        };
+        const unchanged = previous != null
+          && current.mode === previous.mode
+          && Math.abs(current.height - previous.height) <= 0.5
+          && Math.abs(current.top - previous.top) <= 0.5
+          && current.clientHeight === previous.clientHeight;
+        stableFrames = unchanged ? stableFrames + 1 : 0;
+        previous = current;
+        const distance = current.height - current.top - current.clientHeight;
+        const expectedPosition = !requireTail || (current.mode === "tail-follow" && distance <= 4);
+        if (expectedPosition && stableFrames >= frames) {
+          resolve();
+          return;
+        }
+      } else {
+        previous = null;
+        stableFrames = 0;
+      }
+      if (performance.now() - startedAt >= timeout) {
+        reject(new Error(`transcript geometry did not stay stable for ${frames} frames`));
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }), { timeout, frames, requireTail });
+}
+
 async function waitForServer() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -79,6 +123,10 @@ try {
     ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  // Both 1.27.0 field reports keep completed working steps expanded. Apply the
+  // preference before the app mounts so every long-session, native-thumb, and
+  // measurement-churn assertion exercises the larger virtual row model.
+  await page.addInitScript(() => localStorage.setItem("reasonix-process-fold", "expanded"));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
   await page.click('.project-tree__topic-main:has-text("bench:small-6t")');
@@ -278,16 +326,52 @@ try {
   });
   assert(questionJumpWrites.length === 1, `question navigation clears stale selection and emits one indexed jump (${questionJumpWrites.length})`);
   await page.locator(".transcript__jump-bottom").waitFor({ state: "visible" });
-  // The question jump itself is smooth, so Playwright's actionability check
-  // can see the bottom button moving while the viewport settles. A DOM click
-  // still exercises the same React handler without waiting on button geometry.
-  await page.locator(".transcript__jump-bottom").evaluate((button) => button.click());
-  await page.waitForFunction(() => {
-    const element = document.querySelector(".transcript");
-    return element instanceof HTMLElement
-      && element.dataset.scrollMode === "tail-follow"
-      && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+  // The question jump itself is smooth. Wait for its geometry to settle before
+  // clicking the current button: resolving a locator while React remounts the
+  // moving control can otherwise call click() on a detached node, which never
+  // reaches React's delegated handler.
+  await waitForStableTranscriptGeometry(page, { timeout: 5_000, frames: 3 });
+  await page.evaluate(() => {
+    window.__reasonixJumpBottomWrites = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__reasonixJumpBottomWrites.push(write);
   });
+  const jumpBottomClicked = await page.evaluate(() => {
+    const button = document.querySelector(".transcript__jump-bottom");
+    if (!(button instanceof HTMLButtonElement) || !button.isConnected) return false;
+    button.click();
+    return true;
+  });
+  assert(jumpBottomClicked, "question jump exposes a connected jump-bottom control");
+  // The arbiter's rest threshold is 4px: a late sub-threshold remeasure can
+  // legally rest at 2-4px from the extent without earning another write.
+  try {
+    await page.waitForFunction(() => {
+      const element = document.querySelector(".transcript");
+      return element instanceof HTMLElement
+        && element.dataset.scrollMode === "tail-follow"
+        && element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
+    });
+  } catch (error) {
+    const state = await page.evaluate(() => {
+      const element = document.querySelector(".transcript");
+      return element instanceof HTMLElement ? {
+        mode: element.dataset.scrollMode,
+        distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+        jumpVisible: Boolean(document.querySelector(".transcript__jump-bottom")),
+        selectionCollapsed: document.getSelection()?.isCollapsed ?? null,
+        writes: window.__reasonixJumpBottomWrites ?? [],
+      } : null;
+    });
+    throw new Error(`question jump-bottom did not settle (${JSON.stringify(state)})`, { cause: error });
+  } finally {
+    await page.evaluate(() => {
+      window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
+      window.__reasonixJumpBottomWrites = undefined;
+    });
+  }
 
   // Stay on the tail. Opening the workspace dock must not crop right-aligned
   // user bubbles — that is a width/padding bug, not the scroll-up overlap.
@@ -312,10 +396,17 @@ try {
       fromBottom: +(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight).toFixed(2),
     };
   });
+  // Late hydration can momentarily detach the tail between the previous wait
+  // and this sample; the crop contract only needs a converged viewport.
+  await page.waitForFunction(() => {
+    const element = document.querySelector(".transcript");
+    return element instanceof HTMLElement
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
+  });
   const dockOpen = await measureDockCrop();
   assert(dockOpen.ok, "tail-follow dock check can see the chat and a user bubble");
   assert(dockOpen.workspaceOpen === true, "bench starts with the workspace dock open");
-  assert(dockOpen.fromBottom <= 1, `dock-open check stays on the tail without scrolling up (${dockOpen.fromBottom})`);
+  assert(dockOpen.fromBottom <= 4, `dock-open check stays on the tail without scrolling up (${dockOpen.fromBottom})`);
   assert(dockOpen.overflowChatRight <= 1, `user bubble stays inside the chat column with the dock open (${dockOpen.overflowChatRight})`);
   assert(
     dockOpen.overflowDock == null || dockOpen.overflowDock <= 1,
@@ -354,11 +445,30 @@ try {
     );
   }
 
-  // Start away from either edge and record a visible stable row. Growing an
-  // already-mounted row above it reproduces async Markdown/tool hydration.
+  // Start away from either edge via a real upward gesture: user intent claims
+  // manual mode, which forbids tail writes for the rest of the section. The
+  // previous teleport-based setup left tail-follow armed, so the arbiter's
+  // legitimate pull-back raced the trusted wheel's async landing and the
+  // settle probe could fire on the pull-back instead of the gesture.
+  await moveToOuterReaderGutter(page, transcript);
+  await page.mouse.wheel(0, -1600);
+  // Playwright resolves mouse.wheel before Chromium finishes the trusted
+  // event's native default scroll. Let it land before sampling anchors.
+  await page.waitForTimeout(120);
+  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 5_000 });
+  await transcript.evaluate((element) => new Promise((resolve) => {
+    let previousTop = element.scrollTop;
+    let stableFrames = 0;
+    const sample = () => {
+      const currentTop = element.scrollTop;
+      stableFrames = Math.abs(currentTop - previousTop) <= 0.5 ? stableFrames + 1 : 0;
+      previousTop = currentTop;
+      if (stableFrames >= 2) { resolve(); return; }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }));
   const beforeGrowth = await transcript.evaluate((element) => {
-    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight * 2);
-    element.dispatchEvent(new Event("scroll"));
     const viewport = element.getBoundingClientRect();
     const rows = [...element.querySelectorAll(".transcript__row")];
     const visible = rows
@@ -377,28 +487,7 @@ try {
   });
   assert(beforeGrowth.anchorKey && beforeGrowth.grownKey, "bench exposes a visible anchor and mounted dynamic row above it");
 
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await transcript.evaluate((element) => {
-    const initialTop = element.scrollTop;
-    let previousTop = initialTop;
-    let stableFrames = 0;
-    element.dataset.benchWheelSettled = "false";
-    const sample = () => {
-      const currentTop = element.scrollTop;
-      const moved = Math.abs(currentTop - initialTop) > 1;
-      stableFrames = moved && Math.abs(currentTop - previousTop) <= 0.5 ? stableFrames + 1 : 0;
-      previousTop = currentTop;
-      if (stableFrames >= 2) {
-        element.dataset.benchWheelSettled = "true";
-        return;
-      }
-      requestAnimationFrame(sample);
-    };
-    requestAnimationFrame(sample);
-  });
-  await page.mouse.wheel(0, -360);
-  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.benchWheelSettled === "true");
-  const gestureStart = await transcript.evaluate((element) => element.scrollTop);
+  const gestureStart = beforeGrowth.top;
   await transcript.evaluate((element) => {
     const viewport = element.getBoundingClientRect();
     const rows = [...element.querySelectorAll(".transcript__row")];
@@ -574,6 +663,41 @@ try {
         && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
     });
     assert(true, "native thumb release keeps the remeasured transcript at the physical bottom");
+    const idleTail = await transcript.evaluate((element) => new Promise((resolve) => {
+      const writes = [];
+      const tops = [];
+      let geometryStable = false;
+      const stableWrites = [];
+      let lastGeometry = null;
+      window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+        writes.push(write);
+        if (geometryStable) stableWrites.push(write);
+      };
+      let frames = 0;
+      const sample = () => {
+        tops.push(element.scrollTop);
+        // Virtuoso can still be committing the +900px tail remeasure when the
+        // window opens; a write against changing geometry is legitimate
+        // convergence. Only writes after the geometry itself stops moving are
+        // the oscillation this gate exists to catch.
+        const geometry = `${element.scrollHeight}@${element.clientHeight}`;
+        if (lastGeometry === null) lastGeometry = geometry;
+        else if (geometry === lastGeometry && frames >= 10) geometryStable = true;
+        else lastGeometry = geometry;
+        frames += 1;
+        if (frames < 30) {
+          requestAnimationFrame(sample);
+          return;
+        }
+        window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
+        resolve({ writes, stableWrites, tops, geometryStable });
+      };
+      requestAnimationFrame(sample);
+    }));
+    const idleTailRange = Math.max(...idleTail.tops) - Math.min(...idleTail.tops);
+    assert(idleTail.geometryStable, "an idle expanded tail reaches stable geometry within the window");
+    assert(idleTail.stableWrites.length === 0, `a stable idle tail emits no corrective scroll writes (${idleTail.stableWrites.length} of ${idleTail.writes.length}) ${JSON.stringify(idleTail.stableWrites)}`);
+    assert(idleTailRange <= 1, `an idle expanded tail keeps stable native geometry (${idleTailRange}px)`);
   }
 
   // Explicit bottom owns the tail. Subsequent async growth must use Virtuoso's
@@ -819,6 +943,136 @@ try {
     stormProbe.writes.every((write) => write.owner !== "recovery"),
     `zero recovery-owned scroll writes through the storm (${stormProbe.writes.length} writes)`,
   );
+
+  // ── Reduced-motion tail stability (#9028/#9089). Windows reports
+  // prefers-reduced-motion: reduce whenever "Animate controls and elements
+  // inside windows" is off — the default on many machines. The global CSS
+  // reset then collapses every transition to ~0ms, layout churn lands one
+  // whole step per frame, and 1.28.0's tail writer chased each step through
+  // scrollToIndex against a stale size tree: a sustained per-frame flicker
+  // loop with the view never reaching the bottom (#9028 captured 340 no-op
+  // tail writes in 11s). The tail writer must stay calm through churn and
+  // still land on the physical bottom, with no OS setting involved.
+  const reducedPage = await browser.newPage({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+  await reducedPage.addInitScript(() => localStorage.setItem("reasonix-process-fold", "expanded"));
+  await reducedPage.goto(url, { waitUntil: "domcontentloaded" });
+  await reducedPage.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
+  assert(
+    await reducedPage.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches),
+    "reduced-motion emulation is active",
+  );
+  await reducedPage.click('.project-tree__topic-main:has-text("bench:reported-long-turn")');
+  await reducedPage.waitForFunction(
+    () => document.querySelector(".transcript")?.textContent?.includes("Reported long turn complete."),
+    undefined,
+    { timeout: 30_000 },
+  );
+  // Let the open-time hydration burst converge, then require several stable
+  // frames before watching the idle tail. A single bottom sample can race a
+  // late markdown/row remeasurement on loaded CI runners and contaminate the
+  // idle probe with legitimate convergence motion.
+  await waitForStableTranscriptGeometry(reducedPage, { requireTail: true });
+  const reducedIdle = await reducedPage.evaluate(() => new Promise((resolve) => {
+    const element = document.querySelector(".transcript");
+    const writes = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => writes.push(write);
+    const tops = [];
+    let frames = 0;
+    const sample = () => {
+      if (element instanceof HTMLElement) tops.push(element.scrollTop);
+      frames += 1;
+      if (frames < 180) { requestAnimationFrame(sample); return; }
+      window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
+      let reversals = 0;
+      let lastDirection = 0;
+      for (let i = 1; i < tops.length; i += 1) {
+        const delta = tops[i] - tops[i - 1];
+        if (Math.abs(delta) <= 2) continue;
+        const direction = Math.sign(delta);
+        if (lastDirection !== 0 && direction !== lastDirection) reversals += 1;
+        lastDirection = direction;
+      }
+      const live = document.querySelector(".transcript");
+      resolve({
+        reversals,
+        tailWrites: writes.filter((write) => write.owner === "tail-follow").length,
+        finalDistance: live instanceof HTMLElement
+          ? live.scrollHeight - live.scrollTop - live.clientHeight
+          : Number.NaN,
+      });
+    };
+    requestAnimationFrame(sample);
+  }));
+  assert(
+    reducedIdle.reversals <= 2,
+    `reduced-motion idle tail does not ping-pong (${reducedIdle.reversals} direction reversals in 180 frames; ${reducedIdle.tailWrites} writes; ${reducedIdle.finalDistance}px from bottom)`,
+  );
+  // The #9028 pathology was a sustained loop: ~340 tail writes in 11s (about
+  // 2 writes every 3 frames, forever). Late fixture hydration can still land
+  // a legitimate convergence burst inside the window, so gate on an order of
+  // magnitude below the pathology instead of near-zero.
+  assert(
+    reducedIdle.tailWrites < 30,
+    `reduced-motion idle tail never enters a sustained write loop (${reducedIdle.tailWrites} tail writes in 180 frames)`,
+  );
+  assert(
+    reducedIdle.finalDistance <= 4,
+    `reduced-motion tail rests on the physical bottom (${reducedIdle.finalDistance}px)`,
+  );
+  // The #9089 gesture: wheel up, wheel back to the bottom, release, idle.
+  await moveToOuterReaderGutter(reducedPage, reducedPage.locator(".transcript"));
+  await reducedPage.mouse.wheel(0, -900);
+  await reducedPage.waitForTimeout(120);
+  await reducedPage.mouse.wheel(0, 100_000);
+  await reducedPage.waitForFunction(() => {
+    const element = document.querySelector(".transcript");
+    return element instanceof HTMLElement
+      && element.dataset.scrollMode === "tail-follow"
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
+  }, undefined, { timeout: 10_000 });
+  const reducedReturn = await reducedPage.evaluate(() => new Promise((resolve) => {
+    const element = document.querySelector(".transcript");
+    const tops = [];
+    let frames = 0;
+    const sample = () => {
+      if (element instanceof HTMLElement) tops.push(element.scrollTop);
+      frames += 1;
+      if (frames < 120) { requestAnimationFrame(sample); return; }
+      let movingFrames = 0;
+      let reversals = 0;
+      let lastDirection = 0;
+      for (let i = 1; i < tops.length; i += 1) {
+        const delta = tops[i] - tops[i - 1];
+        if (Math.abs(delta) <= 2) continue;
+        movingFrames += 1;
+        const direction = Math.sign(delta);
+        if (lastDirection !== 0 && direction !== lastDirection) reversals += 1;
+        lastDirection = direction;
+      }
+      const live = document.querySelector(".transcript");
+      resolve({
+        movingFrames,
+        reversals,
+        finalDistance: live instanceof HTMLElement
+          ? live.scrollHeight - live.scrollTop - live.clientHeight
+          : Number.NaN,
+      });
+    };
+    requestAnimationFrame(sample);
+  }));
+  assert(
+    reducedReturn.reversals <= 2,
+    `reduced-motion return-to-bottom does not ping-pong (${reducedReturn.reversals} reversals in 120 frames)`,
+  );
+  assert(
+    reducedReturn.movingFrames < 12,
+    `reduced-motion return-to-bottom idles without sustained self-scrolling (${reducedReturn.movingFrames} moving frames in 120)`,
+  );
+  assert(
+    reducedReturn.finalDistance <= 4,
+    `reduced-motion return-to-bottom rests on the physical bottom (${reducedReturn.finalDistance}px)`,
+  );
+  await reducedPage.close();
 
   process.stdout.write("\ntranscript scroll stability browser gate passed\n");
 } finally {

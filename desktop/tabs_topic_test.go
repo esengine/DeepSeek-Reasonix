@@ -17,7 +17,7 @@ import (
 )
 
 type runtimeStatusSessionController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status control.RuntimeStatus
 }
 

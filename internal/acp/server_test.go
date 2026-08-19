@@ -14,7 +14,6 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -262,8 +261,8 @@ func requireDeprecatedConfigNoop(t *testing.T, client *rpcClient, factory *confi
 		t.Fatalf("set_config_option %s=%s: %+v", configID, value, resp.Error)
 	}
 	var set SetSessionConfigOptionResult
-	if err := json.Unmarshal(resp.Result, &set); err != nil || set.DeprecatedNotice != agentpreset.DeprecatedNotice {
-		t.Fatalf("set_config_option %s result err=%v notice=%q", configID, err, set.DeprecatedNotice)
+	if err := json.Unmarshal(resp.Result, &set); err != nil {
+		t.Fatalf("set_config_option %s result err=%v", configID, err)
 	}
 	if got := factory.buildCount(); got != buildsBefore {
 		t.Fatalf("set_config_option %s rebuilt controller: builds=%d, want %d", configID, got, buildsBefore)
@@ -1039,8 +1038,8 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 		t.Fatalf("goal prompt: %+v", promptResp.Error)
 	}
 	goalObserved := <-seen
-	if goalObserved.preset != "balanced" || goalObserved.approval != control.ToolApprovalAuto || goalObserved.plan || goalObserved.goal != "ship the ACP profile switch" {
-		t.Fatalf("goal axes = %+v, want balanced + auto + goal", goalObserved)
+	if goalObserved.preset != "standard" || goalObserved.approval != control.ToolApprovalAuto || goalObserved.plan || goalObserved.goal != "ship the ACP profile switch" {
+		t.Fatalf("goal axes = %+v, want standard + auto + goal", goalObserved)
 	}
 
 	setPlan := client.call(t, "session/set_mode", SessionSetModeParams{SessionID: nr.SessionID, ModeID: sessionModePlan})
@@ -1056,8 +1055,8 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 		t.Fatalf("plan prompt: %+v", promptResp.Error)
 	}
 	planObserved := <-seen
-	if planObserved.preset != "balanced" || planObserved.approval != control.ToolApprovalAuto || !planObserved.plan || planObserved.goal != "" {
-		t.Fatalf("plan axes = %+v, want balanced + auto + plan", planObserved)
+	if planObserved.preset != "standard" || planObserved.approval != control.ToolApprovalAuto || !planObserved.plan || planObserved.goal != "" {
+		t.Fatalf("plan axes = %+v, want standard + auto + plan", planObserved)
 	}
 }
 

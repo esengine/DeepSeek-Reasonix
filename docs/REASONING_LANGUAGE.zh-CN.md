@@ -14,7 +14,7 @@
 
 取值只有三种：
 
-- `auto`：用户原始提问明显为中文时锚定中文，并忽略 `@file` 等注入的引用内容；英文或不确定时不额外注入语言指令。
+- `auto`：用户原始提问明显为中文时锚定中文，并忽略 `@file` 等注入的引用内容；英文或不确定时不额外注入语言指令。官方 DeepSeek-V4-Pro 是例外：`auto` 会把可见思考钉在英文，避免覆盖该模型的 agent 人设。
 - `zh`：可见思考过程优先使用简体中文。
 - `en`：可见思考过程优先使用英文。
 
@@ -81,11 +81,7 @@ reasoning_language = "auto" # auto|zh|en
 
 `auto` 仍然对缓存友好。用户原始提问明显是中文时，Reasonix 会为这一轮加入同样很小的 `<reasoning-language>` 临时 block；英文或信号不明确时不注入，只复用已有的稳定语言策略。`@file` 等注入的引用内容不会参与这个自动判断。
 
-当设置为 `zh` 或 `en` 时，Reasonix 总是会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。所有模式下，它都不会改变：
-
-- system prompt
-- 工具 schema 的字节或顺序
-- provider 可见的稳定前缀
+当设置为 `zh` 或 `en` 时，Reasonix 总是会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。所有模式下，它都不会改变工具 schema 的字节或顺序。官方 DeepSeek-V4-Pro 还会在 system prompt 开头稳定写入一句 agent 人设；其他模型的 system prompt 不变。
 
 因此它能在表达明确偏好的同时，尽量保持高 prompt-cache 命中率。
 

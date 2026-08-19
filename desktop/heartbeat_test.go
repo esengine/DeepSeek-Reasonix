@@ -188,7 +188,7 @@ func (s heartbeatStatusStub) RuntimeStatus() control.RuntimeStatus {
 }
 
 type heartbeatExecuteTaskCtrlStub struct {
-	control.SessionAPI
+	stubSessionAPI
 	status       control.RuntimeStatus
 	submitted    []string
 	approvalMode string

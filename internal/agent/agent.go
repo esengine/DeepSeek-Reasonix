@@ -30,6 +30,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
@@ -953,6 +954,8 @@ type Options struct {
 	WriteScheduler *SubagentScheduler
 	// WriteWorkspaceRoot normalizes parent write reservations.
 	WriteWorkspaceRoot string
+	// SessionTemp owns the exact private scratch root for delivery accounting.
+	SessionTemp *sessiontemp.Manager
 	// WriteRoots is the session-scoped writable directory manager.
 	WriteRoots *sandbox.WritableRootSet
 	// WriteAccessGate authorizes extra writable directories. nil is fail-closed
@@ -1176,6 +1179,9 @@ func (a *Agent) closedLoopActive() bool {
 		return true
 	}
 	if a.planContractSnapshot() != nil {
+		return true
+	}
+	if a.turn.constraints.PolicyFloor == taskcontract.PolicyFloorDelivery {
 		return true
 	}
 	if a.turn.engine == nil {
@@ -2265,7 +2271,13 @@ func (a *Agent) recoveryPlanTransition(toolName string, args json.RawMessage) (b
 		return false, "", "", ""
 	}
 	after := evidence.ReceiptFromToolCall("todo_write", args, true, true).Todos
-	if len(after) == 0 || evidence.ValidateSerialTodos(after) != nil || !evidence.PreservesCompletedTodoPositions(before, after) {
+	if evidence.ValidateSerialTodos(after) != nil {
+		return false, "", "", ""
+	}
+	if len(after) == 0 {
+		return true, planReviewText(before), planReviewText(after), planTransitionDiff(before, after)
+	}
+	if !evidence.PreservesCompletedTodoPositions(before, after) {
 		// Let todo_write report malformed or invalid state directly; an invalid
 		// task list is not a meaningful plan proposal for the reviewer.
 		return false, "", "", ""

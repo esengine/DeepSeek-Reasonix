@@ -28,13 +28,15 @@ func committedNotices(m chatTUI) string {
 
 func TestParseAgentPresetAcceptsLegacyLabels(t *testing.T) {
 	for input, want := range map[string]string{
-		"economy":  "light",
-		"light":    "light",
-		"eco":      "light",
-		"lite":     "light",
-		"balanced": "balanced",
-		"full":     "balanced",
+		"economy":  "standard",
+		"light":    "standard",
+		"eco":      "standard",
+		"lite":     "standard",
+		"balanced": "standard",
+		"full":     "standard",
+		"standard": "standard",
 		"delivery": "delivery",
+		"deliver":  "delivery",
 	} {
 		got, ok := parseAgentPreset(input)
 		if !ok || got != want {
@@ -119,7 +121,7 @@ func TestWorkModeHelpHidesDeprecatedCommand(t *testing.T) {
 	}
 }
 
-func TestPresetCommandIsNoOpCompatibility(t *testing.T) {
+func TestPresetCommandSwitchesFloorInPlace(t *testing.T) {
 	resetPresetDeprecationForTest()
 	oldCtrl := control.New(control.Options{Label: "old"})
 	oldCtrl.SetToolApprovalMode(control.ToolApprovalAuto)
@@ -134,30 +136,26 @@ func TestPresetCommandIsNoOpCompatibility(t *testing.T) {
 
 	cmd := m.runWorkModeCommand("/preset delivery")
 	if cmd != nil {
-		t.Fatal("deprecated /preset must not schedule a controller rebuild")
+		t.Fatal("/preset must not schedule a controller rebuild")
 	}
 	if m.ctrl != oldCtrl {
 		t.Fatal("controller must stay the same instance")
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
+		t.Fatalf("controller preset = %q, want delivery", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("unexpected rebuilds: %d", builds)
 	}
-	out := committedNotices(m)
-	if got := strings.Count(out, i18n.M.WorkModeDeprecatedNotice); got != 1 {
-		t.Fatalf("deprecation notices = %d, want 1:\n%s", got, out)
+	if out := committedNotices(m); !strings.Contains(out, i18n.M.QualityFloorApplied) {
+		t.Fatalf("applied /preset missing floor notice:\n%s", out)
 	}
 
 	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
-		t.Fatal("second /preset must stay a no-op")
+		t.Fatal("second /preset must not rebuild")
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("controller preset changed to %q", m.ctrl.AgentPreset())
-	}
-	if got := strings.Count(committedNotices(m), i18n.M.WorkModeDeprecatedNotice); got != 1 {
-		t.Fatalf("deprecation notice should print once, got %d:\n%s", got, committedNotices(m))
+	if m.ctrl.AgentPreset() != boot.AgentPresetStandard {
+		t.Fatalf("light must fold to standard, got %q", m.ctrl.AgentPreset())
 	}
 }
 
@@ -176,21 +174,18 @@ func TestPresetCommandRejectsInvalidValue(t *testing.T) {
 		t.Fatal("invalid /preset unexpectedly scheduled a rebuild")
 	}
 	out := committedNotices(m)
-	if !strings.Contains(out, i18n.M.WorkModeDeprecatedNotice) {
-		t.Fatalf("invalid /preset missing deprecation notice:\n%s", out)
-	}
 	if !strings.Contains(out, i18n.M.WorkModeUsage) {
 		t.Fatalf("invalid /preset missing usage:\n%s", out)
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetStandard {
+		t.Fatalf("controller preset = %q, want standard", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("rejected preset request triggered %d builds", builds)
 	}
 }
 
-func TestPresetCommandStaysNoOpWhenBusy(t *testing.T) {
+func TestPresetCommandSwitchesWhenBusy(t *testing.T) {
 	resetPresetDeprecationForTest()
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "model"})
@@ -204,15 +199,15 @@ func TestPresetCommandStaysNoOpWhenBusy(t *testing.T) {
 	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
 		t.Fatal("busy /preset must not rebuild")
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("busy /preset changed AgentPreset to %q", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetStandard {
+		t.Fatalf("busy /preset AgentPreset = %q, want standard (light folds)", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("busy /preset triggered %d builds", builds)
 	}
 }
 
-func TestPresetCommandStaysNoOpDuringRunningTurn(t *testing.T) {
+func TestPresetCommandSwitchesDuringRunningTurn(t *testing.T) {
 	resetPresetDeprecationForTest()
 	runner := &blockingTurnRunner{started: make(chan struct{})}
 	ctrl := control.New(control.Options{Runner: runner, Sink: event.Discard, SessionDir: t.TempDir(), Label: "model"})
@@ -237,13 +232,13 @@ func TestPresetCommandStaysNoOpDuringRunningTurn(t *testing.T) {
 	if cmd := m.runWorkModeCommand("/preset delivery"); cmd != nil {
 		t.Fatal("running-turn /preset must not rebuild")
 	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
-		t.Fatalf("running-turn /preset changed AgentPreset to %q", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
+		t.Fatalf("running-turn /preset AgentPreset = %q, want delivery", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("running-turn /preset triggered %d builds", builds)
 	}
-	if got := strings.Count(committedNotices(m), i18n.M.WorkModeDeprecatedNotice); got != 1 {
-		t.Fatalf("running-turn /preset notices = %d, want 1:\n%s", got, committedNotices(m))
+	if out := committedNotices(m); !strings.Contains(out, i18n.M.QualityFloorApplied) {
+		t.Fatalf("running-turn /preset missing floor notice:\n%s", out)
 	}
 }

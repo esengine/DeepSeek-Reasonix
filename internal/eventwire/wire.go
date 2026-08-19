@@ -59,6 +59,8 @@ type CompletionSummary struct {
 	Review             string   `json:"review"`
 	GapKinds           []string `json:"gap_kinds,omitempty"`
 	ConstraintDegraded bool     `json:"constraint_degraded"`
+	Floor              string   `json:"floor,omitempty"`
+	Attention          bool     `json:"attention"`
 }
 
 type WorkspaceChanged struct {
@@ -208,6 +210,8 @@ func ToWire(e event.Event) Event {
 				Review:             c.Review,
 				GapKinds:           append([]string(nil), c.GapKinds...),
 				ConstraintDegraded: c.ConstraintDegraded,
+				Floor:              c.Floor,
+				Attention:          c.Attention,
 			}
 		}
 	}

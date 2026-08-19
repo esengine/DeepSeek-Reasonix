@@ -722,10 +722,13 @@ func (a *App) restoreOrBuildTabs() {
 			}
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
-			// Execution modes are gone: old agentPreset/tokenMode entries are
-			// parsed for compatibility but never applied. The tab keeps the
-			// pinned dual-write compat value.
-			tab.tokenMode = boot.TokenModeFull
+			// The role entry seeds the quality floor: delivery (and legacy
+			// delivery labels) raise it; light folds to standard.
+			if entry.QualityFloor == control.QualityFloorDelivery {
+				tab.qualityFloor = control.QualityFloorDelivery
+			} else {
+				tab.qualityFloor = ""
+			}
 			tab.mode = persistedTabMode(entry.Mode)
 			// Validate the persisted goal against the session's goal-state
 			// sidecar: a typed /new or /clear rotates the session through the
@@ -827,7 +830,7 @@ func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *Wo
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
 		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
 		model:            model,
-		tokenMode:        boot.TokenModeFull,
+		qualityFloor:     "",
 		mode:             tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo),
 		toolApprovalMode: toolApprovalMode,
 		disabledMCP:      map[string]ServerView{},
@@ -1966,10 +1969,12 @@ func (a *App) NewSessionForTab(tabID string) error {
 	if ctrl == nil {
 		return a.workspaceNotReadyErr(tab)
 	}
-	// Tab is already blank — just persist and skip the new-session dance.
+	// Tab is already blank — skip rotation, but still apply the configured
+	// default. A reused empty tab otherwise keeps the previous session's
+	// provider after a default-model change (#9080).
 	if !controllerHasActiveRuntimeWork(ctrl) && !messagesHaveConversationContent(ctrl.History()) {
 		a.persistTabSessionPath(tab, ctrl.SessionPath())
-		return nil
+		return a.applyNewSessionDefaultModel(tab)
 	}
 
 	if err := ctrl.NewSession(); err != nil {
@@ -1987,7 +1992,26 @@ func (a *App) NewSessionForTab(tabID string) error {
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
 	a.emitProjectTreeChangedForSessionDirs(ctrl.SessionDir())
-	return nil
+	return a.applyNewSessionDefaultModel(tab)
+}
+
+// applyNewSessionDefaultModel makes a freshly rotated or reused blank session
+// obey the same default as EnsureBlankTab. Existing conversations keep their
+// saved model until the user starts a new one.
+func (a *App) applyNewSessionDefaultModel(tab *WorkspaceTab) error {
+	if tab == nil {
+		return nil
+	}
+	a.mu.RLock()
+	scope := tab.Scope
+	root := tab.WorkspaceRoot
+	a.mu.RUnlock()
+	if strings.TrimSpace(scope) != "project" {
+		scope = "global"
+		root = ""
+	}
+	defaultModel, _ := desktopNewSessionDefaults(scope, root)
+	return a.alignReusableBlankTabModel(tab, defaultModel)
 }
 
 func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
@@ -3342,7 +3366,7 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		topicTitleSource: topicTitleSourceAuto,
 		SessionPath:      sessionPath,
 		model:            model,
-		tokenMode:        boot.TokenModeFull,
+		qualityFloor:     "",
 		mode:             tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo),
 		toolApprovalMode: toolApprovalMode,
 		disabledMCP:      map[string]ServerView{},
@@ -10047,12 +10071,14 @@ func (a *App) SetAgentPreset(preset string) error {
 // the legacy argument, does not require an idle tab, saves no mode, rebuilds
 // no agent, and always succeeds with the deprecation notice.
 func (a *App) SetAgentPresetForTab(tabID, preset string) error {
-	_ = boot.NormalizeAgentPreset(preset)
+	normalized, err := boot.NormalizeAgentPresetErr(preset)
+	if err != nil {
+		return err
+	}
 	if tab := a.tabByID(tabID); tab == nil && strings.TrimSpace(tabID) != "" {
 		return fmt.Errorf("tab %q not found", tabID)
 	}
-	a.noticeForTab(strings.TrimSpace(tabID), SetAgentPresetDeprecatedNotice)
-	return nil
+	return a.SetQualityFloorForTab(tabID, normalized)
 }
 
 // persistTabTokenMode persists the deprecated dual-write compatibility values
@@ -10064,7 +10090,6 @@ func (a *App) persistTabTokenMode(tab *WorkspaceTab) {
 		return
 	}
 	a.mu.Lock()
-	tab.tokenMode = boot.TokenModeFull
 	a.saveTabsLocked()
 	a.mu.Unlock()
 	_ = a.saveTabSessionMetaForCurrentSession(tab)

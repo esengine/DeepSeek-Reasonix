@@ -109,6 +109,14 @@ func TestMapWriterMatrix(t *testing.T) {
 		!hasKind(got.PostSuccess, ObligationActionReceipt, EnforcementStrict) {
 		t.Fatalf("git push mapping = %+v", got)
 	}
+
+	scratch := evidence.ClassifyEffect(evidence.EffectInput{
+		ToolName: "write_file", Args: json.RawMessage(`{"path":"/tmp/btc_klines.py"}`),
+	})
+	got = MapWriter(scratch, 12, "", false)
+	if len(got.Preconditions) != 0 || len(got.PostSuccess) != 0 {
+		t.Fatalf("scratch write must not create duties: %+v", got)
+	}
 }
 
 func TestRebuildIsDeterministicAndInvalidates(t *testing.T) {

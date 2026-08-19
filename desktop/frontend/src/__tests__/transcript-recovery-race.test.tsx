@@ -121,19 +121,18 @@ let scrollByCalls = 0;
 let scrollToIndexCalls = 0;
 let scrollToCalls = 0;
 let scrollToBottomCalls = 0;
-let tailWriteStep = 0;
-let snapTailOnWrite = false;
 // Null disables snapshot capture; the snapshot sections opt in explicitly so
 // the pre-snapshot scenarios keep their first-mount scrollToBottom behavior.
 let stubSnapshot: StateSnapshot | null = null;
 const virtuosoHandle = {
   scrollBy: () => { scrollByCalls += 1; },
-  scrollToIndex: () => {
-    scrollToIndexCalls += 1;
-    if (snapTailOnWrite) scrollElement.scrollTop = scrollExtent - scrollElement.clientHeight;
-    else if (tailWriteStep > 0) scrollElement.scrollTop = Math.min(scrollExtent - scrollElement.clientHeight, scrollElement.scrollTop + tailWriteStep);
+  scrollToIndex: () => { scrollToIndexCalls += 1; },
+  // Browser semantics: an offset write clamps against the current extent.
+  scrollTo: (options?: { top?: number }) => {
+    scrollToCalls += 1;
+    const top = options?.top ?? 0;
+    scrollElement.scrollTop = Math.max(0, Math.min(scrollExtent - scrollElement.clientHeight, top));
   },
-  scrollTo: () => { scrollToCalls += 1; },
   getState: (callback: (state: StateSnapshot) => void) => {
     if (stubSnapshot) callback(stubSnapshot);
   },
@@ -208,11 +207,11 @@ scrollElement.scrollTop = 400;
 await act(async () => window.dispatchEvent(new dom.window.Event("pointerup")));
 check(arbiter?.modeRef.current === "tail-follow", "native thumb release at the physical bottom resumes tail-follow");
 scrollExtent = 900;
-snapTailOnWrite = true;
 await act(async () => arbiter?.deliverScroll());
 await flushFrames();
+await flushFrames();
+await flushFrames();
 check(scrollElement.scrollTop === 800, "post-release remeasurement reconverges the claimed native bottom");
-snapTailOnWrite = false;
 scrollExtent = 500;
 
 // A nested code/tool scrollport owns the wheel until it reaches its edge.
@@ -263,22 +262,56 @@ check(bottomWheelAccepted && arbiter?.modeRef.current === "tail-follow", "a down
 
 // A queued confirmation belongs to the surface that requested it. Resetting
 // before its frame runs must prevent the old request from writing the new one.
-scrollToIndexCalls = 0;
+scrollToCalls = 0;
 scrollElement.scrollTop = 0;
 await act(async () => arbiter?.scrollToBottom());
-check(scrollToIndexCalls === 1, "bottom request performs its immediate LAST write");
+check(scrollToCalls === 1, "bottom request performs its immediate native-extent write");
 await act(async () => arbiter?.reset());
 await flushFrames();
-check(scrollToIndexCalls === 1, "a reset invalidates the previous surface's queued tail confirmation");
+check(scrollToCalls === 1, "a reset invalidates the previous surface's queued tail confirmation");
 
-// Tail-follow is a persistent mode, not a six-frame retry window. Each
-// delivered non-bottom position must request another coalesced convergence.
-scrollToIndexCalls = 0;
-tailWriteStep = 20;
+// Tail-follow is a persistent mode, not a six-frame retry window. As long as
+// growth keeps arriving (streaming), each height notification re-arms another
+// coalesced convergence and the view keeps landing on the current bottom.
+scrollToCalls = 0;
 await act(async () => arbiter?.scrollToBottom());
-for (let i = 0; i < 10; i += 1) await flushFrames();
-check(scrollToIndexCalls > 8, "tail convergence remains live beyond the former six-frame budget");
-tailWriteStep = 0;
+for (let i = 0; i < 14; i += 1) {
+  scrollExtent += 200;
+  await act(async () => arbiter?.followGrowingTail());
+  await flushFrames();
+}
+for (let i = 0; i < 4; i += 1) await flushFrames();
+check(scrollToCalls > 6, `tail convergence remains live beyond the former six-frame budget (${scrollToCalls} writes)`);
+check(
+  scrollElement.scrollTop === scrollExtent - scrollElement.clientHeight,
+  "sustained growth still lands on the physical bottom after the burst ends",
+);
+
+// ── Reduced-motion flicker filter (#9028/#9089): layout churn alternates the
+// extent between two values on consecutive frames. A tail displacement must
+// survive a full frame before the writer acts, so pure oscillation earns zero
+// writes; once the churn settles off-bottom, one write reconverges.
+const churnBase = scrollExtent;
+scrollToCalls = 0;
+for (let i = 0; i < 8; i += 1) {
+  scrollExtent = i % 2 === 0 ? churnBase + 700 : churnBase;
+  await act(async () => arbiter?.followGrowingTail());
+  await flushFrames();
+}
+check(scrollToCalls === 0, `alternating-extent churn earns zero tail writes (${scrollToCalls})`);
+check(arbiter?.modeRef.current === "tail-follow", "churn does not revoke tail ownership");
+scrollExtent = churnBase + 700;
+await act(async () => arbiter?.followGrowingTail());
+for (let i = 0; i < 4; i += 1) await flushFrames();
+check(
+  scrollElement.scrollTop === scrollExtent - scrollElement.clientHeight,
+  "a settled post-churn displacement reconverges on the physical bottom",
+);
+check(scrollToCalls >= 1 && scrollToCalls <= 2, `post-churn convergence costs at most two writes (${scrollToCalls})`);
+
+scrollExtent = 500;
+scrollElement.scrollTop = 400;
+await act(async () => arbiter?.deliverScroll());
 
 await act(async () => integrity?.scheduleBlankViewportCheck());
 await switchSurface("surface-b");
@@ -586,7 +619,7 @@ await act(async () => { otherWriteOk = arbiter?.writeOffset("jump", 5) ?? true; 
 check(!otherWriteOk, "non-selection writes stay rejected in selection mode");
 scrollToIndexCalls = 0;
 await act(async () => arbiter?.setMode("manual", "question-navigation"));
-await act(async () => arbiter?.scrollToDataIndex(1_000, 5));
+await act(async () => arbiter?.scrollToDataIndex(5));
 check(scrollToIndexCalls === 1, "question navigation emits one indexed jump after its explicit selection cleanup");
 
 // ── T6: a snapshot captured before the keyed remount restores when the row

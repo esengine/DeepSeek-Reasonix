@@ -64,6 +64,9 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"qwen-coding-plan-global-anthropic",
 		"stepfun",
 		"stepfun-anthropic",
+		"stepfun-responses",
+		"stepfun-api",
+		"stepfun-api-anthropic",
 		"novita",
 		"gmi",
 		"vercel-ai-gateway",
@@ -349,6 +352,21 @@ func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 			kind:    "anthropic",
 			baseURL: "https://api.stepfun.com/step_plan",
 		},
+		{
+			id:      "stepfun-responses",
+			kind:    "responses",
+			baseURL: "https://api.stepfun.com/v1",
+		},
+		{
+			id:      "stepfun-api",
+			kind:    "openai",
+			baseURL: "https://api.stepfun.com/v1",
+		},
+		{
+			id:      "stepfun-api-anthropic",
+			kind:    "anthropic",
+			baseURL: "https://api.stepfun.com",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
@@ -367,6 +385,44 @@ func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 				t.Fatalf("preset %q base_url = %q, want %q", tt.id, entry.BaseURL, tt.baseURL)
 			}
 		})
+	}
+}
+
+// StepFun's Responses API enables only step-3.7-flash server-side and ignores
+// previous_response_id, so the preset must ship the single-model catalog and
+// the stateless mode.
+func TestCuratedProviderPresetsStepFunResponsesContract(t *testing.T) {
+	preset, ok := CuratedProviderPreset("stepfun-responses")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatal("missing stepfun-responses preset")
+	}
+	entry := preset.Entries[0]
+	if got := entry.ModelList(); len(got) != 1 || got[0] != "step-3.7-flash" {
+		t.Fatalf("stepfun-responses models = %v, want [step-3.7-flash]", got)
+	}
+	if entry.ResponsesMode != "stateless" {
+		t.Fatalf("stepfun-responses responses_mode = %q, want stateless", entry.ResponsesMode)
+	}
+}
+
+// The pay-as-you-go presets must stay on the standard /v1 surface and expose
+// vision only on step-3.7-flash, matching the channel's live behavior (the
+// step_plan channel rejects images; 3.5 SKUs are not Responses-enabled).
+func TestCuratedProviderPresetsStepFunPayAsYouGoContract(t *testing.T) {
+	api, ok := CuratedProviderPreset("stepfun-api")
+	if !ok || len(api.Entries) != 1 {
+		t.Fatal("missing stepfun-api preset")
+	}
+	entry := api.Entries[0]
+	if !stringSlicesEqual(entry.VisionModels, []string{"step-3.7-flash"}) {
+		t.Fatalf("stepfun-api vision_models = %v, want [step-3.7-flash]", entry.VisionModels)
+	}
+	anthropic, ok := CuratedProviderPreset("stepfun-api-anthropic")
+	if !ok || len(anthropic.Entries) != 1 {
+		t.Fatal("missing stepfun-api-anthropic preset")
+	}
+	if got := anthropic.Entries[0].BaseURL; got != "https://api.stepfun.com" {
+		t.Fatalf("stepfun-api-anthropic base_url = %q, want origin (SDK appends /v1/messages)", got)
 	}
 }
 

@@ -82,6 +82,32 @@ func TestBuildModelFetchURLs(t *testing.T) {
 			override: "https://tokenrhythm.studio/openai/models",
 			want:     []string{"https://tokenrhythm.studio/openai/models"},
 		},
+		{
+			name: "stepfun anthropic-docs base is unique canonical models",
+			base: "https://api.stepfun.com/step_plan",
+			want: []string{"https://api.stepfun.com/step_plan/v1/models"},
+		},
+		{
+			name: "stepfun correct base is unique canonical models",
+			base: "https://api.stepfun.com/step_plan/v1",
+			want: []string{"https://api.stepfun.com/step_plan/v1/models"},
+		},
+		{
+			name: "stepfun global host base is unique canonical models",
+			base: "https://api.stepfun.ai/step_plan",
+			want: []string{"https://api.stepfun.ai/step_plan/v1/models"},
+		},
+		{
+			name: "stepfun standard api root keeps legacy candidates",
+			base: "https://api.stepfun.com",
+			want: []string{"https://api.stepfun.com/models", "https://api.stepfun.com/v1/models"},
+		},
+		{
+			name:     "stepfun models override is unique canonical models",
+			base:     "https://example.invalid/v1",
+			override: "https://api.stepfun.com/step_plan",
+			want:     []string{"https://api.stepfun.com/step_plan/v1/models"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

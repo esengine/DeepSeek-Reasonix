@@ -25,7 +25,6 @@ import (
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
-	"reasonix/internal/worktree"
 	"slices"
 	"sort"
 	"strings"
@@ -234,7 +233,7 @@ type WorkspaceTab struct {
 
 	model            string // active model ref (for meta)
 	effort           *string
-	tokenMode        string
+	qualityFloor     string // standard|delivery; see desktop/quality_floor.go
 	mode             string // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
 	goal             string
 	toolApprovalMode string
@@ -690,7 +689,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		displayState:        tab.displayBufferState(),
 		model:               tab.model,
 		effort:              cloneStringPtr(tab.effort),
-		tokenMode:           tab.tokenMode,
+		qualityFloor:        tab.qualityFloor,
 		mode:                tab.mode,
 		goal:                tab.goal,
 		toolApprovalMode:    tab.toolApprovalMode,
@@ -794,7 +793,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.ActivityStatus = source.ActivityStatus
 	target.model = source.model
 	target.effort = cloneStringPtr(source.effort)
-	target.tokenMode = source.tokenMode
+	target.qualityFloor = source.qualityFloor
 	target.mode = source.mode
 	target.goal = source.goal
 	target.toolApprovalMode = source.toolApprovalMode
@@ -2172,6 +2171,8 @@ type TabMeta struct {
 	ToolApprovalMode  string             `json:"toolApprovalMode"`
 	TokenMode         string             `json:"tokenMode"`
 	AgentPreset       string             `json:"agentPreset,omitempty"`
+	QualityFloor      string             `json:"qualityFloor,omitempty"`
+	FloorInferred     bool               `json:"floorInferred,omitempty"`
 	Goal              string             `json:"goal,omitempty"`
 	GoalStatus        string             `json:"goalStatus,omitempty"`
 	Recovered         bool               `json:"recovered,omitempty"`
@@ -2208,6 +2209,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		sessionRevision = meta.Revision
 		sessionDigest = meta.ContentDigest
 	}
+	floor := derivedQualityFloor(tab)
 	m := TabMeta{
 		ID:                tab.ID,
 		Scope:             tab.Scope,
@@ -2228,14 +2230,16 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		Mode:              currentTabMode(tab),
 		CollaborationMode: currentTabCollaborationMode(tab),
 		ToolApprovalMode:  currentTabToolApprovalMode(tab),
-		AgentPreset:       boot.AgentPresetBalanced, // deprecated compat label
-		TokenMode:         boot.TokenModeFull,       // deprecated compat label
+		QualityFloor:      floor.floor,
+		FloorInferred:     floor.inferred,
+		AgentPreset:       agentPresetForFloor(floor.floor),
+		TokenMode:         tokenModeForFloor(floor.floor),
 		Goal:              currentTabGoal(tab),
 		GoalStatus:        currentTabGoalStatus(tab),
 		StartupErr:        tab.StartupErr,
 		Active:            active,
 		Cwd:               tab.WorkspaceRoot,
-		IsolatedWorktree:  worktree.IsManagedPath(tab.WorkspaceRoot, config.DeliveryWorktreeDir()),
+		IsolatedWorktree:  floor.isolated,
 	}
 	switch tab.Scope {
 	case "global":
@@ -2641,13 +2645,12 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		return enrichTabMeta(meta), nil
 	}
 
-	// New blank sessions start from global session defaults for model and
-	// Ask/Auto/YOLO approval posture. Keep the remaining execution-local settings
-	// from the active tab so a new blank session preserves effort/token/MCP
-	// continuity without letting the active tab override global defaults (#4019).
+	// New blank sessions start from global defaults for model and approval
+	// posture, keeping execution-local settings (effort/floor/MCP) from the
+	// active tab without letting it override global defaults (#4019).
 	inheritedModel := defaultModel
 	var inheritedEffort *string
-	inheritedTokenMode := boot.TokenModeFull // deprecated dual-write compat value
+	inheritedFloor := tabQualityFloor(workspaceRoot, a.activeTabLocked().qualityFloorSafe())
 	inheritedMode := tabModeFromAxes(false, defaultToolApprovalMode == control.ToolApprovalYolo)
 	inheritedToolApprovalMode := defaultToolApprovalMode
 	inheritedDisabledMCP := map[string]ServerView{}
@@ -2680,7 +2683,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 			topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
 			model:            inheritedModel,
 			effort:           inheritedEffort,
-			tokenMode:        inheritedTokenMode,
+			qualityFloor:     inheritedFloor,
 			mode:             inheritedMode,
 			toolApprovalMode: inheritedToolApprovalMode,
 			disabledMCP:      inheritedDisabledMCP,
@@ -2736,7 +2739,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		topicTitleSource: topicTitleSourceAuto,
 		model:            inheritedModel,
 		effort:           inheritedEffort,
-		tokenMode:        inheritedTokenMode,
+		qualityFloor:     inheritedFloor,
 		mode:             inheritedMode,
 		toolApprovalMode: inheritedToolApprovalMode,
 		disabledMCP:      inheritedDisabledMCP,
@@ -3843,7 +3846,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	tab.Label = model
 	tab.SharedHostKey = rootKey
 	buildEffort := cloneStringPtr(tab.effort)
-	buildTokenMode := boot.NormalizeTokenMode(tab.tokenMode)
+	buildTokenMode := currentTabTokenMode(tab)
 	buildMode := tab.mode
 	buildToolApprovalMode := tab.toolApprovalMode
 	buildGoal := tab.goal
@@ -4862,6 +4865,7 @@ type desktopTabEntry struct {
 	Effort           *string `json:"effort,omitempty"`
 	TokenMode        string  `json:"tokenMode,omitempty"`
 	AgentPreset      string  `json:"agentPreset,omitempty"`
+	QualityFloor     string  `json:"qualityFloor,omitempty"`
 	Mode             string  `json:"mode,omitempty"`
 	Goal             string  `json:"goal,omitempty"`
 	ToolApprovalMode string  `json:"toolApprovalMode,omitempty"`
@@ -4924,8 +4928,9 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 				ReadOnly:         tab.ReadOnly,
 				Model:            tab.model,
 				Effort:           cloneStringPtr(tab.effort),
-				TokenMode:        persistedTabTokenMode(currentTabTokenMode(tab)),
-				AgentPreset:      boot.AgentPresetBalanced,
+				AgentPreset:      currentTabAgentPreset(tab),
+				TokenMode:        currentTabTokenMode(tab),
+				QualityFloor:     tab.qualityFloor,
 				Mode:             persistedTabMode(currentTabMode(tab)),
 				Goal:             persistedTabGoal(tab),
 				ToolApprovalMode: persistedToolApprovalMode(currentTabToolApprovalMode(tab)),
@@ -6132,6 +6137,7 @@ func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionReco
 		topicTitle := tab.TopicTitle
 		model := strings.TrimSpace(tab.model)
 		tokenMode := boot.TokenModeFull // deprecated dual-write compat value
+		qualityFloor := strings.TrimSpace(tab.qualityFloor)
 		mode := normalizeTabMode(tab.mode)
 		toolApprovalMode := normalizeToolApprovalMode(tab.toolApprovalMode)
 		goal := strings.TrimSpace(tab.goal)
@@ -6158,7 +6164,8 @@ func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionReco
 			TopicID:          topicID,
 			TopicTitle:       topicTitle,
 			Model:            model,
-			AgentPreset:      boot.AgentPresetBalanced, // deprecated compat label
+			AgentPreset:      currentTabAgentPreset(&WorkspaceTab{qualityFloor: qualityFloor}),
+			QualityFloor:     qualityFloor,
 			TokenMode:        tokenMode,
 			Mode:             persistedTabMode(mode),
 			ToolApprovalMode: persistedToolApprovalMode(toolApprovalMode),
@@ -7451,14 +7458,6 @@ func currentTabToolApprovalMode(tab *WorkspaceTab) string {
 	return normalizeToolApprovalMode(tab.toolApprovalMode)
 }
 
-// currentTabTokenMode returns the deprecated dual-write compat label. Execution
-// modes no longer exist at runtime; the value is pinned so one-version-old
-// clients keep parsing tab state.
-func currentTabTokenMode(tab *WorkspaceTab) string {
-	_ = tab
-	return boot.TokenModeFull
-}
-
 // tabRuntimeSnapshot is a consistent under-a.mu copy of the per-tab fields
 // that bound methods and rebuild paths need after releasing the lock. The
 // build/rebuild goroutines write these fields under a.mu, so lock-free reads
@@ -7466,34 +7465,30 @@ func currentTabTokenMode(tab *WorkspaceTab) string {
 // fixed for #5955). Controller methods are invoked on the snapshot's ctrl
 // AFTER unlocking, never while holding a.mu.
 type tabRuntimeSnapshot struct {
-	ctrl             control.SessionAPI
-	sink             *tabEventSink
-	label            string
-	ready            bool
-	readOnly         bool
-	startupErr       string
-	scope            string
-	workspaceRoot    string
-	sessionPath      string
-	topicID          string
-	topicTitle       string
-	sharedHostKey    string
-	model            string
-	effort           *string
-	tokenMode        string
-	mode             string
-	goal             string
-	toolApprovalMode string
+	ctrl                          control.SessionAPI
+	sink                          *tabEventSink
+	label                         string
+	ready                         bool
+	readOnly                      bool
+	startupErr                    string
+	scope                         string
+	workspaceRoot                 string
+	sessionPath                   string
+	topicID                       string
+	topicTitle                    string
+	sharedHostKey                 string
+	model                         string
+	effort                        *string
+	tokenMode, qualityFloor, mode string
+	goal, toolApprovalMode        string
 }
 
 // normalizedTabRuntime is the internal, orthogonal runtime profile restored
 // across controller rebuilds. Goal sidecars remain authoritative; legacyGoal is
 // only a fallback for a running legacy Goal with no sidecar.
 type normalizedTabRuntime struct {
-	collaborationMode string
-	toolApprovalMode  string
-	tokenMode         string
-	legacyGoal        string
+	collaborationMode, toolApprovalMode, tokenMode string
+	qualityFloor, legacyGoal                       string
 }
 
 // snapshotTabRuntimeLocked copies the racy per-tab fields. Callers must hold
@@ -7517,7 +7512,8 @@ func snapshotTabRuntimeLocked(tab *WorkspaceTab) tabRuntimeSnapshot {
 		sharedHostKey:    tab.SharedHostKey,
 		model:            tab.model,
 		effort:           cloneStringPtr(tab.effort),
-		tokenMode:        tab.tokenMode,
+		tokenMode:        currentTabTokenMode(tab),
+		qualityFloor:     tab.qualityFloor,
 		mode:             tab.mode,
 		goal:             tab.goal,
 		toolApprovalMode: tab.toolApprovalMode,
@@ -7595,10 +7591,15 @@ func (s tabRuntimeSnapshot) normalizedRuntime() normalizedTabRuntime {
 		goalStatus = s.ctrl.GoalStatus()
 	}
 
+	qualityFloor := s.qualityFloor
+	if qualityFloor == "" {
+		qualityFloor = tabQualityFloor(s.workspaceRoot, "")
+	}
 	runtime := normalizedTabRuntime{
 		collaborationMode: "normal",
 		toolApprovalMode:  approvalMode,
 		tokenMode:         boot.NormalizeTokenMode(s.tokenMode),
+		qualityFloor:      qualityFloor,
 	}
 	switch {
 	case plan:
@@ -7620,19 +7621,12 @@ func applyNormalizedRuntimeToTabLocked(tab *WorkspaceTab, runtime normalizedTabR
 	}
 	tab.mode = runtime.tabMode()
 	tab.toolApprovalMode = normalizeToolApprovalMode(runtime.toolApprovalMode)
-	tab.tokenMode = boot.NormalizeTokenMode(runtime.tokenMode)
+	tab.qualityFloor = runtime.qualityFloor
 	if runtime.collaborationMode == "goal" {
 		tab.goal = strings.TrimSpace(runtime.legacyGoal)
 	} else {
 		tab.goal = ""
 	}
-}
-
-// persistedTabTokenMode pins the deprecated tokenMode compat value written
-// into tab state and session metas. It is always the safe default.
-func persistedTabTokenMode(mode string) string {
-	_ = mode
-	return boot.TokenModeFull
 }
 
 func normalizeToolApprovalMode(mode string) string {
@@ -7827,7 +7821,7 @@ func (a *App) saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 		workspaceRoot:    tab.WorkspaceRoot,
 		topicID:          tab.TopicID,
 		topicTitle:       tab.TopicTitle,
-		tokenMode:        boot.NormalizeTokenMode(tab.tokenMode),
+		tokenMode:        currentTabTokenMode(tab),
 		mode:             normalizeTabMode(tab.mode),
 		toolApprovalMode: normalizeToolApprovalMode(tab.toolApprovalMode),
 		goal:             strings.TrimSpace(tab.goal),
@@ -7846,15 +7840,11 @@ func (a *App) saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 }
 
 type tabSessionMetaSnapshot struct {
-	path             string
-	scope            string
-	workspaceRoot    string
-	topicID          string
-	topicTitle       string
-	tokenMode        string
-	mode             string
-	toolApprovalMode string
-	goal             string
+	path, scope, workspaceRoot string
+	topicID, topicTitle        string
+	tokenMode, qualityFloor    string
+	mode, toolApprovalMode     string
+	goal                       string
 }
 
 func (a *App) saveTabSessionMetaForCurrentSession(tab *WorkspaceTab) error {
@@ -7881,7 +7871,8 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 	workspaceRoot := tab.WorkspaceRoot
 	topicID := tab.TopicID
 	topicTitle := tab.TopicTitle
-	tokenMode := boot.NormalizeTokenMode(tab.tokenMode)
+	tokenMode := currentTabTokenMode(tab)
+	qualityFloor := strings.TrimSpace(tab.qualityFloor)
 	mode := normalizeTabMode(tab.mode)
 	toolApprovalMode := normalizeToolApprovalMode(tab.toolApprovalMode)
 	goal := strings.TrimSpace(tab.goal)
@@ -7902,6 +7893,7 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 		activeWork = status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 		mode = tabModeFromAxes(ctrl.PlanMode(), ctrl.AutoApproveTools())
 		toolApprovalMode = normalizeToolApprovalMode(ctrl.ToolApprovalMode())
+		qualityFloor = firstCtrlFloor(ctrl, qualityFloor)
 		if ctrl.GoalStatus() == control.GoalStatusRunning {
 			goal = strings.TrimSpace(ctrl.Goal())
 		} else {
@@ -7943,6 +7935,7 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 		topicID:          topicID,
 		topicTitle:       topicTitle,
 		tokenMode:        tokenMode,
+		qualityFloor:     qualityFloor,
 		mode:             mode,
 		toolApprovalMode: toolApprovalMode,
 		goal:             goal,
@@ -7983,8 +7976,11 @@ func saveTabSessionMetaSnapshot(snap tabSessionMetaSnapshot) error {
 	m.WorkspaceRoot = workspaceRoot
 	m.TopicID = snap.topicID
 	m.TopicTitle = snap.topicTitle
-	m.TokenMode = persistedTabTokenMode(snap.tokenMode)
-	m.AgentPreset = boot.AgentPresetBalanced
+	delivery := strings.TrimSpace(snap.qualityFloor) == control.QualityFloorDelivery
+	m.QualityFloor, m.TokenMode, m.AgentPreset = "", boot.TokenModeFull, ""
+	if delivery {
+		m.QualityFloor, m.TokenMode, m.AgentPreset = control.QualityFloorDelivery, boot.TokenModeDelivery, boot.AgentPresetDelivery
+	}
 	m.Mode = persistedTabMode(snap.mode)
 	m.ToolApprovalMode = persistedToolApprovalMode(snap.toolApprovalMode)
 	m.Goal = strings.TrimSpace(snap.goal)
@@ -8013,10 +8009,8 @@ func tabSessionMetaPathForSession(runtimeDir, sessionDir, sessionPath string) st
 }
 
 type tabSessionProfile struct {
-	tokenMode        string
-	mode             string
-	toolApprovalMode string
-	goal             string
+	tokenMode, qualityFloor, mode string
+	toolApprovalMode, goal        string
 }
 
 func defaultTabSessionProfile() tabSessionProfile {
@@ -8029,11 +8023,18 @@ func defaultTabSessionProfile() tabSessionProfile {
 
 func tabSessionProfileFromMeta(sessionPath string, meta agent.BranchMeta) tabSessionProfile {
 	profile := defaultTabSessionProfile()
-	// Prefer agent_preset; fall back to legacy token_mode for one version.
-	if strings.TrimSpace(meta.AgentPreset) != "" {
+	// Prefer agent_preset/quality_floor; fall back to legacy token_mode.
+	profile.tokenMode = boot.NormalizeTokenMode(meta.TokenMode)
+	if meta.AgentPreset != "" {
 		profile.tokenMode = boot.TokenModeFromAgentPreset(meta.AgentPreset)
-	} else {
-		profile.tokenMode = boot.NormalizeTokenMode(meta.TokenMode)
+	}
+	switch {
+	case strings.TrimSpace(meta.QualityFloor) != "":
+		profile.qualityFloor = meta.QualityFloor
+	case boot.NormalizeTokenMode(meta.TokenMode) == boot.TokenModeDelivery || meta.AgentPreset == boot.AgentPresetDelivery:
+		profile.qualityFloor = control.QualityFloorDelivery
+	default:
+		profile.qualityFloor = control.QualityFloorStandard
 	}
 	profile.mode = normalizeTabMode(meta.Mode)
 	profile.toolApprovalMode = normalizeToolApprovalMode(meta.ToolApprovalMode)
@@ -8056,7 +8057,7 @@ func applyTabSessionProfile(tab *WorkspaceTab, profile tabSessionProfile) {
 	if tab == nil {
 		return
 	}
-	tab.tokenMode = boot.NormalizeTokenMode(profile.tokenMode)
+	tab.qualityFloor = profile.qualityFloor
 	tab.mode = normalizeTabMode(profile.mode)
 	tab.toolApprovalMode = normalizeToolApprovalMode(profile.toolApprovalMode)
 	if tab.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(tab.mode) {

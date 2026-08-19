@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -63,6 +64,7 @@ type agentServices struct {
 	// cannot request new directories.
 	writeAccessExpandable bool
 	workspaceRoot         string
+	sessionTemp           *sessiontemp.Manager
 	homeDir               string
 	stateRoot             string
 	// hooks fires PreToolUse / PostToolUse shell hooks around each tool call.
@@ -136,6 +138,7 @@ func newAgentServices(
 		writeAccess:           opts.WriteAccessGate,
 		writeAccessExpandable: opts.SubagentDepth == 0 && !opts.DisableWriteAccessExpand,
 		workspaceRoot:         strings.TrimSpace(opts.WriteWorkspaceRoot),
+		sessionTemp:           opts.SessionTemp,
 		homeDir:               strings.TrimSpace(opts.HomeDir),
 		stateRoot:             strings.TrimSpace(opts.StateRoot),
 	}

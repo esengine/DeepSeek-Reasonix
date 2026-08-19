@@ -374,6 +374,10 @@ export interface WireCompletionSummary {
   review: string;
   gap_kinds?: string[];
   constraint_degraded: boolean;
+  /** Turn-time policy floor. Missing on historical events. */
+  floor?: "standard" | "delivery" | string;
+  /** Backend decision; authoritative when floor is present. */
+  attention?: boolean;
 }
 
 export type WorkspaceWatchState = "active" | "degraded" | "unavailable";
@@ -456,8 +460,9 @@ export interface TabMeta {
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   recovered?: boolean;
@@ -926,8 +931,9 @@ export interface Meta {
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
@@ -936,11 +942,12 @@ export interface Meta {
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
-// TokenMode is the dual-write wire value for Agent role settings (角色设定).
-// Canonical product ids are light|balanced|delivery; economy/full remain one
-// compatibility version of persisted/API values.
+// TokenMode is the dual-write wire value for the session quality floor.
+// The floor itself is standard|delivery; light and its aliases fold to
+// standard, and full/economy remain one compatibility version of old values.
 export type TokenMode = "full" | "economy" | "delivery" | "light" | "balanced";
 export type AgentPreset = "light" | "balanced" | "delivery";
+export type QualityFloor = "standard" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
 // Optional Goal runtime summary; absent for old hosts or when no goal is active.
 export interface GoalRuntime {

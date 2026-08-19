@@ -58,6 +58,7 @@ func plannerTurnMetadataFromContext(ctx context.Context) (plannerTurnMetadata, b
 func (c *Controller) withPlannerTurnMetadata(ctx context.Context, userText string, synthetic bool, priorMessages int) context.Context {
 	text := strings.TrimSpace(agent.StripTransientUserBlocks(userText))
 	constraints := runtimepolicy.ParseConstraints(runtimepolicy.StripQuotedConstraints(text))
+	constraints.PolicyFloor = c.qualityFloorConstraint()
 	if c.PlanMode() {
 		constraints.PlanModeReadOnly = true
 		constraints.ForbidMutation = true

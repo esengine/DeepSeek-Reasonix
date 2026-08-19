@@ -10,6 +10,8 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
@@ -41,8 +43,11 @@ func TestDeliveryExecutionScopeDoesNotChangeProviderRequestBytes(t *testing.T) {
 	}
 }
 
+// Delivery-scoped goal turns run under the delivery floor: the floor is what
+// arms the readiness pause these tests assert on.
 func deliveryGoalContext(id, task string) context.Context {
-	return WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: id, TaskText: task})
+	ctx := runtimepolicy.WithContext(context.Background(), runtimepolicy.Constraints{PolicyFloor: taskcontract.PolicyFloorDelivery})
+	return WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: id, TaskText: task})
 }
 
 func TestDeliveryGoalFinalAnswerAlwaysGatesMutationExpectation(t *testing.T) {

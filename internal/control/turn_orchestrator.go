@@ -323,7 +323,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return err
 	}
 	c.mu.Lock()
-	plan := c.planMode
+	plan := c.sessionSettings.planMode
 	c.mu.Unlock()
 	if !plan {
 		return nil

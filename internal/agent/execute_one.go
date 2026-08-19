@@ -805,6 +805,11 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if obs != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil && change.Path != "" {
+				if evidence.ClassifyWriteScope(change.Path, a.writeWorkspaceRoot, a.scratchRoots()) == evidence.WriteScopeScratch {
+					obs.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapScratch, Tool: toolName, Path: change.Path, Detail: "scratch path is not a project file"})
+					plan.mutationPath = change.Path
+					return
+				}
 				obs.BeforeMutationFromChange(change, toolName)
 				plan.mutationPath = change.Path
 				return

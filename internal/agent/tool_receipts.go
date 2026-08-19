@@ -6,6 +6,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
@@ -38,9 +39,18 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 	}
 	call := plan.call
 	args := json.RawMessage(call.Arguments)
+	// The session floor in force at write time is a fact of the write: it
+	// rides the receipt so the per-turn contract replay re-derives the same
+	// floor obligations even after the floor changes.
+	floorStamp := a.turn.constraints.PolicyFloor.String()
+	if floorStamp == taskcontract.PolicyFloorNone.String() {
+		floorStamp = ""
+	}
 	switch {
 	case call.Name == "complete_step":
 		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.readOnly)
+		a.stampReceiptDeliveryScope(&rec)
+		rec.PolicyFloor = floorStamp
 		a.task.ledger.Record(rec)
 		a.commitToolReceipt(rec)
 		if err == nil {
@@ -51,12 +61,16 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		a.task.ledger.Record(proxy)
 		rec := evidence.ReceiptFromToolCall(plan.evidenceName, plan.evidenceArgs, err == nil, plan.readOnly)
 		rec.Mutation = plan.effects.ContentMutation
+		a.stampReceiptDeliveryScope(&rec)
+		rec.PolicyFloor = floorStamp
 		decorateExecutionReceipt(&rec, result, execution)
 		a.task.ledger.Record(rec)
 		a.commitToolReceipt(rec)
 	default:
 		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.tool.ReadOnly())
 		rec.Mutation = plan.effects.ContentMutation
+		a.stampReceiptDeliveryScope(&rec)
+		rec.PolicyFloor = floorStamp
 		decorateExecutionReceipt(&rec, result, execution)
 		a.task.ledger.Record(rec)
 		a.commitToolReceipt(rec)

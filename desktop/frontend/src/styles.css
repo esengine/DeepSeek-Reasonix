@@ -7247,6 +7247,15 @@ body > .mermaid-diagram--fullscreen {
   max-width: min(168px, 28vw);
 }
 
+.composer-meta__control--floor {
+  flex: 0 1 auto;
+  min-width: 132px;
+  max-width: min(220px, 26vw);
+  margin-inline-start: 2px;
+  display: flex;
+  align-items: center;
+}
+
 .composer-meta__control--approval {
   flex: 0 1 auto;
   min-width: 216px;
@@ -7298,6 +7307,27 @@ body > .mermaid-diagram--fullscreen {
   --composer-modebar-active-bg: var(--mode-auto-bg);
   --composer-modebar-active-border: var(--mode-auto-border);
   --composer-modebar-active-fg: var(--mode-auto-fg);
+}
+
+/* Two segments instead of three, so the thumb spans half the track. Standard
+   needs a solid neutral thumb, not the near-invisible default: otherwise
+   leaving delivery reads as the pill vanishing rather than sliding. */
+.composer-modebar--floor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  --composer-modebar-active-bg: color-mix(in srgb, var(--fg) 16%, var(--surface-2));
+  --composer-modebar-active-border: color-mix(in srgb, var(--fg) 30%, transparent);
+  --composer-modebar-active-fg: var(--fg);
+}
+
+.composer-modebar--floor .composer-modebar__thumb {
+  width: calc((100% - 4px) / 2);
+}
+
+.composer-modebar--floor[data-floor="delivery"] {
+  --composer-modebar-index: 1;
+  --composer-modebar-active-bg: var(--accent);
+  --composer-modebar-active-border: var(--accent-strong);
+  --composer-modebar-active-fg: var(--accent-fg);
 }
 
 .composer-modebar--approval[data-mode="auto"] {
@@ -7576,6 +7606,12 @@ body > .mermaid-diagram--fullscreen {
     max-width: 100%;
   }
 
+  .composer-meta__control--floor {
+    flex-basis: 120px;
+    min-width: 110px;
+    max-width: 120px;
+  }
+
   .composer-meta__control--intent {
     max-width: 128px;
   }
@@ -7627,6 +7663,12 @@ body > .mermaid-diagram--fullscreen {
     flex-basis: 92px;
     min-width: 86px;
     max-width: 92px;
+  }
+
+  .composer-meta__control--floor {
+    flex-basis: 62px;
+    min-width: 58px;
+    max-width: 62px;
   }
 
   .composer-meta__divider {
@@ -7827,6 +7869,17 @@ body > .mermaid-diagram--fullscreen {
 .composer-intent-menu__check {
   flex: 0 0 auto;
   color: var(--accent);
+}
+
+.composer-modebar__inferred {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .composer-intent-menu__stop {
@@ -10280,6 +10333,9 @@ body > .mermaid-diagram--fullscreen {
 .workspace-completion-summary--attention {
   border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft));
 }
+.workspace-completion-summary {
+  cursor: default;
+}
 .workspace-completion-summary__head,
 .workspace-completion-summary__metrics,
 .workspace-completion-summary__details {
@@ -10287,9 +10343,11 @@ body > .mermaid-diagram--fullscreen {
   flex-wrap: wrap;
   gap: 4px 8px;
 }
-.workspace-completion-summary__head strong {
-  margin-right: auto;
+.workspace-completion-summary__title {
+  margin: 0 auto 0 0;
   color: var(--fg);
+  font: inherit;
+  font-weight: 650;
 }
 .workspace-completion-summary__metrics {
   margin-top: 6px;
@@ -22157,6 +22215,15 @@ body > .mermaid-diagram--fullscreen {
   user-select: none;
   --wails-draggable: no-drag;
   transition: opacity var(--dur-base) ease;
+}
+
+/* The image viewer is an app-level fullscreen surface. Hide the custom
+   Windows caption controls while it is open so the preview owns the only
+   visible close affordance; native shortcuts such as Alt+F4 remain intact. */
+.app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* When the workspace panel is closed (no layout--workspace-open or

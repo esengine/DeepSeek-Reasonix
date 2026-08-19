@@ -2,6 +2,418 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.29.0",
+      "date": "2026-08-18",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop reliability and workflow fixes",
+        "zh": "桌面端可靠性与工作流修复"
+      },
+      "summary": {
+        "en": "This release makes the configured default model apply after restart and to new sessions, unblocks todo progress updates, and fixes Windows image preview controls, reduced-motion transcript flicker, and duplicate pinned conversations.",
+        "zh": "此版本让设置的默认模型在重启后和新会话中正确生效，解除待办进度更新阻塞，并修复 Windows 图片预览窗口按钮、减少动态效果时的对话区闪烁以及置顶对话重复显示问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Default model now applies after restart and to new sessions",
+            "zh": "默认模型在重启和新会话中正确生效"
+          },
+          "body": {
+            "en": "Changing the default model in Settings now persists across restart and applies when starting or reusing a blank session, while existing conversations keep their saved model.",
+            "zh": "在设置中更改默认模型后，重启应用以及新建或复用空白会话都会使用该模型，已有会话仍保留各自保存的模型。"
+          },
+          "refs": [
+            9101
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Todo progress updates no longer stall",
+            "zh": "待办进度更新不再卡住"
+          },
+          "body": {
+            "en": "The todo panel now updates progress without requiring a prior complete_step, avoiding deadlocks in plan mode and normal execution.",
+            "zh": "待办面板现在无需先执行 complete_step 即可更新进度，避免在计划模式和普通执行中出现死锁。"
+          },
+          "refs": [
+            9098
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows image preview hides window controls",
+            "zh": "Windows 图片预览隐藏窗口控制按钮"
+          },
+          "body": {
+            "en": "The image viewer now hides custom minimize, maximize, and close controls on Windows, eliminating duplicate close actions.",
+            "zh": "图片查看器现在在 Windows 上隐藏自定义的最小化、最大化和关闭按钮，消除了重复的关闭操作。"
+          },
+          "refs": [
+            9100
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Reduced-motion transcript flicker resolved",
+            "zh": "减少动态效果时对话区闪烁问题已解决"
+          },
+          "body": {
+            "en": "Fixed the scroll oscillation loop that occurred when Windows system animations were disabled, ensuring the transcript stays stable and the jump-to-bottom button works reliably.",
+            "zh": "修复了 Windows 关闭系统动画时出现的滚动振荡循环，确保对话区正确稳定，跳到底部按钮可靠工作。"
+          },
+          "refs": [
+            9095
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Pinned conversations no longer duplicate in project tree",
+            "zh": "置顶对话不再在项目树中重复显示"
+          },
+          "body": {
+            "en": "Pinned conversations now appear only once in the sidebar, without being repeated in their original folder.",
+            "zh": "置顶对话现在在侧边栏中只显示一次，不会在其原始文件夹中再次出现。"
+          },
+          "refs": [
+            9086
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [],
+        "fixed": [
+          {
+            "title": {
+              "en": "Default model persists and seeds new sessions",
+              "zh": "默认模型持久化并应用到新会话"
+            },
+            "body": {
+              "en": "The desktop persists the selected default to the current session sidecar and applies it after New Session rotation or when reusing a blank tab.",
+              "zh": "桌面端会把所选默认模型持久化到当前会话 sidecar，并在新会话轮换或复用空白标签页时应用该模型。"
+            },
+            "refs": [
+              9101
+            ]
+          },
+          {
+            "title": {
+              "en": "Todo progress updates no longer stall",
+              "zh": "待办进度更新不再卡住"
+            },
+            "body": {
+              "en": "todo_write can now mark items completed in any workflow phase without a prior complete_step, fixing deadlocks in plan mode and normal execution.",
+              "zh": "todo_write 现在可以在任何工作流阶段标记项目完成，无需先执行 complete_step，修复了计划模式和普通执行中的死锁。"
+            },
+            "refs": [
+              9098
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows image preview hides window controls",
+              "zh": "Windows 图片预览隐藏窗口控制按钮"
+            },
+            "body": {
+              "en": "The image viewer hides custom window controls on Windows, removing the duplicate close button.",
+              "zh": "图片查看器在 Windows 上隐藏自定义窗口控制按钮，移除了重复的关闭按钮。"
+            },
+            "refs": [
+              9100
+            ]
+          },
+          {
+            "title": {
+              "en": "Reduced-motion transcript flicker resolved",
+              "zh": "减少动态效果时对话区闪烁问题已解决"
+            },
+            "body": {
+              "en": "Fixed scroll oscillation when Windows system animations are disabled, ensuring the transcript position remains stable.",
+              "zh": "修复了 Windows 关闭系统动画时的滚动振荡，确保对话区位置稳定。"
+            },
+            "refs": [
+              9095
+            ]
+          },
+          {
+            "title": {
+              "en": "Pinned conversations no longer duplicate in project tree",
+              "zh": "置顶对话不再在项目树中重复显示"
+            },
+            "body": {
+              "en": "Pinned conversations are deduplicated and appear only once in the sidebar.",
+              "zh": "置顶对话已去重，在侧边栏中只显示一次。"
+            },
+            "refs": [
+              9086
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.29.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.28.0...desktop-v1.29.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.29.0",
+      "baseVersion": "1.29.0",
+      "status": "reviewed",
+      "previousRelease": "1.28.0",
+      "builds": {
+        "cli": "v1.29.0",
+        "desktop": "v1.29.0",
+        "npm": "1.29.0"
+      }
+    },
+    {
+      "version": "1.28.0",
+      "date": "2026-08-18",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.28.0",
+        "zh": "Reasonix 1.28.0"
+      },
+      "summary": {
+        "en": "This release restores delivery-grade session quality floors, bounds background job lease retention, pins official DeepSeek-V4-Pro to the DSH persona, completes StepFun provider presets, and fixes several desktop transcript navigation issues.",
+        "zh": "此版本恢复了交付级会话质量底线，限制了后台任务租约保留时间，为官方 DeepSeek-V4-Pro 固定 DSH 人设，补全了阶跃星辰提供商预设，并修复了多个桌面端会话记录导航问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Reasoning Language Documentation",
+            "zh": "推理语言文档"
+          },
+          "body": {
+            "en": "Updated to document the official DeepSeek-V4-Pro auto reasoning language and first-line persona.",
+            "zh": "更新以记录官方 DeepSeek-V4-Pro 的自动推理语言和首行人设。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ac17fe3429a5084c9dec8d3420ed8e584a69c9df/docs/REASONING_LANGUAGE.md"
+        },
+        {
+          "title": {
+            "en": "推理语言文档（中文）",
+            "zh": "推理语言文档（中文）"
+          },
+          "body": {
+            "en": "Updated to document the official DeepSeek-V4-Pro auto reasoning language and first-line persona.",
+            "zh": "更新以记录官方 DeepSeek-V4-Pro 的自动推理语言和首行人设。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ac17fe3429a5084c9dec8d3420ed8e584a69c9df/docs/REASONING_LANGUAGE.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Session quality floor restored",
+            "zh": "恢复会话质量底线"
+          },
+          "body": {
+            "en": "The standard and delivery roles return as session quality floors. Delivery sessions now enforce sticky completion gates: strict full verification after writes, plus final readiness checks.",
+            "zh": "标准和交付角色作为会话质量底线回归。交付会话现在强制执行粘性完成门槛：写入后进行严格完整验证，以及最终就绪检查。"
+          },
+          "refs": [
+            9072
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Background job lease retention bounded",
+            "zh": "后台任务租约保留有界"
+          },
+          "body": {
+            "en": "Resident background services no longer hold the workspace write lease indefinitely. The lease is released after a 30-second grace period following the final agent run.",
+            "zh": "常驻后台服务不再无限期持有工作区写入租约。在最终代理运行结束后的 30 秒宽限期后，租约将被释放。"
+          },
+          "refs": [
+            9078
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Official DeepSeek-V4-Pro persona pinned",
+            "zh": "官方 DeepSeek-V4-Pro 人设固定"
+          },
+          "body": {
+            "en": "Official DeepSeek-V4-Pro now automatically prepends the DeepSeek Harness minimal-mode persona as the first system-prompt paragraph, with reasoning language pinned to English.",
+            "zh": "官方 DeepSeek-V4-Pro 现在自动将 DeepSeek Harness 最小模式人设作为系统提示的第一段前置，并将推理语言固定为英语。"
+          },
+          "refs": [
+            9074
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "StepFun provider URL canonicalization and preset completion",
+            "zh": "阶跃星辰提供商 URL 规范化与预设补全"
+          },
+          "body": {
+            "en": "StepFun custom OpenAI-compatible endpoints are now canonicalized to prevent 404 errors, and the preset matrix is completed for all channel and protocol combinations.",
+            "zh": "阶跃星辰自定义 OpenAI 兼容端点现已规范化以防止 404 错误，并补全了所有渠道和协议组合的预设矩阵。"
+          },
+          "refs": [
+            9075
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop transcript navigation fixes",
+            "zh": "桌面端会话记录导航修复"
+          },
+          "body": {
+            "en": "Question navigation and rewind now land on the selected question instead of jumping to the transcript tail. Repeated tail writes during scroll delivery are also prevented.",
+            "zh": "问题导航和回退现在会落在所选问题上，而不是跳到会话记录末尾。同时防止了滚动交付期间重复的尾部写入。"
+          },
+          "refs": [
+            9065,
+            9062
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Session quality floor",
+              "zh": "会话质量底线"
+            },
+            "body": {
+              "en": "Restores standard and delivery roles as session quality floors, with delivery enforcing sticky completion gates.",
+              "zh": "恢复标准和交付角色作为会话质量底线，交付角色强制执行粘性完成门槛。"
+            },
+            "refs": [
+              9072
+            ]
+          },
+          {
+            "title": {
+              "en": "Official DeepSeek-V4-Pro persona",
+              "zh": "官方 DeepSeek-V4-Pro 人设"
+            },
+            "body": {
+              "en": "Automatically prepends the DSH minimal-mode persona and pins reasoning language to English for official DeepSeek-V4-Pro.",
+              "zh": "为官方 DeepSeek-V4-Pro 自动前置 DSH 最小模式人设，并将推理语言固定为英语。"
+            },
+            "refs": [
+              9074
+            ]
+          },
+          {
+            "title": {
+              "en": "StepFun preset matrix completion",
+              "zh": "阶跃星辰预设矩阵补全"
+            },
+            "body": {
+              "en": "Adds missing StepFun presets for all channel and protocol combinations.",
+              "zh": "为所有渠道和协议组合添加缺失的阶跃星辰预设。"
+            },
+            "refs": [
+              9075
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "StepFun URL canonicalization",
+              "zh": "阶跃星辰 URL 规范化"
+            },
+            "body": {
+              "en": "Canonicalizes known official StepFun step_plan URLs to prevent chat/probe endpoint mismatch.",
+              "zh": "规范化已知的官方阶跃星辰 step_plan URL，防止聊天/探测端点不匹配。"
+            },
+            "refs": [
+              9075
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Background job lease retention bounded",
+              "zh": "后台任务租约保留有界"
+            },
+            "body": {
+              "en": "Releases workspace write lease after a 30-second grace period following the final agent run, even if background jobs continue.",
+              "zh": "在最终代理运行结束后的 30 秒宽限期后释放工作区写入租约，即使后台任务仍在继续。"
+            },
+            "refs": [
+              9078
+            ]
+          },
+          {
+            "title": {
+              "en": "Question navigation landing",
+              "zh": "问题导航落点"
+            },
+            "body": {
+              "en": "Fixes question navigator and rewind jumping to transcript tail instead of selected question.",
+              "zh": "修复问题导航器和回退跳到会话记录末尾而不是所选问题的问题。"
+            },
+            "refs": [
+              9065
+            ]
+          },
+          {
+            "title": {
+              "en": "Repeated tail writes during scroll delivery",
+              "zh": "滚动交付期间重复尾部写入"
+            },
+            "body": {
+              "en": "Prevents repeated tail-follow writes when multiple non-bottom deliveries occur for one physical displacement.",
+              "zh": "防止在一次物理位移产生多个非底部交付时重复进行尾部跟随写入。"
+            },
+            "refs": [
+              9062
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "Linearl",
+        "wuhanwoaini521"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.28.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.27.0...desktop-v1.28.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.28.0",
+      "baseVersion": "1.28.0",
+      "status": "reviewed",
+      "previousRelease": "1.27.0",
+      "builds": {
+        "cli": "v1.28.0",
+        "desktop": "v1.28.0",
+        "npm": "1.28.0"
+      }
+    },
+    {
       "version": "1.27.0",
       "date": "2026-08-17",
       "channel": "stable",

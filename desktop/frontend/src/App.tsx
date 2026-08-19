@@ -106,10 +106,13 @@ import {
   type RemoteHostView,
   type SessionMeta,
   type SettingsView,
+  type QualityFloor,
   type TabMeta,
   type ToolApprovalMode,
+  type WireCompletionSummary,
   type WorkspaceConflictView,
 } from "./lib/types";
+import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import type { RewindUndoState } from "./lib/rewindTypes";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
@@ -267,7 +270,14 @@ function NoticePreviewPanel() {
       <div style={{ maxWidth: 920, margin: "0 auto" }}>
         {noticePreviewItems().map((item) => {
           if (item.kind !== "notice") return null;
-          return <NoticeCard key={item.id} item={item} onAction={item.action ? () => undefined : undefined} />;
+          return (
+            <NoticeCard
+              key={item.id}
+              item={item}
+              onAction={item.action ? () => undefined : undefined}
+              onAccept={item.action === "continue_delivery" ? () => undefined : undefined}
+            />
+          );
         })}
       </div>
     </div>
@@ -1067,6 +1077,7 @@ export default function App() {
     drainExtensionNotifications,
     setCollaborationMode: setControllerCollaborationMode,
     setToolApprovalMode: setControllerToolApprovalMode,
+    setQualityFloor: setControllerQualityFloor,
     setComposerProfileForTab: setControllerComposerProfileForTab,
     setGoalForTab: setControllerGoalForTab,
     resumeGoalForTab: resumeControllerGoalForTab,
@@ -1915,6 +1926,14 @@ export default function App() {
       void setControllerToolApprovalMode(m);
     },
     [activeTabId, patchActiveComposerProfile, setControllerToolApprovalMode, toolApprovalMode],
+  );
+  const applyQualityFloor = useCallback(
+    (floor: QualityFloor) => {
+      if (!activeTabId) return;
+      patchActiveComposerProfile({ qualityFloor: floor }, ["qualityFloor"]);
+      void setControllerQualityFloor(floor);
+    },
+    [activeTabId, patchActiveComposerProfile, setControllerQualityFloor],
   );
   const toggleYoloApprovalMode = useCallback(() => {
     if (!activeTabId) return;
@@ -2915,6 +2934,22 @@ export default function App() {
     },
     [openWorkspacePanel],
   );
+
+  const verificationRevealSequenceRef = useRef(0);
+  const [verificationRevealRequest, setVerificationRevealRequest] = useState<WorkspaceVerificationRevealRequest | null>(null);
+  const openTurnVerification = useCallback((summary: WireCompletionSummary) => {
+    openRightDockMode("changed");
+    verificationRevealSequenceRef.current += 1;
+    setVerificationRevealRequest({
+      id: verificationRevealSequenceRef.current,
+      summary,
+      tabId: activeTabId ?? "",
+      turnStartAt: state.turnStartAt,
+      currentSummary: state.completionSummary,
+    });
+  }, [activeTabId, openRightDockMode, state.completionSummary, state.turnStartAt]);
+
+  useEffect(() => { setVerificationRevealRequest(null); }, [activeTabId, state.completionSummary, state.turnStartAt]);
 
   const toggleTerminalPanel = useCallback(() => {
     setTerminalPanelOpen((prev) => {
@@ -4834,7 +4869,9 @@ export default function App() {
                   footerHeight={footerHeight}
                   onPrompt={handleTranscriptPrompt}
                   onDeliveryContinue={() => void handleDeliveryContinue()}
+                  onAcceptDelivery={() => void app.AcceptDeliveryToTab(activeTabIdRef.current ?? "")}
                   onOpenChanges={() => openRightDockMode("changed")}
+                  onOpenVerification={openTurnVerification}
                   onEditPrompt={handleEditPrompt}
                   onRewind={handleMessageAction}
                   checkpoints={state.checkpoints}
@@ -5042,6 +5079,9 @@ export default function App() {
               running={state.running || rewindCommitting}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
+              qualityFloor={composerProfile.qualityFloor}
+              floorInferred={(activeTab?.floorInferred ?? false) && !composerProfile.pending.qualityFloor}
+              onSetQualityFloor={applyQualityFloor}
               turnPhase={state.turnPhase}
               goal={goal}
               goalStatus={state.meta?.goalStatus}
@@ -5232,6 +5272,9 @@ export default function App() {
                     onOpenInTerminal={openTerminalForPath}
                     initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
                     completionSummary={state.completionSummary}
+                    turnStartAt={state.turnStartAt}
+                    verificationRevealRequest={verificationRevealRequest}
+                    qualityFloor={composerProfile.qualityFloor}
                     showViewTabs={false}
                     creationMode={sidebarCreation}
                   />

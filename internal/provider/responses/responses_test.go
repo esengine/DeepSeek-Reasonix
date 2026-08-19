@@ -52,6 +52,10 @@ func TestDetectVendorAndModeDefaults(t *testing.T) {
 		{"https://api.xiaomimimo.com/v1", "mimo", "stateless"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
 		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://api.stepfun.com/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.com/step_plan/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.ai/v1", "stepfun", "stateless"},
+		{"https://gateway.stepfun.com/v1", "", "stateful"},
 		{"https://api.deepseek.com.attacker.example/v1", "", "stateful"},
 		{"https://example.com/api.deepseek.com/v1", "", "stateful"},
 		{"https://example.com/v1", "", "stateful"},
@@ -1195,5 +1199,41 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
 	if _, exists := db["max_output_tokens"]; exists {
 		t.Fatalf("deepseek auto budget = %#v, want omitted official ceiling", db["max_output_tokens"])
+	}
+}
+
+// TestStepFunResponsesSummaryRequired: StepFun's Responses API rejects input
+// reasoning items without a `summary` list (verified live: 400 without,
+// 200 with), like DashScope. The vendor capability must carry the flag so the
+// replay path emits it, and its reasoning.effort shape follows the OpenAI
+// contract.
+func TestStepFunResponsesSummaryRequired(t *testing.T) {
+	c := New(Config{Name: "stepfun-responses", BaseURL: "https://api.stepfun.com/v1", Model: "step-3.7-flash", Effort: "low"}).(*client)
+	body, _, _ := c.buildRequestBody(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "hi"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "think",
+				ReasoningID: "rs_1", ReasoningStatus: "completed"},
+		},
+	})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("stepfun reasoning.effort = %q, want low", got)
+	}
+	items := body["input"].([]map[string]any)
+	var reasoningItem map[string]any
+	for _, item := range items {
+		if item["type"] == "reasoning" {
+			reasoningItem = item
+		}
+	}
+	if reasoningItem == nil {
+		t.Fatal("stepfun input must replay the reasoning item")
+	}
+	if _, ok := reasoningItem["summary"].([]map[string]string); !ok {
+		t.Fatalf("stepfun reasoning item must carry summary, got %#v", reasoningItem["summary"])
+	}
+	if reasoningItem["id"] != "rs_1" {
+		t.Fatalf("stepfun reasoning item id = %v, want rs_1", reasoningItem["id"])
 	}
 }

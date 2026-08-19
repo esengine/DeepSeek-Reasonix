@@ -1990,14 +1990,17 @@ model = "x"
 }
 
 func TestNormalizeTokenModeSupportsRuntimeProfilesAndLegacyAliases(t *testing.T) {
-	// NormalizeTokenMode remains the dual-write legacy mapping.
+	// NormalizeTokenMode remains the dual-write legacy mapping; light folds
+	// to full because standard already runs light work lightly.
 	for input, want := range map[string]string{
 		"":           TokenModeFull,
 		"full":       TokenModeFull,
+		"standard":   TokenModeFull,
 		"balanced":   TokenModeFull,
-		"economy":    TokenModeEconomy,
-		"eco":        TokenModeEconomy,
-		"light":      TokenModeEconomy,
+		"economy":    TokenModeFull,
+		"eco":        TokenModeFull,
+		"light":      TokenModeFull,
+		"lite":       TokenModeFull,
 		"delivery":   TokenModeDelivery,
 		"quality":    TokenModeDelivery,
 		"unexpected": TokenModeFull,
@@ -2007,11 +2010,12 @@ func TestNormalizeTokenModeSupportsRuntimeProfilesAndLegacyAliases(t *testing.T)
 		}
 	}
 	for input, want := range map[string]string{
-		"":         AgentPresetBalanced,
-		"full":     AgentPresetBalanced,
-		"balanced": AgentPresetBalanced,
-		"economy":  AgentPresetLight,
-		"light":    AgentPresetLight,
+		"":         AgentPresetStandard,
+		"full":     AgentPresetStandard,
+		"standard": AgentPresetStandard,
+		"balanced": AgentPresetStandard,
+		"economy":  AgentPresetStandard,
+		"light":    AgentPresetStandard,
 		"delivery": AgentPresetDelivery,
 	} {
 		if got := NormalizeAgentPreset(input); got != want {
@@ -2129,7 +2133,7 @@ model = "executor-model"%s
 }
 
 func TestBuildInjectsEnvironmentBlockByDefaultAndEconomy(t *testing.T) {
-	for _, tokenMode := range []string{"", TokenModeEconomy} {
+	for _, tokenMode := range []string{"", "economy"} {
 		t.Run(firstNonEmpty(tokenMode, "default"), func(t *testing.T) {
 			isolateConfigHome(t)
 			dir := robustTempDir(t)
@@ -2242,7 +2246,7 @@ model = "x"
 `)
 
 	fullReq, _ := captureTokenProfileSurface(t, TokenModeFull)
-	economyReq, _ := captureTokenProfileSurface(t, TokenModeEconomy)
+	economyReq, _ := captureTokenProfileSurface(t, "economy")
 	doc, err := os.ReadFile(filepath.Join(pkgDir, "..", "..", "docs", "TOOL_CONTRACT.md"))
 	if err != nil {
 		t.Fatalf("read tool contract doc: %v", err)
@@ -2319,7 +2323,7 @@ command = "reasonix-missing-mockmcp"
 `)
 	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: "economy"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -2412,7 +2416,7 @@ model = "x"
 				testutil.Turn{Text: "done"},
 			)
 			setBootTokenProfileTestProvider(t, prov)
-			ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+			ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: "economy"})
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
@@ -2461,7 +2465,7 @@ model = "x"
 `)
 	registerBootTokenProfileTestProvider()
 	var base []string
-	for _, mode := range []string{TokenModeEconomy, TokenModeFull, TokenModeDelivery, "light", "balanced"} {
+	for _, mode := range []string{"economy", TokenModeFull, TokenModeDelivery, "light", "balanced"} {
 		prov := testutil.NewMock("stable-"+mode, testutil.Turn{Text: "done"})
 		setBootTokenProfileTestProvider(t, prov)
 		ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: mode, AgentPreset: mode})

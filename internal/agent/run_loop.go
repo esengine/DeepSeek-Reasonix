@@ -551,7 +551,9 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		// controller when automatic continuation is armed (or for the existing
 		// strict/Goal path). Unfinished todos are hard failures only in closed-loop
 		// turns; in ordinary turns they remain visible cross-turn work state.
-		if a.turn.automaticReadinessContinuation || a.closedLoopActive() || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
+		// readinessPauseActive keeps the standard floor out of this entirely.
+		if a.readinessPauseActive() &&
+			(a.turn.automaticReadinessContinuation || a.closedLoopActive() || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0) {
 			event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
 			a.pending.finalReadinessRecovery = true
 			a.persistFinalReadinessRecovery(readiness.missingIDs())

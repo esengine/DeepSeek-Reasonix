@@ -14,7 +14,7 @@ import (
 )
 
 type tabScopedActionController struct {
-	control.SessionAPI
+	stubSessionAPI
 	history           []provider.Message
 	newSessionCalls   int
 	clearSessionCalls int

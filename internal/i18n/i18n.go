@@ -351,6 +351,8 @@ type Messages struct {
 	// WorkModeDeprecatedNotice is shown once when a legacy /work-mode or
 	// /profile command is used. Prefer /preset.
 	WorkModeDeprecatedNotice string
+	// QualityFloorApplied confirms a quality floor switch.
+	QualityFloorApplied      string
 	RewindNone               string
 	RewindCodeConversation   string
 	RewindConversationOnly   string

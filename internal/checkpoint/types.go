@@ -36,6 +36,7 @@ const (
 	GapBashSideEffect   = "bash_side_effect"
 	GapHookWrite        = "hook_write"
 	GapMCPExternal      = "mcp_external"
+	GapScratch          = "scratch"
 	GapOutsideWorkspace = "outside_workspace"
 	GapSymlink          = "symlink"
 	GapHardlink         = "hardlink"
@@ -46,6 +47,17 @@ const (
 	GapCaptureFailed    = "capture_failed"
 	GapExpiredPayload   = "expired_file_payload"
 )
+
+// HasProjectCoverageGap reports a gap that can prevent restoring workspace
+// files. Scratch-only gaps do not.
+func HasProjectCoverageGap(gaps []CoverageGap) bool {
+	for _, gap := range gaps {
+		if gap.Reason != "" && gap.Reason != GapScratch {
+			return true
+		}
+	}
+	return false
+}
 
 // CaptureSource identifies how a preimage was obtained.
 type CaptureSource string

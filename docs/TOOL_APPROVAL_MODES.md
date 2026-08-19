@@ -4,7 +4,7 @@ The Ask / Auto / Yolo control under the desktop composer sets how Reasonix handl
 
 Tool permission is independent of collaboration mode:
 
-- **Collaboration mode** (Normal / Plan / Goal) decides how Reasonix advances the task. There is no automatic simple / light / full task mode. Verification obligations come from real tool actions.
+- **Collaboration mode** (Normal / Plan / Goal) decides how Reasonix advances the task. There is no automatic task mode. The one session role is the quality floor: standard (default) or delivery; facts can still raise it. Verification obligations come from real tool actions.
 - **Tool permission** decides whether controlled tools wait for approval before running.
 
 ## Quick comparison

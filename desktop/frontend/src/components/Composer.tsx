@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, PackageCheck, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -34,7 +34,7 @@ import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type QualityFloor, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -534,6 +534,8 @@ export function Composer({
   running,
   collaborationMode,
   toolApprovalMode,
+  qualityFloor,
+  floorInferred,
   turnPhase,
   goal,
   goalStatus,
@@ -550,6 +552,7 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
+  onSetQualityFloor,
   onToggleYoloApprovalMode,
   onClearGoal,
   onPauseGoal,
@@ -600,6 +603,8 @@ export function Composer({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
+  qualityFloor?: QualityFloor;
+  floorInferred?: boolean;
   /** Host turn phase: working | checking | verifying | reviewing */
   turnPhase?: string;
   goal?: string;
@@ -620,6 +625,7 @@ export function Composer({
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
+  onSetQualityFloor?: (floor: QualityFloor) => void;
   onToggleYoloApprovalMode: () => void;
   onClearGoal: () => void;
   onPauseGoal: () => void;
@@ -3617,6 +3623,11 @@ export function Composer({
       requestActiveDraftFrame(focusComposerInput);
     });
   };
+  const floorOn = qualityFloor === "delivery";
+  const chooseQualityFloor = (floor: QualityFloor) => {
+    if (floor === qualityFloor) return;
+    onSetQualityFloor?.(floor);
+  };
   const stopGoalMode = () => {
     closeIntentMenu(() => {
       onClearGoal();
@@ -4668,6 +4679,42 @@ export function Composer({
                   >
                     <ShieldAlert size={14} />
                     <span>{t("composer.modeYolo")}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            {!heroMode && (
+              <div className="composer-meta__control composer-meta__control--floor">
+                {/* Orthogonal to the intent menu: the floor only raises the
+                    completion gates, so goal mode and delivery combine. */}
+                <div
+                  className="composer-modebar composer-modebar--floor"
+                  data-floor={floorOn ? "delivery" : "standard"}
+                  title={t("composer.qualityFloor")}
+                >
+                  <span className="composer-modebar__thumb" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`composer-modebar__item${floorOn ? "" : " composer-modebar__item--active"}`}
+                    onClick={() => chooseQualityFloor("standard")}
+                    disabled={approvalBarDisabled || !onSetQualityFloor}
+                    aria-pressed={!floorOn}
+                    title={t("composer.qualityFloor")}
+                  >
+                    <Equal size={14} />
+                    <span>{t("composer.qualityFloorStandard")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer-modebar__item${floorOn ? " composer-modebar__item--active" : ""}`}
+                    onClick={() => chooseQualityFloor("delivery")}
+                    disabled={approvalBarDisabled || !onSetQualityFloor}
+                    aria-pressed={floorOn}
+                    title={t("composer.qualityFloorDeliveryTitle")}
+                  >
+                    <PackageCheck size={14} />
+                    <span>{t("composer.qualityFloorDelivery")}</span>
+                    {floorOn && floorInferred ? <span className="composer-modebar__inferred" /> : null}
                   </button>
                 </div>
               </div>

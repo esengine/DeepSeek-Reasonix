@@ -7,13 +7,18 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
+// A closed-loop turn is a delivery-floor turn: the floor alone arms the
+// readiness pause, so the scope on its own no longer produces one.
 func withClosedLoopContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = runtimepolicy.WithContext(ctx, runtimepolicy.Constraints{PolicyFloor: taskcontract.PolicyFloorDelivery})
 	return WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "test-closed-loop", TaskText: "closed-loop test"})
 }
 

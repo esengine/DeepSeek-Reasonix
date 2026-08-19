@@ -9,7 +9,7 @@ import (
 )
 
 type backgroundRuntimeController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status     control.RuntimeStatus
 	jobs       []jobs.View
 	lease      workspacelease.State

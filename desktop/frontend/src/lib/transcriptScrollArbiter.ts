@@ -36,7 +36,7 @@ export type TranscriptScrollEvent =
   | { type: "USER_SCROLL_INTENT"; canClaimTail: boolean }
   | { type: "MANUAL_READING" }
   | { type: "READER_INTENT_ENDED" }
-  | { type: "SCROLL_DELIVERED"; atBottom: boolean; scrollable: boolean }
+  | { type: "SCROLL_DELIVERED"; atBottom: boolean; scrollable: boolean; substantial?: boolean }
   | { type: "TAIL_CONTENT_CHANGED" }
   | { type: "CONTENT_SHRANK" }
   | { type: "LAYOUT_HEIGHT_CHANGED" }
@@ -78,6 +78,15 @@ export const INITIAL_TRANSCRIPT_SCROLL_STATE: TranscriptScrollState = {
 // Fold collapse drops at least one process row (~28px). Smaller deltas are
 // Virtuoso measurement jitter and must keep following the tail.
 export const TRANSCRIPT_CONTENT_SHRINK_THRESHOLD_PX = 24;
+
+// A delivery this far above the bottom is a real physical displacement (thumb
+// drop, row remeasure), not bottom-adjacent jitter. Re-converging these is the
+// tail writer's job even when the previous delivery was already non-bottom.
+export const TRANSCRIPT_SUBSTANTIAL_DISPLACEMENT_PX = 24;
+
+export function isSubstantialTranscriptDisplacement(distance: number): boolean {
+  return distance >= TRANSCRIPT_SUBSTANTIAL_DISPLACEMENT_PX;
+}
 
 export function isTranscriptContentShrink(delta: number): boolean {
   return delta <= -TRANSCRIPT_CONTENT_SHRINK_THRESHOLD_PX;
@@ -142,7 +151,19 @@ export function reduceTranscriptScroll(
       }
       return transition(
         next,
-        state.mode === "tail-follow" && !event.atBottom && !state.readerIntent
+        // One physical displacement may produce several scroll deliveries
+        // while WebView2/Virtuoso remeasures variable-height rows. Re-arming
+        // the tail writer for every repeated `false` delivery creates a
+        // visible write loop; layout/viewport events remain the convergence
+        // lane for later geometry changes. A substantial displacement is a
+        // real repositioning: the tail writer reconverges even when the
+        // previous delivery was already non-bottom, because a misread shrink
+        // (CONTENT_SHRANK below) can otherwise strand the viewport with no
+        // remaining convergence lane.
+        state.mode === "tail-follow"
+          && !event.atBottom
+          && !state.readerIntent
+          && (state.atBottom || event.substantial === true)
           ? [{ type: "AUTOSCROLL_TO_BOTTOM" }]
           : [],
       );

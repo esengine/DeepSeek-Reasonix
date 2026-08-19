@@ -6,32 +6,53 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/control"
 )
 
-func TestSaveTabSessionMetaReplacesStaleAgentPreset(t *testing.T) {
+func TestSaveTabSessionMetaPersistsDeliveryFloor(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	meta, err := agent.EnsureBranchMeta(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta.AgentPreset = boot.AgentPresetBalanced
+	meta.AgentPreset = boot.AgentPresetStandard
 	meta.TokenMode = boot.TokenModeFull
 	if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: path, tokenMode: boot.TokenModeDelivery}); err != nil {
+	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: path, qualityFloor: control.QualityFloorDelivery}); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := agent.LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta = %+v, %v, %v", got, ok, err)
 	}
-	if got.AgentPreset != boot.AgentPresetBalanced || got.TokenMode != boot.TokenModeFull {
-		t.Fatalf("persisted role = preset:%q tokenMode:%q, want pinned balanced/full", got.AgentPreset, got.TokenMode)
+	if got.QualityFloor != control.QualityFloorDelivery {
+		t.Fatalf("persisted floor = %q, want delivery", got.QualityFloor)
 	}
-	if restored := tabSessionProfileFromMeta(path, got).tokenMode; restored != boot.TokenModeFull {
-		t.Fatalf("restored tokenMode = %q, want pinned full", restored)
+	if got.AgentPreset != boot.AgentPresetDelivery {
+		t.Fatalf("dual-write preset = %q, want delivery", got.AgentPreset)
+	}
+	if got.TokenMode != boot.TokenModeDelivery {
+		t.Fatalf("dual-write tokenMode = %q, want delivery", got.TokenMode)
+	}
+}
+
+func TestSaveTabSessionMetaStandardWritesNoFloor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "standard.jsonl")
+	if _, err := agent.EnsureBranchMeta(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{path: path, qualityFloor: control.QualityFloorStandard}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta = %+v, %v, %v", got, ok, err)
+	}
+	if got.QualityFloor != "" {
+		t.Fatalf("standard floor must not persist a value, got %q", got.QualityFloor)
 	}
 }
 
@@ -43,12 +64,30 @@ func TestTabSessionProfileFromMetaDecodesLegacyDelivery(t *testing.T) {
 	}
 	meta.AgentPreset = boot.AgentPresetDelivery
 	meta.TokenMode = boot.TokenModeDelivery
-	if restored := tabSessionProfileFromMeta(path, meta).tokenMode; restored != boot.TokenModeDelivery {
-		t.Fatalf("legacy decode tokenMode = %q, want delivery", restored)
+	profile := tabSessionProfileFromMeta(path, meta)
+	if profile.qualityFloor != control.QualityFloorDelivery {
+		t.Fatalf("legacy decode floor = %q, want delivery", profile.qualityFloor)
 	}
 	tab := &WorkspaceTab{}
-	applyTabSessionProfile(tab, tabSessionProfileFromMeta(path, meta))
-	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
-		t.Fatalf("legacy delivery must not change runtime tokenMode: got %q", got)
+	applyTabSessionProfile(tab, profile)
+	if got := tab.qualityFloor; got != control.QualityFloorDelivery {
+		t.Fatalf("legacy delivery must reach the tab floor: got %q", got)
+	}
+	if got := currentTabTokenMode(tab); got != boot.TokenModeDelivery {
+		t.Fatalf("derived tokenMode = %q, want delivery", got)
+	}
+}
+
+func TestTabSessionProfileFromMetaFoldsLegacyLight(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "light.jsonl")
+	meta, err := agent.EnsureBranchMeta(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.AgentPreset = "light"
+	meta.TokenMode = "economy"
+	profile := tabSessionProfileFromMeta(path, meta)
+	if profile.qualityFloor != control.QualityFloorStandard {
+		t.Fatalf("legacy light must fold to standard, got %q", profile.qualityFloor)
 	}
 }

@@ -207,13 +207,13 @@ func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
 
 	app := NewApp()
 	tab := testTab("a", t.TempDir())
-	tab.tokenMode = "economy"
+	tab.qualityFloor = control.QualityFloorStandard
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	for _, inMemory := range []string{"economy", "delivery", "full"} {
-		tab.tokenMode = inMemory
+	for _, inMemory := range []string{"", "delivery", ""} {
+		tab.qualityFloor = inMemory
 		app.mu.Lock()
 		app.saveTabsLocked()
 		app.mu.Unlock()
@@ -222,9 +222,13 @@ func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
 		if len(got.Tabs) != 1 {
 			t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
 		}
-		if got.Tabs[0].TokenMode != boot.TokenModeFull || got.Tabs[0].AgentPreset != boot.AgentPresetBalanced {
-			t.Fatalf("saved compat after in-memory %q = token:%q preset:%q, want full/balanced",
-				inMemory, got.Tabs[0].TokenMode, got.Tabs[0].AgentPreset)
+		wantToken, wantPreset := boot.TokenModeFull, boot.AgentPresetStandard
+		if inMemory == "delivery" {
+			wantToken, wantPreset = boot.TokenModeDelivery, boot.AgentPresetDelivery
+		}
+		if got.Tabs[0].TokenMode != wantToken || got.Tabs[0].AgentPreset != wantPreset {
+			t.Fatalf("saved compat after in-memory %q = token:%q preset:%q, want %q/%q",
+				inMemory, got.Tabs[0].TokenMode, got.Tabs[0].AgentPreset, wantToken, wantPreset)
 		}
 	}
 }
@@ -240,7 +244,7 @@ func TestLoadTabsFileDecodesLegacyTokenModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := loadTabsFile()
-	if len(got.Tabs) != 1 || got.Tabs[0].TokenMode != boot.TokenModeEconomy || got.Tabs[0].AgentPreset != boot.AgentPresetLight {
+	if len(got.Tabs) != 1 || got.Tabs[0].TokenMode != "economy" || got.Tabs[0].AgentPreset != "light" {
 		t.Fatalf("legacy tabs decode = %+v", got.Tabs)
 	}
 }
@@ -485,10 +489,10 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	}
 
 	app.SetCollaborationModeForTab(tab.ID, "plan")
-	tab.tokenMode = boot.TokenModeEconomy
+	tab.qualityFloor = ""
 	meta = app.MetaForTab(tab.ID)
-	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetBalanced {
-		t.Fatalf("profile meta = %+v, want plan + pinned full/balanced", meta)
+	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetStandard {
+		t.Fatalf("profile meta = %+v, want plan + full/standard", meta)
 	}
 }
 

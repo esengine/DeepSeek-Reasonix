@@ -228,7 +228,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 		case "verification":
 			command := strings.TrimSpace(e.Command)
 			if command == "" {
-				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification — cite the command you ran, or use kind \"manual\"", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification — cite the command you ran in this session, or use kind \"files\", \"diff\", or \"manual\"", i+1)
 			}
 			if !ledger.HasSuccessfulCommand(command) && !verifyCommandFromSession(ctx, command) {
 				if ledger.HasFailedCommand(command) {

@@ -662,7 +662,7 @@ func TestAuthoritativeBotStylePersistIndexesSessionImmediately(t *testing.T) {
 }
 
 type retargetRuntimeController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status control.RuntimeStatus
 	path   string
 }

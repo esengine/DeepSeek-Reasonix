@@ -17,7 +17,7 @@ import (
 // from a tab controller; everything else falls through the embedded nil
 // SessionAPI and must not be called.
 type extensionCatalogCtrl struct {
-	control.SessionAPI
+	stubSessionAPI
 	catalog []provider.Descriptor
 }
 

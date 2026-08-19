@@ -47,7 +47,7 @@ import (
 )
 
 type todoMetaController struct {
-	control.SessionAPI
+	stubSessionAPI
 	todos []evidence.TodoItem
 }
 
@@ -5387,29 +5387,26 @@ func assertDeprecatedExecutionModeNoop(t *testing.T, app *App, tab *WorkspaceTab
 	if tab.Ctrl == nil || tab.Ctrl != old {
 		t.Fatalf("controller identity changed: got %p want %p", tab.Ctrl, old)
 	}
-	if got := old.AgentPreset(); got != boot.AgentPresetBalanced {
-		t.Fatalf("controller AgentPreset = %q, want balanced", got)
+	if got := old.AgentPreset(); got != boot.AgentPresetStandard {
+		t.Fatalf("controller AgentPreset = %q, want standard (light folds)", got)
 	}
 	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
-		t.Fatalf("token mode = %q, want pinned full", got)
+		t.Fatalf("token mode = %q, want full", got)
 	}
 	meta := app.MetaForTab(tab.ID)
-	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetBalanced {
-		t.Fatalf("meta token/preset = %q/%q, want full/balanced", meta.TokenMode, meta.AgentPreset)
-	}
-	if len(notices) == 0 || notices[len(notices)-1] != SetAgentPresetDeprecatedNotice {
-		t.Fatalf("deprecation notice = %q, want %q", notices, SetAgentPresetDeprecatedNotice)
+	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetStandard {
+		t.Fatalf("meta token/preset = %q/%q, want full/standard", meta.TokenMode, meta.AgentPreset)
 	}
 }
 
 func assertSetTokenModeDidNotPersistLiveModes(t *testing.T) {
 	t.Helper()
 	for _, entry := range loadTabsFile().Tabs {
-		if entry.TokenMode == boot.TokenModeEconomy || entry.TokenMode == boot.TokenModeDelivery {
-			t.Fatalf("SetTokenMode persisted live mode %q", entry.TokenMode)
+		if entry.TokenMode == "economy" || entry.TokenMode == "light" {
+			t.Fatalf("SetTokenMode persisted folded mode %q", entry.TokenMode)
 		}
-		if entry.AgentPreset == boot.AgentPresetLight || entry.AgentPreset == boot.AgentPresetDelivery {
-			t.Fatalf("SetTokenMode persisted live preset %q", entry.AgentPreset)
+		if entry.AgentPreset == "light" || entry.AgentPreset == "balanced" {
+			t.Fatalf("SetTokenMode persisted non-floor preset %q", entry.AgentPreset)
 		}
 	}
 }
@@ -5421,8 +5418,8 @@ func assertPinnedCompatPersisted(t *testing.T, app *App, tab *WorkspaceTab) {
 	if len(saved.Tabs) != 1 {
 		t.Fatalf("saved tabs = %+v, want 1", saved.Tabs)
 	}
-	if saved.Tabs[0].TokenMode != boot.TokenModeFull || saved.Tabs[0].AgentPreset != boot.AgentPresetBalanced {
-		t.Fatalf("saved compat = token:%q preset:%q, want full/balanced", saved.Tabs[0].TokenMode, saved.Tabs[0].AgentPreset)
+	if saved.Tabs[0].TokenMode != boot.TokenModeFull {
+		t.Fatalf("saved compat token = %q, want full", saved.Tabs[0].TokenMode)
 	}
 }
 
@@ -5452,7 +5449,7 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 }
 
 func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
-	// Name kept for history; SetTokenMode(delivery) is ignored and does not persist delivery.
+	// SetTokenMode(delivery) now writes the session quality floor in place.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -5471,8 +5468,15 @@ func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
 	if err := app.SetTokenMode(boot.TokenModeDelivery); err != nil {
 		t.Fatalf("SetTokenMode(delivery): %v", err)
 	}
-	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
-	assertSetTokenModeDidNotPersistLiveModes(t)
+	if tab.Ctrl == nil || tab.Ctrl != old {
+		t.Fatalf("controller identity changed: got %p want %p", tab.Ctrl, old)
+	}
+	if got := old.QualityFloor(); got != control.QualityFloorDelivery {
+		t.Fatalf("controller QualityFloor = %q, want delivery", got)
+	}
+	if got := tab.qualityFloor; got != control.QualityFloorDelivery {
+		t.Fatalf("tab qualityFloor = %q, want delivery", got)
+	}
 
 	if err := app.SetTokenMode(boot.TokenModeFull); err != nil {
 		t.Fatalf("SetTokenMode(full): %v", err)
@@ -5868,7 +5872,7 @@ func TestSetTokenModeUnknownTabErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
 		t.Fatalf("SetTokenModeForTab(unknown) = %v, want tab not found", err)
 	}
-	err = app.SetAgentPresetForTab("missing-tab", boot.AgentPresetLight)
+	err = app.SetAgentPresetForTab("missing-tab", "light")
 	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
 		t.Fatalf("SetAgentPresetForTab(unknown) = %v, want tab not found", err)
 	}

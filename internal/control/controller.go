@@ -289,10 +289,12 @@ type Controller struct {
 	// and rotating are mutually exclusive gates — a turn refuses to start while
 	// a rotation is in progress, and a rotation refuses to start while a turn
 	// runs — so the run loop's session reference cannot change under it.
-	rotating    bool
-	autosaveWG  sync.WaitGroup
-	planMode    bool
-	sessionPath string
+	rotating   bool
+	autosaveWG sync.WaitGroup
+	// sessionSettings groups the per-session posture knobs that share one
+	// lifetime: swapped together on session rotation.
+	sessionSettings sessionSettings
+	sessionPath     string
 	// sessionTemp owns the logical-session private temporary directory shared
 	// by Bash calls. Retained for this Controller's lifetime; rotated on
 	// /new, /clear, resume of another session, and branch switches.
@@ -2630,27 +2632,30 @@ func (c *Controller) SetPlanMode(v bool) {
 	c.applyPlanMode(v)
 }
 
-// SetAgentPreset is a deprecated compatibility shim. Reasonix runs one
-// adaptive standard execution; the preset no longer exists at runtime. The
-// call is accepted, validated for diagnostics, and ignored: it never rebuilds
-// the agent, never changes tool schemas, and never alters planning,
-// verification, or review behavior.
+// SetAgentPreset writes the role through to the session quality floor:
+// delivery/deliver/quality set the delivery floor, everything valid folds to
+// standard, unknown values are ignored for compat. It never rebuilds the
+// agent and never changes tool schemas.
 func (c *Controller) SetAgentPreset(preset string) {
 	if c == nil {
 		return
 	}
-	_ = agentpreset.Normalize(preset)
+	if p, err := agentpreset.Normalize(preset); err == nil {
+		_ = c.SetQualityFloor(string(p))
+	}
 }
 
-// AgentPreset returns the fixed compatibility label. One-version-old clients
-// read it from status snapshots; new code must not branch on it.
+// AgentPreset returns the session role label derived from the quality floor.
 func (c *Controller) AgentPreset() string {
-	return string(agentpreset.Balanced)
+	if c.QualityFloor() == QualityFloorDelivery {
+		return string(agentpreset.Delivery)
+	}
+	return string(agentpreset.Standard)
 }
 
 func (c *Controller) applyPlanMode(v bool) {
 	c.mu.Lock()
-	c.planMode = v
+	c.sessionSettings.planMode = v
 	c.mu.Unlock()
 	if setter, ok := c.runner.(interface{ SetPlanMode(bool) }); ok {
 		setter.SetPlanMode(v)
@@ -2694,7 +2699,7 @@ func (c *Controller) SetReasoningLanguage(lang string) {
 func (c *Controller) PlanMode() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.planMode
+	return c.sessionSettings.planMode
 }
 
 // GoalStrict enables or disables strict goal mode. Since the structured
