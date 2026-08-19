@@ -10,7 +10,7 @@
     "marker": 0,
     "narrative": 64,
     "struct-state": 115,
-    "test-file-size": 69471
+    "test-file-size": 69535
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -67,7 +67,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4678
+      "file-size": 4677
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -106,7 +106,7 @@
       "file-size": 2653
     },
     "desktop/frontend/src/components/Composer.tsx": {
-      "file-size": 4020
+      "file-size": 4006
     },
     "desktop/frontend/src/components/ContextPanel.tsx": {
       "file-size": 64
@@ -121,7 +121,7 @@
       "file-size": 48
     },
     "desktop/frontend/src/components/ProjectTree.tsx": {
-      "file-size": 1474
+      "file-size": 1470
     },
     "desktop/frontend/src/components/RichComposerInput.tsx": {
       "file-size": 141
@@ -228,7 +228,7 @@
       "essay": 1
     },
     "desktop/session_catalog_runtime.go": {
-      "essay": 2
+      "essay": 1
     },
     "desktop/session_key_test.go": {
       "essay": 3
@@ -881,10 +881,10 @@
       "file-size": 604
     },
     "internal/config/render.go": {
-      "complexity": 255,
+      "complexity": 261,
       "essay": 2,
-      "file-size": 1022,
-      "function-size": 973
+      "file-size": 1034,
+      "function-size": 985
     },
     "internal/config/render_test.go": {
       "test-file-size": 759
@@ -1231,10 +1231,10 @@
       "file-size": 5
     },
     "internal/provider/anthropic/anthropic.go": {
-      "complexity": 43,
+      "complexity": 42,
       "essay": 33,
-      "file-size": 72,
-      "function-size": 143,
+      "file-size": 70,
+      "function-size": 130,
       "struct-state": 6
     },
     "internal/provider/anthropic/anthropic_test.go": {
