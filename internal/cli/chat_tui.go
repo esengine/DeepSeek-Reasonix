@@ -4210,7 +4210,7 @@ func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 		_ = m.cfg.SetShowReasoning(m.showReasoning)
 		path := config.SourcePath()
 		if path == "" {
-			path = "reasonix.toml"
+			path = config.ProjectConfigPath(".")
 		}
 		saveErr = config.EditConfigFile(path, func(cfg *config.Config) error {
 			return cfg.SetShowReasoning(m.showReasoning)

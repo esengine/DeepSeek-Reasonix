@@ -1399,12 +1399,12 @@ type setupTargets struct {
 }
 
 // defaultConfigTarget is the user-global config file, falling back to a
-// project-local reasonix.toml only when the user config dir can't be resolved.
+// project-local config only when the user config dir can't be resolved.
 func defaultConfigTarget() string {
 	if p := config.UserConfigPath(); p != "" {
 		return p
 	}
-	return "reasonix.toml"
+	return config.ProjectConfigPath(".")
 }
 
 // defaultEnvTarget is the display target for the reasonix-owned global
@@ -1421,7 +1421,7 @@ func resolveSetupTargets(args []string) setupTargets {
 	for _, a := range args {
 		switch a {
 		case "--local", "-l":
-			t.config = "reasonix.toml"
+			t.config = config.ProjectConfigPath(".")
 		default:
 			t.config = a
 		}
@@ -2506,7 +2506,7 @@ func configReasoningLanguageCommand(args []string) int {
 	}
 	path := config.UserConfigPath()
 	if *local {
-		path = "reasonix.toml"
+		path = config.ProjectConfigPath(".")
 	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
@@ -2578,7 +2578,7 @@ func configCompactRatioCommand(args []string) int {
 	path := config.UserConfigPath()
 	scope := "user"
 	if *local {
-		path = "reasonix.toml"
+		path = config.ProjectConfigPath(".")
 		scope = "project"
 	}
 	if path == "" {
@@ -2623,8 +2623,8 @@ func configCompactRatioCommand(args []string) int {
 }
 
 func compactRatioSource() string {
-	if config.ConfigFileDefinesCompactRatio("reasonix.toml") {
-		return "project: " + displayPath("reasonix.toml")
+	if config.ConfigFileDefinesCompactRatio(config.ProjectConfigPath(".")) {
+		return "project: " + displayPath(config.ProjectConfigPath("."))
 	}
 	if path := config.UserConfigPath(); path != "" && config.ConfigFileDefinesCompactRatio(path) {
 		return "user: " + displayPath(path)

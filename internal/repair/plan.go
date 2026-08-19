@@ -845,9 +845,5 @@ func configSnapshotByID(id string) (ConfigSnapshot, error) {
 }
 
 func projectConfigPath(root string) string {
-	root = strings.TrimSpace(root)
-	if root == "" || root == "." {
-		return "reasonix.toml"
-	}
-	return filepath.Join(root, "reasonix.toml")
+	return config.ProjectConfigPath(root)
 }

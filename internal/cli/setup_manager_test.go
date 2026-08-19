@@ -717,7 +717,7 @@ func TestProviderSetupCommitDoesNotOverwriteMalformedConcurrentConfig(t *testing
 
 func TestResolveSetupTargetsLocalKeepsGlobalCredentialTarget(t *testing.T) {
 	targets := resolveSetupTargets([]string{"--local"})
-	if targets.config != "reasonix.toml" {
+	if targets.config != ".reasonix/config.toml" {
 		t.Fatalf("local config target = %q", targets.config)
 	}
 	if targets.env != config.CredentialsTargetDescription() {

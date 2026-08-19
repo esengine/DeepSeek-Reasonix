@@ -7951,7 +7951,7 @@ func withPluginConfigInWorkspace(v ServerView, p config.PluginEntry, workspace s
 func mcpServerSource(source config.MCPConfigSource) (kind, configSource string) {
 	switch source {
 	case config.MCPSourceProjectConfig:
-		return "project", "reasonix.toml"
+		return "project", ".reasonix/config.toml"
 	case config.MCPSourceProjectMCPJSON:
 		return "project", ".mcp.json"
 	case config.MCPSourcePluginPackage:

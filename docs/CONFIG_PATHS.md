@@ -217,7 +217,7 @@ Runtime configuration is resolved in this order:
 
 ```text
 command-line flags
-> project ./reasonix.toml
+> project ./.reasonix/config.toml (or legacy ./reasonix.toml)
 > global <Reasonix home>/config.toml
 > compatible legacy global config
 > built-in defaults

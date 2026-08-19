@@ -172,7 +172,7 @@ Linux 的 `$XDG_CACHE_HOME/reasonix` 或 `~/.cache/reasonix`、Windows 的
 
 ```text
 命令行参数
-> 项目 ./reasonix.toml
+> 项目 ./.reasonix/config.toml（或旧版 ./reasonix.toml）
 > 全局 <Reasonix home>/config.toml
 > 兼容读取的旧全局配置
 > 内置默认值

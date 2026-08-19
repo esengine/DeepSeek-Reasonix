@@ -380,7 +380,7 @@ provider 层的核心类型包括 `Role`、`Message`、`ToolCall`、`ToolSchema`
 配置优先级：
 
 ```text
-flag > ./reasonix.toml > 用户 config.toml > 内置默认值
+flag > 项目 .reasonix/config.toml（或旧版 ./reasonix.toml）> 用户 config.toml > 内置默认值
 ```
 
 从 v1.8.1 起，用户配置位于 macOS/Linux 的 `~/.reasonix/config.toml` 或 Windows 的 `%AppData%\reasonix\config.toml`。provider key 保存在 Reasonix home 的 `.env`；项目 `.env` 只用于 workspace 范围的非 provider 变量展开。完整路径见[配置路径](./CONFIG_PATHS.zh-CN.md)。

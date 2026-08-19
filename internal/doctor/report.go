@@ -127,7 +127,7 @@ func Collect(opts Options) Report {
 	// project reasonix.toml outranks it. Users who toggle the sandbox off in
 	// Settings while the project file pins [sandbox] read the no-op as "bash is
 	// broken" (#5961, #6046) — surface the layering explicitly.
-	if sourcePath != "" && filepath.Base(sourcePath) == "reasonix.toml" {
+	if sourcePath != "" && config.IsProjectConfigFile(sourcePath) {
 		if raw, err := fileencoding.ReadFileUTF8(sourcePath); err == nil && tomlHasSandboxTable(raw) {
 			warnings = append(warnings, "project "+redactHome(sourcePath)+" sets [sandbox]; it overrides user-level Settings -> Sandbox for this workspace — edit the project file to change sandbox behavior here")
 		}

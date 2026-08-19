@@ -57,14 +57,14 @@ func (g SessionDataGuard) Check(target string) error {
 	}
 	if g.deniesSecurity(abs) {
 		return fmt.Errorf("path %q is a Reasonix security boundary file (%s holds the global hooks; hooks execute arbitrary shell commands on every future session). Agents may not modify it. "+
-			"Ask the user to edit it themselves, or to add the directory to [sandbox] allow_write in reasonix.toml if raw access is truly intended",
+			"Ask the user to edit it themselves, or to add the directory to [sandbox] allow_write in .reasonix/config.toml if raw access is truly intended",
 			target, g.stateRoot)
 	}
 	if !g.denies(abs) {
 		return nil
 	}
 	return fmt.Errorf("path %q is inside Reasonix's own session/state data (%s); the app is the only writer of these files, and edits from a chat race its saves — that surfaces as repeated save-conflict copies. "+
-		"Do not modify session or runtime-state files directly; report the underlying problem instead. If raw access is truly intended, add the directory to [sandbox] allow_write in reasonix.toml",
+		"Do not modify session or runtime-state files directly; report the underlying problem instead. If raw access is truly intended, add the directory to [sandbox] allow_write in .reasonix/config.toml",
 		target, g.stateRoot)
 }
 

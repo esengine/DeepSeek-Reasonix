@@ -131,7 +131,7 @@ func TestApplyLocalSkillRootRegistersPath(t *testing.T) {
 	if resp.PlanID == "" {
 		t.Error("PlanID should be populated on apply")
 	}
-	cfg := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
+	cfg := config.LoadForEdit(filepath.Join(project, ".reasonix", "config.toml"))
 	if len(cfg.Skills.Paths) != 1 || cfg.Skills.Paths[0] != root {
 		t.Fatalf("skills.paths = %v, want %q", cfg.Skills.Paths, root)
 	}
@@ -661,7 +661,7 @@ func TestPlanProjectMCPJSONDefaultsProject(t *testing.T) {
 	if !resp.OK || len(resp.Actions) != 1 {
 		t.Fatalf("response = %+v", resp)
 	}
-	wantPath := filepath.Join(project, "reasonix.toml")
+	wantPath := filepath.Join(project, ".reasonix", "config.toml")
 	if resp.Scope != "project" || resp.Actions[0].Scope != "project" || resp.Actions[0].ConfigPath != wantPath {
 		t.Fatalf("project .mcp.json scope/path = response %q action %q path %q, want project %q", resp.Scope, resp.Actions[0].Scope, resp.Actions[0].ConfigPath, wantPath)
 	}
@@ -825,7 +825,7 @@ func TestApplyRemoteMCPURLConnectsAndPersists(t *testing.T) {
 	if resp.Actions[0].RiskLevel != RiskHigh {
 		t.Errorf("auth headers should produce RiskHigh, got %q", resp.Actions[0].RiskLevel)
 	}
-	cfg := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
+	cfg := config.LoadForEdit(filepath.Join(project, ".reasonix", "config.toml"))
 	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Headers["Authorization"] != "Bearer ${TOKEN}" {
 		t.Fatalf("plugins = %+v", cfg.Plugins)
 	}

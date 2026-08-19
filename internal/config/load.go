@@ -72,9 +72,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
 
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
+	projectTOML := ProjectConfigPath(root)
+	if bothProjectConfigsExist(root) {
+		slog.Warn("project config: reasonix.toml and .reasonix/config.toml both exist; reasonix.toml wins", "root", root)
 	}
 	if primary := userConfigPath(); primary != "" {
 		if _, err := resolveConfigAccessPath(primary, true); err != nil {
@@ -967,11 +967,7 @@ func MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
-	paths = append(paths, projectPath)
+	paths = append(paths, ProjectConfigPath(root))
 
 	changedAny := false
 	seen := make(map[string]struct{}, len(paths))
@@ -1012,11 +1008,7 @@ func MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
-	paths = append(paths, projectPath)
+	paths = append(paths, ProjectConfigPath(root))
 
 	changedAny := false
 	seen := make(map[string]struct{}, len(paths))
@@ -1054,11 +1046,7 @@ func MigrateLegacyMemoryCompilerForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
-	paths = append(paths, projectPath)
+	paths = append(paths, ProjectConfigPath(root))
 
 	changedAny := false
 	seen := make(map[string]struct{}, len(paths))
@@ -1123,11 +1111,7 @@ func MigrateLegacyMultiThresholdCompactionForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
-	paths = append(paths, projectPath)
+	paths = append(paths, ProjectConfigPath(root))
 
 	changedAny := false
 	seen := make(map[string]struct{}, len(paths))

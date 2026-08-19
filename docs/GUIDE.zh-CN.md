@@ -32,7 +32,7 @@
 
 ## 配置
 
-优先级：**flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**。从
+优先级：**flag > 项目 `.reasonix/config.toml`（或旧版 `./reasonix.toml`）> 用户配置文件 > 内置默认值**。从
 **Reasonix v1.8.1** 开始，用户配置位于 macOS/Linux 的
 `~/.reasonix/config.toml`，Windows 为 `%AppData%\reasonix\config.toml`；迁移和相关数据路径见
 [配置路径](./CONFIG_PATHS.zh-CN.md)。标注为“仅用户/全局”的字段（包括 agent 轮数上限）不会被 `./reasonix.toml` 覆盖。
