@@ -40,7 +40,7 @@ built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows; see
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Fields marked user/global only are not overridden by `./reasonix.toml`.
+Fields marked user/global only are not overridden by the project-local config.
 Provider entries name secrets with `api_key_env`, while the secret values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
@@ -308,7 +308,7 @@ and its files all live on the remote host at full fidelity; nothing runs through
 a lossy file proxy. V1 supports Linux and macOS remote hosts.
 
 Hosts live in a user-global `[remote]` section of `config.toml`. Like
-`[secrets]`, a project `reasonix.toml` cannot inject or override remote hosts —
+`[secrets]`, the project-local config cannot inject or override remote hosts —
 a cloned repo can never steer where Reasonix opens SSH connections. Credentials
 follow the provider idiom: the host names an env var (`passphrase_env`,
 `password_env`) whose value lives in Reasonix's global `.env`; key material
@@ -905,7 +905,7 @@ connect**, `/mcp add`, or ask Reasonix to install a package or URL. These
 explicit installs are saved to the user-global `config.toml` and are also
 authorization: the server connects in the current session, and no second trust
 step appears now or on the next startup. Servers declared by the current
-project's `reasonix.toml` or `.mcp.json` remain in that project and are trusted
+project-local config or `.mcp.json` remain in that project and are trusted
 without a separate launch confirmation. Explicit deny rules still win. The
 server's calls run
 directly, including tools that declare `destructiveHint`. The dedicated Planner
@@ -913,7 +913,7 @@ still refuses destructive tools, and strict read-only sub-agents still expose
 only hinted non-destructive readers.
 
 MCP names are resolved once per workspace. Project declarations override
-same-name global installs; inside a project, `reasonix.toml` overrides
+same-name global installs; inside a project, the project-local config overrides
 `.mcp.json`. Editing updates the effective declaration in its original file,
 and removing a higher-priority declaration reveals the next one instead of
 deleting every same-name entry.
@@ -991,7 +991,7 @@ is connected. Either value can be overridden per server.
 **Already have an `.mcp.json`?** Drop it in the project root and Reasonix
 reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
 `headers`, `${VAR}` expansion) maps field-for-field onto `[[plugins]]`. Both
-sources are merged; on a name collision `reasonix.toml` wins.
+sources are merged; on a name collision the project-local config wins.
 
 ```json
 {
@@ -1004,7 +1004,7 @@ sources are merged; on a name collision `reasonix.toml` wins.
 
 **Upgrading from `0.x`?** Your old `~/.reasonix/config.json` is still read for its
 `mcpServers` (honouring `mcpDisabled`) as a lowest-priority source, so MCP servers
-keep working — move them into `reasonix.toml`'s `[[plugins]]` or a `.mcp.json` when
+keep working — move them into the project-local config's `[[plugins]]` or a `.mcp.json` when
 convenient.
 
 ## Slash commands
