@@ -708,6 +708,11 @@ export function Composer({
   const inboxSessionKey = inboxScopeKey(inboxSessionPath, workspaceScopeKey);
   const now = useTick(running);
   const [text, setText] = useState("");
+  // During IME composition the browser owns the textarea value. Keeping the
+  // last native value here prevents an unrelated React render from writing the
+  // previous controlled value back into the textarea and cancelling the
+  // composition (Chromium then drops the first committed character).
+  const [plainCompositionActive, setPlainCompositionActive] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [imageViewer, setImageViewer] = useState<{ open: boolean; url: string; name: string }>({ open: false, url: "", name: "" });
   const openComposerImageViewer = useCallback((url: string, name: string) => {
@@ -790,6 +795,12 @@ export function Composer({
   const creationChrome = showContextWindowRing;
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
+  const plainCompositionValueRef = useRef<string | null>(null);
+  const plainCompositionStartValueRef = useRef<string | null>(null);
+  const plainCompositionSelectionRef = useRef<RichComposerSelection | null>(null);
+  const plainCompositionFinalizeFrameRef = useRef<number | null>(null);
+  const plainCompositionCancelRef = useRef<(commitNative?: boolean) => void>(() => {});
+  const plainCompositionHandlersRef = useRef({ start: () => {}, end: () => {} });
   const lastCompositionEndAt = useRef(0);
   const pastChatSearchComposingRef = useRef(false);
   const pastChatSearchLastCompositionEndAt = useRef(0);
@@ -836,8 +847,157 @@ export function Composer({
   pendingPasteRef.current = pendingPaste;
   submittingRef.current = submitting;
 
+  plainCompositionCancelRef.current = (commitNative = true) => {
+    const latest = plainCompositionValueRef.current ?? taRef.current?.value ?? textRef.current;
+    if (plainCompositionFinalizeFrameRef.current !== null) {
+      window.clearTimeout(plainCompositionFinalizeFrameRef.current);
+      plainCompositionFinalizeFrameRef.current = null;
+    }
+    composingRef.current = false;
+    if (commitNative) {
+      textRef.current = latest;
+      setText(latest);
+      const textarea = taRef.current;
+      if (textarea) {
+        const selection = plainCompositionSelectionRef.current ?? {
+          start: textarea.selectionStart ?? latest.length,
+          end: textarea.selectionEnd ?? latest.length,
+        };
+        lastSelectionRef.current = selection;
+        setPlainSelection(selection);
+      }
+    }
+    plainCompositionValueRef.current = null;
+    plainCompositionStartValueRef.current = null;
+    plainCompositionSelectionRef.current = null;
+    setPlainCompositionActive(false);
+  };
+
+  plainCompositionHandlersRef.current = {
+    start: () => {
+      if (plainCompositionFinalizeFrameRef.current !== null) {
+        window.clearTimeout(plainCompositionFinalizeFrameRef.current);
+        plainCompositionFinalizeFrameRef.current = null;
+      }
+      composingRef.current = true;
+      plainCompositionValueRef.current = taRef.current?.value ?? textRef.current;
+      plainCompositionStartValueRef.current = plainCompositionValueRef.current;
+      const textarea = taRef.current;
+      plainCompositionSelectionRef.current = textarea
+        ? { start: textarea.selectionStart ?? 0, end: textarea.selectionEnd ?? 0 }
+        : lastSelectionRef.current;
+      setPlainCompositionActive(true);
+    },
+    end: () => {
+      const next = plainCompositionValueRef.current ?? taRef.current?.value ?? textRef.current;
+      const textarea = taRef.current;
+      const nextSelection = plainCompositionSelectionRef.current ?? (textarea
+        ? { start: textarea.selectionStart ?? next.length, end: textarea.selectionEnd ?? next.length }
+        : lastSelectionRef.current);
+      composingRef.current = false;
+      lastCompositionEndAt.current = Date.now();
+      // Keep the native value as the rendered value until the browser has
+      // delivered any follow-up non-composing input event. Chromium/WebView2
+      // differ on whether that event precedes or follows compositionend.
+      plainCompositionValueRef.current = next;
+      textRef.current = next;
+      lastSelectionRef.current = nextSelection;
+      setPlainSelection(nextSelection);
+      setText(next);
+      setPlainCompositionActive(true);
+      plainCompositionFinalizeFrameRef.current = window.setTimeout(() => {
+        plainCompositionFinalizeFrameRef.current = null;
+        const latest = plainCompositionValueRef.current ?? taRef.current?.value ?? next;
+        const latestSelection = plainCompositionSelectionRef.current;
+        textRef.current = latest;
+        setText(latest);
+        if (latestSelection) {
+          lastSelectionRef.current = latestSelection;
+          setPlainSelection(latestSelection);
+          const active = document.activeElement;
+          const currentTextarea = taRef.current;
+          if (currentTextarea && active === currentTextarea && latestSelection.start <= latest.length && latestSelection.end <= latest.length) {
+            currentTextarea.setSelectionRange(latestSelection.start, latestSelection.end);
+          }
+        }
+        plainCompositionValueRef.current = null;
+        plainCompositionStartValueRef.current = null;
+        plainCompositionSelectionRef.current = null;
+        setPlainCompositionActive(false);
+      }, 250);
+    },
+  };
+
+  useLayoutEffect(() => {
+    if (!plainCompositionActive || plainCompositionValueRef.current === null) return;
+    if (text !== plainCompositionValueRef.current || invocations.length > 0) plainCompositionCancelRef.current(false);
+  }, [invocations.length, plainCompositionActive, text]);
+
+  useLayoutEffect(() => {
+    const textarea = taRef.current;
+    if (!textarea) return;
+    const onCompositionStart = () => plainCompositionHandlersRef.current.start();
+    const onCompositionEnd = () => plainCompositionHandlersRef.current.end();
+    const rememberCompositionSelection = () => {
+      plainCompositionSelectionRef.current = {
+        start: textarea.selectionStart ?? textarea.value.length,
+        end: textarea.selectionEnd ?? textarea.value.length,
+      };
+    };
+    const onCompositionUpdate = () => {
+      if (plainCompositionValueRef.current !== null) {
+        plainCompositionValueRef.current = textarea.value;
+        rememberCompositionSelection();
+      }
+    };
+    const onInput = () => {
+      const currentValue = textarea.value;
+      const stalePostCompositionEcho = !composingRef.current
+        && plainCompositionStartValueRef.current !== null
+        && currentValue === plainCompositionStartValueRef.current
+        && plainCompositionValueRef.current !== null
+        && currentValue !== plainCompositionValueRef.current;
+      if (stalePostCompositionEcho) {
+        // WebView2 can briefly expose the pre-composition value in this slot.
+        // Restore the candidate before React's delegated onChange listener sees
+        // the event; otherwise its controlled echo would overwrite the commit.
+        const committed = plainCompositionValueRef.current;
+        if (committed !== null) {
+          textarea.value = committed;
+          const selection = plainCompositionSelectionRef.current;
+          if (selection && selection.start <= committed.length && selection.end <= committed.length) {
+            textarea.setSelectionRange(selection.start, selection.end);
+          }
+        }
+      } else if (plainCompositionValueRef.current !== null) {
+        plainCompositionValueRef.current = currentValue;
+        rememberCompositionSelection();
+      }
+      if (!stalePostCompositionEcho && !composingRef.current && plainCompositionValueRef.current !== null) {
+        plainCompositionCancelRef.current();
+      }
+    };
+    textarea.addEventListener("compositionstart", onCompositionStart);
+    textarea.addEventListener("compositionupdate", onCompositionUpdate);
+    textarea.addEventListener("compositionend", onCompositionEnd);
+    textarea.addEventListener("input", onInput);
+    return () => {
+      textarea.removeEventListener("compositionstart", onCompositionStart);
+      textarea.removeEventListener("compositionupdate", onCompositionUpdate);
+      textarea.removeEventListener("compositionend", onCompositionEnd);
+      textarea.removeEventListener("input", onInput);
+    };
+  }, [invocations.length]);
+
+  useLayoutEffect(() => () => {
+    if (plainCompositionFinalizeFrameRef.current !== null) {
+      window.clearTimeout(plainCompositionFinalizeFrameRef.current);
+      plainCompositionFinalizeFrameRef.current = null;
+    }
+  }, []);
+
   const snapshotComposerDraft = (): ComposerDraft => ({
-    text: textRef.current,
+    text: plainCompositionValueRef.current ?? textRef.current,
     invocations: invocationsRef.current.map((invocation) => ({ ...invocation, command: { ...invocation.command } })),
     attachments: [...attachmentsRef.current],
     workspaceRefs: [...workspaceRefsRef.current],
@@ -857,6 +1017,7 @@ export function Composer({
   });
 
   const restoreComposerDraft = (draft: ComposerDraft) => {
+    plainCompositionCancelRef.current(false);
     const next = cloneComposerDraft(draft);
     textRef.current = next.text;
     invocationsRef.current = next.invocations;
@@ -1177,6 +1338,7 @@ export function Composer({
     const previousKey = activeDraftKeyRef.current;
     if (previousKey === draftKey) return;
     draftsBySessionRef.current[previousKey] = snapshotComposerDraft();
+    plainCompositionCancelRef.current(false);
     draftActivationEpochRef.current += 1;
     activeDraftKeyRef.current = draftKey;
     setGuidanceDraftKey(draftKey);
@@ -1637,6 +1799,7 @@ export function Composer({
   };
 
   const setTextCaretEnd = (next: string, trackEdit = true) => {
+    plainCompositionCancelRef.current(false);
     const targetDraftKey = activeDraftKeyRef.current;
     const beforeEdit = trackEdit ? composerEditSnapshot(targetDraftKey) : null;
     textRef.current = next;
@@ -1675,6 +1838,7 @@ export function Composer({
   };
 
   const insertNewlineAtCaret = () => {
+    plainCompositionCancelRef.current(false);
     const selection = getComposerSelection();
     const targetDraftKey = activeDraftKeyRef.current;
     const beforeEdit = composerEditSnapshot(targetDraftKey, selection);
@@ -1693,6 +1857,7 @@ export function Composer({
   };
 
   const insertTextAtCaret = (snippet: string) => {
+    plainCompositionCancelRef.current(false);
     const selection = getComposerSelection();
     const targetDraftKey = activeDraftKeyRef.current;
     const beforeEdit = composerEditSnapshot(targetDraftKey, selection);
@@ -2368,6 +2533,7 @@ export function Composer({
     // reconciliation cannot race with the native DOM update and lose the
     // pasted content (WebView2 / Windows). We insert the text manually below.
     e.preventDefault();
+    plainCompositionCancelRef.current(false);
     const selection = getComposerSelection();
     const start = selection.start;
     const end = selection.end;
@@ -4511,17 +4677,25 @@ export function Composer({
                   ref={taRef}
                   className="composer__input"
                   aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
-                  value={text}
+                  value={plainCompositionActive ? (plainCompositionValueRef.current ?? text) : text}
                   onInputCapture={(e) => {
-                    pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;
+                    const nativeEvent = e.nativeEvent as InputEvent;
+                    pendingNativeInputTypeRef.current = nativeEvent.inputType;
+                    if (composingRef.current || nativeEvent.isComposing) {
+                      plainCompositionValueRef.current = e.currentTarget.value;
+                    }
                   }}
                   onChange={(e) => {
                     const targetDraftKey = activeDraftKeyRef.current;
+                    const compositionActive = composingRef.current || plainCompositionValueRef.current !== null;
                     const inputType = (e.nativeEvent as InputEvent).inputType
                       || pendingNativeInputTypeRef.current;
                     pendingNativeInputTypeRef.current = undefined;
                     resetPromptHistoryNavigation();
                     textRef.current = e.target.value;
+                    if (compositionActive) {
+                      plainCompositionValueRef.current = e.target.value;
+                    }
                     setText(e.target.value);
                     const nextSelection = {
                       start: e.target.selectionStart ?? e.target.value.length,
@@ -4529,7 +4703,7 @@ export function Composer({
                     };
                     lastSelectionRef.current = nextSelection;
                     setPlainSelection(nextSelection);
-                    syncComposerNativeHistory(targetDraftKey, inputType);
+                    if (!compositionActive) syncComposerNativeHistory(targetDraftKey, inputType);
                     if (composerPrompt) setComposerPrompt(null);
                   }}
                   onSelect={rememberCaret}
@@ -4539,13 +4713,6 @@ export function Composer({
                   onContextMenu={openInputMenu}
                   onPaste={onPaste}
                   onKeyDown={onKeyDown}
-                  onCompositionStart={() => {
-                    composingRef.current = true;
-                  }}
-                  onCompositionEnd={() => {
-                    composingRef.current = false;
-                    lastCompositionEndAt.current = Date.now();
-                  }}
                   style={textareaStyle}
                   placeholder={composerPlaceholder}
                   rows={1}
