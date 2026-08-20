@@ -1548,6 +1548,9 @@ export function ProjectTree({
       ? classicTopicWindow(children, folderShowAll)
       : { visible: children, hiddenCount: 0 };
     const windowToggleVisible = classicTruncationActive && (hiddenCount > 0 || (folderShowAll && children.length > CLASSIC_TOPIC_PREVIEW_LIMIT));
+    // Filtering (search query or time range) narrows the page to a closed view;
+    // paging through a filtered result adds little value, so hide load-more.
+    const filtering = query.trim() !== "" || timeFilter !== "all";
     const backendPage = topicPageState[key];
     const renderFolderChildren = () => {
       if (!hasChildren) {
@@ -1576,7 +1579,7 @@ export function ProjectTree({
                 {hiddenCount > 0 ? t("projectTree.showMoreTopics", { n: hiddenCount }) : t("projectTree.showFewerTopics")}
               </button>
             )}
-            {backendPage?.nextCursor && (
+            {backendPage?.nextCursor && !filtering && (
               <button
                 type="button"
                 className="project-tree__topic-window-toggle"
