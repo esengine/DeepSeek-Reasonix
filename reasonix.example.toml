@@ -184,6 +184,10 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Working directory for stdio subprocesses; empty inherits Reasonix's CWD.
+# # Use ${WORKSPACE_ROOT} (or ${REASONIX_WORKSPACE}) to pin cwd-sensitive
+# # servers to the active project root.
+# # dir = "${WORKSPACE_ROOT}"
 # # Startup may continue in the background after the first caller stops waiting.
 # # startup_timeout_seconds = 60
 # # Per-server MCP call timeout; 0 keeps the global/default cap.

@@ -2614,7 +2614,7 @@ func PluginSpecsForRootWithOptions(entries []config.PluginEntry, workspaceRoot s
 }
 
 func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, opts PluginSpecOptions) plugin.Spec {
-	e = e.ExpandedPlugin() // resolve ${VAR} / ${VAR:-default} from the environment
+	e = e.ExpandedPluginForWorkspace(workspaceRoot)
 	configSource := strings.TrimSpace(string(e.Source))
 	if configSource == "" {
 		configSource = opts.ConfigSource
@@ -2624,6 +2624,7 @@ func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, 
 		Package:               strings.TrimSpace(opts.PackageOwners[e.Name]),
 		Type:                  e.Type,
 		Command:               e.Command,
+		Dir:                   e.Dir,
 		Args:                  e.Args,
 		Env:                   e.Env,
 		URL:                   e.URL,

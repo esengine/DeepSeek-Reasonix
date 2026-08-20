@@ -3979,6 +3979,54 @@ func TestPluginSpecsForRootDoesNotPinHTTPCodeGraph(t *testing.T) {
 	}
 }
 
+func TestPluginSpecsForRootExpandsWorkspaceRootInArgsAndDir(t *testing.T) {
+	specs := PluginSpecsForRoot([]config.PluginEntry{{
+		Name:    "fff",
+		Command: "fff-mcp",
+		Dir:     "${WORKSPACE_ROOT}",
+		Args:    []string{"--root", "${WORKSPACE_ROOT}"},
+	}}, "/work")
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1", len(specs))
+	}
+	if specs[0].Dir != "/work" {
+		t.Errorf("Dir = %q, want /work", specs[0].Dir)
+	}
+	if len(specs[0].Args) != 2 || specs[0].Args[1] != "/work" {
+		t.Errorf("Args = %v, want [--root /work]", specs[0].Args)
+	}
+}
+
+func TestPluginSpecsForRootExplicitDirBeatsCodeGraphOverride(t *testing.T) {
+	specs := PluginSpecsForRoot([]config.PluginEntry{{
+		Name: "codegraph",
+		Dir:  "${REASONIX_WORKSPACE}",
+	}}, "/workspace")
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1", len(specs))
+	}
+	if specs[0].Dir != "/workspace" {
+		t.Errorf("Dir = %q, want /workspace (explicit dir takes precedence)", specs[0].Dir)
+	}
+}
+
+func TestPluginSpecsNoRootDoesNotExpandWorkspaceVars(t *testing.T) {
+	specs := PluginSpecs([]config.PluginEntry{{
+		Name: "server",
+		Dir:  "${WORKSPACE_ROOT}",
+		Args: []string{"--root", "${WORKSPACE_ROOT:-fallback}"},
+	}})
+	if len(specs) != 1 {
+		t.Fatalf("got %d specs, want 1", len(specs))
+	}
+	if specs[0].Dir != "" {
+		t.Errorf("Dir = %q, want empty (no workspace root)", specs[0].Dir)
+	}
+	if specs[0].Args[1] != "fallback" {
+		t.Errorf("Args[1] = %q, want fallback (:-default)", specs[0].Args[1])
+	}
+}
+
 func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)

@@ -121,6 +121,7 @@ auth_mode = "none"             # none|token|password; use auth before binding be
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
+# dir = "${WORKSPACE_ROOT}"   # subprocess CWD; empty inherits Reasonix CWD
 startup_timeout_seconds = 60   # optional initialize + tools/list cap
 call_timeout_seconds = 600   # optional per-server MCP call timeout
 tool_timeout_seconds = { "generate_video" = 1800 }   # optional raw MCP tool names
@@ -843,6 +844,15 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
 of the file); `sse` connects to servers that still use the legacy persistent
 GET + announced POST endpoint transport.
+
+Stdio subprocesses inherit Reasonix's working directory, not the user's
+project root. Servers that detect their workspace from CWD (file finders,
+indexers, linters) need an explicit `dir` — use
+`dir = "${WORKSPACE_ROOT}"` (or `${REASONIX_WORKSPACE}`) to pin them to the
+active session workspace. Servers that implement the MCP `roots` capability
+receive the project root automatically and need no `dir` override. The
+substitution variables resolve from the session root first, then from the
+process environment.
 
 For a remote HTTP server without a static `Authorization` header, an
 authentication challenge is shown as **Sign in**. Run

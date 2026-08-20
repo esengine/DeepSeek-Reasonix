@@ -115,6 +115,7 @@ auth_mode = "none"             # none|token|password；绑定到非 localhost �
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
+# dir = "${WORKSPACE_ROOT}"   # 子进程工作目录；留空继承 Reasonix CWD
 startup_timeout_seconds = 60   # 可选：initialize + tools/list 上限
 call_timeout_seconds = 600   # 可选：单个 MCP server 的调用超时
 tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名称
@@ -668,6 +669,12 @@ Reasonix 是一个 MCP 客户端。`[[plugins]]` 的 `type` 选择传输：`stdi
 程（`command`/`args`/`env`）；`http`（Streamable HTTP）连接远程 `url`，可带静态
 `headers`（`${VAR}` / `${VAR:-default}` 从环境展开，密钥不入文件）。
 `sse` 则兼容仍使用持久 GET 与 server 公布 POST endpoint 的旧版远程 server。
+
+Stdio 子进程继承 Reasonix 的工作目录，而非用户的项目根目录。CWD 敏感的 server（文件查找器、
+索引器、linter）需要显式 `dir` — 用 `dir = "${WORKSPACE_ROOT}"`（或
+`${REASONIX_WORKSPACE}`）将它们指向当前会话的工作区根目录。实现了 MCP `roots` 能力的
+server 会自动收到项目根目录，无需 `dir` 覆盖。替换变量先从会话根目录取值，再从进程环境变量
+回退。
 
 远程 HTTP server 未配置静态 `Authorization` header 时，认证要求会显示为 **登录**。
 CLI 可运行 `reasonix mcp auth <name>`，桌面端则在 MCP 面板点击该 server 的 **登录**。
