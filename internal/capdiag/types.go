@@ -41,6 +41,7 @@ type Report struct {
 	Hooks         HookReport          `json:"hooks"`
 	Plugins       PluginPackageReport `json:"plugins"`
 	MCP           MCPReport           `json:"mcp"`
+	Permissions   PermissionsReport   `json:"permissions"`
 	Issues        []Issue             `json:"issues"`
 }
 
@@ -204,4 +205,38 @@ type MCPToolInfo struct {
 	Name            string `json:"name"`
 	ReadOnlyHint    bool   `json:"read_only_hint,omitempty"`
 	DestructiveHint bool   `json:"destructive_hint,omitempty"`
+}
+
+// PermissionsReport covers the configured [permissions] policy and its
+// validation. It reflects the configured mode and rule lists, not the desktop
+// Ask/Auto/Yolo runtime override of the fallback mode.
+type PermissionsReport struct {
+	Mode  string               `json:"mode"`
+	Allow []PermissionRuleInfo `json:"allow"`
+	Ask   []PermissionRuleInfo `json:"ask"`
+	Deny  []PermissionRuleInfo `json:"deny"`
+	// Tools is each built-in tool's effective decision for a bare call (no
+	// subject), under the configured policy.
+	Tools []PermissionToolInfo `json:"tools"`
+}
+
+// PermissionRuleInfo is one configured allow/ask/deny rule with its validation
+// status. Status is "ok" or a stable "permission.*" diagnostic code; Message
+// explains non-ok findings.
+type PermissionRuleInfo struct {
+	Rule    string `json:"rule"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// PermissionToolInfo is a built-in tool's effective decision for a bare call
+// (no subject). Scope is "rule" when Matched names the configured rule that
+// decided it, or "fallback" when the writer fallback mode or reader allow
+// applied.
+type PermissionToolInfo struct {
+	Tool     string `json:"tool"`
+	ReadOnly bool   `json:"read_only"`
+	Decision string `json:"decision"` // allow | ask | deny
+	Matched  string `json:"matched,omitempty"`
+	Scope    string `json:"scope"` // rule | fallback
 }

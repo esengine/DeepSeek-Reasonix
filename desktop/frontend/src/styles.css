@@ -35484,6 +35484,32 @@ body > .mermaid-diagram--fullscreen {
   letter-spacing: .04em;
   color: var(--text-muted, #888);
 }
+.diag-perm-bucket {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted, #888);
+}
+.diag-perm-status {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  background: var(--warn, rgba(217,164,65,.18));
+  color: var(--warn, #d9a441);
+}
+.diag-perm-status--empty_specifier,
+.diag-perm-status--invalid,
+.diag-perm-status--malformed {
+  background: var(--danger, rgba(229,72,77,.18));
+  color: var(--danger, #e5484d);
+}
+.diag-perm-status--ok {
+  display: none;
+}
 .diag-issue {
   border: 1px solid var(--border, rgba(127,127,127,.2));
   border-radius: 8px;
