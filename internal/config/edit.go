@@ -903,10 +903,9 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 // user switches tabs while the action is waiting on a lifecycle lock.
 func ClearPluginAuthenticationInSourceForRoot(root, name string) (PluginEntry, bool, string, error) {
 	resolvedRoot := resolveRoot(root)
-	projectTOML := "reasonix.toml"
+	projectTOML := ProjectConfigPath(resolvedRoot)
 	projectMCPJSON := mcpJSONFile
 	if resolvedRoot != "." {
-		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
 		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
 	}
 	lockPaths := append([]string{}, userConfigCandidatePaths()...)
@@ -953,10 +952,7 @@ func ClearPluginAuthenticationInSourceForRoot(root, name string) (PluginEntry, b
 }
 
 func pluginTOMLSourcePathForRoot(root, name string) string {
-	projectTOML := "reasonix.toml"
-	if resolved := resolveRoot(root); resolved != "." {
-		projectTOML = filepath.Join(resolved, "reasonix.toml")
-	}
+	projectTOML := ProjectConfigPath(resolveRoot(root))
 	paths := append([]string{projectTOML}, userConfigCandidatePaths()...)
 	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
@@ -978,10 +974,9 @@ func pluginTOMLSourcePathForRoot(root, name string) string {
 // the highest priority.
 func MCPConfigPathForEntry(root string, entry PluginEntry) string {
 	resolvedRoot := resolveRoot(root)
-	projectTOML := "reasonix.toml"
+	projectTOML := ProjectConfigPath(resolvedRoot)
 	projectMCPJSON := mcpJSONFile
 	if resolvedRoot != "." {
-		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
 		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
 	}
 	switch entry.Source {
@@ -1207,10 +1202,9 @@ func RemovePluginFromEffectiveSourceForRoot(root, name string) (PluginEntry, boo
 // of a now-shadowed source.
 func mcpConfigSourcePathsForRoot(root string) []string {
 	resolvedRoot := resolveRoot(root)
-	projectTOML := "reasonix.toml"
+	projectTOML := ProjectConfigPath(resolvedRoot)
 	projectMCPJSON := mcpJSONFile
 	if resolvedRoot != "." {
-		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
 		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
 	}
 	paths := append([]string{}, userConfigCandidatePaths()...)
@@ -1412,10 +1406,7 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 
 	userPaths := userConfigCandidatePaths()
 	resolvedRoot := resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if resolvedRoot != "." {
-		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
-	}
+	projectTOML := ProjectConfigPath(resolvedRoot)
 	isUserPath := false
 	for _, path := range userPaths {
 		if samePath(path, projectTOML) {
@@ -2409,12 +2400,12 @@ func IsUserConfigPath(path string) bool {
 }
 
 // Save writes the configuration back to the file it was loaded from
-// (SourcePath), or to ./reasonix.toml when none exists yet — the conventional
-// project-local target a fresh GUI session would create.
+// (SourcePath), or to .reasonix/config.toml when none exists yet — the
+// conventional project-local target a fresh GUI session would create.
 func (c *Config) Save() error {
 	path := SourcePath()
 	if path == "" {
-		path = "reasonix.toml"
+		path = projectConfigLocal
 	}
 	return c.SaveTo(path)
 }
@@ -2424,10 +2415,7 @@ func (c *Config) Save() error {
 // are edited from their own TOML only, never from a runtime user+project merge.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
+	projectTOML := ProjectConfigPath(root)
 	if _, err := os.Stat(projectTOML); err == nil {
 		projectCfg := LoadForEditWithoutCredentials(projectTOML)
 		return projectCfg.SaveTo(projectTOML)
