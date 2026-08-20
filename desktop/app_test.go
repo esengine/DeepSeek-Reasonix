@@ -3286,6 +3286,89 @@ func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 	}
 }
 
+func TestSetModelForTabDefersWhileRunning(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a1"
+	cfg.Desktop.ProviderAccess = []string{"prov-a", "prov-b"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "REASONIX_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.enableDeferredRebuildRetry()
+	t.Cleanup(app.stopDeferredRebuildRetry)
+	tab := &WorkspaceTab{
+		ID:          "tab_deferred_model",
+		Scope:       "global",
+		Ready:       true,
+		model:       "prov-a/model-a1",
+		sink:        &tabEventSink{tabID: "tab_deferred_model", app: app},
+		disabledMCP: map[string]ServerView{},
+	}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	sessionPath := filepath.Join(dir, "deferred-model-switch.jsonl")
+	oldCtrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "old"})
+	tab.Ctrl = oldCtrl
+	app.bindControllerDisplayRecorder(oldCtrl)
+	t.Cleanup(func() {
+		if c := app.controllerForTab(tab); c != nil && c != oldCtrl {
+			c.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	oldCtrl.Submit("work")
+	<-runner.started
+
+	err := app.SetModelForTab(tab.ID, "prov-b/model-b1")
+	if err == nil || !strings.Contains(err.Error(), "will apply from the next turn") {
+		t.Fatalf("SetModelForTab while running err = %v, want deferred-accept error", err)
+	}
+	if got := tab.model; got != "prov-b/model-b1" {
+		t.Fatalf("tab.model after deferred switch = %q, want prov-b/model-b1", got)
+	}
+	if !app.deferredRebuildPending(tab.ID) {
+		t.Fatal("deferred rebuild was not scheduled while the turn is running")
+	}
+	if app.controllerForTab(tab) != oldCtrl {
+		t.Fatal("controller changed while the turn is still running")
+	}
+
+	close(runner.release)
+	waitNotRunning(t, oldCtrl)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != oldCtrl {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if app.deferredRebuildPending(tab.ID) {
+		t.Fatal("deferred rebuild is still pending after the turn finished")
+	}
+	if c := app.controllerForTab(tab); c == nil || c == oldCtrl {
+		t.Fatalf("controller was not rebuilt with the new model after the turn finished: got %p", c)
+	}
+}
+
 func TestSetModelForTabRefreshesCarriedSystemPromptWithoutChangingDefaults(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")

@@ -37,6 +37,7 @@ func (admission *tabTurnAdmission) abort() {
 
 // beginTabTurn reserves one tab until its TurnDone fan-out completes.
 func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (*tabTurnAdmission, control.SessionAPI, error) {
+	flushedDeferredModel := false
 	for {
 		tab, ctrl := a.tabAndCtrlByID(tabID)
 		if a.tabIsReadOnly(tab) {
@@ -91,6 +92,20 @@ func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (
 			}
 			abort()
 			return nil, nil, control.ErrTurnRunning
+		}
+		// A deferred model switch must land before the next turn starts — the
+		// notice promises the new model applies from the next turn. Flush the
+		// pending rebuild synchronously here (the 2s retry loop could
+		// otherwise let a fast resubmit run on the old model); a failed flush
+		// falls through to the current controller once instead of blocking or
+		// looping forever.
+		if !flushedDeferredModel {
+			if setting, ok := a.deferredRebuildSetting(tab.ID); ok && setting == "model" {
+				flushedDeferredModel = true
+				abort()
+				a.retryDeferredRebuild(tab.ID, setting)
+				continue
+			}
 		}
 		if tab.sink != nil && !tab.sink.tryBeginTurn(submissionID...) {
 			abort()

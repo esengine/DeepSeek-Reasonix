@@ -3673,9 +3673,15 @@ a[href] {
   color: var(--fg-faint);
   border-radius: 6px;
 }
-.notice-line--warn {
+.notice-line--warn,
+.notice-line--model-switch {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.notice-line--model-switch {
+  /* The notice sits between its user message and the streaming content that
+     follows; keep that transition airy instead of cramped. */
+  margin-bottom: 10px;
 }
 .notice-line--delivery {
   gap: 9px;

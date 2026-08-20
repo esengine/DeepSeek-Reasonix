@@ -626,6 +626,38 @@ ok(
   "failed close preserves model balance reconciliation",
 );
 
+const deferredSwitchGate = deferred<void>();
+modelSwitchSteps.push({
+  gate: deferredSwitchGate,
+  error: new Error("model switch accepted; the new model will apply from the next turn"),
+});
+let deferredSwitch: Promise<boolean> | undefined;
+await act(async () => {
+  deferredSwitch = controller?.setModel("provider-j/model-j");
+  await flushPromises();
+});
+deferredSwitchGate.resolve();
+let deferredSwitchResult: boolean | undefined;
+await act(async () => {
+  deferredSwitchResult = await deferredSwitch;
+  await flushPromises();
+});
+eq(deferredSwitchResult, true, "deferred model switch reports success to its caller");
+ok(
+  (controller?.state.items ?? []).some(
+    (item) =>
+      (item as { kind: string }).kind === "notice" &&
+      (item as { level?: string }).level === "info" &&
+      (item as { text?: string }).text === "Model switched. It will take effect from your next message.",
+  ),
+  "deferred model switch surfaces the next-turn notice",
+);
+eq(
+  controller?.state.meta?.label,
+  backendModel,
+  "deferred model switch reconciles metadata to the backend model",
+);
+
 await act(async () => {
   root.unmount();
 });

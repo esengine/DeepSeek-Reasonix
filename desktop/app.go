@@ -9469,6 +9469,62 @@ func rebuildControllerActiveWorkErrorFor(ctrl control.SessionAPI, setting string
 	return &rebuildBusyError{setting: setting, work: work}
 }
 
+// modelSwitchDeferredError reports a model switch accepted while the tab was
+// busy. The selection updates immediately but the controller rebuild is queued
+// behind the running turn, so the new model applies from the next turn; the
+// frontend surfaces it as a notice rather than a failure.
+type modelSwitchDeferredError struct{}
+
+func (e *modelSwitchDeferredError) Error() string {
+	return "model switch accepted; the new model will apply from the next turn"
+}
+
+// deferModelSwitch accepts a model switch while the tab has active runtime
+// work: it updates the tab's model identity and persisted session metadata now
+// (so the UI and a restart see the new selection), queues a deferred rebuild
+// that swaps the controller once the turn finishes, and reports the switch as
+// accepted-but-not-yet-applied. busy must be the rejection from the active-work
+// guard; any other error is returned untouched.
+func (a *App) deferModelSwitch(tab *WorkspaceTab, name string, busy error) error {
+	var work *rebuildBusyError
+	if !errors.As(busy, &work) {
+		return busy
+	}
+	resolved, effortOverride, err := a.resolveModelSwitchTarget(tab, a.tabRuntimeSnapshot(tab), name)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if tab.removed || a.tabs[tab.ID] != tab {
+		a.mu.Unlock()
+		return fmt.Errorf("tab %q changed while switching model; retry", tab.ID)
+	}
+	prevModel := tab.model
+	tab.model = resolved
+	// Carry the normalized effort alongside the model, exactly like the
+	// immediate switch path, so the deferred generic rebuild does not run the
+	// new model with a stale or invalid effort.
+	tab.effort = cloneStringPtr(effortOverride)
+	a.saveTabsLocked()
+	a.mu.Unlock()
+	if path := a.currentSessionPathFor(tab); path != "" {
+		if err := agent.SetBranchModelPreserveUpdated(path, resolved); err != nil {
+			// Roll back the tab identity: the old controller is still running
+			// under the previous model, and keeping the new model here would
+			// both mislead the UI and make a retry a no-op via the
+			// currentModel match in SetModelForTab.
+			a.mu.Lock()
+			tab.model = prevModel
+			tab.effort = nil
+			a.saveTabsLocked()
+			a.mu.Unlock()
+			return fmt.Errorf("persist selected model: %w", err)
+		}
+	}
+	a.scheduleDeferredRebuild(tab.ID, "model")
+	return &modelSwitchDeferredError{}
+}
+
 type sessionLeaseBusyError struct {
 	setting string
 	err     error
@@ -9673,6 +9729,47 @@ type modelSwitchTiming struct {
 	Outcome        string
 }
 
+// resolveModelSwitchTarget resolves a user-facing model name into the wire
+// name a controller build consumes, applying the provider-access check and the
+// tab's effort override. Shared by the immediate rebuild path and the deferred
+// switch so a busy tab validates the target before queueing it.
+func (a *App) resolveModelSwitchTarget(tab *WorkspaceTab, snap tabRuntimeSnapshot, name string) (resolved string, effort *string, err error) {
+	cfg, err := config.LoadForRoot(snap.workspaceRoot)
+	if err != nil {
+		return "", nil, err
+	}
+	entry, ok := cfg.ResolveModel(name)
+	pluginRef := false
+	if !ok {
+		// Plugin-namespaced refs belong to extension sidecars: validate them
+		// against the tab controller's merged catalog instead of the config.
+		if d, found := extensionModelDescriptor(a.providerCatalogForTab(tab), name); found {
+			pluginRef = true
+			ok = true
+			name = d.Ref
+		}
+	}
+	if !ok {
+		return "", nil, fmt.Errorf("unknown model %q", name)
+	}
+	if !pluginRef {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
+			return "", nil, fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
+		}
+		name = entry.Name + "/" + entry.Model
+	}
+	effortOverride := cloneStringPtr(snap.effort)
+	if effortOverride != nil && !pluginRef {
+		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride}))
+		if err != nil {
+			effortOverride = nil
+		} else {
+			effortOverride = &normalized
+		}
+	}
+	return name, effortOverride, nil
+}
+
 func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	if a.ctx == nil || name == "" {
 		return nil
@@ -9731,7 +9828,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		a.attachExistingSessionRuntime(tab, prevPath, a.ctx)
 	}
 	if err := rebuildControllerActiveWorkErrorFor(a.controllerForTab(tab), "model"); err != nil {
-		return err
+		return a.deferModelSwitch(tab, name, err)
 	}
 	if err := a.ensureTabControllerWorkspace(tab); err != nil {
 		return err
@@ -9746,7 +9843,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 			prevPath = a.currentSessionPathFor(tab)
 		}
 		if err := rebuildControllerActiveWorkErrorFor(a.controllerForTab(tab), "model"); err != nil {
-			return err
+			return a.deferModelSwitch(tab, name, err)
 		}
 	}
 	timing.Prepare = time.Since(stageStarted)
@@ -9756,38 +9853,9 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	stageStarted = time.Now()
 	snap := a.tabRuntimeSnapshot(tab)
 	runtime := snap.normalizedRuntime()
-	cfg, err := config.LoadForRoot(snap.workspaceRoot)
+	name, effortOverride, err := a.resolveModelSwitchTarget(tab, snap, name)
 	if err != nil {
 		return err
-	}
-	entry, ok := cfg.ResolveModel(name)
-	pluginRef := false
-	if !ok {
-		// Plugin-namespaced refs belong to extension sidecars: validate them
-		// against the tab controller's merged catalog instead of the config.
-		if d, found := extensionModelDescriptor(a.providerCatalogForTab(tab), name); found {
-			pluginRef = true
-			ok = true
-			name = d.Ref
-		}
-	}
-	if !ok {
-		return fmt.Errorf("unknown model %q", name)
-	}
-	if !pluginRef {
-		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
-			return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
-		}
-		name = entry.Name + "/" + entry.Model
-	}
-	effortOverride := cloneStringPtr(snap.effort)
-	if effortOverride != nil && !pluginRef {
-		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride}))
-		if err != nil {
-			effortOverride = nil
-		} else {
-			effortOverride = &normalized
-		}
 	}
 	timing.Config = time.Since(stageStarted)
 

@@ -787,6 +787,34 @@ const nextGenerationResetBefore = integrity?.resetKey;
 await triggerWatchdogRebuild();
 check(integrity?.resetKey !== nextGenerationResetBefore, "a changed 10,000-row generation receives a fresh hard-reset budget");
 
+// ── Model-switch notice live→history transition keeps a manual viewport ─────
+// The first streaming update carrying the notice moves it out of the live
+// surface into history (splitTranscriptLiveRows), growing history by one row
+// while the live surface shrinks. That geometry change must not drag a
+// manually positioned viewport (AGENTS.md race-test mandate).
+{
+  const noticeRow: TranscriptRow = {
+    kind: "notice",
+    key: "n:model-switch",
+    item: { kind: "notice", id: "model-switch", level: "info", text: "Model switched. It will take effect from your next message.", variant: "model-switch" },
+  };
+  await switchSurface("surface-model-switch", baseRows);
+  // User manually scrolls away from the tail before the notice lands.
+  scrollElement.scrollTop = 300;
+  scrollToCalls = 0;
+  scrollByCalls = 0;
+  scrollToIndexCalls = 0;
+  await act(async () => arbiter?.releaseTailFollow());
+  // The transition lands: the notice row joins history on the same surface.
+  await act(async () => root.render(<Probe surfaceKey="surface-model-switch" rows={[noticeRow, ...baseRows]} />));
+  await flushFrames();
+  await advanceClock(240);
+  await flushFrames();
+  check(scrollElement.scrollTop === 300, "model-switch notice history transition keeps the manual viewport");
+  check(scrollToCalls === 0 && scrollToIndexCalls === 0 && scrollByCalls === 0,
+    "no recovery write drags the viewport during the notice transition");
+}
+
 await act(async () => root.unmount());
 Date.now = originalDateNow;
 dom.window.setTimeout = originalSetTimeout;

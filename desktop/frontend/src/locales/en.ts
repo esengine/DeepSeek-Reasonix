@@ -865,6 +865,7 @@ export const en = {
   "modelSwitcher.noMatches": "No matching models",
   "status.noModels": "no switchable models",
   "status.modelSwitchBusy": "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+  "status.modelSwitchDeferred": "Model switched. It will take effect from your next message.",
   "status.modelSwitchBusyRunning": "The model cannot change while the current answer is running. Stop it first.",
   "status.modelSwitchBusyPrompt": "The model cannot change while a prompt is waiting for your response. Handle it first.",
   "status.modelSwitchBusyJobs": "The model cannot change while background work is active. Active jobs: {n}. Open Background jobs in the status bar to stop them.",

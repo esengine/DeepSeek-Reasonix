@@ -1974,6 +1974,18 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
+	// The rebuild snapshots the old controller, whose autosave writes its own
+	// modelRef back into the session sidecar; a deferred model switch must not
+	// lose the new selection that way. Re-persist the final model after the
+	// swap — a no-op for rebuilds that did not change the model.
+	a.mu.RLock()
+	rebuiltModel := tab.model
+	a.mu.RUnlock()
+	if path != "" && rebuiltModel != "" {
+		if err := agent.SetBranchModelPreserveUpdated(path, rebuiltModel); err != nil {
+			return fmt.Errorf("persist selected model: %w", err)
+		}
+	}
 	a.clearDeferredRebuild(tab.ID)
 	a.notifyTabRuntimeRebuilt(tab)
 	a.emitReady(a.ctx)

@@ -127,6 +127,44 @@ const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key).jo
   check(keys(split.liveRows) === keys(rows), "a prelude turn's rows all render in the live region");
 }
 
+// ── Model-switch notice stays in history while the turn streams ──────────────
+{
+  const notice: Item = {
+    kind: "notice",
+    id: "n1",
+    level: "info",
+    text: "Model switched. It will take effect from your next message.",
+    variant: "model-switch",
+  };
+  const { models, rows } = rowsFor(
+    [user("u1"), notice, assistant("a1", { text: "answering", streaming: true })],
+    { id: "a1", hasAnswerText: true, hasReasoning: false },
+    true,
+  );
+  const split = splitTranscriptLiveRows(models, rows, "a1", true);
+  check(split.liveActive, "a streaming turn with a model-switch notice stays live");
+  check(keys(split.historyRows).includes("n:n1"), "model-switch notice scrolls with history");
+  check(!keys(split.liveRows).includes("n:n1"), "model-switch notice is not pinned to the live region");
+  check(keys(split.liveRows).includes("a:a1"), "the streaming answer still renders in the live region");
+}
+
+// ── Settled turn: model-switch notice keeps its position next to the user ─────
+{
+  const notice: Item = {
+    kind: "notice",
+    id: "n1",
+    level: "info",
+    text: "Model switched. It will take effect from your next message.",
+    variant: "model-switch",
+  };
+  const { rows } = rowsFor([user("u1"), notice, assistant("a1", { text: "done", reasoningComplete: true })]);
+  const ordered = rows.map((row) => row.key);
+  check(
+    ordered[0] === userRowKey("u1") && ordered[1] === "n:n1",
+    "settled turn keeps the model-switch notice right after the user message",
+  );
+}
+
 if (failed > 0) {
   console.error(`\n${failed} transcript live-split test(s) failed; ${passed} passed.`);
   process.exit(1);
