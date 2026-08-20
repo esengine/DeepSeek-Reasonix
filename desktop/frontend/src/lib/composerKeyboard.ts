@@ -171,7 +171,12 @@ export function canUsePromptHistory(options: PromptHistoryEligibility): boolean 
   if (selectionStart !== selectionEnd) return false;
 
   if (direction === "up") {
-    return historyIndex >= 0 || selectionStart === 0;
+    // Always allow UP to recall history: in history mode it goes older; on the
+    // first press (historyIndex === -1) it enters history mode. Do not gate on
+    // cursor position — most chat apps recall history regardless of where the
+    // caret sits, and the previous "selectionStart === 0" guard made the first
+    // UP press a no-op whenever the user had typed any text.
+    return true;
   }
 
   return historyIndex >= 0 && selectionEnd === value.length;

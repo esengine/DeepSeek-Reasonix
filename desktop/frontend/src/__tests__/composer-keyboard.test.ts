@@ -63,11 +63,11 @@ eq(isFnKeyEvent({ key: "ArrowUp", getModifierState: (key) => key === "Fn" }), tr
 
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0 }), true, "empty input ArrowUp can recall history");
 eq(eligible("down", { value: "", selectionStart: 0, selectionEnd: 0 }), false, "empty input ArrowDown does not start history");
-eq(eligible("up", { value: "draft", selectionStart: 5, selectionEnd: 5 }), false, "ArrowUp at draft end keeps native textarea movement");
+eq(eligible("up", { value: "draft", selectionStart: 5, selectionEnd: 5 }), true, "ArrowUp recalls history regardless of cursor position");
 eq(eligible("up", { value: "draft", selectionStart: 0, selectionEnd: 0 }), true, "ArrowUp at first position recalls history");
 eq(eligible("down", { value: "history", selectionStart: 7, selectionEnd: 7, historyIndex: 0 }), true, "ArrowDown at recalled history end moves newer");
 eq(eligible("down", { value: "history", selectionStart: 3, selectionEnd: 3, historyIndex: 0 }), false, "ArrowDown inside text keeps native movement");
-eq(eligible("up", { value: "line1\nline2", selectionStart: 7, selectionEnd: 7 }), false, "ArrowUp inside multiline text keeps native movement");
+eq(eligible("up", { value: "line1\nline2", selectionStart: 7, selectionEnd: 7 }), true, "ArrowUp recalls history even inside multiline text");
 eq(eligible("up", { value: "history", selectionStart: 7, selectionEnd: 7, historyIndex: 0 }), true, "history mode allows repeated ArrowUp");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, fnKey: true }), false, "Fn-modified arrows are not history shortcuts");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, shiftKey: true }), false, "Shift+Arrow preserves selection behavior");
