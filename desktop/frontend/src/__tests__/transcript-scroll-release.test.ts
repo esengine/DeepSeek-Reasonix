@@ -5,6 +5,8 @@ import {
   isSubstantialTranscriptDisplacement,
   isTranscriptContentShrink,
   reduceTranscriptScroll,
+  transcriptTailSettleBudgetExhausted,
+  TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS,
   type TranscriptScrollEvent,
   type TranscriptScrollState,
 } from "../lib/transcriptScrollArbiter";
@@ -254,6 +256,16 @@ check(
   strandedAfterMisreadShrink.commands.join(",") === "AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM",
   "substantial displacements keep reconverging after a misread shrink",
 );
+
+// The tail-settle convergence loop needs a bounded attempt budget: long
+// virtualized sessions whose bottom rows keep re-measuring can hold the native
+// distance-from-bottom just above the threshold forever, so without a cap the
+// settle rAF loop (and the flicker it drives) never ends (#9208).
+check(transcriptTailSettleBudgetExhausted(0) === false, "tail settle may re-aim from zero attempts");
+check(transcriptTailSettleBudgetExhausted(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS - 1) === false, "tail settle keeps re-aiming before the budget fully spent");
+check(transcriptTailSettleBudgetExhausted(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS) === true, "tail settle stops once the re-aim budget is exhausted");
+check(transcriptTailSettleBudgetExhausted(99) === true, "tail settle stops for any attempt count above the budget");
+check(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS > 0, "the tail settle budget is positive");
 
 const wrapScroller = { scrollHeight: 500, scrollTop: 400, clientHeight: 80 };
 check(pinTranscriptScrollerToNativeTail(wrapScroller) === true, "a composer-wrap viewport shrink is off-bottom and gets pinned");
