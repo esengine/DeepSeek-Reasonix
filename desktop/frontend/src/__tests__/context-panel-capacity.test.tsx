@@ -98,6 +98,7 @@ const capacity = document.querySelector(".context-panel__capacity-card");
 const meter = capacity?.querySelector(".context-panel__capacity-meter");
 const fill = meter?.querySelector(".context-panel__progress-fill") as HTMLElement | null;
 const usedPin = meter?.querySelector(".context-panel__capacity-pin--used");
+const compactPin = meter?.querySelector(".context-panel__capacity-pin--compact");
 const compactMarker = meter?.querySelector(".context-panel__compact-marker") as HTMLElement | null;
 
 eq(capacity?.querySelector(".context-panel__capacity-status")?.textContent, "Over context limit", "over-limit status is explicit");
@@ -106,6 +107,13 @@ eq(fill?.style.width, "100%", "capacity fill is capped at the physical track wid
 eq(meter?.querySelectorAll(".context-panel__progress-segment").length, 0, "capacity meter does not mix token composition into its fill");
 eq(compactMarker?.style.left, "80%", "compression threshold marker stays at the configured ratio");
 ok(meter?.getAttribute("aria-label")?.includes("101% used") === true, "accessible summary reports the over-limit ratio");
+
+// The compact pin must not read as a bare percentage: it carries the
+// compression-threshold label so users cannot mistake it for context usage.
+ok(compactPin?.textContent?.includes("80%") === true, "compact pin still shows the threshold ratio");
+ok((compactPin?.textContent?.trim().length ?? 0) > "80%".length, "compact pin is labeled, not a bare ratio");
+ok(compactPin?.getAttribute("title")?.includes("80%") === true, "compact pin tooltip includes the threshold ratio");
+ok(usedPin?.getAttribute("title") !== null, "used pin exposes a tooltip for assistive clarification");
 
 await act(async () => {
   root.unmount();

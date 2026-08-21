@@ -618,9 +618,22 @@ export function ContextPanel({
                 <strong>{usedLabel}/{windowLabel}</strong>
               </div>
               <div className="context-panel__usage-progress context-panel__capacity-meter" aria-label={`${t(windowStatus.key)}. ${usageSummary}. ${compactSummary}`}>
-                <div className="context-panel__capacity-scale" aria-hidden="true">
-                  <span className="context-panel__capacity-pin context-panel__capacity-pin--used" style={{ left: `${usageMarkerPct}%` }}>{rawUsagePct}%</span>
-                  <span className="context-panel__capacity-pin context-panel__capacity-pin--compact" style={{ left: `${compactLabelPct}%` }}>{compactPct}%</span>
+                <div className="context-panel__capacity-scale">
+                  <span
+                    className="context-panel__capacity-pin context-panel__capacity-pin--used"
+                    style={{ left: `${usageMarkerPct}%` }}
+                    title={`${t("context.windowUsedLabel")}: ${rawUsagePct}%`}
+                    aria-hidden="true"
+                  >
+                    {rawUsagePct}%
+                  </span>
+                  <span
+                    className="context-panel__capacity-pin context-panel__capacity-pin--compact"
+                    style={{ left: `${compactLabelPct}%` }}
+                    title={`${t("context.windowCompactThreshold")}: ${compactPct}%`}
+                  >
+                    {t("context.windowCompactThreshold")} {compactPct}%
+                  </span>
                 </div>
                 <div className="context-panel__progress-track" aria-hidden="true">
                   <span className="context-panel__progress-fill" style={{ width: `${usagePct}%` }} />

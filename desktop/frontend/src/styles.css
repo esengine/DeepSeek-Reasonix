@@ -25919,7 +25919,7 @@ body > .mermaid-diagram--fullscreen {
   position: absolute;
   top: 0;
   z-index: var(--z-local-raised);
-  max-width: 58px;
+  max-width: 150px;
   overflow: hidden;
   padding: 3px 7px;
   border: 1px solid var(--border-soft);
