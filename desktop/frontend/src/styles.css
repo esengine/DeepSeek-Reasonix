@@ -32410,6 +32410,14 @@ body > .mermaid-diagram--fullscreen {
   max-width: 64px;
 }
 
+.app--creation .composer-meta__control--floor,
+:root[data-theme-style] .app--creation .composer-meta__control--floor {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 64px;
+  margin-inline-start: 0;
+}
+
 .app--creation .composer-modebar,
 :root[data-theme-style] .app--creation .composer-modebar {
   --creation-mode-cell: 28px;

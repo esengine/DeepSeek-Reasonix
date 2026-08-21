@@ -747,6 +747,8 @@ export function Composer({
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const [intentMenuOpen, setIntentMenuOpen] = useState(false);
   const [intentMenuClosing, setIntentMenuClosing] = useState(false);
+  const [floorMenuOpen, setFloorMenuOpen] = useState(false);
+  const [floorMenuClosing, setFloorMenuClosing] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuClosing, setMoreMenuClosing] = useState(false);
   const [contentMenuOpen, setContentMenuOpen] = useState(false);
@@ -790,11 +792,14 @@ export function Composer({
   const composerWrapRef = useRef<HTMLDivElement>(null);
   const contentMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
+  const floorMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
+  const floorCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
   // Creation chrome: hover-open task menus (same pattern as ContextWindowRing).
   const intentHoverTimerRef = useRef<number | null>(null);
+  const floorHoverTimerRef = useRef<number | null>(null);
   const creationChrome = showContextWindowRing;
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const pastChatSearchComposingRef = useRef(false);
@@ -929,6 +934,8 @@ export function Composer({
     setImageViewer((current) => current.open ? { ...current, open: false } : current);
     setIntentMenuOpen(false);
     setIntentMenuClosing(false);
+    setFloorMenuOpen(false);
+    setFloorMenuClosing(false);
     setMoreMenuOpen(false);
     setMoreMenuClosing(false);
   };
@@ -1934,15 +1941,29 @@ export function Composer({
     timerRef.current = null;
   };
 
+  const clearFloorCloseTimer = useCallback(() => {
+    if (floorCloseTimerRef.current === null) return;
+    window.clearTimeout(floorCloseTimerRef.current);
+    floorCloseTimerRef.current = null;
+  }, []);
+
+  const dismissFloorMenu = useCallback(() => {
+    clearFloorCloseTimer();
+    clearHoverTimer(floorHoverTimerRef);
+    setFloorMenuOpen(false);
+    setFloorMenuClosing(false);
+  }, [clearFloorCloseTimer]);
+
   const openIntentMenu = useCallback(() => {
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
+    dismissFloorMenu();
     setContentMenuOpen(false);
     setDirectPastChats(false);
     setDismissed(true);
     setIntentMenuClosing(false);
     setIntentMenuOpen(true);
-  }, [clearIntentCloseTimer]);
+  }, [clearIntentCloseTimer, dismissFloorMenu]);
 
   const closeIntentMenu = useCallback((afterClose?: () => void) => {
     clearIntentCloseTimer();
@@ -1961,6 +1982,61 @@ export function Composer({
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
   }, [clearIntentCloseTimer]);
+
+  const openFloorMenu = useCallback(() => {
+    clearFloorCloseTimer();
+    clearHoverTimer(floorHoverTimerRef);
+    clearHoverTimer(intentHoverTimerRef);
+    setIntentMenuOpen(false);
+    setIntentMenuClosing(false);
+    setContentMenuOpen(false);
+    setDirectPastChats(false);
+    setDismissed(true);
+    setFloorMenuClosing(false);
+    setFloorMenuOpen(true);
+  }, [clearFloorCloseTimer]);
+
+  const closeFloorMenu = useCallback((afterClose?: () => void) => {
+    clearFloorCloseTimer();
+    clearHoverTimer(floorHoverTimerRef);
+    setFloorMenuClosing(true);
+    window.requestAnimationFrame(() => setFloorMenuOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    floorCloseTimerRef.current = window.setTimeout(() => {
+      floorCloseTimerRef.current = null;
+      setFloorMenuClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearFloorCloseTimer]);
+
+  useEffect(() => () => {
+    clearFloorCloseTimer();
+    clearHoverTimer(floorHoverTimerRef);
+  }, [clearFloorCloseTimer]);
+
+  const onFloorHoverEnter = useCallback(() => {
+    if (!creationChrome || disabled || running) return;
+    clearHoverTimer(floorHoverTimerRef);
+    floorHoverTimerRef.current = window.setTimeout(() => {
+      floorHoverTimerRef.current = null;
+      openFloorMenu();
+    }, 120);
+  }, [creationChrome, disabled, openFloorMenu, running]);
+
+  const onFloorHoverLeave = useCallback(() => {
+    if (!creationChrome) return;
+    clearHoverTimer(floorHoverTimerRef);
+    if (!floorMenuOpen && !floorMenuClosing) return;
+    floorHoverTimerRef.current = window.setTimeout(() => {
+      floorHoverTimerRef.current = null;
+      closeFloorMenu();
+    }, 140);
+  }, [closeFloorMenu, creationChrome, floorMenuClosing, floorMenuOpen]);
+
+  const onFloorPopoverEnter = useCallback(() => {
+    if (!creationChrome) return;
+    clearHoverTimer(floorHoverTimerRef);
+  }, [creationChrome]);
 
   const onIntentHoverEnter = useCallback(() => {
     if (!creationChrome || disabled || running) return;
@@ -1994,12 +2070,13 @@ export function Composer({
 
   const openMoreMenu = useCallback(() => {
     clearMoreCloseTimer();
+    dismissFloorMenu();
     setContentMenuOpen(false);
     setDirectPastChats(false);
     setDismissed(true);
     setMoreMenuClosing(false);
     setMoreMenuOpen(true);
-  }, [clearMoreCloseTimer]);
+  }, [clearMoreCloseTimer, dismissFloorMenu]);
 
   const closeMoreMenu = useCallback((afterClose?: () => void) => {
     clearMoreCloseTimer();
@@ -3202,6 +3279,7 @@ export function Composer({
 
   const openContentMenu = () => {
     if (intentMenuOpen || intentMenuClosing) closeIntentMenu();
+    if (floorMenuOpen || floorMenuClosing) closeFloorMenu();
     if (moreMenuOpen || moreMenuClosing) closeMoreMenu();
     setDirectPastChats(false);
     setShowPastChats(false);
@@ -3658,6 +3736,12 @@ export function Composer({
     if (floor === qualityFloor) return;
     onSetQualityFloor?.(floor);
   };
+  const chooseQualityFloorFromMenu = (floor: QualityFloor) => {
+    closeFloorMenu(() => {
+      chooseQualityFloor(floor);
+      requestActiveDraftFrame(focusComposerInput);
+    });
+  };
   const stopGoalMode = () => {
     closeIntentMenu(() => {
       onClearGoal();
@@ -3676,6 +3760,14 @@ export function Composer({
       : "composer.taskModeDirectTooltipSummary";
   const TaskModeIcon = collaborationMode === "plan" ? List : collaborationMode === "goal" ? Target : ArrowRight;
   const taskModeTriggerLabel = t("composer.taskModeTrigger", { mode: t(taskModeShortKey) });
+  const floorShortKey = floorOn ? "composer.qualityFloorDelivery" : "composer.qualityFloorStandard";
+  const FloorIcon = floorOn ? PackageCheck : Equal;
+  const floorTriggerLabel = t("composer.qualityFloorTrigger", { floor: t(floorShortKey) });
+  const floorTooltipLabel = t("composer.controlTooltip", {
+    category: t("composer.qualityFloor"),
+    mode: t(floorShortKey),
+    summary: t(floorOn ? "composer.qualityFloorDeliveryTooltipSummary" : "composer.qualityFloorStandardTooltipSummary"),
+  });
   const taskModeTooltipLabel = t("composer.controlTooltip", {
     category: t("composer.intentMenuTitle"),
     mode: t(taskModeShortKey),
@@ -3747,8 +3839,9 @@ export function Composer({
     setDirectPastChats(false);
     setShowPastChats(false);
     closeIntentMenu();
+    closeFloorMenu();
     closeMoreMenu();
-  }, [suspendedByDecision, closeIntentMenu, closeMoreMenu]);
+  }, [suspendedByDecision, closeFloorMenu, closeIntentMenu, closeMoreMenu]);
   // Live text+reasoning character count for the run-strip TPS fallback. Reads
   // through the live store's own subscription so stream deltas re-render only
   // this component — the controller's bump path stays text-delta-free.
@@ -4082,6 +4175,54 @@ export function Composer({
               </button>
             </div>
           )}
+        </div>
+      </AnchoredPopover>}
+      {creationChrome && !heroMode && <AnchoredPopover
+        open={floorMenuOpen}
+        closing={floorMenuClosing}
+        anchorRef={floorMenuAnchorRef}
+        onClose={() => closeFloorMenu()}
+        className="composer-access-menu composer-intent-menu composer-floor-menu"
+        align="start"
+      >
+        <div
+          className="composer-access-menu__section"
+          role="menu"
+          aria-label={t("composer.qualityFloor")}
+          onMouseEnter={onFloorPopoverEnter}
+          onMouseLeave={onFloorHoverLeave}
+        >
+          <div className="composer-access-menu__label">{t("composer.qualityFloor")}</div>
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={!floorOn}
+            className={`composer-access-menu__item composer-intent-menu__item${!floorOn ? " composer-access-menu__item--active" : ""}`}
+            onClick={() => chooseQualityFloorFromMenu("standard")}
+            disabled={approvalBarDisabled || !onSetQualityFloor}
+          >
+            <Equal size={16} />
+            <span className="composer-access-menu__copy">
+              <span className="composer-access-menu__title">{t("composer.qualityFloorStandardItem")}</span>
+              <span className="composer-access-menu__desc">{t("composer.qualityFloorStandardDesc")}</span>
+            </span>
+            {!floorOn && <Check className="composer-intent-menu__check" size={16} aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={floorOn}
+            className={`composer-access-menu__item composer-intent-menu__item${floorOn ? " composer-access-menu__item--active" : ""}`}
+            onClick={() => chooseQualityFloorFromMenu("delivery")}
+            disabled={approvalBarDisabled || !onSetQualityFloor}
+          >
+            <PackageCheck size={16} />
+            <span className="composer-access-menu__copy">
+              <span className="composer-access-menu__title">{t("composer.qualityFloorDeliveryItem")}</span>
+              <span className="composer-access-menu__desc">{t("composer.qualityFloorDeliveryDesc")}</span>
+            </span>
+            {floorOn && <Check className="composer-intent-menu__check" size={16} aria-hidden="true" />}
+          </button>
         </div>
       </AnchoredPopover>}
       <AnchoredPopover
@@ -4659,6 +4800,29 @@ export function Composer({
                 </Tooltip>
               </div>
             )}
+            {creationChrome && !heroMode && (
+              <div className="composer-meta__control composer-meta__control--floor">
+                <Tooltip label={floorTooltipLabel} disabled={floorMenuOpen || floorMenuClosing || creationChrome}>
+                  <button
+                    ref={floorMenuAnchorRef}
+                    type="button"
+                    className={`composer-task-mode-trigger composer-floor-trigger${floorMenuOpen || floorMenuClosing ? " composer-task-mode-trigger--open composer-floor-trigger--open" : ""}`}
+                    onClick={() => (floorMenuOpen || floorMenuClosing ? closeFloorMenu() : openFloorMenu())}
+                    onMouseEnter={onFloorHoverEnter}
+                    onMouseLeave={onFloorHoverLeave}
+                    disabled={approvalBarDisabled || !onSetQualityFloor}
+                    aria-haspopup="menu"
+                    aria-expanded={floorMenuOpen && !floorMenuClosing}
+                    aria-label={floorTriggerLabel}
+                  >
+                    <FloorIcon size={14} aria-hidden="true" />
+                    <span className="composer-task-mode-trigger__value">{t(floorShortKey)}</span>
+                    {floorOn && floorInferred ? <span className="composer-modebar__inferred" /> : null}
+                    <ChevronsUpDown size={11} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              </div>
+            )}
             {!heroMode && (
               <div className="composer-meta__control composer-meta__control--approval">
                 {/* A pending tool approval disables the composer, but the approval
@@ -4707,7 +4871,7 @@ export function Composer({
                 </div>
               </div>
             )}
-            {!heroMode && (
+            {!creationChrome && !heroMode && (
               <div className="composer-meta__control composer-meta__control--floor">
                 {/* Orthogonal to the intent menu: the floor only raises the
                     completion gates, so goal mode and delivery combine. */}
