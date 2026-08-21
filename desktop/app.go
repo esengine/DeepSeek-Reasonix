@@ -363,8 +363,9 @@ type App struct {
 	skillRootsMu    sync.Mutex
 	skillRootsCache skillRootsCache
 
-	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
-	lifecycle desktopLifecycleRuntime
+	heartbeat    *HeartbeatEngine    // scheduled heartbeat tasks; nil until startup
+	browserRelay *browserRelayServer // browser relay extension bridge; nil until startup
+	lifecycle    desktopLifecycleRuntime
 	// diagnosticsOwner is acquired before Wails starts so Linux's OnStartup
 	// ordering cannot let a second-instance handoff create lifecycle evidence.
 	diagnosticsOwner        bool
@@ -486,6 +487,9 @@ func (a *App) startup(ctx context.Context) {
 
 	a.heartbeat = newHeartbeatEngine(a)
 	a.heartbeat.Start()
+
+	a.browserRelay = newBrowserRelayServer()
+	a.browserRelay.Start(ctx)
 
 	a.mu.Lock()
 	a.tabsRestored = make(chan struct{})

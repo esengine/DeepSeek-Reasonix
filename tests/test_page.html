@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reasonix Relay Test Page</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, sans-serif; padding: 32px; background: #f5f5f5; }
+  .container { max-width: 800px; margin: 0 auto; }
+  h1 { margin-bottom: 8px; }
+  p.subtitle { color: #666; margin-bottom: 24px; }
+  section { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  h2 { font-size: 18px; margin-bottom: 12px; color: #333; }
+  .test-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  input, select, textarea { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+  input[type="text"] { width: 200px; }
+  button { padding: 8px 16px; background: #0070f3; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #0051a2; }
+  button.danger { background: #e00; }
+  button.danger:hover { background: #b00; }
+  .output { background: #f0f0f0; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 13px; min-height: 20px; margin-top: 8px; white-space: pre-wrap; }
+  .link { color: #0070f3; text-decoration: underline; cursor: pointer; }
+  .file-input-wrapper { position: relative; }
+  .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .hover-area { padding: 16px; background: #e8f4fd; border: 2px dashed #0070f3; border-radius: 4px; text-align: center; cursor: pointer; transition: background 0.2s; }
+  .hover-area:hover { background: #d0ebff; }
+  .hover-tooltip { display: none; background: #333; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 4px; }
+  .hover-area:hover + .hover-tooltip { display: inline-block; }
+  #dialog-trigger-area { display: flex; gap: 8px; }
+  #scroll-container { height: 120px; overflow-y: scroll; border: 1px solid #ddd; border-radius: 4px; padding: 8px; }
+  #scroll-container div { height: 40px; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+  #click-counter { font-weight: bold; font-size: 20px; color: #0070f3; }
+  .hover-target { padding: 12px; background: #fdf6e3; border: 1px solid #f5d76e; border-radius: 4px; text-align: center; }
+  .success { color: #090; }
+  .file-upload-area { border: 2px dashed #ccc; padding: 16px; text-align: center; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🧪 Reasonix Relay 工具测试页</h1>
+  <p class="subtitle">每个测试区对应一个 browser_* 工具</p>
+
+  <!-- 1. browser_read / browser_read_dom -->
+  <section id="sec-read" data-test="read">
+    <h2>📖 1. Read / ReadDOM</h2>
+    <p>这段文字会被 <code>browser_read</code> 读取。</p>
+    <p data-testid="read-target">用 browser_read_dom 可以找到这个元素。</p>
+    <a href="https://example.com" class="link" id="example-link">Example Link</a>
+  </section>
+
+  <!-- 2. browser_click -->
+  <section id="sec-click" data-test="click">
+    <h2>🖱️ 2. Click</h2>
+    <div class="test-row">
+      <button id="click-btn" onclick="document.getElementById('click-result').textContent = 'clicked!'">Click Me</button>
+      <span id="click-result" data-testid="click-result">not clicked</span>
+    </div>
+    <div class="test-row">
+      <span>点击次数: <span id="click-counter">0</span></span>
+      <button id="click-counter-btn" onclick="incrementCounter()">+1</button>
+    </div>
+  </section>
+
+  <!-- 3. browser_type -->
+  <section id="sec-type" data-test="type">
+    <h2>⌨️ 3. Type</h2>
+    <div class="test-row">
+      <label>姓名: <input type="text" id="name-input" placeholder="输入姓名"></label>
+    </div>
+    <div class="test-row">
+      <label>邮箱: <input type="text" id="email-input" placeholder="输入邮箱"></label>
+    </div>
+    <div class="test-row">
+      <label>密码: <input type="password" id="password-input" placeholder="输入密码"></label>
+    </div>
+  </section>
+
+  <!-- 4. browser_fill_form -->
+  <section id="sec-form" data-test="fill-form">
+    <h2>📝 4. Fill Form</h2>
+    <div class="test-row">
+      <label>地址: <input type="text" id="address-input" placeholder="输入地址"></label>
+    </div>
+    <div class="test-row">
+      <label>城市: <input type="text" id="city-input" placeholder="输入城市"></label>
+    </div>
+    <div class="test-row">
+      <label>国家:
+        <select id="country-select">
+          <option value="">请选择</option>
+          <option value="CN">中国</option>
+          <option value="US">美国</option>
+          <option value="JP">日本</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <!-- 5. browser_press_key -->
+  <section id="sec-key" data-test="press-key">
+    <h2>🔑 5. Press Key</h2>
+    <div class="test-row">
+      <label>测试输入（按 Enter 后提交）: <input type="text" id="key-input" placeholder="输入后按 Enter"></label>
+    </div>
+    <div class="test-row">
+      <button id="key-submit-btn" onclick="document.getElementById('key-result').textContent = 'submitted: ' + document.getElementById('key-input').value">提交</button>
+      <span id="key-result" data-testid="key-result">等待输入...</span>
+    </div>
+  </section>
+
+  <!-- 6. browser_hover -->
+  <section id="sec-hover" data-test="hover">
+    <h2>🖐️ 6. Hover</h2>
+    <div class="hover-target" id="hover-target">Hover over me</div>
+    <div class="hover-tooltip" id="hover-tooltip">Tooltip visible!</div>
+  </section>
+
+  <!-- 7. browser_scroll -->
+  <section id="sec-scroll" data-test="scroll">
+    <h2>📜 7. Scroll</h2>
+    <div id="scroll-container">
+      <div>Item 1</div>
+      <div>Item 2</div>
+      <div>Item 3</div>
+      <div>Item 4</div>
+      <div>Item 5</div>
+      <div>Item 6</div>
+      <div>Item 7</div>
+      <div id="scroll-target">Item 8 - Scroll Target</div>
+      <div>Item 9</div>
+      <div>Item 10</div>
+    </div>
+    <div class="output" id="scroll-output">Scroll to see more items</div>
+  </section>
+
+  <!-- 8. browser_wait -->
+  <section id="sec-wait" data-test="wait">
+    <h2>⏳ 8. Wait</h2>
+    <button id="add-element-btn" onclick="addDelayedElement()">延迟添加元素</button>
+    <div id="wait-container"></div>
+  </section>
+
+  <!-- 9. browser_handle_dialog -->
+  <section id="sec-dialog" data-test="dialog">
+    <h2>💬 9. Handle Dialog</h2>
+    <div id="dialog-trigger-area">
+      <button onclick="alert('Hello from alert!')">触发 Alert</button>
+      <button onclick="showConfirm()">触发 Confirm</button>
+      <button onclick="showPrompt()">触发 Prompt</button>
+    </div>
+  </section>
+
+  <!-- 10. browser_upload_file -->
+  <section id="sec-upload" data-test="upload">
+    <h2>📎 10. Upload File</h2>
+    <div class="file-upload-area">
+      <input type="file" id="file-input">
+      <p id="file-status">未选择文件</p>
+    </div>
+  </section>
+
+  <!-- 11. browser_resize -->
+  <section id="sec-resize" data-test="resize">
+    <h2>📐 11. Resize</h2>
+    <p id="viewport-info">Viewport: <span id="vp-size">loading...</span></p>
+  </section>
+
+  <!-- 12. browser_eval -->
+  <section id="sec-eval" data-test="eval">
+    <h2>⚡ 12. Eval</h2>
+    <div class="output" id="eval-result">Run eval to see result</div>
+  </section>
+</div>
+
+<script>
+  let counter = 0;
+  function incrementCounter() {
+    counter++;
+    document.getElementById('click-counter').textContent = counter;
+  }
+
+  function addDelayedElement() {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.id = 'delayed-element';
+      el.textContent = 'Delayed element appeared!';
+      el.style.cssText = 'padding: 8px; background: #d4edda; border-radius: 4px; margin-top: 8px;';
+      document.getElementById('wait-container').appendChild(el);
+    }, 2000);
+  }
+
+  function showConfirm() {
+    const result = confirm('Are you sure?');
+    document.getElementById('click-result').textContent = 'confirm: ' + result;
+  }
+
+  function showPrompt() {
+    const result = prompt('Enter your name:', 'default');
+    document.getElementById('click-result').textContent = 'prompt: ' + (result || 'cancelled');
+  }
+
+  // Viewport info
+  function updateViewport() {
+    document.getElementById('vp-size').textContent = window.innerWidth + 'x' + window.innerHeight;
+  }
+  updateViewport();
+  window.addEventListener('resize', updateViewport);
+
+  // File input listener
+  document.getElementById('file-input').addEventListener('change', function() {
+    const files = this.files;
+    if (files.length > 0) {
+      document.getElementById('file-status').textContent = '已选择: ' + files[0].name + ' (' + files[0].size + ' bytes)';
+    }
+  });
+
+  // Hover tooltip
+  document.getElementById('hover-target').addEventListener('mouseenter', function() {
+    document.getElementById('hover-tooltip').style.display = 'inline-block';
+  });
+  document.getElementById('hover-target').addEventListener('mouseleave', function() {
+    document.getElementById('hover-tooltip').style.display = 'none';
+  });
+</script>
+</body>
+</html>

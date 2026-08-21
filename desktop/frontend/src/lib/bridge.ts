@@ -188,6 +188,10 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   HeartbeatSaveConfig(update: unknown): Promise<unknown>;
   HeartbeatTriggerNow(id: string): Promise<void>;
   HeartbeatGenerateID(): Promise<string>;
+  // ── Browser Relay ──
+  BrowserRelayStatus(): Promise<{ running: boolean; state: string; addr: string; token_prefix: string; extension_info: string }>;
+  BrowserRelayAddr(): Promise<string>;
+  BrowserRelayToken(): Promise<string>;
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitToTabWithID(tabID: string, input: string, submissionID: string): Promise<void>;
@@ -4986,6 +4990,9 @@ function makeMockApp(): AppBindings {
     },
     async HeartbeatTriggerNow(_id: string) {},
     async HeartbeatGenerateID() { return "mock-" + Date.now().toString(36); },
+    async BrowserRelayStatus() { return { running: false, state: 'disconnected', addr: '', token_prefix: '', extension_info: '' }; },
+    async BrowserRelayAddr() { return ''; },
+    async BrowserRelayToken() { return ''; },
     async ListTasks() { return []; },
     async CurrentTaskSessionID() { return ""; },
     async ListTasksForSession() { return []; },

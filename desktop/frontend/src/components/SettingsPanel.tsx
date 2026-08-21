@@ -1645,6 +1645,21 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const [soundExpanded, setSoundExpanded] = useState(false);
+  const [relayStatus, setRelayStatus] = useState<{running:boolean;state:string;addr:string;token_prefix:string;extension_info:string} | null>(null);
+  const [relayToken, setRelayToken] = useState<string>('');
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      app.BrowserRelayStatus().then((status) => { if (!cancelled) setRelayStatus(status); }).catch(() => {});
+      app.BrowserRelayToken().then((token) => { if (!cancelled) setRelayToken(token); }).catch(() => {});
+    };
+    refresh();
+    const id = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
@@ -1894,6 +1909,28 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
         />
       </SettingsField>
     </SettingsSection>
+    {relayStatus && (
+      <SettingsSection title="Browser Relay" description="Connect Reasonix to your browser via the Chrome extension">
+        <SettingsField label="Status" icon={<span style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:relayStatus.state==='authorized'?'#2e7d32':relayStatus.state==='connected'?'#1565c0':'#999'}} />}>
+          <span style={{fontSize:13,fontWeight:500}}>{relayStatus.state}</span>
+        </SettingsField>
+        {relayStatus.addr && (
+          <SettingsField label="Address">
+            <code style={{fontSize:12,userSelect:'all'}}>{relayStatus.addr}</code>
+          </SettingsField>
+        )}
+        <SettingsField label="Token">
+          <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            <code style={{fontSize:12,userSelect:'all',wordBreak:'break-all'}}>{relayToken || relayStatus.token_prefix}</code>
+            <button className="chip chip--icon" type="button" title="Copy token" onClick={() => {
+              navigator.clipboard.writeText(relayToken);
+            }}>
+              <Clipboard size={14} />
+            </button>
+          </div>
+        </SettingsField>
+      </SettingsSection>
+    )}
     </>
   );
 }
