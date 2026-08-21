@@ -101,7 +101,7 @@ assert.equal(active.markerCount, 0, "evicted markers are not counted as retained
 const payload = diagnostics.stop();
 assert.equal(payload.schemaVersion, 1);
 assert.equal(payload.manifest.platform, "windows");
-assert.equal(payload.events.at(-1)?.type, "stop");
+assert.equal(payload.events[payload.events.length - 1]?.type, "stop");
 const serialized = JSON.stringify(payload);
 assert.equal(serialized.includes("scrollToIndex"), true, "scroll writer details remain available for analysis");
 assert.equal(serialized.includes("targetIndex"), true, "scroll target remains available for analysis");

@@ -54,6 +54,7 @@ const markdownAnswer = {
     kind: "assistant" as const,
     id: "answer:markdown",
     streaming: false,
+    reasoning: "",
     text: "### Geometry block\n\n折叠布局检查完成，answer 保持内容感知估高。\n\n- 中文换行\n- English wrapping",
   },
   layoutVariant: "text-flow" as const,
@@ -89,6 +90,7 @@ assert.equal(resolveToolCardDefaultOpen({
     text: "",
     notice: "",
     lastActivityAt: 1,
+    truncated: false,
     startedAt: 1,
   },
 }, 0, "auto"), true, "auto mode follows live subagent reasoning");
