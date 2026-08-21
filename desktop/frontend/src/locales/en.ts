@@ -3012,6 +3012,8 @@ export const en = {
   "questionNav.jump": "Jump to question {n}",
   "questionNav.hint": "Click to jump to this question",
   "questionNav.notLoaded": "Question {n} (click to load)",
+  "questionNav.up": "Previous question",
+  "questionNav.down": "Next question",
   "compaction.working": "Compacting conversation…",
   "compaction.title": "Context compacted",
   "compaction.messages": "{n} messages",
