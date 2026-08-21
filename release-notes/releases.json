@@ -2,6 +2,131 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.31.2",
+      "date": "2026-08-21",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop stability and provider setup improvements",
+        "zh": "桌面稳定性与提供商配置改进"
+      },
+      "summary": {
+        "en": "This release fixes transcript scrolling issues on Windows and simplifies OpenCode Go setup with a one-key configuration path.",
+        "zh": "此版本修复了 Windows 上会话滚动问题，并通过一键配置路径简化了 OpenCode Go 的设置。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Stable transcript scrolling on Windows",
+            "zh": "Windows 上稳定的会话滚动"
+          },
+          "body": {
+            "en": "Fixed upward-scroll flashback in long sessions by unifying row geometry, measurement caching, and snapshot validation. Added frontend diagnostics for test builds and Settings → Diagnostics.",
+            "zh": "通过统一行几何、测量缓存和快照验证，修复了长会话中向上滚动闪回的问题。为测试构建和设置 → 诊断添加了前端诊断功能。"
+          },
+          "refs": [
+            9240
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Simplified OpenCode Go setup",
+            "zh": "简化 OpenCode Go 配置"
+          },
+          "body": {
+            "en": "OpenCode Go now shares the featured-provider level with DeepSeek, offering a one-key setup with safe base routes and route-aware output budgets.",
+            "zh": "OpenCode Go 现在与 DeepSeek 共享特色提供商级别，提供一键设置，包含安全基础路由和路由感知的输出预算。"
+          },
+          "refs": [
+            9245
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "OpenCode Go setup flow",
+              "zh": "OpenCode Go 设置流程"
+            },
+            "body": {
+              "en": "Added a featured-provider setup flow for DeepSeek and OpenCode Go, with one API key and safe base routes. Legacy, Anthropic, Responses, and DeepSeek search routes remain available.",
+              "zh": "为 DeepSeek 和 OpenCode Go 添加了特色提供商设置流程，只需一个 API 密钥和安全基础路由。旧版、Anthropic、Responses 和 DeepSeek 搜索路由仍然可用。"
+            },
+            "refs": [
+              9245
+            ]
+          },
+          {
+            "title": {
+              "en": "Route-aware output budgets",
+              "zh": "路由感知的输出预算"
+            },
+            "body": {
+              "en": "Added route/model-aware output budgets with one safe retry when a provider reports a lower completion limit. Streaming requests do not retry after the first output event.",
+              "zh": "添加了路由/模型感知的输出预算，当提供商报告较低的完成限制时进行一次安全重试。流式请求在第一个输出事件后不会重试。"
+            },
+            "refs": [
+              9245
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Transcript scroll flashback",
+              "zh": "会话滚动闪回"
+            },
+            "body": {
+              "en": "Fixed upward-scroll flashback by adding state-aware row geometry, session-scoped LRU measurement caching, snapshot validation, and disabling browser scroll anchoring during manual scrolling.",
+              "zh": "通过添加状态感知的行几何、会话范围的 LRU 测量缓存、快照验证以及在手动滚动期间禁用浏览器滚动锚定，修复了向上滚动闪回问题。"
+            },
+            "refs": [
+              9240
+            ]
+          },
+          {
+            "title": {
+              "en": "Frontend diagnostics",
+              "zh": "前端诊断"
+            },
+            "body": {
+              "en": "Added a sanitized frontend diagnostics recorder for test builds and Settings → Diagnostics, without exporting text, paths, stable IDs, or session identifiers.",
+              "zh": "为测试构建和设置 → 诊断添加了经过清理的前端诊断记录器，不导出文本、路径、稳定 ID 或会话标识符。"
+            },
+            "refs": [
+              9240
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.31.2",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.31.1...desktop-v1.31.2",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.31.2",
+      "baseVersion": "1.31.2",
+      "status": "reviewed",
+      "previousRelease": "1.31.1",
+      "builds": {
+        "cli": "v1.31.2",
+        "desktop": "v1.31.2",
+        "npm": "1.31.2"
+      }
+    },
+    {
       "version": "1.31.1",
       "date": "2026-08-21",
       "channel": "stable",
