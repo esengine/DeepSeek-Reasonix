@@ -31524,12 +31524,16 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .topicbar,
-:root[data-theme-style] .app--creation .topicbar {
+:root[data-theme-style] .app--creation .topicbar,
+:root[data-theme="dark"] .app--creation .topicbar,
+:root[data-theme="light"] .app--creation .topicbar,
+:root[data-theme="light"][data-theme-style] .app--creation .topicbar,
+:root:not([data-theme]) .app--creation .topicbar {
   min-height: 56px;
   padding-top: 14px;
   padding-bottom: 0;
   border-bottom: 0;
-  background: transparent;
+  background: transparent !important;
 }
 
 .app--creation .topicbar__title-row,
