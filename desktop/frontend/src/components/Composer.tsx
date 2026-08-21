@@ -3762,12 +3762,10 @@ export function Composer({
   const taskModeTriggerLabel = t("composer.taskModeTrigger", { mode: t(taskModeShortKey) });
   const floorShortKey = floorOn ? "composer.qualityFloorDelivery" : "composer.qualityFloorStandard";
   const FloorIcon = floorOn ? PackageCheck : Equal;
-  const floorTriggerLabel = t("composer.qualityFloorTrigger", { floor: t(floorShortKey) });
-  const floorTooltipLabel = t("composer.controlTooltip", {
-    category: t("composer.qualityFloor"),
-    mode: t(floorShortKey),
-    summary: t(floorOn ? "composer.qualityFloorDeliveryTooltipSummary" : "composer.qualityFloorStandardTooltipSummary"),
-  });
+  const floorTriggerLabel = `${t("composer.qualityFloor")} · ${t(floorShortKey)}`;
+  const floorTooltipLabel = floorOn
+    ? t("composer.qualityFloorDeliveryTitle")
+    : t("composer.qualityFloor");
   const taskModeTooltipLabel = t("composer.controlTooltip", {
     category: t("composer.intentMenuTitle"),
     mode: t(taskModeShortKey),
@@ -4203,8 +4201,7 @@ export function Composer({
           >
             <Equal size={16} />
             <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.qualityFloorStandardItem")}</span>
-              <span className="composer-access-menu__desc">{t("composer.qualityFloorStandardDesc")}</span>
+              <span className="composer-access-menu__title">{t("composer.qualityFloorStandard")}</span>
             </span>
             {!floorOn && <Check className="composer-intent-menu__check" size={16} aria-hidden="true" />}
           </button>
@@ -4218,8 +4215,8 @@ export function Composer({
           >
             <PackageCheck size={16} />
             <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.qualityFloorDeliveryItem")}</span>
-              <span className="composer-access-menu__desc">{t("composer.qualityFloorDeliveryDesc")}</span>
+              <span className="composer-access-menu__title">{t("composer.qualityFloorDelivery")}</span>
+              <span className="composer-access-menu__desc">{t("composer.qualityFloorDeliveryTitle")}</span>
             </span>
             {floorOn && <Check className="composer-intent-menu__check" size={16} aria-hidden="true" />}
           </button>
