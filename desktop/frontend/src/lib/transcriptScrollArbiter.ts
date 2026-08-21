@@ -107,6 +107,29 @@ export function isTranscriptContentShrink(delta: number): boolean {
 // JUMP_TO_BOTTOM bypasses the hold.
 export const TRANSCRIPT_BOTTOM_HOLD_DELIVERIES = 2;
 
+// Bounded budget for the tail-settle convergence loop. A virtualized bottom
+// whose rows keep re-measuring (long sessions, streaming output) can keep the
+// native distance-from-bottom just above the threshold forever; without a cap
+// the settle rAF loop — and the flicker it drives — never ends (#9208).
+export const TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS = 8;
+
+/** Whether the tail-settle loop has spent its bounded re-aim budget. */
+export function transcriptTailSettleBudgetExhausted(attempts: number): boolean {
+  return attempts >= TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS;
+}
+
+// Minimum native scrollHeight growth before the tail-settle loop re-aims
+// against an already-pinned tail. Virtualized bottom rows emit many small
+// height deltas while being measured; re-aiming on every one is what makes the
+// pinned tail visibly jitter at the bottom of long sessions (#9208).
+export const TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX = 24;
+
+/** Whether a settled tail should re-aim given the recorded bottom height. */
+export function transcriptTailShouldReaim(previousBottomHeight: number | null, currentHeight: number): boolean {
+  if (previousBottomHeight == null) return true;
+  return currentHeight - previousBottomHeight >= TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX;
+}
+
 function transition(state: TranscriptScrollState, commands: readonly TranscriptScrollCommand[] = []): TranscriptScrollTransition {
   return { state, commands };
 }

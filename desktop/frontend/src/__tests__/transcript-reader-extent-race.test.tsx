@@ -211,6 +211,31 @@ await flushFrames();
 check(scrollByCalls === 0 && scrollWrites.length === 0,
   "selection ownership cancels a pending reader transaction");
 
+// #9208 — a downward wheel near the physical bottom must not arm the
+// reader-extent guard: its correction would snap the viewport back up and
+// fight the scroll wheel, so the tail can never be reached.
+await act(async () => arbiter?.reset());
+scrollExtent = 2_000;
+Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 725 });
+scrollElement.scrollTop = 1_275; // distance-from-bottom = 2_000-1_275-725 = 0 ⇒ at the physical tail
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.releaseTailFollow());
+scrollWrites.length = 0;
+scrollByCalls = 0;
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaMode: 0,
+  deltaX: 0,
+  deltaY: 120,
+  target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+// A later extent rebound cannot snap the viewport because no guard was armed.
+scrollElement.scrollTop = 1_100;
+await act(async () => arbiter?.followGrowingTail());
+await flushFrames();
+check(scrollByCalls === 0 && scrollWrites.length === 0,
+  "near-bottom downward wheel does not arm the reader-extent guard");
+
 await act(async () => root.unmount());
 dom.window.close();
 

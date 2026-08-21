@@ -1,7 +1,7 @@
 import type { TranscriptLayoutAnchor } from "./transcriptVirtuosoRecovery";
 import type { TranscriptScrollEvent } from "./transcriptScrollArbiter";
 
-const MIN_REVERSE_JUMP_PX = 96;
+export const MIN_REVERSE_JUMP_PX = 96;
 const REVERSE_JUMP_VIEWPORT_RATIO = 0.5;
 const EXTENT_REBOUND_VIEWPORT_RATIO = 0.5;
 
