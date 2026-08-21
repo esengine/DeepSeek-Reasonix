@@ -113,6 +113,16 @@ func (a *App) deferredRebuildPending(tabID string) bool {
 	return ok
 }
 
+// deferredRebuildSetting returns the pending rebuild label for a tab, or
+// ok=false when the tab has no queued rebuild.
+func (a *App) deferredRebuildSetting(tabID string) (string, bool) {
+	d := &a.deferredRebuild
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	setting, ok := d.pending[tabID]
+	return setting, ok
+}
+
 // stopDeferredRebuildRetry permanently stops the retry loop; used on shutdown
 // and by tests.
 func (a *App) stopDeferredRebuildRetry() {

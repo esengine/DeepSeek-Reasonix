@@ -866,6 +866,7 @@ export const zh: Record<DictKey, string> = {
   "modelSwitcher.noMatches": "没有匹配的模型",
   "status.noModels": "没有可切换模型",
   "status.modelSwitchBusy": "暂时不能切换模型。请先停止当前回答、处理待确认问题，或等待后台任务结束。",
+  "status.modelSwitchDeferred": "已切换模型，将在下一轮对话中生效。",
   "status.modelSwitchBusyRunning": "当前回答仍在运行，暂时不能切换模型。请先停止回答。",
   "status.modelSwitchBusyPrompt": "有待处理的确认问题，暂时不能切换模型。请先完成处理。",
   "status.modelSwitchBusyJobs": "仍有 {n} 个后台任务在运行，暂时不能切换模型。请从状态栏的“后台作业”中停止它们。",

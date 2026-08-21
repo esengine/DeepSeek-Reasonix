@@ -137,6 +137,16 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // production and 2358.3 KiB in test: about 9.0 KiB (0.38%) over main-v2's
 // channel gates. Retain that attributable UI capacity with 0.1 KiB of build-SHA
 // headroom without widening the gzip or largest-chunk exceptions.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.4 : 2_353.2;
+// Deferred model switching (busy turns accept a model change that applies from
+// the next turn) adds ~0.4 KiB raw to the startup path; raise the raw gate by
+// that amount while keeping the gzip and largest-chunk exceptions unchanged.
+// The next-turn notice's dedicated variant style and direct transcript
+// placement add another ~0.2 KiB raw, absorbed in the same gate. Keeping the
+// notice in history (instead of the live footer) adds the live-split filter,
+// another ~0.4 KiB raw, widening the gate once more. Rendering the notice next
+// to its user message in the settled rows (so it never jumps to the bottom
+// after the turn) adds ~0.2 KiB more.
+// Preserving the notice across history replaces (merge helper) adds ~0.2 KiB.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_359.8 : 2_354.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

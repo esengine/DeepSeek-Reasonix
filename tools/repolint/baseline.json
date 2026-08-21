@@ -25,14 +25,14 @@
     },
     "desktop/app.go": {
       "complexity": 58,
-      "essay": 64,
-      "file-size": 11122,
+      "essay": 65,
+      "file-size": 11190,
       "function-size": 365,
       "struct-state": 15
     },
     "desktop/app_test.go": {
       "essay": 2,
-      "test-file-size": 10263
+      "test-file-size": 10345
     },
     "desktop/bot_bridge.go": {
       "essay": 3
@@ -166,7 +166,7 @@
       "file-size": 1604
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 4035
+      "file-size": 4120
     },
     "desktop/frontend/src/lib/useTranscriptScrollArbiter.ts": {
       "file-size": 138
@@ -257,7 +257,7 @@
     },
     "desktop/settings_app.go": {
       "complexity": 29,
-      "essay": 6,
+      "essay": 7,
       "file-size": 2828
     },
     "desktop/settings_app_test.go": {
@@ -1540,6 +1540,12 @@
     },
     "internal/botruntime/runtime.go": {
       "file-size": 38
+    },
+    "desktop/turn_admission.go": {
+      "essay": 3
+    },
+    "desktop/frontend/src/__tests__/transcript-recovery-race.test.tsx": {
+      "test-file-size": 28
     }
   }
 }

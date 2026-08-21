@@ -87,7 +87,7 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
       if (isSteerNoticeText(item.text)) {
         current.outsideItems.push(item);
         currentHasConversation = true;
-      } else if (item.level === "warn" || item.variant === "delivery") {
+      } else if (item.level === "warn" || item.variant === "delivery" || item.variant === "model-switch") {
         current.outsideItems.push(item);
       } else {
         pushProcess(item);
@@ -554,6 +554,17 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
     if (user) {
       rows.push({ kind: "user", key: userRowKey(user.id), item: user, turn });
     }
+    // Model-switch notices render right after their user message: they confirm
+    // an accepted switch, and keeping that position in the settled rows (not
+    // after the answer body) stops the notice from jumping to the bottom when
+    // the live split hands the turn over to history.
+    for (const segment of model.segments) {
+      for (const item of segment.outsideItems) {
+        if (item.kind === "notice" && item.variant === "model-switch") {
+          rows.push({ kind: "notice", key: `n:${item.id}`, item });
+        }
+      }
+    }
     for (const segment of model.segments) {
       if (segment.displayItems.length > 0) {
         const open = options.folds.get(segment.key)?.open ?? defaultFoldOpen(segment, options.foldPreference);
@@ -564,6 +575,7 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
         if (item.kind === "extension") {
           rows.push({ kind: "extension", key: `x:${item.id}`, item });
         } else if (item.kind === "notice") {
+          if (item.variant === "model-switch") continue; // already rendered after the user row
           rows.push({ kind: "notice", key: `n:${item.id}`, item });
         } else {
           rows.push({ kind: "answer", key: `a:${item.id}`, item });
@@ -630,15 +642,31 @@ export function splitTranscriptLiveRows(
     const firstKey = firstRowKeyForModel(active);
     const firstIndex = firstKey ? rows.findIndex((row) => row.key === firstKey) : -1;
     if (!firstKey || firstIndex < 0) return { historyRows: [...rows], liveRows: [], liveActive: true };
-    return { historyRows: rows.slice(0, firstIndex), liveRows: rows.slice(firstIndex), liveActive: true };
+    const liveRows = rows.slice(firstIndex);
+    return {
+      historyRows: [...rows.slice(0, firstIndex), ...pullLiveModelSwitchNotices(liveRows)],
+      liveRows: withoutLiveModelSwitchNotices(liveRows),
+      liveActive: true,
+    };
   }
   const userIndex = rows.findIndex((row) => row.key === userRowKey(active.user!.id));
   if (userIndex < 0) return { historyRows: [...rows], liveRows: [], liveActive: false };
+  const liveRows = rows.slice(userIndex + 1);
   return {
-    historyRows: rows.slice(0, userIndex + 1),
-    liveRows: rows.slice(userIndex + 1),
+    historyRows: [...rows.slice(0, userIndex + 1), ...pullLiveModelSwitchNotices(liveRows)],
+    liveRows: withoutLiveModelSwitchNotices(liveRows),
     liveActive: true,
   };
+}
+
+// Model-switch notices confirm an accepted switch and must scroll with history
+// even while the turn streams: pinning them to the live footer makes them
+// flash on every stream update. Pull them into the history tail instead.
+function pullLiveModelSwitchNotices(rows: readonly TranscriptRow[]): TranscriptRow[] {
+  return rows.filter((row) => row.kind === "notice" && (row.item as NoticeItem).variant === "model-switch");
+}
+function withoutLiveModelSwitchNotices(rows: readonly TranscriptRow[]): TranscriptRow[] {
+  return rows.filter((row) => !(row.kind === "notice" && (row.item as NoticeItem).variant === "model-switch"));
 }
 
 // ── Measurement / identity helpers ────────────────────────────────────────────

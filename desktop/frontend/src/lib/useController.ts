@@ -239,7 +239,7 @@ export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number; historyTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion" | "model-switch"; turnUserID?: string; action?: "continue_delivery" | "open_changes"; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
       kind: "compaction";
       id: string;
@@ -759,6 +759,48 @@ function compactArchivedToolItems(items: Item[]): Item[] {
   });
 }
 
+// Model-switch notices are session-local UI state: the backend history never
+// stores them, so a live-turn history replace would otherwise drop the
+// "applies from the next turn" confirmation the moment the turn settles.
+// Re-insert the current session's notices after the user message they belong
+// to (turnUserID), so a notice does not migrate to a later unrelated turn.
+function mergeModelSwitchNotices(prev: readonly Item[], next: readonly Item[]): Item[] {
+  const notices = prev.filter((item): item is Extract<Item, { kind: "notice" }> =>
+    item.kind === "notice" && item.variant === "model-switch");
+  if (notices.length === 0) return [...next];
+  const byUser = new Map<string, Item[]>();
+  const orphaned: Item[] = [];
+  for (const notice of notices) {
+    const uid = notice.turnUserID;
+    if (uid) {
+      const list = byUser.get(uid) ?? [];
+      list.push(notice);
+      byUser.set(uid, list);
+    } else {
+      orphaned.push(notice);
+    }
+  }
+  const out: Item[] = [];
+  for (const item of next) {
+    out.push(item);
+    if (item.kind === "user") {
+      const attached = byUser.get(item.id);
+      if (attached) out.push(...attached);
+    }
+  }
+  // Notices whose originating user message is not in the new history (e.g.
+  // a rewind or compaction) fall back to the tail of the current turn.
+  if (orphaned.length > 0) {
+    let lastUser = -1;
+    for (let i = 0; i < out.length; i += 1) {
+      if (out[i].kind === "user") lastUser = i;
+    }
+    if (lastUser < 0) return [...orphaned, ...out];
+    return [...out.slice(0, lastUser + 1), ...orphaned, ...out.slice(lastUser + 1)];
+  }
+  return out;
+}
+
 type Action =
   | { type: "event"; e: WireEvent }
   | { type: "stream_batch"; segments: StreamSegment[] }
@@ -792,7 +834,7 @@ type Action =
   | { type: "history_items_patch"; patches: Record<string, Item> }
   | { type: "history_older_start" }
   | { type: "history_older_error"; error?: string }
-  | { type: "local_notice"; level: "info" | "warn"; text: string; preserveRuntime?: boolean }
+  | { type: "local_notice"; level: "info" | "warn"; text: string; variant?: "model-switch"; turnUserID?: string; preserveRuntime?: boolean }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
   | { type: "clearExtensionForm" }
@@ -2086,7 +2128,7 @@ export function reducer(s: State, a: Action): State {
     case "history_replace":
       return {
         ...s,
-        items: compactArchivedToolItems(a.items),
+        items: compactArchivedToolItems(mergeModelSwitchNotices(s.items, a.items)),
         pendingSubmissionId: undefined,
         hydrateHistoryLoaded: true,
         hydratePlaceholderItems: undefined,
@@ -2128,7 +2170,7 @@ export function reducer(s: State, a: Action): State {
       });
       return changed ? { ...s, items: next, historyLayoutRevision: s.historyLayoutRevision + 1 } : s;
     }
-    case "local_notice": return { ...s, running: a.preserveRuntime ? s.running : false, turnActive: a.preserveRuntime ? s.turnActive : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
+    case "local_notice": return { ...s, running: a.preserveRuntime ? s.running : false, turnActive: a.preserveRuntime ? s.turnActive : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text, ...(a.variant ? { variant: a.variant } : {}), ...(a.turnUserID ? { turnUserID: a.turnUserID } : {}) }] };
     case "clearApproval": {
       const next = { ...s, approval: undefined, pendingPrompt: Boolean(s.ask), resolvedPromptId: s.approval?.id ?? s.resolvedPromptId };
       return endPromptWaitIfIdle(next);
@@ -2224,6 +2266,13 @@ function errorMessage(err: unknown): string {
   return String(err || "");
 }
 
+// isModelSwitchDeferred reports the backend's deferred-accept error: the model
+// selection changed immediately and the controller rebuild is queued until the
+// running turn finishes, so the switch takes effect from the next turn.
+function isModelSwitchDeferred(err: unknown): boolean {
+  return /model switch accepted; the new model will apply from the next turn/i.test(errorMessage(err));
+}
+
 export function effortSwitchNoticeText(err: unknown): string {
   return settingSwitchNoticeText(err, "effort", {
     busy: "status.effortSwitchBusy",
@@ -2240,6 +2289,9 @@ export function effortSwitchNoticeText(err: unknown): string {
 
 export function modelSwitchNoticeText(err: unknown): string {
   const msg = errorMessage(err).trim() || "unknown error";
+  if (isModelSwitchDeferred(err)) {
+    return t("status.modelSwitchDeferred");
+  }
   const unknownModel = /^unknown model (.+)$/i.exec(msg);
   if (unknownModel) {
     return t("status.modelSwitchUnknown", { model: unknownModel[1] });
@@ -2587,6 +2639,11 @@ export function useController() {
   const modelSwitchSeqByTab = useRef(new Map<string, number>());
   const modelSwitchSuccessVersionByTab = useRef(new Map<string, number>());
   const modelSwitchQueueByTab = useRef(new Map<string, ModelSwitchQueueState>());
+  // Tabs with an accepted-but-not-yet-applied deferred model switch: the
+  // runtime-rebuilt event for that tab must refresh balance/meta against the
+  // selected provider, which the deferred-success branch cannot do yet (the
+  // outgoing controller is still installed at that point).
+  const deferredModelSwitchByTabRef = useRef(new Map<string, string>());
   const lastTurnActivityAtByTab = useRef(new Map<string, number>());
   const runtimeEpochByTabRef = useRef(new Map<string, string>());
   const listedSessionIdentityByTabRef = useRef(new Map<string, { sessionPath?: string; sessionGeneration?: number }>());
@@ -3476,6 +3533,13 @@ export function useController() {
         invalidateSharedQuery("MetaForTab", [rebuiltTabId]);
         if (runtimeEpoch) runtimeEpochByTabRef.current.set(rebuiltTabId, runtimeEpoch);
         dispatchTo(rebuiltTabId, { type: "controller_rebuilt" });
+        // A deferred model switch lands here: the outgoing controller's
+        // balance/meta were refreshed too early, so re-fetch against the
+        // selected provider now that the swap completed.
+        if (deferredModelSwitchByTabRef.current.delete(rebuiltTabId)) {
+          void refreshBalanceForTab(rebuiltTabId);
+          void refreshMetaForTab(rebuiltTabId);
+        }
       } else {
         if (runtimeEpoch) {
           for (const id of Array.from(statesRef.current.keys())) runtimeEpochByTabRef.current.set(id, runtimeEpoch);
@@ -4293,21 +4357,52 @@ export function useController() {
       );
     } catch (err) {
       if (modelSwitchSeqByTab.current.get(tabId) !== switchSeq) return false;
-      dispatchTo(tabId, { type: "local_notice", level: "warn", text: modelSwitchNoticeText(err) });
-      const olderSwitchSucceeded =
-        (modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0) !== successVersion;
-      // Restore the known balance only when no older overlapping switch
-      // completed after this attempt began. Otherwise the backend now owns a
-      // different provider and the refresh below must establish its balance.
-      if (fallbackBalance && !olderSwitchSucceeded) {
-        dispatchTo(tabId, { type: "balance", balance: fallbackBalance });
+      if (isModelSwitchDeferred(err)) {
+        // The backend accepted the switch and will swap the controller when
+        // the current turn finishes; the selection already changed, so treat
+        // it as a success instead of a failure.
+        modelSwitchSuccessVersionByTab.current.set(
+          tabId,
+          (modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0) + 1,
+        );
+        // preserveRuntime: the switch is accepted while the turn is still
+        // running — the notice must not flip the UI out of the streaming state.
+        // variant "model-switch" gives it the same visual weight as a warning
+        // while staying semantically informational. turnUserID pins the notice
+        // to the turn it was accepted on.
+        let turnUserID: string | undefined;
+        const items = statesRef.current.get(tabId)?.items ?? [];
+        for (let i = items.length - 1; i >= 0; i -= 1) {
+          if (items[i].kind === "user") {
+            turnUserID = items[i].id;
+            break;
+          }
+        }
+        dispatchTo(tabId, { type: "local_notice", level: "info", text: modelSwitchNoticeText(err), variant: "model-switch", turnUserID, preserveRuntime: true });
+        // The backend swap arrives as a runtime-rebuilt event later; mark the
+        // expected provider so that handler can refresh balance/meta with the
+        // selected model instead of the outgoing one.
+        deferredModelSwitchByTabRef.current.set(tabId, name);
+      } else {
+        dispatchTo(tabId, { type: "local_notice", level: "warn", text: modelSwitchNoticeText(err) });
+        const olderSwitchSucceeded =
+          (modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0) !== successVersion;
+        // Restore the known balance only when no older overlapping switch
+        // completed after this attempt began. Otherwise the backend now owns a
+        // different provider and the refresh below must establish its balance.
+        if (fallbackBalance && !olderSwitchSucceeded) {
+          dispatchTo(tabId, { type: "balance", balance: fallbackBalance });
+        }
+        void refreshBalanceForTab(tabId);
+        // A superseded success deliberately skips its own UI reconciliation.
+        // If this latest queued switch then fails, reconcile the model metadata
+        // to the provider that actually became active in the backend.
+        if (olderSwitchSucceeded) await refreshMetaForTab(tabId);
+        return false;
       }
       void refreshBalanceForTab(tabId);
-      // A superseded success deliberately skips its own UI reconciliation.
-      // If this latest queued switch then fails, reconcile the model metadata
-      // to the provider that actually became active in the backend.
-      if (olderSwitchSucceeded) await refreshMetaForTab(tabId);
-      return false;
+      await refreshMetaForTab(tabId);
+      return modelSwitchSeqByTab.current.get(tabId) === switchSeq;
     }
     if (modelSwitchSeqByTab.current.get(tabId) !== switchSeq) return false;
     void refreshBalanceForTab(tabId);
