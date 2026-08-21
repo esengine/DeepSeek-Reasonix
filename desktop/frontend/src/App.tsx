@@ -4325,7 +4325,7 @@ export default function App() {
       ].filter(Boolean).join(" ")}
     >
       <ThemeBackground />
-      {sidebarWorkbench && <div className="app__dock-toggle">{dockToggleButton}</div>}
+      {sidebarWorkbench && !automationView && <div className="app__dock-toggle">{dockToggleButton}</div>}
       <div
         ref={layoutRef}
         className={[
