@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
+  AppWindow,
   Bot,
   Box,
   Cable,
@@ -26,13 +27,13 @@ import { useT, type DictKey } from "../lib/i18n";
 import type { SettingsTab } from "../lib/types";
 
 export const SETTINGS_NAV_TABS: SettingsTab[] = [
-  "general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory",
+  "general", "models", "bots", "mcp", "remote", "relay", "skills", "subagents", "plugins", "memory",
   "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "storage", "updates",
 ];
 
 const SETTINGS_TAB_GROUPS: { labelKey: DictKey; tabs: SettingsTab[] }[] = [
   { labelKey: "settings.navGroup.preferences", tabs: ["general", "models", "bots"] },
-  { labelKey: "settings.navGroup.connections", tabs: ["mcp", "remote"] },
+  { labelKey: "settings.navGroup.connections", tabs: ["mcp", "remote", "relay"] },
   { labelKey: "settings.navGroup.capabilities", tabs: ["skills", "subagents", "plugins"] },
   { labelKey: "settings.navGroup.context", tabs: ["memory"] },
   { labelKey: "settings.navGroup.automation", tabs: ["hooks", "diagnostics", "shortcuts"] },
@@ -132,6 +133,7 @@ function settingsTabIcon(id: SettingsTab): ReactNode {
     case "bots": return <Bot {...props} />;
     case "mcp": return <Plug {...props} />;
     case "remote": return <Server {...props} />;
+    case "relay": return <AppWindow {...props} />;
     case "skills": return <Sparkles {...props} />;
     case "subagents": return <Users {...props} />;
     case "plugins": return <Package {...props} />;

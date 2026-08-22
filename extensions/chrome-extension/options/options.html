@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reasonix Browser Relay - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Reasonix Browser Relay</h1>
+      <p class="subtitle">Configure connection to the Reasonix desktop app</p>
+    </div>
+
+    <div class="field">
+      <label for="portInput">Relay Port (default: 23002)</label>
+      <input type="text" id="portInput" placeholder="23002" />
+    </div>
+
+    <div class="field">
+      <label for="tokenInput">Auth Token (paste from Reasonix settings)</label>
+      <div class="token-wrapper">
+        <input type="password" id="tokenInput" placeholder="Paste token from Reasonix settings" />
+        <button id="toggleTokenBtn" class="toggle-btn" type="button">Show</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="saveBtn" class="btn btn-primary">Save</button>
+      <span id="saveStatus" class="save-status"></span>
+    </div>
+
+    <p class="hint">
+      The relay port and auth token can be found in the Reasonix desktop app under Settings &rarr; General &rarr; Browser Relay.
+      If Reasonix is running on the same machine, the default port (23002) should work automatically.
+    </p>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

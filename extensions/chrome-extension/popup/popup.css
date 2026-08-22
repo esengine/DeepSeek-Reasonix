@@ -1,0 +1,333 @@
+/* Reasonix Browser Relay — Popup Styles */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #1a1a2e;
+  background: #fff;
+}
+
+.container {
+  padding: 12px;
+}
+
+/* Module separators: full-width light dividers between the header/status/
+   attached blocks so each section reads as a distinct unit. */
+.status-area {
+  border-top: 1px solid #e8e8e8;
+  padding: 10px 12px 0;
+  margin: 0 -12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.icon-btn:hover {
+  background: #f0f0f0;
+  color: #555;
+}
+
+.logo {
+  font-weight: 600;
+  font-size: 14px;
+  color: #3477eb;
+}
+
+.status-badge {
+  font-size: 13px;
+  font-weight: 500;
+  color: #888;
+}
+
+.status-badge.connected {
+  color: #1565c0;
+}
+
+.status-badge.authorized {
+  color: #16a34a;
+}
+
+.status-badge.error {
+  color: #c62828;
+}
+
+.section {
+  margin-bottom: 12px;
+}
+
+.field {
+  margin-bottom: 8px;
+}
+
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 3px;
+}
+
+.field input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  color: #333;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field input:focus {
+  border-color: #3477eb;
+  box-shadow: 0 0 0 2px rgba(52, 119, 235, 0.1);
+}
+
+.addr-display .addr-value {
+  padding: 6px 8px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  color: #666;
+  word-break: break-all;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.btn {
+  flex: 1;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  background: #e8e8e8;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #3477eb;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2962d6;
+}
+
+.btn-secondary {
+  background: #e8e8e8;
+  color: #444;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #d0d0d0;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.status-detail {
+  color: #555;
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+/* Attached tabs list */
+.attached-section {
+  margin: 12px -12px 14px;
+  padding: 10px 12px 0;
+  border-top: 1px solid #e8e8e8;
+}
+
+.attached-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.attached-header .label {
+  color: #888;
+}
+
+.attached-list {
+  /* Row is a fixed 26px (16px line-height + 10px padding). 5 rows + 4 gaps
+     = 138px; max-height 140px keeps 5 rows visible, and the 6th row
+     (166px) overflows into a scrollbar. */
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #ddd transparent;
+}
+
+.attached-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.attached-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.attached-list::-webkit-scrollbar-thumb {
+  background: #ddd;
+  border-radius: 2px;
+}
+
+.attached-empty {
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+}
+
+.attached-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  height: 26px;
+}
+
+.attached-item__info {
+  min-width: 0;
+  flex: 1;
+}
+
+.attached-item__title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 16px;
+  line-height: 16px;
+}
+
+.attached-item__title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #555;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.attached-item__id {
+  font-size: 10px;
+  color: #999;
+  line-height: 16px;
+  flex-shrink: 0;
+}
+
+.attached-item__actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chip--small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.chip--small:hover:not(:disabled) {
+  background: #f0f0f0;
+  color: #666;
+}
+
+/* Detach only appears on row hover, as a small icon button. */
+.attached-item .chip--danger {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.attached-item:hover .chip--danger {
+  visibility: visible;
+  opacity: 1;
+}
+
+.chip--danger:hover:not(:disabled) {
+  color: #c62828;
+}

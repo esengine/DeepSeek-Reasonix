@@ -1,0 +1,134 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: #1a1a2e;
+  background: #fff;
+  padding: 24px;
+  min-width: 400px;
+}
+
+.container {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.header {
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #3477eb;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #888;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  color: #333;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field input:focus {
+  border-color: #3477eb;
+  box-shadow: 0 0 0 2px rgba(52, 119, 235, 0.1);
+}
+
+.token-wrapper {
+  position: relative;
+  display: flex;
+  gap: 6px;
+}
+
+.token-wrapper input {
+  flex: 1;
+}
+
+.toggle-btn {
+  padding: 6px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font-size: 12px;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.toggle-btn:hover {
+  background: #e8e8e8;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-primary {
+  background: #3477eb;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #2962d6;
+}
+
+.save-status {
+  font-size: 13px;
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.save-status.error {
+  color: #c62828;
+}
+
+.hint {
+  font-size: 12px;
+  color: #999;
+  line-height: 1.5;
+  border-top: 1px solid #e8e8e8;
+  padding-top: 16px;
+}
