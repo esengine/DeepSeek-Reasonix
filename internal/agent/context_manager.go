@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
@@ -186,7 +187,29 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 			}
 			latest := m.currentPrepared()
 			if policy.Trigger == CompactionTriggerOverflow || latest.InputTokens >= hard {
-				return PreparedContext{}, fmt.Errorf("%w: %w", ErrCompactionRequired, err)
+				// The prompt physically cannot ship unsummarized, so a failed
+				// summary ends the turn — but a transient provider failure
+				// (network blip, load-shed 5xx) deserves exactly one immediate
+				// retry before an entire unattended run dies with zero output.
+				// Deterministic summary rejections (truncation, checkpoint)
+				// and cancel/deadline shapes already returned above; a retry
+				// here cannot loop.
+				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+					Text:    "Compaction summary failed at the context ceiling; retrying once before failing the turn",
+					Detail:  err.Error(),
+					Source:  event.UsageSourceCompaction,
+					ModelRef: a.modelRef})
+				retryOutcome, retryErr := a.compactToProjectionLocked(ctx, policy.Trigger, policy.Instructions, forceFold, mustFree)
+				if retryErr == nil && retryOutcome != CompactionNoop {
+					a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", "recovered", "retry after transient summary failure succeeded")
+					result = m.currentPrepared()
+					continue
+				}
+				if retryErr != nil {
+					a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", "failed", fmt.Sprintf("context summary retry failed: %v", retryErr))
+					return PreparedContext{}, fmt.Errorf("%w: %w (retry also failed: %v)", ErrCompactionRequired, err, retryErr)
+				}
+				return PreparedContext{}, fmt.Errorf("%w: context is above the maintenance threshold but no foldable region remains after retry", ErrCompactionRequired)
 			}
 			return latest, nil
 		}
