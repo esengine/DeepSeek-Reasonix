@@ -1681,7 +1681,12 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			Text: fmt.Sprintf("planner_model %q is not a configured provider — continuing with the executor alone", pm)})
 	}
 	if pm != "" && plannerResolved {
-		if pe.Model != entry.Model {
+		// Distinctness must be judged on the full provider-qualified ref, not
+		// the bare model name: two providers (deepseek vs a vendor gateway)
+		// offering the same model name are genuinely different models, each
+		// with its own pricing, context window, and cache prefix. Comparing
+		// bare names collapsed that setup into "no planner" (#8230).
+		if modelRefFromEntry(pe) != modelRefFromEntry(entry) {
 			plannerProv, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
@@ -1724,7 +1729,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				StateRoot:                    config.MemoryUserDir(),
 			}
 			runner = agent.NewCoordinatorWithPlannerPolicy(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, cfg.Agent.Temperature, sink, control.NewPlannerPolicy())
-			label = entry.Model + " + planner " + pe.Model
+			label = modelRefFromEntry(entry) + " + planner " + modelRefFromEntry(pe)
 		}
 	}
 	visionProviderResolver := func(ref string) (provider.Provider, error) {
