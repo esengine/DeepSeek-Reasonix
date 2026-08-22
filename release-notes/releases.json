@@ -2,6 +2,191 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.31.3",
+      "date": "2026-08-22",
+      "channel": "stable",
+      "title": {
+        "en": "DeepSeek Vision Support and Smoother Session Switching",
+        "zh": "DeepSeek 视觉支持与更流畅的会话切换"
+      },
+      "summary": {
+        "en": "This release adds official DeepSeek vision model support for image inputs, cleans up the web search sources panel, and fixes transcript flicker during session switches.",
+        "zh": "此版本新增官方 DeepSeek 视觉模型图像输入支持，清理了网络搜索来源面板，并修复了切换会话时的 transcript 闪烁问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Billing Guide",
+            "zh": "计费指南"
+          },
+          "body": {
+            "en": "Learn about billing for DeepSeek models, including the new vision SKU.",
+            "zh": "了解 DeepSeek 模型的计费方式，包括新的视觉 SKU。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ffe9885f5a12764a98e102aa4e34cb810db03c29/docs/BILLING.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Find configuration file locations for DeepSeek Reasonix.",
+            "zh": "查找 DeepSeek Reasonix 的配置文件位置。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ffe9885f5a12764a98e102aa4e34cb810db03c29/docs/CONFIG_PATHS.md"
+        },
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Get started with DeepSeek Reasonix.",
+            "zh": "开始使用 DeepSeek Reasonix。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ffe9885f5a12764a98e102aa4e34cb810db03c29/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Technical specification for DeepSeek Reasonix.",
+            "zh": "DeepSeek Reasonix 的技术规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ffe9885f5a12764a98e102aa4e34cb810db03c29/docs/SPEC.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Official DeepSeek Vision Model Support",
+            "zh": "官方 DeepSeek 视觉模型支持"
+          },
+          "body": {
+            "en": "Added the official DeepSeek vision SKU `deepseek-v4-flash-vision-exp` as a third catalog option. Image payloads are enabled only when this SKU is selected, with support for inline base64, public URLs, and Files API file IDs. Local images over 32 MiB are uploaded via the Files API.",
+            "zh": "新增官方 DeepSeek 视觉 SKU `deepseek-v4-flash-vision-exp` 作为第三个目录选项。仅在选择此 SKU 时启用图像负载，支持内联 base64、公共 URL 和 Files API 文件 ID。超过 32 MiB 的本地图像通过 Files API 上传。"
+          },
+          "refs": [
+            9242
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Cleaner Web Search Sources Panel",
+            "zh": "更简洁的网络搜索来源面板"
+          },
+          "body": {
+            "en": "Replaced the expanded raw URL dump with a collapsed, accessible Sources panel. Display-only sources are normalized: HTTP(S) only, tracking parameters stripped, redirects unwrapped, invalid or title-less hits hidden, and canonical URLs deduplicated.",
+            "zh": "将展开的原始 URL 转储替换为可折叠、无障碍的 Sources 面板。仅显示规范化来源：仅 HTTP(S)，去除跟踪参数，解开重定向，隐藏无效或无标题的命中，并对规范 URL 去重。"
+          },
+          "refs": [
+            9264
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "No More Transcript Flicker on Session Switch",
+            "zh": "切换会话时不再出现 transcript 闪烁"
+          },
+          "body": {
+            "en": "Switching between desktop sessions no longer exposes an empty transcript while history loads. The last stable transcript remains visible behind an inert loading overlay and is replaced only after the target surface is ready.",
+            "zh": "在桌面会话之间切换时，不再在历史记录加载期间显示空白 transcript。最后一个稳定的 transcript 保持可见，并带有惰性加载覆盖层，仅在目标表面就绪后才替换。"
+          },
+          "refs": [
+            9266
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "DeepSeek Vision SKU",
+              "zh": "DeepSeek 视觉 SKU"
+            },
+            "body": {
+              "en": "Added `deepseek-v4-flash-vision-exp` as a third catalog SKU with image input support.",
+              "zh": "新增 `deepseek-v4-flash-vision-exp` 作为第三个目录 SKU，支持图像输入。"
+            },
+            "refs": [
+              9242
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Web Search Sources Panel",
+              "zh": "网络搜索来源面板"
+            },
+            "body": {
+              "en": "Collapsed and normalized the web search sources display.",
+              "zh": "折叠并规范化网络搜索来源显示。"
+            },
+            "refs": [
+              9264
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Transcript Flicker on Session Switch",
+              "zh": "切换会话时的 transcript 闪烁"
+            },
+            "body": {
+              "en": "Prevented empty transcript flash during session switches.",
+              "zh": "防止切换会话时出现空白 transcript 闪烁。"
+            },
+            "refs": [
+              9266
+            ]
+          },
+          {
+            "title": {
+              "en": "Typecheck Errors in Transcript Diagnostics Tests",
+              "zh": "transcript 诊断测试中的类型检查错误"
+            },
+            "body": {
+              "en": "Fixed typecheck errors in test files by using ES2022-compatible indexing and adding missing fixture fields.",
+              "zh": "通过使用 ES2022 兼容的索引并添加缺失的 fixture 字段，修复了测试文件中的类型检查错误。"
+            },
+            "refs": [
+              9254
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.31.3",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.31.2...desktop-v1.31.3",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.31.3",
+      "baseVersion": "1.31.3",
+      "status": "reviewed",
+      "previousRelease": "1.31.2",
+      "builds": {
+        "cli": "v1.31.3",
+        "desktop": "v1.31.3",
+        "npm": "1.31.3"
+      }
+    },
+    {
       "version": "1.31.2",
       "date": "2026-08-21",
       "channel": "stable",
