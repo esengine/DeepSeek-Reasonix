@@ -51,6 +51,35 @@ interface HeartbeatPanelProps {
   onOpenTopic?: (scope: string, workspaceRoot: string, topicId: string) => void;
 }
 
+// 详情打开状态缓存：切换对话/视图导致面板 unmount 后，重新进入时恢复上次
+// 查看的任务详情（与列表宽度缓存 reasonix-heartbeat-list-width 同一模式）。
+const DETAIL_CACHE_KEY = "reasonix-heartbeat-detail";
+
+interface DetailCache {
+  open: boolean;
+  taskId: string;
+}
+
+function readDetailCache(): DetailCache | null {
+  try {
+    const raw = localStorage.getItem(DETAIL_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DetailCache;
+    return parsed && typeof parsed.taskId === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDetailCache(cache: DetailCache | null) {
+  try {
+    if (cache) localStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(cache));
+    else localStorage.removeItem(DETAIL_CACHE_KEY);
+  } catch {
+    // Storage may be unavailable in hardened webviews; in-memory state still works.
+  }
+}
+
 export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   const t = useHeartbeatT();
   const [tasks, setTasks] = useState<HeartbeatTask[]>([]);
@@ -80,6 +109,9 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
     }
   });
   const dirtyRef = useRef(false);
+  // 加载慢时用户可能先打开草稿/其他任务：置位后跳过挂载时的缓存恢复，
+  // 避免延迟完成的恢复回调覆盖用户已打开的编辑器（Codex P1）。
+  const restoreBlockedRef = useRef(false);
   // IDs of drafts created via Add/scoped-Add/startNew that have not been saved yet.
   // They are intentionally absent from `tasks`, so the "clear editing" effect
   // below must not close the editor for them.
@@ -204,10 +236,22 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   }, []);
 
   useEffect(() => {
+    restoreBlockedRef.current = false;
     setEditing(null);
     setSearchQuery("");
     setStatusFilter("all");
-    void loadTasks();
+    void loadTasks().then((taskList) => {
+      if (!taskList || restoreBlockedRef.current) return;
+      // 恢复上次查看的详情：切换对话/视图导致面板 unmount 后重新进入时，
+      // 重新打开之前缓存的任务。任务已不存在（被删除）时不恢复。
+      const cached = readDetailCache();
+      if (!cached?.open || !cached.taskId) return;
+      const task = taskList.find((t) => t.id === cached.taskId);
+      if (task) {
+        setEditing({ ...task });
+        setDetailOpen(true);
+      }
+    });
   }, [loadTasks]);
 
   // Clear editing when the edited task is no longer in the filtered list.
@@ -218,18 +262,20 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
     if (!editing) return;
     if (unsavedDraftIdsRef.current.has(editing.id)) return;
     // 过滤变化导致编辑任务不可见时，直接关闭（丢弃未保存修改）。
-    const closeIfNotDirty = () => {
+    // 隐式关闭同样要清除缓存，否则切走再回来会恢复已被取消选中的任务（Codex P2）。
+    const closeEditor = () => {
       dirtyRef.current = false;
-      return true;
+      setEditing(null);
+      writeDetailCache(null);
     };
     const match = tasks.find(t => t.id === editing.id);
-    if (!match) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (!match) { closeEditor(); return; }
     // 状态筛选切换（全部↔已开启↔已暂停）不关闭已打开的详情——右侧详情跟随任务，
     // 与左侧列表筛选解耦（用户明确要求：已激活任务的详情不受筛选影响）。
-    if (searchQuery && !match.title.toLowerCase().includes(searchQuery.toLowerCase())) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (searchQuery && !match.title.toLowerCase().includes(searchQuery.toLowerCase())) { closeEditor(); return; }
     // 与列表过滤一致：scopeFilter 过滤掉正在编辑的任务时关闭编辑器。
-    if (scopeFilter === "global" && (match.scope === "project" && match.workspaceRoot)) { if (closeIfNotDirty()) setEditing(null); return; }
-    if (scopeFilter !== "all" && scopeFilter !== "global" && (match.scope !== "project" || match.workspaceRoot !== scopeFilter)) { if (closeIfNotDirty()) setEditing(null); }
+    if (scopeFilter === "global" && (match.scope === "project" && match.workspaceRoot)) { closeEditor(); return; }
+    if (scopeFilter !== "all" && scopeFilter !== "global" && (match.scope !== "project" || match.workspaceRoot !== scopeFilter)) { closeEditor(); }
   }, [tasks, editing?.id, statusFilter, searchQuery, scopeFilter, t]);
 
   const save = useCallback(
@@ -252,6 +298,7 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   );
 
   const openUnsavedDraft = useCallback((task: HeartbeatTask) => {
+    restoreBlockedRef.current = true;
     unsavedDraftIdsRef.current.add(task.id);
     setEditing(task);
     setDetailOpen(true);
@@ -328,9 +375,11 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   const handleEdit = useCallback((task: HeartbeatTask) => {
     // 分栏模式下切换任务直接丢弃当前编辑器未保存改动（ChatGPT 式，不确认）。
     dirtyRef.current = false;
+    restoreBlockedRef.current = true;
     unsavedDraftIdsRef.current.delete(task.id);
     setEditing({ ...task });
     setDetailOpen(true);
+    writeDetailCache({ open: true, taskId: task.id });
   }, []);
 
   // 列表行点击状态图标切换任务启用/暂停（即时保存）
@@ -392,6 +441,9 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
       // The draft is now persisted; stop treating it as an unsaved draft.
       unsavedDraftIdsRef.current.delete(task.id);
       setEditing({ ...(saved.find((item) => item.id === task.id) ?? persisted) });
+      // 保存后编辑器仍打开该任务：缓存指向它，新建任务保存后切走再回来
+      // 恢复的是当前打开的 B 而不是之前的 A（Codex P2）。
+      writeDetailCache({ open: true, taskId: task.id });
       return true;
     },
     [save],
@@ -911,9 +963,10 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
                   if (deleted) {
                     setEditing(null);
                     setDetailOpen(false);
+                    writeDetailCache(null);
                   }
                   return deleted;
-                }} onCloseDetail={() => { setDetailOpen(false); }} onDirtyChange={(d) => { dirtyRef.current = d; }} onOpenTopic={onOpenTopic} onTrigger={handleTrigger} />
+                }} onCloseDetail={() => { setDetailOpen(false); writeDetailCache(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} onOpenTopic={onOpenTopic} onTrigger={handleTrigger} />
               ) : (
                 <div className="heartbeat-split__empty">
                   <div className="heartbeat-split__empty-inner">
