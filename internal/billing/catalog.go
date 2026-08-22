@@ -14,6 +14,15 @@ const (
 
 var deepSeekV4August2026EffectiveAt = time.Date(2026, time.August, 16, 16, 0, 0, 0, time.UTC)
 
+// deepSeekBillingZone is the zone DeepSeek states its weekend rule in. China has
+// observed a fixed UTC+08:00 with no daylight saving since 1991, so a fixed zone
+// is exact here and does not depend on host tzdata being installed.
+var deepSeekBillingZone = time.FixedZone("CST", 8*60*60)
+
+// deepSeekWeekendOffPeakFrom is when the weekend-wide off-peak rule takes effect:
+// 00:00 Beijing time on Sunday 2026-08-23, i.e. 2026-08-22T16:00Z.
+var deepSeekWeekendOffPeakFrom = time.Date(2026, time.August, 23, 0, 0, 0, 0, deepSeekBillingZone)
+
 // CatalogEntry is one official list price for a model in a billing currency.
 type CatalogEntry struct {
 	Provider      string // deepseek | longcat | mimo
@@ -112,10 +121,33 @@ func catalogEntryEffective(e CatalogEntry, at time.Time) bool {
 	return e.EffectiveTo.IsZero() || at.Before(e.EffectiveTo)
 }
 
+// deepSeekWeekendOffPeak reports whether at falls on a Beijing-time Saturday or
+// Sunday with the weekend-wide off-peak rule already in force.
+//
+// The weekend is bounded in Beijing time, so it runs from 16:00Z Friday to
+// 16:00Z Sunday; the same test written as at.UTC().Weekday() covers a different
+// 48 hours. Both spellings happen to agree on the band today, because the two
+// peak windows (01:00-04:00 and 06:00-10:00 UTC) sit entirely outside the 16
+// hours they disagree over. This one keeps agreeing if the windows move.
+func deepSeekWeekendOffPeak(at time.Time) bool {
+	if at.Before(deepSeekWeekendOffPeakFrom) {
+		return false
+	}
+	switch at.In(deepSeekBillingZone).Weekday() {
+	case time.Saturday, time.Sunday:
+		return true
+	}
+	return false
+}
+
 // DeepSeekRateBand selects the documented Beijing peak windows by their stable
-// UTC equivalents.
+// UTC equivalents, and from 2026-08-22T16:00Z bills whole Beijing weekends
+// off-peak.
 func DeepSeekRateBand(at time.Time) string {
 	at = at.UTC()
+	if deepSeekWeekendOffPeak(at) {
+		return RateBandOffPeak
+	}
 	minutes := at.Hour()*60 + at.Minute()
 	if (minutes >= 60 && minutes < 240) || (minutes >= 360 && minutes < 600) {
 		return RateBandPeak

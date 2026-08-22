@@ -57,7 +57,11 @@ For official DeepSeek OpenAI, Responses, and Anthropic endpoints, V4 Flash,
 `deepseek-v4-flash-vision-exp` (same list price as Flash), and V4 Pro use
 occurrence-time pricing from 2026-08-17 00:00 Beijing time. Peak windows are
 09:00–12:00 and 14:00–18:00 Beijing time; boundaries are left-closed/right-open
-and all other times are off-peak. The request-completion timestamp is used
+and all other times are off-peak. From 2026-08-23 00:00 Beijing time, Saturdays
+and Sundays bill off-peak for the whole day, peak hours included. That weekend
+is bounded in Beijing time, so it runs 16:00Z Friday to 16:00Z Sunday — the same
+window written against a UTC weekday would be a different 48 hours. The
+request-completion timestamp is used
 because the provider does not report per-token billing time. Images sent to the
 vision SKU are billed as input tokens from provider usage.
 
