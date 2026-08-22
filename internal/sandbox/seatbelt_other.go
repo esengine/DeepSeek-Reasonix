@@ -117,7 +117,9 @@ func bwrapBaseArgs(spec Spec) []string {
 		// Re-allow network by removing the network namespace.
 		args = args[1:] // drop --unshare-net
 	}
-	for _, root := range spec.WriteRoots {
+	writeRoots := append([]string{}, spec.WriteRoots...)
+	writeRoots = append(writeRoots, gitWorktreeWriteRoots(spec.WriteRoots)...)
+	for _, root := range writeRoots {
 		args = append(args, bwrapWriteRootMountArgs(root)...)
 	}
 	if !spec.MinimalWrites {
