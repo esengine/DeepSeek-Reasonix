@@ -2077,6 +2077,13 @@ a[href] {
   transition: grid-template-columns 0.16s ease, min-width 0.16s ease;
 }
 
+/* Reveal-open must land the dock width immediately: a grid transition
+   re-wraps rendered history rows while the pane narrows (vertical jump). */
+.layout.layout--workspace-instant,
+.app--darwin .layout.layout--workspace-instant {
+  transition: grid-template-columns 0s, min-width 0s;
+}
+
 .layout.layout--statusbar-hidden,
 :root[data-theme-style] .layout.layout--statusbar-hidden {
   --statusbar-height: 0px;
