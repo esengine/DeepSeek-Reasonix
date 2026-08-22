@@ -1799,6 +1799,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.addProvider.connectAndStart": "連線並開始使用",
   "settings.addProvider.chooseAnotherProvider": "選擇其他模型服務",
   "settings.addProvider.otherProviders": "其他模型服務",
+  "settings.addProvider.searchProviders": "搜尋模型服務...",
+  "settings.addProvider.noProviderMatches": "未找到相符的模型服務",
   "settings.addProvider.manageRoutes": "進階線路設定",
   "settings.addProvider.opencodeGoCompatibilityLabel": "OpenCode Go Chat（相容入口）",
   "settings.addProvider.zenCredentialHint": "獨立的 Zen 產品、金鑰與計費體系。",

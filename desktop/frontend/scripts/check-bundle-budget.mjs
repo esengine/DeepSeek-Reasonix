@@ -111,7 +111,8 @@ if (initialCSS.length > 0) {
 // Navigation overlay styles add a bounded 0.1 KiB to the deferred shell.
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 114.3 * 1024);
+// The Other-providers search box and its empty state add 0.1 KiB gzip.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 114.4 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -137,8 +138,10 @@ for (const path of localeChunks) {
   // platform-dependent gate. The OpenCode one-key setup adds product-level
   // connection, fallback, and legacy-state copy while removing protocol
   // choices from the primary UI; keep that complete guidance with a bounded
-  // 0.4–0.5 KiB locale-only ratchet.
-  const budget = name.startsWith("zh-TW-") ? 57.2 * 1024 : 56.5 * 1024;
+  // 0.4–0.5 KiB locale-only ratchet. The Other-providers search placeholder
+  // and empty state add ~10 B gzip to zh and ~35 B to zh-TW; keep the 0.1 KiB
+  // headroom per chunk.
+  const budget = name.startsWith("zh-TW-") ? 57.3 * 1024 : 56.6 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -153,7 +156,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // More menu, completion summary) makes the latest-base merge 2353.1 KiB in
 // production and 2358.3 KiB in test: about 9.0 KiB (0.38%) over main-v2's
 // channel gates. Retain that attributable UI capacity with 0.1 KiB of build-SHA
-// headroom without widening the gzip or largest-chunk exceptions.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.4 : 2_353.2;
+// headroom without widening the gzip or largest-chunk exceptions. The
+// Other-providers search box adds ~0.3 KiB raw across both channels.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.7 : 2_353.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

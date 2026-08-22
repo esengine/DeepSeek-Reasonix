@@ -5536,6 +5536,19 @@ function isFeaturedProviderChoice(choice: ProviderTemplateChoice): boolean {
     || (choice.source === "preset" && choice.presetID === "opencode-go-recommended");
 }
 
+// providerTemplateSearchText joins every user-facing or stable identifier of a
+// template choice into one case-normalized haystack so the other-provider search
+// box can match names, descriptions, preset IDs, and key env vars alike.
+function providerTemplateSearchText(choice: ProviderTemplateChoice): string {
+  return [
+    choice.label,
+    choice.description,
+    choice.id,
+    "presetID" in choice ? choice.presetID : "",
+    choice.keyEnv,
+  ].join(" ").toLowerCase();
+}
+
 function isHiddenOpenCodeRouteChoice(choice: ProviderTemplateChoice): boolean {
   return choice.source === "preset"
     && choice.displayGroup === "opencode"
@@ -5683,6 +5696,14 @@ export function AddProviderPanel({
 
   const featuredProviderChoices = visibleTemplateChoices.filter(isFeaturedProviderChoice);
   const otherChoices = visibleTemplateChoices.filter((choice) => !isFeaturedProviderChoice(choice));
+  const [otherQuery, setOtherQuery] = useState("");
+  const normalizedOtherQuery = otherQuery.trim().toLowerCase();
+  const filteredOtherChoices = useMemo(
+    () => normalizedOtherQuery
+      ? otherChoices.filter((choice) => providerTemplateSearchText(choice).includes(normalizedOtherQuery))
+      : otherChoices,
+    [otherChoices, normalizedOtherQuery],
+  );
   const focusedFeaturedProvider = selected && isFeaturedProviderChoice(selected) && !showProviderCatalog ? selected : null;
 
   const header = (
@@ -5797,8 +5818,22 @@ export function AddProviderPanel({
         ) : null}
         {otherChoices.length > 0 ? (
           <div className="provider-preset-group">
-            <h4>{t("settings.addProvider.otherProviders")}</h4>
-            <div className="provider-template-grid">{otherChoices.map(renderTemplateChoice)}</div>
+            <div className="provider-preset-group__head">
+              <h4>{t("settings.addProvider.otherProviders")}</h4>
+              <input
+                type="search"
+                className="mem-input provider-other-search"
+                placeholder={t("settings.addProvider.searchProviders")}
+                aria-label={t("settings.addProvider.searchProviders")}
+                value={otherQuery}
+                onChange={(event) => setOtherQuery(event.target.value)}
+              />
+            </div>
+            {filteredOtherChoices.length > 0 ? (
+              <div className="provider-template-grid">{filteredOtherChoices.map(renderTemplateChoice)}</div>
+            ) : (
+              <p className="provider-preset-group__empty">{t("settings.addProvider.noProviderMatches")}</p>
+            )}
           </div>
         ) : null}
         <label className="set-label">{t("settings.providerKeyOptional")}</label>

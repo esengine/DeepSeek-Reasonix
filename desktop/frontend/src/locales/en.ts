@@ -2637,6 +2637,8 @@ export const en = {
   "settings.addProvider.connectAndStart": "Connect and start using",
   "settings.addProvider.chooseAnotherProvider": "Choose another provider",
   "settings.addProvider.otherProviders": "Other providers",
+  "settings.addProvider.searchProviders": "Search model services...",
+  "settings.addProvider.noProviderMatches": "No matching model services",
   "settings.addProvider.manageRoutes": "Advanced route settings",
   "settings.addProvider.opencodeGoCompatibilityLabel": "OpenCode Go Chat (Compatibility)",
   "settings.addProvider.zenCredentialHint": "Independent Zen product, key, and billing.",
