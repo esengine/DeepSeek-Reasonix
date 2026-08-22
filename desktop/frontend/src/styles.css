@@ -17531,6 +17531,31 @@ body > .mermaid-diagram--fullscreen {
 .provider-preset-group > h4 {
   font-size: var(--text-lg);
 }
+.provider-preset-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.provider-preset-group__head h4 {
+  margin: 0;
+}
+.provider-other-search {
+  flex: none;
+  width: min(230px, 100%);
+  padding: 4px 8px;
+  font-size: var(--font-control-small);
+}
+.provider-preset-group__empty {
+  margin: 0;
+  padding: 18px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  text-align: center;
+}
 .provider-preset-section {
   display: flex;
   flex-direction: column;

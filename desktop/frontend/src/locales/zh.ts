@@ -2640,6 +2640,8 @@ export const zh: Record<DictKey, string> = {
   "settings.addProvider.connectAndStart": "连接并开始使用",
   "settings.addProvider.chooseAnotherProvider": "选择其他模型服务",
   "settings.addProvider.otherProviders": "其他模型服务",
+  "settings.addProvider.searchProviders": "搜索模型服务...",
+  "settings.addProvider.noProviderMatches": "未找到匹配的模型服务",
   "settings.addProvider.manageRoutes": "高级线路设置",
   "settings.addProvider.opencodeGoCompatibilityLabel": "OpenCode Go Chat（兼容入口）",
   "settings.addProvider.zenCredentialHint": "独立的 Zen 产品、密钥和计费体系。",
