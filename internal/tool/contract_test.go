@@ -72,6 +72,39 @@ var acceptsDefaultSnip = map[string]bool{
 	"update_goal":   true,
 	"wait":          true,
 	"write_file":    true,
+
+	// Browser-relay tools are desktop-only (relay runtime). Their results are
+	// structured JSON or already internally truncated (browser_read caps at
+	// MaxBodyLength), so the ReadOnly-tiered generic head/tail default is fine.
+	"browser_attach_page":           true,
+	"browser_attached_pages":        true,
+	"browser_click":                 true,
+	"browser_close_page":            true,
+	"browser_drag":                  true,
+	"browser_emulate":               true,
+	"browser_eval":                  true,
+	"browser_fill_form":             true,
+	"browser_go_back":               true,
+	"browser_go_forward":            true,
+	"browser_handle_dialog":         true,
+	"browser_hover":                 true,
+	"browser_list_console_messages": true,
+	"browser_list_network_requests": true,
+	"browser_list_pages":            true,
+	"browser_navigate":              true,
+	"browser_new_page":              true,
+	"browser_press_key":             true,
+	"browser_read":                  true,
+	"browser_read_dom":              true,
+	"browser_resize":                true,
+	"browser_scroll":                true,
+	"browser_screenshot":            true,
+	"browser_select_page":           true,
+	"browser_status":                true,
+	"browser_take_snapshot":         true,
+	"browser_type":                  true,
+	"browser_upload_file":           true,
+	"browser_wait":                  true,
 }
 
 func TestEveryBuiltinDeclaresSnipStance(t *testing.T) {

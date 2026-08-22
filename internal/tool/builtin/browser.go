@@ -4,11 +4,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"reasonix/internal/browserrelay"
 	"reasonix/internal/tool"
 )
+
+// RelayBound marks browser_* tools that only function when a browser relay
+// server is running (desktop runtime). boot skips them in CLI/ACP sessions so
+// unusable schemas are never advertised to the model.
+type RelayBound interface {
+	relayBound()
+}
+
+// evalParams builds Runtime.evaluate params that request the result by value,
+// so object/array results carry a usable `value` field instead of a remote
+// object reference the Go side cannot decode.
+func evalParams(expression string, extra ...map[string]interface{}) json.RawMessage {
+	params := map[string]interface{}{"expression": expression, "returnByValue": true}
+	for _, e := range extra {
+		for k, v := range e {
+			params[k] = v
+		}
+	}
+	raw, _ := json.Marshal(params)
+	return raw
+}
+
+// evaluateException extracts a JavaScript exception raised inside a successful
+// Runtime.evaluate response. CDP reports JS errors in exceptionDetails, not as
+// a command error, so callers must inspect it before reporting success.
+func evaluateException(result json.RawMessage) error {
+	var evalResult struct {
+		Result struct {
+			Type  string `json:"type"`
+			Value any    `json:"value"`
+		} `json:"result"`
+		ExceptionDetails *struct {
+			Text      string `json:"text"`
+			Exception *struct {
+				Description string `json:"description"`
+			} `json:"exception"`
+		} `json:"exceptionDetails"`
+	}
+	if err := json.Unmarshal(result, &evalResult); err != nil {
+		return nil // not a parseable evaluate response; caller handles it
+	}
+	if evalResult.ExceptionDetails != nil {
+		msg := evalResult.ExceptionDetails.Text
+		if evalResult.ExceptionDetails.Exception != nil && evalResult.ExceptionDetails.Exception.Description != "" {
+			msg = evalResult.ExceptionDetails.Exception.Description
+		}
+		return fmt.Errorf("page script error: %s", msg)
+	}
+	return nil
+}
 
 func init() {
 	tool.RegisterBuiltin(browserStatus{})
@@ -44,6 +95,55 @@ func init() {
 	tool.RegisterBuiltin(browserDrag{})
 	tool.RegisterBuiltin(browserListConsoleMessages{})
 	tool.RegisterBuiltin(browserListNetworkRequests{})
+}
+
+// relayBound marks every browser_* tool as relay-only (see RelayBound).
+func (browserStatus) relayBound()              {}
+func (browserNavigate) relayBound()            {}
+func (browserClick) relayBound()               {}
+func (browserType) relayBound()                {}
+func (browserRead) relayBound()                {}
+func (browserScreenshot) relayBound()          {}
+func (browserEval) relayBound()                {}
+func (browserListPages) relayBound()           {}
+func (browserSelectPage) relayBound()          {}
+func (browserNewPage) relayBound()             {}
+func (browserClosePage) relayBound()           {}
+func (browserReadDOM) relayBound()             {}
+func (browserScroll) relayBound()              {}
+func (browserGoBack) relayBound()              {}
+func (browserGoForward) relayBound()           {}
+func (browserPressKey) relayBound()            {}
+func (browserHover) relayBound()               {}
+func (browserWait) relayBound()                {}
+func (browserUploadFile) relayBound()          {}
+func (browserResize) relayBound()              {}
+func (browserHandleDialog) relayBound()        {}
+func (browserFillForm) relayBound()            {}
+func (browserAttachedPages) relayBound()       {}
+func (browserAttachPage) relayBound()          {}
+func (browserEmulate) relayBound()             {}
+func (browserTakeSnapshot) relayBound()        {}
+func (browserDrag) relayBound()                {}
+func (browserListConsoleMessages) relayBound() {}
+func (browserListNetworkRequests) relayBound() {}
+
+// FilterRelayTools drops browser_* tools when no browser relay server runs in
+// this process. boot calls it for CLI/ACP registries so unusable schemas never
+// reach the model; the desktop starts a relay before building sessions, so its
+// registries keep the tools.
+func FilterRelayTools(tools []tool.Tool) []tool.Tool {
+	if browserrelay.Available() {
+		return tools
+	}
+	out := make([]tool.Tool, 0, len(tools))
+	for _, t := range tools {
+		if _, ok := t.(RelayBound); ok {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // ─── browser_status ────────────────────────────────────────────────────────
@@ -105,7 +205,7 @@ func (browserNavigate) Execute(ctx context.Context, args json.RawMessage) (strin
 
 	// Wait for the page to finish loading (guide §9.2): poll document.readyState
 	// until "complete" or timeout.
-	readyRaw, _ := json.Marshal(map[string]string{"expression": "document.readyState"})
+	readyRaw := evalParams("document.readyState")
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		stateResult, err := browserrelay.Send(ctx, "Runtime.evaluate", readyRaw)
@@ -163,8 +263,7 @@ func (browserClick) Execute(ctx context.Context, args json.RawMessage) (string, 
 
 	// First find the element, then click it.
 	findJS := fmt.Sprintf(`document.querySelector(%q)`, params.Selector)
-	findRaw, _ := json.Marshal(map[string]string{"expression": findJS})
-	findResult, err := browserrelay.Send(ctx, "Runtime.evaluate", findRaw)
+	findResult, err := browserrelay.Send(ctx, "Runtime.evaluate", evalParams(findJS))
 	if err != nil {
 		return "", fmt.Errorf("find element: %w", err)
 	}
@@ -180,10 +279,12 @@ func (browserClick) Execute(ctx context.Context, args json.RawMessage) (string, 
 		return {x: Math.round(x), y: Math.round(y)};
 	})()`, params.Selector, params.Selector)
 
-	coordRaw, _ := json.Marshal(map[string]string{"expression": clickJS})
-	coordResult, err := browserrelay.Send(ctx, "Runtime.evaluate", coordRaw)
+	coordResult, err := browserrelay.Send(ctx, "Runtime.evaluate", evalParams(clickJS))
 	if err != nil {
 		return "", fmt.Errorf("get coordinates: %w", err)
+	}
+	if err := evaluateException(coordResult); err != nil {
+		return "", fmt.Errorf("click: %w", err)
 	}
 
 	// Parse coordinates from result.
@@ -276,8 +377,12 @@ func (browserType) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return true;
 	})()`, params.Selector, params.Selector, clear, params.Text)
 
-	raw, _ := json.Marshal(map[string]string{"expression": js})
-	if _, err := browserrelay.Send(ctx, "Runtime.evaluate", raw); err != nil {
+	raw := evalParams(js)
+	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
+	if err != nil {
+		return "", fmt.Errorf("type text: %w", err)
+	}
+	if err := evaluateException(result); err != nil {
 		return "", fmt.Errorf("type text: %w", err)
 	}
 	return fmt.Sprintf(`{"typed": true, "selector": %q, "text": %q, "clear": %v}`, params.Selector, params.Text, params.Clear), nil
@@ -333,7 +438,7 @@ func (browserRead) Execute(ctx context.Context, args json.RawMessage) (string, e
 		})`
 	}
 
-	raw, _ := json.Marshal(map[string]string{"expression": js})
+	raw := evalParams(js)
 	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
 		return "", fmt.Errorf("read page: %w", err)
@@ -350,6 +455,9 @@ func (browserRead) Execute(ctx context.Context, args json.RawMessage) (string, e
 		// Return raw result if we can't parse it.
 		b, _ := json.MarshalIndent(result, "", "  ")
 		return string(b), nil
+	}
+	if evalResult.Result.Type == "undefined" {
+		return "", fmt.Errorf("read page: page script returned undefined (selector %q matched nothing?)", params.Selector)
 	}
 
 	// Truncate overly long page text to avoid blowing the tool output limit.
@@ -383,12 +491,21 @@ func (browserScreenshot) Schema() json.RawMessage {
 }
 
 func (browserScreenshot) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	text, _, err := browserScreenshot{}.ExecuteWithImages(ctx, args)
+	return text, err
+}
+
+// ExecuteWithImages implements tool.ImageTool: the base64 payload rides the
+// structural image channel (data: URL) so vision-capable providers embed it and
+// the tool-output byte limiter never truncates it. Execute returns the same
+// text with the placeholder marker.
+func (browserScreenshot) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
 	var params struct {
 		Format  string `json:"format"`
 		Quality int    `json:"quality"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return "", nil, fmt.Errorf("invalid args: %w", err)
 	}
 	if params.Format == "" {
 		params.Format = "png"
@@ -403,7 +520,7 @@ func (browserScreenshot) Execute(ctx context.Context, args json.RawMessage) (str
 	})
 	result, err := browserrelay.Send(ctx, "Page.captureScreenshot", screenshotParams)
 	if err != nil {
-		return "", fmt.Errorf("screenshot: %w", err)
+		return "", nil, fmt.Errorf("screenshot: %w", err)
 	}
 
 	var ssResult struct {
@@ -411,10 +528,17 @@ func (browserScreenshot) Execute(ctx context.Context, args json.RawMessage) (str
 	}
 	if err := json.Unmarshal(result, &ssResult); err != nil {
 		b, _ := json.MarshalIndent(result, "", "  ")
-		return string(b), nil
+		return string(b), nil, nil
+	}
+	if ssResult.Data == "" {
+		return "", nil, fmt.Errorf("screenshot: empty image data")
 	}
 
-	return fmt.Sprintf(`{"format": %q, "data": %q}`, params.Format, ssResult.Data), nil
+	mime := "image/png"
+	if params.Format == "jpeg" {
+		mime = "image/jpeg"
+	}
+	return "[image: " + mime + "]", []string{"data:" + mime + ";base64," + ssResult.Data}, nil
 }
 
 // ─── browser_eval ──────────────────────────────────────────────────────────
@@ -448,9 +572,12 @@ func (browserEval) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("expression is required")
 	}
 
-	raw, _ := json.Marshal(map[string]string{"expression": params.Expression})
+	raw := evalParams(params.Expression)
 	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
+		return "", fmt.Errorf("eval: %w", err)
+	}
+	if err := evaluateException(result); err != nil {
 		return "", fmt.Errorf("eval: %w", err)
 	}
 	b, _ := json.MarshalIndent(result, "", "  ")
@@ -714,9 +841,12 @@ func (browserReadDOM) Execute(ctx context.Context, args json.RawMessage) (string
 		return elements;
 	})()`
 
-	raw, _ := json.Marshal(map[string]string{"expression": js})
+	raw := evalParams(js)
 	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
+		return "", fmt.Errorf("read dom: %w", err)
+	}
+	if err := evaluateException(result); err != nil {
 		return "", fmt.Errorf("read dom: %w", err)
 	}
 
@@ -749,23 +879,44 @@ func (browserScroll) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "direction":{"type":"string","description":"Scroll direction","enum":["up","down","left","right"]},
-  "amount":{"type":"integer","description":"Pixels to scroll (default 500)","default":500}
+  "selector":{"type":"string","description":"CSS selector of the element to scroll into view. PREFERRED: use this instead of guessing pixel values"},
+  "direction":{"type":"string","description":"Scroll direction (only used when selector is empty)","enum":["up","down","left","right"]},
+  "amount":{"type":"integer","description":"Pixels to scroll (only used when selector is empty; default 500)","default":500}
 },
-"required":["direction"]
+"required":[]
 }`)
 }
 
 func (browserScroll) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
+		Selector  string `json:"selector"`
 		Direction string `json:"direction"`
 		Amount    int    `json:"amount"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
+
+	if params.Selector != "" {
+		// Preferred path: scroll the element into view (guide §9.2).
+		js := fmt.Sprintf(`(()=>{
+			const el = document.querySelector(%q);
+			if (!el) throw new Error("element not found: "+%q);
+			el.scrollIntoView({behavior:'smooth', block:'center'});
+			return true;
+		})()`, params.Selector, params.Selector)
+		result, err := browserrelay.Send(ctx, "Runtime.evaluate", evalParams(js))
+		if err != nil {
+			return "", fmt.Errorf("scroll: %w", err)
+		}
+		if err := evaluateException(result); err != nil {
+			return "", fmt.Errorf("scroll: %w", err)
+		}
+		return fmt.Sprintf(`{"scrolled": true, "selector": %q}`, params.Selector), nil
+	}
+
 	if params.Direction == "" {
-		return "", fmt.Errorf("direction is required")
+		return "", fmt.Errorf("direction or selector is required")
 	}
 	if params.Amount <= 0 {
 		params.Amount = 500
@@ -786,7 +937,7 @@ func (browserScroll) Execute(ctx context.Context, args json.RawMessage) (string,
 	}
 
 	js := fmt.Sprintf(`window.scrollBy({top: %d, left: %d, behavior: 'smooth'}); window.scrollY`, dy, dx)
-	raw, _ := json.Marshal(map[string]string{"expression": js})
+	raw := evalParams(js)
 	if _, err := browserrelay.Send(ctx, "Runtime.evaluate", raw); err != nil {
 		return "", fmt.Errorf("scroll: %w", err)
 	}
@@ -911,23 +1062,54 @@ func (browserPressKey) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("key is required")
 	}
 
+	// Split modifier prefixes ("Control+A") from the terminal key ("a"). CDP
+	// expects the DOM key in `key` and the modifier state as a bitmask.
+	key, modifiers := splitModifiers(params.Key)
+
 	keyDown, _ := json.Marshal(map[string]interface{}{
-		"type": "keyDown",
-		"key":  params.Key,
+		"type":      "keyDown",
+		"key":       key,
+		"modifiers": modifiers,
 	})
 	if _, err := browserrelay.Send(ctx, "Input.dispatchKeyEvent", keyDown); err != nil {
 		return "", fmt.Errorf("press key down: %w", err)
 	}
 
 	keyUp, _ := json.Marshal(map[string]interface{}{
-		"type": "keyUp",
-		"key":  params.Key,
+		"type":      "keyUp",
+		"key":       key,
+		"modifiers": modifiers,
 	})
 	if _, err := browserrelay.Send(ctx, "Input.dispatchKeyEvent", keyUp); err != nil {
 		return "", fmt.Errorf("press key up: %w", err)
 	}
 
 	return fmt.Sprintf(`{"pressed": true, "key": %q}`, params.Key), nil
+}
+
+// splitModifiers parses key names that carry modifier prefixes (Control+A,
+// Shift+Tab, Alt+ArrowUp) into the CDP key and modifiers bitmask (Alt=1,
+// Ctrl=2, Meta=4, Shift=8). A bare key passes through unchanged.
+func splitModifiers(name string) (key string, modifiers int) {
+	key = name
+	for _, part := range strings.Split(name, "+") {
+		switch strings.ToLower(part) {
+		case "ctrl", "control":
+			modifiers |= 2
+		case "shift":
+			modifiers |= 8
+		case "alt", "option":
+			modifiers |= 1
+		case "meta", "cmd", "command", "super":
+			modifiers |= 4
+		default:
+			key = part // terminal key: last non-modifier segment wins
+		}
+	}
+	if key == "" || key == name {
+		return name, modifiers // no modifier prefix found (or bare modifier)
+	}
+	return key, modifiers
 }
 
 // ─── browser_hover ─────────────────────────────────────────────────────────
@@ -968,10 +1150,13 @@ func (browserHover) Execute(ctx context.Context, args json.RawMessage) (string, 
 		return {x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2)};
 	})()`, params.Selector, params.Selector)
 
-	coordRaw, _ := json.Marshal(map[string]string{"expression": js})
+	coordRaw := evalParams(js)
 	coordResult, err := browserrelay.Send(ctx, "Runtime.evaluate", coordRaw)
 	if err != nil {
 		return "", fmt.Errorf("get coordinates: %w", err)
+	}
+	if err := evaluateException(coordResult); err != nil {
+		return "", fmt.Errorf("hover: %w", err)
 	}
 
 	var evalResult struct {
@@ -983,8 +1168,8 @@ func (browserHover) Execute(ctx context.Context, args json.RawMessage) (string, 
 			} `json:"value"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(coordResult, &evalResult); err != nil {
-		return `{"hovered": true, "note": "coordinate extraction not supported"}`, nil
+	if err := json.Unmarshal(coordResult, &evalResult); err != nil || evalResult.Result.Type != "object" {
+		return "", fmt.Errorf("hover: element found but could not extract coordinates (selector=%q, parse_err=%v)", params.Selector, err)
 	}
 
 	x, y := evalResult.Result.Value.X, evalResult.Result.Value.Y
@@ -1042,7 +1227,10 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 
 	checkVisible := params.State == "visible"
-	js := fmt.Sprintf(`await new Promise((resolve, reject) => {
+	// Runtime.evaluate runs a script, not a module: a top-level `await` is a
+	// syntax error. Wrap the polling loop in an immediately-invoked promise so
+	// awaitPromise: true can wait on it.
+	js := fmt.Sprintf(`(async () => {
 		const start = Date.now();
 		const timeout = %d;
 		const checkVisible = %v;
@@ -1050,24 +1238,22 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 		function poll() {
 			const el = document.querySelector(selector);
 			if (el && (!checkVisible || el.offsetParent !== null)) {
-				resolve(JSON.stringify({found: true, text: (el.textContent || '').trim().slice(0, 500)}));
-				return;
+				return JSON.stringify({found: true, text: (el.textContent || '').trim().slice(0, 500)});
 			}
 			if (Date.now() - start > timeout) {
-				resolve(JSON.stringify({found: false, timeout: true, message: 'Element not found within ' + timeout + 'ms'}));
-				return;
+				return JSON.stringify({found: false, timeout: true, message: 'Element not found within ' + timeout + 'ms'});
 			}
-			setTimeout(poll, 200);
+			return new Promise((resolve) => setTimeout(() => resolve(poll()), 200));
 		}
-		poll();
-	})`, params.Timeout, checkVisible, params.Selector)
+		return poll();
+	})()`, params.Timeout, checkVisible, params.Selector)
 
-	raw, _ := json.Marshal(map[string]interface{}{
-		"expression":   js,
-		"awaitPromise": true,
-	})
+	raw := evalParams(js, map[string]interface{}{"awaitPromise": true})
 	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
+		return "", fmt.Errorf("wait: %w", err)
+	}
+	if err := evaluateException(result); err != nil {
 		return "", fmt.Errorf("wait: %w", err)
 	}
 
@@ -1230,13 +1416,19 @@ func (browserHandleDialog) Schema() json.RawMessage {
 
 func (browserHandleDialog) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
-		Accept bool   `json:"accept"`
+		Accept *bool  `json:"accept"` // nil = omitted; default true
 		Text   string `json:"text"`
 	}
-	json.Unmarshal(args, &params) // both fields optional
+	if err := json.Unmarshal(args, &params); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	accept := true // documented default: accept when omitted
+	if params.Accept != nil {
+		accept = *params.Accept
+	}
 
 	dialogParams := map[string]interface{}{
-		"accept": params.Accept,
+		"accept": accept,
 	}
 	if params.Text != "" {
 		dialogParams["promptText"] = params.Text
@@ -1248,7 +1440,7 @@ func (browserHandleDialog) Execute(ctx context.Context, args json.RawMessage) (s
 	}
 
 	action := "accepted"
-	if !params.Accept {
+	if !accept {
 		action = "dismissed"
 	}
 	return fmt.Sprintf(`{"dialog": %q}`, action), nil
@@ -1292,20 +1484,31 @@ func (browserFillForm) Execute(ctx context.Context, args json.RawMessage) (strin
 			const el = document.querySelector(%q);
 			if (el) {
 				el.focus();
-				el.value = %q;
-				el.dispatchEvent(new Event('input', {bubbles:true}));
-				el.dispatchEvent(new Event('change', {bubbles:true}));
+				const type = (el.type || '').toLowerCase();
+				if (type === 'checkbox' || type === 'radio') {
+					// Assigning .value never toggles checked state; parse an
+					// explicit boolean representation instead.
+					const on = ['true', '1', 'on', 'yes', 'checked'].includes(String(%q).toLowerCase());
+					el.checked = on;
+				} else {
+					el.value = %q;
+					el.dispatchEvent(new Event('input', {bubbles:true}));
+					el.dispatchEvent(new Event('change', {bubbles:true}));
+				}
 				results[%q] = 'ok';
 			} else {
 				results[%q] = 'not found';
 			}
-		} catch(e) { results[%q] = e.message; }`, selector, value, selector, selector, selector)
+		} catch(e) { results[%q] = e.message; }`, selector, value, value, selector, selector, selector)
 	}
 	js += ` return JSON.stringify(results); })()`
 
-	raw, _ := json.Marshal(map[string]string{"expression": js})
+	raw := evalParams(js)
 	result, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
+		return "", fmt.Errorf("fill form: %w", err)
+	}
+	if err := evaluateException(result); err != nil {
 		return "", fmt.Errorf("fill form: %w", err)
 	}
 
@@ -1351,7 +1554,7 @@ func (browserEmulate) Execute(ctx context.Context, args json.RawMessage) (string
 		Width             int     `json:"width"`
 		Height            int     `json:"height"`
 		DeviceScaleFactor float64 `json:"device_scale_factor"`
-		Mobile            bool    `json:"mobile"`
+		Mobile            *bool   `json:"mobile"` // nil = omitted; default true
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -1365,12 +1568,16 @@ func (browserEmulate) Execute(ctx context.Context, args json.RawMessage) (string
 	if params.DeviceScaleFactor == 0 {
 		params.DeviceScaleFactor = 2
 	}
+	mobile := true // documented default: emulate mobile viewport when omitted
+	if params.Mobile != nil {
+		mobile = *params.Mobile
+	}
 
 	raw, _ := json.Marshal(map[string]interface{}{
 		"width":             params.Width,
 		"height":            params.Height,
 		"deviceScaleFactor": params.DeviceScaleFactor,
-		"mobile":            params.Mobile,
+		"mobile":            mobile,
 	})
 	result, err := browserrelay.Send(ctx, "Emulation.setDeviceMetricsOverride", raw)
 	if err != nil {
@@ -1441,9 +1648,12 @@ func (browserDrag) Execute(ctx context.Context, args json.RawMessage) (string, e
 		from: (() => { const el = document.querySelector(%q); const r = el.getBoundingClientRect(); return {x: r.x + r.width/2, y: r.y + r.height/2}; })(),
 		to:   (() => { const el = document.querySelector(%q); const r = el.getBoundingClientRect(); return {x: r.x + r.width/2, y: r.y + r.height/2}; })()
 	})`, params.FromSelector, params.ToSelector)
-	raw, _ := json.Marshal(map[string]string{"expression": js})
+	raw := evalParams(js)
 	coordResult, err := browserrelay.Send(ctx, "Runtime.evaluate", raw)
 	if err != nil {
+		return "", fmt.Errorf("drag: get coordinates: %w", err)
+	}
+	if err := evaluateException(coordResult); err != nil {
 		return "", fmt.Errorf("drag: get coordinates: %w", err)
 	}
 	var evalResult struct {

@@ -57,8 +57,11 @@ func (br *browserRelayServer) Start(ctx context.Context) {
 	br.server = srv
 	br.addr = addr
 
-	log.Printf("browserrelay: server started on %s (token: %s)",
-		addr, srv.Token())
+	// Never log the bearer token — captured stdout/diagnostics could otherwise
+	// authenticate to the localhost relay. The settings page fetches the full
+	// token through the Wails binding instead.
+	log.Printf("browserrelay: server started on %s (token %s…)",
+		addr, srv.Token()[:min(8, len(srv.Token()))])
 }
 
 // Stop gracefully shuts down the relay server.
@@ -122,6 +125,10 @@ func extensionDirPath() string {
 		binDir := filepath.Dir(exe)
 		candidates = append(candidates,
 			filepath.Join(binDir, "extensions", "chrome-extension"),
+			// macOS bundle: Reasonix.app/Contents/Resources/extensions/... (the
+			// binary lives in Contents/MacOS). Check both casings — APFS is
+			// case-insensitive by default but the standard layout uses "Resources".
+			filepath.Join(binDir, "..", "Resources", "extensions", "chrome-extension"),
 			filepath.Join(binDir, "..", "resources", "extensions", "chrome-extension"),
 		)
 	}

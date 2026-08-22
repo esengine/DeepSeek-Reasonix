@@ -17,7 +17,9 @@ toggleTokenBtn.addEventListener('click', () => {
 // ── Load saved settings ────────────────────────────────────────────────────
 
 chrome.storage.local.get(['relayPort', 'relayToken'], (data) => {
-  if (data.relayPort) portInput.value = data.relayPort;
+  // Fresh installs have no stored port; initialize with the documented default
+  // (23002) so entering only the token establishes the first connection.
+  portInput.value = data.relayPort || '23002';
   if (data.relayToken) tokenInput.value = data.relayToken;
 });
 

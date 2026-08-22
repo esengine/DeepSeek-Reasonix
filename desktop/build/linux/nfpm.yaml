@@ -38,6 +38,11 @@ contents:
     dst: /usr/bin/reasonix-launcher
     file_info:
       mode: 0755
+  # Browser-relay Chrome extension: extensionDirPath's binDir candidate
+  # (/usr/bin/extensions/chrome-extension) finds it in the installed .deb.
+  - src: ../extensions/chrome-extension
+    dst: /usr/bin/extensions/chrome-extension
+    type: tree
   - src: ./build/bin/reasonix
     dst: /usr/bin/reasonix
     file_info:

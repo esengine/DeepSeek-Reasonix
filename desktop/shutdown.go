@@ -52,6 +52,12 @@ func (a *App) shutdownBody() {
 	a.stopBotRuntime()
 	a.stopRemoteRuntime()
 	a.stopTray()
+	// Browser relay owns port 23002 and the extension socket; release both so a
+	// replacement process (Linux self-update launches the new binary before the
+	// old one exits) can bind the fixed port on restart.
+	if a.browserRelay != nil {
+		a.browserRelay.Stop()
+	}
 	// Terminal process shutdown is independent from controller teardown. Do it
 	// before acquiring runtime lifecycle locks so a slow PTY cannot delay while
 	// holding locks used by Wails-bound chat calls.

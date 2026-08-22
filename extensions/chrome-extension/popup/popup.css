@@ -199,6 +199,13 @@ body {
   cursor: pointer;
 }
 
+/* "Allow AI to attach tabs" sits under the actions as its own module. */
+.allow-remote {
+  margin: 10px -12px 0;
+  padding: 10px 12px 0;
+  border-top: 1px solid #e8e8e8;
+}
+
 /* Attached tabs list */
 .attached-section {
   margin: 12px -12px 14px;

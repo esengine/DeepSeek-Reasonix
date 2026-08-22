@@ -146,6 +146,11 @@ cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$portable_staging/versions/$version_label/$W
 cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$LAUNCHERNAME.exe"
 cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$APPNAME.exe"
 cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$portable_staging/$WINDOWS_CLINAME.exe"
+# Browser-relay Chrome extension beside the launcher entry point (the process
+# users launch), so extensionDirPath's binDir candidate finds it.
+if [ -d "$PAYLOAD/extensions" ]; then
+	cp -R "$PAYLOAD/extensions" "$portable_staging/extensions"
+fi
 cat >"$portable_staging/current.json" <<EOF
 {
   "schemaVersion": 1,

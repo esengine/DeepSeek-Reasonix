@@ -117,6 +117,18 @@ reconnectBtn.addEventListener('click', () => {
   port.postMessage({ action: 'reconnect' });
 });
 
+// "Allow AI to attach tabs": remote browser_attach_page requires this explicit
+// opt-in (privacy by default — the AI can only operate tabs the user attached
+// in the popup). The preference lives in chrome.storage.local, which the
+// background service worker reads before honoring attach_page.
+const allowRemoteAttach = document.getElementById('allowRemoteAttach');
+chrome.storage.local.get(['allowRemoteAttach'], (data) => {
+  allowRemoteAttach.checked = !!data.allowRemoteAttach;
+});
+allowRemoteAttach.addEventListener('change', () => {
+  chrome.storage.local.set({ allowRemoteAttach: allowRemoteAttach.checked });
+});
+
 // Disable "Attach current tab" when the active page is browser-internal
 // (chrome://, chrome-extension://, edge://, ...) — the debugger cannot attach
 // to those pages, so clicking would be a dead action.

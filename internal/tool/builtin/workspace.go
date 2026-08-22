@@ -90,6 +90,9 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
 	}
 	all := tool.Builtins()
+	// Browser relay tools need a running relay server (desktop runtime); the
+	// workspace registry serves CLI/ACP sessions where no relay exists.
+	all = FilterRelayTools(all)
 	if len(enabled) == 0 {
 		for i, t := range all {
 			if bound, ok := overrides[t.Name()]; ok {

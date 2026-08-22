@@ -8,6 +8,35 @@
 | --- | --- | --- |
 | `bash` | false | 执行 shell 命令并返回 stdout/stderr。构建、测试、git、包管理器等使用它；读写查找文件优先使用专用工具。 |
 | `bash_output` | true | 读取后台 `bash` 或 `task` job 自上次读取后的新增输出和状态。 |
+| `browser_attach_page` | false | 按 tabId 附加一个浏览器标签页，使其可读可操作，并成为活动 CDP 目标。先用 browser_list_pages 获取 tabId。附加即授予对该标签页的读写操作权限，只应附加用户已批准的标签页。 |
+| `browser_attached_pages` | true | 列出用户已显式附加到本会话的浏览器标签页，返回 tabId、URL、标题及当前活动 CDP 目标。在调用 browser_navigate/browser_click 等之前用它确认可操作的页面。 |
+| `browser_click` | false | 按 CSS 选择器点击当前页面中的元素，点击前会滚动到可见区域。先用 browser_read 或 browser_read_dom 发现页面内容并确定选择器；简单点击优先用它而非 browser_eval。 |
+| `browser_close_page` | false | 按 tabId 关闭浏览器标签页，先用 browser_list_pages 获取 tabId。最后一个打开的标签页不可关闭；若关闭的是活动调试目标，会自动附加另一个标签页。 |
+| `browser_drag` | false | 把一个元素拖到另一个元素上，用 CDP Input.dispatchMouseEvent 模拟按下、移动、松开。提供源 CSS 选择器（拖什么）和目标 CSS 选择器（拖到哪）。 |
+| `browser_emulate` | false | 在当前页面模拟设备视口，用于测试响应式布局：设置宽、高、设备缩放因子和移动端模式。调用 browser_resize 恢复默认。 |
+| `browser_eval` | false | 在当前页面上下文执行任意 JavaScript，结果以 JSON 字符串返回。仅在其他工具无法完成时使用——标准操作优先用 browser_click、browser_fill_form、browser_read 等。表达式必须返回可 JSON 序列化的值。 |
+| `browser_fill_form` | false | 一次填充多个表单字段：提供 CSS 选择器到值的映射。这是填充表单的首选工具，比逐字段调用更快更可靠。一次处理输入框、文本域、下拉、复选框和单选框。 |
+| `browser_go_back` | false | 回到浏览器历史中的上一页，等价于点击浏览器后退按钮。导航后用 browser_read 确认页面已变化。 |
+| `browser_go_forward` | false | 前进到浏览器历史中的下一页，等价于点击浏览器前进按钮。仅在前一次 browser_go_back 之后可用。 |
+| `browser_handle_dialog` | false | 接受或取消 JavaScript 对话框（alert、confirm、prompt），默认接受。prompt 对话框可提供要输入的文本。对话框阻塞页面交互时使用——browser_click 等工具在对话框未处理前会失败。 |
+| `browser_hover` | false | 将鼠标悬停在 CSS 选择器指定的元素上，用于触发悬停效果、提示或下拉菜单。悬停后用 browser_read_dom 发现新出现的元素。悬停前会把元素滚动到可见区域。 |
+| `browser_list_console_messages` | true | 列出当前页面自上次导航以来记录的控制台消息，返回消息数组（级别、文本、来源、行号）。用于调试 JS 错误、警告和日志。传 clear=true 读取后清空缓存。 |
+| `browser_list_network_requests` | true | 列出当前页面的网络请求，返回数组（URL、方法、状态码、类型、头）。用于查看页面调用了哪些 API、调试失败请求或检查请求/响应详情。传 clear=true 读取后清空缓存。 |
+| `browser_list_pages` | true | 列出所有打开的浏览器标签页，返回页面数组（索引、tabId、标题、URL、活动状态）。先用它发现打开的页面，再用 browser_select_page 切换。发现标签页首选此工具。 |
+| `browser_navigate` | false | 将当前浏览器标签页导航到指定 URL，等待页面加载完成再返回。导航后用 browser_read 或 browser_read_dom 确认页面加载正确。页面未加载时检查 URL 格式。 |
+| `browser_new_page` | false | 打开一个可选 URL 的新浏览器标签页，新标签页成为活动调试目标。不传 URL 时打开 about:blank。 |
+| `browser_press_key` | false | 在当前聚焦元素上按键或组合键。在 browser_fill_form/browser_type 输入文本后用于提交表单（Enter）、导航（Tab、Escape）或触发快捷键（Control+A、Control+C、Shift+Tab）。支持 Enter、Tab、Escape、方向键、Backspace、Delete、Home、End、F1-F12 及修饰键组合。 |
+| `browser_read` | true | 读取当前页面的可见文本内容，返回页面标题、URL 和正文。读取页面内容的首选工具。可用 CSS 选择器只读特定元素；交互元素（按钮、链接、输入框）用 browser_read_dom。 |
+| `browser_read_dom` | true | 读取当前页面的所有交互元素（按钮、链接、输入框、下拉、文本域）及其 CSS 选择器、文本内容和包围矩形。在 browser_click/browser_fill_form/browser_type 之前发现可点击元素的首选工具；需要交互时用它替代 browser_read。 |
+| `browser_resize` | false | 按像素调整页面视口宽高，用于测试响应式布局或截屏前确保指定尺寸。默认设备缩放因子为 1。 |
+| `browser_screenshot` | true | 截取当前页面截图，返回 base64 编码图片。JPEG 格式体积更小（format='jpeg'）。用于视觉检查页面布局；文本内容优先用 browser_read 或 browser_read_dom。 |
+| `browser_scroll` | false | 按指定像素数滚动页面，或用 CSS 选择器把元素滚动到可见区域。内容在折叠线以下时使用。优先用 selector 参数滚动到具体元素，而不是猜测像素值。 |
+| `browser_select_page` | false | 把浏览器调试焦点切换到指定已附加标签页（按 tabId）。先用 browser_attached_pages 查看已附加标签页及其 ID。只有已附加的标签页可被选择。 |
+| `browser_status` | true | 检查浏览器中继扩展是否已连接并授权。使用任何其他 browser 工具前先调用它确认连接状态，返回服务器地址、连接状态和扩展信息。 |
+| `browser_take_snapshot` | true | 基于无障碍树截取当前页面的文本快照，返回带角色、名称、唯一 ID 的结构化元素。browser_read_dom 不够详细时用它发现页面结构和交互元素。 |
+| `browser_type` | false | 按 CSS 选择器向输入框输入文本，默认先清空已有内容。需要处理下拉等更简单的替代用 browser_fill_form；输入后按 Enter 或 Tab 等特殊键用 browser_press_key。 |
+| `browser_upload_file` | false | 向页面文件输入元素上传文件，文件路径必须是本机绝对路径。用于文件上传表单，要求页面存在文件输入元素。 |
+| `browser_wait` | true | 等待 CSS 选择器指定的元素出现在页面上。在 browser_navigate 或 browser_click 之后等待动态内容加载时使用。默认最多等 5 秒并检查元素是否可见；找到返回 true，超时返回 false。优先于固定延时。 |
 | `code_index` | true | 轻量内置代码符号索引；优先使用 `lsp_*` 或代码图 MCP，缺失时用它兜底。 |
 | `complete_step` | true | 用证据记录已批准计划中一个步骤的完成情况。 |
 | `compress` | true | 压缩当前模型可见对话中选定的范围，不删除可见历史。仅在用户明确要求压缩上下文时使用；锚点必须是某条真实用户消息中唯一、精确的原文片段。 |

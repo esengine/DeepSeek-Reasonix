@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/agentpreset"
 	"reasonix/internal/billing"
+	"reasonix/internal/browserrelay"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -2533,12 +2534,15 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, writeRootSet 
 	}
 
 	if len(enabled) == 0 {
-		for _, t := range tool.Builtins() {
+		for _, t := range builtin.FilterRelayTools(tool.Builtins()) {
 			reg.Add(t)
 		}
 	} else {
 		for _, name := range enabled {
 			if t, ok := tool.LookupBuiltin(name); ok {
+				if _, relayOnly := t.(builtin.RelayBound); relayOnly && !browserrelay.Available() {
+					continue // browser_* tools need a relay; keep unusable schemas out of CLI/ACP
+				}
 				reg.Add(t)
 			} else {
 				fmt.Fprintf(stderr, "warning: unknown built-in tool %q\n", name)

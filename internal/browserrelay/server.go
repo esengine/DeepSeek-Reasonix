@@ -15,8 +15,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -151,6 +153,14 @@ func GetStatus() Status {
 		return Status{}
 	}
 	return DefaultServer.Status()
+}
+
+// Available reports whether a browser relay server is active in this process.
+// The desktop assigns DefaultServer at startup; CLI/ACP runtimes never do.
+// boot uses it to keep browser_* tools out of runtimes where every call would
+// fail with "browser relay not initialized".
+func Available() bool {
+	return DefaultServer != nil
 }
 
 // NewServer creates an unstarted relay server.
@@ -388,7 +398,7 @@ func (s *Server) sendMessage(ctx context.Context, msg *message) (json.RawMessage
 
 	// Send command to extension.
 	if err := s.sendJSON(conn, msg); err != nil {
-		s.handleDisconnect()
+		s.handleDisconnect(conn)
 		return nil, fmt.Errorf("send %s: %w", msg.Type, err)
 	}
 
@@ -410,9 +420,17 @@ func (s *Server) sendMessage(ctx context.Context, msg *message) (json.RawMessage
 // handleWS upgrades HTTP to WebSocket and manages the extension connection.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
-		// Safe: the server only binds to 127.0.0.1, so no external origin can
-		// reach it. Accepting any origin is harmless in this local-only context.
-		CheckOrigin: func(r *http.Request) bool { return true },
+		// Only the Chrome extension (chrome-extension:// origin) or non-browser
+		// clients without an Origin header may connect; a random web page on
+		// loopback must not reserve the single extension slot.
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			return err == nil && strings.EqualFold(u.Scheme, "chrome-extension")
+		},
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -443,7 +461,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		var msg message
 		if err := conn.ReadJSON(&msg); err != nil {
 			slog.Info("browserrelay: connection closed", "err", err)
-			s.handleDisconnect()
+			s.handleDisconnect(conn)
 			return
 		}
 
@@ -508,9 +526,18 @@ func (s *Server) handleCDPEvent(msg message) {
 	)
 }
 
-// handleDisconnect cleans up after the extension disconnects.
-func (s *Server) handleDisconnect() {
+// handleDisconnect cleans up after the extension disconnects. conn is the
+// connection whose read loop exited; if a newer connection has already taken
+// the slot (e.g. the old socket's read loop exits after RotateToken dropped it
+// and a fresh connection authenticated), only the stale connection's own state
+// is left alone — the current connection keeps its authorized status.
+func (s *Server) handleDisconnect(conn *websocket.Conn) {
 	s.mu.Lock()
+	if s.conn != conn {
+		// A replacement connection already owns the slot; do not clobber it.
+		s.mu.Unlock()
+		return
+	}
 	s.conn = nil
 	s.state = StateDisconnected
 	s.extInfo = ""

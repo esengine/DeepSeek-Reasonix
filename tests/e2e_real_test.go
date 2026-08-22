@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 // TestRealE2E_NavigateAndRead 是真的 E2E 测试：
 // 1. 启动 Relay Server
 // 2. 用 WebSocket 模拟扩展连接并认证
-// 3. 通过 Relay 发送 CDP 命令到浏览器
+// 3. 从服务器侧（s.Send）发出 CDP 命令，扩展侧接收后回结果
 func TestRealE2E_NavigateAndRead(t *testing.T) {
 	if testing.Short() {
 		t.Skip("跳过 E2E 测试（需要真实浏览器）")
@@ -58,16 +59,19 @@ func TestRealE2E_NavigateAndRead(t *testing.T) {
 	}
 	t.Log("✅ 扩展认证成功")
 
-	// Step 4: 发送 Navigate 命令
-	navID := uint64(1)
-	conn.WriteJSON(map[string]interface{}{
-		"type":   "cdp_command",
-		"id":     navID,
-		"method": "Page.navigate",
-		"params": map[string]string{"url": "about:blank"},
-	})
+	// Step 4: 服务器侧发起 CDP 命令（这是生产代码路径——AI 通过 s.Send 发送）
+	resultCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := s.Send(ctx, "Page.navigate", json.RawMessage(`{"url":"about:blank"}`))
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- string(result)
+	}()
 
-	// 读取扩展发回的 CDP 命令
+	// 扩展侧接收 CDP 命令
 	var cmd struct {
 		ID     uint64          `json:"id"`
 		Method string          `json:"method"`
@@ -82,6 +86,17 @@ func TestRealE2E_NavigateAndRead(t *testing.T) {
 		"id":     cmd.ID,
 		"result": map[string]interface{}{"frameId": "test"},
 	})
+
+	select {
+	case result := <-resultCh:
+		if !strings.Contains(result, "frameId") {
+			t.Fatalf("result = %q, want frameId echo", result)
+		}
+	case err := <-errCh:
+		t.Fatalf("Send() failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send() timed out")
+	}
 
 	t.Log("✅ 完整的 CDP 指令流：Send → 扩展接收 → 返回结果，链路通畅")
 }

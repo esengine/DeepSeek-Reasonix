@@ -62,11 +62,16 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
 // ── Connection management ──────────────────────────────────────────────────
 
-function connect(addr, token) {
+// connect opens a WebSocket to the relay server. resetBackoff controls the
+// exponential-reconnect counter: only user-initiated connections (popup button,
+// options save, startup auto-connect) reset it; automatic scheduleReconnect
+// retries must keep the growing delay so a dead desktop does not hammer the
+// minimum 2s forever.
+function connect(addr, token, resetBackoff = true) {
   closeSocket();
 
   intentionalDisconnect = false;
-  reconnectAttempts = 0;
+  if (resetBackoff) reconnectAttempts = 0;
   authRejected = false;
   connectedAddr = addr;
   authToken = token;
@@ -139,20 +144,22 @@ function scheduleReconnect() {
       if (intentionalDisconnect || !data.autoConnect || !data.relayAddr || !data.relayToken) {
         return;
       }
-      connect(data.relayAddr, data.relayToken);
+      // Preserve the backoff counter across automatic retries.
+      connect(data.relayAddr, data.relayToken, false);
     });
   }, delay);
 }
 
 // Close the WebSocket and reset connection state, but keep attached tabs and
 // their debugger connections — reconnecting should not wipe pages the user
-// already attached.
+// already attached. The backoff counter is intentionally left untouched here:
+// connect() owns it (resetBackoff), so automatic retries keep their growing
+// delay instead of being reset to 2s on every attempt.
 function closeSocket() {
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
-  reconnectAttempts = 0;
   clearTimeout(authTimer);
   authTimer = null;
   authSucceeded = false;
@@ -284,13 +291,42 @@ function handleTabCommand(msg) {
         sendTabResult(msg.id, null, 'tabId is required');
         return;
       }
-      detachTab(msg.tabId);
-      chrome.tabs.remove(msg.tabId, () => {
-        if (chrome.runtime.lastError) {
-          sendTabResult(msg.id, null, chrome.runtime.lastError.message);
+      // Never close the last open tab: that closes the browser window.
+      chrome.tabs.query({}, (allTabs) => {
+        if (!allTabs || allTabs.length <= 1) {
+          sendTabResult(msg.id, null, 'Cannot close the last open tab');
           return;
         }
-        sendTabResult(msg.id, { closed: true, tabId: msg.tabId }, null);
+        const wasActiveTarget = activeTabId === msg.tabId;
+        chrome.tabs.remove(msg.tabId, () => {
+          if (chrome.runtime.lastError) {
+            sendTabResult(msg.id, null, chrome.runtime.lastError.message);
+            return;
+          }
+          // The removed tab's detach is handled by onDetach (or explicit
+          // detachTab below) — remove it from attached state either way.
+          if (attachedTabs.has(msg.tabId)) {
+            detachTab(msg.tabId);
+          }
+          // Restore a valid target when we closed the active one: attach the
+          // previously active tab if any, else the first remaining tab.
+          if (wasActiveTarget && activeTabId === null) {
+            const replacement = allTabs.find((t) => t.id !== msg.tabId && t.id != null && t.url && !/^(chrome|chrome-extension|edge|about|devtools):/i.test(t.url));
+            const fallback = allTabs.find((t) => t.id !== msg.tabId && t.id != null);
+            const next = replacement || fallback;
+            if (next && next.id != null) {
+              attachDebuggerToTab(next.id, next.url || '', next.title || '', (err) => {
+                if (err) {
+                  sendTabResult(msg.id, null, 'closed, but failed to re-attach: ' + err);
+                  return;
+                }
+                sendTabResult(msg.id, { closed: true, tabId: msg.tabId, nextTabId: next.id }, null);
+              });
+              return;
+            }
+          }
+          sendTabResult(msg.id, { closed: true, tabId: msg.tabId }, null);
+        });
       });
       break;
 
@@ -305,9 +341,23 @@ function handleTabCommand(msg) {
         sendTabResult(msg.id, { tabId: msg.tabId, attached: true, active: true }, null);
         return;
       }
-      chrome.tabs.get(msg.tabId, (tab) => {
-        attachDebuggerToTab(msg.tabId, tab ? (tab.url || '') : '', tab ? (tab.title || '') : '');
-        sendTabResult(msg.id, { tabId: msg.tabId, attached: true, active: true }, null);
+      // Privacy boundary: remote attach must be explicitly approved by the
+      // user (popup "Allow AI to attach tabs"). Without it, an authorized
+      // model could attach and operate any tab in Auto/YOLO modes.
+      chrome.storage.local.get(['allowRemoteAttach'], (prefs) => {
+        if (!prefs.allowRemoteAttach) {
+          sendTabResult(msg.id, null, 'Remote attach is disabled. Enable "Allow AI to attach tabs" in the extension popup.');
+          return;
+        }
+        chrome.tabs.get(msg.tabId, (tab) => {
+          attachDebuggerToTab(msg.tabId, tab ? (tab.url || '') : '', tab ? (tab.title || '') : '', (err) => {
+            if (err) {
+              sendTabResult(msg.id, null, err);
+              return;
+            }
+            sendTabResult(msg.id, { tabId: msg.tabId, attached: true, active: true }, null);
+          });
+        });
       });
       break;
 
@@ -387,24 +437,33 @@ function attachToActiveTab() {
     const tabId = tabs[0].id;
     const tabUrl = tabs[0].url || '';
     const tabTitle = tabs[0].title || '';
-    attachDebuggerToTab(tabId, tabUrl, tabTitle);
+    attachDebuggerToTab(tabId, tabUrl, tabTitle, (err) => {
+      if (err) {
+        broadcastState({ status: 'error', error: err });
+      }
+    });
   });
 }
 
-function attachDebuggerToTab(tabId, tabUrl, tabTitle) {
+// attachDebuggerToTab attaches chrome.debugger to a tab and reports the result
+// through the optional callback (error message, or null on success). The
+// callback runs only after chrome.debugger.attach settles, so callers can
+// acknowledge a remote attach_page command with the true outcome instead of
+// optimistically reporting success before activeTabId is set.
+function attachDebuggerToTab(tabId, tabUrl, tabTitle, callback) {
   if (attachedTabs.has(tabId)) {
     // Already attached — just make it the active CDP target.
     activeTabId = tabId;
     broadcastState(getState());
+    if (callback) callback(null);
     return;
   }
 
   chrome.debugger.attach({ tabId: tabId }, '1.3', () => {
     if (chrome.runtime.lastError) {
-      broadcastState({
-        status: 'error',
-        error: 'Failed to attach debugger: ' + chrome.runtime.lastError.message
-      });
+      const err = 'Failed to attach debugger: ' + chrome.runtime.lastError.message;
+      broadcastState({ status: 'error', error: err });
+      if (callback) callback(err);
       return;
     }
 
@@ -428,6 +487,8 @@ function attachDebuggerToTab(tabId, tabUrl, tabTitle) {
     chrome.debugger.sendCommand({ tabId: tabId }, 'Network.enable', {}, () => {
       chrome.runtime.lastError; // ignore
     });
+
+    if (callback) callback(null);
   });
 }
 
@@ -488,13 +549,28 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   }
 });
 
-// Keep attached tab titles fresh: SPA navigation (e.g. switching between docs
-// on a single-page app) changes titles after attach without re-attaching.
+// Keep attached tab metadata fresh: SPA navigation and page loads change the
+// URL after attach without re-attaching, and each navigation starts a new
+// document — console/network caches from the previous page must not leak into
+// the new page's diagnostics.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.title && attachedTabs.has(tabId)) {
-    attachedTabs.get(tabId).title = changeInfo.title;
-    broadcastState(getState());
+  if (!attachedTabs.has(tabId)) return;
+  const info = attachedTabs.get(tabId);
+
+  if (changeInfo.url) {
+    info.url = changeInfo.url;
   }
+  if (changeInfo.title) {
+    info.title = changeInfo.title;
+  }
+  // A fresh document begins at 'loading'; drop per-document caches so
+  // browser_list_console_messages / browser_list_network_requests report only
+  // the current page.
+  if (changeInfo.status === 'loading') {
+    info.consoleMessages = [];
+    info.networkRequests = [];
+  }
+  broadcastState(getState());
 });
 
 // ── Popup communication ────────────────────────────────────────────────────

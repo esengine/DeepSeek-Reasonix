@@ -217,6 +217,11 @@ darwin)
 	[ -s "$app/Contents/Resources/$bundle_icon" ] || { echo "macOS bundle icon is missing: $bundle_icon" >&2; exit 1; }
 	cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon" || { echo "macOS bundle icon replacement failed: $bundle_icon" >&2; exit 1; }
 
+	# Bundle the browser-relay Chrome extension so BrowserRelayExtensionPath finds
+	# it in packaged builds (binDir/../Resources/extensions/chrome-extension).
+	mkdir -p "$app/Contents/Resources/extensions"
+	cp -R "$ROOT/extensions/chrome-extension" "$app/Contents/Resources/extensions/"
+
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization
 	# key we sign with a hardened runtime, notarize, and staple — a downloaded build
@@ -299,6 +304,9 @@ windows)
 	cp "$guard_out" "$payload_dir/$GUARDNAME.exe"
 	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$payload_dir/$WINDOWS_CLINAME.exe"
 	cp "build/windows/installer/reasonix-uninstall.exe" "$payload_dir/reasonix-uninstall.exe"
+	# Browser-relay Chrome extension rides the portable archive (beside the
+	# launcher entry point) so BrowserRelayExtensionPath finds it after install.
+	cp -R "$ROOT/extensions/chrome-extension" "$payload_dir/extensions"
 	"$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"
 	;;
 linux)
@@ -309,9 +317,15 @@ linux)
 		grep -F -x -q "$desktop_contract" build/linux/reasonix.desktop || { echo "Linux desktop entry missing: $desktop_contract" >&2; exit 1; }
 	done
 	# Portable Linux tarball: desktop + thin launcher + one-shot migrator
-	# (compat name reasonix-guard) + CLI. After migrator runs, Guard self-deletes.
+	# (compat name reasonix-guard) + CLI + browser-relay extension. After
+	# migrator runs, Guard self-deletes.
+	#
+	# The extension is staged beside the binary (build/bin/extensions/...) so
+	# extensionDirPath's binDir candidate finds it after extraction.
+	mkdir -p "build/bin/extensions"
+	cp -R "$ROOT/extensions/chrome-extension" "build/bin/extensions/"
 	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin \
-		"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME"
+		"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME" extensions
 	# Build the privileged update helper shipped inside the .deb. Portable tarball
 	# installs do not need it; only the dpkg package installs helper + Polkit policy.
 	echo "==> go build reasonix-update-helper"

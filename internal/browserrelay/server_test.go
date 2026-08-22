@@ -3,6 +3,7 @@ package browserrelay
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -512,5 +513,135 @@ func writeMsg(t *testing.T, conn *websocket.Conn, msg message) {
 	t.Helper()
 	if err := conn.WriteJSON(msg); err != nil {
 		t.Fatalf("write message: %v", err)
+	}
+}
+
+// TestRejectNonExtensionOrigin verifies the WebSocket upgrade rejects browser
+// page origins (only chrome-extension:// or absent Origin may connect), so a
+// random web page on loopback cannot occupy the single extension slot.
+func TestRejectNonExtensionOrigin(t *testing.T) {
+	s := NewServer()
+	ctx := context.Background()
+	addr, err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	defer s.Stop()
+
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/"}
+
+	// A browser page origin (http://...) must be rejected before reserving the slot.
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Origin", "http://evil.example")
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, u.String(), req.Header)
+	if err == nil {
+		conn.Close()
+		t.Fatal("expected upgrade rejection for http:// origin")
+	}
+	_ = resp
+
+	// The slot must still be free for the real extension after the rejection.
+	conn2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("extension dial after rejection failed: %v", err)
+	}
+	defer conn2.Close()
+	if st := s.Status(); st.State != "connected" {
+		t.Fatalf("state = %q, want connected", st.State)
+	}
+}
+
+// TestRotateThenReauthKeepsNewConnection covers the race where the old socket's
+// read loop exits after RotateToken drops it while a fresh connection already
+// authenticated: the stale cleanup must not reset the new connection's state.
+func TestRotateThenReauthKeepsNewConnection(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+
+	s := NewServer()
+	ctx := context.Background()
+	addr, err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	defer s.Stop()
+
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/"}
+
+	// First extension connects and authorizes.
+	old, err := s.RotateToken()
+	if err != nil {
+		t.Fatalf("initial rotate: %v", err)
+	}
+	conn1, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial conn1: %v", err)
+	}
+	defer conn1.Close()
+	writeMsg(t, conn1, message{Type: "auth", Token: old})
+	var authResp message
+	if err := conn1.ReadJSON(&authResp); err != nil {
+		t.Fatalf("read auth response: %v", err)
+	}
+	if authResp.Type != "auth_ok" {
+		t.Fatalf("auth failed: %v", authResp)
+	}
+
+	// Rotate while conn1 is live: the server drops conn1 and clears the slot.
+	if _, err := s.RotateToken(); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	newToken := s.Token()
+
+	// A fresh connection authenticates with the new token before conn1's read
+	// loop observes the close.
+	conn2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial conn2: %v", err)
+	}
+	defer conn2.Close()
+	writeMsg(t, conn2, message{Type: "auth", Token: newToken})
+	if err := conn2.ReadJSON(&authResp); err != nil {
+		t.Fatalf("read conn2 auth: %v", err)
+	}
+	if authResp.Type != "auth_ok" {
+		t.Fatalf("conn2 auth failed: %v", authResp)
+	}
+
+	// Drain conn1 until its read loop exits (it was closed server-side).
+	for {
+		var m message
+		if err := conn1.ReadJSON(&m); err != nil {
+			break
+		}
+	}
+
+	// Give the stale cleanup a moment to run; conn2 must stay authorized.
+	time.Sleep(200 * time.Millisecond)
+	if st := s.Status(); st.State != "authorized" {
+		t.Fatalf("state after stale cleanup = %q, want authorized (new connection must survive)", st.State)
+	}
+
+	// And conn2 must still be able to carry a CDP command round trip.
+	resultCh := make(chan string, 1)
+	go func() {
+		res, err := s.Send(ctx, "Runtime.evaluate", nil)
+		if err != nil {
+			t.Errorf("send: %v", err)
+			return
+		}
+		resultCh <- string(res)
+	}()
+	var cmdMsg message
+	if err := conn2.ReadJSON(&cmdMsg); err != nil {
+		t.Fatalf("read conn2 command: %v", err)
+	}
+	writeMsg(t, conn2, message{Type: "cdp_result", ID: cmdMsg.ID, Result: []byte(`{"ok":true}`)})
+	select {
+	case <-resultCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("conn2 command timed out after stale cleanup")
 	}
 }

@@ -1,10 +1,10 @@
 {
   "limits": {
-    "banner": 15,
+    "banner": 55,
     "commented-code": 0,
     "complexity": 1992,
-    "essay": 1982,
-    "file-size": 107668,
+    "essay": 2032,
+    "file-size": 108867,
     "function-size": 8617,
     "layering": 1,
     "marker": 0,
@@ -25,7 +25,7 @@
     "desktop/app.go": {
       "complexity": 58,
       "essay": 64,
-      "file-size": 11122,
+      "file-size": 11126,
       "function-size": 365,
       "struct-state": 15
     },
@@ -41,6 +41,9 @@
     },
     "desktop/bot_runtime_app.go": {
       "essay": 2
+    },
+    "desktop/browserrelay.go": {
+      "essay": 5
     },
     "desktop/cmd/sign/main.go": {
       "essay": 12
@@ -123,7 +126,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 7239
+      "file-size": 7418
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 43
@@ -147,7 +150,7 @@
       "file-size": 180
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4864
+      "file-size": 4878
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -156,7 +159,7 @@
       "file-size": 265
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1611
+      "file-size": 1619
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 4034
@@ -564,7 +567,7 @@
     "internal/boot/boot.go": {
       "complexity": 248,
       "essay": 82,
-      "file-size": 2039,
+      "file-size": 2043,
       "function-size": 1687,
       "narrative": 3
     },
@@ -644,6 +647,9 @@
     },
     "internal/botruntime/runtime.go": {
       "file-size": 38
+    },
+    "internal/browserrelay/server_test.go": {
+      "essay": 3
     },
     "internal/capability/audit.go": {
       "struct-state": 12
@@ -1434,6 +1440,10 @@
     "internal/tool/builtin/bgjobs_test.go": {
       "essay": 2
     },
+    "internal/tool/builtin/browser.go": {
+      "banner": 33,
+      "file-size": 990
+    },
     "internal/tool/builtin/builtin_test.go": {
       "essay": 3
     },
@@ -1489,6 +1499,13 @@
     },
     "sdk/go/wire.go": {
       "essay": 1
+    },
+    "tests/e2e_real_test.go": {
+      "essay": 8
+    },
+    "tests/e2e_test.go": {
+      "banner": 7,
+      "essay": 34
     },
     "workers/crash-report/src/index.ts": {
       "file-size": 899

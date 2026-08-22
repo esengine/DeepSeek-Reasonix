@@ -13,8 +13,11 @@ FAIL=0
 FAILURES=""
 
 info()  { echo -e "\033[36m[INFO]\033[0m $1"; }
-ok()    { echo -e "\033[32m[PASS]\033[0m $1"; ((PASS++)); }
-fail()  { echo -e "\033[31m[FAIL]\033[0m $1"; ((FAIL++)); FAILURES+="  ❌ $1\n"; }
+# Bash `set -e` treats `((PASS++))` returning 1 (old value 0) as a fatal exit,
+# so the script would die on the very first pass. Use arithmetic assignment,
+# whose status is always 0.
+ok()    { echo -e "\033[32m[PASS]\033[0m $1"; PASS=$((PASS + 1)); }
+fail()  { echo -e "\033[31m[FAIL]\033[0m $1"; FAIL=$((FAIL + 1)); FAILURES+="  ❌ $1\n"; }
 
 # ── 1. 检查端口 ──
 info "🔍 检查 Reasonix Relay 是否在运行..."
@@ -25,31 +28,11 @@ fi
 ok "Reasonix Relay 正在运行 (端口 ${RELAY_PORT})"
 
 # ── 2. 检查工具注册 ──
-info "🔍 检查所有工具是否注册..."
+info "🔍 检查工具注册..."
 TOOLS=$(reasonix tools list 2>/dev/null || echo "cannot list tools")
-echo "$TOOLS" | grep -q "browser_status" && ok "browser_status" || fail "browser_status"
-echo "$TOOLS" | grep -q "browser_navigate" && ok "browser_navigate" || fail "browser_navigate"
-echo "$TOOLS" | grep -q "browser_click" && ok "browser_click" || fail "browser_click"
-echo "$TOOLS" | grep -q "browser_type" && ok "browser_type" || fail "browser_type"
-echo "$TOOLS" | grep -q "browser_read" && ok "browser_read" || fail "browser_read"
-echo "$TOOLS" | grep -q "browser_screenshot" && ok "browser_screenshot" || fail "browser_screenshot"
-echo "$TOOLS" | grep -q "browser_eval" && ok "browser_eval" || fail "browser_eval"
-echo "$TOOLS" | grep -q "browser_list_pages" && ok "browser_list_pages" || fail "browser_list_pages"
-echo "$TOOLS" | grep -q "browser_select_page" && ok "browser_select_page" || fail "browser_select_page"
-echo "$TOOLS" | grep -q "browser_new_page" && ok "browser_new_page" || fail "browser_new_page"
-echo "$TOOLS" | grep -q "browser_close_page" && ok "browser_close_page" || fail "browser_close_page"
-echo "$TOOLS" | grep -q "browser_read_dom" && ok "browser_read_dom" || fail "browser_read_dom"
-echo "$TOOLS" | grep -q "browser_scroll" && ok "browser_scroll" || fail "browser_scroll"
-echo "$TOOLS" | grep -q "browser_go_back" && ok "browser_go_back" || fail "browser_go_back"
-echo "$TOOLS" | grep -q "browser_go_forward" && ok "browser_go_forward" || fail "browser_go_forward"
-echo "$TOOLS" | grep -q "browser_press_key" && ok "browser_press_key" || fail "browser_press_key"
-echo "$TOOLS" | grep -q "browser_hover" && ok "browser_hover" || fail "browser_hover"
-echo "$TOOLS" | grep -q "browser_wait" && ok "browser_wait" || fail "browser_wait"
-echo "$TOOLS" | grep -q "browser_upload_file" && ok "browser_upload_file" || fail "browser_upload_file"
-echo "$TOOLS" | grep -q "browser_resize" && ok "browser_resize" || fail "browser_resize"
-echo "$TOOLS" | grep -q "browser_handle_dialog" && ok "browser_handle_dialog" || fail "browser_handle_dialog"
-echo "$TOOLS" | grep -q "browser_fill_form" && ok "browser_fill_form" || fail "browser_fill_form"
-echo "$TOOLS" | grep -q "browser_attached_pages" && ok "browser_attached_pages" || fail "browser_attached_pages"
+# browser_* 工具只在桌面 Runtime（Relay 已启动）注册；CLI 会话不注册，避免
+# 向模型暴露不可用的工具 schema。因此这里验证的是"过滤生效"而非"存在"。
+echo "$TOOLS" | grep -q "browser_" && fail "browser_* tools must NOT appear in CLI tool list (relay-only)" || ok "browser_* tools correctly excluded from CLI"
 
 # ── 结果汇总 ──
 echo ""
