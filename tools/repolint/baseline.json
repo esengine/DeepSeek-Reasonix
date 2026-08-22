@@ -2,15 +2,15 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2013,
+    "complexity": 2015,
     "essay": 1980,
     "file-size": 107997,
-    "function-size": 8672,
+    "function-size": 8680,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "struct-state": 113,
-    "test-file-size": 69381
+    "struct-state": 114,
+    "test-file-size": 69473
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -564,13 +564,13 @@
     "internal/boot/boot.go": {
       "complexity": 264,
       "essay": 82,
-      "file-size": 2078,
+      "file-size": 2079,
       "function-size": 1726,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
       "essay": 3,
-      "test-file-size": 3778
+      "test-file-size": 3827
     },
     "internal/boot/extension_dispatch_test.go": {
       "essay": 3,
@@ -816,7 +816,7 @@
     },
     "internal/config/config.go": {
       "essay": 24,
-      "file-size": 1547,
+      "file-size": 1561,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -830,7 +830,7 @@
       "file-size": 1673
     },
     "internal/config/edit_test.go": {
-      "test-file-size": 2425
+      "test-file-size": 2433
     },
     "internal/config/effort.go": {
       "complexity": 9,
@@ -860,7 +860,7 @@
       "essay": 7
     },
     "internal/config/provider_presets.go": {
-      "file-size": 373
+      "file-size": 381
     },
     "internal/config/provider_presets_test.go": {
       "test-file-size": 174
@@ -868,11 +868,11 @@
     "internal/config/render.go": {
       "complexity": 258,
       "essay": 2,
-      "file-size": 1049,
+      "file-size": 1052,
       "function-size": 1000
     },
     "internal/config/render_test.go": {
-      "test-file-size": 759
+      "test-file-size": 760
     },
     "internal/control/approval.go": {
       "essay": 5
@@ -1221,14 +1221,14 @@
       "test-file-size": 252
     },
     "internal/provider/openai/openai.go": {
-      "complexity": 67,
+      "complexity": 69,
       "essay": 35,
-      "file-size": 541,
-      "function-size": 250,
-      "struct-state": 9
+      "file-size": 553,
+      "function-size": 258,
+      "struct-state": 10
     },
     "internal/provider/openai/openai_test.go": {
-      "test-file-size": 1591
+      "test-file-size": 1625
     },
     "internal/provider/openai/realcache_test.go": {
       "essay": 2
