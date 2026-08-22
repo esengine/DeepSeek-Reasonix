@@ -25,6 +25,23 @@ func TestTaskSchemaIncludesProfileAndWritePaths(t *testing.T) {
 	}
 }
 
+func TestTaskDescribesFileGrainedWritePaths(t *testing.T) {
+	task := &TaskTool{}
+	description := task.Description()
+	for _, want := range []string{
+		"prefer individual file paths over whole directories",
+		"use a directory only when the writer may modify it broadly",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("task description missing %q: %s", want, description)
+		}
+	}
+	schema := string(task.Schema())
+	if want := "prefer individual file paths"; !strings.Contains(schema, want) {
+		t.Fatalf("task schema missing %q: %s", want, schema)
+	}
+}
+
 func TestTaskWriterWithoutPathsClaimsWholeWorkspace(t *testing.T) {
 	root := t.TempDir()
 	task := NewTaskTool(&mockProvider{name: "sub"}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
