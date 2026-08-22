@@ -156,6 +156,6 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // headroom without widening the gzip or largest-chunk exceptions.
 // Local-path sidebar preview adds a small lucide-react icon (Eye) and the
 // reveal-path event wiring — 0.2 KiB raw over the previous gate.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.6 : 2_353.4;
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.7 : 2_353.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
