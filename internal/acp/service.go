@@ -126,12 +126,15 @@ type AgentInfo struct {
 // stdout is the JSON-RPC channel: callers must keep all other output (logs,
 // diagnostics) off w and on stderr, or the wire corrupts.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info AgentInfo) error {
+	askFallback := strings.EqualFold(strings.TrimSpace(os.Getenv("REASONIX_ACP_ASK_FALLBACK")), "1") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("REASONIX_ACP_ASK_FALLBACK")), "true")
 	conn := NewConn(r, w)
 	svc := &service{
-		conn:     conn,
-		factory:  factory,
-		info:     info,
-		sessions: make(map[string]*acpSession),
+		conn:                  conn,
+		factory:               factory,
+		info:                  info,
+		sessions:              make(map[string]*acpSession),
+		askFallbackUnattended: askFallback,
 	}
 	conn.Handle("initialize", svc.initialize)
 	conn.Handle("authenticate", svc.authenticate)
@@ -168,6 +171,12 @@ type service struct {
 	conn    *Conn
 	factory Factory
 	info    AgentInfo
+	// askFallbackUnattended arms #8238's degradation: a rejected ask is
+	// resolved as "no interactive user" so the agent falls back to its
+	// model-assumption path instead of cancelling the turn. Set from
+	// REASONIX_ACP_ASK_FALLBACK at Serve time; interactive clients keep the
+	// dismiss contract.
+	askFallbackUnattended bool
 
 	mu       sync.Mutex
 	sessions map[string]*acpSession
@@ -692,6 +701,9 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
 	sink.bindAnswer(ctrl.AnswerQuestion)
+	if s.askFallbackUnattended {
+		sink.bindAskRejectUnattended(ctrl.RejectAskUnattended)
+	}
 
 	now := time.Now().UTC()
 	sess := &acpSession{
@@ -995,6 +1007,9 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
 	sink.bindAnswer(ctrl.AnswerQuestion)
+	if s.askFallbackUnattended {
+		sink.bindAskRejectUnattended(ctrl.RejectAskUnattended)
+	}
 
 	dir := ctrl.SessionDir()
 	if dir == "" {

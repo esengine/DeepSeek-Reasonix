@@ -351,8 +351,17 @@ type pendingApproval struct {
 // event (see ReplayPendingPrompts).
 type pendingAsk struct {
 	questions []event.AskQuestion
-	reply     chan []event.AskAnswer
+	reply     chan askResolution
 	queued    bool // registered but not yet shown; replay must skip it
+}
+
+// askResolution is one settled AskRequest. answers carries the user's (or
+// host's) selections; unattended marks a host that has no interactive user at
+// all, so the ask tool should fall back to its unattended judgment path
+// instead of reading the empty selection as a deliberate dismiss (#8238).
+type askResolution struct {
+	answers    []event.AskAnswer
+	unattended bool
 }
 
 type plannerSessionResetter interface {
@@ -2508,8 +2517,11 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	defer cancelWait()
 
 	select {
-	case ans := <-reply:
-		return ans, nil
+	case res := <-reply:
+		if res.unattended {
+			return nil, ErrAskUnattended
+		}
+		return res.answers, nil
 	case <-waitCtx.Done():
 		c.approval.cancelAsk(id)
 		return nil, waitCtx.Err()
@@ -2533,7 +2545,27 @@ func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 			}
 		}
 		c.recordAskDecisionReceipt(id, pending, answers)
-		pending.reply <- answers // buffered, never blocks
+		pending.reply <- askResolution{answers: answers} // buffered, never blocks
+	}
+}
+
+// ErrAskUnattended is agent.ErrAskUnattended re-exported for hosts: Ask fails
+// with it when the question was resolved by RejectAskUnattended — no
+// interactive user exists on the other side, and the caller should fall back
+// to its unattended judgment path instead of treating the resolution as a
+// user decision.
+var ErrAskUnattended = agent.ErrAskUnattended
+
+// RejectAskUnattended resolves a pending AskRequest as coming from a host with
+// no interactive user (an unattended daemon answering every prompt with a
+// rejection). Ask then fails with ErrAskUnattended, which the ask tool maps to
+// the same model-assumption fallback `reasonix run -p` produces — instead of
+// the empty-selection path, which cancels the turn and kills unattended runs
+// (#8238). Unknown/expired IDs are ignored.
+func (c *Controller) RejectAskUnattended(id string) {
+	if pending, ok := c.approval.resolveAsk(id); ok {
+		c.recordAskDecisionReceipt(id, pending, nil)
+		pending.reply <- askResolution{unattended: true} // buffered, never blocks
 	}
 }
 

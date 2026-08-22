@@ -56,6 +56,10 @@ type updateSink struct {
 	cwd     string
 	approve func(id string, allow, session, persist bool)
 	answer  func(id string, answers []event.AskAnswer)
+	// rejectUnattended resolves an ask as "host has no interactive user"
+	// (ask-fallback mode): nil means unavailable and the plain dismiss path
+	// stays in effect for interactive clients (#8238).
+	rejectUnattended func(id string)
 	status  func(event.Event)
 	// extensionSurface records the client's negotiated
 	// reasonix.extensionSurface support: structured surfaces go out as vendor
@@ -91,6 +95,10 @@ func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool
 // events.
 func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 	s.answer = fn
+}
+
+func (s *updateSink) bindAskRejectUnattended(fn func(id string)) {
+	s.rejectUnattended = fn
 }
 
 // bindStatus installs the vendor-status observer. It receives typed events,
@@ -517,6 +525,15 @@ func (s *updateSink) requestAsk(ctx context.Context, a event.Ask) {
 	for _, q := range a.Questions {
 		selected, ok := s.requestAskQuestion(ctx, a.ID, q)
 		if !ok {
+			// Ask-fallback mode: a rejection means the host has no
+			// interactive user, so degrade to the agent's model-assumption
+			// fallback instead of the dismiss path that cancels the turn
+			// (#8238). Without the mode, rejection keeps the interactive
+			// dismiss contract (#6869).
+			if s.rejectUnattended != nil {
+				s.rejectUnattended(a.ID)
+				return
+			}
 			s.answer(a.ID, nil)
 			return
 		}
