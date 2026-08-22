@@ -2449,6 +2449,7 @@ export const zhTW: Record<DictKey, string> = {
   "externalOpener.saveAs": "另存為…",
   "externalOpener.saved": "已儲存到 {path}",
   "externalOpener.persistFailed": "已開啟，但無法將 {name} 儲存為預設：{error}",
+  "externalOpener.previewInSidebar": "在側邊欄預覽",
   "workspace.filterReferencedFiles": "篩選依賴檔案…",
   "workspace.clearFileScope": "顯示完整檔案樹",
   "workspace.clearChangeScope": "顯示全部改動",

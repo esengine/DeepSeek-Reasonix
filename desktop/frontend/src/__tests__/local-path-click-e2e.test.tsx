@@ -22,9 +22,11 @@ const { window } = dom;
 // React 19 requires this flag for act() to flush renders/pass-through events.
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Bridge spies: OpenLocalPath is what the click must call; BrowserOpenURL is
-// what plain http links must call instead.
+// Bridge spies: OpenLocalPath is what the right-click "open default" must
+// call; the default click now dispatches a custom event for sidebar preview.
+// BrowserOpenURL is what plain http links must call instead.
 const opened: string[] = [];
+const revealedPaths: string[] = [];
 const openedWith: Array<[string, string]> = [];
 const browsed: string[] = [];
 type MockOpeners = {
@@ -94,6 +96,12 @@ const { default: remarkGfm } = await import("remark-gfm");
 const { remarkLocalPathLinks } = await import("../lib/localPathLinks");
 const { localPathFromHref, RichMarkdownLink } = await import("../components/githubLink");
 
+// Listen for custom reveal-path events dispatched by the link click handler.
+window.addEventListener("app:reveal-path", ((event: Event) => {
+  const path = (event as CustomEvent).detail;
+  if (typeof path === "string") revealedPaths.push(path);
+}) as EventListener);
+
 const markdownUrlTransform = (value: string) =>
   localPathFromHref(value) !== null ? value : defaultUrlTransform(value);
 
@@ -126,9 +134,9 @@ console.log("\nheadless click-to-open e2e");
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened.length === 1, "click invoked OpenLocalPath once");
-  ok(opened[0] === "D:/Project/Jhtj/20250804_000000_001_中停时分析/05-静态验收.md",
-    `OpenLocalPath received the decoded CJK path (${opened[0]})`);
+  ok(revealedPaths.length === 1, "click dispatched reveal-path event once");
+  ok(revealedPaths[0] === "D:/Project/Jhtj/20250804_000000_001_中停时分析/05-静态验收.md",
+    `reveal-path received the decoded CJK path (${revealedPaths[0]})`);
   ok(browsed.length === 0, "system browser was not involved");
 }
 
@@ -139,7 +147,7 @@ console.log("\nheadless click-to-open e2e");
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened[1] === "//nas/share/docs/report.md", `UNC path forwarded as slash form (${opened[1]})`);
+  ok(revealedPaths[1] === "//nas/share/docs/report.md", `UNC path forwarded as slash form (${revealedPaths[1]})`);
 }
 
 // 3. Canonical authority-form UNC markdown links use the same native path.
@@ -149,7 +157,7 @@ console.log("\nheadless click-to-open e2e");
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened[2] === "//nas/share/docs/report.md", `canonical UNC path forwarded correctly (${opened[2]})`);
+  ok(revealedPaths[2] === "//nas/share/docs/report.md", `canonical UNC path forwarded correctly (${revealedPaths[2]})`);
 }
 
 // 4. Explicit markdown link to a local file keeps working through the same path.
@@ -158,7 +166,7 @@ console.log("\nheadless click-to-open e2e");
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened[3] === "D:/docs/acceptance.md", "explicit file:/// markdown link opens locally");
+  ok(revealedPaths[3] === "D:/docs/acceptance.md", "explicit file:/// markdown link opens locally");
 
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
@@ -247,7 +255,7 @@ console.log("\nheadless click-to-open e2e");
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
   ok(browsed.length === 1 && browsed[0] === "https://example.com/page", "http link went to the system browser");
-  ok(opened.length === 4, "OpenLocalPath was not called for the http link");
+  ok(revealedPaths.length === 4 && opened.length === 0, "OpenLocalPath was not called for the http link");
 }
 
 // 9. Non-path text renders no anchors and no clicks.

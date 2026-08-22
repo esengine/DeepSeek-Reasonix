@@ -205,6 +205,7 @@ export const zh: Record<DictKey, string> = {
   "externalOpener.saveAs": "另存为…",
   "externalOpener.saved": "已保存到 {path}",
   "externalOpener.persistFailed": "已打开，但无法将 {name} 保存为默认：{error}",
+  "externalOpener.previewInSidebar": "在侧边栏预览",
 
   // 范围标签
   "scope.global": "范围：全局",

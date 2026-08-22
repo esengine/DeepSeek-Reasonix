@@ -2999,6 +2999,29 @@ export default function App() {
 
   const verificationRevealSequenceRef = useRef(0);
   const [verificationRevealRequest, setVerificationRevealRequest] = useState<WorkspaceVerificationRevealRequest | null>(null);
+  const revealPathSeqRef = useRef(0);
+  const [fileRevealRequest, setFileRevealRequest] = useState<{ id: number; path: string } | null>(null);
+  // Listen for local path clicks from chat markdown links — reveal the file
+  // in the workspace panel (sidebar preview).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent).detail;
+      if (typeof path !== "string" || !path) return;
+      revealPathSeqRef.current += 1;
+      setFileRevealRequest({ id: revealPathSeqRef.current, path });
+      openWorkspacePanel("files");
+    };
+    window.addEventListener("app:reveal-path", handler);
+    return () => window.removeEventListener("app:reveal-path", handler);
+  }, [openWorkspacePanel]);
+  // Clear the reveal request after the panel has processed it, so the next
+  // click on the same path re-triggers the reveal.
+  useEffect(() => {
+    if (!fileRevealRequest) return;
+    const id = setTimeout(() => setFileRevealRequest(null), 100);
+    return () => clearTimeout(id);
+  }, [fileRevealRequest]);
   const openTurnVerification = useCallback((summary: WireCompletionSummary) => {
     openRightDockMode("changed");
     verificationRevealSequenceRef.current += 1;
@@ -5330,6 +5353,7 @@ export default function App() {
                     qualityFloor={composerProfile.qualityFloor}
                     showViewTabs={false}
                     creationMode={sidebarCreation}
+                    revealPathRequest={fileRevealRequest}
                   />
                 </Suspense>
               )}
