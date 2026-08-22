@@ -17,6 +17,10 @@ let activeTabId = null;
 // WS onclose handler does not schedule a reconnect.
 let intentionalDisconnect = false;
 let reconnectAttempts = 0;
+// Set when the server rejected our token (auth_error or a 4000 close such as
+// "token rotated"). Retrying with the same stored token can only fail again,
+// so auto-reconnect stays off until the user connects with a fresh token.
+let authRejected = false;
 // Idle cleanup: tabs with no CDP activity for this long are detached (guide §9.3).
 const ATTACH_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 // Console messages and network requests cache per tab.
@@ -63,6 +67,7 @@ function connect(addr, token) {
 
   intentionalDisconnect = false;
   reconnectAttempts = 0;
+  authRejected = false;
   connectedAddr = addr;
   authToken = token;
 
@@ -105,9 +110,13 @@ function connect(addr, token) {
     detachDebugger();
     connectedAddr = '';
     authToken = '';
-    // Auto-reconnect with exponential backoff unless the user disconnected on
-    // purpose (guide §5.2). Reuse the stored addr/token when available.
-    if (!intentionalDisconnect) {
+    // A server-initiated 4000 close ("token rotated" / invalid token) means the
+    // stored token is stale; retrying it would only fail again, so stop
+    // auto-reconnect until the user reconnects with a fresh token.
+    if (event.code === 4000) {
+      authRejected = true;
+    }
+    if (!intentionalDisconnect && !authRejected) {
       scheduleReconnect();
     }
   };
@@ -175,6 +184,7 @@ function handleMessage(msg) {
       break;
 
     case 'auth_error':
+      authRejected = true;
       broadcastState({ status: 'error', error: 'Authentication failed: ' + (msg.error || 'invalid token') });
       ws.close();
       break;

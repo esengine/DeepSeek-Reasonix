@@ -1508,7 +1508,15 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "relay" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
+
+// RelayTabInfo mirrors the browser-relay extension's attached-tab entry.
+export type RelayTabInfo = {
+  tabId: number;
+  url: string;
+  title: string;
+  active: boolean;
+};
 
 // ── Remote SSH module (mirrors desktop/remote_app.go view structs) ──
 

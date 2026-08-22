@@ -24,9 +24,13 @@ import (
 )
 
 // DefaultListenAddr is the default listen address. The desktop sets it to
-// 127.0.0.1:23001 for a fixed port; the library default of :0 uses a random
+// 127.0.0.1:23002 for a fixed port; the library default of :0 uses a random
 // port for test isolation.
 var DefaultListenAddr = "127.0.0.1:0"
+
+// authGrace is how long an unauthenticated WebSocket connection may hold the
+// single extension slot before being dropped (CSWSH placeholder protection).
+const authGrace = 10 * time.Second
 
 // State describes the relay connection state.
 type State int
@@ -62,6 +66,7 @@ type Status struct {
 // Server is a local WebSocket bridge for browser extension relay.
 type Server struct {
 	mu       sync.Mutex
+	writeMu  sync.Mutex // serializes WebSocket writes (gorilla requires one writer)
 	ln       net.Listener
 	token    string
 	addr     string
@@ -260,6 +265,37 @@ func (s *Server) Token() string {
 	return s.token
 }
 
+// RotateToken generates a new auth token, persists it, and drops any active
+// connection — a rotated token invalidates the extension's current session.
+func (s *Server) RotateToken() (string, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := persistToken(tokenFilePath(), token); err != nil {
+		return "", err
+	}
+
+	s.mu.Lock()
+	s.token = token
+	conn := s.conn
+	s.conn = nil
+	s.state = StateDisconnected
+	s.extInfo = ""
+	for id, ch := range s.pending {
+		ch <- &cdpResponse{Error: "token rotated"}
+		delete(s.pending, id)
+	}
+	s.mu.Unlock()
+
+	if conn != nil {
+		s.sendClose(conn, 4000, "token rotated")
+		conn.Close()
+	}
+	slog.Info("browserrelay: token rotated")
+	return token, nil
+}
+
 // Addr returns the listening address.
 func (s *Server) Addr() string {
 	s.mu.Lock()
@@ -319,6 +355,23 @@ func (s *Server) sendCommand(ctx context.Context, msgType, method string, params
 }
 
 // sendMessage sends a pre-built message and waits for the response.
+// sendJSON writes a message to the extension connection. Writes are
+// serialized because gorilla/websocket allows only one concurrent writer;
+// command replies, auth responses and the token-rotation close can otherwise
+// race on the same connection.
+func (s *Server) sendJSON(conn *websocket.Conn, msg any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return conn.WriteJSON(msg)
+}
+
+// sendClose writes a control close frame, serialized like sendJSON.
+func (s *Server) sendClose(conn *websocket.Conn, code int, text string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, text))
+}
+
 func (s *Server) sendMessage(ctx context.Context, msg *message) (json.RawMessage, error) {
 	s.mu.Lock()
 	if s.state != StateAuthorized || s.conn == nil {
@@ -334,7 +387,7 @@ func (s *Server) sendMessage(ctx context.Context, msg *message) (json.RawMessage
 	s.mu.Unlock()
 
 	// Send command to extension.
-	if err := conn.WriteJSON(msg); err != nil {
+	if err := s.sendJSON(conn, msg); err != nil {
 		s.handleDisconnect()
 		return nil, fmt.Errorf("send %s: %w", msg.Type, err)
 	}
@@ -371,13 +424,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Only one extension connection at a time.
 	if s.conn != nil {
 		s.mu.Unlock()
-		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4000, "already connected"))
+		s.sendClose(conn, 4000, "already connected")
 		conn.Close()
 		return
 	}
 	s.conn = conn
 	s.state = StateConnected
 	s.mu.Unlock()
+
+	// Require authentication within a grace period; otherwise the connection
+	// is dropped so a stray client cannot hold the single slot forever.
+	conn.SetReadDeadline(time.Now().Add(authGrace))
 
 	slog.Info("browserrelay: extension connected", "remote", conn.RemoteAddr())
 
@@ -412,14 +469,16 @@ func (s *Server) handleAuth(conn *websocket.Conn, msg message) {
 	if valid {
 		s.state = StateAuthorized
 		s.extInfo = msg.Info
+		// Authenticated: lift the auth grace deadline.
+		conn.SetReadDeadline(time.Time{})
 	}
 	s.mu.Unlock()
 
 	if valid {
-		conn.WriteJSON(message{Type: "auth_ok", Version: "1"})
+		s.sendJSON(conn, message{Type: "auth_ok", Version: "1"})
 		slog.Info("browserrelay: extension authorized", "info", msg.Info)
 	} else {
-		conn.WriteJSON(message{Type: "auth_error", Error: "invalid token"})
+		s.sendJSON(conn, message{Type: "auth_error", Error: "invalid token"})
 		slog.Warn("browserrelay: auth failed: invalid token")
 		conn.Close()
 	}
@@ -478,6 +537,17 @@ func tokenFilePath() string {
 	return filepath.Join(home, "browser-relay.json")
 }
 
+// persistToken atomically writes the token to its JSON file.
+func persistToken(path, token string) error {
+	os.MkdirAll(filepath.Dir(path), 0700)
+	payload, _ := json.Marshal(map[string]string{"token": token})
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // loadOrCreateToken loads a persisted token or generates a new one.
 func loadOrCreateToken() (string, error) {
 	path := tokenFilePath()
@@ -495,9 +565,9 @@ func loadOrCreateToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	os.MkdirAll(filepath.Dir(path), 0700)
-	payload, _ := json.Marshal(map[string]string{"token": token})
-	os.WriteFile(path, payload, 0600)
+	if err := persistToken(path, token); err != nil {
+		return "", err
+	}
 	return token, nil
 }
 

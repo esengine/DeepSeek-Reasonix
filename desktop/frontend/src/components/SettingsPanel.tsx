@@ -1,6 +1,7 @@
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
+import { ArrowRight, BrainCircuit, Cable, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, Download, ExternalLink, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelsTopLeft, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { writeClipboardText } from "../lib/clipboard";
 import { CHANNEL_ICONS } from "./channelIcons";
 import { botAccessEntryCount, botAccessReady, botConnectionCredentialSummary, botConnectionLabel, botConnectionScopeLabel, botConnectionSecretEnv, botConnectionSecretPatch, botInstallTargetForConnection, botInstallTargetMatchesConnection, botTargetHint, botTargetLabel, diagnosticMessage, diagnosticReportDetail, firstConnectionRemote, formatInstallTimeLeft, formatInstallUserCode, qqBotAdded, type BotInstallTarget, type BotOfficialInstallTarget } from "./botConnectionSettings";
 import { useDeferredClose } from "../lib/useMountTransition";
@@ -65,7 +66,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, RelayTabInfo, SettingsTab, SettingsView } from "../lib/types";
 import { AppearanceOverview } from "./AppearanceOverview";
 import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -347,6 +348,7 @@ export function SettingsPanel({
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "remote" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><RemoteHostsPage /></Suspense></SettingsPageShell>}
+                {tab === "relay" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><BrowserRelaySection /></SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage activeWorkspaceKey={activeWorkspaceKey} /></Suspense></SettingsPageShell>}
                 {tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
                   pendingSubagentCommandRef.current = command;
@@ -588,6 +590,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.mcp");
     case "remote":
       return t("settings.tab.remote");
+    case "relay":
+      return t("settings.tab.relay");
     case "skills":
       return t("settings.tab.skills");
     case "subagents":
@@ -629,6 +633,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("caps.connectorsTab");
     case "remote":
       return t("remote.tabHint");
+    case "relay":
+      return "";
     case "skills":
       return t("settings.tabSub.skills");
     case "subagents":
@@ -1645,21 +1651,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const [soundExpanded, setSoundExpanded] = useState(false);
-  const [relayStatus, setRelayStatus] = useState<{running:boolean;state:string;addr:string;token_prefix:string;extension_info:string} | null>(null);
-  const [relayToken, setRelayToken] = useState<string>('');
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => {
-      app.BrowserRelayStatus().then((status) => { if (!cancelled) setRelayStatus(status); }).catch(() => {});
-      app.BrowserRelayToken().then((token) => { if (!cancelled) setRelayToken(token); }).catch(() => {});
-    };
-    refresh();
-    const id = window.setInterval(refresh, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
@@ -1909,28 +1900,179 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
         />
       </SettingsField>
     </SettingsSection>
-    {relayStatus && (
-      <SettingsSection title="Browser Relay" description="Connect Reasonix to your browser via the Chrome extension">
-        <SettingsField label="Status" icon={<span style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:relayStatus.state==='authorized'?'#2e7d32':relayStatus.state==='connected'?'#1565c0':'#999'}} />}>
-          <span style={{fontSize:13,fontWeight:500}}>{relayStatus.state}</span>
+    </>
+  );
+}
+
+// Browser Relay settings page: live connection status, auth token and the
+// tabs currently attached via the Chrome extension.
+function BrowserRelaySection() {
+  const t = useT();
+  const [status, setStatus] = useState<{ running: boolean; state: string; addr: string; token_prefix: string; extension_info: string } | null>(null);
+  const [token, setToken] = useState<string>("");
+  const [tabs, setTabs] = useState<RelayTabInfo[]>([]);
+  const [extPath, setExtPath] = useState<string>("");
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [rotating, setRotating] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      app.BrowserRelayStatus().then((st) => { if (!cancelled) setStatus(st); }).catch(() => {});
+      app.BrowserRelayToken().then((tk) => { if (!cancelled) setToken(tk); }).catch(() => {});
+      app.BrowserRelayAttachedTabs().then((ts) => { if (!cancelled) setTabs(ts ?? []); }).catch(() => {});
+    };
+    refresh();
+    const id = window.setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    app.BrowserRelayExtensionPath().then((p) => { if (!cancelled) setExtPath(p); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const connected = status?.state === "connected" || status?.state === "authorized";
+  const stateColor = connected ? "#16a34a" : status?.state === "error" ? "#dc2626" : "#999";
+  const stateText = connected
+    ? t("settings.relay.stateConnected")
+    : status?.state === "error"
+      ? t("settings.relay.stateError")
+      : t("settings.relay.stateDisconnected");
+
+  // Visually masked token: full value is still copied by the button.
+  const maskedToken = token
+    ? token.length > 12
+      ? `${token.slice(0, 8)}…${token.slice(-4)}`
+      : token
+    : status?.token_prefix ?? "";
+
+  const copyToClipboard = (text: string, setter: (v: boolean) => void) => {
+    void writeClipboardText(text).then((ok) => {
+      if (!ok) return;
+      setter(true);
+      setTimeout(() => setter(false), 1500);
+    });
+  };
+
+  const regenerate = () => {
+    if (!window.confirm(t("settings.relay.regenerateConfirm"))) return;
+    setRotating(true);
+    app.BrowserRelayRotateToken()
+      .then((tk) => { if (tk) setToken(tk); })
+      .catch(() => {})
+      .finally(() => setRotating(false));
+  };
+
+  const sectionTitle = (icon: ReactNode, text: string) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {icon}
+      {text}
+    </span>
+  );
+
+  return (
+    <>
+      <SettingsSection title={sectionTitle(<Cable size={15} strokeWidth={1.8} />, t("settings.relay.connection"))} description={t("settings.relay.connectionDesc")}>
+        <SettingsField label={t("settings.relay.status")}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500 }}>
+            {stateText}
+            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: stateColor }} />
+          </span>
         </SettingsField>
-        {relayStatus.addr && (
-          <SettingsField label="Address">
-            <code style={{fontSize:12,userSelect:'all'}}>{relayStatus.addr}</code>
+        {status?.addr && (
+          <SettingsField label={t("settings.relay.address")}>
+            <code style={{ fontSize: 12, userSelect: "all" }}>{status.addr}</code>
           </SettingsField>
         )}
-        <SettingsField label="Token">
-          <div style={{display:'flex',gap:6,alignItems:'center'}}>
-            <code style={{fontSize:12,userSelect:'all',wordBreak:'break-all'}}>{relayToken || relayStatus.token_prefix}</code>
-            <button className="chip chip--icon" type="button" title="Copy token" onClick={() => {
-              navigator.clipboard.writeText(relayToken);
-            }}>
-              <Clipboard size={14} />
+      </SettingsSection>
+
+      <SettingsSection title={sectionTitle(<KeyRound size={15} strokeWidth={1.8} />, t("settings.relay.token"))} description={t("settings.relay.tokenDesc")}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            className="mem-input"
+            type="text"
+            readOnly
+            value={maskedToken}
+            style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 12, userSelect: "all" }}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <button className="chip" type="button" title={t("settings.relay.copyToken")} onClick={() => copyToClipboard(token, setCopiedToken)}>
+            {copiedToken ? <Check size={14} /> : <Clipboard size={14} />}
+            {t("settings.relay.copyToken")}
+          </button>
+          <button className="chip" type="button" title={t("settings.relay.regenerate")} onClick={regenerate} disabled={rotating}>
+            <RefreshCw size={14} />
+            {t("settings.relay.regenerate")}
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={sectionTitle(<PanelsTopLeft size={15} strokeWidth={1.8} />, t("settings.relay.attachedTabs"))} description={t("settings.relay.attachedTabsDesc")}>
+        {tabs.length === 0 ? (
+          <div className="empty">{t("settings.relay.noTabs")}</div>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {tabs.map((tab) => (
+              <span
+                key={tab.tabId}
+                title={tab.title || tab.url}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  maxWidth: 280,
+                  padding: "3px 10px",
+                  borderRadius: 999,
+                  background: "var(--accent-soft)",
+                  color: "var(--accent)",
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                #{tab.tabId} {tab.title || tab.url || "—"}
+              </span>
+            ))}
+          </div>
+        )}
+      </SettingsSection>
+
+      <SettingsSection title={sectionTitle(<Download size={15} strokeWidth={1.8} />, t("settings.relay.manualInstall"))} description={t("settings.relay.manualInstallDesc")}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{t("settings.relay.extensionPath")}</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              className="mem-input"
+              type="text"
+              readOnly
+              value={extPath || t("settings.relay.extPathUnavailable")}
+              style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 12, userSelect: "all" }}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <button className="chip chip--icon" type="button" title={t("settings.relay.copyPath")} aria-label={t("settings.relay.copyPath")} disabled={!extPath} onClick={() => copyToClipboard(extPath, setCopiedPath)}>
+              {copiedPath ? <Check size={14} /> : <Clipboard size={14} />}
             </button>
           </div>
-        </SettingsField>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 600, paddingTop: 4 }}>
+          {t("settings.relay.steps")}
+        </div>
+        <ol style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.7, color: "var(--text-muted)" }}>
+          <li>{t("settings.relay.step1")}</li>
+          <li>{t("settings.relay.step2")}</li>
+          <li>{t("settings.relay.step3")}</li>
+          <li>{t("settings.relay.step4")}</li>
+          <li>{t("settings.relay.step5")}</li>
+        </ol>
       </SettingsSection>
-    )}
     </>
   );
 }

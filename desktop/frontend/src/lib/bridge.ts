@@ -129,6 +129,7 @@ import type {
   GitCommitDetailView,
   WorkspaceView,
   SessionClearResult,
+  RelayTabInfo,
 } from "./types";
 
 export interface DesktopShellStatusView {
@@ -192,6 +193,9 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   BrowserRelayStatus(): Promise<{ running: boolean; state: string; addr: string; token_prefix: string; extension_info: string }>;
   BrowserRelayAddr(): Promise<string>;
   BrowserRelayToken(): Promise<string>;
+  BrowserRelayAttachedTabs(): Promise<RelayTabInfo[]>;
+  BrowserRelayRotateToken(): Promise<string>;
+  BrowserRelayExtensionPath(): Promise<string>;
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitToTabWithID(tabID: string, input: string, submissionID: string): Promise<void>;
@@ -4993,6 +4997,9 @@ function makeMockApp(): AppBindings {
     async BrowserRelayStatus() { return { running: false, state: 'disconnected', addr: '', token_prefix: '', extension_info: '' }; },
     async BrowserRelayAddr() { return ''; },
     async BrowserRelayToken() { return ''; },
+    async BrowserRelayAttachedTabs() { return []; },
+    async BrowserRelayRotateToken() { return ''; },
+    async BrowserRelayExtensionPath() { return ''; },
     async ListTasks() { return []; },
     async CurrentTaskSessionID() { return ""; },
     async ListTasksForSession() { return []; },

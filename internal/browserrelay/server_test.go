@@ -4,12 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// TestMain isolates the persisted token file for every test: without this,
+// Start() writes the real ~/.reasonix/browser-relay.json on the dev machine.
+func TestMain(m *testing.M) {
+	tmp, err := os.MkdirTemp("", "browserrelay-test-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(tmp)
+	os.Setenv("REASONIX_HOME", tmp)
+	code := m.Run()
+	os.Unsetenv("REASONIX_HOME")
+	os.Exit(code)
+}
 
 func TestNewServer(t *testing.T) {
 	s := NewServer()
@@ -161,6 +176,89 @@ func TestExtensionAuth(t *testing.T) {
 	}
 	if status.ExtensionInfo != "test-extension-v1" {
 		t.Fatalf("extension info = %q, want test-extension-v1", status.ExtensionInfo)
+	}
+}
+
+// TestRotateToken verifies token rotation: a new token is persisted to disk,
+// the old session is dropped, and the previous token no longer authorizes.
+func TestRotateToken(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir()) // isolate the persisted token file
+
+	s := NewServer()
+	ctx := context.Background()
+	addr, err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	defer s.Stop()
+
+	old := s.Token()
+	if old == "" {
+		t.Fatal("token empty after start")
+	}
+
+	// Connect and authorize like an extension would.
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	writeMsg(t, conn, message{Type: "auth", Token: old, Info: "test-extension-v1"})
+	var authResp message
+	if err := conn.ReadJSON(&authResp); err != nil {
+		t.Fatalf("read auth response: %v", err)
+	}
+	if authResp.Type != "auth_ok" {
+		t.Fatalf("response type = %q, want auth_ok", authResp.Type)
+	}
+
+	// Rotate the token.
+	rotated, err := s.RotateToken()
+	if err != nil {
+		t.Fatalf("RotateToken() failed: %v", err)
+	}
+	if rotated == "" || rotated == old {
+		t.Fatalf("rotated token = %q, want non-empty and different from %q", rotated, old)
+	}
+	if s.Token() != rotated {
+		t.Fatalf("server token = %q, want %q", s.Token(), rotated)
+	}
+
+	// The old connection must have been dropped and state reset.
+	if st := s.Status(); st.State != "disconnected" {
+		t.Fatalf("state = %q, want disconnected after rotation", st.State)
+	}
+
+	// The persisted file must contain the new token.
+	data, err := os.ReadFile(tokenFilePath())
+	if err != nil {
+		t.Fatalf("read token file: %v", err)
+	}
+	var stored struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatalf("parse token file: %v", err)
+	}
+	if stored.Token != rotated {
+		t.Fatalf("persisted token = %q, want %q", stored.Token, rotated)
+	}
+
+	// A fresh connection using the old token must be rejected.
+	conn2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("re-dial failed: %v", err)
+	}
+	defer conn2.Close()
+
+	writeMsg(t, conn2, message{Type: "auth", Token: old})
+	if err := conn2.ReadJSON(&authResp); err != nil {
+		t.Fatalf("read auth response: %v", err)
+	}
+	if authResp.Type != "auth_error" {
+		t.Fatalf("response type = %q, want auth_error", authResp.Type)
 	}
 }
 
