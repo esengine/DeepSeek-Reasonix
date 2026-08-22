@@ -46,6 +46,14 @@ const UNC_RE = new RegExp(
   String.raw`\\(?!\\)[^\s\\<>"|?*:：${SENT_PUNCT}]+\\${PATH_CHAR}+`,
   "g",
 );
+// Unix absolute paths: /etc/hosts, /Users/douba/project/file.go
+const UNIX_ABS_RE = new RegExp(String.raw`/[^\s<>"|?*${SENT_PUNCT}]+/${PATH_CHAR}+`, "g");
+// Home-relative paths: ~/project/config.json
+const HOME_REL_RE = new RegExp(String.raw`~/[^\s<>"|?*${SENT_PUNCT}]+/${PATH_CHAR}+`, "g");
+// Explicit relative paths: ./src/main.go, ../shared/utils.go
+const DOT_REL_RE = new RegExp(String.raw`\.\.?/[^\s<>"|?*${SENT_PUNCT}]+/${PATH_CHAR}*`, "g");
+// Simple relative paths with at least 2 separators: a/b/c, internal/control/controller.go
+const SIMPLE_REL_RE = new RegExp(String.raw`[a-zA-Z_][^\s<>"|?*:：${SENT_PUNCT}]*/${PATH_CHAR}+/${PATH_CHAR}+`, "g");
 
 const DRIVE_PREFIX_RE = /[:/A-Za-z]/;
 const UNC_PREFIX_RE = /[\\/\w:；：，。、！？（）]/;
@@ -54,7 +62,7 @@ const UNC_PREFIX_RE = /[\\/\w:；：，。、！？（）]/;
 // clickable suffix that was never a local path.
 const FILE_PREFIX_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./\\:+-?#&=";
 
-function hasValidPrefixBoundary(text: string, start: number, kind: "file" | "drive" | "unc"): boolean {
+function hasValidPrefixBoundary(text: string, start: number, kind: "file" | "drive" | "unc" | "unix" | "home" | "dotrel" | "simplerel"): boolean {
   if (start === 0) return true;
   const previous = text[start - 1];
   if (kind === "file") return !FILE_PREFIX_CHARS.includes(previous);
@@ -92,11 +100,15 @@ export interface LocalPathSegment {
  * Pure function — unit tests cover the full recognition matrix here.
  */
 export function linkifyLocalPaths(text: string): LocalPathSegment[] {
-  const matches: Array<{ start: number; end: number; raw: string; kind: "file" | "drive" | "unc" }> = [];
-  const patterns: Array<[RegExp, "file" | "drive" | "unc"]> = [
+  const matches: Array<{ start: number; end: number; raw: string; kind: "file" | "drive" | "unc" | "unix" | "home" | "dotrel" | "simplerel" }> = [];
+  const patterns: Array<[RegExp, "file" | "drive" | "unc" | "unix" | "home" | "dotrel" | "simplerel"]> = [
     [FILE_RE, "file"],
     [DRIVE_RE, "drive"],
     [UNC_RE, "unc"],
+    [UNIX_ABS_RE, "unix"],
+    [HOME_REL_RE, "home"],
+    [DOT_REL_RE, "dotrel"],
+    [SIMPLE_REL_RE, "simplerel"],
   ];
   for (const [re, kind] of patterns) {
     re.lastIndex = 0;

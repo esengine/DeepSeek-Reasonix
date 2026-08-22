@@ -274,7 +274,6 @@ function LocalPathMarkdownLink({
           refreshOpeners();
         }}
       >
-        <ExternalLink aria-hidden="true" size={13} strokeWidth={2} />
         <span className="md-rich-link__label">{children}</span>
       </a>
       <ContextMenu
