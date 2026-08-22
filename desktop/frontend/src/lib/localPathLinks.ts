@@ -177,7 +177,17 @@ export function localPathHref(path: string): string {
       // Malformed escapes: keep the literal text rather than failing.
     }
   }
-  return "file:///" + encodeURI(path.replace(/\\/g, "/")).replace(/#/g, "%23");
+  // Relative paths (no leading /, not a Windows drive letter) must be
+  // distinguishable from Unix absolute paths so the click handler can resolve
+  // them relative to the workspace root. Prefix with %2E%2F (URL-encoded ./).
+  const normalized = path.replace(/\\/g, "/");
+  const isRelative = !normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized);
+  if (isRelative) {
+    return "file:///%2E%2F/" + encodeURI(normalized).replace(/#/g, "%23");
+  }
+  // Unix absolute paths: strip leading / because file:/// already provides it.
+  const prefix = normalized.startsWith("/") ? "file://" : "file:///";
+  return prefix + encodeURI(normalized).replace(/#/g, "%23");
 }
 
 /**

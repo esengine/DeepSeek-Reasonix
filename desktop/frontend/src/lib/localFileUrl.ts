@@ -45,6 +45,11 @@ export function localPathFromHref(href?: string): string | null {
     if (url.hostname === "." || url.hostname === "?") return null;
 
     let path = decodeURIComponent(url.pathname);
+    // file:///%2E%2F/path — relative path reference (distinguishable from
+    // Unix absolute paths like file:///etc/hosts). Return the path as-is.
+    if (url.pathname.startsWith("/%2E%2F/")) {
+      return decodeURIComponent(url.pathname.slice("/%2E%2F/".length));
+    }
     if (url.hostname) path = `//${url.hostname}${path}`;
 
     // file:///D:/... has a URL root slash that is not part of the Windows
