@@ -1494,6 +1494,55 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderOmitsToolsForUnsupportedModel(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	supportsTools := false
+	cfg := &config.Config{Providers: []config.ProviderEntry{{
+		Name:    "ollama",
+		Kind:    "openai",
+		BaseURL: srv.URL,
+		Models:  []string{"qwen2.5vl:7b"},
+		ModelOverrides: map[string]config.ProviderModelOverride{
+			"qwen2.5vl:7b": {SupportsTools: &supportsTools},
+		},
+	}}}
+	entry, ok := cfg.ResolveModel("ollama/qwen2.5vl:7b")
+	if !ok {
+		t.Fatal("ResolveModel failed")
+	}
+	p, err := NewProvider(entry)
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "describe"}},
+		Tools: []provider.ToolSchema{{
+			Name:       "read_file",
+			Parameters: json.RawMessage(`{"type":"object"}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if _, exists := gotReq["tools"]; exists {
+		t.Fatalf("unsupported model request included tools: %+v", gotReq)
+	}
+}
+
 func TestNewProviderPreservesExplicitlySupportedKimiK3Efforts(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

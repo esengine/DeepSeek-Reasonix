@@ -884,6 +884,7 @@ func TestEffectiveVisionUsesPerModelVisionList(t *testing.T) {
 
 func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	visionOff := false
+	supportsToolsOff := false
 	c := &Config{Providers: []ProviderEntry{{
 		Name:              "gateway",
 		Kind:              "openai",
@@ -900,6 +901,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 				SupportedEfforts:  []string{"high", "max"},
 				DefaultEffort:     "max",
 				Vision:            &visionOff,
+				SupportsTools:     &supportsToolsOff,
 				ContextWindow:     1_000_000,
 				MaxOutputTokens:   32_768,
 			},
@@ -920,6 +922,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	if EffectiveVision(deepseek) {
 		t.Fatalf("vision override false should disable image input")
 	}
+	if EffectiveSupportsTools(deepseek) {
+		t.Fatalf("supports_tools override false should disable tool schemas")
+	}
 	if deepseek.ContextWindow != 1_000_000 {
 		t.Fatalf("deepseek context window = %d, want per-model override", deepseek.ContextWindow)
 	}
@@ -939,6 +944,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	}
 	if plain.MaxOutputTokens != 8_192 {
 		t.Fatalf("plain max output tokens = %d, want inherited provider value", plain.MaxOutputTokens)
+	}
+	if !EffectiveSupportsTools(plain) {
+		t.Fatal("models without an override should keep tools enabled")
 	}
 }
 

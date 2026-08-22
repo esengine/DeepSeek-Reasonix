@@ -1454,6 +1454,7 @@ type ProviderEntry struct {
 	// base_url/key.
 	ModelOverrides map[string]ProviderModelOverride `toml:"model_overrides"`
 	visionOverride *bool
+	toolsOverride  *bool
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
@@ -1467,6 +1468,10 @@ type ProviderModelOverride struct {
 	SupportedEfforts  []string `toml:"supported_efforts"`
 	DefaultEffort     string   `toml:"default_effort"`
 	Vision            *bool    `toml:"vision"`
+	// SupportsTools overrides whether this model accepts the tools schema.
+	// Nil inherits the provider default, while false supports models such as
+	// local vision checkpoints that reject OpenAI tool definitions.
+	SupportsTools *bool `toml:"supports_tools"`
 	// ContextWindow overrides the provider-wide context budget for this model.
 	// Zero inherits ProviderEntry.ContextWindow so existing configurations keep
 	// their current compaction behavior.
@@ -1614,6 +1619,9 @@ func (e *ProviderEntry) applyModelOverride() {
 	if ov.Vision != nil {
 		e.visionOverride = ov.Vision
 	}
+	if ov.SupportsTools != nil {
+		e.toolsOverride = ov.SupportsTools
+	}
 	if ov.ContextWindow > 0 {
 		e.ContextWindow = ov.ContextWindow
 	}
@@ -1636,6 +1644,12 @@ func (e *ProviderEntry) modelOverrideForModel(model string) (ProviderModelOverri
 		}
 	}
 	return ProviderModelOverride{}, false
+}
+
+// EffectiveSupportsTools reports whether the selected model accepts the
+// provider's tool schema. Existing configurations keep tools enabled.
+func EffectiveSupportsTools(e *ProviderEntry) bool {
+	return e == nil || e.toolsOverride == nil || *e.toolsOverride
 }
 
 func clonePricing(p *provider.Pricing) *provider.Pricing {

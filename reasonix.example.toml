@@ -88,6 +88,8 @@ effort      = "high"
 # A single-model provider still works (use `model = "..."`) — pick this form when
 # a model needs its own base_url. Use model_overrides when models share an endpoint
 # but need distinct context windows or capability settings.
+# Models that reject OpenAI tool definitions can disable them per model:
+# model_overrides = { "qwen2.5vl:7b" = { supports_tools = false } }
 
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"

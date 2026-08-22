@@ -2537,6 +2537,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"auth_header":        e.AuthHeader,
 			"proxy_spec":         proxy,
 			"vision":             config.EffectiveVision(e),
+			"supports_tools":     config.EffectiveSupportsTools(e),
 			"vision_detail":      e.VisionDetail,
 			"web_search":         config.EffectiveWebSearch(e),
 			"mode":               e.ResponsesMode,

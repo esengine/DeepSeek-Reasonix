@@ -89,6 +89,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
 	vision, _ := cfg.Extra["vision"].(bool)
+	disableTools := false
+	if configured, ok := cfg.Extra["supports_tools"].(bool); ok {
+		disableTools = !configured
+	}
 	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
 	// Official DeepSeek image input is pinned to one SKU. Ignore Extra["vision"]
 	// so stale config or extension metadata cannot send image_url to Flash/Pro.
@@ -248,6 +252,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		mimo:            IsMiMo(cfg.BaseURL),
 		thinkingType:    thinkingType,
 		vision:          vision,
+		disableTools:    disableTools,
 		visionDetail:    visionDetail,
 		maxOutputTokens: maxOutputTokens,
 		effort:          effort,
@@ -288,6 +293,7 @@ type client struct {
 	thinkingType    string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision          bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail    string        // image_url detail hint (low|high); "" = auto/omit
+	disableTools    bool          // explicit model capability override
 	maxOutputTokens int           // resolved total output budget; <=0 omits the optional field
 	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	requestEfforts  []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
@@ -460,6 +466,9 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if c.disableTools {
+		req.Tools = nil
+	}
 	stream, err := c.openStream(ctx, c.chatURL, c.buildRequest(req), req.Tools)
 	if err != nil {
 		return nil, err
@@ -669,6 +678,9 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 }
 
 func (c *client) buildRequest(req provider.Request) chatRequest {
+	if c.disableTools {
+		req.Tools = nil
+	}
 	// Repair tool-call pairing before sending: an interrupted/resumed history can
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
 	// rejects with a 400 ("must be followed by tool messages …").
