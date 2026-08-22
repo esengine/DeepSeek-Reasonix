@@ -597,6 +597,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
 	sysPrompt = appendCorePolicies(sysPrompt)
+	sysPrompt = appendModelIdentity(sysPrompt, entry)
 	if workspaceLine := currentWorkspacePromptLine(root); workspaceLine != "" {
 		sysPrompt += "\n\n" + workspaceLine
 	}
