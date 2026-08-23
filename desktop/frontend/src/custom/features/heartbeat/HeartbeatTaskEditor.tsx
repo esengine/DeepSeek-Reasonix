@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Check, ChevronsUpDown, CirclePause, Play, Trash2, X } from "lucide-react";
 import { Tooltip } from "../../../components/Tooltip";
 import { app } from "../../../lib/bridge";
-import type { WorkspaceView } from "../../../lib/types";
+import type { ModelInfo, WorkspaceView } from "../../../lib/types";
 import { CycleEditor } from "./HeartbeatCycleEditor";
 import { CirclePlaySolid, mergeEngineRunState } from "./HeartbeatShared";
 import { useHeartbeatT } from "./heartbeat.i18n";
@@ -34,15 +34,22 @@ export function TaskEditor({
   const t = useHeartbeatT();
   const titleRef = useRef<HTMLInputElement>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceView[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [projectOpen, setProjectOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [frequencyError, setFrequencyError] = useState(false);
   const projectRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     app.ListWorkspaces().then((list) => setWorkspaces(list ?? [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    app.Models().then((list) => setModels(list ?? [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -55,6 +62,17 @@ export function TaskEditor({
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [projectOpen]);
+
+  useEffect(() => {
+    if (!modelOpen) return;
+    const close = (e: MouseEvent) => {
+      if (modelRef.current && !modelRef.current.contains(e.target as Node)) {
+        setModelOpen(false);
+      }
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [modelOpen]);
 
   const [draft, setDraft] = useState(task);
   const initialTaskRef = useRef(task);
@@ -80,7 +98,8 @@ export function TaskEditor({
     || draft.scope !== initialTaskRef.current.scope
     || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
     || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
-    || draft.timeWindowEnd !== initialTaskRef.current.timeWindowEnd;
+    || draft.timeWindowEnd !== initialTaskRef.current.timeWindowEnd
+    || draft.model !== initialTaskRef.current.model;
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
@@ -317,6 +336,52 @@ export function TaskEditor({
           placeholder={t("heartbeat.promptPlaceholder")}
           rows={5}
         />
+      </div>
+
+      {/* Model（可选）：任务执行时切换到指定模型；留空使用当前模型 */}
+      <div className="heartbeat-editor__field">
+        <label>{t("heartbeat.fieldModel")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
+        <div className="heartbeat-scope-wrap" ref={modelRef}>
+          <button
+            className="heartbeat-scope-select heartbeat-model-select"
+            onClick={() => setModelOpen((v) => !v)}
+          >
+            <span>{draft.model || t("heartbeat.modelDefault")}</span>
+            <ChevronsUpDown size={12} />
+          </button>
+          {modelOpen && (
+            <div className="heartbeat-project-menu heartbeat-model-menu">
+              <button
+                className={`heartbeat-project-menu__item${!draft.model ? " heartbeat-project-menu__item--active" : ""}`}
+                onClick={() => {
+                  setDraft((prev) => ({ ...prev, model: undefined }));
+                  setModelOpen(false);
+                }}
+              >
+                {t("heartbeat.modelDefault")}
+                {!draft.model && <Check size={12} className="heartbeat-filter-menu__check" />}
+              </button>
+              {models.length === 0 ? (
+                <div className="heartbeat-project-menu__empty">{t("heartbeat.modelNoModels")}</div>
+              ) : (
+                models.map((m) => (
+                  <button
+                    key={m.ref}
+                    className={`heartbeat-project-menu__item${draft.model === m.ref ? " heartbeat-project-menu__item--active" : ""}`}
+                    onClick={() => {
+                      setDraft((prev) => ({ ...prev, model: m.ref }));
+                      setModelOpen(false);
+                    }}
+                  >
+                    <span className="heartbeat-model-menu__ref">{m.ref}</span>
+                    {draft.model === m.ref && <Check size={12} className="heartbeat-filter-menu__check" />}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+        <span className="heartbeat-editor__mode-hint">{t("heartbeat.modelHint")}</span>
       </div>
 
       {/* Approval Mode（竖排） */}

@@ -1649,6 +1649,28 @@
   color: var(--fg-faint);
 }
 
+/* Model picker: long "provider/model" refs ellipsize in both the trigger and
+   the menu; the menu keeps the current-model tag and check on one line. */
+.heartbeat-model-select {
+  max-width: 240px;
+}
+.heartbeat-model-select > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.heartbeat-model-menu__ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: auto;
+  min-width: 0;
+}
+.heartbeat-model-menu .heartbeat-project-menu__item {
+  gap: 8px;
+}
+
 /* ── footer hint ──────────────────────────────────────────────── */
 
 

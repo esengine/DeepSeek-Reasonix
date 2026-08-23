@@ -72,6 +72,12 @@ Object.assign(window, {
         async HeartbeatTriggerNow() {},
         async HeartbeatGenerateID() { nextID += 1; return `draft-${nextID}`; },
         async ListWorkspaces() { return [{ name: "Project One", path: "/project-one", current: true }]; },
+        async Models() {
+          return [
+            { ref: "deepseek/deepseek-v4", provider: "deepseek", model: "deepseek-v4", current: true },
+            { ref: "17an/deepseek-v4-flash", provider: "17an", model: "deepseek-v4-flash", current: false },
+          ];
+        },
       },
     },
   },
@@ -210,6 +216,47 @@ await act(async () => {
 });
 ok(document.querySelector<HTMLInputElement>('[aria-label="Title"]')?.value === "Product update digest", "parent save conflict keeps the unsaved recommendation draft open");
 ok(document.querySelector('.heartbeat-editor__save-error')?.textContent?.includes("Your draft is still here") === true, "parent save conflict is reported instead of marking the draft clean");
+
+console.log("\nheartbeat editor model picker");
+
+let modelSubmitted: HeartbeatTask | null = null;
+await act(async () => {
+  renderEditor({ ...originalTask, id: "model-task" }, async (task) => { modelSubmitted = task; return true; }, "model");
+  await flush();
+  await flush();
+});
+const modelTrigger = document.querySelector<HTMLButtonElement>(".heartbeat-model-select");
+ok(modelTrigger != null, "model picker renders for an existing task");
+ok(modelTrigger?.textContent?.includes("Default model") === true, "empty model shows the default-model label");
+await act(async () => {
+  document.querySelector<HTMLButtonElement>(".heartbeat-model-select")?.click();
+  await flush();
+});
+const modelItems = Array.from(document.querySelectorAll(".heartbeat-model-menu .heartbeat-project-menu__item"));
+ok(modelItems.length === 3, "model menu lists the default entry plus configured models");
+await act(async () => {
+  Array.from(document.querySelectorAll(".heartbeat-model-menu .heartbeat-project-menu__item"))
+    .find((item) => item.textContent?.includes("17an/deepseek-v4-flash"))?.click();
+  await flush();
+});
+ok(button("Save") != null, "selecting a model marks the editor dirty");
+await act(async () => {
+  button("Save")?.click();
+  await flush();
+});
+ok(modelSubmitted?.model === "17an/deepseek-v4-flash", "save persists the selected model ref");
+await act(async () => {
+  renderEditor({ ...originalTask, id: "model-preset", model: "deepseek/deepseek-v4" }, async () => true, "model-preset");
+  await flush();
+  await flush();
+});
+ok(document.querySelector<HTMLButtonElement>(".heartbeat-model-select")?.textContent?.includes("deepseek/deepseek-v4") === true, "an existing model selection shows its ref in the trigger");
+await act(async () => {
+  document.querySelector<HTMLButtonElement>(".heartbeat-model-select")?.click();
+  await flush();
+});
+ok(Array.from(document.querySelectorAll(".heartbeat-model-menu .heartbeat-project-menu__item"))
+  .find((item) => item.textContent?.includes("deepseek/deepseek-v4")) != null, "the selected model stays listed in the menu");
 
 await act(async () => root.unmount());
 dom.window.close();

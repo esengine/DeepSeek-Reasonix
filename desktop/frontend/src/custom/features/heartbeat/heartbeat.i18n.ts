@@ -65,6 +65,10 @@ export const heartbeatFeatureEn = {
   "heartbeat.unitDay": "d",
   "heartbeat.viewFlat": "Flat list",
   "heartbeat.viewGrouped": "Group by project",
+  "heartbeat.fieldModel": "Model",
+  "heartbeat.modelDefault": "Default model",
+  "heartbeat.modelNoModels": "No models available",
+  "heartbeat.modelHint": "Optional model used to run this task. Empty keeps the topic's current model.",
 } as const;
 
 export type HeartbeatFeatureKey = keyof typeof heartbeatFeatureEn;
@@ -138,6 +142,10 @@ const heartbeatFeatureZh = {
   "heartbeat.unitDay": "天",
   "heartbeat.viewFlat": "纯列表",
   "heartbeat.viewGrouped": "按项目分组",
+  "heartbeat.fieldModel": "模型",
+  "heartbeat.modelDefault": "默认模型",
+  "heartbeat.modelNoModels": "暂无可用模型",
+  "heartbeat.modelHint": "可选：运行该任务时使用的模型。留空则使用话题当前模型。",
 } satisfies Record<HeartbeatFeatureKey, string>;
 
 const heartbeatFeatureZhTW = {
@@ -204,6 +212,10 @@ const heartbeatFeatureZhTW = {
   "heartbeat.unitDay": "天",
   "heartbeat.viewFlat": "純列表",
   "heartbeat.viewGrouped": "按專案分組",
+  "heartbeat.fieldModel": "模型",
+  "heartbeat.modelDefault": "預設模型",
+  "heartbeat.modelNoModels": "暫無可用模型",
+  "heartbeat.modelHint": "可選：執行此任務時使用的模型。留空則沿用話題目前的模型。",
 } satisfies Record<HeartbeatFeatureKey, string>;
 
 export const heartbeatFeatureKeys = Object.keys(heartbeatFeatureEn) as HeartbeatFeatureKey[];
