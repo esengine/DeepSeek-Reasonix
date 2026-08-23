@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { StateSnapshot, VirtuosoHandle } from "react-virtuoso";
 import { useTranscriptScrollArbiter, type TranscriptRecoveryTerminal } from "../lib/useTranscriptScrollArbiter";
+import { TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS } from "../lib/transcriptScrollArbiter";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import type { TranscriptScrollWriteRecord } from "../lib/transcriptScrollProbe";
 import type { TranscriptRow } from "../lib/transcriptRows";
@@ -752,6 +753,44 @@ await advanceClock(2_100);
 const nextGenerationResetBefore = integrity?.resetKey;
 await triggerWatchdogRebuild();
 check(integrity?.resetKey !== nextGenerationResetBefore, "a changed 10,000-row generation receives a fresh hard-reset budget");
+
+// ── #9208: the tail-settle loop is bounded. When virtualized bottom rows keep
+// the native distance just above the threshold (an extreme offsetTop/native
+// height mismatch) while the extent keeps growing, each real-growth re-aim can
+// only re-aim a bounded number of times before pausing, instead of flashing
+// forever. Once the height stops growing, re-aims stop entirely.
+await act(async () => arbiter?.reset());
+scrollExtent = 10_000;
+Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 100 });
+scrollElement.scrollTop = 9_850; // distance-from-bottom = 50 ⇒ off-bottom
+await act(async () => arbiter?.scrollToBottom());
+// The jump transaction's 240ms confirmation must elapse before the settle
+// re-arms; otherwise its pending timer busies the schedule lane.
+await advanceClock(300);
+const originalTailScrollTo = virtuosoHandle.scrollTo;
+virtuosoHandle.scrollTo = (() => {
+  scrollToCalls += 1;
+  // Never move: simulates a bottom the tail writer cannot physically reach.
+}) as typeof virtuosoHandle.scrollTo;
+const budgetStart = scrollToCalls;
+for (let i = 0; i < 6; i += 1) {
+  scrollExtent += 200; // real growth past the re-aim threshold, every iteration
+  scrollElement.scrollTop = scrollExtent - 100 - 50; // keep the viewport displaced
+  await act(async () => arbiter?.followGrowingTail());
+  await flushFrames();
+  await flushFrames();
+}
+const budgetSpent = scrollToCalls - budgetStart;
+check(budgetSpent <= TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS,
+  `a hyper-native-mismatched tail spends no more than the settle budget (${budgetSpent} writes)`);
+// Drain the remaining settle budget while the height is frozen, then confirm
+// no writes continue: the tail must not flash once it is physically unable to
+// reach the bottom.
+for (let i = 0; i < 14; i += 1) await flushFrames();
+const drained = scrollToCalls;
+for (let i = 0; i < 8; i += 1) await flushFrames();
+check(scrollToCalls === drained, "a hyper-variance tail drains its budget and goes quiet");
+virtuosoHandle.scrollTo = originalTailScrollTo;
 
 await act(async () => root.unmount());
 Date.now = originalDateNow;

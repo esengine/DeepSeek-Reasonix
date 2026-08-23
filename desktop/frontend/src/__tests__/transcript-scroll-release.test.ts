@@ -5,6 +5,10 @@ import {
   isSubstantialTranscriptDisplacement,
   isTranscriptContentShrink,
   reduceTranscriptScroll,
+  transcriptTailSettleBudgetExhausted,
+  transcriptTailShouldReaim,
+  TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS,
+  TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX,
   type TranscriptScrollEvent,
   type TranscriptScrollState,
 } from "../lib/transcriptScrollArbiter";
@@ -270,6 +274,23 @@ check(
   pinTranscriptTailAfterViewportShrink(foldScroller, { contentExtent: 500, viewportExtent: 100 }, false) === null,
   "manual reading suppresses viewport-shrink pinning",
 );
+
+// #9208 — the tail-settle loop needs a bounded re-aim budget so virtualized
+// bottom rows that keep re-measuring cannot loop the convergence rAF forever.
+check(transcriptTailSettleBudgetExhausted(0) === false, "tail settle may re-aim from zero attempts");
+check(transcriptTailSettleBudgetExhausted(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS - 1) === false, "tail settle keeps re-aiming before the budget is fully spent");
+check(transcriptTailSettleBudgetExhausted(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS) === true, "tail settle stops once the re-aim budget is exhausted");
+check(transcriptTailSettleBudgetExhausted(99) === true, "tail settle stops for any attempt count above the budget");
+check(TRANSCRIPT_TAIL_SETTLE_MAX_ATTEMPTS > 0, "the tail settle budget is positive");
+
+// #9208 — a settled tail only re-aims on real growth, not on the small
+// measurement jitter that virtualized rows emit while drawing in.
+check(transcriptTailShouldReaim(null, 1_000) === true, "a fresh settle with no recorded bottom always re-aims");
+check(transcriptTailShouldReaim(1_000, 1_000) === false, "zero height growth does not re-aim a pinned tail");
+check(transcriptTailShouldReaim(1_000, 1_000 + TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX - 1) === false, "sub-threshold re-measurement jitter does not re-aim");
+check(transcriptTailShouldReaim(1_000, 1_000 + TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX) === true, "threshold-height growth re-aims the pinned tail");
+check(transcriptTailShouldReaim(1_000, 1_000 + TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX + 1) === true, "supra-threshold growth re-aims the pinned tail");
+check(TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX > 0, "the re-aim threshold is positive");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

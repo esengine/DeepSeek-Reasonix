@@ -6,7 +6,11 @@ import {
   type TranscriptScrollDiagnosticSource,
   type TranscriptTailWriteDiagnostic,
 } from "./transcriptScrollDiagnosticProbe";
-import type { TranscriptScrollMode } from "./transcriptScrollArbiter";
+import {
+  type TranscriptScrollMode,
+  transcriptTailSettleBudgetExhausted,
+  transcriptTailShouldReaim,
+} from "./transcriptScrollArbiter";
 import { nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
 
 const TAIL_STAGNANT_FRAME_LIMIT = 2;
@@ -54,9 +58,13 @@ export function createTranscriptTailSettle({
     distance: number;
     stagnantFrames: number;
     offBottomFrames: number;
+    attempts: number;
   } | null = null;
   let jumpTailTimer: number | null = null;
   let layoutTransientIdleTimer: number | null = null;
+  // Native scrollHeight recorded when the tail was last fully pinned. Guards
+  // the settle loop from re-aiming on every small bottom re-measurement.
+  let lastBottomHeight: number | null = null;
 
   const scrollToTail = (
     behavior: "auto" | "smooth",
@@ -65,6 +73,7 @@ export function createTranscriptTailSettle({
     const element = scrollRef.current;
     if (!element) return;
     const top = element.scrollHeight;
+    lastBottomHeight = top;
     if (CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && diagnostic) {
       noteTranscriptScrollWrite({
         owner: "tail-follow",
@@ -91,6 +100,7 @@ export function createTranscriptTailSettle({
     if (tailSettleFrame !== null) cancelAnimationFrame(tailSettleFrame);
     tailSettleFrame = null;
     tailSettleProgress = null;
+    lastBottomHeight = null;
     if (jumpTailTimer !== null) window.clearTimeout(jumpTailTimer);
     jumpTailTimer = null;
     if (layoutTransientIdleTimer !== null) window.clearTimeout(layoutTransientIdleTimer);
@@ -146,6 +156,12 @@ export function createTranscriptTailSettle({
     }
     if (jumpTailTimer !== null) return;
     if (tailSettleFrame !== null) return;
+    // A layout event for bottom re-measurement (virtualized rows drawing in)
+    // does not need another settle if the tail is already pinned and the
+    // native height has barely grown — re-aiming here is the visible jitter.
+    if (!jump && !transcriptTailShouldReaim(lastBottomHeight, scrollElement.scrollHeight)) {
+      return;
+    }
     const generation = generationRef.current;
     const tick = () => {
       tailSettleFrame = null;
@@ -169,17 +185,26 @@ export function createTranscriptTailSettle({
       const previous = tailSettleProgress;
       const offBottomFrames = (previous?.offBottomFrames ?? 0) + 1;
       if (offBottomFrames < TAIL_CONFIRM_OFF_BOTTOM_FRAMES) {
-        tailSettleProgress = { distance, stagnantFrames: 0, offBottomFrames };
+        tailSettleProgress = { distance, stagnantFrames: 0, offBottomFrames, attempts: previous?.attempts ?? 0 };
         tailSettleFrame = requestAnimationFrame(tick);
+        return;
+      }
+      const attempts = (previous?.attempts ?? 0) + 1;
+      if (transcriptTailSettleBudgetExhausted(attempts)) {
+        // Virtualization can keep the native distance off the bottom without
+        // real growth (long/unmeasured rows near the tail). Stop re-aiming so
+        // the settle loop cannot flash forever; a later layout change retries fresh.
+        tailSettleProgress = null;
+        armLayoutTransientIdle();
         return;
       }
       const stagnantFrames = previous && Math.abs(previous.distance - distance) <= 0.5
         ? previous.stagnantFrames + 1
         : 0;
       scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && source
-        ? { source, phase: "settle", settle: { frame: offBottomFrames, offBottomFrames, stagnantFrames } }
+        ? { source, phase: "settle", settle: { frame: attempts, offBottomFrames, stagnantFrames } }
         : undefined);
-      tailSettleProgress = { distance, stagnantFrames, offBottomFrames };
+      tailSettleProgress = { distance, stagnantFrames, offBottomFrames, attempts };
       if (stagnantFrames < TAIL_STAGNANT_FRAME_LIMIT) tailSettleFrame = requestAnimationFrame(tick);
       else armLayoutTransientIdle();
     };
