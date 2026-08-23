@@ -829,6 +829,41 @@ func (a *App) HeartbeatGenerateID() string {
 	return string(b)
 }
 
+// PrecheckTestResult is the Wails contract for a manual precheck test run. It
+// mirrors the three-state gate outcome so the UI can show what a precheck
+// command would do without waiting for the next scheduled tick.
+type PrecheckTestResult struct {
+	Status  string `json:"status"`  // "passed" | "skipped" | "failed"
+	Summary string `json:"summary"` // human-readable outcome
+}
+
+// TestPrecheck runs a precheck command once, in the given workspace root, and
+// returns the resulting outcome. It is read-only (the gate itself does not
+// create topics or submit prompts), so it is safe to call from the UI.
+func (e *HeartbeatEngine) TestPrecheck(command, workspaceRoot string) PrecheckTestResult {
+	if strings.TrimSpace(command) == "" {
+		return PrecheckTestResult{Status: "failed", Summary: "empty precheck command"}
+	}
+	t := HeartbeatTask{Precheck: command, WorkspaceRoot: workspaceRoot, Title: "precheck test"}
+	outcome, summary := e.runPrecheck(t)
+	status := "failed"
+	switch outcome {
+	case precheckPass:
+		status = "passed"
+	case precheckSkip:
+		status = "skipped"
+	}
+	return PrecheckTestResult{Status: status, Summary: summary}
+}
+
+// HeartbeatTestPrecheck runs a precheck command once for the UI "test" button.
+func (a *App) HeartbeatTestPrecheck(precheckCommand, workspaceRoot string) PrecheckTestResult {
+	if a.heartbeat == nil {
+		return PrecheckTestResult{Status: "failed", Summary: "heartbeat engine not available"}
+	}
+	return a.heartbeat.TestPrecheck(precheckCommand, workspaceRoot)
+}
+
 // newBotForwarder builds event forwarding for a heartbeat turn. The caller
 // attaches it only after acquiring the tab's turn-admission gate.
 func (e *HeartbeatEngine) newBotForwarder(tabID string) event.Sink {

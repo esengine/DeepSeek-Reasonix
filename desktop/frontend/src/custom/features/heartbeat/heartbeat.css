@@ -1154,6 +1154,47 @@
   width: 100%;
 }
 
+.heartbeat-editor__precheck-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heartbeat-editor__precheck-test {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.heartbeat-editor__precheck-test:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.heartbeat-editor__precheck-result {
+  font-size: 12px;
+}
+
+.heartbeat-editor__precheck-result--passed {
+  color: var(--ok, #2e7d32);
+}
+
+.heartbeat-editor__precheck-result--skipped {
+  color: var(--warn, #b45309);
+}
+
+.heartbeat-editor__precheck-result--failed {
+  color: var(--danger, #b91c1c);
+}
+
 /* Precheck history list above run history */
 .heartbeat-precheck-history {
   display: flex;
