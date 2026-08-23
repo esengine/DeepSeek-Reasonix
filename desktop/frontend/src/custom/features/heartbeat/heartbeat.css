@@ -1139,6 +1139,44 @@
   box-sizing: border-box;
 }
 
+/* Precheck gate input: single-line command editor, monospace */
+.heartbeat-editor__precheck-input {
+  height: 32px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+/* Last-skipped notice above run history */
+.heartbeat-precheck-skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+}
+
+.heartbeat-precheck-skipped__title {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.heartbeat-precheck-skipped__reason {
+  font-size: 12px;
+  color: var(--fg-faint);
+  word-break: break-all;
+}
+
+
 .heartbeat-editor__input:focus,
 .heartbeat-editor__textarea:focus {
   outline: none;

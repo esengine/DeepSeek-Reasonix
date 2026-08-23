@@ -211,6 +211,23 @@ await act(async () => {
 ok(document.querySelector<HTMLInputElement>('[aria-label="Title"]')?.value === "Product update digest", "parent save conflict keeps the unsaved recommendation draft open");
 ok(document.querySelector('.heartbeat-editor__save-error')?.textContent?.includes("Your draft is still here") === true, "parent save conflict is reported instead of marking the draft clean");
 
+console.log("\nheartbeat editor precheck gate");
+
+await act(async () => {
+  renderEditor({
+    ...originalTask,
+    id: "precheck-task",
+    precheck: "node ~/.reasonix/hooks/precheck.js",
+    lastSkippedAt: 1700000000000,
+    lastSkippedReason: "exit status 1: ci not green",
+  }, async () => true, "precheck");
+  await flush();
+});
+const precheckInput = document.querySelector<HTMLInputElement>(".heartbeat-editor__precheck-input");
+ok(precheckInput?.value === "node ~/.reasonix/hooks/precheck.js", "precheck input shows the configured gate command");
+ok(document.querySelector(".heartbeat-precheck-skipped") != null, "skipped notice renders when lastSkippedAt is present");
+ok(document.querySelector(".heartbeat-precheck-skipped__reason")?.textContent?.includes("ci not green") === true, "skipped notice shows the recorded reason");
+
 await act(async () => root.unmount());
 dom.window.close();
 

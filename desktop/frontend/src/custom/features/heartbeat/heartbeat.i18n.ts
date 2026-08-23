@@ -64,6 +64,11 @@ export const heartbeatFeatureEn = {
   "heartbeat.suggestionsHint": "Create common automation tasks in one click",
   "heartbeat.unitDay": "d",
   "heartbeat.viewFlat": "Flat list",
+  "heartbeat.precheck": "Precheck",
+  "heartbeat.precheckHint": "Optional gate command run before each execution. The task is skipped when it exits non-zero (or times out), and retried on the next scheduled run.",
+  "heartbeat.precheckPlaceholder": "e.g. node ~/.reasonix/hooks/precheck.js",
+  "heartbeat.precheckSkippedAt": "Last run skipped by precheck",
+  "heartbeat.precheckSkippedReason": "Reason: {reason}",
   "heartbeat.viewGrouped": "Group by project",
 } as const;
 
@@ -137,6 +142,11 @@ const heartbeatFeatureZh = {
   "heartbeat.suggestionsHint": "一键创建常用自动化任务",
   "heartbeat.unitDay": "天",
   "heartbeat.viewFlat": "纯列表",
+  "heartbeat.precheck": "前置检查",
+  "heartbeat.precheckHint": "可选。每次执行前先运行此检查命令；退出码非 0（或超时）时本次跳过任务，下个周期自动重试。",
+  "heartbeat.precheckPlaceholder": "例如 node ~/.reasonix/hooks/precheck.js",
+  "heartbeat.precheckSkippedAt": "上次执行被前置检查跳过",
+  "heartbeat.precheckSkippedReason": "原因：{reason}",
   "heartbeat.viewGrouped": "按项目分组",
 } satisfies Record<HeartbeatFeatureKey, string>;
 
@@ -203,6 +213,11 @@ const heartbeatFeatureZhTW = {
   "heartbeat.suggestionsHint": "一鍵建立常用自動化任務",
   "heartbeat.unitDay": "天",
   "heartbeat.viewFlat": "純列表",
+  "heartbeat.precheck": "前置檢查",
+  "heartbeat.precheckHint": "可選。每次執行前先執行此檢查命令；退出碼非 0（或逾時）時本次略過任務，下個週期自動重試。",
+  "heartbeat.precheckPlaceholder": "例如 node ~/.reasonix/hooks/precheck.js",
+  "heartbeat.precheckSkippedAt": "上次執行被前置檢查略過",
+  "heartbeat.precheckSkippedReason": "原因：{reason}",
   "heartbeat.viewGrouped": "按專案分組",
 } satisfies Record<HeartbeatFeatureKey, string>;
 

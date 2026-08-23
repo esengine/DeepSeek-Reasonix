@@ -77,6 +77,7 @@ export function TaskEditor({
     || draft.approvalMode !== initialTaskRef.current.approvalMode
     || draft.newConversationEachRun !== initialTaskRef.current.newConversationEachRun
     || draft.notifyChannels !== initialTaskRef.current.notifyChannels
+    || draft.precheck !== initialTaskRef.current.precheck
     || draft.scope !== initialTaskRef.current.scope
     || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
     || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
@@ -376,6 +377,19 @@ export function TaskEditor({
           </span>
         </div>
 
+      {/* Precheck：可选的前置检查命令，通过后才执行任务 */}
+      <div className="heartbeat-editor__field">
+        <label>{t("heartbeat.precheck")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
+        <input
+          className="heartbeat-editor__precheck-input"
+          value={draft.precheck || ""}
+          onChange={(e) => set("precheck", e.target.value)}
+          placeholder={t("heartbeat.precheckPlaceholder")}
+          spellCheck={false}
+        />
+        <span className="heartbeat-editor__mode-hint">{t("heartbeat.precheckHint")}</span>
+      </div>
+
       {/* New conversation per run */}
       <div className="heartbeat-editor__field">
         <label>{t("heartbeat.fieldNewConversation")}</label>
@@ -520,6 +534,20 @@ export function TaskEditor({
           />
         )}
       </div>
+
+      {/* 上次被前置检查跳过：任务已配置 precheck 且最近一次被跳过时展示 */}
+      {task.lastSkippedAt ? (
+        <div className="heartbeat-precheck-skipped" role="status">
+          <span className="heartbeat-precheck-skipped__title">
+            {t("heartbeat.precheckSkippedAt")} · {formatRelativeTime(task.lastSkippedAt, Date.now(), t)}
+          </span>
+          {task.lastSkippedReason && (
+            <span className="heartbeat-precheck-skipped__reason">
+              {t("heartbeat.precheckSkippedReason", { reason: task.lastSkippedReason })}
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {/* 运行历史记录：每次成功执行的记录，点击可打开对应对话
           历史为空但有最近会话（task.topicId）时，用最近会话合成一条——旧任务

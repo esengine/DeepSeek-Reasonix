@@ -11,13 +11,17 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +30,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/filelock"
+	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
 )
 
@@ -45,10 +50,13 @@ type HeartbeatTask struct {
 	NewConversationEachRun bool           `json:"newConversationEachRun,omitempty"` // true = create new topic every run
 	RunHistory             []HeartbeatRun `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
 	CreatedAt              int64          `json:"createdAt,omitempty"`
-	ApprovalMode           string         `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
-	TimeWindowStart        string         `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
-	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
-	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
+	ApprovalMode           string         `json:"approvalMode"`                // "ask" | "auto" | "yolo"; empty defaults to "yolo"
+	TimeWindowStart        string         `json:"timeWindowStart,omitempty"`   // "HH:MM" — interval tasks only run after this time (inclusive)
+	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`     // "HH:MM" — interval tasks only run before this time (exclusive)
+	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`    // true = push to bot channels; nil/false = skip
+	Precheck               string         `json:"precheck,omitempty"`          // optional gate command; run before each execution, skip run on non-zero exit
+	LastSkippedAt          int64          `json:"lastSkippedAt,omitempty"`     // unix millis when the precheck gate last skipped a run
+	LastSkippedReason      string         `json:"lastSkippedReason,omitempty"` // why the last run was skipped (stderr/stdout, truncated)
 }
 
 // HeartbeatRun records a single successful execution of a heartbeat task.
@@ -393,6 +401,20 @@ func (e *HeartbeatEngine) resolveHeartbeatTopic(t HeartbeatTask, scope, workspac
 }
 
 func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
+	// Precheck gate: run the optional gate command before creating any topic
+	// or tab. A non-zero exit, timeout, or spawn error skips this run. LastRunAt
+	// still advances so a failing gate is re-evaluated on the next scheduled
+	// tick instead of hammering the command every 30s.
+	if t.Precheck != "" {
+		if ok, reason := e.runPrecheck(t); !ok {
+			now := time.Now().UnixMilli()
+			t.LastSkippedAt = now
+			t.LastSkippedReason = reason
+			t.LastRunAt = now
+			log.Printf("[heartbeat] task %q skipped by precheck: %s", t.Title, reason)
+			return t
+		}
+	}
 	title := "Heartbeat: " + t.Title
 	scope := t.Scope
 	workspaceRoot := t.WorkspaceRoot
@@ -491,6 +513,78 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 		t.RunHistory = t.RunHistory[len(t.RunHistory)-maxRunHistory:]
 	}
 	return t
+}
+
+// heartbeatPrecheckTimeout bounds a single precheck command run.
+const heartbeatPrecheckTimeout = 10 * time.Second
+
+// precheckPayload is the JSON written to the precheck command's stdin, shaped
+// like a hook payload so the same scripts can be reused for both.
+type precheckPayload struct {
+	Event         string `json:"event"`
+	Cwd           string `json:"cwd"`
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+	TaskID        string `json:"taskId"`
+	TaskTitle     string `json:"taskTitle"`
+}
+
+// runPrecheck executes a task's precheck command. It returns ok=false with a
+// reason when the gate fails (non-zero exit, timeout, or spawn error). The
+// command runs with the task's workspace root as cwd (the process cwd for
+// global tasks) and receives a JSON payload on stdin, mirroring hooks.
+func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatPrecheckTimeout)
+	defer cancel()
+	var shell, flag string
+	if runtime.GOOS == "windows" {
+		shell, flag = "cmd", "/c"
+	} else {
+		shell, flag = "sh", "-c"
+	}
+	cmd := proc.CommandContext(ctx, shell, flag, t.Precheck)
+	cwd := t.WorkspaceRoot
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	cmd.Dir = cwd
+	payload, err := json.Marshal(precheckPayload{
+		Event:         "HeartbeatPrecheck",
+		Cwd:           cwd,
+		WorkspaceRoot: t.WorkspaceRoot,
+		TaskID:        t.ID,
+		TaskTitle:     t.Title,
+	})
+	if err != nil {
+		return false, "cannot build precheck payload: " + err.Error()
+	}
+	cmd.Stdin = bytes.NewReader(payload)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err == nil {
+		return true, ""
+	}
+	reason := strings.TrimSpace(stderr.String())
+	if reason == "" {
+		reason = strings.TrimSpace(stdout.String())
+	}
+	if reason == "" {
+		reason = err.Error()
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		reason = "precheck timed out after " + heartbeatPrecheckTimeout.String() + ": " + reason
+	}
+	return false, truncateHeartbeatReason(reason)
+}
+
+// truncateHeartbeatReason caps a skipped-reason string for display/storage.
+func truncateHeartbeatReason(s string) string {
+	const max = 400
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // ListTasks returns a copy of the current tasks (in-memory).
