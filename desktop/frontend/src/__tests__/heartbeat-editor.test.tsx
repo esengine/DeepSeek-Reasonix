@@ -218,15 +218,20 @@ await act(async () => {
     ...originalTask,
     id: "precheck-task",
     precheck: "node ~/.reasonix/hooks/precheck.js",
-    lastSkippedAt: 1700000000000,
-    lastSkippedReason: "exit status 1: ci not green",
+    precheckHistory: [
+      { at: 1700000000000, passed: false, summary: "任务看板无 todo 任务，跳过本次认领" },
+      { at: 1700000060000, passed: true, summary: "任务看板有 2 个 todo 任务待认领" },
+    ],
   }, async () => true, "precheck");
   await flush();
 });
 const precheckInput = document.querySelector<HTMLInputElement>(".heartbeat-editor__precheck-input");
 ok(precheckInput?.value === "node ~/.reasonix/hooks/precheck.js", "precheck input shows the configured gate command");
-ok(document.querySelector(".heartbeat-precheck-skipped") != null, "skipped notice renders when lastSkippedAt is present");
-ok(document.querySelector(".heartbeat-precheck-skipped__reason")?.textContent?.includes("ci not green") === true, "skipped notice shows the recorded reason");
+ok(document.querySelector(".heartbeat-precheck-history") != null, "precheck history renders when the task has a precheck");
+const historyItems = Array.from(document.querySelectorAll(".heartbeat-precheck-history__item"));
+ok(historyItems.length === 2, "precheck history lists recent gate outcomes");
+ok(historyItems[0]?.textContent?.includes("passed") === true && historyItems[0]?.textContent?.includes("2 个 todo 任务") === true, "newest passed outcome shows first with its pass note");
+ok(historyItems[1]?.textContent?.includes("skipped") === true && historyItems[1]?.textContent?.includes("无 todo 任务") === true, "skipped outcome shows with its skip reason");
 
 await act(async () => root.unmount());
 dom.window.close();

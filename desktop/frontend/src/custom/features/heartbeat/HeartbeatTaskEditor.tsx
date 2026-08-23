@@ -535,19 +535,30 @@ export function TaskEditor({
         )}
       </div>
 
-      {/* 上次被前置检查跳过：任务已配置 precheck 且最近一次被跳过时展示 */}
-      {task.lastSkippedAt ? (
-        <div className="heartbeat-precheck-skipped" role="status">
-          <span className="heartbeat-precheck-skipped__title">
-            {t("heartbeat.precheckSkippedAt")} · {formatRelativeTime(task.lastSkippedAt, Date.now(), t)}
-          </span>
-          {task.lastSkippedReason && (
-            <span className="heartbeat-precheck-skipped__reason">
-              {t("heartbeat.precheckSkippedReason", { reason: task.lastSkippedReason })}
-            </span>
-          )}
+      {/* 前置检查记录：每次 precheck 执行的结果（通过/跳过 + 摘要），倒序展示 */}
+      {draft.precheck && (task.precheckHistory && task.precheckHistory.length > 0 ? (
+        <div className="heartbeat-precheck-history">
+          <div className="heartbeat-precheck-history__header">
+            <span>{t("heartbeat.precheckHistory")}</span>
+          </div>
+          <div className="heartbeat-precheck-history__list">
+            {[...task.precheckHistory].reverse().map((run, i) => (
+              <div key={`${run.at}-${i}`} className={`heartbeat-precheck-history__item${run.passed ? "" : " heartbeat-precheck-history__item--skipped"}`}>
+                <span className="heartbeat-precheck-history__time">{formatRelativeTime(run.at, Date.now(), t)}</span>
+                <span className={`heartbeat-precheck-history__badge${run.passed ? " heartbeat-precheck-history__badge--pass" : " heartbeat-precheck-history__badge--skip"}`}>
+                  {run.passed ? t("heartbeat.precheckPassed") : t("heartbeat.precheckSkipped")}
+                </span>
+                {run.summary && <span className="heartbeat-precheck-history__summary">{run.summary}</span>}
+              </div>
+            ))}
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="heartbeat-precheck-history heartbeat-precheck-history--empty">
+          <span className="heartbeat-precheck-history__header">{t("heartbeat.precheckHistory")}</span>
+          <span className="heartbeat-precheck-history__empty">{t("heartbeat.precheckHistoryEmpty")}</span>
+        </div>
+      ))}
 
       {/* 运行历史记录：每次成功执行的记录，点击可打开对应对话
           历史为空但有最近会话（task.topicId）时，用最近会话合成一条——旧任务

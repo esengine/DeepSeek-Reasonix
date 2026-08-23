@@ -38,25 +38,33 @@ import (
 
 // HeartbeatTask defines a single scheduled prompt.
 type HeartbeatTask struct {
-	ID                     string         `json:"id"`
-	Title                  string         `json:"title"`    // user-visible label
-	Prompt                 string         `json:"prompt"`   // the prompt to submit
-	Interval               string         `json:"interval"` // e.g. "5m", "1h", "30s"
-	Enabled                bool           `json:"enabled"`
-	Scope                  string         `json:"scope,omitempty"`                  // "global" or "project"
-	WorkspaceRoot          string         `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
-	TopicID                string         `json:"topicId,omitempty"`                // created topic, reused on re-run
-	LastRunAt              int64          `json:"lastRunAt,omitempty"`              // unix millis
-	NewConversationEachRun bool           `json:"newConversationEachRun,omitempty"` // true = create new topic every run
-	RunHistory             []HeartbeatRun `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
-	CreatedAt              int64          `json:"createdAt,omitempty"`
-	ApprovalMode           string         `json:"approvalMode"`                // "ask" | "auto" | "yolo"; empty defaults to "yolo"
-	TimeWindowStart        string         `json:"timeWindowStart,omitempty"`   // "HH:MM" — interval tasks only run after this time (inclusive)
-	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`     // "HH:MM" — interval tasks only run before this time (exclusive)
-	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`    // true = push to bot channels; nil/false = skip
-	Precheck               string         `json:"precheck,omitempty"`          // optional gate command; run before each execution, skip run on non-zero exit
-	LastSkippedAt          int64          `json:"lastSkippedAt,omitempty"`     // unix millis when the precheck gate last skipped a run
-	LastSkippedReason      string         `json:"lastSkippedReason,omitempty"` // why the last run was skipped (stderr/stdout, truncated)
+	ID                     string                 `json:"id"`
+	Title                  string                 `json:"title"`    // user-visible label
+	Prompt                 string                 `json:"prompt"`   // the prompt to submit
+	Interval               string                 `json:"interval"` // e.g. "5m", "1h", "30s"
+	Enabled                bool                   `json:"enabled"`
+	Scope                  string                 `json:"scope,omitempty"`                  // "global" or "project"
+	WorkspaceRoot          string                 `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
+	TopicID                string                 `json:"topicId,omitempty"`                // created topic, reused on re-run
+	LastRunAt              int64                  `json:"lastRunAt,omitempty"`              // unix millis
+	NewConversationEachRun bool                   `json:"newConversationEachRun,omitempty"` // true = create new topic every run
+	RunHistory             []HeartbeatRun         `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
+	CreatedAt              int64                  `json:"createdAt,omitempty"`
+	ApprovalMode           string                 `json:"approvalMode"`                // "ask" | "auto" | "yolo"; empty defaults to "yolo"
+	TimeWindowStart        string                 `json:"timeWindowStart,omitempty"`   // "HH:MM" — interval tasks only run after this time (inclusive)
+	TimeWindowEnd          string                 `json:"timeWindowEnd,omitempty"`     // "HH:MM" — interval tasks only run before this time (exclusive)
+	NotifyChannels         *bool                  `json:"notifyChannels,omitempty"`    // true = push to bot channels; nil/false = skip
+	Precheck               string                 `json:"precheck,omitempty"`          // optional gate command; run before each execution, skip run on non-zero exit
+	LastSkippedAt          int64                  `json:"lastSkippedAt,omitempty"`     // unix millis when the precheck gate last skipped a run
+	LastSkippedReason      string                 `json:"lastSkippedReason,omitempty"` // why the last run was skipped (stderr/stdout, truncated)
+	PrecheckHistory        []HeartbeatPrecheckRun `json:"precheckHistory,omitempty"`   // recent precheck outcomes (oldest first, capped)
+}
+
+// HeartbeatPrecheckRun records a single precheck gate execution outcome.
+type HeartbeatPrecheckRun struct {
+	At      int64  `json:"at"`      // unix millis execution time
+	Passed  bool   `json:"passed"`  // true = gate passed and the task proceeded
+	Summary string `json:"summary"` // human-readable outcome (skip reason or pass note)
 }
 
 // HeartbeatRun records a single successful execution of a heartbeat task.
@@ -69,6 +77,9 @@ type HeartbeatRun struct {
 
 // maxRunHistory caps how many recent executions are kept per task.
 const maxRunHistory = 20
+
+// maxPrecheckHistory caps how many recent precheck gate outcomes are kept.
+const maxPrecheckHistory = 20
 
 // heartbeatSchemaVersion is the current on-disk config schema version.
 // v1 (schemaVersion absent/0): interval-only tasks, no runHistory.
@@ -404,14 +415,20 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 	// Precheck gate: run the optional gate command before creating any topic
 	// or tab. A non-zero exit, timeout, or spawn error skips this run. LastRunAt
 	// still advances so a failing gate is re-evaluated on the next scheduled
-	// tick instead of hammering the command every 30s.
+	// tick instead of hammering the command every 30s. Every gate outcome is
+	// recorded so the UI can show recent pass/skip history.
 	if t.Precheck != "" {
-		if ok, reason := e.runPrecheck(t); !ok {
-			now := time.Now().UnixMilli()
+		ok, summary := e.runPrecheck(t)
+		now := time.Now().UnixMilli()
+		t.PrecheckHistory = append(t.PrecheckHistory, HeartbeatPrecheckRun{At: now, Passed: ok, Summary: summary})
+		if len(t.PrecheckHistory) > maxPrecheckHistory {
+			t.PrecheckHistory = t.PrecheckHistory[len(t.PrecheckHistory)-maxPrecheckHistory:]
+		}
+		if !ok {
 			t.LastSkippedAt = now
-			t.LastSkippedReason = reason
+			t.LastSkippedReason = summary
 			t.LastRunAt = now
-			log.Printf("[heartbeat] task %q skipped by precheck: %s", t.Title, reason)
+			log.Printf("[heartbeat] task %q skipped by precheck: %s", t.Title, summary)
 			return t
 		}
 	}
@@ -563,7 +580,13 @@ func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if err == nil {
-		return true, ""
+		// Passed: surface the script's stdout (if any) as the pass note so the
+		// UI can show what the gate observed (e.g. "3 tasks waiting").
+		summary := strings.TrimSpace(stdout.String())
+		if summary == "" {
+			summary = "passed"
+		}
+		return true, truncateHeartbeatReason(summary)
 	}
 	reason := strings.TrimSpace(stderr.String())
 	if reason == "" {

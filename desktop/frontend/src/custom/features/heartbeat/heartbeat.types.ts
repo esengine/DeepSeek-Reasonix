@@ -5,6 +5,12 @@ export interface HeartbeatRun {
   topicId: string; // topic used/created by this run
 }
 
+export interface HeartbeatPrecheckRun {
+  at: number;       // unix millis execution time
+  passed: boolean;  // true = gate passed and the task proceeded
+  summary: string;  // human-readable outcome (skip reason or pass note)
+}
+
 export interface HeartbeatTask {
   id: string;
   title: string;
@@ -25,4 +31,5 @@ export interface HeartbeatTask {
   precheck?: string;        // optional gate command; run before each execution, skip run on non-zero exit
   lastSkippedAt?: number;   // unix millis when the precheck gate last skipped a run
   lastSkippedReason?: string; // why the last run was skipped
+  precheckHistory?: HeartbeatPrecheckRun[]; // recent precheck outcomes (oldest first)
 }

@@ -1154,26 +1154,69 @@
   width: 100%;
 }
 
-/* Last-skipped notice above run history */
-.heartbeat-precheck-skipped {
+/* Precheck history list above run history */
+.heartbeat-precheck-history {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: transparent;
 }
 
-.heartbeat-precheck-skipped__title {
-  font-size: 12px;
-  color: var(--fg);
-}
-
-.heartbeat-precheck-skipped__reason {
+.heartbeat-precheck-history__header {
   font-size: 12px;
   color: var(--fg-faint);
+}
+
+.heartbeat-precheck-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.heartbeat-precheck-history__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.heartbeat-precheck-history__time {
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.heartbeat-precheck-history__badge {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.heartbeat-precheck-history__badge--pass {
+  color: var(--ok, #2e7d32);
+}
+
+.heartbeat-precheck-history__badge--skip {
+  color: var(--warn, #b45309);
+}
+
+.heartbeat-precheck-history__summary {
+  color: var(--fg);
   word-break: break-all;
+}
+
+.heartbeat-precheck-history--empty {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.heartbeat-precheck-history__empty {
+  font-size: 12px;
+  color: var(--fg-faint);
 }
 
 

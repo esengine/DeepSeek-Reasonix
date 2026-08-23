@@ -818,8 +818,38 @@ func TestHeartbeatPrecheckSkipsTaskWhenGateFails(t *testing.T) {
 	if got.LastSkippedReason == "" {
 		t.Fatal("gated task should record LastSkippedReason")
 	}
+	if len(got.PrecheckHistory) != 1 || got.PrecheckHistory[0].Passed || got.PrecheckHistory[0].Summary == "" {
+		t.Fatalf("gated task should record one failed precheck outcome, got %+v", got.PrecheckHistory)
+	}
 	if len(engine.pendingTopics) != 0 {
 		t.Fatalf("gated task should not leave a pending topic, got %v", engine.pendingTopics)
+	}
+}
+
+func TestHeartbeatPrecheckHistoryCapsRecentOutcomes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
+	engine := &HeartbeatEngine{
+		app:           app,
+		pendingTopics: map[string]heartbeatPendingTopic{},
+	}
+	seed := HeartbeatTask{
+		ID:              "gated-caps",
+		Title:           "Gated Caps",
+		Prompt:          "ping",
+		Precheck:        "exit 1",
+		PrecheckHistory: make([]HeartbeatPrecheckRun, maxPrecheckHistory), // fill to the cap
+	}
+	got := engine.executeTask(seed)
+	if len(got.PrecheckHistory) != maxPrecheckHistory {
+		t.Fatalf("precheck history should stay capped at %d, got %d", maxPrecheckHistory, len(got.PrecheckHistory))
+	}
+	last := got.PrecheckHistory[len(got.PrecheckHistory)-1]
+	if last.Passed || last.At == 0 {
+		t.Fatalf("newest outcome should be the failed run just executed, got %+v", last)
 	}
 }
 
@@ -900,6 +930,9 @@ func TestHeartbeatPrecheckGatePassesAndReceivesPayloadAndCwd(t *testing.T) {
 	}
 	if len(ctrl.submitted) != 1 || ctrl.submitted[0] != "ping" {
 		t.Fatalf("submitted prompts = %v, want [ping]", ctrl.submitted)
+	}
+	if len(got.PrecheckHistory) != 1 || !got.PrecheckHistory[0].Passed {
+		t.Fatalf("passing gate should record one passed outcome, got %+v", got.PrecheckHistory)
 	}
 }
 
