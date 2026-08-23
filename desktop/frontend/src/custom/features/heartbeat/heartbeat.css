@@ -1139,6 +1139,132 @@
   box-sizing: border-box;
 }
 
+/* Precheck gate input: single-line command editor, monospace */
+.heartbeat-editor__precheck-input {
+  height: 32px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+.heartbeat-editor__precheck-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heartbeat-editor__precheck-test {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.heartbeat-editor__precheck-test:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.heartbeat-editor__precheck-result {
+  font-size: 12px;
+}
+
+.heartbeat-editor__precheck-result--passed {
+  color: var(--ok, #2e7d32);
+}
+
+.heartbeat-editor__precheck-result--skipped {
+  color: var(--warn, #b45309);
+}
+
+.heartbeat-editor__precheck-result--failed {
+  color: var(--danger, #b91c1c);
+}
+
+/* Precheck history list above run history */
+.heartbeat-precheck-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+}
+
+.heartbeat-precheck-history__header {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.heartbeat-precheck-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.heartbeat-precheck-history__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.heartbeat-precheck-history__time {
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.heartbeat-precheck-history__badge {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.heartbeat-precheck-history__badge--pass {
+  color: var(--ok, #2e7d32);
+}
+
+.heartbeat-precheck-history__badge--skip {
+  color: var(--warn, #b45309);
+}
+
+.heartbeat-precheck-history__badge--failed {
+  color: var(--danger, #b91c1c);
+}
+
+.heartbeat-precheck-history__summary {
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.heartbeat-precheck-history--empty {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.heartbeat-precheck-history__empty {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+
 .heartbeat-editor__input:focus,
 .heartbeat-editor__textarea:focus {
   outline: none;

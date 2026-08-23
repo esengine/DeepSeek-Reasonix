@@ -6,6 +6,9 @@ export function mergeEngineRunState(prev: HeartbeatTask, fresh: HeartbeatTask): 
     ...(fresh.runHistory ? { runHistory: fresh.runHistory } : {}),
     ...(fresh.topicId ? { topicId: fresh.topicId } : {}),
     ...(fresh.lastRunAt ? { lastRunAt: fresh.lastRunAt } : {}),
+    ...(fresh.lastSkippedAt ? { lastSkippedAt: fresh.lastSkippedAt } : {}),
+    ...(fresh.lastSkippedReason ? { lastSkippedReason: fresh.lastSkippedReason } : {}),
+    ...(fresh.precheckHistory ? { precheckHistory: fresh.precheckHistory } : {}),
   };
 }
 

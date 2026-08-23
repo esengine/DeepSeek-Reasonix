@@ -5,6 +5,7 @@ import { app } from "../../../lib/bridge";
 import type { WorkspaceView } from "../../../lib/types";
 import { CycleEditor } from "./HeartbeatCycleEditor";
 import { CirclePlaySolid, mergeEngineRunState } from "./HeartbeatShared";
+import { heartbeatTestPrecheck } from "./heartbeat.bridge";
 import { useHeartbeatT } from "./heartbeat.i18n";
 import { changeHeartbeatFrequency, describeCron, formatCronNext, formatRelativeTime, isCronExpr, nextCronRunAt, type HeartbeatFrequencyType } from "./heartbeat.presentation";
 import type { HeartbeatTask } from "./heartbeat.types";
@@ -39,6 +40,8 @@ export function TaskEditor({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [frequencyError, setFrequencyError] = useState(false);
+  const [precheckTesting, setPrecheckTesting] = useState(false);
+  const [precheckResult, setPrecheckResult] = useState<{ status: string; summary: string } | null>(null);
   const projectRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,6 +80,7 @@ export function TaskEditor({
     || draft.approvalMode !== initialTaskRef.current.approvalMode
     || draft.newConversationEachRun !== initialTaskRef.current.newConversationEachRun
     || draft.notifyChannels !== initialTaskRef.current.notifyChannels
+    || draft.precheck !== initialTaskRef.current.precheck
     || draft.scope !== initialTaskRef.current.scope
     || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
     || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
@@ -116,6 +120,23 @@ export function TaskEditor({
   const set = useCallback((field: keyof HeartbeatTask, value: string | boolean) => {
     setDraft((prev) => ({ ...prev, [field]: value }));
   }, []);
+
+  // 测试前置检查：立即运行一次 precheck 命令，展示结果（放行/跳过/失败），
+  // 不改动任务配置，方便配置脚本时验证写法。
+  const runPrecheckTest = useCallback(async () => {
+    const command = draft.precheck?.trim();
+    if (!command) return;
+    setPrecheckTesting(true);
+    setPrecheckResult(null);
+    try {
+      const res = await heartbeatTestPrecheck(command, draft.workspaceRoot || "");
+      setPrecheckResult(res);
+    } catch {
+      setPrecheckResult({ status: "failed", summary: "测试执行失败" });
+    } finally {
+      setPrecheckTesting(false);
+    }
+  }, [draft.precheck, draft.workspaceRoot]);
 
   // 启用/暂停切换（状态文字入口 + 右侧按钮共用）：
   // 只持久化 enabled 变更，基于最近保存基线（initialTaskRef）翻转，
@@ -376,6 +397,39 @@ export function TaskEditor({
           </span>
         </div>
 
+      {/* Precheck：可选的前置检查命令，通过后才执行任务 */}
+      <div className="heartbeat-editor__field">
+        <label>{t("heartbeat.precheck")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
+        <div className="heartbeat-editor__precheck-row">
+          <input
+            className="heartbeat-editor__precheck-input"
+            value={draft.precheck || ""}
+            onChange={(e) => { set("precheck", e.target.value); setPrecheckResult(null); }}
+            placeholder={t("heartbeat.precheckPlaceholder")}
+            spellCheck={false}
+          />
+          <button
+            className="heartbeat-editor__precheck-test"
+            type="button"
+            disabled={precheckTesting || !draft.precheck?.trim()}
+            onClick={() => void runPrecheckTest()}
+            title={t("heartbeat.precheckTest")}
+          >
+            {precheckTesting ? t("heartbeat.precheckTesting") : t("heartbeat.precheckTest")}
+          </button>
+        </div>
+        {precheckResult && (
+          <span
+            className={`heartbeat-editor__precheck-result heartbeat-editor__precheck-result--${precheckResult.status}`}
+            role="status"
+          >
+            {precheckResult.status === "passed" ? t("heartbeat.precheckPassed") : precheckResult.status === "failed" ? t("heartbeat.precheckFailed") : t("heartbeat.precheckSkipped")}
+            {precheckResult.summary ? ` · ${precheckResult.summary}` : ""}
+          </span>
+        )}
+        <span className="heartbeat-editor__mode-hint">{t("heartbeat.precheckHint")}</span>
+      </div>
+
       {/* New conversation per run */}
       <div className="heartbeat-editor__field">
         <label>{t("heartbeat.fieldNewConversation")}</label>
@@ -520,6 +574,31 @@ export function TaskEditor({
           />
         )}
       </div>
+
+      {/* 前置检查记录：每次 precheck 执行的结果（通过/跳过 + 摘要），倒序展示 */}
+      {draft.precheck && (task.precheckHistory && task.precheckHistory.length > 0 ? (
+        <div className="heartbeat-precheck-history">
+          <div className="heartbeat-precheck-history__header">
+            <span>{t("heartbeat.precheckHistory")}</span>
+          </div>
+          <div className="heartbeat-precheck-history__list">
+            {[...task.precheckHistory].reverse().map((run, i) => (
+              <div key={`${run.at}-${i}`} className={`heartbeat-precheck-history__item heartbeat-precheck-history__item--${run.status}`}>
+                <span className="heartbeat-precheck-history__time">{formatRelativeTime(run.at, Date.now(), t)}</span>
+                <span className={`heartbeat-precheck-history__badge heartbeat-precheck-history__badge--${run.status}`}>
+                  {run.status === "passed" ? t("heartbeat.precheckPassed") : run.status === "failed" ? t("heartbeat.precheckFailed") : t("heartbeat.precheckSkipped")}
+                </span>
+                {run.summary && <span className="heartbeat-precheck-history__summary">{run.summary}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="heartbeat-precheck-history heartbeat-precheck-history--empty">
+          <span className="heartbeat-precheck-history__header">{t("heartbeat.precheckHistory")}</span>
+          <span className="heartbeat-precheck-history__empty">{t("heartbeat.precheckHistoryEmpty")}</span>
+        </div>
+      ))}
 
       {/* 运行历史记录：每次成功执行的记录，点击可打开对应对话
           历史为空但有最近会话（task.topicId）时，用最近会话合成一条——旧任务

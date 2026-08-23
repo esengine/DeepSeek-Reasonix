@@ -69,3 +69,7 @@ export function heartbeatTriggerNow(id: string): Promise<void> {
 export function heartbeatGenerateID(): Promise<string> {
   return app.HeartbeatGenerateID();
 }
+
+export function heartbeatTestPrecheck(precheckCommand: string, workspaceRoot: string): Promise<{ status: string; summary: string }> {
+  return app.HeartbeatTestPrecheck(precheckCommand, workspaceRoot);
+}
