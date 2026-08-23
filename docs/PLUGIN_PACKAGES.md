@@ -532,3 +532,41 @@ Desktop exposes plugin package operations through Wails methods:
 - `SetPluginEnabled`
 - `UpdatePlugin`
 - `PluginDoctor`
+
+
+## Build Remote Agent (phone pairing)
+
+Pair a phone running [Build Remote Agent](https://grokbuildremote.com/) to this Reasonix desktop session. Protocol `gbr/1`. Phone is spectator + veto, not orchestrator.
+
+Independent product by Linespotting AB. Not affiliated with xAI or SpaceX.
+
+A plugin package can contribute an MCP server (see `.mcp.json` import above). Point that server at **gbr-mcp** stdio after `gbr-agent` is running. Do not invent a fourth pair protocol. Attach only loopback Bot API `http://127.0.0.1:8788` or MCP stdio `gbr-mcp`. Never put mailbox keys in plugin JSON.
+
+```bash
+curl -fsSL https://grokbuildremote.com/install.sh | bash
+gbr-agent version          # v0.6.0+
+gbr-agent pair && gbr-agent run
+git clone https://github.com/LinespottingOrg/GrokBuildRemote-Agents.git
+cd GrokBuildRemote-Agents/mcp/gbr-mcp && npm install
+```
+
+Example plugin-root `.mcp.json` (stdio; `auto_start` still defaults false until you connect it):
+
+```json
+{
+  "mcpServers": {
+    "gbr": {
+      "command": "node",
+      "args": ["GrokBuildRemote-Agents/mcp/gbr-mcp/bin/gbr-mcp.js"]
+    }
+  }
+}
+```
+
+Install from a local plugin directory that contains `reasonix-plugin.json` plus that `.mcp.json`:
+
+```bash
+reasonix plugin install /path/to/gbr-plugin --link --replace --yes
+```
+
+Phone: Build Remote Agent → scan the QR from `gbr-agent pair` (or type the 8-char code). Unpair in Settings before changing PCs.
