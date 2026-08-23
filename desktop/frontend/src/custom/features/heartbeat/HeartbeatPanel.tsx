@@ -65,7 +65,7 @@ function readDetailCache(): DetailCache | null {
     const raw = localStorage.getItem(DETAIL_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as DetailCache;
-    return parsed && typeof parsed.taskId === "string" ? parsed : null;
+    return parsed && typeof parsed.taskId === "string" && typeof parsed.open === "boolean" ? parsed : null;
   } catch {
     return null;
   }

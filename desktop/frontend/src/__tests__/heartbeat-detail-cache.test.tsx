@@ -267,6 +267,41 @@ await act(async () => {
 });
 ok(document.querySelector(".heartbeat-split__right") == null, "no restore after the filtered-out task was deselected");
 
+// 8. 删除当前编辑的任务 → 清除缓存 + 关闭详情
+await act(async () => { unmountView(); await flush(); });
+// #7 遗留的搜索词（zzz-no-match）会过滤掉全部任务，先清掉以便点击任务
+localStorage.removeItem("reasonix-heartbeat-filter");
+await act(async () => {
+  renderView();
+  await flush();
+  await flush();
+});
+await act(async () => {
+  document.querySelector<HTMLDivElement>(".worktree-node--task")?.click();
+  await flush();
+  await flush();
+});
+ok(localStorage.getItem("reasonix-heartbeat-detail")?.includes("task-1") === true, "task detail is cached before deleting");
+await act(async () => {
+  // 删除需二次确认：首次点击进入确认态，再次点击真正删除
+  document.querySelector<HTMLButtonElement>(".heartbeat-editor__header-action--danger")?.click();
+  await flush();
+});
+await act(async () => {
+  document.querySelector<HTMLButtonElement>(".heartbeat-editor__header-action--danger")?.click();
+  await flush();
+  await flush();
+});
+ok(localStorage.getItem("reasonix-heartbeat-detail") == null, "deleting the edited task clears the cache");
+ok(document.querySelector(".heartbeat-split__right") == null, "detail closes after deleting the edited task");
+await act(async () => { unmountView(); await flush(); });
+await act(async () => {
+  renderView();
+  await flush();
+  await flush();
+});
+ok(document.querySelector(".heartbeat-split__right") == null, "no detail restore after the cached task was deleted");
+
 await act(async () => root.unmount());
 dom.window.close();
 
