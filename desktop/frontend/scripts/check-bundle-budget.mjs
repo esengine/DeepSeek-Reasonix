@@ -156,8 +156,7 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // production and 2358.3 KiB in test: about 9.0 KiB (0.38%) over main-v2's
 // channel gates. Retain that attributable UI capacity with 0.1 KiB of build-SHA
 // headroom without widening the gzip or largest-chunk exceptions.
-// Local-path sidebar preview adds a small lucide-react icon (Eye) and the
-// reveal-path event wiring — 0.2 KiB raw over the previous gate.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.7 : 2_353.5;
+// Local-path sidebar preview + Unix path patterns add ~0.5 KiB raw.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.9 : 2_353.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
