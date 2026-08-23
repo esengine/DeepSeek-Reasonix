@@ -19,6 +19,114 @@ export type HydrateProjection = {
   digest?: string;
 };
 
+export type SessionHydrateIdentity = {
+  sessionPath?: string;
+  sessionGeneration?: number;
+};
+
+export type HydrateSurfacePolicy = "preserve-current" | "replace-surface";
+
+type ActiveTabHydrationTarget = SessionHydrateIdentity & {
+  sessionRevision?: number;
+  sessionDigest?: string;
+};
+
+export type ActiveTabHydrationLoadOptions = ActiveTabHydrationTarget & {
+  preserveCachedHistory: boolean;
+  surfacePolicy?: HydrateSurfacePolicy;
+};
+
+export function activeTabHydrationPlan(
+  target: ActiveTabHydrationTarget,
+  current: SessionHydrateIdentity | undefined,
+  reset: boolean,
+  requestedPolicy?: HydrateSurfacePolicy,
+  requestedCache?: boolean,
+): {
+  sameSession: boolean;
+  surfacePolicy: HydrateSurfacePolicy;
+  loadOptions: ActiveTabHydrationLoadOptions;
+} {
+  const sameSession = sameSessionHydrateIdentity(target, current);
+  const surfacePolicy = requestedPolicy ?? (sameSession ? "preserve-current" : "replace-surface");
+  if (surfacePolicy === "replace-surface") {
+    return {
+      sameSession,
+      surfacePolicy,
+      loadOptions: {
+        preserveCachedHistory: false,
+        surfacePolicy,
+        sessionPath: target.sessionPath,
+        sessionRevision: target.sessionRevision,
+        sessionDigest: target.sessionDigest,
+        sessionGeneration: target.sessionGeneration,
+      },
+    };
+  }
+  return {
+    sameSession,
+    surfacePolicy,
+    loadOptions: {
+      preserveCachedHistory: sameSession && (requestedCache ?? !reset),
+      sessionPath: target.sessionPath,
+      sessionRevision: target.sessionRevision,
+      sessionDigest: target.sessionDigest,
+    },
+  };
+}
+
+type UnboundLiveSurfaceState = HydrateLiveState & {
+  hydrateHistoryLoaded?: boolean;
+};
+
+/** A surface may retain content only when the target session is provably the same. */
+export function sameSessionHydrateIdentity(
+  target: SessionHydrateIdentity | undefined,
+  current: SessionHydrateIdentity | undefined,
+): boolean {
+  const targetPath = (target?.sessionPath ?? "").trim();
+  const currentPath = (current?.sessionPath ?? "").trim();
+  if (!targetPath || !currentPath || targetPath !== currentPath) return false;
+  if (
+    target?.sessionGeneration !== undefined &&
+    current?.sessionGeneration !== undefined &&
+    target.sessionGeneration !== current.sessionGeneration
+  ) return false;
+  return true;
+}
+
+/**
+ * Adopt only a live runtime tail that has never been bound to persisted
+ * history. This is the compatibility bridge for background runtime events
+ * that predate the tab metadata snapshot: it must never retain a resident
+ * transcript merely because the tab id matches.
+ */
+export function canAdoptUnboundLiveSurface(
+  target: SessionHydrateIdentity | undefined,
+  current: SessionHydrateIdentity | undefined,
+  state: UnboundLiveSurfaceState | undefined,
+  backendRunning: boolean,
+  targetRuntimeEpoch?: string,
+  currentRuntimeEpoch?: string,
+): boolean {
+  if (!backendRunning || !state) return false;
+  if (!(target?.sessionPath ?? "").trim()) return false;
+  if ((current?.sessionPath ?? "").trim()) return false;
+  if (state.hydrateHistoryLoaded || (state.historyTotalTurns ?? 0) > 0) return false;
+  if (state.historyRevision !== undefined || (state.historyDigest ?? "").trim()) return false;
+  if (!state.running && !state.turnActive) return false;
+  if (targetRuntimeEpoch && currentRuntimeEpoch && targetRuntimeEpoch !== currentRuntimeEpoch) return false;
+  return Boolean(
+    state.live ||
+    state.currentAssistant ||
+    state.pendingUser !== undefined ||
+    state.items.some((item) =>
+      (item.kind === "assistant" && item.streaming) ||
+      (item.kind === "tool" && item.status === "running"),
+    ),
+  );
+}
+
 export function shouldPreferResidentHistory(reset: boolean, preserveCachedHistory?: boolean): boolean {
   return !reset && preserveCachedHistory !== false;
 }
@@ -52,6 +160,25 @@ export function hasCachedLiveTurn(state: HydrateLiveState | undefined): boolean 
     (item.kind === "assistant" && item.streaming) ||
     (item.kind === "tool" && item.status === "running"),
   );
+}
+
+export function hasReusableCachedTranscript(
+  state: (HydrateLiveState & { meta?: SessionHydrateIdentity }) | undefined,
+  sessionPath?: string,
+  revision?: number,
+  digest?: string,
+): boolean {
+  if (!state || state.items.length === 0 || state.historyTotalTurns === 0) return false;
+  const expectedSessionPath = (sessionPath ?? "").trim();
+  if (!expectedSessionPath) return true;
+  if ((state.meta?.sessionPath ?? "").trim() !== expectedSessionPath) return false;
+  if (typeof revision === "number" && revision > 0) {
+    return state.historyRevision === revision && (digest ?? "") === (state.historyDigest ?? "");
+  }
+  if ((digest ?? "").trim() !== "") return state.historyDigest === digest;
+  // Missing backend fingerprints must not bless a resident page that already
+  // has one; the sidecar may be between atomic replacements.
+  return state.historyRevision === undefined && !state.historyDigest;
 }
 
 // An empty surface has to apply history or switch-back shows Welcome. A turn
@@ -113,11 +240,8 @@ export function duplicateLiveItemIds(
 }
 
 export function sameSessionPlaceholderItems<T>(
-  targetSessionPath: string | undefined,
-  prev: { meta?: { sessionPath?: string }; items?: T[] } | undefined,
+  target: SessionHydrateIdentity | undefined,
+  prev: { meta?: SessionHydrateIdentity; items?: T[] } | undefined,
 ): T[] | undefined {
-  const target = (targetSessionPath ?? "").trim();
-  const current = (prev?.meta?.sessionPath ?? "").trim();
-  if (!target || !current || target !== current) return undefined;
-  return prev?.items;
+  return sameSessionHydrateIdentity(target, prev?.meta) ? prev?.items : undefined;
 }

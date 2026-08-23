@@ -375,7 +375,7 @@ func TestRepairSessionDisplayReadModelFromAuthoritativeEventLog(t *testing.T) {
 	if err := RepairSessionDisplayReadModel(path); err != nil {
 		t.Fatalf("RepairSessionDisplayReadModel: %v", err)
 	}
-	repaired, err := loadSessionMessagesFromJSONL(path)
+	repaired, err := loadSessionMessagesFromJSONL(path, nil)
 	if err != nil || !reflect.DeepEqual(repaired, msgs) {
 		t.Fatalf("repaired model = %+v, err %v; want %+v", repaired, err, msgs)
 	}

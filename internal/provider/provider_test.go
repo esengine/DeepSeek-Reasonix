@@ -221,6 +221,24 @@ func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing
 	}
 }
 
+func TestModelMessagesStripsVisionSummaryMetadataButKeepsSummaryContent(t *testing.T) {
+	stored := []Message{{
+		Role:    RoleUser,
+		Content: "question\n\n<reasonix-image-context>chart</reasonix-image-context>",
+		VisionSummary: &VisionSummary{
+			Version: 1, PromptVersion: "image-summary-v1", ModelRef: "vision/model",
+			ImageDigests: []string{"digest"}, Summary: "chart",
+		},
+	}}
+	model := ModelMessages(stored)
+	if len(model) != 1 || model[0].VisionSummary != nil || model[0].Content != stored[0].Content {
+		t.Fatalf("provider projection = %+v", model)
+	}
+	if stored[0].VisionSummary == nil {
+		t.Fatal("provider projection mutated stored metadata")
+	}
+}
+
 func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T) {
 	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
 	stored := []Message{{Role: RoleUser, Content: rendered, RawContent: "fix the bug"}}

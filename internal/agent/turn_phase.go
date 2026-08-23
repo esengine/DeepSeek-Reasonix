@@ -6,6 +6,7 @@ import (
 	"reasonix/internal/agentpreset"
 	"reasonix/internal/completion"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/taskcontract"
 )
 
@@ -27,16 +28,9 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 	mutations := 0
 	if a.task.ledger != nil {
 		for _, r := range a.task.ledger.Receipts() {
-			if r.Success && (r.Mutation || r.Write) {
+			if evidence.IsDeliveryMutation(r, a.writeWorkspaceRoot, nil) {
 				mutations++
 			}
-		}
-	}
-	verdict := c.GoalVerdict()
-	// Skip noise: no mutations and ordinary complete/continue conversation.
-	if mutations == 0 && (verdict == taskcontract.VerdictComplete || verdict == taskcontract.VerdictContinue || verdict == taskcontract.VerdictUncertain) {
-		if !c.HasSuppressed() {
-			return
 		}
 	}
 	passed, failed, suppressed := 0, 0, 0
@@ -49,6 +43,18 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 		case taskcontract.Suppressed:
 			suppressed++
 		}
+	}
+	verdict := c.GoalVerdict()
+	floor := a.turn.constraints.PolicyFloor.String()
+	attention := completion.NeedsAttention(completion.AttentionInput{
+		Verdict:            verdict.String(),
+		ChecksFailed:       failed,
+		GapKinds:           report.GapKinds(),
+		Floor:              floor,
+		RequiredSuppressed: c.HasSuppressed(),
+	})
+	if mutations == 0 && !attention {
+		return
 	}
 	review := "none"
 	if a.task.ledger != nil {
@@ -95,7 +101,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 			// Preset is a deprecated wire-compat field: it is pinned to the
 			// historical default so one-version-old clients keep parsing. New
 			// surfaces read the verdict/check/review/gap fields instead.
-			Preset:             string(agentpreset.Balanced),
+			Preset:             string(agentpreset.Standard),
 			Verdict:            summaryVerdict,
 			Mutations:          mutations,
 			ChecksPassed:       passed,
@@ -104,6 +110,8 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 			Review:             review,
 			GapKinds:           gaps,
 			ConstraintDegraded: constraintDegraded,
+			Floor:              floor,
+			Attention:          attention,
 		},
 	})
 }

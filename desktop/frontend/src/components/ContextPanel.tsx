@@ -7,6 +7,7 @@ import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { formatTokens, formatOptionalTokens } from "../lib/format";
+import { appendRateBand, normalizeRateBand, rateBandLabel, type DisplayRateBand } from "../lib/costRateBand";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
 import { ContextBudgetCard, resolveContextBudget } from "./ContextBudgetCard";
@@ -20,6 +21,7 @@ interface ContextPanelProps {
   sessionTurns?: number;
   turnTokens?: number;
   turnCost?: number;
+  turnRateBand?: string;
   balance?: BalanceInfo;
   sessionGen?: number;
   refreshKey?: number;
@@ -406,6 +408,7 @@ export function ContextPanel({
   sessionCurrency,
   turnTokens,
   turnCost,
+  turnRateBand,
   balance,
   sessionGen,
   refreshKey,
@@ -490,7 +493,7 @@ export function ContextPanel({
   const usagePercentages = contextWindowPercentages(usedTokens, windowTokens);
   const rawUsagePct = usagePercentages.raw;
   const usagePct = usagePercentages.display;
-  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
+  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.80;
   const compactPct = Math.round(compactRatio * 100);
   const reportedTriggerTokens = context?.maintenance?.triggerTokens ?? 0;
   const triggerTokens = reportedTriggerTokens > 0
@@ -514,14 +517,21 @@ export function ContextPanel({
   const turnEstimated = usage?.estimated === true || info?.estimated === true;
   const sessionEstimated = info?.sessionEstimated === true || context?.estimated === true;
   const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
-  const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated);
-  const sessionCostLabel = cost.labelKind === "bucketed"
+  const turnCostLabel = appendRateBand(markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated), turnRateBand, t);
+  const rawSessionCostLabel = cost.labelKind === "bucketed"
     ? t("context.sessionCostBucketed")
     : cost.labelKind === "unavailable"
       ? t("context.sessionCostUnavailable")
       : cost.labelKind === "fallback"
         ? `${markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated)} (${t("context.sessionCostFallback")})`
         : markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated);
+  const sessionCostLabel = rawSessionCostLabel;
+  const turnRateBandTitle = rateBandLabel(turnRateBand, t) ? t("billing.rateBand.tooltip") : undefined;
+  const sessionRateBand = normalizeRateBand(info?.sessionCostQuote?.rateBand);
+  const sessionRateBandTitle = sessionRateBand ? t("billing.rateBand.tooltip") : undefined;
+  const sessionRateBandBadge = sessionRateBand
+    ? { label: rateBandLabel(sessionRateBand, t) ?? sessionRateBand, tone: sessionRateBand, title: sessionRateBandTitle }
+    : undefined;
   const totalTokensTitle = totalTokensMetric.exact === "-" ? "-" : t("context.tokensValue", { value: totalTokensMetric.exact });
   const usedLabel = formatTokens(usedTokens);
   const windowLabel = formatTokens(windowTokens);
@@ -631,7 +641,7 @@ export function ContextPanel({
             <div className="context-panel__session-metrics">
               <div className="context-panel__summary-rows">
                 <MiniStat label={t("status.cacheAvgLabel")} value={formatCacheHitRate(sessionCacheHit, sessionCacheMiss)} tone={cacheHitTone(sessionCacheHit, sessionCacheMiss)} />
-                <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} />
+                <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} title={sessionRateBandTitle} badge={sessionRateBandBadge} />
                 <MiniStat label={t("context.time")} value={fmtDuration(elapsed, t)} />
                 <MiniStat label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
                 <MiniStat label={t("context.sessionTokensShort")} value={markEstimated(totalTokensMetric.display, sessionEstimated)} title={totalTokensTitle} wide />
@@ -641,7 +651,7 @@ export function ContextPanel({
           <section className="context-panel__creation-grid" aria-label={t("context.overview")}>
             <MetricCard label={t("status.cacheLabel")} value={fmtUsageCacheRate(usage)} tone="accent" />
             <MetricCard label={t("status.turnTokensLabel")} value={formatOptionalTokens(turnTokens)} />
-            <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} />
+            <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} valueTitle={turnRateBandTitle} />
             <MetricCard label={t("status.balanceLabel")} value={balanceLabel} tone="accent" />
           </section>
           <section className="context-panel__section context-panel__analysis">
@@ -771,13 +781,29 @@ function TokenLegend({ label, value, color }: { label: string; value: number; co
   );
 }
 
-function MiniStat({ label, value, title, tone, wide }: { label: string; value: string; title?: string; tone?: MetricTone; wide?: boolean }) {
+interface MiniStatBadge {
+  label: string;
+  tone: DisplayRateBand;
+  title?: string;
+}
+
+function MiniStat({ label, value, title, tone, wide, badge }: { label: string; value: string; title?: string; tone?: MetricTone; wide?: boolean; badge?: MiniStatBadge }) {
   const toneClass = tone ? ` context-panel__mini-stat--${tone}` : "";
   const wideClass = wide ? " context-panel__mini-stat--wide" : "";
   const exactTitle = title && title !== value ? title : undefined;
+  const accessibleLabel = badge || exactTitle
+    ? `${label}: ${value}${badge ? `, ${badge.label}` : ""}${exactTitle ? `. ${exactTitle}` : ""}`
+    : undefined;
   return (
-    <div className={`context-panel__mini-stat${toneClass}${wideClass}`} aria-label={exactTitle ? `${label}: ${exactTitle}` : undefined}>
-      <span>{label}</span>
+    <div className={`context-panel__mini-stat${toneClass}${wideClass}`} aria-label={accessibleLabel}>
+      <div className="context-panel__mini-stat-head">
+        <span className="context-panel__mini-stat-label">{label}</span>
+        {badge && (
+          <span className={`context-panel__rate-band context-panel__rate-band--${badge.tone}`} title={badge.title}>
+            {badge.label}
+          </span>
+        )}
+      </div>
       <strong title={exactTitle}>{value}</strong>
     </div>
   );

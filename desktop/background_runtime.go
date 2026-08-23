@@ -43,6 +43,8 @@ type WorkspaceConflictView struct {
 	State             string         `json:"state"`
 	OwnerTabID        string         `json:"ownerTabId,omitempty"`
 	OwnerTitle        string         `json:"ownerTitle,omitempty"`
+	OwnerScope        string         `json:"ownerScope,omitempty"`
+	OwnerLabel        string         `json:"ownerLabel,omitempty"`
 	OwnerWork         ActiveWorkView `json:"ownerWork"`
 	CanReveal         bool           `json:"canReveal"`
 	CanCreateWorktree bool           `json:"canCreateWorktree"`
@@ -201,6 +203,7 @@ func (a *App) RevealBackgroundRuntime(tabID string) (TabMeta, error) {
 
 type workspaceLeaseReporter interface {
 	WorkspaceLeaseState() workspacelease.State
+	WorkspaceLeaseHeldKeys() []string
 }
 
 func controllerWorkspaceLeaseState(ctrl control.SessionAPI) workspacelease.State {
@@ -208,6 +211,10 @@ func controllerWorkspaceLeaseState(ctrl control.SessionAPI) workspacelease.State
 		return reporter.WorkspaceLeaseState()
 	}
 	return workspacelease.State{}
+}
+
+func leaseDomainsOverlap(waitingRoot string, waiting workspacelease.State, holderRoot string, holder workspacelease.State) bool {
+	return workspacelease.LeaseStatesOverlap(waitingRoot, waiting, holderRoot, holder)
 }
 
 // WorkspaceConflictForTab classifies the owner that a Delivery writer is
@@ -233,7 +240,7 @@ func (a *App) WorkspaceConflictForTab(tabID string) WorkspaceConflictView {
 		return empty
 	}
 	targetState := controllerWorkspaceLeaseState(targetCtrl)
-	if !targetState.Waiting || targetState.Acquired {
+	if !targetState.Waiting {
 		return empty
 	}
 	targetRoot, err := workspacelease.CanonicalWorkspace(targetWorkspaceRoot)
@@ -266,11 +273,20 @@ func (a *App) WorkspaceConflictForTab(tabID string) WorkspaceConflictView {
 
 	for _, candidate := range candidates {
 		root, err := workspacelease.CanonicalWorkspace(candidate.root)
-		if err != nil || root != targetRoot || !controllerWorkspaceLeaseState(candidate.ctrl).Acquired {
+		ownerState := controllerWorkspaceLeaseState(candidate.ctrl)
+		if err != nil || !ownerState.Acquired {
 			continue
+		}
+		if !leaseDomainsOverlap(targetRoot, targetState, root, ownerState) {
+			continue
+		}
+		ownerScope, ownerLabel := ownerState.HeldScope, ownerState.HeldLabel
+		if ownerScope == "" {
+			ownerScope, ownerLabel = ownerState.Scope, ownerState.Label
 		}
 		return WorkspaceConflictView{
 			State: "local", OwnerTabID: candidate.id, OwnerTitle: candidate.title,
+			OwnerScope: ownerScope, OwnerLabel: ownerLabel,
 			OwnerWork: activeWorkForController(candidate.ctrl), CanReveal: true,
 			CanCreateWorktree: availability.Available,
 		}

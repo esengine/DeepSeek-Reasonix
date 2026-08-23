@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/planmode"
 	"reasonix/internal/tool"
 )
 
@@ -58,7 +59,7 @@ func TestTodoWriteRejectsNonSerialStates(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
+func TestTodoWriteAcceptsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -68,9 +69,12 @@ func TestTodoWriteRejectsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("new completion without complete_step should be rejected, got %v", err)
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("new completion without complete_step should be accepted: %v", err)
+	}
+	if !strings.Contains(out, "1 completed") {
+		t.Fatalf("todo_write output = %q, want 1 completed", out)
 	}
 }
 
@@ -90,16 +94,16 @@ func TestTodoWriteAcceptsNewCompletedWithCompleteStepReceipt(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsInitialCompletedWithoutBaseline(t *testing.T) {
+func TestTodoWriteAcceptsInitialCompletedWithoutBaseline(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	if _, err := (todoWrite{}).Execute(ctx, args); err == nil || !strings.Contains(err.Error(), "cannot start completed") {
-		t.Fatalf("initial completed todo without baseline should be rejected: %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("initial completed todo without baseline should be accepted: %v", err)
 	}
 }
 
-func TestTodoWriteRejectsDroppingCurrentTodo(t *testing.T) {
+func TestTodoWriteRejectsDroppingCurrentTodoWithoutReplacementAuth(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -116,9 +120,17 @@ func TestTodoWriteRejectsDroppingCurrentTodo(t *testing.T) {
 		`{"todos":[{"content":"Write code","status":"in_progress"}]}`,
 	} {
 		_, err := (todoWrite{}).Execute(ctx, json.RawMessage(args))
-		if err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
-			t.Fatalf("dropping current todo with %s should be rejected: %v", args, err)
+		if err == nil || !strings.Contains(err.Error(), "cannot be") {
+			t.Fatalf("dropping current todo with %s should require replacement approval: %v", args, err)
 		}
+	}
+
+	authorized := tool.WithPlanReplacementAuthorization(ctx)
+	if _, err := (todoWrite{}).Execute(authorized, json.RawMessage(`{"todos":[{"content":"Write code","status":"in_progress"}]}`)); err != nil {
+		t.Fatalf("approved replacement of the current todo should succeed: %v", err)
+	}
+	if _, err := (todoWrite{}).Execute(authorized, json.RawMessage(`{"todos":[]}`)); err != nil {
+		t.Fatalf("approved clearing of an incomplete list should succeed: %v", err)
 	}
 }
 
@@ -168,6 +180,14 @@ func TestTodoWriteDoesNotTreatNumericContentAsStepIndex(t *testing.T) {
 	if _, err := (todoWrite{}).Execute(ctx, args); err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
 		t.Fatalf("numeric todo content should be matched by identity, got %v", err)
 	}
+
+	completeNumeric := json.RawMessage(`{"todos":[
+		{"content":"Finished","status":"completed"},
+		{"content":"2","status":"completed"}
+	]}`)
+	if _, err := (todoWrite{}).Execute(ctx, completeNumeric); err != nil {
+		t.Fatalf("completing numeric todo content should not treat it as a step index: %v", err)
+	}
 }
 
 func TestTodoWriteAllowsRephrasingCurrentTodo(t *testing.T) {
@@ -200,15 +220,15 @@ func TestTodoWritePreservesCanonicalCompletedPrefixAcrossTurns(t *testing.T) {
 	}
 }
 
-func TestTodoWriteCannotCompleteCanonicalCurrentAcrossTurns(t *testing.T) {
+func TestTodoWriteCanCompleteCanonicalCurrentAcrossTurns(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
 	ctx = evidence.WithTodoState(ctx, []evidence.TodoItem{
 		{Content: "Inspect environment", Status: "in_progress"},
 	})
 
 	args := json.RawMessage(`{"todos":[{"content":"Inspect environment","status":"completed"}]}`)
-	if _, err := (todoWrite{}).Execute(ctx, args); err == nil || !strings.Contains(err.Error(), "cannot become completed") {
-		t.Fatalf("cross-turn current todo completion should require complete_step: %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("cross-turn current todo completion should be accepted: %v", err)
 	}
 }
 
@@ -244,7 +264,7 @@ func TestTodoWriteRejectsDuplicatedOrReorderedCompletedPrefix(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsFailedCompleteStepReceipt(t *testing.T) {
+func TestTodoWriteAcceptsCompletedAfterFailedCompleteStep(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -255,13 +275,12 @@ func TestTodoWriteRejectsFailedCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step without proof-bearing recovery should not authorize completion, got %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("failed complete_step should not block todo progress: %v", err)
 	}
 }
 
-func TestTodoWriteRejectsFailedCompleteStepWithoutProof(t *testing.T) {
+func TestTodoWriteAcceptsCompletedWithoutProofBearingSignoff(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -281,13 +300,12 @@ func TestTodoWriteRejectsFailedCompleteStepWithoutProof(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step without proof should not authorize completion, got %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("todo progress should not wait for a proof-bearing complete_step: %v", err)
 	}
 }
 
-func TestTodoWriteRejectsFailedCompleteStepMissingResult(t *testing.T) {
+func TestTodoWriteAcceptsCompletedWhenSignoffLacksResult(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -306,13 +324,12 @@ func TestTodoWriteRejectsFailedCompleteStepMissingResult(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step without result should not authorize completion, got %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("todo progress should not wait for a complete_step result: %v", err)
 	}
 }
 
-func TestTodoWriteRecoversAfterFailedCompleteStepWithProgressReceipt(t *testing.T) {
+func TestTodoWriteCompletesWithoutSignoffRecoveryHatch(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -333,11 +350,11 @@ func TestTodoWriteRecoversAfterFailedCompleteStepWithProgressReceipt(t *testing.
 	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
 
 	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
-		t.Fatalf("matching failed complete_step with progress receipt should recover todo completion: %v", err)
+		t.Fatalf("todo completion should not need the failed-signoff recovery hatch: %v", err)
 	}
 }
 
-func TestTodoWriteRejectsRecoveryWhenProgressIsAfterFailedCompleteStep(t *testing.T) {
+func TestTodoWriteCompletesWhenProgressIsAfterFailedCompleteStep(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -358,9 +375,8 @@ func TestTodoWriteRejectsRecoveryWhenProgressIsAfterFailedCompleteStep(t *testin
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Run project script","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("progress after a failed complete_step should not authorize recovery, got %v", err)
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("later progress should not be required to complete a todo: %v", err)
 	}
 }
 
@@ -417,7 +433,7 @@ func TestTodoWriteRejectsOrphanSubStep(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsDroppingActiveSubStep(t *testing.T) {
+func TestTodoWriteRejectsReplacingActiveSubStepWithoutReplacementAuth(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -429,11 +445,107 @@ func TestTodoWriteRejectsDroppingActiveSubStep(t *testing.T) {
 		},
 	})
 	ctx := evidence.WithLedger(context.Background(), ledger)
-
-	_, err := (todoWrite{}).Execute(ctx, json.RawMessage(`{"todos":[
+	args := json.RawMessage(`{"todos":[
 		{"content":"Port the parser","status":"pending"},
-		{"content":"rewrite everything","status":"in_progress","level":1}]}`))
-	if err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
-		t.Fatalf("dropping the active sub-step should be rejected: %v", err)
+		{"content":"rewrite everything","status":"in_progress","level":1}]}`)
+
+	if _, err := (todoWrite{}).Execute(ctx, args); err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
+		t.Fatalf("replacing the active sub-step should require replacement approval: %v", err)
+	}
+	if _, err := (todoWrite{}).Execute(tool.WithPlanReplacementAuthorization(ctx), args); err != nil {
+		t.Fatalf("approved replacement of the active sub-step should succeed: %v", err)
+	}
+}
+
+func TestTodoWriteAdvancesFiveItemListWithoutSignoff(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Remove debug files from git", Status: "in_progress", StepID: "cleanup_step_01"},
+			{Content: "Clean leftover artifacts", Status: "pending", StepID: "cleanup_step_02"},
+			{Content: "Update AGENTS.md", Status: "pending", StepID: "cleanup_step_03"},
+			{Content: "Trim unused libraries", Status: "pending", StepID: "cleanup_step_04"},
+			{Content: "Verify the build", Status: "pending", StepID: "cleanup_step_05"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[
+		{"content":"Remove debug files from git","status":"completed","step_id":"cleanup_step_01"},
+		{"content":"Clean leftover artifacts","status":"in_progress","step_id":"cleanup_step_02"},
+		{"content":"Update AGENTS.md","status":"pending","step_id":"cleanup_step_03"},
+		{"content":"Trim unused libraries","status":"pending","step_id":"cleanup_step_04"},
+		{"content":"Verify the build","status":"pending","step_id":"cleanup_step_05"}
+	]}`)
+
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("issue #9094 progress update should succeed without complete_step: %v", err)
+	}
+	if !strings.Contains(out, "1 completed") || !strings.Contains(out, "1 in progress") {
+		t.Fatalf("todo_write output = %q, want 1 completed and 1 in progress", out)
+	}
+}
+
+func TestTodoWriteRetitlesCompletedItemByStepID(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Remove debug files from git", Status: "in_progress", StepID: "cleanup_step_01"},
+			{Content: "Clean leftover artifacts", Status: "pending", StepID: "cleanup_step_02"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[
+		{"content":"Remove output/ debug files from git","status":"completed","step_id":"cleanup_step_01"},
+		{"content":"Clean leftover artifacts","status":"in_progress","step_id":"cleanup_step_02"}
+	]}`)
+
+	if _, err := (todoWrite{}).Execute(ctx, args); err != nil {
+		t.Fatalf("retitling a completed item by step_id should succeed: %v", err)
+	}
+}
+
+func TestTodoWriteUpdatesProgressWhilePlanModeIsActive(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Inspect environment", Status: "in_progress"},
+			{Content: "Draft a plan", Status: "pending"},
+		},
+	})
+	ctx := planmode.WithActive(evidence.WithLedger(context.Background(), ledger), true)
+
+	if _, err := (todoWrite{}).Execute(ctx, json.RawMessage(`{"todos":[
+		{"content":"Inspect environment","status":"completed"},
+		{"content":"Draft a plan","status":"in_progress"}
+	]}`)); err != nil {
+		t.Fatalf("plan mode should still accept todo progress: %v", err)
+	}
+	if _, err := (todoWrite{}).Execute(ctx, json.RawMessage(`{"todos":[]}`)); err == nil || !strings.Contains(err.Error(), "cannot be cleared") {
+		t.Fatalf("plan mode should still require approval to clear the list: %v", err)
+	}
+}
+
+func TestTodoWriteRejectsUnauthorizedCompletedHistoryRewrite(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Inspect environment", Status: "completed"},
+			{Content: "Write code", Status: "in_progress"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	args := json.RawMessage(`{"todos":[{"content":"Write code","status":"in_progress"}]}`)
+
+	if _, err := (todoWrite{}).Execute(ctx, args); err == nil || !strings.Contains(err.Error(), "completed task history") {
+		t.Fatalf("unauthorized drop of completed history should be rejected: %v", err)
 	}
 }

@@ -81,5 +81,10 @@ assert.doesNotMatch(
   desktopBuildScript,
   /github\.com\/wailsapp\/wails\/v2\/cmd\/wails@/,
 );
+assert.match(
+  desktopBuildScript,
+  /REASONIX_CHANNEL="\$CHANNEL" wails build/,
+  "desktop builds must pass the Go release channel through to Vite",
+);
 
 console.log("desktop build contract: PASS");

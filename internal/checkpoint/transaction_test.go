@@ -255,6 +255,29 @@ func TestBackgroundWriterStartingAfterPreviewBlocksCommit(t *testing.T) {
 	}
 }
 
+func TestCaptureScratchPathIsNotOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	scratchPath := filepath.Join(os.TempDir(), "reasonix-capture-probe.py")
+	_, gap, err := CapturePath(scratchPath, CaptureOptions{WorkspaceRoot: root, ReadContent: true})
+	if err != nil || gap == nil || gap.Reason != GapScratch {
+		t.Fatalf("scratch capture: gap=%+v err=%v", gap, err)
+	}
+}
+
+func TestCaptureScratchSymlinkIntoWorkspaceStaysProjectGap(t *testing.T) {
+	root := t.TempDir()
+	scratch := t.TempDir()
+	link := filepath.Join(scratch, "workspace-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	path := filepath.Join(link, "probe.py")
+	_, gap, err := CapturePath(path, CaptureOptions{WorkspaceRoot: root, ReadContent: true})
+	if err == nil || gap == nil || gap.Reason == GapScratch || !HasProjectCoverageGap([]CoverageGap{*gap}) {
+		t.Fatalf("scratch alias capture: gap=%+v err=%v, want a project coverage gap", gap, err)
+	}
+}
+
 func TestCaptureRejectsAncestorSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

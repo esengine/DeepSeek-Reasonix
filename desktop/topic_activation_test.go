@@ -308,7 +308,7 @@ func TestStartTopicActivationSyncBuildAndReuseFastPath(t *testing.T) {
 // activationStubController is the minimal SessionAPI surface exercised by
 // prune/detach/attach flows around a tab with active runtime work.
 type activationStubController struct {
-	control.SessionAPI
+	stubSessionAPI
 	sessionPath string
 	closed      atomic.Bool
 	status      *control.RuntimeStatus
@@ -634,6 +634,7 @@ func TestMetaForTabFastPathCachesExpensiveFields(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.DefaultModel = "custom/vision-pro"
+	cfg.Agent.VisionModel = "auto"
 	cfg.Desktop.ProviderAccess = []string{"custom"}
 	cfg.Providers = []config.ProviderEntry{{
 		Name:         "custom",
@@ -737,6 +738,9 @@ func TestMetaForTabFastPathCachesExpensiveFields(t *testing.T) {
 	}
 	if !refreshed.Meta.ImageInputEnabled {
 		t.Fatal("refreshed meta should enable image input for custom/vision-pro")
+	}
+	if !refreshed.Meta.VisionFallbackEnabled {
+		t.Fatal("refreshed meta should expose the configured image-understanding fallback")
 	}
 
 	// A fresh cache serves subsequent calls without another config load.

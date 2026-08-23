@@ -1,51 +1,512 @@
-/* ===================================================================
- * heartbeat 模块 — 定时任务配置面板
- *
- * 所有选择器以 .heartbeat- 为前缀，不与上游样式冲突。
- * 区域注释格式：/* ── <模块名> ── *／ 方便合并时定位。
- * ================================================================ */
+/* heartbeat 模块 — 定时任务配置面板；选择器以 .heartbeat- 为前缀 */
 
-/* ── backdrop ─────────────────────────────────────────────────── */
-
-.heartbeat-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(3px);
+/* 面板分栏背景：浅色主题保持历史观感 #fafafa（接近主背景的近白），
+   暗色主题（data-theme=dark 或 OS 深色）跟随主背景 var(--bg)，
+   避免 #fafafa 硬编码在暗色下刺眼。 */
+:root[data-theme="light"],
+:root:not([data-theme]) {
+  --heartbeat-split-bg: #fafafa;
+}
+:root[data-theme="dark"] {
+  --heartbeat-split-bg: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --heartbeat-split-bg: var(--bg);
+  }
 }
 
-/* ── modal ────────────────────────────────────────────────────── */
+/* ── page（页面式容器，替换原 backdrop/modal 弹窗）────────────── */
 
-.heartbeat-modal {
+.heartbeat-page {
   display: flex;
   flex-direction: column;
-  width: min(640px, 92vw);
-  max-height: min(780px, 92vh);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  height: 100%;
+  min-width: 0;
   overflow: hidden;
+  background: var(--bg);
+  position: relative;
 }
 
-.heartbeat-modal__header {
+/* ── split layout ─────────────────────────────────────────────── */
+
+.heartbeat-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  /* 面板分栏背景：浅色 #fafafa、暗色 var(--bg)，见顶部变量定义 */
+  background: var(--heartbeat-split-bg);
+}
+
+/* 无详情时：页面顶部一条全宽透明拖拽条（可拖窗口），无独立背景色块 */
+.heartbeat-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  z-index: 3;
+  --wails-draggable: drag;
+  user-select: none;
+}
+
+/* 列表/详情内容区保持可交互，不参与窗口拖拽 */
+.heartbeat-split__left,
+.heartbeat-split__right {
+  --wails-draggable: no-drag;
+}
+
+/* 自定义滚动条可拖拽滑块不参与窗口拖拽 */
+.heartbeat-scrollbar,
+.heartbeat-scrollbar__thumb {
+  --wails-draggable: no-drag;
+}
+
+/* 分割线本身必须 no-drag——否则继承 .heartbeat-split 的 drag，
+   鼠标按下会被 Wails 当成拖窗口，React 收不到 mousedown 无法拖动分栏 */
+.heartbeat-split__divider {
+  --wails-draggable: no-drag;
+}
+
+.heartbeat-split__left {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 220px;
+  padding: 12px 2px 0 4px;
+  overflow: hidden;
+  /* 滚动条绝对定位参照：贴在左栏右缘（而非居中的 list-wrap 内容区） */
+  position: relative;
+}
+
+/* 未打开详情时：列表内容区最多 700px 且在页面中居中（背景仍全宽） */
+.heartbeat-split__left--full {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.heartbeat-split__left .heartbeat-toolbar {
+  flex-shrink: 0;
+  padding: 0 4px 8px 16px;
+}
+
+/* 无详情时（列表全宽）：标签组左对齐与标题一致，容器本身无背景色 */
+.heartbeat-split__left--full .heartbeat-status-tabs {
+  padding: 0;
+}
+
+/* 无详情时页面头部：大间距 + 大标题 + 副标题（ChatGPT 自动化页风格） */
+.heartbeat-hero {
+  flex-shrink: 0;
+  padding: 36px 14px 18px 16px;
+}
+
+.heartbeat-hero__title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.heartbeat-hero__subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-faint);
+}
+
+.heartbeat-list-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 6px 12px 2px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-faint);
+}
+
+/* 聚焦态不改变边框/背景，保持简洁 */
+.heartbeat-list-search:focus-within {
   color: var(--fg);
+}
+
+.heartbeat-list-search__icon,
+.heartbeat-list-search__clear {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
 }
 
-.heartbeat-modal__back,
-.heartbeat-modal__close {
+.heartbeat-list-search__input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.heartbeat-list-search__input::placeholder {
+  color: var(--fg-faint);
+}
+
+.heartbeat-list-search__clear {
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+}
+
+.heartbeat-list-search__clear:hover {
+  color: var(--fg);
+}
+
+.heartbeat-split__list-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 详情打开时左栏较宽：列表内容限宽居中（无详情时 left--full 已限宽，此值不叠加） */
+  width: 100%;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.heartbeat-split__list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  /* 让出右侧滚动条区域（选中背景/操作按钮不被滚动条遮挡） */
+  padding-right: 8px;
+  /* 隐藏系统滚动条（轨道槽、边线全部不显示） */
+  scrollbar-width: none;
+}
+
+.heartbeat-split__list::-webkit-scrollbar {
+  display: none;
+}
+
+/* 自定义滚动条：定位在滚动容器外层（不随内容滚动），只显示可拖拽滑块 */
+.heartbeat-scrollbar {
+  position: absolute;
+  right: 1px;
+  /* 顶部与搜索输入框齐平：left padding-top 12px + toolbar(tab 28px + padding 8px) ≈ 48px，
+     避免滚动条覆盖顶部的状态 tab；无详情(edge)模式由 --edge 类独立处理 */
+  top: 48px;
+  bottom: 0;
+  width: 6px;
+  pointer-events: none;
+  z-index: 2;
+  /* 滚动时显示，停止滚动 1.2s 后自动淡出。
+     淡出时同时关闭交互：opacity:0 的元素仍会捕获鼠标（thumb 是 pointer-events:auto），
+     若不清除命中会挡住左栏右缘的点击；用 visibility 彻底移除命中。 */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s;
+}
+
+.heartbeat-scrollbar--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 无详情时（列表 700px 居中）：滚动条移到窗口最右缘 */
+.heartbeat-scrollbar--edge {
+  right: calc(1px - max(0px, (100vw - 700px) / 2));
+}
+
+.heartbeat-scrollbar__thumb {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border-radius: 3px;
+  /* 淡色滚动条：fg-faint 的 35% 不透明度（用户要求 30-40%） */
+  background: color-mix(in srgb, var(--fg-faint) 35%, transparent);
+  pointer-events: auto;
+  cursor: pointer;
+  transition: background 0.12s;
+  display: none;
+}
+
+.heartbeat-scrollbar__thumb:hover {
+  /* hover 略加深，保持交互反馈但不突兀 */
+  background: color-mix(in srgb, var(--fg-faint) 55%, transparent);
+}
+
+.heartbeat-split__divider {
+  width: 0px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+  z-index: 5;
+}
+
+/* 视觉 1px 细竖线（与页面整体分割风格一致），紧贴边缘 */
+.heartbeat-split__divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+/* 5px 可拖拽热区：透明，以视觉线为中心向两侧各扩 2.5px，
+   width:0 的元素本身无法命中鼠标，热区由伪元素承载 */
+.heartbeat-split__divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2px;
+  width: 5px;
+  cursor: col-resize;
+}
+
+.heartbeat-split__divider:hover::before {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.heartbeat-split__divider:active::before {
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.heartbeat-split__right {
+  flex: 1;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--heartbeat-split-bg);
+}
+
+.heartbeat-split__right .heartbeat-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.heartbeat-split__empty-hint {
+  font-size: 12px;
+  color: var(--fg-faint);
+  text-align: center;
+  max-width: 220px;
+  line-height: 1.5;
+}
+
+.heartbeat-split__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.heartbeat-split__empty-inner {
+  margin-top: -70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── tree node styles (reused from worktree) ──────────────────── */
+
+.worktree-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.worktree-node {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding-right: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--fg);
+  user-select: none;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.worktree-node:hover {
+  background: var(--list-row-hover-bg);
+}
+
+.worktree-node--selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left: 2px solid var(--accent);
+  color: var(--accent);
+}
+
+.worktree-node--scope {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--fg-dim);
+  height: 32px;
+  margin: 6px 4px 0 4px;
+  border-radius: 8px;
+}
+
+.worktree-node--scope:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.worktree-node__scope-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  color: var(--fg-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.worktree-node--scope:hover .worktree-node__scope-add {
+  opacity: 1;
+}
+
+.worktree-node__scope-add:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
+
+.worktree-node--task {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  font-size: 13px;
+  height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  margin: 3px 4px;
+  padding-right: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-radius: 8px;
+}
+
+.worktree-node__main {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.worktree-node__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding-left: 22px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--fg-faint);
+}
+
+.worktree-node__meta .worktree-node__scope-tag {
+  margin-left: 0;
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  max-width: none;
+}
+
+.worktree-node--task:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.worktree-node--task.worktree-node--selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left: 0;
+}
+
+.worktree-node--task.worktree-node--selected .worktree-node__label {
+  color: var(--fg);
+}
+
+/* 悬停/选中：两行文字都增强（标题保持最深，meta 从 faint 提到 dim） */
+.worktree-node--task:hover .worktree-node__label {
+  color: var(--fg);
+}
+.worktree-node--task:hover .worktree-node__meta,
+.worktree-node--task.worktree-node--selected .worktree-node__meta {
+  color: var(--fg-dim);
+}
+
+.worktree-node--task.worktree-node--selected .worktree-node__action-btn {
+  color: var(--fg-faint);
+}
+
+.worktree-node--task.worktree-node--selected .worktree-node__action-btn:hover {
+  color: var(--fg);
+}
+
+.worktree-node__tail {
+  flex-shrink: 0;
+  margin-left: auto;
+  position: relative;
+  min-width: 40px;
+  text-align: right;
+}
+
+.worktree-node__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.worktree-node--task:hover .worktree-node__actions {
+  opacity: 1;
+}
+
+.worktree-node__interval {
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.worktree-node__action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,61 +515,136 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.heartbeat-modal__back:hover,
-.heartbeat-modal__close:hover {
-  background: var(--hover-bg);
-  color: var(--fg);
-}
-
-.heartbeat-modal__close {
-  margin-left: auto;
-}
-
-.heartbeat-modal__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.heartbeat-btn--mini {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-faint);
   cursor: pointer;
   flex-shrink: 0;
+  padding: 0;
   transition: background 0.12s, color 0.12s;
 }
-.heartbeat-btn--mini:hover {
-  background: var(--hover-bg);
-  color: var(--fg);
-}
-.heartbeat-btn--mini-primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.heartbeat-btn--mini-primary:hover {
-  opacity: 0.88;
+
+.worktree-node__action-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
-.heartbeat-modal__body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+.worktree-node__action-btn:hover:not(:disabled) {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
+
+.worktree-node__icon {
+  width: 12px;
+  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-faint);
+}
+
+.worktree-node__marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  margin-right: 4px;
+}
+
+/* 启停状态（ChatGPT 三态）：运行中=空圆圈，hover 显示暂停条提示可暂停；暂停中=播放三角提示可启动 */
+.worktree-node__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.worktree-node__toggle:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
+
+/* 停用态进一步弱化：降低透明度，呈现“被禁用”的感觉 */
+.worktree-node__toggle:not(.worktree-node__toggle--on) {
+  opacity: 0.45;
+}
+
+.worktree-node__toggle:not(.worktree-node__toggle--on):hover {
+  opacity: 1;
+}
+
+/* 运行中默认：空圆圈图标（lucide Circle，与 hover/停用图标同尺寸同粗细，切换零抖动） */
+.worktree-node__toggle--on .worktree-node__toggle-circle {
+  display: block;
+}
+
+/* 运行中 hover：空圆圈换成暂停条图标，提示点击会暂停；hover 图标高亮 */
+.worktree-node__toggle--on .worktree-node__toggle-hover {
+  display: none;
+}
+
+.worktree-node__toggle--on:hover .worktree-node__toggle-circle {
+  display: none;
+}
+
+.worktree-node__toggle--on:hover .worktree-node__toggle-hover {
+  display: block;
+}
+
+.worktree-node--scope .worktree-node__marker {
+  color: var(--fg-faint);
+}
+
+.worktree-node__label {
+  flex: 1;
+  overflow: hidden;  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-node__count {
+  font-size: 10px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+/* 暂停任务（未选中）：两行文字都弱化；选中后与激活任务一样高亮（:not 排除选中态）
+   meta 在 faint 基础上再降透明度，与激活任务第二行拉开差异 */
+.worktree-node--task.worktree-node--paused:not(.worktree-node--selected) .worktree-node__label {
+  color: var(--fg-faint);
+}
+.worktree-node--task.worktree-node--paused:not(.worktree-node--selected) .worktree-node__meta {
+  color: var(--fg-faint);
+  opacity: 0.65;
+}
+
+.worktree-node__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border);
+}
+
+.worktree-node--task.worktree-node--selected .worktree-node__dot {
+  background: var(--border);
+}
+
+.worktree-node__dot--on {
+  background: #4caf50;
+}
+
+.worktree-node--task.worktree-node--selected .worktree-node__dot--on {
+  background: #4caf50;
 }
 
 /* ── toolbar ──────────────────────────────────────────────────── */
@@ -123,8 +659,7 @@
 
 /* All toolbar children share height: 28px for visual consistency */
 .heartbeat-toolbar__btn,
-.heartbeat-toolbar__search,
-.heartbeat-toolbar__status-btn {
+.heartbeat-toolbar__search {
   height: 28px;
   box-sizing: border-box;
 }
@@ -146,14 +681,18 @@
   transition: background 0.12s, border-color 0.12s, color 0.12s;
   font-family: inherit;
 }
-/* Icon-only buttons in toolbar: minimal width */
+/* Icon-only buttons in toolbar: minimal width, borderless ghost icon
+   (默认纯图标无边框；hover 由基础 .heartbeat-toolbar__btn:hover 提供轻背景) */
 .heartbeat-toolbar__btn--icon {
   width: 28px;
   padding: 0;
   justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
 }
 .heartbeat-toolbar__btn:hover {
-  background: var(--hover-bg);
+  background: var(--list-row-hover-bg);
   color: var(--fg);
 }
 .heartbeat-toolbar__btn:disabled {
@@ -161,19 +700,32 @@
   cursor: default;
 }
 
+.heartbeat-toolbar__btn--primary,
+.heartbeat-toolbar__btn--primary:hover {
+  color: #fff;
+}
 .heartbeat-toolbar__btn--primary {
   background: var(--accent);
-  color: #fff;
   border-color: var(--accent);
 }
 .heartbeat-toolbar__btn--primary:hover {
-  opacity: 0.88;
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+.heartbeat-toolbar__btn--add {
+  border-radius: 999px;
+  padding: 0 13px;
+  gap: 5px;
+  font-weight: 600;
 }
 
 .heartbeat-toolbar__btn--select {
   min-width: 76px;
   max-width: 130px;
-  padding: 0 8px 0 10px;
+  padding: 0 4px 0 8px;
+  justify-content: space-between;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
 }
 .heartbeat-toolbar__btn--select > span {
   flex: 1;
@@ -183,89 +735,10 @@
   white-space: nowrap;
 }
 
-.heartbeat-toolbar__search {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 120px;
-  max-width: 200px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  transition: border-color 0.15s;
-}
-.heartbeat-toolbar__search:focus-within {
-  border-color: var(--accent);
-}
-
-.heartbeat-toolbar__search-icon {
-  flex-shrink: 0;
-}
-
-.heartbeat-toolbar__search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-  height: 100%;
-}
-.heartbeat-toolbar__search-input::placeholder {
-  color: var(--fg-faint);
-}
-
-.heartbeat-toolbar__search-clear {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-faint);
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 0;
-}
-.heartbeat-toolbar__search-clear:hover {
-  background: var(--hover-bg);
-  color: var(--fg);
-}
-
 .heartbeat-toolbar__status {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-}
-
-.heartbeat-toolbar__status-btn {
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-  white-space: nowrap;
-  font-family: inherit;
-}
-.heartbeat-toolbar__status-btn:hover {
-  background: var(--hover-bg);
-  color: var(--fg);
-}
-.heartbeat-toolbar__status-btn--active {
-  background: rgba(128, 128, 128, 0.08);
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .heartbeat-scope-filter {
@@ -293,7 +766,7 @@
   box-sizing: border-box;
 }
 .heartbeat-btn:hover {
-  background: var(--hover-bg);
+  background: var(--list-row-hover-bg);
   border-color: var(--border-focus);
 }
 .heartbeat-btn:disabled {
@@ -324,7 +797,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
 }
 
 /* ── empty / loading ──────────────────────────────────────────── */
@@ -335,8 +808,101 @@
   align-items: center;
   gap: 12px;
   padding: 40px 0;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 13px;
+}
+
+/* ── 双视图：视图切换 + flat 行项目标签 + 引导式空态 ───────────── */
+
+.heartbeat-toolbar__view {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── 状态筛选 tab（全部/已开启/已暂停） ────────────────────────── */
+
+/* 列表区与详情区头部支持拖拽窗口（Wails --wails-draggable），
+   交互元素（按钮/输入框）保持 no-drag 可点击 */
+.heartbeat-toolbar,
+.heartbeat-editor__header {
+  --wails-draggable: drag;
+  user-select: none;
+}
+
+.heartbeat-toolbar button,
+.heartbeat-toolbar input,
+.heartbeat-editor__header button {
+  --wails-draggable: no-drag;
+}
+
+.heartbeat-status-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.heartbeat-status-tabs__tab {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.heartbeat-status-tabs__tab:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
+
+.heartbeat-status-tabs__tab--on {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.worktree-node__scope-tag {
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  background: var(--list-row-hover-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 4px;
+}
+
+.heartbeat-empty--guided {
+  gap: 14px;
+  padding: 48px 0;
+}
+
+.heartbeat-empty--guided .heartbeat-btn--primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.heartbeat-empty--guided .heartbeat-btn--primary:hover {
+  opacity: 0.9;
 }
 
 @keyframes heartbeat-keyframe-pulse {
@@ -345,13 +911,6 @@
 }
 .heartbeat-pulse {
   animation: heartbeat-keyframe-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes heartbeat-keyframe-spin {
-  to { transform: rotate(360deg); }
-}
-.heartbeat-spin {
-  animation: heartbeat-keyframe-spin 0.8s linear infinite;
 }
 
 /* ── filter menu (popover) ──────────────────────────────────── */
@@ -395,281 +954,138 @@
   flex-shrink: 0;
 }
 
-/* ── tasklist ─────────────────────────────────────────────────── */
+/* ── editor ─────────────────────────────────────────────────────── */
 
-.heartbeat-tasklist {
-  list-style: none;
-  margin: 0;
+.heartbeat-editor {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
+  overflow: hidden;
 }
 
-/* ── card ─────────────────────────────────────────────────────── */
-
-.heartbeat-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  transition: border-color 0.15s;
-}
-
-.heartbeat-card:hover {
-  border-color: var(--border);
-}
-
-.heartbeat-card--disabled {
-  opacity: 0.55;
-}
-
-.heartbeat-card__head {
+/* 详情头部：状态文字（点击切换，CodeX 式）+ 操作菜单 + 关闭 */
+.heartbeat-editor__header {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.heartbeat-card__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  padding: 10px 16px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
   flex-shrink: 0;
-  background: var(--fg-faint);
+}
+.heartbeat-editor__header-spacer {
+  flex: 1;
 }
 
-.heartbeat-card__dot--on {
-  background: #4caf50;
-  box-shadow: 0 0 4px rgba(76, 175, 80, 0.5);
-}
-
-.heartbeat-card__title {
-  display: flex;
+.heartbeat-editor__status {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  cursor: pointer;
 }
 
-.heartbeat-card__title-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
-  font-weight: 600;
+.heartbeat-editor__status:hover {
   color: var(--fg);
 }
 
-.heartbeat-card__title-btn {
+.heartbeat-editor__status--on {
+  color: var(--accent);
+}
+
+.heartbeat-editor__close {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-  text-align: left;
-  font: inherit;
-  transition: background 0.12s;
-  overflow: hidden;
-}
-.heartbeat-card__title-btn:hover {
-  background: var(--hover-bg);
-}
-
-.heartbeat-card__title-scope {
-  flex-shrink: 0;
-  font-size: 11.5px;
-  color: var(--fg-faint);
-  white-space: nowrap;
-  line-height: 1.5;
-}
-
-.heartbeat-card__head-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-/* Hover reveal: buttons in head-actions hidden by default, show on card hover */
-.heartbeat-card:hover .heartbeat-card__head-actions .heartbeat-card__open-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-.heartbeat-card .heartbeat-card__head-actions .heartbeat-card__open-btn {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s;
-}
-/* Toggle always visible */
-.heartbeat-card .heartbeat-card__head-actions .heartbeat-card__toggle,
-.heartbeat-card:hover .heartbeat-card__head-actions .heartbeat-card__toggle {
-  opacity: 1;
-  pointer-events: auto;
-}
-/* Open topic button always visible when not disabled */
-.heartbeat-card__open-btn:not(:disabled) {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-
-.heartbeat-card__open-btn {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-  flex-shrink: 0;
-}
-.heartbeat-card__open-btn:hover:not(:disabled) {
-  background: var(--hover-bg);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.heartbeat-card__open-btn:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.heartbeat-card__badge {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: var(--border-soft);
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
-}
-
-.heartbeat-card__badge--on {
-  background: rgba(76, 175, 80, 0.15);
-  color: #4caf50;
-}
-
-/* ── toggle ───────────────────────────────────────────────────── */
-
-.heartbeat-card__toggle {
-  position: relative;
-  width: 32px;
-  height: 18px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: 9px;
-  background: var(--border);
-  cursor: pointer;
-  transition: background 0.2s;
-  padding: 0;
-}
-
-.heartbeat-card__toggle:hover {
-  background: var(--fg-faint);
-}
-
-.heartbeat-card__toggle--on {
-  background: #4caf50;
-}
-
-.heartbeat-card__toggle--on:hover {
-  background: #43a047;
-}
-
-.heartbeat-card__toggle-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.heartbeat-card__toggle--on .heartbeat-card__toggle-knob {
-  transform: translateX(14px);
-}
-
-/* ── compact meta in single row ──────────────────────────────── */
-
-.heartbeat-card__meta-item--compact {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
   color: var(--fg-faint);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.heartbeat-card__meta-sep {
-  color: var(--border);
-}
-
-.heartbeat-card__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-size: 11.5px;
-  font-weight: 500;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
 }
 
-.heartbeat-card__btn:hover {
-  background: var(--hover-bg);
+.heartbeat-editor__close:hover {
+  background: var(--list-row-hover-bg);
   color: var(--fg);
 }
 
-.heartbeat-card__btn--danger:hover {
-  color: var(--err);
-  background: rgba(128, 128, 128, 0.1);
-}
-
-.heartbeat-card__confirm {
+/* 详情头部操作按钮（启停/删除）：图标+文字，统一 26px 高，与关闭按钮同一水平线 */
+.heartbeat-editor__header-action {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
-  color: var(--err);
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-/* ── editor ───────────────────────────────────────────────────── */
+.heartbeat-editor__header-action:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
 
-.heartbeat-editor {
-  display: flex;
-  flex-direction: column;
+.heartbeat-editor__header-action--on {
+  color: var(--fg);
+}
+
+.heartbeat-editor__header-action--danger:hover {
+  color: var(--danger);
+}
+
+.heartbeat-editor__header-action--confirm {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.heartbeat-editor__header-action:disabled {
+  opacity: 0.4;
+}
+
+/* 表单滚动区 */.heartbeat-editor__fields {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 16px 0;
-}
-
-.heartbeat-editor__fields {
+  padding: 8px 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 24px;
+}
+
+/* 标题：隐形输入框（无边框大标题样式，点击直接编辑） */
+.heartbeat-editor__title {
+  border: none;
+  background: transparent;
+  width: 100%;
+  padding: 2px 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  outline: none;
+  border-radius: 0;
+}
+
+.heartbeat-editor__title::placeholder {
+  color: var(--fg-faint);
+  font-weight: 500;
 }
 
 .heartbeat-editor__field {
@@ -681,9 +1097,19 @@
 .heartbeat-editor__field > label {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.heartbeat-editor__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heartbeat-editor__title-row .heartbeat-editor__input {
+  flex: 1;
 }
 
 /* ── editor text inputs ───────────────────────────────────────── */
@@ -694,7 +1120,7 @@
   font-size: 13px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--bg);
+  background: transparent;
   color: var(--fg);
   font-family: inherit;
   transition: border-color 0.15s;
@@ -706,7 +1132,7 @@
   font-size: 13px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--bg);
+  background: transparent;
   color: var(--fg);
   font-family: inherit;
   transition: border-color 0.15s;
@@ -716,14 +1142,34 @@
 .heartbeat-editor__input:focus,
 .heartbeat-editor__textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border);
 }
 
 .heartbeat-editor__textarea {
-  resize: none;
-  min-height: 80px;
-  max-height: 180px;
-  overflow-y: auto;
+  resize: vertical;
+  height: 300px;
+}
+
+/* 滚动条：无轨道背景，只显示可拖拽滑块 */
+.heartbeat-editor__textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.heartbeat-editor__textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.heartbeat-editor__textarea::-webkit-scrollbar-thumb {
+  /* 与列表滚动条一致：fg-faint 的 35% 不透明度 */
+  background: color-mix(in srgb, var(--fg-faint) 35%, transparent);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.heartbeat-editor__textarea::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--fg-faint) 55%, transparent);
+  background-clip: content-box;
 }
 
 /* ── editor rows ──────────────────────────────────────────────── */
@@ -758,31 +1204,6 @@
   font-size: 10.5px;
 }
 
-.heartbeat-editor__mode-hint {
-  font-size: 11px;
-  color: var(--fg-muted);
-  line-height: 1.4;
-}
-
-.heartbeat-editor__tw-add {
-  cursor: pointer;
-  color: var(--fg-faint);
-}
-
-.heartbeat-editor__tw-sep {
-  font-size: 11px;
-}
-
-.heartbeat-editor__tw-clear {
-  padding: 0 4px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--fg-muted);
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
 /* ── frequency: unified components ──────────────────────────────── */
 /* All freq-* components share height: 32px for visual consistency */
 
@@ -801,7 +1222,7 @@
 
 .heartbeat-editor__freq-input {
   height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: 13px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -810,15 +1231,27 @@
   font-family: var(--mono);
   transition: border-color 0.15s;
   box-sizing: border-box;
-  width: 60px;
+  width: 48px;
 }
 .heartbeat-editor__freq-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border);
 }
 .heartbeat-editor__freq-input--time {
   width: 100px;
   font-family: var(--font-ui);
+}
+
+.heartbeat-editor__freq-input--cron {
+  width: 220px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.heartbeat-editor__cron-hint {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-top: 2px;
 }
 
 .heartbeat-editor__freq-select {
@@ -834,7 +1267,7 @@
 }
 .heartbeat-editor__freq-select:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border);
 }
 
 /* ── weekday buttons ──────────────────────────────────────────── */
@@ -854,12 +1287,12 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .heartbeat-editor__weekday-btn:hover {
-  background: var(--hover-bg);
+  background: var(--list-row-hover-bg);
 }
 .heartbeat-editor__weekday-btn--on {
   background: var(--accent);
@@ -930,59 +1363,233 @@
 
 .heartbeat-editor__toggle-label {
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   white-space: nowrap;
 }
 
 /* ── editor actions ───────────────────────────────────────────── */
 
-.heartbeat-editor__actions {
+/* ── 运行历史记录（频率字段之后） ─────────────────────────── */
+.heartbeat-run-history {
+  margin: 0;
+}
+.heartbeat-run-history__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 18px 0 8px;
+}
+.heartbeat-run-history__empty {
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 6px 0;
+}
+.heartbeat-run-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.heartbeat-run-history__item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 24px 0 16px;
+  width: 100%;
+  padding: 9px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+}
+.heartbeat-run-history__item:hover:not(:disabled) {
+  background: var(--list-row-hover-bg);
+}
+.heartbeat-run-history__item:disabled {
+  cursor: default;
+  color: var(--fg-faint);
+}
+.heartbeat-run-history__title {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.heartbeat-run-history__scope {
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  margin-left: 6px;
+}
+.heartbeat-run-history__rel {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.heartbeat-run-history__notopic {
+  margin-left: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.heartbeat-editor__actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.heartbeat-editor__inline-error,
+.heartbeat-editor__save-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.heartbeat-editor__save-notice {
+  padding: 9px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  flex-shrink: 0;
+}
+
+/* 保存/取消操作条（仅脏状态显示） */
+.heartbeat-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.heartbeat-editor__action-btn {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.heartbeat-editor__action-btn:hover {
+  background: var(--list-row-hover-bg);
+}
+
+.heartbeat-editor__action-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.heartbeat-editor__action-btn--primary:hover {
+  opacity: 0.9;
+  background: var(--accent);
+}
+
+.heartbeat-editor__action-btn--primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.heartbeat-editor__mode-hint {
+  font-size: 11px;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+
+.heartbeat-editor__tw-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.heartbeat-editor__tw-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.heartbeat-editor__tw-sep {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.heartbeat-editor__tw-add {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--accent);
+  font-weight: 500;
+  user-select: none;
+}
+
+.heartbeat-editor__tw-add:hover {
+  opacity: 0.8;
+}
+
+.heartbeat-editor__tw-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.heartbeat-editor__tw-remove:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--err);
 }
 
 /* ── scope selector ───────────────────────────────────────────── */
 
-.heartbeat-editor__scope-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.heartbeat-scope-wrap {
+  position: relative;
 }
 
-.heartbeat-scope-btn {
+.heartbeat-scope-select {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: var(--font-control);
+  font-weight: 400;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--bg);
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
-  box-sizing: border-box;
-}
-
-.heartbeat-scope-btn:hover {
-  background: var(--hover-bg);
-  border-color: var(--border-focus);
-}
-
-.heartbeat-scope-btn--active {
-  background: rgba(128, 128, 128, 0.08);
-  border-color: var(--border);
   color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s;
 }
 
-/* ── project dropdown ─────────────────────────────────────────── */
-
-.heartbeat-project-wrap {
-  position: relative;
+.heartbeat-scope-select:hover {
+  border-color: var(--border-focus);
 }
 
 .heartbeat-project-menu {
@@ -1015,13 +1622,18 @@
   text-align: left;
 }
 
+.heartbeat-project-menu--up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .heartbeat-project-menu__item:hover {
-  background: var(--hover-bg);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .heartbeat-project-menu__item--active {
   background: rgba(128, 128, 128, 0.08);
-  color: var(--accent);
+  color: var(--fg-dim);
 }
 
 .heartbeat-project-menu__current {
@@ -1036,6 +1648,9 @@
   font-size: 12px;
   color: var(--fg-faint);
 }
+
+/* ── footer hint ──────────────────────────────────────────────── */
+
 
 /* ── Sidebar header automation button ── */
 
@@ -1067,31 +1682,7 @@
 }
 
 .sidebar__hb-add:hover {
-  background: var(--hover-bg);
-  color: var(--fg);
-}
-
-.sidebar__hb-btn {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  height: 30px;
-  padding: 0 8px;
-  font-size: 13px;
-  font-weight: 400;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-dim);
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  transition: color 0.12s, background 0.12s;
-}
-
-.sidebar__hb-btn:hover {
-  background: var(--sidebar-hover);
+  background: var(--list-row-hover-bg);
   color: var(--fg);
 }
 
@@ -1196,36 +1787,96 @@
   height: 30px;
 }
 
-.sidebar__project-header {
+/* ── 建议区（全部视图列表底部，一键创建预设任务） ── */
+.heartbeat-suggestions {
+  padding: 20px 14px 10px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 16px;
+}
+.heartbeat-suggestions__header {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 8px;
-  font-size: 13px;
-  font-weight: 400;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-dim);
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  transition: color 0.12s;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  margin-bottom: 8px;
 }
-
-.sidebar__project-header:hover {
-  color: var(--fg);
-}
-
-.sidebar__hb-label {
-  flex: 1;
-  text-align: left;
-}
-
-.sidebar__hb-hint {
-  font-size: 10px;
+.heartbeat-suggestions__hint {
+  font-size: 11px;
   font-weight: 400;
   color: var(--fg-faint);
-  letter-spacing: normal;
+}
+.heartbeat-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  margin-bottom: 6px;
+  transition: background 0.12s;
+}
+.heartbeat-suggestion:hover {
+  background: var(--list-row-hover-bg);
+}
+.heartbeat-suggestion__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.heartbeat-suggestion__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.heartbeat-suggestion__freq {
+  font-size: 11px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.heartbeat-suggestion__desc {
+  font-size: 12px;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+
+/* ── 任务行 ⋯ 菜单（仅删除） ── */
+.heartbeat-task-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.heartbeat-task-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.heartbeat-task-menu__item:hover {
+  background: var(--list-row-hover-bg);
+}
+.heartbeat-task-menu__item--danger {
+  color: var(--danger);
 }

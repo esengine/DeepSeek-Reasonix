@@ -21,6 +21,9 @@ type QuoteContext struct {
 	// immutable boot config. It keeps billing_mode authoritative even when a
 	// custom provider name does not contain a token-plan heuristic.
 	BillingModeForModel func(modelRef string) string
+	// PricingContextForModel resolves trusted catalog/schedule identity from the
+	// immutable boot config. It supersedes BillingModeForModel when present.
+	PricingContextForModel func(modelRef string) billing.PricingContext
 }
 
 // SetDisplay updates the resolved display currency used for Selected.
@@ -87,12 +90,30 @@ func (c *QuoteContext) billingMode(modelRef string) string {
 	return strings.TrimSpace(resolve(modelRef))
 }
 
+func (c *QuoteContext) pricingContext(modelRef string) billing.PricingContext {
+	if c == nil {
+		return billing.PricingContext{}
+	}
+	c.mu.RLock()
+	resolve := c.PricingContextForModel
+	c.mu.RUnlock()
+	if resolve != nil {
+		return resolve(modelRef)
+	}
+	return billing.PricingContext{BillingMode: c.billingMode(modelRef)}
+}
+
 // CostQuoteSink fills CostQuote on Usage events before forwarding. Frontends
 // must consume e.CostQuote and must not call Pricing.Cost for aggregation.
+// The embedded forwarder carries the optional audit capabilities past this
+// link: without it every recorder below a quoting sink — trajectory and stats
+// among them — silently receives nothing.
 type CostQuoteSink struct {
-	Inner Sink
-	Ctx   *QuoteContext
+	AuditForwarder
+	Ctx *QuoteContext
 }
+
+var _ OptionalSinkCapabilities = (*CostQuoteSink)(nil)
 
 // NewCostQuoteSink wraps inner with quoting. A nil ctx still quotes the
 // original price-book currency.
@@ -100,7 +121,7 @@ func NewCostQuoteSink(inner Sink, ctx *QuoteContext) *CostQuoteSink {
 	if ctx == nil {
 		ctx = &QuoteContext{}
 	}
-	return &CostQuoteSink{Inner: inner, Ctx: ctx}
+	return &CostQuoteSink{AuditForwarder: AuditForwarder{Inner: inner}, Ctx: ctx}
 }
 
 func (s *CostQuoteSink) Emit(e Event) {
@@ -129,8 +150,9 @@ func EnsureCostQuote(e Event, ctx *QuoteContext) *billing.CostQuote {
 		}
 		return &q
 	}
+	pricingCtx := ctx.pricingContext(e.ModelRef)
 	mode := billing.BillingModePAYG
-	if configured := ctx.billingMode(e.ModelRef); configured != "" {
+	if configured := strings.TrimSpace(pricingCtx.BillingMode); configured != "" {
 		mode = configured
 	} else if strings.Contains(strings.ToLower(e.ModelRef), "token-plan") ||
 		strings.Contains(strings.ToLower(e.Source), "token-plan") {
@@ -138,13 +160,17 @@ func EnsureCostQuote(e Event, ctx *QuoteContext) *billing.CostQuote {
 	}
 	card := rateCardFromPricing(e.Pricing)
 	q := billing.BuildQuote(billing.QuoteInput{
-		Usage:       usageTokens(e.Usage),
-		Rates:       card,
-		OccurredAt:  now,
-		Display:     display,
-		BillingMode: mode,
-		ModelRef:    e.ModelRef,
-		UsageSource: firstUsageSource(e),
+		Usage:         usageTokens(e.Usage),
+		Rates:         card,
+		OccurredAt:    now,
+		Display:       display,
+		BillingMode:   mode,
+		ModelRef:      e.ModelRef,
+		UsageSource:   firstUsageSource(e),
+		ProviderKind:  pricingCtx.ProviderKind,
+		ModelID:       pricingCtx.ModelID,
+		ScheduleID:    pricingCtx.ScheduleID,
+		CatalogSource: pricingCtx.CatalogSource,
 	})
 	return &q
 }

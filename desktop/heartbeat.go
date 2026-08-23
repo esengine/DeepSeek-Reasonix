@@ -11,12 +11,9 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -29,7 +26,6 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/filelock"
-	"reasonix/internal/fileutil"
 	"reasonix/internal/secrets"
 )
 
@@ -37,27 +33,53 @@ import (
 
 // HeartbeatTask defines a single scheduled prompt.
 type HeartbeatTask struct {
-	ID                     string `json:"id"`
-	Title                  string `json:"title"`    // user-visible label
-	Prompt                 string `json:"prompt"`   // the prompt to submit
-	Interval               string `json:"interval"` // e.g. "5m", "1h", "30s"
-	Enabled                bool   `json:"enabled"`
-	Scope                  string `json:"scope,omitempty"`                  // "global" or "project"
-	WorkspaceRoot          string `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
-	TopicID                string `json:"topicId,omitempty"`                // created topic, reused on re-run
-	LastRunAt              int64  `json:"lastRunAt,omitempty"`              // unix millis
-	NewConversationEachRun bool   `json:"newConversationEachRun,omitempty"` // true = create new topic every run
-	CreatedAt              int64  `json:"createdAt,omitempty"`
-	ApprovalMode           string `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
-	TimeWindowStart        string `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
-	TimeWindowEnd          string `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
-	NotifyChannels         *bool  `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
+	ID                     string         `json:"id"`
+	Title                  string         `json:"title"`    // user-visible label
+	Prompt                 string         `json:"prompt"`   // the prompt to submit
+	Interval               string         `json:"interval"` // e.g. "5m", "1h", "30s"
+	Enabled                bool           `json:"enabled"`
+	Scope                  string         `json:"scope,omitempty"`                  // "global" or "project"
+	WorkspaceRoot          string         `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
+	TopicID                string         `json:"topicId,omitempty"`                // created topic, reused on re-run
+	LastRunAt              int64          `json:"lastRunAt,omitempty"`              // unix millis
+	NewConversationEachRun bool           `json:"newConversationEachRun,omitempty"` // true = create new topic every run
+	RunHistory             []HeartbeatRun `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
+	CreatedAt              int64          `json:"createdAt,omitempty"`
+	ApprovalMode           string         `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
+	TimeWindowStart        string         `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
+	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
+	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
 }
+
+// HeartbeatRun records a single successful execution of a heartbeat task.
+// TopicID is the conversation created/reused by that run (may be empty if
+// the run produced no topic).
+type HeartbeatRun struct {
+	At      int64  `json:"at"`      // unix millis execution time
+	TopicID string `json:"topicId"` // topic used/created by this run
+}
+
+// maxRunHistory caps how many recent executions are kept per task.
+const maxRunHistory = 20
+
+// heartbeatSchemaVersion is the current on-disk config schema version.
+// v1 (schemaVersion absent/0): interval-only tasks, no runHistory.
+// v2: adds runHistory per task (execution history, capped at maxRunHistory).
+//
+// Migration boundary: configs written by v2+ binaries are read fine by older
+// binaries (unknown fields are ignored by json.Unmarshal), but an older
+// binary doing a full-table save (ReplaceTasks/ReplaceConfig) will silently
+// drop runHistory because it doesn't know the field. This is a one-way
+// upgrade — once a v2+ binary has saved, do not run an older binary that
+// writes the config. writeTasks refuses to overwrite a config with a
+// schemaVersion newer than this binary understands (forward protection).
+const heartbeatSchemaVersion = 2
 
 // heartbeatConfig is the on-disk format.
 type heartbeatConfig struct {
-	Revision uint64          `json:"revision,omitempty"`
-	Tasks    []HeartbeatTask `json:"tasks"`
+	SchemaVersion int             `json:"schemaVersion,omitempty"`
+	Revision      uint64          `json:"revision,omitempty"`
+	Tasks         []HeartbeatTask `json:"tasks"`
 }
 
 // ErrHeartbeatConfigConflict means another writer changed the config after
@@ -138,115 +160,6 @@ func (e *HeartbeatEngine) configPath() string {
 	return filepath.Join(dir, "heartbeat-tasks.json")
 }
 
-// loadTasks reads tasks from disk.
-func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
-	snapshot, err := e.readConfigSnapshot()
-	if err != nil {
-		return nil
-	}
-	return snapshot.cfg.Tasks
-}
-
-func (e *HeartbeatEngine) readConfigSnapshot() (heartbeatConfigSnapshot, error) {
-	path := e.configPath()
-	b, err := readFileUTF8(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return heartbeatConfigSnapshot{}, nil
-		}
-		return heartbeatConfigSnapshot{}, err
-	}
-	var cfg heartbeatConfig
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return heartbeatConfigSnapshot{}, fmt.Errorf("invalid config: %w", err)
-	}
-	snapshot := heartbeatConfigSnapshot{
-		cfg:    cfg,
-		digest: sha256.Sum256(b),
-		exists: true,
-	}
-	return snapshot, nil
-}
-
-func (e *HeartbeatEngine) recordConfigSnapshotLocked(snapshot heartbeatConfigSnapshot) {
-	e.cfgRevision = snapshot.cfg.Revision
-	e.cfgDigest = snapshot.digest
-	e.cfgKnown = snapshot.exists
-	e.cfgInitialized = true
-	if snapshot.exists {
-		e.cfgDeleted = false
-	}
-}
-
-// adoptExternalEditsLocked compares the exact content digest so edits are
-// detected even on filesystems with coarse mtimes.
-func (e *HeartbeatEngine) adoptExternalEditsLocked() {
-	snapshot, err := e.readConfigSnapshot()
-	if err != nil {
-		log.Printf("[heartbeat] invalid external config: %v", err)
-		return
-	}
-	if !snapshot.exists {
-		// A config that existed when this engine started was explicitly removed
-		// by the user. Treat that deletion as authoritative: retaining the old
-		// in-memory tasks would execute a side effect on the next tick and then
-		// recreate the file from stale state.
-		if e.cfgInitialized && e.cfgKnown {
-			e.tasks = nil
-			e.pendingTopics = make(map[string]heartbeatPendingTopic)
-			e.cfgDeleted = true
-			e.recordConfigSnapshotLocked(snapshot)
-		}
-		return
-	}
-	if e.cfgKnown && snapshot.digest == e.cfgDigest {
-		return
-	}
-	e.recordConfigSnapshotLocked(snapshot)
-	e.tasks = snapshot.cfg.Tasks
-	e.prunePendingTopicsLocked(e.tasks)
-}
-
-// saveTasks writes tasks to disk atomically.
-func (e *HeartbeatEngine) saveTasks(tasks []HeartbeatTask) error {
-	return e.writeTasks(tasks, heartbeatConfigSnapshot{}, false)
-}
-
-func (e *HeartbeatEngine) writeTasks(tasks []HeartbeatTask, expected heartbeatConfigSnapshot, compare bool) error {
-	if tasks == nil {
-		tasks = []HeartbeatTask{}
-	}
-	path := e.configPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	release, err := filelock.Acquire(lockCtx, path+".lock")
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	current, err := e.readConfigSnapshot()
-	if err != nil {
-		return err
-	}
-	if compare && (current.exists != expected.exists || current.digest != expected.digest || current.cfg.Revision != expected.cfg.Revision) {
-		return ErrHeartbeatConfigConflict
-	}
-	revision := current.cfg.Revision + 1
-	if !current.exists {
-		revision = 1
-	}
-	cfg := heartbeatConfig{Revision: revision, Tasks: tasks}
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return fileutil.AtomicWriteFile(path, b, 0o644)
-}
-
 // Start launches the scheduler goroutine.
 func (e *HeartbeatEngine) Start() {
 	e.mu.Lock()
@@ -302,22 +215,15 @@ func (e *HeartbeatEngine) tick() {
 	e.mu.Unlock()
 
 	now := time.Now()
-	updates := make(map[string]HeartbeatTask)
-	for i, t := range tasks {
+	for _, t := range tasks {
 		if !t.Enabled {
 			continue
 		}
 		if !heartbeatTaskDueAt(t, now) {
 			continue
 		}
-		// Run this task
-		tasks[i] = e.executeTask(t)
-		updates[t.ID] = tasks[i]
+		e.executeScheduledTask(t, now)
 	}
-
-	e.mu.Lock()
-	e.mergeRunUpdatesLocked(updates)
-	e.mu.Unlock()
 }
 
 // normalizeHeartbeatApprovalMode returns a valid approval mode for the task.
@@ -347,6 +253,26 @@ func heartbeatControllerBusy(ctrl heartbeatRuntimeStatus) bool {
 // On controller failure the task is returned WITHOUT updating LastRunAt,
 // so it will be retried on the next tick.
 func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
+	return e.executeTaskWithLease(t, nil)
+}
+
+func (e *HeartbeatEngine) executeScheduledTask(t HeartbeatTask, dueAt time.Time) HeartbeatTask {
+	return e.executeTaskWithLease(t, func(task HeartbeatTask) (HeartbeatTask, bool) {
+		snapshot, err := e.readConfigSnapshot()
+		if err != nil {
+			log.Printf("[heartbeat] cannot revalidate task %q before execution: %v", task.Title, err)
+			return task, false
+		}
+		for _, current := range snapshot.cfg.Tasks {
+			if current.ID == task.ID {
+				return current, current.Enabled && heartbeatTaskDueAt(current, dueAt)
+			}
+		}
+		return task, false
+	})
+}
+
+func (e *HeartbeatEngine) executeTaskWithLease(t HeartbeatTask, prepare func(HeartbeatTask) (HeartbeatTask, bool)) HeartbeatTask {
 	if !e.claimTask(t.ID) {
 		log.Printf("[heartbeat] task %q is already running, skipping overlapping trigger", t.Title)
 		return t
@@ -361,7 +287,18 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 		releaseLease()
 		e.releaseTask(t.ID)
 	}()
-	return e.executeTaskOwned(t)
+	if prepare != nil {
+		var ready bool
+		t, ready = prepare(t)
+		if !ready {
+			return t
+		}
+	}
+	updated := e.executeTaskOwned(t)
+	e.mu.Lock()
+	e.mergeRunUpdatesLocked(map[string]HeartbeatTask{updated.ID: updated})
+	e.mu.Unlock()
+	return updated
 }
 
 // tryAcquireTaskLease extends the in-process reservation to other Reasonix
@@ -399,27 +336,20 @@ func (e *HeartbeatEngine) releaseTask(id string) {
 	e.mu.Unlock()
 }
 
-func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
-	title := "Heartbeat: " + t.Title
-	scope := t.Scope
-	workspaceRoot := t.WorkspaceRoot
-	if scope == "" {
-		scope = "global"
-	}
-
-	// Determine which topic to use.
-	//
-	// For NewConversationEachRun:
-	//   - Reuse a pending topic from a failed pre-submit attempt.
-	//   - Re-check a submitted topic until its controller is idle, so a long
-	//     previous run cannot overlap with the next scheduled fresh topic.
-	//   - Once the submitted topic is idle and due again, clear it and create a
-	//     fresh topic.
-	//   - topicId is always updated to the latest conversation so the task list
-	//     always points to the most recent session regardless of mode switch.
-	//
-	// For the legacy mode:
-	//   - Reuse the persisted topicID if available; create one on first run.
+// resolveHeartbeatTopic selects or creates the topic for one run.
+//
+// For NewConversationEachRun:
+//   - Reuse a pending topic from a failed pre-submit attempt.
+//   - Re-check a submitted topic until its controller is idle, so a long
+//     previous run cannot overlap with the next scheduled fresh topic.
+//   - Once the submitted topic is idle and due again, clear it and create a
+//     fresh topic.
+//   - topicId is always updated to the latest conversation so the task list
+//     always points to the most recent session regardless of mode switch.
+//
+// For the legacy mode:
+//   - Reuse the persisted topicID if available; create one on first run.
+func (e *HeartbeatEngine) resolveHeartbeatTopic(t HeartbeatTask, scope, workspaceRoot, title string) (HeartbeatTask, string, bool, bool) {
 	var topicID string
 	var pendingSubmitted bool
 	if t.NewConversationEachRun {
@@ -434,7 +364,7 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 			if err != nil {
 				log.Printf("[heartbeat] CreateTopic(%q): %v", t.Title, err)
 				t.LastRunAt = time.Now().UnixMilli()
-				return t
+				return t, "", false, false
 			}
 			topicID = meta.ID
 			t.TopicID = topicID // always persist the latest topic
@@ -453,11 +383,25 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 			if err != nil {
 				log.Printf("[heartbeat] CreateTopic(%q): %v", t.Title, err)
 				t.LastRunAt = time.Now().UnixMilli()
-				return t
+				return t, "", false, false
 			}
 			topicID = meta.ID
 			t.TopicID = topicID
 		}
+	}
+	return t, topicID, pendingSubmitted, true
+}
+
+func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
+	title := "Heartbeat: " + t.Title
+	scope := t.Scope
+	workspaceRoot := t.WorkspaceRoot
+	if scope == "" {
+		scope = "global"
+	}
+	t, topicID, pendingSubmitted, ok := e.resolveHeartbeatTopic(t, scope, workspaceRoot, title)
+	if !ok {
+		return t
 	}
 
 	// Open the tab for the topic (creates one if needed) without changing the
@@ -541,6 +485,11 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 	if t.CreatedAt == 0 {
 		t.CreatedAt = t.LastRunAt
 	}
+	// 追加本次成功执行记录（最新追加到尾部，前端倒序展示；最多保留 20 条）
+	t.RunHistory = append(t.RunHistory, HeartbeatRun{At: t.LastRunAt, TopicID: topicID})
+	if len(t.RunHistory) > maxRunHistory {
+		t.RunHistory = t.RunHistory[len(t.RunHistory)-maxRunHistory:]
+	}
 	return t
 }
 
@@ -583,6 +532,10 @@ func (e *HeartbeatEngine) ReplaceTasks(tasks []HeartbeatTask) error {
 	if e.cfgInitialized && (expected.exists != e.cfgKnown || expected.digest != e.cfgDigest || expected.cfg.Revision != e.cfgRevision) {
 		return ErrHeartbeatConfigConflict
 	}
+	// Protect run-state written by the engine since the frontend snapshot was
+	// loaded: a stale panel save (e.g. toggling enabled) must not clear the
+	// runHistory that a background execution persisted meanwhile.
+	tasks = mergeHeartbeatDiskRunHistory(tasks, expected.cfg.Tasks)
 	if err := e.writeTasks(tasks, expected, true); err != nil {
 		return err
 	}
@@ -609,7 +562,8 @@ func (e *HeartbeatEngine) ReplaceConfig(update HeartbeatConfigUpdate) (Heartbeat
 	if expected.cfg.Revision != update.Revision || expected.view().ETag != update.ETag {
 		return expected.view(), ErrHeartbeatConfigConflict
 	}
-	if err := e.writeTasks(update.Tasks, expected, true); err != nil {
+	tasks := mergeHeartbeatDiskRunHistory(update.Tasks, expected.cfg.Tasks)
+	if err := e.writeTasks(tasks, expected, true); err != nil {
 		return expected.view(), err
 	}
 	latest, err := e.readConfigSnapshot()
@@ -644,423 +598,24 @@ func (e *HeartbeatEngine) TriggerNow(id string) {
 	e.mu.Lock()
 	tasks := append([]HeartbeatTask(nil), e.tasks...)
 	e.mu.Unlock()
-	updates := make(map[string]HeartbeatTask, 1)
-	for i, t := range tasks {
+	for _, t := range tasks {
 		if t.ID == id {
-			tasks[i] = e.executeTask(t)
-			updates[id] = tasks[i]
-			break
-		}
-	}
-	if len(updates) == 0 {
-		return
-	}
-	e.mu.Lock()
-	e.mergeRunUpdatesLocked(updates)
-	e.mu.Unlock()
-}
-
-func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask) {
-	if len(updates) == 0 {
-		return
-	}
-	// Rebase onto the on-disk list before the full-list save: the config file
-	// is documented as human- and AI-editable, so an external edit may have
-	// landed after the in-memory snapshot this tick ran from. The engine owns
-	// only the run-state fields (TopicID, LastRunAt, CreatedAt backfill);
-	// task definitions added, edited, or deleted externally are adopted from
-	// disk, so the save below can never silently roll an external edit back.
-	for range 3 {
-		expected, err := e.readConfigSnapshot()
-		if err != nil {
-			log.Printf("[heartbeat] cannot read config before run-state merge: %v", err)
+			e.executeTaskWithLease(t, func(task HeartbeatTask) (HeartbeatTask, bool) {
+				snapshot, err := e.readConfigSnapshot()
+				if err != nil {
+					log.Printf("[heartbeat] cannot revalidate task %q before manual execution: %v", task.Title, err)
+					return task, false
+				}
+				for _, current := range snapshot.cfg.Tasks {
+					if current.ID == task.ID {
+						return current, true
+					}
+				}
+				return task, false
+			})
 			return
 		}
-		tasks := expected.cfg.Tasks
-		if !expected.exists {
-			switch {
-			case e.cfgDeleted || (e.cfgInitialized && e.cfgKnown):
-				// Observe deletion in this CAS loop too. A run can finish before the
-				// next scheduler tick adopts external edits; relying only on tick
-				// would let that completion recreate a file the user just removed.
-				e.tasks = nil
-				e.pendingTopics = make(map[string]heartbeatPendingTopic)
-				e.cfgDeleted = true
-				e.recordConfigSnapshotLocked(expected)
-				return
-			case !e.cfgInitialized:
-				// Only an engine that has never observed disk may bootstrap from an
-				// in-memory list. Once a config existed, deletion is authoritative.
-				tasks = append([]HeartbeatTask(nil), e.tasks...)
-			}
-		}
-		mergeHeartbeatRunUpdates(tasks, updates)
-		if err := e.writeTasks(tasks, expected, true); err != nil {
-			if errors.Is(err, ErrHeartbeatConfigConflict) {
-				continue
-			}
-			log.Printf("[heartbeat] run-state merge failed: %v", err)
-			return
-		}
-		latest, err := e.readConfigSnapshot()
-		if err != nil {
-			log.Printf("[heartbeat] reload after run-state merge: %v", err)
-			return
-		}
-		e.recordConfigSnapshotLocked(latest)
-		e.tasks = tasks
-		e.prunePendingTopicsLocked(tasks)
-		return
 	}
-	log.Printf("[heartbeat] run-state merge lost repeated config races; next tick will retry")
-}
-
-func mergeHeartbeatRunUpdates(tasks []HeartbeatTask, updates map[string]HeartbeatTask) {
-	for i := range tasks {
-		update, ok := updates[tasks[i].ID]
-		if !ok {
-			continue
-		}
-		// Run state is monotonic. A runtime that lost the cross-process task
-		// lease returns the task snapshot it started with; if its later config
-		// merge lands after the owner, that stale completion must not roll back
-		// the owner's timestamp or fresh-conversation topic.
-		newerRun := update.LastRunAt > tasks[i].LastRunAt
-		if update.TopicID != "" && (tasks[i].TopicID == "" || newerRun) {
-			tasks[i].TopicID = update.TopicID
-		}
-		if newerRun {
-			tasks[i].LastRunAt = update.LastRunAt
-		}
-		if tasks[i].CreatedAt == 0 && update.CreatedAt != 0 {
-			tasks[i].CreatedAt = update.CreatedAt
-		}
-	}
-}
-
-// parseInterval converts a string like "5m", "1h", "30s" to time.Duration.
-// Suffix after '|' is stripped (e.g. "24h|daily@09:00" -> "24h").
-// Empty or invalid strings return 0, nil (task will be skipped).
-func parseInterval(s string) (time.Duration, error) {
-	if idx := strings.Index(s, "|"); idx >= 0 {
-		s = s[:idx]
-	}
-	if len(s) == 0 {
-		return 0, nil
-	}
-	// Support common suffixed intervals
-	switch s[len(s)-1] {
-	case 's', 'm', 'h':
-		return time.ParseDuration(s)
-	default:
-		// Try "Xm" as default assumption
-		return time.ParseDuration(s + "m")
-	}
-}
-
-func heartbeatTaskDueAt(t HeartbeatTask, now time.Time) bool {
-	if scheduled, ok := previousHeartbeatScheduleAt(t, now); ok {
-		if t.CreatedAt != 0 && scheduled.Before(time.UnixMilli(t.CreatedAt)) {
-			return false
-		}
-		if t.LastRunAt != 0 && !time.UnixMilli(t.LastRunAt).Before(scheduled) {
-			return false
-		}
-		return !scheduled.After(now)
-	}
-
-	d, err := parseInterval(t.Interval)
-	if err != nil || d <= 0 {
-		return false
-	}
-	baseMillis := t.LastRunAt
-	if baseMillis == 0 {
-		baseMillis = t.CreatedAt
-	}
-	hasTimeWindow := t.TimeWindowStart != "" || t.TimeWindowEnd != ""
-	if baseMillis == 0 {
-		if hasTimeWindow {
-			return heartbeatWithinTimeWindow(t, now)
-		}
-		return true
-	}
-	if now.Sub(time.UnixMilli(baseMillis)) < d {
-		return false
-	}
-
-	// For interval-based tasks with a time window, check if current time
-	// falls within the configured window. If outside, defer until the next
-	// tick that falls within the window.
-	if hasTimeWindow {
-		return heartbeatWithinTimeWindow(t, now)
-	}
-
-	return true
-}
-
-// heartbeatWithinTimeWindow returns true when now falls within the task's
-// configured time window. If the window is empty it returns true.
-// Format: "HH:MM" in 24-hour clock; start inclusive, end exclusive.
-func heartbeatWithinTimeWindow(t HeartbeatTask, now time.Time) bool {
-	startH, startM, startOK := parseHeartbeatClock(t.TimeWindowStart)
-	endH, endM, endOK := parseHeartbeatClock(t.TimeWindowEnd)
-
-	if !startOK && !endOK {
-		return true // no window configured
-	}
-
-	minutes := now.Hour()*60 + now.Minute()
-
-	// If only start is set: allow from start to end of day
-	if startOK && !endOK {
-		return minutes >= startH*60+startM
-	}
-
-	// If only end is set: allow from midnight to end
-	if !startOK && endOK {
-		return minutes < endH*60+endM
-	}
-
-	startMin := startH*60 + startM
-	endMin := endH*60 + endM
-
-	if startMin < endMin {
-		// Normal window: 09:00-17:00
-		return minutes >= startMin && minutes < endMin
-	}
-	// Cross-midnight window: 22:00-06:00
-	return minutes >= startMin || minutes < endMin
-}
-
-type heartbeatSchedule struct {
-	kind     string
-	days     []time.Weekday
-	month    int
-	day      int
-	hour     int
-	minute   int
-	hasRules bool
-}
-
-func parseHeartbeatSchedule(interval string) (heartbeatSchedule, bool) {
-	_, after, ok0 := strings.Cut(interval, "|")
-	if !ok0 {
-		return heartbeatSchedule{}, false
-	}
-	raw := strings.TrimSpace(after)
-	if raw == "" {
-		return heartbeatSchedule{}, false
-	}
-	at := "09:00"
-	if parts := strings.SplitN(raw, "@", 2); len(parts) == 2 {
-		raw = parts[0]
-		at = parts[1]
-	}
-	hour, minute, ok := parseHeartbeatClock(at)
-	if !ok {
-		return heartbeatSchedule{}, false
-	}
-	kind := raw
-	rule := ""
-	if parts := strings.SplitN(raw, ":", 2); len(parts) == 2 {
-		kind = parts[0]
-		rule = parts[1]
-	}
-	s := heartbeatSchedule{kind: kind, hour: hour, minute: minute, hasRules: true}
-	switch kind {
-	case "daily":
-		return s, true
-	case "weekly", "biweekly":
-		for part := range strings.SplitSeq(rule, ",") {
-			if wd, ok := parseHeartbeatWeekday(part); ok {
-				s.days = append(s.days, wd)
-			}
-		}
-		return s, len(s.days) > 0
-	case "monthly":
-		s.day = parsePositiveInt(rule, 1)
-		return s, true
-	case "yearly":
-		parts := strings.SplitN(rule, "-", 2)
-		s.month = parsePositiveInt(firstString(parts), 1)
-		s.day = 1
-		if len(parts) == 2 {
-			s.day = parsePositiveInt(parts[1], 1)
-		}
-		if s.month < 1 {
-			s.month = 1
-		}
-		if s.month > 12 {
-			s.month = 12
-		}
-		return s, true
-	default:
-		return heartbeatSchedule{}, false
-	}
-}
-
-func previousHeartbeatScheduleAt(t HeartbeatTask, now time.Time) (time.Time, bool) {
-	s, ok := parseHeartbeatSchedule(t.Interval)
-	if !ok || !s.hasRules {
-		return time.Time{}, false
-	}
-	switch s.kind {
-	case "daily":
-		candidate := dateAt(now.Year(), now.Month(), now.Day(), s.hour, s.minute, now.Location())
-		if candidate.After(now) {
-			candidate = candidate.AddDate(0, 0, -1)
-		}
-		return candidate, true
-	case "weekly":
-		return previousHeartbeatWeeklyAt(s, now, 7, time.Time{})
-	case "biweekly":
-		anchor := heartbeatScheduleAnchor(t, now)
-		return previousHeartbeatWeeklyAt(s, now, 14, anchor)
-	case "monthly":
-		return previousHeartbeatMonthlyAt(s, now), true
-	case "yearly":
-		return previousHeartbeatYearlyAt(s, now), true
-	default:
-		return time.Time{}, false
-	}
-}
-
-func previousHeartbeatWeeklyAt(s heartbeatSchedule, now time.Time, windowDays int, anchor time.Time) (time.Time, bool) {
-	var best time.Time
-	for offset := range windowDays {
-		day := now.AddDate(0, 0, -offset)
-		for _, wd := range s.days {
-			if day.Weekday() != wd {
-				continue
-			}
-			candidate := dateAt(day.Year(), day.Month(), day.Day(), s.hour, s.minute, now.Location())
-			if candidate.After(now) {
-				continue
-			}
-			if !anchor.IsZero() && weeksBetween(weekStart(anchor), weekStart(candidate))%2 != 0 {
-				continue
-			}
-			if best.IsZero() || candidate.After(best) {
-				best = candidate
-			}
-		}
-	}
-	return best, !best.IsZero()
-}
-
-func previousHeartbeatMonthlyAt(s heartbeatSchedule, now time.Time) time.Time {
-	candidate := monthlyCandidate(now.Year(), now.Month(), s.day, s.hour, s.minute, now.Location())
-	if candidate.After(now) {
-		prev := now.AddDate(0, -1, 0)
-		candidate = monthlyCandidate(prev.Year(), prev.Month(), s.day, s.hour, s.minute, now.Location())
-	}
-	return candidate
-}
-
-func previousHeartbeatYearlyAt(s heartbeatSchedule, now time.Time) time.Time {
-	month := time.Month(s.month)
-	candidate := monthlyCandidate(now.Year(), month, s.day, s.hour, s.minute, now.Location())
-	if candidate.After(now) {
-		candidate = monthlyCandidate(now.Year()-1, month, s.day, s.hour, s.minute, now.Location())
-	}
-	return candidate
-}
-
-func heartbeatScheduleAnchor(t HeartbeatTask, now time.Time) time.Time {
-	if t.CreatedAt != 0 {
-		return time.UnixMilli(t.CreatedAt)
-	}
-	if t.LastRunAt != 0 {
-		return time.UnixMilli(t.LastRunAt)
-	}
-	return now
-}
-
-func parseHeartbeatClock(s string) (int, int, bool) {
-	parts := strings.SplitN(strings.TrimSpace(s), ":", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	hour := parsePositiveInt(parts[0], -1)
-	minute := parsePositiveInt(parts[1], -1)
-	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-		return 0, 0, false
-	}
-	return hour, minute, true
-}
-
-func parseHeartbeatWeekday(s string) (time.Weekday, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "sun":
-		return time.Sunday, true
-	case "mon":
-		return time.Monday, true
-	case "tue":
-		return time.Tuesday, true
-	case "wed":
-		return time.Wednesday, true
-	case "thu":
-		return time.Thursday, true
-	case "fri":
-		return time.Friday, true
-	case "sat":
-		return time.Saturday, true
-	default:
-		return time.Sunday, false
-	}
-}
-
-func parsePositiveInt(s string, fallback int) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return fallback
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return fallback
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
-}
-
-func firstString(values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	return values[0]
-}
-
-func dateAt(year int, month time.Month, day, hour, minute int, loc *time.Location) time.Time {
-	return time.Date(year, month, day, hour, minute, 0, 0, loc)
-}
-
-func monthlyCandidate(year int, month time.Month, day, hour, minute int, loc *time.Location) time.Time {
-	if day < 1 {
-		day = 1
-	}
-	if max := daysInMonth(year, month, loc); day > max {
-		day = max
-	}
-	return dateAt(year, month, day, hour, minute, loc)
-}
-
-func daysInMonth(year int, month time.Month, loc *time.Location) int {
-	return time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
-}
-
-func weekStart(t time.Time) time.Time {
-	dayOffset := (int(t.Weekday()) + 6) % 7
-	base := dateAt(t.Year(), t.Month(), t.Day(), 0, 0, t.Location())
-	return base.AddDate(0, 0, -dayOffset)
-}
-
-func weeksBetween(a, b time.Time) int {
-	if b.Before(a) {
-		a, b = b, a
-	}
-	return int(b.Sub(a).Hours() / 24 / 7)
 }
 
 // ── Wails bindings on App ───────────────────────────────────────────────────

@@ -40,7 +40,7 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Sessions | `<state root>/sessions/` |
 | Archives | `<state root>/archive/` |
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
-| Disposable session catalog | `<cache root>/session-catalog/v3.sqlite` |
+| Disposable session catalog | `<cache root>/session-catalog/v5.sqlite` |
 | Disposable history search catalog | `<cache root>/history-search/v1.sqlite` |
 | Disposable usage catalog | `<cache root>/usage-catalog/v1.sqlite` |
 | Disposable task catalog | `<cache root>/task-catalog/v1.sqlite` |
@@ -96,7 +96,7 @@ provider_access = ["deepseek"]
 name        = "deepseek"
 kind        = "anthropic"
 base_url    = "https://api.deepseek.com/anthropic"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+models      = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 web_search  = true

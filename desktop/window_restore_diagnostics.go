@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,7 +92,11 @@ func (a *App) showMainWindowFrom(source string) {
 		return
 	}
 	if !windowRestoreDiagnosticsSupported() {
-		showFromBackground(a.ctx, a.backgroundMaximised.Swap(false))
+		if a.desktopShell.coordinator != nil {
+			a.desktopShell.coordinator.Present(source)
+		} else {
+			applyDesktopPresentPlan(a.ctx, desktopPresentPlanFor("", a.backgroundMaximised.Swap(false)))
+		}
 		a.kickDeferredRebuildRetry()
 		return
 	}
@@ -108,7 +113,11 @@ func (a *App) showMainWindowFrom(source string) {
 	_ = writeWindowRestoreState(state)
 	windowRestoreMu.Unlock()
 
-	showFromBackground(a.ctx, a.backgroundMaximised.Swap(false))
+	if a.desktopShell.coordinator != nil {
+		a.desktopShell.coordinator.Present(source)
+	} else {
+		applyDesktopPresentPlan(a.ctx, desktopPresentPlanFor("", a.backgroundMaximised.Swap(false)))
+	}
 	a.goSafe("windowRestoreMonitor", func() {
 		restored := waitForWindowRestoreConfirmation()
 		a.completeWindowRestoreAttempt(attemptID, state, restored)
@@ -158,6 +167,9 @@ func (a *App) completeWindowRestoreAttempt(attemptID uint64, state windowRestore
 	}
 	windowRestoreMu.Unlock()
 	a.recordDiagnosticMetric("desktop_restore", metric)
+	if !restored {
+		showWindowRestoreFailure(a)
+	}
 }
 
 func windowRestoreFailureReport(kind, source, startedAt string) crashReport {
@@ -166,18 +178,19 @@ func windowRestoreFailureReport(kind, source, startedAt string) crashReport {
 	report := baseCrashReport("performance")
 	report.SchemaVersion = 2
 	report.Source = "native.window"
-	report.Label = "windows.window_restore." + kind
-	report.ErrorType = "WindowsWindowRestoreFailure"
-	report.ErrorMessage = sanitizeCrashText("Windows window restoration did not complete normally.", maxCrashFieldBytes)
-	report.TopFrame = "windows.window_restore." + source
-	report.FingerprintHint = "windows.window_restore." + kind + "." + source
+	platform := metricBucket(goruntime.GOOS)
+	report.Label = platform + ".window_restore." + kind
+	report.ErrorType = "DesktopWindowRestoreFailure"
+	report.ErrorMessage = sanitizeCrashText("Desktop window restoration did not complete normally.", maxCrashFieldBytes)
+	report.TopFrame = platform + ".window_restore." + source
+	report.FingerprintHint = platform + ".window_restore." + kind + "." + source
 	report.OccurredAt = time.Now().UTC().Format(time.RFC3339)
-	report.Message = sanitizeCrashText(fmt.Sprintf(`[windows.window_restore.%s]
+	report.Message = sanitizeCrashText(fmt.Sprintf(`[%s.window_restore.%s]
 
 Reasonix could not confirm that the hidden window was restored.
 
 source: %s
 attempt started at: %s
-timeout: %s`, kind, source, sanitizeCrashField(startedAt, 64), windowRestoreTimeout), maxCrashDetailBytes)
+timeout: %s`, platform, kind, source, sanitizeCrashField(startedAt, 64), windowRestoreTimeout), maxCrashDetailBytes)
 	return report
 }

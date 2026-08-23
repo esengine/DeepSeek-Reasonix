@@ -29,10 +29,7 @@ func installSessionCatalogForTest(t *testing.T, app *App, path, scope, workspace
 	}
 	app.sessionCatalog.Store(catalog)
 	t.Cleanup(func() {
-		app.sessionCatalog.CompareAndSwap(catalog, nil)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = catalog.Close(ctx)
+		app.stopSessionCatalog(time.Second)
 	})
 }
 
@@ -438,7 +435,7 @@ func TestListProjectTopicsKeepsMetadataWhileFirstCatalogScanIsPending(t *testing
 		t.Fatal(err)
 	}
 	if len(page.Items) != 1 || page.Items[0].TopicID != "topic-keep" || page.Items[0].Label != "Previous chat" {
-		t.Fatalf("topics while v4 catalog is still empty = %#v, want the desktop-projects conversation", page.Items)
+		t.Fatalf("topics while v5 catalog is still empty = %#v, want the desktop-projects conversation", page.Items)
 	}
 }
 
@@ -665,7 +662,7 @@ func TestAuthoritativeBotStylePersistIndexesSessionImmediately(t *testing.T) {
 }
 
 type retargetRuntimeController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status control.RuntimeStatus
 	path   string
 }

@@ -1499,20 +1499,26 @@ func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessag
 	if sess == nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unknown session " + p.SessionID}
 	}
-	// Deprecated execution-mode options are no longer published, but
-	// one-version-old clients still send them. Accept, switch nothing, rebuild
-	// nothing, and answer success with a deprecation notice.
-	if id := normalizeConfigID(p.ConfigID); id == "work_mode" || id == "agent_preset" {
+	// The execution-mode options are now the session quality floor: light
+	// folds to standard silently, delivery sets the delivery floor.
+	if id := normalizeConfigID(p.ConfigID); id == "work_mode" || id == "agent_preset" || id == "quality_floor" {
 		if err := validateDeprecatedModeValue(p.Value); err != nil {
 			return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: " + err.Error()}
+		}
+		ctrl := sess.currentCtrl()
+		if ctrl != nil {
+			if p, err := agentpreset.Normalize(p.Value); err == nil {
+				if err := ctrl.SetQualityFloor(string(p)); err != nil {
+					return nil, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
+				}
+			}
 		}
 		cfgState, err := s.configStateForSession(ctx, sess)
 		if err != nil {
 			return nil, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
 		}
 		return SetSessionConfigOptionResult{
-			ConfigOptions:    cfgState.ConfigOptions,
-			DeprecatedNotice: agentpreset.DeprecatedNotice,
+			ConfigOptions: cfgState.ConfigOptions,
 		}, nil
 	}
 	cfgState, err := s.configStateForSession(ctx, sess)
@@ -2264,7 +2270,8 @@ func (s *service) configStateForSession(ctx context.Context, sess *acpSession) (
 	// Fold in the live controller's extension catalog so plugin/... models
 	// are discoverable on every config-state read, not only when current.
 	state = enrichStateWithExtensionModels(state, sess.currentCtrl().ProviderCatalog())
-	return withToolApprovalConfig(state, sess.currentToolApprovalMode()), nil
+	state = withToolApprovalConfig(state, sess.currentToolApprovalMode())
+	return withQualityFloorConfig(state, sess.currentQualityFloor()), nil
 }
 
 func (s *acpSession) configStateParams() SessionConfigStateParams {
@@ -2345,11 +2352,11 @@ func findConfigOption(options []SessionConfigOption, id string) (SessionConfigOp
 // well-formed values succeed as no-ops.
 func validateDeprecatedModeValue(value string) error {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "light", "economy", "eco", "lite",
-		"balanced", "full", "delivery", "deliver", "quality":
+	case "", "light", "economy", "eco", "lite", "save", "saving", "low", "minimal",
+		"standard", "normal", "balanced", "full", "delivery", "deliver", "quality":
 		return nil
 	}
-	return fmt.Errorf("invalid value %q for deprecated execution setting (accepted: light, balanced, delivery; legacy: economy, full)", value)
+	return fmt.Errorf("invalid value %q for quality floor (accepted: standard, delivery; legacy light folds to standard)", value)
 }
 
 func normalizeConfigID(id string) string {

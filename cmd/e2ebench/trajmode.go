@@ -37,7 +37,7 @@ func runTrajMode(dir string) (string, error) {
 		}
 		fmt.Fprintf(&b, "### `%s`\n\n```json\n%s\n```\n\n", id, enc)
 	}
-	return "## Trajectory digest\n\n" + renderTimeAttribution(results) + renderToolSurface(results) + renderOutcomeProgress(results) + renderCognition(results) + renderDelegationAdmission(results) + renderMechanismLedger(results) + b.String(), nil
+	return "## Trajectory digest\n\n" + renderTimeAttribution(results) + renderToolSurface(results) + renderAnchorSafety(results) + renderOutcomeProgress(results) + renderCognition(results) + renderDelegationAdmission(results) + renderMechanismLedger(results) + b.String(), nil
 }
 
 func emitTrajMode(dir, outMD string) {

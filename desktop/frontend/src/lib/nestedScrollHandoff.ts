@@ -14,6 +14,8 @@ export const NESTED_SCROLL_ATTR = "data-nested-scroll";
 
 const EDGE_EPSILON_PX = 1;
 const DEFAULT_LINE_HEIGHT_PX = 16;
+const DOM_DELTA_PIXEL = 0;
+const DOM_DELTA_PAGE = 2;
 
 export type NestedScrollHandoffOptions = {
   /** Outer reading scroller (`.transcript`). */
@@ -31,10 +33,11 @@ export type NestedScrollHandoff = {
 
 /** Normalize WheelEvent line/page deltas before applying them to scrollTop. */
 export function normalizeWheelDelta(event: Pick<WheelEvent, "deltaX" | "deltaY" | "deltaMode">, viewport: HTMLElement) {
-  if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL) {
+  const deltaMode = event.deltaMode ?? DOM_DELTA_PIXEL;
+  if (deltaMode === DOM_DELTA_PIXEL) {
     return { x: event.deltaX, y: event.deltaY };
   }
-  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+  if (deltaMode === DOM_DELTA_PAGE) {
     const page = Math.max(1, viewport.clientHeight);
     return { x: event.deltaX * page, y: event.deltaY * page };
   }

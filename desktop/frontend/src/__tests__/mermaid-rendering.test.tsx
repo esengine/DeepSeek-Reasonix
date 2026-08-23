@@ -9,7 +9,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
-import { splitStableMarkdownSections, streamingCommitTarget, streamingMarkdownCommitInterval, useRenderedMarkdownText } from "../components/Markdown";
+import { splitStableMarkdownSections, splitStreamingTailFence, streamingCommitTarget, streamingMarkdownCommitInterval, useRenderedMarkdownText } from "../components/Markdown";
 import MermaidDiagram from "../components/MermaidDiagram";
 import {
   __setMermaidPanZoomFactoryForTest,
@@ -20,6 +20,7 @@ import {
   safelySyncPanZoom,
   sanitizeMermaidSvg,
 } from "../components/MermaidDiagram";
+import { createMermaidPanZoom } from "../components/mermaidPanZoom";
 import { LocaleProvider } from "../lib/i18n";
 import { REMOTE_MARKDOWN_IMAGE_PATH } from "../lib/markdownImage";
 
@@ -28,6 +29,7 @@ const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const markdownRendererSource = readFileSync(resolve(testDir, "../components/MarkdownRenderer.tsx"), "utf8");
 const markdownComponentsSource = readFileSync(resolve(testDir, "../components/markdownComponents.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(testDir, "../components/Markdown.tsx"), "utf8");
+const mermaidDiagramSource = readFileSync(resolve(testDir, "../components/MermaidDiagram.tsx"), "utf8");
 const messageSource = readFileSync(resolve(testDir, "../components/Message.tsx"), "utf8");
 
 let passed = 0;
@@ -132,6 +134,67 @@ function installDom() {
   dom.window.close();
 }
 
+// Inline pan/zoom (replaces svg-pan-zoom, #8068): transform math on one
+// viewport <g>, zoom clamped to 0.3–8, wheel/drag/dblclick interactions.
+{
+  const dom = installDom();
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 160 80");
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.setAttribute("id", "arrow");
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+  const content = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  content.setAttribute("id", "drawing");
+  svg.appendChild(content);
+  // 640x360 layout box: the meet mapping fits at scale 4, origin (0, 20).
+  Object.defineProperty(svg, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, width: 640, height: 360, top: 0, right: 640, bottom: 360, left: 0, toJSON: () => ({}) }),
+  });
+  document.body.appendChild(svg);
+
+  const panZoom = createMermaidPanZoom(svg, { minZoom: 0.3, maxZoom: 8, zoomScaleSensitivity: 0.3 });
+  const viewport = () => svg.querySelector("g[data-mermaid-pan-zoom-viewport]");
+  ok(svg.querySelector("g[data-mermaid-pan-zoom-viewport] g#drawing"), "inline pan/zoom wraps the drawing in one viewport group");
+  ok(defs.parentNode === svg, "SVG definitions stay outside the transformed viewport");
+  ok(!viewport()?.querySelector("defs"), "the viewport does not transform SVG definitions");
+  ok(svg.querySelector("defs marker#arrow") === marker, "definition children remain available by ID");
+
+  panZoom.fit();
+  eq(viewport()?.getAttribute("transform"), "translate(0 0) scale(1)", "fit keeps the browser meet mapping at unit scale");
+
+  svg.dispatchEvent(new dom.window.WheelEvent("wheel", { clientX: 320, clientY: 180, deltaY: -120, bubbles: true, cancelable: true }));
+  eq(viewport()?.getAttribute("transform"), "translate(-24 -12) scale(1.3)", "wheel zooms in around the cursor");
+
+  for (let i = 0; i < 40; i += 1) {
+    svg.dispatchEvent(new dom.window.WheelEvent("wheel", { clientX: 320, clientY: 180, deltaY: 120, bubbles: true, cancelable: true }));
+  }
+  ok(viewport()?.getAttribute("transform")?.endsWith("scale(0.3)"), "wheel zoom-out clamps at the minimum zoom");
+
+  panZoom.reset();
+  eq(viewport()?.getAttribute("transform"), "translate(0 0) scale(1)", "reset restores the fitted unit transform");
+  for (let i = 0; i < 40; i += 1) {
+    svg.dispatchEvent(new dom.window.WheelEvent("wheel", { clientX: 320, clientY: 180, deltaY: -120, bubbles: true, cancelable: true }));
+  }
+  ok(viewport()?.getAttribute("transform")?.endsWith("scale(8)"), "wheel zoom-in clamps at the maximum zoom");
+
+  panZoom.reset();
+  svg.dispatchEvent(new dom.window.MouseEvent("pointerdown", { button: 0, clientX: 100, clientY: 100, bubbles: true }));
+  svg.dispatchEvent(new dom.window.MouseEvent("pointermove", { clientX: 130, clientY: 110, bubbles: true }));
+  eq(viewport()?.getAttribute("transform"), "translate(7.5 2.5) scale(1)", "pointer drag pans the drawing in screen pixels");
+  svg.dispatchEvent(new dom.window.MouseEvent("pointerup", { clientX: 130, clientY: 110, bubbles: true }));
+
+  panZoom.destroy();
+  svg.dispatchEvent(new dom.window.WheelEvent("wheel", { clientX: 320, clientY: 180, deltaY: -120, bubbles: true, cancelable: true }));
+  eq(viewport()?.getAttribute("transform"), "translate(7.5 2.5) scale(1)", "destroy detaches the interaction listeners");
+
+  ok(!mermaidDiagramSource.includes("svg-pan-zoom"), "MermaidDiagram no longer imports svg-pan-zoom");
+  ok(!styles.includes("svg-pan-zoom"), "styles no longer carry svg-pan-zoom hooks");
+  dom.window.close();
+}
+
 function parseSvg(svg: string): Document {
   return new DOMParser().parseFromString(svg, "image/svg+xml");
 }
@@ -199,7 +262,7 @@ console.log("\nmermaid rendering");
   eq(streamingCommitTarget("intro\n\npartial paragraph"), "intro\n\n", "commit target stops at the last completed block");
   eq(streamingCommitTarget("no blank line yet"), "", "no completed block means nothing to parse yet");
   eq(streamingCommitTarget("done\n\nalso done\n\n"), "done\n\nalso done\n\n", "trailing boundary commits everything");
-  eq(streamingCommitTarget("t\n\n```js\nstreaming code"), "t\n\n```js\nstreaming code", "an open fence keeps the whole text parsed for live highlighting");
+  eq(streamingCommitTarget("t\n\n```js\nstreaming code"), "t\n\n", "an open fence stays in the tail for code-styled streaming");
   eq(streamingCommitTarget("t\n\n$$\n\\int_0^1"), "t\n\n$$\n\\int_0^1", "open display math keeps the whole text parsed");
   eq(streamingCommitTarget("t\n\n```\nc\n```\nafter"), "t\n\n```\nc\n```\n", "a closed fence promotes immediately without waiting for a blank line");
   eq(streamingCommitTarget("t\n\n$$\nx\n$$\nafter"), "t\n\n$$\nx\n$$\n", "closed display math promotes immediately");
@@ -259,7 +322,7 @@ console.log("\nmermaid rendering");
   );
   eq(
     streamingCommitTarget("t\n\n```\n- not a list\n- also not\n"),
-    "t\n\n```\n- not a list\n- also not\n",
+    "t\n\n",
     "list markers inside an open fence do not create commit boundaries",
   );
   eq(
@@ -549,6 +612,16 @@ console.log("\nmermaid rendering");
   __setMermaidRenderAdapterForTest(null);
   __setMermaidPanZoomFactoryForTest(undefined);
   dom.window.close();
+}
+
+{
+  eq(splitStreamingTailFence("still typing"), null, "a plain tail has no code fence split");
+  eq(splitStreamingTailFence("```\nc\n```\nafter"), null, "a closed fence leaves no open code tail");
+  const split = splitStreamingTailFence("```js\nconst a = 1;\nconst b");
+  eq(split?.head, "", "an open fence at the tail start has no plain head");
+  eq(split?.lang, "js", "the open fence split keeps the info-string language");
+  eq(split?.code, "const a = 1;\nconst b", "the open fence split drops the opener line from the code body");
+  eq(splitStreamingTailFence("para\n\n```\nx")?.head, "para\n\n", "text before the open fence stays plain");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

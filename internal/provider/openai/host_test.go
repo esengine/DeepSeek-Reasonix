@@ -37,6 +37,45 @@ func TestIsDeepSeek(t *testing.T) {
 	}
 }
 
+func TestIsOfficialDeepSeekVisionModel(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		want  bool
+	}{
+		{OfficialDeepSeekVisionModel, true},
+		{"DEEPSEEK-V4-FLASH-VISION-EXP", true},
+		{" deepseek-v4-flash-vision-exp ", true},
+		{"deepseek-v4-flash", false},
+		{"deepseek-v4-pro", false},
+		{"deepseek-v5-vision", false},
+		{"", false},
+	} {
+		if got := IsOfficialDeepSeekVisionModel(tc.model); got != tc.want {
+			t.Errorf("IsOfficialDeepSeekVisionModel(%q) = %v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
+func TestOfficialDeepSeekAllowsVision(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		model   string
+		want    bool
+	}{
+		{"https://api.deepseek.com", OfficialDeepSeekVisionModel, true},
+		{"https://api.deepseek.com/anthropic", OfficialDeepSeekVisionModel, true},
+		{"https://eu.deepseek.com/v1", OfficialDeepSeekVisionModel, true},
+		{"https://api.deepseek.com", "deepseek-v4-flash", false},
+		{"https://api.deepseek.com", "deepseek-v4-pro", false},
+		{"https://api.deepseek.com", "deepseek-v5-vision", false},
+		{"https://gateway.example/v1", OfficialDeepSeekVisionModel, false},
+	} {
+		if got := OfficialDeepSeekAllowsVision(tc.baseURL, tc.model); got != tc.want {
+			t.Errorf("OfficialDeepSeekAllowsVision(%q, %q) = %v, want %v", tc.baseURL, tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestIsOpenAI(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string

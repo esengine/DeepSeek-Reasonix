@@ -35,7 +35,7 @@ func TestPartialWaiverDoesNotClearIncompleteTodos(t *testing.T) {
 		task: taskRuntime{ledger: readinessLedger(writer, todo,
 			evidence.Receipt{ToolName: "update_goal", Success: true, Args: []byte(`{"status":"complete","completion":{"unverified":["e2e"]}}`)},
 		)},
-		turn: turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
+		turn: turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{}), deliveryScopeActive: true},
 	}
 	got := a.ReadinessResult()
 	if got.Ready || !strings.Contains(got.Reason, "incomplete") {

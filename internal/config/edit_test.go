@@ -789,8 +789,8 @@ func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGatewa
 			visionOverride:    &visionOn,
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
 		}
-		if CanConfigureVision(official) {
-			t.Fatalf("official DeepSeek endpoint %q must not allow vision configuration", endpoint.baseURL)
+		if !CanConfigureVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must allow Settings vision checkboxes", endpoint.baseURL)
 		}
 		if EffectiveVision(official) {
 			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)

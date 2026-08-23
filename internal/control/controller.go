@@ -119,11 +119,14 @@ type Controller struct {
 	// one — sub-agents then keep whatever gate they were constructed with.
 	subagentGate *SharedHeadlessGate
 
-	label        string
-	modelRef     string
-	systemPrompt string
-	sessionDir   string
-	commands     atomic.Pointer[[]command.Command]
+	label                  string
+	modelRef               string
+	visionModel            string
+	visionProviderResolver func(string) (provider.Provider, error)
+	visionModelSelector    func(string, string) (string, bool)
+	systemPrompt           string
+	sessionDir             string
+	commands               atomic.Pointer[[]command.Command]
 	// skills owns the session's discovered skills (enabled subset, full set, and
 	// the reloadable stores) — the skills slice of the Capabilities concern. See
 	// skill.go.
@@ -289,10 +292,12 @@ type Controller struct {
 	// and rotating are mutually exclusive gates — a turn refuses to start while
 	// a rotation is in progress, and a rotation refuses to start while a turn
 	// runs — so the run loop's session reference cannot change under it.
-	rotating    bool
-	autosaveWG  sync.WaitGroup
-	planMode    bool
-	sessionPath string
+	rotating   bool
+	autosaveWG sync.WaitGroup
+	// sessionSettings groups the per-session posture knobs that share one
+	// lifetime: swapped together on session rotation.
+	sessionSettings sessionSettings
+	sessionPath     string
 	// sessionTemp owns the logical-session private temporary directory shared
 	// by Bash calls. Retained for this Controller's lifetime; rotated on
 	// /new, /clear, resume of another session, and branch switches.
@@ -444,18 +449,24 @@ type Options struct {
 	// SetToolApprovalMode and ApplyHeadlessApprovalMode call Update on it so a
 	// runtime approval-mode switch reaches sub-agents, not just the parent
 	// executor's own gate.
-	SubagentGate  *SharedHeadlessGate
-	Label         string
-	ModelRef      string
-	SystemPrompt  string
-	SessionDir    string
-	SessionPath   string
-	Host          *plugin.Host
-	Commands      []command.Command
-	Skills        []skill.Skill
-	AllSkills     []skill.Skill
-	SkillStore    *skill.Store
-	AllSkillStore *skill.Store
+	SubagentGate *SharedHeadlessGate
+	Label        string
+	ModelRef     string
+	// VisionModel is empty (off), "auto", or a canonical provider/model ref.
+	// The resolver and selector are assembled by boot so the controller remains
+	// transport-agnostic and tests can inject deterministic fake providers.
+	VisionModel            string
+	VisionProviderResolver func(string) (provider.Provider, error)
+	VisionModelSelector    func(string, string) (string, bool)
+	SystemPrompt           string
+	SessionDir             string
+	SessionPath            string
+	Host                   *plugin.Host
+	Commands               []command.Command
+	Skills                 []skill.Skill
+	AllSkills              []skill.Skill
+	SkillStore             *skill.Store
+	AllSkillStore          *skill.Store
 	// DisableImplicitSkillInvocation controls model-facing discovery only;
 	// explicit /skill commands and management remain host-side capabilities.
 	DisableImplicitSkillInvocation bool
@@ -617,6 +628,9 @@ func New(opts Options) *Controller {
 		subagentGate:                      opts.SubagentGate,
 		label:                             opts.Label,
 		modelRef:                          opts.ModelRef,
+		visionModel:                       strings.TrimSpace(opts.VisionModel),
+		visionProviderResolver:            opts.VisionProviderResolver,
+		visionModelSelector:               opts.VisionModelSelector,
 		systemPrompt:                      opts.SystemPrompt,
 		sessionDir:                        opts.SessionDir,
 		sessionPath:                       opts.SessionPath,
@@ -1090,7 +1104,7 @@ const ManagedConfigWriteApprovalTool = "config_write"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off. Implement the plan now. The ordinary writer fallback is approved for this execution turn; explicit ask/deny rules and forced fresh reviews still apply. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. Repeat 2–3 for each remaining sub-step. You don’t need another todo_write to mark steps completed; each complete_step advances the list. Sign off one sub-step at a time — never batch multiple completions."
+const planApprovedMessage = "Plan approved — plan mode is off. Implement the plan now. The ordinary writer fallback is approved for this execution turn; explicit ask/deny rules and forced fresh reviews still apply. Use this workflow: 1) mark the first sub-step in_progress with todo_write (this establishes the task list); 2) execute the sub-step; 3) call complete_step with evidence — the host then marks that sub-step completed and moves the next one to in_progress for you. You may call complete_step for multiple sub-steps in one tool-call round when their work and evidence already exist, but keep calls in Todo order; the host processes them sequentially and rejects skipped or out-of-order sign-offs. You don’t need another todo_write to mark steps completed; each complete_step advances the list."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in Plan the model is instructed to
@@ -1998,7 +2012,12 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	}
 	marker = c.markInFlightTurn(startMessages, true)
 	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false, startMessages)
-	err = c.runner.Run(ctx, c.withCapabilityRoute(ctx, input, rawInput))
+	modelInput := c.withCapabilityRoute(ctx, input, rawInput)
+	modelInput, ctx, err = c.prepareVisionTurn(ctx, modelInput, agent.SubagentImageCandidates(ctx))
+	if err != nil {
+		return err
+	}
+	err = c.runner.Run(ctx, modelInput)
 	return err
 }
 
@@ -2630,27 +2649,30 @@ func (c *Controller) SetPlanMode(v bool) {
 	c.applyPlanMode(v)
 }
 
-// SetAgentPreset is a deprecated compatibility shim. Reasonix runs one
-// adaptive standard execution; the preset no longer exists at runtime. The
-// call is accepted, validated for diagnostics, and ignored: it never rebuilds
-// the agent, never changes tool schemas, and never alters planning,
-// verification, or review behavior.
+// SetAgentPreset writes the role through to the session quality floor:
+// delivery/deliver/quality set the delivery floor, everything valid folds to
+// standard, unknown values are ignored for compat. It never rebuilds the
+// agent and never changes tool schemas.
 func (c *Controller) SetAgentPreset(preset string) {
 	if c == nil {
 		return
 	}
-	_ = agentpreset.Normalize(preset)
+	if p, err := agentpreset.Normalize(preset); err == nil {
+		_ = c.SetQualityFloor(string(p))
+	}
 }
 
-// AgentPreset returns the fixed compatibility label. One-version-old clients
-// read it from status snapshots; new code must not branch on it.
+// AgentPreset returns the session role label derived from the quality floor.
 func (c *Controller) AgentPreset() string {
-	return string(agentpreset.Balanced)
+	if c.QualityFloor() == QualityFloorDelivery {
+		return string(agentpreset.Delivery)
+	}
+	return string(agentpreset.Standard)
 }
 
 func (c *Controller) applyPlanMode(v bool) {
 	c.mu.Lock()
-	c.planMode = v
+	c.sessionSettings.planMode = v
 	c.mu.Unlock()
 	if setter, ok := c.runner.(interface{ SetPlanMode(bool) }); ok {
 		setter.SetPlanMode(v)
@@ -2694,7 +2716,7 @@ func (c *Controller) SetReasoningLanguage(lang string) {
 func (c *Controller) PlanMode() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.planMode
+	return c.sessionSettings.planMode
 }
 
 // GoalStrict enables or disables strict goal mode. Since the structured
@@ -5535,11 +5557,17 @@ func (c *Controller) CancelJob(id string) bool {
 	return c.jobs.KillForSession(c.parentSessionID(), id)
 }
 
-// WorkspaceLeaseState reports only whether this controller owns or is waiting
-// for the Delivery workspace writer lease. It never exposes filesystem or
-// process identity.
+// WorkspaceLeaseState reports the process-local held and waiting lease scope.
+// Canonical keys are used only for matching another local controller and are
+// never copied into user-facing payloads.
 func (c *Controller) WorkspaceLeaseState() workspacelease.State {
 	return c.workspaceLease.State()
+}
+
+// WorkspaceLeaseHeldKeys is the lock-domain identity this controller currently
+// holds. Empty when no write lease is held.
+func (c *Controller) WorkspaceLeaseHeldKeys() []string {
+	return c.workspaceLease.HeldKeys()
 }
 
 // SetToolApprovalMode changes the runtime approval posture for permission-gated

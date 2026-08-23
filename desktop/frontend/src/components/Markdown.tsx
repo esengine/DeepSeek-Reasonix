@@ -145,9 +145,13 @@ function isStreamingListItemLine(line: string): boolean {
 
 // Live parse prefix: last completed block. A later list marker commits prior
 // items only — the new item stays in the tail so indented continuations can join.
+// An open code fence commits only up to the fence line: the tail renders the
+// growing code with code styling (splitStreamingTailFence), so streaming a
+// large block no longer re-parses the whole document on every commit.
 export function streamingCommitTarget(text: string): string {
   let lineStart = 0;
   let fence: { marker: string; length: number } | null = null;
+  let fenceStart = 0;
   let displayMath = false;
   let boundary = 0;
   while (lineStart < text.length) {
@@ -167,8 +171,10 @@ export function streamingCommitTarget(text: string): string {
       }
     } else {
       const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-      if (fenceMatch) fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
-      else if (line.trim() === "$$") displayMath = true;
+      if (fenceMatch) {
+        fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
+        fenceStart = lineStart;
+      } else if (line.trim() === "$$") displayMath = true;
       else if (terminated && line.trim() === "") boundary = lineEnd;
       // A heading interrupts a paragraph, so a partial heading line already
       // completes everything before it; a terminated one is itself complete.
@@ -177,7 +183,41 @@ export function streamingCommitTarget(text: string): string {
     }
     lineStart = lineEnd;
   }
-  return fence || displayMath ? text : text.slice(0, boundary);
+  return fence ? text.slice(0, fenceStart) : displayMath ? text : text.slice(0, boundary);
+}
+
+type StreamingTailFence = { head: string; lang: string; code: string };
+
+// Split a streaming tail around an unclosed code fence so the fence body can
+// render with code styling before the closing fence arrives. Bail out cheaply
+// when no fence marker exists; otherwise mirror the fence state machine from
+// streamingCommitTarget in one forward pass over the tail.
+export function splitStreamingTailFence(text: string): StreamingTailFence | null {
+  if (!text.includes("```") && !text.includes("~~~")) return null;
+  let lineStart = 0;
+  let fence: { marker: string; length: number } | null = null;
+  let fenceStart = 0;
+  let fenceBodyStart = 0;
+  let lang = "";
+  while (lineStart < text.length) {
+    const newline = text.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? text.length : newline + 1;
+    const line = text.slice(lineStart, newline === -1 ? text.length : newline).replace(/\r$/, "");
+    if (fence) {
+      if (new RegExp(`^ {0,3}${fence.marker}{${fence.length},}[ \\t]*$`).test(line)) fence = null;
+    } else {
+      const fenceMatch = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/.exec(line);
+      if (fenceMatch) {
+        fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
+        fenceStart = lineStart;
+        fenceBodyStart = lineEnd;
+        lang = fenceMatch[2].trim();
+      }
+    }
+    lineStart = lineEnd;
+  }
+  if (!fence) return null;
+  return { head: text.slice(0, fenceStart), lang, code: text.slice(fenceBodyStart) };
 }
 
 export function useRenderedMarkdownText(text: string, streaming: boolean, holdIdleFinalization = false): string {
@@ -302,9 +342,35 @@ const StreamingMarkdownTail = memo(function StreamingMarkdownTail({ text }: { te
     const element = elementRef.current;
     if (!element) return;
     const previousText = previousTextRef.current;
-    const textNode = element.firstChild;
-    if (text.startsWith(previousText) && textNode?.nodeType === Node.TEXT_NODE) {
-      (textNode as Text).appendData(text.slice(previousText.length));
+    const previous = splitStreamingTailFence(previousText);
+    const next = splitStreamingTailFence(text);
+    // Append-only fast paths keep per-frame updates to one text-node append.
+    if (next && previous && next.head === previous.head && next.lang === previous.lang && next.code.startsWith(previous.code)) {
+      const textNode = element.querySelector("code")?.firstChild;
+      if (textNode?.nodeType === Node.TEXT_NODE) {
+        (textNode as Text).appendData(next.code.slice(previous.code.length));
+        previousTextRef.current = text;
+        return;
+      }
+    }
+    if (!next && !previous && text.startsWith(previousText)) {
+      const textNode = element.firstChild;
+      if (element.childNodes.length === 1 && textNode?.nodeType === Node.TEXT_NODE) {
+        (textNode as Text).appendData(text.slice(previousText.length));
+        previousTextRef.current = text;
+        return;
+      }
+    }
+    element.textContent = "";
+    if (next) {
+      if (next.head) element.appendChild(document.createTextNode(next.head));
+      const pre = document.createElement("pre");
+      pre.className = "code md--stream-tail-code";
+      if (next.lang) pre.setAttribute("data-lang", next.lang);
+      const code = document.createElement("code");
+      code.textContent = next.code;
+      pre.appendChild(code);
+      element.appendChild(pre);
     } else {
       element.textContent = text;
     }
@@ -368,7 +434,7 @@ export const Markdown = memo(function Markdown({
 
   const committedView = (
     <>
-      <Suspense fallback={<div className="md" data-transcript-selection-source-fallback>{renderedText}</div>}>
+      <Suspense fallback={<div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{renderedText}</div>}>
         {sections.length === 1 ? (
           <MarkdownRenderer text={renderedText} plainStatusBlocks={plainStatusBlocks} />
         ) : (
@@ -386,14 +452,14 @@ export const Markdown = memo(function Markdown({
   if (streaming || legacyMode) return committedView;
 
   return (
-    <Suspense fallback={<div className="md" data-transcript-selection-source-fallback>{text}</div>}>
+    <Suspense fallback={<div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>}>
       <MarkdownHistory
         text={text}
         plainStatusBlocks={plainStatusBlocks}
         entryId={entryId}
         fallback={wasStreamingRef.current
           ? committedView
-          : <div className="md" data-transcript-selection-source-fallback>{text}</div>}
+          : <div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>}
         onParsed={handleWorkerParsed}
         onError={handleWorkerError}
       />

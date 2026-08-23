@@ -75,16 +75,20 @@ func sessionsCommand(args []string) int {
 }
 
 type sessionRecoveryReport struct {
-	Directories     int      `json:"directories"`
-	Groups          int      `json:"groups"`
-	Branches        int      `json:"branches"`
-	AdoptedGroups   int      `json:"adoptedGroups"`
-	DivergedGroups  int      `json:"divergedGroups"`
-	CleanupEligible int      `json:"cleanupEligible"`
-	MovedToTrash    int      `json:"movedToTrash"`
-	Busy            int      `json:"busy"`
-	Errors          []string `json:"errors"`
-	DryRun          bool     `json:"dryRun"`
+	Directories       int      `json:"directories"`
+	SourceSessions    int      `json:"sourceSessions"`
+	IndexedSessions   int      `json:"indexedSessions"`
+	UnindexedSessions int      `json:"unindexedSessions"`
+	StaleDirectories  int      `json:"staleDirectories"`
+	Groups            int      `json:"groups"`
+	Branches          int      `json:"branches"`
+	AdoptedGroups     int      `json:"adoptedGroups"`
+	DivergedGroups    int      `json:"divergedGroups"`
+	CleanupEligible   int      `json:"cleanupEligible"`
+	MovedToTrash      int      `json:"movedToTrash"`
+	Busy              int      `json:"busy"`
+	Errors            []string `json:"errors"`
+	DryRun            bool     `json:"dryRun"`
 }
 
 func sessionsRecoveryCommand(args []string, cleanup bool) int {
@@ -114,6 +118,14 @@ func sessionsRecoveryCommand(args []string, cleanup bool) int {
 		}
 	}
 	report := sessionRecoveryReport{Errors: []string{}, DryRun: !cleanup || !*apply}
+	persisted, persistedErr := sessioncatalog.Open(context.Background(), sessioncatalog.Options{
+		Path: sessioncatalog.DefaultPath(), DisableRepair: true,
+	})
+	if persistedErr != nil {
+		report.Errors = append(report.Errors, "open persisted session catalog: "+persistedErr.Error())
+	} else {
+		defer persisted.Close(context.Background())
+	}
 	seen := map[string]bool{}
 	for _, rawDir := range dirs {
 		dir := filepath.Clean(strings.TrimSpace(rawDir))
@@ -122,81 +134,14 @@ func sessionsRecoveryCommand(args []string, cleanup bool) int {
 		}
 		seen[dir] = true
 		report.Directories++
-		catalog, err := sessioncatalog.Open(context.Background(), sessioncatalog.Options{InMemory: true, DisableRepair: true})
-		if err != nil {
-			report.Errors = append(report.Errors, err.Error())
-			continue
-		}
-		err = catalog.ReconcileDirectory(context.Background(), sessioncatalog.DirectoryTarget{Path: dir, Scope: "global"})
-		if err != nil {
-			report.Errors = append(report.Errors, err.Error())
-			_ = catalog.Close(context.Background())
-			continue
-		}
-		groups, err := catalog.ListRecoveryGroups(context.Background(), dir)
-		if err != nil {
-			report.Errors = append(report.Errors, err.Error())
-			_ = catalog.Close(context.Background())
-			continue
-		}
-		for _, group := range groups {
-			rootID, members := group.ID, group.Members
-			report.Groups++
-			report.Branches += len(members)
-			canonical := ""
-			diverged := false
-			for _, member := range members {
-				if member.RecoveryCanonical && (member.RecoveryRole == sessioncatalog.RecoveryRoleAdopted || member.RecoveryRole == sessioncatalog.RecoveryRolePreferred) {
-					canonical = member.Path
-				}
-				if member.RecoveryRole == sessioncatalog.RecoveryRoleDiverged {
-					diverged = true
-				}
-			}
-			if canonical == "" {
-				if diverged {
-					report.DivergedGroups++
-				}
-				continue
-			}
-			report.AdoptedGroups++
-			candidates := []string{}
-			for _, member := range members {
-				if member.Path != canonical && member.RecoveryRole == sessioncatalog.RecoveryRoleCoveredCopy {
-					candidates = append(candidates, member.Path)
-				}
-			}
-			report.CleanupEligible += len(candidates)
-			if report.DryRun || len(candidates) == 0 {
-				continue
-			}
-			if err := agent.ReparentRecoveryCanonical(canonical, rootID, dir); err != nil {
-				if errors.Is(err, agent.ErrSessionLeaseHeld) {
-					report.Busy += len(candidates)
-				} else {
-					report.Errors = append(report.Errors, err.Error())
-				}
-				continue
-			}
-			for _, candidate := range candidates {
-				if err := agent.TrashRecoveryBranchCoveredBy(candidate, canonical, dir); err != nil {
-					if errors.Is(err, agent.ErrSessionLeaseHeld) {
-						report.Busy++
-					} else {
-						report.Errors = append(report.Errors, err.Error())
-					}
-					continue
-				}
-				report.MovedToTrash++
-			}
-		}
-		_ = catalog.Close(context.Background())
+		inspectSessionRecoveryDirectory(context.Background(), dir, persisted, &report)
 	}
 	if *jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(report)
 	} else {
+		fmt.Printf("source sessions: %d; indexed sessions: %d; unindexed: %d; stale directories: %d\n", report.SourceSessions, report.IndexedSessions, report.UnindexedSessions, report.StaleDirectories)
 		fmt.Printf("recovery groups: %d (%d adopted, %d diverged)\n", report.Groups, report.AdoptedGroups, report.DivergedGroups)
 		fmt.Printf("recovery branches: %d; safe cleanup: %d; moved: %d; busy: %d\n", report.Branches, report.CleanupEligible, report.MovedToTrash, report.Busy)
 		if report.DryRun && cleanup {
@@ -210,6 +155,112 @@ func sessionsRecoveryCommand(args []string, cleanup bool) int {
 		return 1
 	}
 	return 0
+}
+
+func inspectSessionRecoveryDirectory(ctx context.Context, dir string, persisted *sessioncatalog.Catalog, report *sessionRecoveryReport) {
+	updateSessionRecoveryCounts(ctx, dir, persisted, report)
+	catalog, err := sessioncatalog.Open(ctx, sessioncatalog.Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return
+	}
+	defer catalog.Close(ctx)
+	if err := catalog.ReconcileDirectory(ctx, sessioncatalog.DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return
+	}
+	groups, err := catalog.ListRecoveryGroups(ctx, dir)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return
+	}
+	for _, group := range groups {
+		inspectSessionRecoveryGroup(dir, group, report)
+	}
+}
+
+func updateSessionRecoveryCounts(ctx context.Context, dir string, persisted *sessioncatalog.Catalog, report *sessionRecoveryReport) {
+	source, err := agent.ListSessionOrder(dir)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return
+	}
+	report.SourceSessions += len(source)
+	if persisted == nil {
+		return
+	}
+	indexed, err := persisted.CountDirectorySessions(ctx, dir)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return
+	}
+	report.IndexedSessions += int(indexed)
+	if indexed == int64(len(source)) {
+		return
+	}
+	report.StaleDirectories++
+	if len(source) > int(indexed) {
+		report.UnindexedSessions += len(source) - int(indexed)
+	}
+}
+
+func inspectSessionRecoveryGroup(dir string, group sessioncatalog.RecoveryGroup, report *sessionRecoveryReport) {
+	report.Groups++
+	report.Branches += len(group.Members)
+	canonical, diverged := recoveryGroupState(group.Members)
+	if canonical == "" {
+		if diverged {
+			report.DivergedGroups++
+		}
+		return
+	}
+	report.AdoptedGroups++
+	candidates := coveredRecoveryCandidates(group.Members, canonical)
+	report.CleanupEligible += len(candidates)
+	if report.DryRun || len(candidates) == 0 {
+		return
+	}
+	if err := agent.ReparentRecoveryCanonical(canonical, group.ID, dir); err != nil {
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			report.Busy += len(candidates)
+		} else {
+			report.Errors = append(report.Errors, err.Error())
+		}
+		return
+	}
+	for _, candidate := range candidates {
+		if err := agent.TrashRecoveryBranchCoveredBy(candidate, canonical, dir); err != nil {
+			if errors.Is(err, agent.ErrSessionLeaseHeld) {
+				report.Busy++
+			} else {
+				report.Errors = append(report.Errors, err.Error())
+			}
+			continue
+		}
+		report.MovedToTrash++
+	}
+}
+
+func recoveryGroupState(members []sessioncatalog.SessionRecord) (canonical string, diverged bool) {
+	for _, member := range members {
+		if member.RecoveryCanonical && (member.RecoveryRole == sessioncatalog.RecoveryRoleAdopted || member.RecoveryRole == sessioncatalog.RecoveryRolePreferred) {
+			canonical = member.Path
+		}
+		if member.RecoveryRole == sessioncatalog.RecoveryRoleDiverged {
+			diverged = true
+		}
+	}
+	return canonical, diverged
+}
+
+func coveredRecoveryCandidates(members []sessioncatalog.SessionRecord, canonical string) []string {
+	candidates := make([]string, 0, len(members))
+	for _, member := range members {
+		if member.Path != canonical && member.RecoveryRole == sessioncatalog.RecoveryRoleCoveredCopy {
+			candidates = append(candidates, member.Path)
+		}
+	}
+	return candidates
 }
 
 func printSessionCatalogRebuild(status sessioncatalog.Status, jsonOut bool) int {

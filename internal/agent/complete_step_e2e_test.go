@@ -120,6 +120,33 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestE2ETodoWriteProgressThenOptionalCompleteStep(t *testing.T) {
+	mp := testutil.NewMock("m",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "t0", Name: "todo_write",
+			Arguments: `{"todos":[{"content":"test","status":"in_progress"},{"content":"vet","status":"pending"}]}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "t1", Name: "todo_write",
+			Arguments: `{"todos":[{"content":"test","status":"completed"},{"content":"vet","status":"in_progress"}]}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "b1", Name: "bash",
+			Arguments: `{"command":"go vet ./..."}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
+			Arguments: `{"step":"vet","result":"vet passes","evidence":[{"kind":"verification","summary":"vet passes","command":"go vet ./..."}]}`}}},
+		testutil.Turn{Text: "all done"},
+	)
+	sink := &recordSink{}
+	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, sink)
+
+	if err := a.Run(withNoClosedLoop(context.Background()), "implement the plan"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := a.CanonicalTodoState()
+	if len(got) != 2 || got[0].Status != "completed" || got[1].Status != "completed" {
+		t.Fatalf("canonical todos = %+v, want todo_write then complete_step to finish the list", got)
+	}
+	if n := hostAdvances(sink); n < 1 {
+		t.Fatalf("host advanced %d times, want the complete_step path to still advance", n)
+	}
+}
+
 // A command cited with a different string than it ran under (#2917: the model
 // drops the cd-prefix) is still accepted via segment matching, in-turn.
 func TestE2ECommandDriftAcceptedInTurn(t *testing.T) {
@@ -156,6 +183,8 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: `{"path":"alpha.go"}`}}},
 		testutil.Turn{Text: "all done"},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "v1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "r1", Name: "bash", Arguments: `{"command":"git diff alpha.go"}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
 			Arguments: `{"step":"alpha","result":"done","evidence":[{"kind":"diff","summary":"edited","paths":["alpha.go"]}]}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
@@ -165,11 +194,11 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
 	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
 
-	firstErr := a.Run(withNoClosedLoop(context.Background()), "finish up")
+	firstErr := a.Run(withClosedLoopContext(context.Background()), "finish up")
 	if !readinessBlocked(firstErr) {
 		t.Fatalf("premature 'all done' error = %v, want FinalReadinessError from the cross-turn canonical gate", firstErr)
 	}
-	if err := a.Run(withNoClosedLoop(context.Background()), "finish up"); err != nil {
+	if err := a.Run(withClosedLoopContext(context.Background()), "finish up"); err != nil {
 		t.Fatalf("follow-up Run: %v", err)
 	}
 	for i, td := range a.sess.todoState {

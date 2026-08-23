@@ -112,6 +112,11 @@ func (s *renderSink) Emit(e event.Event) {
 		}
 		name := renderToolName(e.Tool)
 		s.toolNames[e.Tool.ID] = name
+		// 钉钉渠道用「思考中」表情表达处理中，工具进度消息反而刷屏；其他
+		// 平台保留「正在执行」进度提示（对远程聊天参与者有信息量）。
+		if s.adapter != nil && s.adapter.Platform() == PlatformDingtalk {
+			break
+		}
 		s.sendProgress(fmt.Sprintf("正在执行: %s", name), false)
 
 	case event.ToolResult:

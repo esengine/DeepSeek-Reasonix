@@ -25,6 +25,7 @@ import (
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/agentpreset"
 	"reasonix/internal/billing"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
@@ -133,9 +134,9 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
-	// AgentPreset and TokenMode are deprecated no-op compatibility inputs.
-	// Host obligations are fact-driven from real tool actions; these fields are
-	// accepted so old frontends keep compiling, and ignored.
+	// AgentPreset and TokenMode seed the session quality floor. Delivery (or
+	// its aliases) raises it to delivery; light and its aliases fold to
+	// standard; unknown values keep the standard default.
 	AgentPreset string
 	TokenMode   string
 	// SessionDir overrides where persisted chat transcripts are written. When
@@ -267,6 +268,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				return ""
 			}
 			return entry.ProviderBillingMode()
+		},
+		PricingContextForModel: func(modelRef string) billing.PricingContext {
+			entry, ok := cfg.ResolveModel(modelRef)
+			if !ok {
+				return billing.PricingContext{}
+			}
+			return entry.PricingContextForModel(entry.Model)
 		},
 	}
 	// Innermost: frontend sink (CLI metrics/ACP/Desktop bridge live here).
@@ -409,8 +417,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, modelName)
-	// Execution modes are gone: opts.AgentPreset/opts.TokenMode are deprecated
-	// no-op inputs kept for one compatibility version of old frontends.
+	// opts.AgentPreset/opts.TokenMode now seed the session quality floor (see
+	// the SetQualityFloor call after control.New); light folds to standard.
 	keepPolicy := agentKeepPolicy(cfg.Agent.Keep)
 	// Entry resolution: the caller-owned broker is authoritative for every
 	// ref; the extension-merged resolver only owns plugin refs — a config ref
@@ -503,7 +511,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	if multiThresholdMigrated || multiThresholdMigErr != nil {
 		level := event.LevelInfo
 		text := "上下文维护已简化为单一自动压缩阈值。"
-		detail := "Context maintenance now uses a single automatic compact_ratio (default 0.85). soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, and context_editing were removed from config."
+		detail := "Context maintenance now uses a single automatic compact_ratio (default 0.80). soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, and context_editing were removed from config."
 		if multiThresholdMigErr != nil {
 			level = event.LevelWarn
 			text = "Deprecated multi-threshold compaction keys were ignored."
@@ -662,6 +670,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 		}
 	}
+	sysPrompt = config.ApplyOfficialDeepSeekV4ProPersona(sysPrompt, entry)
 
 	reg := tool.NewRegistry()
 	writeRoots := cfg.WriteRootsForRoot(root)
@@ -1059,6 +1068,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
 			Provider:                execProv,
 			Pricing:                 entry.Price,
+			QuoteContext:            quoteCtx,
 			ParentRegistry:          reg,
 			MaxSteps:                maxSteps,
 			ContextWindow:           entry.ContextWindow,
@@ -1194,7 +1204,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// read_only_task, so they cannot write, install, mutate memory, resume/fork
 	// transcripts, or delegate further.
 	//
-	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet)
+	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, quoteCtx, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet)
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
@@ -1618,19 +1628,21 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 
 	execSess := newObservedSession(sysPrompt)
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:    maxSteps,
-		MaxStepsKey: opts.MaxStepsKey,
-		Temperature: cfg.Agent.Temperature,
-		TaskBudget:  taskBudgetFromConfig(cfg),
-		Pricing:     entry.Price,
-		ModelRef:    modelRef,
-		Gate:        headlessGate,
-		Hooks:       hookRunner,
-		Jobs:        jm,
+		MaxSteps:     maxSteps,
+		MaxStepsKey:  opts.MaxStepsKey,
+		Temperature:  cfg.Agent.Temperature,
+		TaskBudget:   taskBudgetFromConfig(cfg),
+		Pricing:      entry.Price,
+		QuoteContext: quoteCtx,
+		ModelRef:     modelRef,
+		Gate:         headlessGate,
+		Hooks:        hookRunner,
+		Jobs:         jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
 		WriteWorkspaceRoot:           root,
+		SessionTemp:                  sessionTemp,
 		WriteRoots:                   writeRootSet,
 		HomeDir:                      userHomeDir(),
 		StateRoot:                    config.MemoryUserDir(),
@@ -1644,6 +1656,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		LearnedWindow:                executorWindow,
 		LearnedCompletionBudget:      executorCompletion,
 		PersistLearnedWindow:         executorPersist,
+		MaxOutputTokens:              entry.MaxOutputTokens,
 		SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
 		ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
 		CompactRatio:                 cfg.Agent.CompactRatio,
@@ -1652,8 +1665,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		RecentKeep:                   cfg.Agent.RecentKeep,
 		ArchiveDir:                   config.ArchiveDir(),
 		KeepPolicy:                   keepPolicy,
-		ReasoningLanguage:            cfg.ReasoningLanguage(),
+		ReasoningLanguage:            config.ReasoningLanguageForEntry(entry, cfg.ReasoningLanguage()),
 		PlanModeReadOnlyCommands:     cfg.Agent.PlanModeReadOnlyCommands,
+		LegacyAnchorSafetyGate:       cfg.Agent.LegacyAnchorSafetyGate,
 		SubagentDepth:                0,
 		MaxSubagentDepth:             maxSubagentDepth,
 		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
@@ -1701,6 +1715,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				MaxSteps:                     0,
 				Gate:                         headlessGate,
 				ModelRef:                     modelRefFromEntry(pe),
+				QuoteContext:                 quoteCtx,
 				ContextWindow:                pe.ContextWindow,
 				ContextWindowSource:          config.EffectiveContextWindowSource(pe),
 				LearnedWindow:                plannerWindow,
@@ -1714,7 +1729,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				RecentKeep:                   cfg.Agent.RecentKeep,
 				ArchiveDir:                   config.ArchiveDir(),
 				KeepPolicy:                   keepPolicy,
-				ReasoningLanguage:            cfg.ReasoningLanguage(),
+				ReasoningLanguage:            config.ReasoningLanguageForEntry(pe, cfg.ReasoningLanguage()),
 				PlanModeReadOnlyCommands:     cfg.Agent.PlanModeReadOnlyCommands,
 				CapabilityLedger:             plannerLedger,
 				CapabilityAudit:              plannerAudit,
@@ -1727,6 +1742,42 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
+	visionProviderResolver := func(ref string) (provider.Provider, error) {
+		ve, ok := resolveOptionalEntry(effectiveResolver, cfg, strings.TrimSpace(ref))
+		if !ok || ve == nil || strings.TrimSpace(ve.Model) == "" {
+			return nil, fmt.Errorf("unknown vision model %q", ref)
+		}
+		return resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(ve)})
+	}
+	visionModelSelector := func(currentRef, _ string) (string, bool) {
+		current, ok := resolveOptionalEntry(effectiveResolver, cfg, strings.TrimSpace(currentRef))
+		if !ok || current == nil {
+			return "", false
+		}
+		for i := range cfg.Providers {
+			p := &cfg.Providers[i]
+			if p.Name != current.Name || !p.Configured() {
+				continue
+			}
+			models := p.ModelList()
+			ordered := make([]string, 0, len(models))
+			if d := p.DefaultModel(); d != "" {
+				ordered = append(ordered, d)
+			}
+			for _, model := range models {
+				if model != "" && model != p.DefaultModel() {
+					ordered = append(ordered, model)
+				}
+			}
+			for _, model := range ordered {
+				candidate, found := cfg.ResolveModel(p.Name + "/" + model)
+				if found && candidate.Configured() && config.EffectiveVision(candidate) {
+					return candidate.Name + "/" + candidate.Model, true
+				}
+			}
+		}
+		return "", false
+	}
 
 	ctrlOpts := control.Options{
 		TaskBudget:                     taskBudgetFromConfig(cfg),
@@ -1738,6 +1789,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		SubagentGate:                   headlessGate,
 		Label:                          label,
 		ModelRef:                       modelRef,
+		VisionModel:                    cfg.Agent.VisionModel,
+		VisionProviderResolver:         visionProviderResolver,
+		VisionModelSelector:            visionModelSelector,
 		SystemPrompt:                   sysPrompt,
 		SessionDir:                     sessionDir,
 		Host:                           pluginHost,
@@ -1782,7 +1836,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		WorkspaceRoot:          root,
 		ExternalFolderToolRefs: readPathResolver,
 		ResponseLanguage:       cfg.ResponseLanguage(),
-		ReasoningLanguage:      cfg.ReasoningLanguage(),
+		ReasoningLanguage:      config.ReasoningLanguageForEntry(entry, cfg.ReasoningLanguage()),
 		DisableColdResumePrune: !cfg.ColdResumePruneEnabled(),
 		Shell:                  shell,
 		ApprovalTimeout:        opts.ApprovalTimeout,
@@ -1884,6 +1938,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 	}
 	ctrl := control.New(ctrlOpts)
+	// The role inputs set the session quality floor: delivery/deliver/quality
+	// raise it, light and its aliases fold to standard, unknown stays default.
+	if p, err := agentpreset.Normalize(firstNonEmpty(opts.AgentPreset, opts.TokenMode)); err == nil && p == agentpreset.Delivery {
+		_ = ctrl.SetQualityFloor(string(p))
+	}
 	// Publish the controller to the extension UI hub's indirection: from here
 	// on, host/ui/* publishes ride ctrl.EmitExtensionEvent and blocking prompts
 	// ride ctrl.Ask, exactly as if the hub had been built after control.New.
@@ -1912,11 +1971,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		effortRef := strings.TrimSpace(cfg.Agent.SubagentEfforts["capability-router"])
 		if p, price, _, err := resolveSubagentProvider(modelRef, effortRef); err == nil && p != nil {
 			usageModelRef, _ := subagentIdentity(modelRef, effortRef)
-			router = &capability.SemanticRouter{Provider: p, Sink: sink, Model: usageModelRef, Pricing: price, Audit: capAudit}
+			router = &capability.SemanticRouter{Provider: p, Sink: sink, Model: usageModelRef, Pricing: price, QuoteContext: quoteCtx, Audit: capAudit}
 		}
 	}
 	if router == nil {
-		router = &capability.SemanticRouter{Provider: execProv, Sink: sink, Model: modelRef, Pricing: entry.Price, Audit: capAudit}
+		router = &capability.SemanticRouter{Provider: execProv, Sink: sink, Model: modelRef, Pricing: entry.Price, QuoteContext: quoteCtx, Audit: capAudit}
 	}
 	ctrl.WireCapabilityRouting(cfg.Plugins, capSpecs, router, capAudit)
 	ctrl.SetCapabilityProxyRouting(true)
@@ -2823,39 +2882,6 @@ func MCPStartupNotice(failures []plugin.Failure) (text, detail string, ok bool) 
 	}
 	return "Some MCP servers failed to start; run /mcp for details.", fmt.Sprintf("%d MCP server(s) failed to start: %s%s\n%s",
 		len(failures), strings.Join(names, ", "), more, strings.Join(details, "\n")), true
-}
-
-// LSPSpecs returns the language → server map: the built-in defaults overlaid with
-// any user overrides. A user entry may set only the fields it wants to change;
-// empty fields keep the default for that language.
-func LSPSpecs(cfg config.LSPConfig) map[string]lsp.ServerSpec {
-	specs := lsp.DefaultSpecs()
-	for lang, s := range cfg.Servers {
-		spec := specs[lang]
-		if s.Command != "" {
-			spec.Command = s.Command
-		}
-		if s.Args != nil {
-			spec.Args = s.Args
-		}
-		if s.Env != nil {
-			spec.Env = s.Env
-		}
-		if s.LanguageID != "" {
-			spec.LanguageID = s.LanguageID
-		}
-		if s.Extensions != nil {
-			spec.Extensions = s.Extensions
-		}
-		if s.InstallHint != "" {
-			spec.InstallHint = s.InstallHint
-		}
-		if spec.LanguageID == "" {
-			spec.LanguageID = lang
-		}
-		specs[lang] = spec
-	}
-	return specs
 }
 
 func providerNames(cfg *config.Config) string {

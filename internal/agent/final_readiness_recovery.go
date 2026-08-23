@@ -76,6 +76,20 @@ func (a *Agent) PrepareFinalReadinessRecovery() bool {
 	return true
 }
 
+// RestoreFinalReadinessRecoveryPreparation releases a prepared recovery when
+// the host could not start Agent.Run. The durable marker remains pending, so a
+// later explicit or automatic continuation can authorize the same evidence
+// exactly once instead of treating a pre-run block as successful delivery.
+func (a *Agent) RestoreFinalReadinessRecoveryPreparation() bool {
+	if a == nil || !a.pending.finalReadinessRecoveryPrepared {
+		return false
+	}
+	a.pending.preserveEvidence = false
+	a.pending.finalReadinessRecovery = true
+	a.pending.finalReadinessRecoveryPrepared = false
+	return true
+}
+
 // beginFinalReadinessRecovery consumes a pending card when a user turn truly
 // begins and returns the evidence and audit state for that turn.
 func (a *Agent) beginFinalReadinessRecovery() (preserveEvidence, recovered bool) {

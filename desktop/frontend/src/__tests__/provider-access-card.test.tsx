@@ -7,10 +7,11 @@ import { createRoot } from "react-dom/client";
 import {
   AddProviderPanel,
   ProviderAccessCard,
+  providerAccessGroups,
   type ProviderAccessGroup,
 } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
-import type { ProviderView } from "../lib/types";
+import type { ProviderPresetView, ProviderView } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -46,6 +47,8 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => undefined });
+Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => undefined });
 window.scrollTo = () => {};
 window.matchMedia = () => ({
   matches: true,
@@ -244,6 +247,7 @@ await act(async () => {
   root.render(
     <LocaleProvider>
       <AddProviderPanel
+        key="official-installed"
         mode="official"
         kinds={["anthropic", "openai"]}
         officialProviders={[{ ...deepSeekAnthropic, name: "deepseek" }]}
@@ -265,6 +269,111 @@ const installedOfficialChoice = Array.from(rootEl.querySelectorAll("button"))
   .find((button) => button.textContent?.includes("DeepSeek"));
 ok(installedOfficialChoice?.disabled === true, "installed official providers cannot be added again");
 ok(installedOfficialChoice?.textContent?.includes("Added") === true, "installed official providers show their backend status");
+
+const openCodePreset = (
+  id: string,
+  label: string,
+  providerNames: string[],
+  displayTier: "primary" | "advanced" | "compatibility",
+  displaySection: "go" | "zen" = "go",
+): ProviderPresetView => ({
+  id,
+  label,
+  description: `${label} description`,
+  keyEnv: displaySection === "zen" ? "OPENCODE_API_KEY" : "OPENCODE_GO_API_KEY",
+  recommended: id === "opencode-go-recommended",
+  displayGroup: "opencode",
+  displaySection,
+  displayTier,
+  routeKind: id === "opencode-go-recommended" ? "bundle" : "anthropic",
+  providerNames,
+  models: ["model"],
+  added: false,
+  status: "available",
+  statusProviderNames: [],
+  keySet: false,
+  requiresKey: true,
+  configured: false,
+});
+
+await act(async () => {
+  root.render(
+    <LocaleProvider>
+      <AddProviderPanel
+        key="opencode-quick-setup"
+        mode="official"
+        kinds={["anthropic", "openai", "responses"]}
+        officialProviders={[{ ...deepSeekAnthropic, name: "deepseek" }]}
+        providerPresets={[
+          openCodePreset("opencode-go-recommended", "OpenCode Go (Recommended)", ["opencode-go", "opencode-go-anthropic", "opencode-go-responses"], "primary"),
+          openCodePreset("opencode-go-anthropic", "OpenCode Go Anthropic", ["opencode-go-anthropic"], "advanced"),
+          openCodePreset("opencode-go-responses", "OpenCode Go Responses", ["opencode-go-responses"], "advanced"),
+          openCodePreset("opencode-go", "OpenCode Go Chat", ["opencode-go"], "compatibility"),
+          openCodePreset("opencode-zen-anthropic", "OpenCode Zen", ["opencode-zen-anthropic"], "primary", "zen"),
+        ]}
+        busy={false}
+        onMode={() => undefined}
+        onCancel={() => undefined}
+        onAddOfficial={async () => undefined}
+        onAddPreset={async () => undefined}
+        onViewPresetConflict={() => undefined}
+        onResetPreset={async () => undefined}
+        onAddCustom={() => undefined}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("OpenCode Go Anthropic") === false, "OpenCode setup hides protocol-specific provider entries");
+ok(rootEl.textContent?.includes("Advanced routes") === false, "OpenCode setup does not expose an advanced-route decision");
+ok(rootEl.textContent?.includes("Compatibility") === false, "OpenCode setup hides compatibility entries from new users");
+const featuredProviders = rootEl.querySelector(".provider-featured-grid");
+ok(
+  featuredProviders?.textContent?.includes("DeepSeek") === true
+    && featuredProviders.textContent.includes("OpenCode Go"),
+  "OpenCode Go and DeepSeek are presented as same-level recommended providers",
+);
+ok(
+  featuredProviders?.querySelectorAll(".provider-template-card").length === 2
+    && featuredProviders.textContent?.includes("OpenCode Zen") === false,
+  "the top-level provider row contains only DeepSeek and OpenCode Go",
+);
+ok(
+  rootEl.querySelector<HTMLInputElement>('input[placeholder*="OPENCODE_GO_API_KEY"]') !== null,
+  "OpenCode Go opens directly on its API key field",
+);
+ok(
+  Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Connect and start using"),
+  "OpenCode Go setup exposes one outcome-oriented primary action",
+);
+ok(rootEl.querySelector('[role="tablist"]') === null, "OpenCode Go quick setup does not ask users to choose a configuration mode");
+const chooseAnotherProvider = Array.from(rootEl.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Choose another provider") as HTMLButtonElement | undefined;
+await act(async () => {
+  chooseAnotherProvider?.click();
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("OpenCode Zen") === true, "OpenCode Zen remains an independent product choice");
+
+const openCodeProviders: ProviderView[] = [
+  { ...deepSeekAnthropic, builtIn: false, name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", apiKeyEnv: "OPENCODE_GO_API_KEY", webSearch: false },
+  { ...deepSeekAnthropic, builtIn: false, name: "opencode-go-anthropic", baseUrl: "https://opencode.ai/zen/go", apiKeyEnv: "OPENCODE_GO_API_KEY", webSearch: false },
+  { ...deepSeekAnthropic, builtIn: false, name: "opencode-go-responses", kind: "responses", baseUrl: "https://opencode.ai/zen/go/v1", apiKeyEnv: "OPENCODE_GO_API_KEY", webSearch: false },
+];
+const openCodeGroups = providerAccessGroups(openCodeProviders, ((key: string) => key) as never);
+ok(openCodeGroups.length === 1, "installed OpenCode Go routes render as one product connection");
+ok(openCodeGroups[0]?.id === "custom:opencode-go", "OpenCode Go connection has a stable product-level identity");
+
+await act(async () => {
+  root.render(renderCard(openCodeGroups[0]));
+  await flushPromises();
+});
+const routeSettings = rootEl.querySelector<HTMLDetailsElement>("details.provider-route-settings");
+ok(routeSettings !== null && routeSettings.open === false, "installed OpenCode Go keeps protocol routes collapsed by default");
+ok(
+  routeSettings?.querySelector("summary")?.textContent?.trim() === "Advanced route settings",
+  "installed OpenCode Go exposes route controls only through an advanced disclosure",
+);
 
 await act(async () => {
   root.unmount();

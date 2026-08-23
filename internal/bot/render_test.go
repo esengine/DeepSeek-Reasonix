@@ -249,6 +249,32 @@ func TestRenderSinkSendsProgressWithoutToolOutput(t *testing.T) {
 	}
 }
 
+// TestRenderSinkSkipsToolProgressForDingtalk: 钉钉渠道用「思考中」表情表达
+// 处理中，工具进度消息应被抑制（不产生「正在执行」消息），但最终结果仍发送。
+func TestRenderSinkSkipsToolProgressForDingtalk(t *testing.T) {
+	adapter := newFakeAdapter(PlatformDingtalk, "fake-dingtalk")
+	sink := newRenderSink(context.Background(), adapter, "dingtalk-conn", "dingtalk", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	sink.Emit(event.Event{Kind: event.TurnStarted})
+	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool-1", Name: "read_file", ReadOnly: true}})
+	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "tool-1", Name: "read_file", Output: "ok"}})
+	sink.Emit(event.Event{Kind: event.Text, Text: "完成。"})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want final result only (no tool dispatch status on dingtalk): %+v", len(sent), sent)
+	}
+	for _, m := range sent {
+		if strings.Contains(m.Text, "正在执行") {
+			t.Fatalf("dingtalk progress message should be suppressed: %+v", sent)
+		}
+	}
+	if sent[0].Text != "完成。" {
+		t.Fatalf("final text = %q, want final result only", sent[0].Text)
+	}
+}
+
 func TestRenderSinkLimitsProgressMessages(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
 	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)

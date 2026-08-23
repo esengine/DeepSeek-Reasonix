@@ -58,12 +58,13 @@ show_turn_usage = false             # 隐藏 TUI 每轮 token/费用回执；默
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # 仅兼容旧配置；Plan bash 现由 Permissions 决定
 # planner_model = "deepseek-pro"      # 可选的低频规划器
+# vision_model = "auto"                # 可选；文本模型先用同服务商视觉模型生成隐藏图片摘要
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 # max_subagent_depth = 2              # 子代理嵌套委派深度；设为 1 可恢复旧的单层边界
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
-# compact_ratio 是唯一自动维护阈值（默认 0.85；预设 0.70/0.80/0.85）
+# compact_ratio 是唯一自动维护阈值（默认 0.80；预设 0.70/0.80/0.85）
 # max_output_tokens = 0            # 自动：官方 DeepSeek 空间充足时省略字段（服务端 384K），临界时裁剪
 # max_output_tokens = 32768        # 可选控费上限，仍可按物理剩余继续下调
 # max_output_tokens = 65536        # 可选控费上限
@@ -351,7 +352,14 @@ Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表
 `config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
 中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
-以及 OpenCode Go 的每模型 reasoning 覆盖。专用的 OpenCode Go DeepSeek Anthropic 与
+以及 OpenCode Go 的每模型 reasoning 覆盖。官方 DeepSeek 的 Anthropic、Responses 与
+Chat Completions 目录还会带上 `deepseek-v4-flash-vision-exp`。在设置里和其他供应商
+一样勾选该模型的「图片输入」，再选中这一枚 SKU。composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
+`http(s)` 图片链接原样作为 URL 传入；`file-api-` 引用走 Files API（官方 DeepSeek 上
+超过 32 MiB 的本地图会自动上传）。Chat Completions 用 `image_url` 或 `file`，Anthropic
+用 `image`+`source.base64|url|file`，Responses 用 `input_image`。Flash/Pro 即使勾了
+「图片输入」线上仍是纯文本，工具截图也不会作为图片块转发。
+视觉 SKU 使用 Flash 价卡。专用的 OpenCode Go DeepSeek Anthropic 与
 DeepSeek Responses 预设接入已验证的 Flash 线路，并默认启用 provider 侧 `web_search`；
 Responses 变体使用无状态上下文回放。原有混合 OpenCode Go Anthropic 预设仍只包含 Qwen
 与 MiniMax，避免把服务端搜索工具发送给未验证模型。DeepSeek Pro 暂时仍只放在 Chat
@@ -472,7 +480,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | macOS `Cmd+Z`，Windows/Linux `Ctrl+Z` | 撤销输入框中的最近一次编辑 | 普通键入继续由 WebView 原生历史管理；Reasonix 接管的粘贴、剪切、折叠块和结构化 token 会作为完整事务恢复。 |
 | macOS `Cmd+Shift+Z`，Windows/Linux `Ctrl+Shift+Z` | 重做输入框中的最近一次编辑 | Windows/Linux 改绑 YOLO 后也可使用 `Ctrl+Y`。 |
 | `Cmd+Y` / `Ctrl+Y`（默认） | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底；当前绑定可在 **设置 → 快捷键** 查看。 |
-| macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 剪贴板图片会作为附件加入；图片也可以拖进输入框。 |
+| macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 剪贴板图片会作为附件加入；图片也可以拖进输入框。官方 DeepSeek 的 Flash/Pro 仍是纯文本；要直接发图请切换到 `deepseek-v4-flash-vision-exp`。 |
 | 输入边界处的普通 `Up` / `Down` | 回放更旧或更新的已提交提示词 | 带修饰键的方向键和原生文本导航仍交给 textarea。 |
 | 运行中按 `Esc` | 取消当前 turn | 如果后端尚未开始回复，会恢复草稿。 |
 
@@ -929,6 +937,13 @@ Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当�
 evaluator 判定。Light/Balanced 会接受 `update_goal` 里诚实申报的 `unverified` 检查缺口；同一检查缺口连续两次 `complete` 会结束 Goal，而不是继续验证循环。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
 普通 Goal，但新版本不会创建或改写这些目录。旧预算 flags 仅为兼容继续接受，不再出现在帮助和补全中。
 
+### 按顺序批量签收步骤
+
+宿主可以在同一个 provider 工具调用轮次中处理多个 `complete_step`。这些调用必须严格遵循
+canonical Todo 顺序，并且每一步的工作和证据都必须在对应签收之前已经产生。每次成功签收后，
+宿主立即推进 Todo 状态；跳过、仍为 pending 或乱序的步骤仍会被拒绝。这不会改变 provider-visible
+工具 Schema。
+
 ## @ 引用
 
 在消息里写 `@` 引用，Reasonix 会在发送前解析成带标签的上下文块：`@path/to/file`（或
@@ -1065,8 +1080,17 @@ enable、授权与完整连接身份，因此共享 Host 中另一个项目/tab 
 server 无法在这里提升权限。严格只读边界比独立 Planner 更窄：Planner 接受已授权的 opaque
 非 destructive MCP，而严格只读子会话必须有明确 reader hint，且根本不暴露 writer。
 
-Reasonix 使用**事实驱动执行**。普通请求一律进入 executor，没有自动的简单 /
-轻量 / 完整任务模式。Plan、Goal、permission、sandbox 与任务合同是互相独立的状态。
+Reasonix 使用**事实驱动执行**。普通请求一律进入 executor，没有自动任务模式；
+唯一的会话角色是质量底线（standard/delivery），事实仍可能高于它。Plan、Goal、permission、sandbox 与任务合同是互相独立的状态。
+
+对于明确要求修改的普通任务，若宿主尚未观察到成功 mutation、本任务内成功
+`todo_write` 创建的列表在 mutation 后仍有未完成项，或模型在已 mutation 且未建立本轮
+Todo 时明确承诺还要继续实施，Standard 最多自动追加 12 轮。每次新的宿主可验证进展会
+重置停滞计数；连续两轮没有新进展就暂停。完全相同的读取、命令、结果或纯文本不能伪造
+进展。历史 canonical Todo 继续显示，但不会阻塞新的普通任务；本轮 Todo 已完成或显式
+清空时仍以结构化状态为准。Standard 下的验证、复核和签收缺口仍只作为完成提示，不升级成
+Delivery 强度的自动闭环。达到轮次或停滞边界后，Reasonix 会以“任务尚未完成”暂停，并
+保留当前证据供 `/continue-checks` 恢复。
 
 所有任务共享同一套 provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell
 生命周期工具，以及稳定的 `use_capability` 代理）。可选工具（搜索、MCP、skills、
@@ -1096,7 +1120,7 @@ reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 
 桌面端“协作方式”菜单里的计划模式与目标模式的使用方法与注意事项，
 见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。没有自动
-简单 / 轻量 / 完整任务模式；验证义务由宿主根据真实工具动作建立。
+任务模式；唯一的会话角色是质量底线（standard/delivery），验证义务由宿主根据真实工具动作建立。
 
 桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
 见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。

@@ -82,7 +82,7 @@ func TestBuildNormalModeKeepsSourceConnectorAndSkillTools(t *testing.T) {
 	t.Chdir(dir)
 	t.Setenv("REASONIX_SAFE_MODE", "")
 
-	for _, tokenMode := range []string{TokenModeFull, TokenModeEconomy} {
+	for _, tokenMode := range []string{TokenModeFull, TokenModeDelivery} {
 		ctrl, err := Build(context.Background(), Options{
 			SessionDir: filepath.Join(t.TempDir(), "sessions"),
 			TokenMode:  tokenMode,

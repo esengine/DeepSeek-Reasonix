@@ -37,8 +37,8 @@ func (a *App) IsolatedWorktreeAvailability(workspaceRoot string) worktree.Availa
 
 // CreateIsolatedWorktree creates a durable branch-backed worktree and opens it
 // as a project. It never switches or modifies the source checkout, and it does
-// not delete the new worktree if later UI registration fails. Creation does
-// not force any execution mode: the standard policy adapts per task.
+// not delete the new worktree if later UI registration fails. The opened tab
+// infers the delivery quality floor (switchable to standard at any time).
 func (a *App) CreateIsolatedWorktree(workspaceRoot string) (IsolatedWorktreeOpenResult, error) {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	created, err := createDeliveryWorktree(a.bootContext(), workspaceRoot, config.DeliveryWorktreeDir())

@@ -157,6 +157,69 @@ func TestStreamSurfacesWebSearchResults(t *testing.T) {
 	}
 }
 
+// TestStreamSurfacesWebSearchResultDelta covers streams that deliver the
+// result array in a web_search_tool_result_delta after an empty block start
+// instead of inlining it in the block-start content.
+func TestStreamSurfacesWebSearchResultDelta(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}`,
+		``,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"s1","name":"web_search"}}`,
+		``,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"latest\"}"}}`,
+		``,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"s1","content":[]}}`,
+		``,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"web_search_tool_result_delta","results":[{"title":"Change Log","url":"https://api-docs.deepseek.com/updates/"}]}}`,
+		``,
+		`data: {"type":"content_block_start","index":2,"content_block":{"type":"text"}}`,
+		``,
+		`data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"answer"}}`,
+		``,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		``,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4-flash", APIKey: "k", Extra: map[string]any{"web_search": true}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "search something"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var text strings.Builder
+	var searches []provider.ServerSearchCall
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkServerSearch:
+			if chunk.ServerSearch != nil {
+				searches = provider.MergeServerSearch(searches, *chunk.ServerSearch)
+			}
+		case provider.ChunkError:
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if text.String() != "answer" {
+		t.Fatalf("answer text = %q, want only the model reply", text.String())
+	}
+	if len(searches) != 1 || searches[0].ID != "s1" || searches[0].Query != "latest" || len(searches[0].Results) != 1 || searches[0].Results[0].Title != "Change Log" {
+		t.Fatalf("delta-delivered searches = %#v", searches)
+	}
+}
+
 func TestBuildRequestReplaysServerSearchBlocks(t *testing.T) {
 	c := &client{name: "deepseek", model: "deepseek-v4-flash", webSearch: true}
 	raw := json.RawMessage(`[{"title":"Change Log","url":"https://api-docs.deepseek.com/updates/","encrypted_content":"xxx"}]`)
@@ -211,15 +274,15 @@ func TestBuildRequestDeepSeekReplaysThinkingBeforeServerSearch(t *testing.T) {
 	}
 }
 
-func TestBuildRequestDeepSeekDoesNotFabricateEmptyThinkingForServerSearch(t *testing.T) {
+func TestBuildRequestDeepSeekProjectsMissingThinkingServerSearchToPlainText(t *testing.T) {
 	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
 	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleAssistant, Content: "answer",
 		ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "latest", Raw: json.RawMessage(`[]`)}},
 	}}})
 	blocks := r.Messages[0].Content
-	if len(blocks) != 3 || blocks[0].Type != "server_tool_use" || blocks[1].Type != "web_search_tool_result" || blocks[2].Type != "text" {
-		t.Fatalf("empty thinking was fabricated or block order changed: %#v", blocks)
+	if len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != "answer" {
+		t.Fatalf("unreplayable search was not projected to plain text: %#v", blocks)
 	}
 }
 

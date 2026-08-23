@@ -77,6 +77,15 @@ MCP（含 `auto_start=false`）。宿主根据真实工具动作建立验证义�
 
 固定代理的 provider 可见 name、description、schema 与顺序不会随 MCP inventory 变化。
 
+frontend 绑定当前会话 reader 后，同一个固定代理还会列出只读能力
+`session:tool_result`。它按 UTF-8 字节偏移分页读取某条工具结果的本地完整副本，不新增
+top-level schema。调用必须提供 `tool_call_id`；新截断标记还会给出稳定 `result_ref`，重复
+call ID 时必须用它消除歧义。`offset` 默认 0，`limit` 默认 16KiB、最大 24KiB。响应先返回
+`result_ref`、实际 offset、`next_offset`、`total_bytes`、完整 SHA-256 与 `complete`，随后是
+原文页。reader 只绑定当前 Agent session，clone capability frontend 时不会继承父 reader。
+已经拥有 `use_capability` 的受限子 Agent 只能读取自己的结果；allowed-tools 配置若完全没有
+该代理，不会为了回读而扩大工具面。
+
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,

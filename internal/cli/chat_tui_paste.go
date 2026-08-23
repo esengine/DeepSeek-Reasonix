@@ -310,17 +310,82 @@ func (m *chatTUI) clearSubmittedPastes() {
 	m.pendingPastes = nil
 }
 
+// applyComposerPaste owns both terminal bracketed pastes and text read from the
+// native clipboard. Only terminal events advance terminalPasteSeq: replaying an
+// internal clipboard result must not make another in-flight Ctrl+V look as if
+// the terminal already handled it.
+func (m chatTUI) applyComposerPaste(msg tea.PasteMsg, terminal bool) (tea.Model, tea.Cmd) {
+	return m.applyComposerPasteCount(msg, terminal, 1)
+}
+
+func (m chatTUI) applyComposerPasteCount(msg tea.PasteMsg, terminal bool, count int) (tea.Model, tea.Cmd) {
+	if terminal {
+		m.terminalPasteSeq++
+	}
+	var cmds []tea.Cmd
+	for range count {
+		cmds = append(cmds, m.applyComposerPasteOnce(msg)...)
+	}
+	return m, finalize(m, cmds)
+}
+
+func (m *chatTUI) applyComposerPasteOnce(msg tea.PasteMsg) []tea.Cmd {
+	m.followComposerCursor()
+	pasteBefore := m.input.Value()
+	var cmds []tea.Cmd
+	if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+	if m.validComposerSelection() && !m.composerSel.empty() {
+		m.deleteComposerSelection()
+	}
+	if ref, ok := pastedFileRef(msg.Content); ok {
+		m.input.InsertString(ref + " ")
+		m.growInputToFit()
+		m.updateCompletion()
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+	if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.clearConfirm == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
+		m.insertFoldedPaste(msg.Content)
+		m.growInputToFit()
+		m.updateCompletion()
+		if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+			cmds = append(cmds, tea.ClearScreen)
+		}
+		return cmds
+	}
+
+	var inputCmd tea.Cmd
+	m.input, inputCmd = m.input.Update(msg)
+	cmds = append(cmds, inputCmd)
+	m.growInputToFit()
+	if shouldClearWideInputChange(pasteBefore, m.input.Value()) {
+		cmds = append(cmds, tea.ClearScreen)
+	}
+	return cmds
+}
+
+var readClipboardImage = control.SaveClipboardImage
+
 func pasteClipboardImage() tea.Cmd {
 	return func() tea.Msg {
-		path, err := control.SaveClipboardImage()
+		path, err := readClipboardImage()
 		return clipboardImageMsg{path: path, err: err}
 	}
 }
 
 type clipboardTextPasteMsg struct {
-	text   string
-	err    error
-	remote bool
+	text             string
+	err              error
+	remote           bool
+	terminalPasteSeq uint64
+	pending          int
 }
 
 var readNativeClipboardText = clipboard.ReadAll
@@ -329,12 +394,18 @@ var readNativeClipboardText = clipboard.ReadAll
 // paste still arrives from the terminal as a bracketed tea.PasteMsg; this read
 // is deliberately text-only so right-click never probes for an image first.
 func pasteClipboardText() tea.Cmd {
+	return pasteClipboardTextGuarded(0, 0)
+}
+
+func pasteClipboardTextGuarded(terminalPasteSeq uint64, pending int) tea.Cmd {
 	return func() tea.Msg {
+		msg := clipboardTextPasteMsg{terminalPasteSeq: terminalPasteSeq, pending: pending}
 		if remoteClipboardSession() {
-			return clipboardTextPasteMsg{remote: true}
+			msg.remote = true
+			return msg
 		}
-		text, err := readNativeClipboardText()
-		return clipboardTextPasteMsg{text: text, err: err}
+		msg.text, msg.err = readNativeClipboardText()
+		return msg
 	}
 }
 
@@ -346,11 +417,24 @@ func imagePasteShortcut(keyName, goos string) bool {
 }
 
 func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
+	m.clipboardImageRequests++
 	if m.clipboardImagePending {
 		return nil
 	}
 	m.clipboardImagePending = true
+	m.clipboardImageTerminalPasteSeq = m.terminalPasteSeq
 	return pasteClipboardImage()
+}
+
+func pendingClipboardTextPastes(requests int, startedAt, current uint64) int {
+	if requests <= 0 {
+		return 0
+	}
+	delivered := current - startedAt
+	if delivered >= uint64(requests) {
+		return 0
+	}
+	return requests - int(delivered)
 }
 
 var (

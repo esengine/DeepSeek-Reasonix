@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -46,9 +45,7 @@ func partitionCoversRegion(t *testing.T, a *Agent, region []provider.Message) (k
 	return kept, fold
 }
 
-func TestPartitionKeepsSmallUserTurnsVerbatim(t *testing.T) {
-	// A constraint stated mid-session cannot be re-derived once a digest drops
-	// it, so small user turns never reach the summarizer's judgement.
+func TestPartitionFoldsSmallUserTurns(t *testing.T) {
 	a := &Agent{}
 	region := []provider.Message{
 		{Role: provider.RoleUser, Content: "small turn 0"},
@@ -57,63 +54,34 @@ func TestPartitionKeepsSmallUserTurnsVerbatim(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "work"},
 	}
 	kept, fold := partitionCoversRegion(t, a, region)
-	if len(kept) != 3 || len(fold) != 1 {
-		t.Fatalf("kept=%d fold=%d, want 3/1", len(kept), len(fold))
+	if len(kept) != 0 || len(fold) != 4 {
+		t.Fatalf("kept=%d fold=%d, want 0/4", len(kept), len(fold))
 	}
-	if got := renderTranscript(fold); strings.Contains(got, "small turn") {
-		t.Fatalf("no user turn should reach the summarizer: %s", got)
+	if got := renderTranscript(fold); !strings.Contains(got, "small turn") {
+		t.Fatalf("old user turns must reach the summarizer: %s", got)
 	}
 }
 
-func TestPartitionFoldsUserTurnsPastBudget(t *testing.T) {
-	// Unbounded hoisting is what padded an earlier revision's candidates past
-	// the acceptance ceiling, so oversize and over-budget turns still fold.
+func TestPartitionFoldsLargeUserTurns(t *testing.T) {
 	a := &Agent{}
 	oversize := provider.Message{
 		Role:    provider.RoleUser,
-		Content: strings.Repeat("y", maxKeptUserTurnTokens*8),
+		Content: strings.Repeat("y", 12_000),
 	}
 	region := []provider.Message{
 		{Role: provider.RoleUser, Content: "small and kept"},
 		oversize,
 	}
 	kept, fold := partitionCoversRegion(t, a, region)
-	if len(kept) != 1 || len(fold) != 1 {
-		t.Fatalf("kept=%d fold=%d, want the oversize turn folded", len(kept), len(fold))
+	if len(kept) != 0 || len(fold) != 2 {
+		t.Fatalf("kept=%d fold=%d, want both turns folded", len(kept), len(fold))
 	}
-	if !strings.Contains(renderTranscript(kept), "small and kept") {
-		t.Fatal("the small turn should survive alongside a folded oversize one")
-	}
-}
-
-func TestPartitionUserTurnBudgetIsBoundedInTotal(t *testing.T) {
-	a := &Agent{}
-	// Each turn is a quarter of the per-turn ceiling, so the total budget —
-	// not the per-turn one — is what must stop retention.
-	each := strings.Repeat("z", maxKeptUserTurnTokens)
-	region := make([]provider.Message, 0, 32)
-	for i := range 32 {
-		// Distinct content: partitionCoversRegion keys its coverage check on it.
-		region = append(region, provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("%02d%s", i, each)})
-	}
-	kept, fold := partitionCoversRegion(t, a, region)
-	if len(fold) == 0 {
-		t.Fatal("total budget never engaged: every turn was kept")
-	}
-	budget := keptUserTurnsBudgetTokens
-	spent := 0
-	for _, m := range kept {
-		spent += fixedTokenEstimate(m)
-	}
-	if spent > budget {
-		t.Fatalf("kept %d tokens of user turns, over the %d budget", spent, budget)
+	if !strings.Contains(renderTranscript(fold), "small and kept") {
+		t.Fatal("the small turn should be summarized with the oversize one")
 	}
 }
 
-func TestPartitionKeepsUserTurnsAcrossPriorDigest(t *testing.T) {
-	// The keep policy is scoped to messages after the latest digest so it cannot
-	// grow forever; user turns are bounded by budget instead, so a turn from
-	// before the digest must still survive the next fold.
+func TestPartitionMergesUserTurnsAcrossPriorDigest(t *testing.T) {
 	a := &Agent{}
 	region := []provider.Message{
 		{Role: provider.RoleUser, Content: "constraint from before the digest"},
@@ -121,8 +89,8 @@ func TestPartitionKeepsUserTurnsAcrossPriorDigest(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "work"},
 	}
 	kept, fold := partitionCoversRegion(t, a, region)
-	if len(kept) != 1 || !strings.Contains(renderTranscript(kept), "constraint from before") {
-		t.Fatalf("pre-digest user turn must survive; kept=%v", renderTranscript(kept))
+	if len(kept) != 0 || !strings.Contains(renderTranscript(fold), "constraint from before") {
+		t.Fatalf("pre-digest user turn must enter the merged summary; fold=%v", renderTranscript(fold))
 	}
 	if !strings.Contains(renderTranscript(fold), "prior digest") {
 		t.Fatal("the digest itself must still fold into the next one")
@@ -144,7 +112,7 @@ func TestPartitionFoldsPriorDigests(t *testing.T) {
 	}
 }
 
-func TestPartitionKeepPolicyOutranksFold(t *testing.T) {
+func TestPartitionIgnoresDeprecatedKeepPolicy(t *testing.T) {
 	a := &Agent{keepPolicy: KeepErrors}
 	region := []provider.Message{
 		{Role: provider.RoleAssistant, Content: "unrelated prose"},
@@ -152,10 +120,10 @@ func TestPartitionKeepPolicyOutranksFold(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "t1", Name: "bash", Content: "error: boom"},
 	}
 	kept, fold := partitionCoversRegion(t, a, region)
-	if len(kept) != 2 || len(fold) != 1 {
-		t.Fatalf("kept=%d fold=%d, want the error tool-call group kept and the prose folded", len(kept), len(fold))
+	if len(kept) != 0 || len(fold) != 3 {
+		t.Fatalf("kept=%d fold=%d, want every old message folded", len(kept), len(fold))
 	}
-	if got := renderTranscript(kept); !strings.Contains(got, "error: boom") || !strings.Contains(got, "call") {
-		t.Fatalf("the failing call and its result must be kept together: %s", got)
+	if got := renderTranscript(fold); !strings.Contains(got, "error: boom") || !strings.Contains(got, "call") {
+		t.Fatalf("the failing call and its result must enter the summary together: %s", got)
 	}
 }

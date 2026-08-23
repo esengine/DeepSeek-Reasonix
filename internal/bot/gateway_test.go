@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -1614,7 +1616,7 @@ func TestGatewayRuntimeOverridePreservesControllersWithActiveWork(t *testing.T) 
 				}
 			}
 
-			text := gw.handleUseProjectCommand(key, "/use project default")
+			text := gw.handleUseProjectCommand(context.Background(), msg, "/use project default")
 			if !strings.Contains(text, "请先完成或停止") {
 				t.Fatalf("busy response = %q", text)
 			}
@@ -2465,13 +2467,17 @@ func TestSessionProfileConsumesPersistedMapping(t *testing.T) {
 		t.Fatal("mapping-derived path must be optional (degradable), not an attach-style hard binding")
 	}
 
-	// A missing target quietly degrades to normal creation.
+	// A missing target falls back to the deterministic per-chat path instead of
+	// a fresh timestamp session, keeping the chat on one stable file.
 	if err := os.Remove(mapped); err != nil {
 		t.Fatal(err)
 	}
 	profile = gw.sessionProfileForMessage(msg)
-	if profile.sessionPath != "" {
-		t.Fatalf("missing mapped file should resolve to empty path, got %q", profile.sessionPath)
+	if profile.sessionPath == "" {
+		t.Fatal("missing mapped file should fall back to a stable chat path, got empty")
+	}
+	if !profile.sessionPathOptional {
+		t.Fatal("stable fallback must stay optional (degradable)")
 	}
 
 	// An /attach override outranks the mapping.
@@ -2479,6 +2485,72 @@ func TestSessionProfileConsumesPersistedMapping(t *testing.T) {
 	profile = gw.sessionProfileForMessage(msg)
 	if profile.sessionPathOptional {
 		t.Fatal("attach override must stay a hard binding")
+	}
+}
+
+// Without any persisted mapping or /attach binding, the session profile must
+// resolve to a deterministic per-chat file so the same chat reuses one
+// conversation across restarts instead of spawning a fresh timestamp session
+// per message (the chat-side analogue of dsh-dingtalk-channel's `ding-<chatId>`).
+func TestSessionProfileFallsBackToStableChatPath(t *testing.T) {
+	dir := t.TempDir()
+	gw := &BotGateway{
+		cfg: GatewayConfig{
+			WorkspaceRoot: dir,
+			Channels:      map[Platform]ChannelConfig{},
+			ConnectionChannels: map[string]ChannelConfig{
+				"conn-1": {WorkspaceRoot: dir},
+			},
+		},
+		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sessionOverrides: map[string]sessionRuntimeOverride{},
+	}
+	dm := InboundMessage{Platform: PlatformFeishu, ConnectionID: "conn-1", ChatID: "oc_abc", ChatType: ChatDM}
+	dmProfile := gw.sessionProfileForMessage(dm)
+	if dmProfile.sessionPath == "" {
+		t.Fatal("DM without a mapping must resolve to a stable session path")
+	}
+	if !dmProfile.sessionPathOptional {
+		t.Fatal("stable fallback path must be optional (degradable), like a mapping")
+	}
+	// Same chat, repeated messages: identical path.
+	if again := gw.sessionProfileForMessage(dm); canonicalBotPath(again.sessionPath) != canonicalBotPath(dmProfile.sessionPath) {
+		t.Fatalf("same DM chat must map to one stable file: first=%q second=%q", dmProfile.sessionPath, again.sessionPath)
+	}
+	// Different chat: different file.
+	other := InboundMessage{Platform: PlatformFeishu, ConnectionID: "conn-1", ChatID: "oc_xyz", ChatType: ChatDM}
+	otherProfile := gw.sessionProfileForMessage(other)
+	if canonicalBotPath(otherProfile.sessionPath) == canonicalBotPath(dmProfile.sessionPath) {
+		t.Fatalf("different chats must map to different files, both=%q", otherProfile.sessionPath)
+	}
+	// Group chat scopes per sender, mirroring BuildSessionKey.
+	groupA := InboundMessage{Platform: PlatformFeishu, ConnectionID: "conn-1", ChatID: "oc_grp", ChatType: ChatGroup, UserID: "ou_a"}
+	groupB := InboundMessage{Platform: PlatformFeishu, ConnectionID: "conn-1", ChatID: "oc_grp", ChatType: ChatGroup, UserID: "ou_b"}
+	pa := gw.sessionProfileForMessage(groupA)
+	pb := gw.sessionProfileForMessage(groupB)
+	if pa.sessionPath == "" || pb.sessionPath == "" {
+		t.Fatal("group messages must resolve to stable session paths")
+	}
+	if canonicalBotPath(pa.sessionPath) == canonicalBotPath(pb.sessionPath) {
+		t.Fatalf("different group senders must map to different files, both=%q", pa.sessionPath)
+	}
+	if again := gw.sessionProfileForMessage(groupA); canonicalBotPath(again.sessionPath) != canonicalBotPath(pa.sessionPath) {
+		t.Fatalf("same group sender must map to one stable file: first=%q second=%q", pa.sessionPath, again.sessionPath)
+	}
+	// The stable path must live under the resolved session dir and carry a
+	// readable, bot-scoped name.
+	projectDir := config.ProjectSessionDir(dir)
+	if projectDir == "" {
+		t.Fatal("ProjectSessionDir must resolve for the test workspace root")
+	}
+	if !strings.HasPrefix(filepath.Base(dmProfile.sessionPath), "bot-") {
+		t.Fatalf("stable path name should be bot-scoped, got %q", filepath.Base(dmProfile.sessionPath))
+	}
+	if !strings.HasSuffix(dmProfile.sessionPath, ".jsonl") {
+		t.Fatalf("stable path must end in .jsonl, got %q", dmProfile.sessionPath)
+	}
+	if !strings.HasPrefix(dmProfile.sessionPath, projectDir+string(filepath.Separator)) {
+		t.Fatalf("stable path must live under the resolved session dir, got %q (want prefix %q)", dmProfile.sessionPath, projectDir)
 	}
 }
 
@@ -2501,3 +2573,147 @@ type stubPathController struct{ botController }
 
 func (stubPathController) SessionPath() string   { return "" }
 func (stubPathController) WorkspaceRoot() string { return "" }
+
+// testSenderAdapter 是实现了 TestSender 的假适配器，用于 TestSendToAdapter 测试。
+type testSenderAdapter struct {
+	*fakeAdapter
+	gotText string
+}
+
+func (a *testSenderAdapter) TestSend(_ context.Context, text string) (SendResult, error) {
+	a.gotText = text
+	return SendResult{MessageID: "test-1"}, nil
+}
+
+func TestGatewayTestSendToAdapter(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ts := &testSenderAdapter{fakeAdapter: newFakeAdapter(PlatformDingtalk, "dingtalk")}
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{}, []AdapterBinding{{
+		ID:       "dingtalk",
+		Domain:   "dingtalk",
+		Platform: PlatformDingtalk,
+		Adapter:  ts,
+	}}, logger)
+
+	result, err := gw.TestSendToAdapter(context.Background(), "dingtalk", "dingtalk", "hello")
+	if err != nil {
+		t.Fatalf("TestSendToAdapter: %v", err)
+	}
+	if result.MessageID != "test-1" {
+		t.Fatalf("message id = %q, want test-1", result.MessageID)
+	}
+	if ts.gotText != "hello" {
+		t.Fatalf("test text = %q, want hello", ts.gotText)
+	}
+
+	if _, err := gw.TestSendToAdapter(context.Background(), "missing", "", "hi"); err == nil {
+		t.Fatal("TestSendToAdapter for unknown conn should fail")
+	}
+}
+
+func TestGatewayTestSendToAdapterUnsupported(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{}, []AdapterBinding{{
+		ID:       "feishu-lark",
+		Domain:   "lark",
+		Platform: PlatformFeishu,
+		Adapter:  newFakeAdapter(PlatformFeishu, "feishu"),
+	}}, logger)
+	if _, err := gw.TestSendToAdapter(context.Background(), "feishu-lark", "lark", "hi"); err == nil {
+		t.Fatal("TestSendToAdapter on non-TestSender adapter should fail")
+	}
+}
+
+func TestParseModelSelector(t *testing.T) {
+	cases := []struct {
+		text       string
+		model      string
+		provider   string
+		statusOnly bool
+		ok         bool
+	}{
+		{"/model", "", "", true, true},
+		{"/model deepseek-v4-flash", "deepseek-v4-flash", "", false, true},
+		{"/model deepseek-v4-flash --provider deepseek", "deepseek-v4-flash", "deepseek", false, true},
+		{"/model deepseek-v4-flash -p deepseek", "deepseek-v4-flash", "deepseek", false, true},
+		{"/model --provider deepseek deepseek-v4-flash", "deepseek-v4-flash", "deepseek", false, true},
+		{"/model deepseek-v4-flash --provider 17an", "deepseek-v4-flash", "17an", false, true},
+		{"not a model command", "", "", false, false},
+		{"/model --provider deepseek", "", "deepseek", false, true},
+	}
+	for _, c := range cases {
+		model, provider, statusOnly, ok := parseModelSelector(c.text)
+		if model != c.model || provider != c.provider || statusOnly != c.statusOnly || ok != c.ok {
+			t.Errorf("parseModelSelector(%q) = (%q, %q, %v, %v), want (%q, %q, %v, %v)",
+				c.text, model, provider, statusOnly, ok, c.model, c.provider, c.statusOnly, c.ok)
+		}
+	}
+}
+
+func TestHandleModelCommand(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{Model: "deepseek/deepseek-v4-flash"}, []AdapterBinding{}, logger)
+	msg := InboundMessage{Platform: PlatformWeixin, ConnectionID: "weixin-weixin", Domain: "weixin", ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	overrideModel := func() string { gw.mu.Lock(); defer gw.mu.Unlock(); return gw.sessionOverrides[key].channel.Model }
+	if got := gw.handleModelCommand(context.Background(), msg, "/model"); !strings.Contains(got, "deepseek-v4-flash") {
+		t.Fatalf("/model status = %q, want global default", got)
+	}
+	gw.mu.Lock()
+	gw.cfg.Channels = map[Platform]ChannelConfig{PlatformWeixin: {Model: "17an/deepseek-v4-flash"}}
+	gw.mu.Unlock()
+	if got := gw.handleModelCommand(context.Background(), msg, "/model"); !strings.Contains(got, "17an/deepseek-v4-flash") {
+		t.Fatalf("/model status with channel model = %q, want channel model", got)
+	}
+	if got := gw.handleModelCommand(context.Background(), msg, "/model deepseek-v4-pro"); !strings.Contains(got, "deepseek-v4-pro") {
+		t.Fatalf("/model switch = %q", got)
+	}
+	if m := overrideModel(); m != "deepseek-v4-pro" {
+		t.Fatalf("override model = %q, want deepseek-v4-pro", m)
+	}
+	if got := gw.handleModelCommand(context.Background(), msg, "/model deepseek-v4-flash --provider 17an"); !strings.Contains(got, "17an") || !strings.Contains(got, "deepseek-v4-flash") {
+		t.Fatalf("/model with provider = %q", got)
+	}
+	if m := overrideModel(); m != "17an/deepseek-v4-flash" {
+		t.Fatalf("override model = %q, want 17an/deepseek-v4-flash", m)
+	}
+	if got := gw.handleModelCommand(context.Background(), msg, "/model --provider deepseek"); !strings.Contains(got, "用法") {
+		t.Fatalf("provider-only /model = %q, want usage message", got)
+	}
+	if m := overrideModel(); m != "17an/deepseek-v4-flash" {
+		t.Fatalf("provider-only /model mutated override to %q, want unchanged", m)
+	}
+}
+
+// TestHandleModelCommandRejectsUnresolvableModel: /model 切换前必须预校验
+// 模型；无效模型直接拒绝且不写入覆盖（失败原子性，保留当前 controller）。
+func TestHandleModelCommandRejectsUnresolvableModel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(GatewayConfig{
+		Model: "deepseek/deepseek-v4-flash",
+		ModelResolver: func(ref string) error {
+			if strings.TrimSpace(ref) == "deepseek-v4-flash" {
+				return nil
+			}
+			return fmt.Errorf("未配置该模型（provider/model 不存在）")
+		},
+	}, []AdapterBinding{}, logger)
+	msg := InboundMessage{Platform: PlatformWeixin, ConnectionID: "weixin-weixin", Domain: "weixin", ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	overrideModel := func() string { gw.mu.Lock(); defer gw.mu.Unlock(); return gw.sessionOverrides[key].channel.Model }
+
+	// 有效模型 → 写入覆盖。
+	if got := gw.handleModelCommand(context.Background(), msg, "/model deepseek-v4-flash"); !strings.Contains(got, "deepseek-v4-flash") {
+		t.Fatalf("/model switch = %q, want success", got)
+	}
+	if m := overrideModel(); m != "deepseek-v4-flash" {
+		t.Fatalf("override model = %q, want deepseek-v4-flash", m)
+	}
+	// 无效模型 → 拒绝且 override 保持原值（controller 未被销毁）。
+	if got := gw.handleModelCommand(context.Background(), msg, "/model nope-model"); !strings.Contains(got, "不可用") {
+		t.Fatalf("/model invalid = %q, want rejection message", got)
+	}
+	if m := overrideModel(); m != "deepseek-v4-flash" {
+		t.Fatalf("invalid /model mutated override to %q, want unchanged", m)
+	}
+}

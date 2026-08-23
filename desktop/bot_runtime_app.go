@@ -15,11 +15,12 @@ import (
 )
 
 type BotRuntimeStatusView struct {
-	Running     bool   `json:"running"`
-	Status      string `json:"status"`
-	Message     string `json:"message"`
-	Connections int    `json:"connections"`
-	StartedAt   string `json:"startedAt"`
+	Running     bool              `json:"running"`
+	Status      string            `json:"status"`
+	Message     string            `json:"message"`
+	Connections int               `json:"connections"`
+	StartedAt   string            `json:"startedAt"`
+	Platforms   map[string]string `json:"platforms,omitempty"`
 }
 
 type desktopBotRuntime struct {
@@ -58,6 +59,34 @@ func desktopBotChannelsWithLegacyQQ(qq config.QQBotConfig, channels map[bot.Plat
 	}
 	if _, ok := connectionChannels[string(bot.PlatformQQ)]; !ok {
 		connectionChannels[string(bot.PlatformQQ)] = channel
+	}
+	return channels, connectionChannels
+}
+
+// desktopBotChannelsWithLegacyDingtalk 把 legacy [bot.dingtalk] 的模型/权限/
+// 工作目录合成进 Channels 与 ConnectionChannels，使直配（无 connection）的
+// 钉钉 bot 也能从设置面板配置这些运行选项（与 legacy QQ 同路径）。
+func desktopBotChannelsWithLegacyDingtalk(dt config.DingtalkBotConfig, channels map[bot.Platform]bot.ChannelConfig, connectionChannels map[string]bot.ChannelConfig) (map[bot.Platform]bot.ChannelConfig, map[string]bot.ChannelConfig) {
+	channel := bot.ChannelConfig{
+		Model:            strings.TrimSpace(dt.Model),
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(dt.ToolApprovalMode),
+		WorkspaceRoot:    strings.TrimSpace(dt.WorkspaceRoot),
+		SessionMappings:  botruntime.SessionMappings(dt.SessionMappings),
+	}
+	if channel.Model == "" && channel.ToolApprovalMode == "" && channel.WorkspaceRoot == "" && len(channel.SessionMappings) == 0 {
+		return channels, connectionChannels
+	}
+	if channels == nil {
+		channels = make(map[bot.Platform]bot.ChannelConfig)
+	}
+	if _, ok := channels[bot.PlatformDingtalk]; !ok {
+		channels[bot.PlatformDingtalk] = channel
+	}
+	if connectionChannels == nil {
+		connectionChannels = make(map[string]bot.ChannelConfig)
+	}
+	if _, ok := connectionChannels[string(bot.PlatformDingtalk)]; !ok {
+		connectionChannels[string(bot.PlatformDingtalk)] = channel
 	}
 	return channels, connectionChannels
 }
@@ -144,6 +173,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 	channels := botruntime.ChannelConfigs(cfg.Bot.Connections, true, true)
 	connectionChannels := botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, true, true)
 	channels, connectionChannels = desktopBotChannelsWithLegacyQQ(cfg.Bot.QQ, channels, connectionChannels)
+	channels, connectionChannels = desktopBotChannelsWithLegacyDingtalk(cfg.Bot.Dingtalk, channels, connectionChannels)
 	gwCfg := bot.GatewayConfig{
 		Model:              modelName,
 		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
@@ -156,9 +186,10 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		PairingMaxPending:  cfg.Bot.Pairing.MaxPendingPerPlatform,
 		IgnoreSelfMessages: cfg.Bot.IgnoreSelfMessages,
 		SelfUserIDs: map[bot.Platform][]string{
-			bot.PlatformQQ:     cfg.Bot.SelfUserIDs.QQ,
-			bot.PlatformFeishu: cfg.Bot.SelfUserIDs.Feishu,
-			bot.PlatformWeixin: cfg.Bot.SelfUserIDs.Weixin,
+			bot.PlatformQQ:       cfg.Bot.SelfUserIDs.QQ,
+			bot.PlatformFeishu:   cfg.Bot.SelfUserIDs.Feishu,
+			bot.PlatformWeixin:   cfg.Bot.SelfUserIDs.Weixin,
+			bot.PlatformDingtalk: cfg.Bot.SelfUserIDs.Dingtalk,
 		},
 		ControlEnabled:     cfg.Bot.Control.Enabled,
 		ControlAddr:        cfg.Bot.Control.Addr,
@@ -173,27 +204,32 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 			Enabled:  cfg.Bot.Allowlist.Enabled,
 			AllowAll: cfg.Bot.Allowlist.AllowAll,
 			Users: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQUsers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuUsers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQUsers,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuUsers,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformDingtalk: cfg.Bot.Allowlist.DingtalkUsers,
 			},
 			Approvers: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQApprovers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuApprovers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinApprovers,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQApprovers,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuApprovers,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinApprovers,
+				bot.PlatformDingtalk: cfg.Bot.Allowlist.DingtalkApprovers,
 			},
 			Admins: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQAdmins,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuAdmins,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinAdmins,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQAdmins,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuAdmins,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinAdmins,
+				bot.PlatformDingtalk: cfg.Bot.Allowlist.DingtalkAdmins,
 			},
 			Groups: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQGroups,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuGroups,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQGroups,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuGroups,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformDingtalk: cfg.Bot.Allowlist.DingtalkGroups,
 			},
 		},
 		Debounce:                 time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
+		ModelResolver:            botruntime.ModelResolver(cfg),
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
 		OnSessionReady:           botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
@@ -335,7 +371,23 @@ func (r *desktopBotRuntime) setStatus(status BotRuntimeStatusView) {
 func (r *desktopBotRuntime) snapshot() BotRuntimeStatusView {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.status
+	s := r.status
+	if r.gw != nil {
+		s.Platforms = botAdapterPlatformStatuses(r.gw.AdapterHealth())
+	}
+	return s
+}
+
+// botAdapterPlatformStatuses 把 gateway 的适配器健康快照收敛为
+// platform → status 映射（如 dingtalk → running），供设置面板显示在线状态。
+func botAdapterPlatformStatuses(health []bot.AdapterHealthSnapshot) map[string]string {
+	out := make(map[string]string, len(health))
+	for _, h := range health {
+		if strings.TrimSpace(string(h.Platform)) != "" {
+			out[string(h.Platform)] = h.Status
+		}
+	}
+	return out
 }
 
 // updateConnectionToolApprovalMode updates a connection's tool approval mode
@@ -365,6 +417,18 @@ func (r *desktopBotRuntime) SendToAdapter(ctx context.Context, connID, domain st
 		return bot.SendResult{}, nil // gateway not running — silent no-op
 	}
 	return gw.SendToAdapter(ctx, connID, domain, msg)
+}
+
+// TestSendToAdapter sends a test message through the running gateway's adapter
+// identified by connID. The adapter must implement bot.TestSender (dingtalk).
+func (r *desktopBotRuntime) TestSendToAdapter(ctx context.Context, connID, domain, text string) (bot.SendResult, error) {
+	r.mu.Lock()
+	gw := r.gw
+	r.mu.Unlock()
+	if gw == nil {
+		return bot.SendResult{}, fmt.Errorf("bot runtime is not running")
+	}
+	return gw.TestSendToAdapter(ctx, connID, domain, text)
 }
 
 // Running returns true if the bot gateway is currently active.

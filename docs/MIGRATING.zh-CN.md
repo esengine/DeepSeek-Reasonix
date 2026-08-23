@@ -133,6 +133,6 @@ Reasonix 1.0 支持读取和编辑 UTF-8、UTF-8 BOM、UTF-16 LE/BE 与 GB18030�
 
 ## 报告问题
 
-Issue 和 PR 按代码线标记：**`v1`** 表示旧 TypeScript 版，**`v2`** 表示 Go 版。请按实际使用版本提交报告。旧 `v1` 线处于维护模式，只接收 bug 修复，不再新增功能。
+Issue 和 PR 按代码线标记：**`v2`** 表示 Go 版（`main-v2`），**`v3`** 表示 Studio（`studio`）。请按实际使用版本提交报告。
 
 如有问题，请发起 [Discussion](https://github.com/esengine/DeepSeek-Reasonix/discussions)。

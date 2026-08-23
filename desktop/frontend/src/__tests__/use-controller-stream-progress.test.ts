@@ -52,9 +52,14 @@ function ev(s: typeof initialState, e: WireEvent) {
       review: "passed",
       gap_kinds: [],
       constraint_degraded: false,
+      floor: "standard",
+      attention: false,
     },
   });
-  eq(complete.items, before.items, "ordinary completion summary stays off the transcript");
+  eq(complete.items.length, before.items.length + 1, "workspace mutations add a neutral change notice");
+  const changeNotice = complete.items[complete.items.length - 1];
+  eq(changeNotice?.kind === "notice" ? changeNotice.level : "", "info", "workspace mutations use an info notice, not a warning");
+  eq(changeNotice?.kind === "notice" ? changeNotice.completionSummary : undefined, complete.completionSummary, "neutral change notice retains its own normalized summary");
   eq(complete.completionSummary?.preset, "balanced", "ordinary completion summary remains available to the change panel");
 
   const after = ev(complete, {
@@ -69,14 +74,47 @@ function ev(s: typeof initialState, e: WireEvent) {
       review: "passed",
       gap_kinds: ["stale_check"],
       constraint_degraded: true,
+      floor: "delivery",
+      attention: true,
     },
   });
-  eq(after.items.length, before.items.length + 1, "actionable completion summary adds one compact transcript notice");
+  eq(after.items.length, complete.items.length + 1, "actionable completion summary adds one compact transcript notice");
   const notice = after.items[after.items.length - 1];
   eq(notice?.kind === "notice" ? notice.variant : "", "completion", "quality gap uses the completion notice variant");
   eq(notice?.kind === "notice" ? notice.action : "", "open_changes", "quality gap links to the change panel");
+  eq(notice?.kind === "notice" ? notice.completionSummary : undefined, after.completionSummary, "completion notice retains its own normalized summary");
   eq(notice?.kind === "notice" ? notice.text.includes("balanced") : true, false, "compact notice does not expose internal preset values");
   eq(after.completionSummary?.checks_failed, 1, "actionable completion summary is retained for details");
+
+  const switchedFloor = ev({
+    ...complete,
+    meta: { label: "test", ready: true, eventChannel: "", cwd: "/repo", qualityFloor: "delivery" },
+  }, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      verdict: "partial",
+      gap_kinds: ["unverified_change"],
+      floor: "standard",
+      attention: false,
+    },
+  });
+  const switchedNotice = switchedFloor.items[switchedFloor.items.length - 1];
+  eq(switchedNotice?.kind === "notice" ? switchedNotice.level : "", "info", "turn-time standard summary stays neutral after switching to delivery");
+
+  const suppressed = ev(complete, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      mutations: 0,
+      checks_suppressed: 1,
+      gap_kinds: ["suppressed_requirement"],
+      floor: "delivery",
+      attention: true,
+    },
+  });
+  const suppressedNotice = suppressed.items[suppressed.items.length - 1];
+  eq(suppressedNotice?.kind === "notice" ? suppressedNotice.title : "", "This turn still needs attention", "required suppression uses a generic attention notice");
 
   const restarted = ev(after, { kind: "turn_started" });
   eq(restarted.completionSummary, undefined, "a new turn clears the previous turn's quality details");

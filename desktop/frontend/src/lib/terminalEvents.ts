@@ -2,12 +2,13 @@ import { onTerminalExit, onTerminalOutput, type TerminalExitEvent, type Terminal
 
 const MAX_HISTORY_BYTES = 1024 * 1024;
 
-type TerminalSink = (data: Uint8Array) => void;
+type SequencedTerminalSink = (data: Uint8Array, sequence: number) => void;
 
-const sinks = new Map<string, TerminalSink>();
+const sinks = new Map<string, SequencedTerminalSink>();
 const exitListeners = new Set<(event: TerminalExitEvent) => void>();
 const history = new Map<string, Uint8Array[]>();
 const historyBytes = new Map<string, number>();
+const nextSequence = new Map<string, number>();
 let started = false;
 let stopBridge: (() => void) | null = null;
 
@@ -22,6 +23,8 @@ function decodeBase64(value: string): Uint8Array {
 function deliverOutput(event: TerminalOutputEvent): void {
   const bytes = decodeBase64(event.data);
   if (bytes.byteLength === 0) return;
+  const sequence = nextSequence.get(event.id) ?? 0;
+  nextSequence.set(event.id, sequence + 1);
   const queue = history.get(event.id) ?? [];
   queue.push(bytes);
   let total = (historyBytes.get(event.id) ?? 0) + bytes.byteLength;
@@ -30,7 +33,7 @@ function deliverOutput(event: TerminalOutputEvent): void {
   }
   history.set(event.id, queue);
   historyBytes.set(event.id, total);
-  sinks.get(event.id)?.(bytes);
+  sinks.get(event.id)?.(bytes, sequence);
 }
 
 function deliverExit(event: TerminalExitEvent): void {
@@ -53,17 +56,23 @@ export function startTerminalEventBridge(): () => void {
   return () => stopBridge?.();
 }
 
-export function registerTerminalSink(id: string, sink: TerminalSink): () => void {
+export function registerTerminalOutputSink(id: string, sink: SequencedTerminalSink): readonly [
+  unregister: () => void,
+  history: () => readonly [chunks: readonly Uint8Array[], nextSequence: number],
+] {
   sinks.set(id, sink);
-  (history.get(id) ?? []).forEach((bytes) => sink(bytes));
-  return () => {
-    if (sinks.get(id) === sink) sinks.delete(id);
-  };
+  return [
+    () => {
+      if (sinks.get(id) === sink) sinks.delete(id);
+    },
+    () => [history.get(id) ?? [], nextSequence.get(id) ?? 0],
+  ];
 }
 
 export function forgetTerminalSession(id: string): void {
   history.delete(id);
   historyBytes.delete(id);
+  nextSequence.delete(id);
 }
 
 export function registerTerminalExitListener(listener: (event: TerminalExitEvent) => void): () => void {
@@ -75,6 +84,7 @@ export function __resetTerminalEventBus(): void {
   sinks.clear();
   history.clear();
   historyBytes.clear();
+  nextSequence.clear();
   stopBridge?.();
 }
 

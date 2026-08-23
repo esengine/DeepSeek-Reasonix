@@ -5,7 +5,7 @@ The desktop composer menu has two independent collaboration axes:
 - **Plan mode**: draft a plan, then implement after approval.
 - **Goal mode**: pursue one objective until it is complete, blocked, or stopped.
 
-There is no automatic simple / light / full task mode. Ordinary requests always
+There is no automatic task mode. The one session role is the quality floor: standard (default) or delivery; facts can still raise it. Ordinary requests always
 enter the executor. The dedicated planner runs only for an explicit Plan, an
 approval boundary, or Goal start. Todos and sub-agents are model-chosen. The
 host builds verification obligations from real tool actions.

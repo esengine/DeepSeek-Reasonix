@@ -20,6 +20,32 @@ type ContextLimitError struct {
 	CompletionTokens int
 }
 
+// OutputLimitError is a provider-reported completion-token ceiling. It is
+// separate from ContextLimitError because the request may fit the model
+// context window while exceeding the route's output-only limit.
+type OutputLimitError struct {
+	APIError        *APIError
+	RequestedTokens int
+	MaxOutputTokens int
+}
+
+func (e *OutputLimitError) Error() string {
+	if e == nil {
+		return "output token limit exceeded"
+	}
+	if e.APIError != nil {
+		return e.APIError.Error()
+	}
+	return "output token limit exceeded"
+}
+
+func (e *OutputLimitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.APIError
+}
+
 func (e *ContextLimitError) Error() string {
 	if e == nil {
 		return "context limit exceeded"
@@ -41,6 +67,7 @@ var (
 	contextLimitEnglishRe = regexp.MustCompile(`(?i)maximum context length is (\d+) tokens?\.?\s*however,\s*you requested (\d+) tokens? \((\d+) in the (?:messages|prompt), (\d+) in the completion\)`)
 	contextLimitPromptRe  = regexp.MustCompile(`(?i)prompt is too long:\s*(\d+) tokens? > (\d+) maximum`)
 	contextLimitSumRe     = regexp.MustCompile("(?i)input length and [`']?max_tokens[`']? exceed context limit:\\s*(\\d+)\\s*\\+\\s*(\\d+)\\s*>\\s*(\\d+)")
+	outputLimitRe         = regexp.MustCompile(`(?i)max_tokens\s*(?:is\s+too\s+large|too\s+large)\s*[:=]?\s*(\d+).*?(?:supports?|maximum|at\s+most)[^\d]*(\d+)`)
 )
 
 func contextLimitStatusOK(status int) bool {
@@ -217,6 +244,37 @@ func ParseContextLimitError(apiErr *APIError) *ContextLimitError {
 // AsContextLimitError unwraps err to a trusted overflow, if any.
 func AsContextLimitError(err error) *ContextLimitError {
 	var limit *ContextLimitError
+	if err != nil && errors.As(err, &limit) {
+		return limit
+	}
+	return nil
+}
+
+// ParseOutputLimitError extracts a completion-only ceiling from a 400/413/422
+// API error. The parser is intentionally conservative: it only accepts text
+// that names both the requested max_tokens and a smaller supported maximum.
+func ParseOutputLimitError(apiErr *APIError) *OutputLimitError {
+	if apiErr == nil || !contextLimitStatusOK(apiErr.Status) {
+		return nil
+	}
+	text := strings.TrimSpace(apiErr.Body)
+	if text == "" {
+		return nil
+	}
+	m := outputLimitRe.FindStringSubmatch(text)
+	if len(m) != 3 {
+		return nil
+	}
+	requested, maxOutput := atoiStrict(m[1]), atoiStrict(m[2])
+	if requested <= 0 || maxOutput <= 0 || requested <= maxOutput {
+		return nil
+	}
+	return &OutputLimitError{APIError: apiErr, RequestedTokens: requested, MaxOutputTokens: maxOutput}
+}
+
+// AsOutputLimitError unwraps err to a trusted output ceiling, if any.
+func AsOutputLimitError(err error) *OutputLimitError {
+	var limit *OutputLimitError
 	if err != nil && errors.As(err, &limit) {
 		return limit
 	}

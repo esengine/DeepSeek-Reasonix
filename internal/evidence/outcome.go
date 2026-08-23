@@ -46,6 +46,12 @@ type OutcomeSample struct {
 	// eligibility is stamped on every arm so baselines carry the shadow.
 	GovernorEligible bool
 	GovernorEngaged  bool
+	// Runway fields are a telemetry-only counterfactual stamped by the outcome
+	// shadow. No runtime guard or provider-visible message reads them.
+	Runway      int
+	RunwayDry   int
+	RunwayIdle  int
+	RunwaySpent bool
 }
 
 // OutcomeTracker is the shadow counterpart of ProgressTracker: same per-round
@@ -65,6 +71,7 @@ type OutcomeTracker struct {
 	debtAge      int
 	blind        int
 	localExec    bool
+	runway       runwayShadow
 }
 
 // OutcomeSeed is the fork-portable slice of tracker state: what a
@@ -74,12 +81,20 @@ type OutcomeSeed struct {
 	DebtAge        int      `json:"debt_age"`
 	BlindMutations int      `json:"blind_mutations"`
 	LocalExecSeen  bool     `json:"local_exec_seen"`
+	RunwayBalance  int      `json:"runway_balance,omitempty"`
+	RunwayDry      int      `json:"runway_dry,omitempty"`
+	RunwayIdle     int      `json:"runway_idle,omitempty"`
+	RunwayObserved bool     `json:"runway_observed,omitempty"`
 }
 
 // ForkSeed exports the state a counterfactual fork must carry so post-fork
 // discriminating detection stays continuous with the original run.
 func (t *OutcomeTracker) ForkSeed() OutcomeSeed {
-	seed := OutcomeSeed{DebtAge: t.debtAge, BlindMutations: t.blind, LocalExecSeen: t.localExec}
+	seed := OutcomeSeed{
+		DebtAge: t.debtAge, BlindMutations: t.blind, LocalExecSeen: t.localExec,
+		RunwayBalance: t.runway.balance, RunwayDry: t.runway.dry,
+		RunwayIdle: t.runway.idle, RunwayObserved: t.runway.observed,
+	}
 	for base := range t.mutatedBases {
 		seed.MutatedBases = append(seed.MutatedBases, base)
 	}
@@ -99,6 +114,10 @@ func RestoreOutcomeTracker(seed OutcomeSeed) *OutcomeTracker {
 	t.blind = seed.BlindMutations
 	t.debt = seed.DebtAge > 0 || seed.BlindMutations > 0
 	t.localExec = seed.LocalExecSeen
+	t.runway = runwayShadow{
+		balance: seed.RunwayBalance, dry: seed.RunwayDry,
+		idle: seed.RunwayIdle, observed: seed.RunwayObserved,
+	}
 	return t
 }
 
@@ -143,6 +162,9 @@ func (t *OutcomeTracker) ScoreRound(receipts []Receipt) OutcomeSample {
 	s.DebtAge = t.debtAge
 	s.BlindMutations = t.blind
 	s.LocalExecSeen = t.localExec
+	runway := t.runway.observe(s)
+	s.Runway, s.RunwayDry, s.RunwayIdle, s.RunwaySpent =
+		runway.balance, runway.dry, runway.idle, runway.spent
 	return s
 }
 

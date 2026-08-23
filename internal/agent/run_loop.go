@@ -129,6 +129,8 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
 	// budgets) lives in taskRuntime and is reconciled there.
 	a.turn = turnRuntime{}
+	a.turn.automaticReadinessContinuation = automaticReadinessContinuationFromContext(ctx)
+	a.turn.mutationExpected = mutationExpectedFromContext(ctx)
 	a.resetStructuralRunGuards()
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
 	preserveEvidence, readinessRecovered := a.beginFinalReadinessRecovery()
@@ -195,6 +197,12 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	}
 	a.turn.engine = runtimepolicy.NewEngine(a.turn.constraints)
 	a.rebuildTurnContract()
+	// Reuse an open provider/configuration circuit before projecting history or
+	// spending another pair of normal thinking-mode requests.
+	if a.beginMissingReasoningRecovery() {
+		event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+		event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+	}
 	// A cancelled/error turn leaves a provider-excluded recovery record at the
 	// transcript tail. Fold its bounded facts into this new user turn exactly
 	// once; the user's raw text remains the source above.
@@ -212,7 +220,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	}
 	a.sess.conversation.Add(provider.Message{
 		Role: provider.RoleUser, Content: input, RawContent: rawContent,
-		Images: userImages(ctx), CreatedAt: userCreatedAt,
+		Images: userImages(ctx), VisionSummary: VisionSummaryFromContext(ctx), CreatedAt: userCreatedAt,
 	})
 
 	// The loop fields join the classification computed above rather than
@@ -271,8 +279,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		partialCalls, err := streamed.partialCalls, streamed.err
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage, contentReasons)
 		if err != nil {
-			a.emitTurnUsage(usage, &cacheDiagnostics)
-			a.observeRunBudget(state, usage)
+			quote := a.emitTurnUsage(usage, &cacheDiagnostics)
+			a.observeRunBudget(state, usage, quote)
 			if msg, ok := finishReasonMessage(usage); ok {
 				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 			}
@@ -284,8 +292,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		}
 		a.sess.lastPrefixShape = prefixShape
 		a.sess.haveLastPrefixShape = true
-		a.emitTurnUsage(usage, &cacheDiagnostics)
-		a.observeRunBudget(state, usage)
+		quote := a.emitTurnUsage(usage, &cacheDiagnostics)
+		a.observeRunBudget(state, usage, quote)
 		if msg, ok := finishReasonMessage(usage); ok {
 			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
@@ -405,6 +413,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
 			if shouldRetry {
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
+				a.emitProtocolRetry(1, provider.SupportsMissingReasoningFallback(a.svc.prov))
 				retrySink := newDeferredStreamSink(a.svc.sink)
 				retry := runAttempt(attemptID, retrySink)
 				billable = mergeSamplingUsage(billable, retry.usage)
@@ -427,12 +436,21 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 					return terminal
 				}
 				streamSink.Discard()
+				if a.reasoningReplayIssue(retry) == ReasoningReplayMissing {
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+					if fallback, ok := a.runMissingReasoningFallback(ctx, turn, &frozen, attemptID, attempt, billable, retrySink); ok {
+						return fallback
+					}
+				}
 				retry = a.finishReasoningReplayRetry(retry, retrySink, billable)
 				a.emitReasoningReplayAttemptOutcome(attemptID, attempt, retry.err)
 				return retry
 			}
 			if !shouldRetry {
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+				if fallback, ok := a.runMissingReasoningFallback(ctx, turn, &frozen, attemptID, attempt, billable, streamSink); ok {
+					return fallback
+				}
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 				result.usage = finalizeSamplingUsage(billable, result.usage)
 				terminal := a.finishUnreplayableReasoning(result, streamSink, issue)
@@ -447,6 +465,17 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		return result
 	}
 	return last
+}
+
+func (a *Agent) emitProtocolRetry(attempt int, hasFallback bool) {
+	maxAttempts := 1
+	if hasFallback {
+		maxAttempts = 2
+	}
+	a.svc.sink.Emit(event.Event{
+		Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxAttempts,
+		RetryScope: event.RetryScopeProtocol,
+	})
 }
 
 func (a *Agent) emitStreamAttempt(id string, action event.StreamAttemptAction, attempt int, reason string, err error) {
@@ -507,7 +536,8 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		}
 	}
 	readiness := a.finalReadinessCheckFor()
-	if state.graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
+	controlReadiness := a.finalReadinessControlProjection(readiness, text)
+	if state.graceRound && (controlReadiness.reason != "" || !hasVisibleFinalAnswer(text)) {
 		a.contextManager().ObserveUsage(usage)
 		return false, a.gracePause(state)
 	}
@@ -518,15 +548,23 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.contextManager().ObserveUsage(usage)
 		return false, a.gracePause(state)
 	}
-	if readiness.reason != "" {
-		// Goal/Plan and fact contradictions (open todos, sign-off, action
-		// receipts) fail the run. Ordinary Recoverable/project/review gaps
-		// become an honest Partial completion instead of a recovery error.
-		if a.closedLoopActive() || readiness.incompleteTodos > 0 || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
+	if readiness.reason != "" || controlReadiness.reason != "" {
+		// The host owns the concrete missing requirements. Return them to the
+		// controller when automatic continuation is armed (or for the existing
+		// strict/Goal path). Standard receives only the task-progress control
+		// projection; the complete observed facts still feed its readiness audit.
+		if controlReadiness.reason != "" && a.readinessPauseActive(controlReadiness) &&
+			(a.turn.automaticReadinessContinuation || a.closedLoopActive() || controlReadiness.missingSignoff > 0 || controlReadiness.missingActionEvidence > 0) {
 			event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
 			a.pending.finalReadinessRecovery = true
-			a.persistFinalReadinessRecovery(readiness.missingIDs())
-			return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
+			a.persistFinalReadinessRecovery(controlReadiness.missingIDs())
+			return false, &FinalReadinessError{
+				Attempts:          1,
+				Reason:            controlReadiness.reason,
+				Missing:           controlReadiness.missingIDs(),
+				ContinuationClass: controlReadiness.continuationClass(),
+				ProgressKey:       a.finalReadinessProgressKey(controlReadiness),
+			}
 		}
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
@@ -612,8 +650,8 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 			ToolCallID: call.ID,
 			Name:       call.Name,
 		}
-		// First-visible Content is always the bounded form in results[i].
-		// Full originals ride on RawContent only when truncation applied.
+		// Content is the stable bounded provider form. Full originals remain in
+		// local RawContent and enter model context only through explicit paging.
 		if i < len(batch.outcomes) && batch.outcomes[i].rawOutput != "" && batch.outcomes[i].rawOutput != results[i] {
 			msg.RawContent = batch.outcomes[i].rawOutput
 		}

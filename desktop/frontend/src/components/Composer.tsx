@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, PackageCheck, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -9,6 +9,7 @@ import { enqueueInboxGuidance } from "../lib/inboxSubmit";
 import { formatInboxError, isInboxItemMissing } from "../lib/inboxError";
 import { inboxScopeKey } from "../lib/composerInboxQueue";
 import { useComposerInboxRefresh } from "../lib/useComposerInboxRefresh";
+import { useComposerImeGuard } from "../lib/useComposerImeGuard";
 import { guidanceIsInFlight, guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
 import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
@@ -28,12 +29,14 @@ import {
   type StructuredInvocationSubmit,
 } from "../lib/invocationDisplay";
 import { formatTokens } from "../lib/format";
+import type { CancelOutcome } from "../lib/inboxCancel";
 import type { ControllerLiveStore } from "../lib/useController";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
+import { resolveComposerContentSizing } from "../lib/composerSizing";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type QualityFloor, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -162,8 +165,43 @@ type WebkitFileEntry = {
   isDirectory?: boolean;
 };
 
+type GuidanceReceiptTracker = {
+  start(draftKey: string): void;
+  recordConsumed(draftKey: string, itemId: string): void;
+  takeConsumed(draftKey: string, itemId: string): boolean;
+  finish(draftKey: string): void;
+};
+
 const DEFAULT_COMPOSER_DRAFT_KEY = "__default_composer_draft__";
 const MAX_COMPOSER_EDIT_HISTORY = 50;
+
+function createGuidanceReceiptTracker(): GuidanceReceiptTracker {
+  const inFlight = new Map<string, number>();
+  const consumedBeforeReceipt = new Map<string, Set<string>>();
+  return {
+    start(draftKey) {
+      inFlight.set(draftKey, (inFlight.get(draftKey) ?? 0) + 1);
+    },
+    recordConsumed(draftKey, itemId) {
+      if ((inFlight.get(draftKey) ?? 0) === 0) return;
+      const consumed = consumedBeforeReceipt.get(draftKey) ?? new Set<string>();
+      consumed.add(itemId);
+      consumedBeforeReceipt.set(draftKey, consumed);
+    },
+    takeConsumed(draftKey, itemId) {
+      return consumedBeforeReceipt.get(draftKey)?.delete(itemId) ?? false;
+    },
+    finish(draftKey) {
+      const remaining = (inFlight.get(draftKey) ?? 1) - 1;
+      if (remaining > 0) {
+        inFlight.set(draftKey, remaining);
+        return;
+      }
+      inFlight.delete(draftKey);
+      consumedBeforeReceipt.delete(draftKey);
+    },
+  };
+}
 
 function lineCount(s: string): number {
   if (s === "") return 0;
@@ -346,6 +384,14 @@ function composerMaxHeight(): number {
   return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.floor(window.innerHeight * COMPOSER_MAX_VIEWPORT_RATIO)));
 }
 
+// Hero (creation) input cap: the old 96px hard cap clipped longer drafts
+// before the card autosize took over; give the hero min(30vh, 160px) so a
+// visible scrollbar takes over instead (#8494/#8742/#9019).
+function composerHeroInputMaxHeight(): number {
+  if (typeof window === "undefined") return 160;
+  return Math.min(Math.floor(window.innerHeight * 0.3), 160);
+}
+
 // The rendered card includes the run strip while a turn runs; subtract it to
 // recover the user's logical height when measuring from the DOM.
 function composerLogicalHeight(card: HTMLElement): number {
@@ -356,10 +402,6 @@ function composerLogicalHeight(card: HTMLElement): number {
 
 function clampComposerHeight(height: number): number {
   return Math.min(Math.max(Math.round(height), COMPOSER_MIN_HEIGHT), composerMaxHeight());
-}
-
-function composerAutoInputMaxHeight(extraReservedHeight = 0): number {
-  return Math.max(32, composerMaxHeight() - COMPOSER_AUTO_RESERVED_HEIGHT - extraReservedHeight);
 }
 
 function loadComposerHeight(): number | null {
@@ -498,6 +540,8 @@ export function Composer({
   running,
   collaborationMode,
   toolApprovalMode,
+  qualityFloor,
+  floorInferred,
   turnPhase,
   goal,
   goalStatus,
@@ -505,6 +549,7 @@ export function Composer({
   cwd,
   modelLabel,
   imageInputEnabled = true,
+  imageUnderstandingEnabled = false,
   tabId,
   effort,
   onSend,
@@ -514,6 +559,7 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
+  onSetQualityFloor,
   onToggleYoloApprovalMode,
   onClearGoal,
   onPauseGoal,
@@ -547,12 +593,14 @@ export function Composer({
   workspaceScopeKey,
   fileRefRefreshKey,
   guidanceConsumedKey,
+  guidanceConsumedItemId,
   guidanceConsumedText,
   guidanceQueuePreviewItems,
   showContextWindowRing = false,
   heroMode = false,
   context,
   turnCost,
+  turnRateBand,
   currency,
   cacheHitTokens,
   cacheMissTokens,
@@ -562,6 +610,8 @@ export function Composer({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
+  qualityFloor?: QualityFloor;
+  floorInferred?: boolean;
   /** Host turn phase: working | checking | verifying | reviewing */
   turnPhase?: string;
   goal?: string;
@@ -570,18 +620,21 @@ export function Composer({
   cwd?: string;
   modelLabel: string;
   imageInputEnabled?: boolean;
+  /** True when text-only image turns are preprocessed by a configured vision model. */
+  imageUnderstandingEnabled?: boolean;
   tabId?: string;
   effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
   onInvocationMetadataChange?: (metadata: Record<string, { kind: "skill" | "subagent"; color?: string }>) => void;
   onSteer?: (submitText: string, tabId?: string) => void | Promise<void>;
-  // Returns the un-sent text when cancelling before the server replied (so it can
-  // be restored to the input); undefined for a normal cancel.
-  onCancel: (queuedItemIDs?: string[]) => string | undefined;
+  // Returns the un-sent text plus the exact durable queue IDs the backend
+  // confirmed were withdrawn and are therefore safe to restore.
+  onCancel: (queuedItemIDs?: string[]) => Promise<CancelOutcome>;
   onCycleMode: () => void;
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
+  onSetQualityFloor?: (floor: QualityFloor) => void;
   onToggleYoloApprovalMode: () => void;
   onClearGoal: () => void;
   onPauseGoal: () => void;
@@ -638,6 +691,7 @@ export function Composer({
   workspaceScopeKey?: string;
   fileRefRefreshKey?: number | string;
   guidanceConsumedKey?: string;
+  guidanceConsumedItemId?: string;
   guidanceConsumedText?: string;
   guidanceQueuePreviewItems?: readonly string[];
   showContextWindowRing?: boolean;
@@ -646,6 +700,7 @@ export function Composer({
   heroMode?: boolean;
   context?: ContextInfo;
   turnCost?: number;
+  turnRateBand?: string;
   currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
@@ -687,6 +742,8 @@ export function Composer({
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  // A saved manual height is a floor, not a hard cap: longer drafts may grow
+  // above it and return to it when their content shrinks.
   const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
   const [composerResizing, setComposerResizing] = useState(false);
   const [textareaAutoHeight, setTextareaAutoHeight] = useState<number | null>(null);
@@ -712,6 +769,8 @@ export function Composer({
   const guidanceSendingIdRef = useRef<string | null>(null);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const cancelSettlingDraftsRef = useRef(new Set<string>());
+  const [, setCancelSettlingRevision] = useState(0);
   const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
@@ -741,8 +800,6 @@ export function Composer({
   const intentHoverTimerRef = useRef<number | null>(null);
   const creationChrome = showContextWindowRing;
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
-  const composingRef = useRef(false);
-  const lastCompositionEndAt = useRef(0);
   const pastChatSearchComposingRef = useRef(false);
   const pastChatSearchLastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
@@ -752,6 +809,8 @@ export function Composer({
   const lastGuidanceConsumedKeyByDraftRef = useRef<Record<string, string | undefined>>(
     guidanceConsumedKey ? { [draftKey]: guidanceConsumedKey } : {},
   );
+  const guidanceReceiptTrackerRef = useRef<GuidanceReceiptTracker | null>(null);
+  guidanceReceiptTrackerRef.current ??= createGuidanceReceiptTracker();
   const selfDispatchedGuidanceByDraftRef = useRef<Record<string, string[]>>({});
   const submittingRef = useRef(false);
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
@@ -772,6 +831,18 @@ export function Composer({
   const openPastedLabelsRef = useRef(openPastedLabels);
   const sessionRefsRef = useRef(sessionRefs);
   const selectedTextRefsRef = useRef(selectedTextRefs);
+  // Plain-textarea IME freeze: while a composition is active the textarea
+  // renders uncontrolled so no re-render can cancel it (#8593/#8409); the
+  // hook owns the composition lifecycle, resync, and force-sync semantics.
+  const { composingRef, lastCompositionEndAt, trackImeInputChange } = useComposerImeGuard({
+    taRef,
+    text,
+    invocationCount: invocations.length,
+    textRef,
+    lastSelectionRef,
+    setText,
+    setPlainSelection,
+  });
   textRef.current = text;
   invocationsRef.current = invocations;
   attachmentsRef.current = attachments;
@@ -1455,10 +1526,16 @@ export function Composer({
     if (guidanceConsumedKey === lastGuidanceConsumedKeyByDraftRef.current[draftKey]) return;
     lastGuidanceConsumedKeyByDraftRef.current[draftKey] = guidanceConsumedKey;
     const consumed = (guidanceConsumedText ?? "").trim();
-    if (consumed && takeSelfDispatchedGuidance(consumed, draftKey)) return;
+    if (guidanceConsumedItemId) {
+      guidanceReceiptTrackerRef.current?.recordConsumed(draftKey, guidanceConsumedItemId);
+    }
+    if (!guidanceConsumedItemId && consumed && takeSelfDispatchedGuidance(consumed, draftKey)) return;
     updatePendingGuidanceForDraft(draftKey, (items) => {
       if (items.length === 0) return items;
-      const idx = consumed
+      const byID = guidanceConsumedItemId
+        ? items.findIndex((item) => item.id === guidanceConsumedItemId)
+        : -1;
+      const idx = guidanceConsumedItemId ? byID : consumed
         ? items.findIndex((item) => guidanceTextMatches(item.submitText, consumed) || guidanceTextMatches(item.text, consumed))
         : -1;
       // Only remove on a real match. Steer notices also fire for guidance this
@@ -1468,7 +1545,7 @@ export function Composer({
       if (idx < 0) return items;
       return items.filter((_, index) => index !== idx);
     });
-  }, [draftKey, guidanceDraftKey, guidanceConsumedKey, guidanceConsumedText, takeSelfDispatchedGuidance]);
+  }, [draftKey, guidanceDraftKey, guidanceConsumedKey, guidanceConsumedItemId, guidanceConsumedText, takeSelfDispatchedGuidance]);
 
   // When the @ trigger disappears (user deleted the @), close the past:chats
   // sub-menu and reset related state. Without this, showPastChats can outlive
@@ -1595,6 +1672,16 @@ export function Composer({
     }
   };
 
+  const setTextForDraft = (targetDraftKey: string, next: string) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      setTextCaretEnd(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.text = next;
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
   const rememberCaret = () => {
     if (invocationsRef.current.length > 0) {
       const selection = richInputRef.current?.getSelection();
@@ -1705,16 +1792,20 @@ export function Composer({
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
     const path = selectedTextRequest.path;
+    const source = selectedTextRequest.source;
     const duplicate = selectedTextRefsRef.current.some(
-      (reference) => reference.text === normalized.text && (reference.path ?? "") === (path ?? ""),
+      (reference) => reference.text === normalized.text
+        && (reference.path ?? "") === (path ?? "")
+        && (reference.source ?? "") === (source ?? ""),
     );
     if (!duplicate) {
       const next = [
         ...selectedTextRefsRef.current,
         {
-          id: `${path ? "code" : "chat"}-selection-${selectedTextRequest.id}`,
+          id: `${path ? "code" : source === "terminal" ? "terminal" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
+          ...(source ? { source } : {}),
         },
       ];
       selectedTextRefsRef.current = next;
@@ -1935,8 +2026,9 @@ export function Composer({
   const planModeOn = collaborationMode === "plan";
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
-  const warnImageInputFallback = useCallback((message = t("composer.imageInputUnsupported")) => {
-    showToast(message, "warn");
+  const warnImageInputFallback = useCallback((message?: string) => {
+    const text = message ?? t("composer.imageInputUnsupported");
+    showToast(text, "warn");
   }, [showToast, t]);
 
   const submit = async () => {
@@ -1952,7 +2044,7 @@ export function Composer({
     const trimmedDraft = typedGoalDraft ?? rawDraft;
     const trimmedText = trimmedDraft.text;
     if (draftHasPendingPaste(submitDraftKey)) return;
-    if (!imageInputEnabled && hasImageAttachments(attachmentsRef.current)) {
+    if (!imageInputEnabled && !imageUnderstandingEnabled && hasImageAttachments(attachmentsRef.current)) {
       warnImageInputFallback();
     }
     const currentAttachments = attachmentsRef.current;
@@ -2018,26 +2110,34 @@ export function Composer({
         const guidanceSubmitText = submitText.trim();
         if (guidanceText) {
           // Durable follow-up: only clear the composer after a durable receipt.
+          const receiptTracker = guidanceReceiptTrackerRef.current;
+          receiptTracker?.start(submitDraftKey);
           try {
             const receipt = await enqueueInboxGuidance(app, submitTabId || "", guidanceText, guidanceSubmitText, structured, { steer: true });
             if (receipt?.error) throw new Error(receipt.error);
-            updatePendingGuidanceForDraft(submitDraftKey, (items) => [
-              ...items.map((item) => receipt.paused ? { ...item, paused: true } : item),
-              {
-                id: receipt.itemId,
-                text: guidanceText.slice(0, 120),
-                submitText: "",
-                intent: "followup",
-                state: "queued",
-                source: "desktop",
-                paused: Boolean(receipt.paused),
-                structured,
-              },
-            ]);
+            const consumedBeforeReceipt = receiptTracker?.takeConsumed(submitDraftKey, receipt.itemId) ?? false;
+            if (!consumedBeforeReceipt) {
+              updatePendingGuidanceForDraft(submitDraftKey, (items) => {
+                const next = items.map((item) => receipt.paused ? { ...item, paused: true } : item);
+                if (next.some((item) => item.id === receipt.itemId)) return next;
+                return [...next, {
+                  id: receipt.itemId,
+                  text: guidanceText.slice(0, 120),
+                  submitText: "",
+                  intent: "followup",
+                  state: "queued",
+                  source: "desktop",
+                  paused: Boolean(receipt.paused),
+                  structured,
+                }];
+              });
+            }
             clearSubmittedDraft(submitDraftKey);
           } catch (error) {
             showToast(formatInboxError(error, locale), "warn");
             // Keep draft on durable failure.
+          } finally {
+            receiptTracker?.finish(submitDraftKey);
           }
         }
         return;
@@ -2126,18 +2226,20 @@ export function Composer({
   };
 
   const dismissQueuedGuidance = async (item: PendingGuidance) => {
+    const targetDraftKey = activeDraftKeyRef.current;
+    const targetTabId = tabId || "";
     try {
       if (!item.id.startsWith("local-")) {
-        await app.DeleteInboxItem(tabId || "", item.id);
+        await app.DeleteInboxItem(targetTabId, item.id);
       }
       updatePendingGuidanceForDraft(
-        activeDraftKeyRef.current,
+        targetDraftKey,
         (items) => items.filter((queued) => queued.id !== item.id),
       );
     } catch (error) {
       if (isInboxItemMissing(error)) {
         updatePendingGuidanceForDraft(
-          activeDraftKeyRef.current,
+          targetDraftKey,
           (items) => items.filter((queued) => queued.id !== item.id),
         );
         return;
@@ -2149,9 +2251,11 @@ export function Composer({
   const editQueuedGuidance = async (item: PendingGuidance, nextText: string) => {
     const text = nextText.trim();
     if (!text || item.id.startsWith("local-")) return;
+    const targetDraftKey = activeDraftKeyRef.current;
+    const targetTabId = tabId || "";
     try {
-      await app.UpdateInboxItem(tabId || "", item.id, text, text);
-      updatePendingGuidanceForDraft(activeDraftKeyRef.current, (items) =>
+      await app.UpdateInboxItem(targetTabId, item.id, text, text);
+      updatePendingGuidanceForDraft(targetDraftKey, (items) =>
         items.map((queued) => queued.id === item.id ? { ...queued, text, submitText: text } : queued),
       );
     } catch (error) {
@@ -2660,31 +2764,40 @@ export function Composer({
 
   // handleCancel stops the in-flight turn; if it was cancelled before the server
   // replied, the just-sent text is handed back so we drop it back into the input.
-  const handleCancel = () => {
-    const ownedGuidance = pendingGuidance.filter((item) => item.id.startsWith("local-") || item.source === "desktop");
+  const handleCancel = async () => {
+    const targetDraftKey = activeDraftKeyRef.current;
+    if (cancelSettlingDraftsRef.current.has(targetDraftKey)) return;
+    cancelSettlingDraftsRef.current.add(targetDraftKey);
+    setCancelSettlingRevision((value) => value + 1);
+    const ownedGuidance = pendingGuidanceRef.current.filter((item) => item.id.startsWith("local-") || item.source === "desktop");
     const durableItemIDs = ownedGuidance
       .map((item) => item.id)
       .filter((id) => !id.startsWith("local-"));
-    const restored = onCancel(durableItemIDs);
     if (goalModeOn && activeGoal) onClearGoal();
-    // A user-requested cancel must not let the natural-completion effect submit
-    // the queued follow-up. Fold it back into the draft: cancelling means "stop
-    // acting", not "discard what I typed" — the same contract onCancel already
-    // honors for un-sent text. Structured items fold back as their slash form
-    // (structured.display is valid /name syntax) so the invocation survives the
-    // round trip instead of degrading to its bare task text.
-    const queued = ownedGuidance
-      .map((item) => item.structured?.display ?? item.text)
-      .filter((part) => part.trim() !== "");
-    if (queued.length === 0) {
-      if (typeof restored === "string") setTextCaretEnd(restored);
-      return;
+    try {
+      const outcome = (await onCancel(durableItemIDs)) ?? { discardedItemIds: [] };
+      const discarded = new Set(outcome.discardedItemIds);
+      const restorable = ownedGuidance.filter((item) => item.id.startsWith("local-") || discarded.has(item.id));
+      const queued = restorable
+        .map((item) => item.structured?.display ?? item.text)
+        .filter((part) => part.trim() !== "");
+      const restoredIDs = new Set(restorable.map((item) => item.id));
+      if (restoredIDs.size > 0) {
+        updatePendingGuidanceForDraft(targetDraftKey, (items) => items.filter((item) => !restoredIDs.has(item.id)));
+      }
+      const draftText = targetDraftKey === activeDraftKeyRef.current
+        ? textRef.current
+        : (draftsBySessionRef.current[targetDraftKey]?.text ?? "");
+      const currentDraft = outcome.restoredText?.trim() === draftText.trim() ? "" : draftText;
+      const nextText = [outcome.restoredText, currentDraft, ...queued]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n");
+      if (nextText) setTextForDraft(targetDraftKey, nextText);
+      if (targetDraftKey === activeDraftKeyRef.current && restorable.length > 0) setGuidanceExpanded(false);
+    } finally {
+      cancelSettlingDraftsRef.current.delete(targetDraftKey);
+      setCancelSettlingRevision((value) => value + 1);
     }
-    const ownedIDs = new Set(ownedGuidance.map((item) => item.id));
-    updatePendingGuidanceForDraft(activeDraftKeyRef.current, (items) => items.filter((item) => !ownedIDs.has(item.id)));
-    setGuidanceExpanded(false);
-    const base = typeof restored === "string" ? restored : text;
-    setTextCaretEnd([base, ...queued].filter((part) => part.trim() !== "").join("\n"));
   };
 
   const pickCommand = (c: CommandInfo) => {
@@ -2836,11 +2949,6 @@ export function Composer({
   }, []);
 
   const measureTextareaAutoHeight = useCallback(() => {
-    if (composerHeight !== null) {
-      setTextareaAutoHeight(null);
-      setTextareaAutoOverflow(false);
-      return;
-    }
     // Creation empty hero starts single-line but must grow so multi-line drafts
     // stay readable before send (review: fixed 20px + overflow:hidden clipped).
     if (heroMode) {
@@ -2853,7 +2961,7 @@ export function Composer({
       const previousHeight = node.style.height;
       node.style.height = "auto";
       const scrollHeight = node.scrollHeight || 20;
-      const maxHeight = 96;
+      const maxHeight = composerHeroInputMaxHeight();
       const nextHeight = Math.min(Math.max(scrollHeight, 20), maxHeight);
       const nextOverflow = scrollHeight > maxHeight + 1;
       node.style.height = previousHeight;
@@ -2867,12 +2975,15 @@ export function Composer({
     const previousHeight = node?.style.height;
     if (node) node.style.height = "auto";
     const scrollHeight = richHeight || node?.scrollHeight || 0;
-    const maxHeight = composerAutoInputMaxHeight();
-    const nextHeight = Math.min(scrollHeight, maxHeight);
-    const nextOverflow = scrollHeight > maxHeight + 1;
+    const sizing = resolveComposerContentSizing({
+      contentHeight: scrollHeight,
+      manualLogicalHeight: composerHeight,
+      maxLogicalHeight: composerMaxHeight(),
+      reservedHeight: COMPOSER_AUTO_RESERVED_HEIGHT,
+    });
     if (node && previousHeight !== undefined) node.style.height = previousHeight;
-    setTextareaAutoHeight((current) => (current === nextHeight ? current : nextHeight));
-    setTextareaAutoOverflow((current) => (current === nextOverflow ? current : nextOverflow));
+    setTextareaAutoHeight((current) => (current === sizing.inputHeight ? current : sizing.inputHeight));
+    setTextareaAutoOverflow((current) => (current === sizing.overflow ? current : sizing.overflow));
   }, [composerHeight, heroMode, invocations.length]);
 
   useLayoutEffect(() => {
@@ -2880,7 +2991,6 @@ export function Composer({
   }, [text, measureTextareaAutoHeight]);
 
   useEffect(() => {
-    if (composerHeight !== null) return;
     let frame = 0;
     const update = () => {
       if (frame) window.cancelAnimationFrame(frame);
@@ -2918,7 +3028,7 @@ export function Composer({
 
     e.preventDefault();
     const startY = e.clientY;
-    const startHeight = composerHeight ?? composerLogicalHeight(card);
+    const startHeight = Math.max(composerHeight ?? COMPOSER_MIN_HEIGHT, composerLogicalHeight(card));
     let nextHeight = clampComposerHeight(startHeight);
     let moved = false;
     card.style.setProperty("--composer-height", `${nextHeight}px`);
@@ -2956,7 +3066,10 @@ export function Composer({
 
   const onComposerResizeKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     const card = composerCardRef.current;
-    const current = composerHeight ?? (card ? composerLogicalHeight(card) : COMPOSER_MIN_HEIGHT);
+    const current = Math.max(
+      composerHeight ?? COMPOSER_MIN_HEIGHT,
+      card ? composerLogicalHeight(card) : COMPOSER_MIN_HEIGHT,
+    );
     const step = e.shiftKey ? 32 : 16;
     let next: number | null = null;
     if (e.key === "ArrowUp" || e.key === "PageUp") next = current + step;
@@ -3418,7 +3531,7 @@ export function Composer({
     // restores the text if the server hadn't replied yet.
     if (composerEscapeAction(e.nativeEvent, running, composing) === "cancel") {
       e.preventDefault();
-      handleCancel();
+      void handleCancel();
     }
 
     // Browser undo owns ordinary DOM edits, while programmatic composer edits
@@ -3506,21 +3619,33 @@ export function Composer({
 
   // When the run strip is visible inside a user-resized card, the card grows
   // by the strip's reserved height so the meta row stays fully visible.
-  // --composer-height carries only the user's logical height; the reservation
-  // is a separate variable consumed by the CSS calc, so the live resize drag
-  // (which writes raw logical heights) stays consistent with this render path.
+  // --composer-height stays in logical card-height space. It may be the saved
+  // manual floor or a larger content-derived height; the run-strip reservation
+  // remains separate so the live resize writer uses the same coordinate space.
   const showRunStrip = Boolean(retry || running);
-  const composerCardStyle = composerHeight === null
+  const effectiveComposerHeight = composerHeight === null
+    ? null
+    : resolveComposerContentSizing({
+        contentHeight: textareaAutoHeight ?? 0,
+        manualLogicalHeight: composerHeight,
+        maxLogicalHeight: composerMaxHeight(),
+        reservedHeight: COMPOSER_AUTO_RESERVED_HEIGHT,
+      }).logicalHeight;
+  const composerCardStyle = effectiveComposerHeight === null
     ? undefined
     : ({
-        "--composer-height": `${composerHeight}px`,
+        "--composer-height": `${effectiveComposerHeight}px`,
         "--composer-run-strip-reserved": `${showRunStrip ? COMPOSER_RUN_STRIP_RESERVED : 0}px`,
       } as CSSProperties);
-  const textareaStyle = composerHeight === null && textareaAutoHeight !== null
+  const textareaStyle = !composerResizing && textareaAutoHeight !== null
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
   const composerAutoExpanded = composerHeight === null && textareaAutoHeight !== null && textareaAutoHeight > 40;
-  const composerResizeValue = composerHeight ?? clampComposerHeight((textareaAutoHeight ?? 0) + COMPOSER_AUTO_RESERVED_HEIGHT);
+  // Autosize mode flips overflow-y to auto once content exceeds the max
+  // height; the card modifier restores a thin scrollbar for exactly that
+  // state so long drafts expose their scrollability (#8494/#8742/#9019).
+  const composerAutoOverflow = composerHeight === null && textareaAutoOverflow;
+  const composerResizeValue = effectiveComposerHeight ?? clampComposerHeight((textareaAutoHeight ?? 0) + COMPOSER_AUTO_RESERVED_HEIGHT);
   void onSetMode;
   const chooseApprovalMode = (nextMode: ToolApprovalMode) => {
     onSetToolApprovalMode(nextMode);
@@ -3531,6 +3656,11 @@ export function Composer({
       if (nextMode !== collaborationMode) onSetCollaborationMode(nextMode);
       requestActiveDraftFrame(focusComposerInput);
     });
+  };
+  const floorOn = qualityFloor === "delivery";
+  const chooseQualityFloor = (floor: QualityFloor) => {
+    if (floor === qualityFloor) return;
+    onSetQualityFloor?.(floor);
   };
   const stopGoalMode = () => {
     closeIntentMenu(() => {
@@ -4240,7 +4370,9 @@ export function Composer({
               variant="selection"
               tooltipLabel={reference.path
                 ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
-                : <Markdown text={reference.text} />}
+                : reference.source === "terminal"
+                  ? <CodeViewer value={reference.text} language="console" maxHeight={240} />
+                  : <Markdown text={reference.text} />}
               removeLabel={t("composer.removeSelectedText")}
               onRemove={() => {
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
@@ -4249,8 +4381,14 @@ export function Composer({
                 requestActiveDraftFrame(focusComposerInput);
               }}
               name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
-              meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
-              icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
+              meta={reference.path
+                ? t("composer.selectedCode")
+                : reference.source === "terminal"
+                  ? t("composer.selectedTerminal")
+                  : t("composer.selectedText")}
+              icon={reference.path
+                ? <FileText size={20} />
+                : <MessageSquare size={20} />}
             />
           ))}
         </div>
@@ -4295,7 +4433,7 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? (waitingPrompt ? " composer-card--waiting" : " composer-card--running") : ""}`}
+        className={`composer-card${composerHeight !== null || composerResizing ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerAutoOverflow ? " composer-card--auto-overflow" : ""}${composerResizing ? " composer-card--resizing" : ""}${running ? (waitingPrompt ? " composer-card--waiting" : " composer-card--running") : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
@@ -4407,7 +4545,7 @@ export function Composer({
                   ref={taRef}
                   className="composer__input"
                   aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
-                  value={text}
+                  value={composingRef.current ? undefined : text}
                   onInputCapture={(e) => {
                     pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;
                   }}
@@ -4416,6 +4554,7 @@ export function Composer({
                     const inputType = (e.nativeEvent as InputEvent).inputType
                       || pendingNativeInputTypeRef.current;
                     pendingNativeInputTypeRef.current = undefined;
+                    trackImeInputChange(e.nativeEvent as InputEvent, inputType, e.target.value);
                     resetPromptHistoryNavigation();
                     textRef.current = e.target.value;
                     setText(e.target.value);
@@ -4435,13 +4574,6 @@ export function Composer({
                   onContextMenu={openInputMenu}
                   onPaste={onPaste}
                   onKeyDown={onKeyDown}
-                  onCompositionStart={() => {
-                    composingRef.current = true;
-                  }}
-                  onCompositionEnd={() => {
-                    composingRef.current = false;
-                    lastCompositionEndAt.current = Date.now();
-                  }}
                   style={textareaStyle}
                   placeholder={composerPlaceholder}
                   rows={1}
@@ -4459,7 +4591,8 @@ export function Composer({
                 <button
                   className="composer__btn composer__btn--stop"
                   type="button"
-                  onClick={handleCancel}
+                  onClick={() => void handleCancel()}
+                  disabled={cancelSettlingDraftsRef.current.has(draftKey)}
                   aria-label={t("composer.stop")}
                 >
                   <Square size={12} fill="currentColor" />
@@ -4578,6 +4711,42 @@ export function Composer({
                 </div>
               </div>
             )}
+            {!heroMode && (
+              <div className="composer-meta__control composer-meta__control--floor">
+                {/* Orthogonal to the intent menu: the floor only raises the
+                    completion gates, so goal mode and delivery combine. */}
+                <div
+                  className="composer-modebar composer-modebar--floor"
+                  data-floor={floorOn ? "delivery" : "standard"}
+                  title={t("composer.qualityFloor")}
+                >
+                  <span className="composer-modebar__thumb" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`composer-modebar__item${floorOn ? "" : " composer-modebar__item--active"}`}
+                    onClick={() => chooseQualityFloor("standard")}
+                    disabled={approvalBarDisabled || !onSetQualityFloor}
+                    aria-pressed={!floorOn}
+                    title={t("composer.qualityFloor")}
+                  >
+                    <Equal size={14} />
+                    <span>{t("composer.qualityFloorStandard")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer-modebar__item${floorOn ? " composer-modebar__item--active" : ""}`}
+                    onClick={() => chooseQualityFloor("delivery")}
+                    disabled={approvalBarDisabled || !onSetQualityFloor}
+                    aria-pressed={floorOn}
+                    title={t("composer.qualityFloorDeliveryTitle")}
+                  >
+                    <PackageCheck size={14} />
+                    <span>{t("composer.qualityFloorDelivery")}</span>
+                    {floorOn && floorInferred ? <span className="composer-modebar__inferred" /> : null}
+                  </button>
+                </div>
+              </div>
+            )}
             {!heroMode && <span className="composer-meta__divider" aria-hidden="true" />}
             <div className="composer-meta__control composer-meta__control--model">
               {/*
@@ -4594,6 +4763,7 @@ export function Composer({
                   context={context}
                   tabId={tabId}
                   turnCost={turnCost}
+                  turnRateBand={turnRateBand}
                   currency={currency}
                   cacheHitTokens={cacheHitTokens}
                   cacheMissTokens={cacheMissTokens}

@@ -874,8 +874,8 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "sent as direct model image input only when the selected model supports vision") || !strings.Contains(block, "OCR/image/vision tool") {
-		t.Fatalf("workspace png should resolve as direct-vision-or-tool image metadata:\n%s", block)
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "attached as visual input") || strings.Contains(block, "OCR/image/vision tool") {
+		t.Fatalf("workspace png on a vision model should ask the model to look at the image, not OCR it:\n%s", block)
 	}
 	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
 		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)

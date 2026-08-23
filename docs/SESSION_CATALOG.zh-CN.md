@@ -2,9 +2,11 @@
 
 Reasonix 始终以会话 transcript、event log、metadata sidecar 和
 `desktop-projects.json` 作为唯一权威数据。桌面项目树读取位于
-`<缓存根目录>/session-catalog/v3.sqlite` 的一次性 SQLite 查询投影；删除该数据库
-不会删除或修改任何会话。早期的 `v1.sqlite` 与 `v2.sqlite` 缓存会保留，避免与仍在
-运行或降级后的旧版本进程交叉写同一投影。
+`<缓存根目录>/session-catalog/v5.sqlite` 的一次性 SQLite 查询投影；删除该数据库
+不会删除或修改任何会话。早期的 `v1.sqlite` 至 `v4.sqlite` 缓存会保留，避免与仍在
+运行或降级后的旧版本进程交叉写同一投影。v5 是修复版本使用的独立索引代际，
+首次启动会从权威文件重新建立；旧 v4 文件保留用于回滚，不会被新版本写入。
+同一 v5 索引的手动重建也会留下带时间戳的 `.replaced-*` 旧文件。
 
 ## 不变量
 
@@ -19,6 +21,8 @@ Reasonix 始终以会话 transcript、event log、metadata sidecar 和
   catalog 结果；这些状态永远不会持久化到 SQLite。
 - catalog、迁移、插件和 MCP 工作都可取消，且不参与桌面退出锁。退出最多等待
   catalog 待写入数据 250 ms。
+- ready 状态只有在磁盘会话路径、scope/workspace、topic 投影和恢复派生字段均与
+  当前权威文件一致时才可复用；数量相等但路径错位也会触发重建。
 
 ## 存储与迁移
 
@@ -49,6 +53,7 @@ topic 分页使用 `(pinned, last_activity_at, topic_id)` keyset cursor。默认
 - `ListProjectTopics` 提供基于 cursor 的分页搜索和时间过滤。
 - `GetTopicSummary` 为 active-turn UI 查询单个 topic，无需重建整棵树。
 - `GetSessionCatalogStatus` 和 `RebuildSessionCatalog` 提供安全诊断和索引替换。
+  状态同时报告最近修复原因、源文件数量和未完成的目录目标，项目树提供手动重建入口。
 - `project-tree:changed-v2` 携带单调递增的 revision、受影响 workspace root 和
   原因。客户端会忽略旧 revision，并只刷新受影响且已展开的项目。
 
@@ -60,8 +65,8 @@ topic 分页使用 `(pinned, last_activity_at, topic_id)` keyset cursor。默认
 只读检查 catalog，不创建或修改它：
 
 ```sh
-reasonix doctor sessions
-reasonix doctor sessions --json
+reasonix sessions diagnose
+reasonix sessions diagnose --json
 ```
 
 只替换一次性查询投影，并索引所有已保存的桌面项目：
@@ -72,7 +77,11 @@ reasonix sessions reindex --json
 ```
 
 可重复传入 `--dir PATH`，从指定目录集合重建；显式目录按 global scope 处理。
-reindex 不会编辑或删除 transcript、event、metadata、recovery、archive 或项目文件。
+reindex 不会编辑或删除 transcript、event、metadata、recovery、archive 或项目文件；旧
+索引文件会保留，便于回滚。
+
+recovery-only 会话在普通树中显示为一个“可恢复”逻辑行；被覆盖的物理副本仍只在
+恢复历史中展示，避免用户把未显示的副本误认为内容丢失。
 
 ## 插件隔离
 

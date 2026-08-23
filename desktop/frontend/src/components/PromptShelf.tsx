@@ -20,6 +20,9 @@ export function PromptShelf({
   role = "dialog",
   decision = false,
   actionsRole = "listbox",
+  cardCollapsible = false,
+  collapsed = false,
+  onToggleCollapse,
 }: {
   className?: string;
   cardClassName?: string;
@@ -45,6 +48,11 @@ export function PromptShelf({
   // Select-then-confirm surfaces use listbox. Immediate actions are a group of
   // buttons so assistive technology does not announce them as pending choices.
   actionsRole?: "listbox" | "group";
+  // Whole-card click-to-collapse (used by the todo shelf): clicking anywhere
+  // on the card toggles collapsed; interactive children stop propagation.
+  cardCollapsible?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   return (
     <div
@@ -59,22 +67,40 @@ export function PromptShelf({
     >
       <div
         ref={barRef}
-        className={["prompt-shelf__card", cardClassName ?? ""].filter(Boolean).join(" ")}
+        className={[
+          "prompt-shelf__card",
+          cardCollapsible ? "prompt-shelf__card--collapsible" : "",
+          cardCollapsible && collapsed ? "prompt-shelf__card--collapsed" : "",
+          cardClassName ?? "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         role={role}
         aria-modal={role === "dialog" ? "false" : undefined}
         aria-labelledby={titleId}
-        tabIndex={-1}
+        tabIndex={cardCollapsible ? 0 : -1}
+        onClick={cardCollapsible ? onToggleCollapse : undefined}
+        onKeyDown={cardCollapsible && onToggleCollapse ? (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggleCollapse();
+          }
+        } : undefined}
       >
         <div className="prompt-shelf__content">
           <div className="prompt-shelf__header">
             <div className="prompt-shelf__copy">
               <div id={titleId} className="prompt-shelf__title">
                 <span className="prompt-shelf__heading">{title}</span>
+                {meta && <span className="prompt-shelf__meta">{meta}</span>}
                 {badges && <span className="prompt-shelf__badges">{badges}</span>}
               </div>
-              {meta && <div className="prompt-shelf__meta">{meta}</div>}
             </div>
-            {headerActions && <div className="prompt-shelf__header-actions">{headerActions}</div>}
+            {headerActions && (
+              <div className="prompt-shelf__header-actions" onClick={(event) => event.stopPropagation()}>
+                {headerActions}
+              </div>
+            )}
           </div>
           {crumbs}
           {children && <div className="prompt-shelf__body">{children}</div>}

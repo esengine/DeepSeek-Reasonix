@@ -124,12 +124,18 @@ type Report struct {
 // be nil: a nil contract means nothing declared acceptance criteria, which
 // leaves the ledger alone to speak.
 func Build(c *taskcontract.Contract, ledger *evidence.Ledger) Report {
+	return BuildAt(c, ledger, "", nil)
+}
+
+// BuildAt is Build with an explicit workspace so absolute project paths stay
+// workspace mutations and scratch paths do not.
+func BuildAt(c *taskcontract.Contract, ledger *evidence.Ledger, workspaceRoot string, scratchRoots []string) Report {
 	receipts := ledger.Receipts()
 	rep := Report{
-		Mutations:     mutationsOf(receipts),
+		Mutations:     mutationsOf(receipts, workspaceRoot, scratchRoots),
 		Criteria:      criteriaOf(c),
-		Changes:       changesOf(ledger, receipts),
-		Verifications: verificationsOf(receipts),
+		Changes:       changesOf(ledger, receipts, workspaceRoot, scratchRoots),
+		Verifications: verificationsOf(receipts, workspaceRoot, scratchRoots),
 	}
 	if c != nil {
 		rep.Risk = c.Risk
@@ -166,16 +172,16 @@ func criteriaOf(c *taskcontract.Contract) []Criterion {
 // changesOf lists mutated paths in first-write order and asks the ledger
 // whether each one was inspected after its own latest write, so a review that
 // covered one file never vouches for another.
-func changesOf(ledger *evidence.Ledger, receipts []evidence.Receipt) []Change {
+func changesOf(ledger *evidence.Ledger, receipts []evidence.Receipt, workspaceRoot string, scratchRoots []string) []Change {
 	var out []Change
 	at := map[string]int{}
 	lastWrite := map[string]int{}
 	for i, r := range receipts {
-		if !r.Success || !(r.Mutation || r.Write) {
+		if !evidence.IsDeliveryMutation(r, workspaceRoot, scratchRoots) {
 			continue
 		}
 		for _, p := range r.Paths {
-			if p == "" {
+			if p == "" || evidence.ClassifyWriteScope(p, workspaceRoot, scratchRoots) == evidence.WriteScopeScratch {
 				continue
 			}
 			if _, seen := at[p]; !seen {
@@ -194,10 +200,10 @@ func changesOf(ledger *evidence.Ledger, receipts []evidence.Receipt) []Change {
 // mutationsOf counts successful mutating receipts, path-named or not: a
 // `sed -i` or `rm` that named nothing still changed the workspace, and must
 // not escape the unverified-change gap by leaving no path behind.
-func mutationsOf(receipts []evidence.Receipt) int {
+func mutationsOf(receipts []evidence.Receipt, workspaceRoot string, scratchRoots []string) int {
 	count := 0
 	for _, r := range receipts {
-		if r.Success && (r.Mutation || r.Write) {
+		if evidence.IsDeliveryMutation(r, workspaceRoot, scratchRoots) {
 			count++
 		}
 	}
@@ -206,10 +212,10 @@ func mutationsOf(receipts []evidence.Receipt) int {
 
 // verificationsOf keeps each delivery-verification command's latest run, in
 // first-run order, and marks the ones that predate the newest mutation.
-func verificationsOf(receipts []evidence.Receipt) []Verification {
+func verificationsOf(receipts []evidence.Receipt, workspaceRoot string, scratchRoots []string) []Verification {
 	lastMutation := -1
 	for i, r := range receipts {
-		if r.Success && (r.Mutation || r.Write) {
+		if evidence.IsDeliveryMutation(r, workspaceRoot, scratchRoots) {
 			lastMutation = i
 		}
 	}

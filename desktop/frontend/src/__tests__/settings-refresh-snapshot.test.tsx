@@ -265,11 +265,11 @@ await act(async () => {
 });
 ok(compactRootEl.textContent?.includes("Advanced context management") === false, "compaction preference has no redundant advanced disclosure");
 ok(compactRootEl.textContent?.includes("Automatic compaction threshold") === true, "compaction preference is visible without expanding a disclosure");
-ok(compactRootEl.textContent?.includes("85,000 tokens") === true, "compact ratio shows the default model token threshold");
-ok(compactRootEl.textContent?.includes("Current threshold: 85% · Recommended") === true, "compact ratio summarizes the saved preset separately");
+ok(compactRootEl.textContent?.includes("80,000 tokens") === true, "compact ratio shows the default model token threshold");
+ok(compactRootEl.textContent?.includes("Current threshold: 80% · Recommended") === true, "compact ratio summarizes the saved preset separately");
 ok(compactRootEl.textContent?.includes("effective threshold is 75%") === true, "project override shows the active effective threshold");
 ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "custom compact ratio editor stays hidden on the default path");
-const recommendedCompactButton = compactRootEl.querySelector('button[aria-label="85% · Recommended"]') as HTMLButtonElement | null;
+const recommendedCompactButton = compactRootEl.querySelector('button[aria-label="80% · Recommended"]') as HTMLButtonElement | null;
 if (!recommendedCompactButton) throw new Error("recommended compaction preset did not render");
 ok(recommendedCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio starts selected");
 const customCompactButton = Array.from(compactRootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Custom threshold…")) as HTMLButtonElement | undefined;
@@ -282,7 +282,7 @@ await act(async () => {
 });
 let customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
 if (!customCompactInput) throw new Error("custom compaction threshold input did not open");
-eq(customCompactInput.value, "85", "custom compaction threshold defaults older backends to 85 percent");
+eq(customCompactInput.value, "80", "custom compaction threshold defaults older backends to 80 percent");
 ok(compactRootEl.textContent?.includes("65%") === true, "custom compact ratio explains the lower guard rail");
 ok(compactRootEl.textContent?.includes("85%") === true, "custom compact ratio explains the upper guard rail");
 ok(document.activeElement === customCompactInput, "opening the custom compact ratio moves focus to its input");
@@ -525,6 +525,14 @@ const botsRootEl = document.createElement("div");
 document.body.appendChild(botsRootEl);
 const botsRoot = createRoot(botsRootEl);
 const botsSettings = baseSettings("standard");
+botsSettings.bot.dingtalk = {
+  enabled: true,
+  clientId: "dinghuspf88znepnhwfp",
+  clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+  secretSet: true,
+  botName: "",
+  requireMention: true,
+};
 botsSettings.bot.connections = [
   {
     id: "conn-feishu-1",
@@ -569,7 +577,7 @@ ok(!document.getElementById("bot-step-access"), "bots tab omits the old global a
 ok(!document.getElementById("bot-step-behavior"), "bots tab omits global default behavior card");
 eq(document.querySelectorAll(".bot-step-chip").length, 0, "hero no longer shows the old two-step chips");
 
-eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 4, "bot manager uses four fixed channel tabs on the left");
+eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 5, "bot manager uses five fixed channel tabs on the left");
 ok(document.querySelector(".bot-channel-setup-card")?.textContent?.includes("Configure QQ") === true, "unconfigured QQ tab shows key setup on the right");
 ok(document.body.textContent?.includes("Back to entry") === false, "bot manager does not show a return-to-entry action");
 
@@ -597,6 +605,109 @@ ok(
 ok(document.body.textContent?.includes("ou_mock_user_001") === true, "selected bot detail shows its trusted user");
 ok(document.body.textContent?.includes("Legacy global allowlist") === true, "advanced area keeps the legacy global allowlist");
 ok(document.querySelector(".bot-simple-advanced")?.textContent?.includes("local control API") === false, "advanced area no longer owns mobile/control API setup");
+
+// DingTalk channel: a persisted ClientID must round-trip back into the UI.
+// The unconfigured setup form and the configured detail card both show it;
+// blur-save and reload must not blank the field.
+const persistedDingtalkSettings = () => {
+  const s = baseSettings("standard");
+  s.bot.dingtalk = {
+    enabled: true,
+    clientId: "dinghuspf88znepnhwfp",
+    clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+    secretSet: true,
+    botName: "",
+    requireMention: true,
+  };
+  return s;
+};
+let dingtalkSettings = persistedDingtalkSettings();
+let dingtalkTestCalls = 0;
+window.go = {
+  main: {
+    App: {
+      Settings: async () => dingtalkSettings,
+      SetBotSettings: async (next: typeof dingtalkSettings) => {
+        dingtalkSettings = next;
+      },
+      SetBotSecret: async () => {},
+      TestDingtalkBot: async () => {
+        dingtalkTestCalls += 1;
+        return { id: "dingtalk", label: "DingTalk", status: "ok", message: "测试消息已发送，请检查钉钉会话。", messageId: "mock-dingtalk-id", phase: "send", code: "dingtalk_test_send_ok", reportKind: "", reportDetail: "", occurredAt: new Date().toISOString() };
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+const dingtalkTab = Array.from(botsRootEl.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("DingTalk")) as HTMLButtonElement | undefined;
+if (!dingtalkTab) throw new Error("DingTalk channel tab did not render");
+await act(async () => {
+  dingtalkTab.click();
+  await flushPromises();
+});
+// Secret is set and the bot is enabled: the configured detail card
+// shows the persisted ClientID (the "input disappeared" regression).
+await waitFor("DingTalk detail card with ClientID", () => {
+  const card = botsRootEl.querySelector(".bot-channel-manager__detail .bot-detail-card");
+  const hasClientId = card?.textContent?.includes("dinghuspf88znepnhwfp") === true;
+  return Boolean(card) && hasClientId;
+});
+const dingtalkDetailClientId = Array.from(botsRootEl.querySelectorAll("input[aria-label]")).find((input) => input.getAttribute("aria-label")?.includes("Client ID")) as HTMLInputElement | undefined;
+eq(dingtalkDetailClientId?.value, "dinghuspf88znepnhwfp", "persisted ClientID is visible in the DingTalk detail card");
+// DingTalk test-send entry: the detail card exposes a test-send button that
+// calls TestDingtalkBot and surfaces the result notice.
+const dingtalkTestButtons = Array.from(botsRootEl.querySelectorAll(".bot-channel-manager__detail .bot-detail-card__actions .btn")).filter((button) => /test|测试|測試|傳送/i.test(button.textContent ?? ""));
+eq(dingtalkTestButtons.length, 1, "DingTalk detail card exposes a test-send button");
+await act(async () => {
+  (dingtalkTestButtons[0] as HTMLButtonElement).click();
+  await flushPromises();
+});
+eq(dingtalkTestCalls, 1, "test-send button invokes TestDingtalkBot");
+await waitFor("DingTalk test-send result notice", () =>
+  botsRootEl.querySelector(".bot-channel-manager__detail .bot-detail-notice")?.textContent?.includes("测试消息已发送") === true);
+// Regression: a ClientID alone must NOT flip the channel into its configured
+// detail card. Only an enabled bot with a set secret does. Mount with
+// enabled=false + secretSet=true + clientId set; the setup panel (not the
+// detail card) must show.
+const notEnabledRootEl = document.createElement("div");
+document.body.appendChild(notEnabledRootEl);
+const notEnabledRoot = createRoot(notEnabledRootEl);
+const notEnabledSettings = baseSettings("standard");
+notEnabledSettings.bot.dingtalk = {
+  enabled: false,
+  clientId: "dinghuspf88znepnhwfp",
+  clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+  secretSet: true,
+  botName: "",
+  requireMention: true,
+};
+window.go = {
+  main: { App: { Settings: async () => notEnabledSettings } } as Partial<AppBindings> as AppBindings,
+};
+await act(async () => {
+  notEnabledRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="bots" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const notEnabledTab = Array.from(notEnabledRootEl.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).find((button) => button.textContent?.includes("DingTalk")) as HTMLButtonElement | undefined;
+if (!notEnabledTab) throw new Error("DingTalk channel tab did not render (not-enabled case)");
+await act(async () => {
+  notEnabledTab.click();
+  await flushPromises();
+});
+await waitFor("DingTalk setup panel instead of detail card when not enabled", () => {
+  const detailCard = notEnabledRootEl.querySelector(".bot-channel-manager__detail .bot-detail-card");
+  const setupCard = notEnabledRootEl.querySelector(".bot-channel-manager__detail .bot-channel-setup-card");
+  return Boolean(setupCard) && detailCard === null;
+});
+await act(async () => {
+  notEnabledRoot.unmount();
+});
+window.go = {
+  main: { App: { Settings: async () => botsSettings } } as Partial<AppBindings> as AppBindings,
+};
 
 await act(async () => {
   botsRoot.unmount();

@@ -13,7 +13,7 @@ require reasonix v0.0.0
 
 require (
 	aead.dev/minisign v0.3.0
-	fyne.io/systray v1.12.2
+	fyne.io/systray v1.12.3-0.20260814134402-f60f01be81c6
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1

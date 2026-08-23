@@ -375,7 +375,8 @@ func resetFatalCrashArtifacts(t *testing.T) {
 
 func TestWindowRestoreFailureReportSeparatesTimeoutAndSource(t *testing.T) {
 	report := windowRestoreFailureReport("timeout", "second_instance", "2026-07-24T08:00:00Z")
-	if report.Label != "windows.window_restore.timeout" || report.TopFrame != "windows.window_restore.second_instance" {
+	platform := metricBucket(runtime.GOOS)
+	if report.Label != platform+".window_restore.timeout" || report.TopFrame != platform+".window_restore.second_instance" {
 		t.Fatalf("report = %+v", report)
 	}
 }

@@ -49,3 +49,13 @@ func TestParseContextLimitErrorAccepts413And422(t *testing.T) {
 		t.Fatal("422 should parse")
 	}
 }
+
+func TestParseOutputLimitError(t *testing.T) {
+	err := ParseOutputLimitError(&APIError{Status: 400, Body: `bad request: max_tokens is too large: 384000. This model supports at most 131072 completion tokens.`})
+	if err == nil || err.RequestedTokens != 384000 || err.MaxOutputTokens != 131072 {
+		t.Fatalf("ParseOutputLimitError = %+v, want requested 384000 max 131072", err)
+	}
+	if ParseOutputLimitError(&APIError{Status: 401, Body: `max_tokens is too large: 384000; supports at most 131072`}) != nil {
+		t.Fatal("authorization errors must not be treated as output-limit errors")
+	}
+}

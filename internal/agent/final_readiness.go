@@ -14,21 +14,90 @@ import (
 // Final readiness: whether the fact contract and ledger allow the turn to stop.
 
 type finalReadinessCheck struct {
-	applies                   bool
-	reason                    string
-	missingProjectChecks      int
-	incompleteTodos           int
-	missingAcceptanceCriteria int
-	missingVerification       int
-	missingReview             int
-	missingSignoff            int
-	missingActionEvidence     int
-	missingMutation           int
-	missingCapabilities       int
+	applies                    bool
+	reason                     string
+	continuationGeneric        bool
+	continuationHighConfidence bool
+	continuationTaskProgress   bool
+	continuationUnsafe         bool
+	missingProjectChecks       int
+	incompleteTodos            int
+	missingAcceptanceCriteria  int
+	missingVerification        int
+	missingReview              int
+	missingSignoff             int
+	missingActionEvidence      int
+	missingMutation            int
+	missingTaskProgress        int
+	missingCapabilities        int
+	incompleteTodoItems        []evidence.TodoStepMatch
+}
+
+func (c finalReadinessCheck) continuationClass() ReadinessContinuationClass {
+	if c.reason == "" || c.continuationUnsafe || c.missingActionEvidence > 0 ||
+		c.missingCapabilities > 0 {
+		return ReadinessContinuationNone
+	}
+	if c.continuationTaskProgress && (c.missingMutation > 0 || c.incompleteTodos > 0 || c.missingTaskProgress > 0) {
+		return ReadinessContinuationTaskProgress
+	}
+	if c.missingMutation > 0 {
+		return ReadinessContinuationNone
+	}
+	if c.continuationHighConfidence {
+		return ReadinessContinuationHighConfidence
+	}
+	if c.continuationGeneric {
+		return ReadinessContinuationGeneric
+	}
+	return ReadinessContinuationNone
+}
+
+func (c *finalReadinessCheck) observeObligation(o taskcontract.Obligation) {
+	if o.Enforcement != taskcontract.EnforcementAdvisory {
+		switch o.Kind {
+		case taskcontract.ObligationActionReceipt:
+			// Repeating an external/destructive action to manufacture a
+			// receipt is never an automatic readiness operation.
+			c.continuationUnsafe = true
+		case taskcontract.ObligationTodo, taskcontract.ObligationCriteria,
+			taskcontract.ObligationFullVerify, taskcontract.ObligationIndependentReview,
+			taskcontract.ObligationSecurityReview, taskcontract.ObligationSignoff:
+			switch {
+			case o.Kind == taskcontract.ObligationTodo || o.Kind == taskcontract.ObligationCriteria:
+				c.continuationHighConfidence = true
+			case o.Enforcement == taskcontract.EnforcementStrict:
+				c.continuationHighConfidence = true
+			case o.Enforcement == taskcontract.EnforcementRecoverable:
+				c.continuationGeneric = true
+			}
+		case taskcontract.ObligationTargetedVerify, taskcontract.ObligationDiffReview:
+			switch o.Enforcement {
+			case taskcontract.EnforcementStrict:
+				c.continuationHighConfidence = true
+			case taskcontract.EnforcementRecoverable:
+				c.continuationGeneric = true
+			}
+		default:
+			c.continuationUnsafe = true
+		}
+	}
+	switch o.Kind {
+	case taskcontract.ObligationTargetedVerify, taskcontract.ObligationFullVerify:
+		c.missingVerification++
+	case taskcontract.ObligationDiffReview, taskcontract.ObligationIndependentReview, taskcontract.ObligationSecurityReview:
+		c.missingReview++
+	case taskcontract.ObligationSignoff:
+		c.missingSignoff++
+	case taskcontract.ObligationActionReceipt:
+		c.missingActionEvidence++
+	case taskcontract.ObligationCriteria:
+		c.missingAcceptanceCriteria++
+	}
 }
 
 func (c finalReadinessCheck) progressSignature() string {
-	return fmt.Sprintf("%d/%d/%d/%d/%d/%d/%d/%d/%d/%d\x00%s",
+	return fmt.Sprintf("%d/%d/%d/%d/%d/%d/%d/%d/%d/%d/%d\x00%s",
 		c.missingProjectChecks,
 		c.incompleteTodos,
 		c.missingAcceptanceCriteria,
@@ -37,14 +106,86 @@ func (c finalReadinessCheck) progressSignature() string {
 		c.missingSignoff,
 		c.missingActionEvidence,
 		c.missingMutation,
+		c.missingTaskProgress,
 		c.missingCapabilities,
 		boolInt(c.applies),
 		c.reason,
 	)
 }
 
+func (c finalReadinessCheck) taskProgressReason() string {
+	var missing []string
+	if c.missingMutation > 0 {
+		missing = append(missing, "no successful state change was observed for the requested modification")
+	}
+	if c.incompleteTodos > 0 {
+		if len(c.incompleteTodoItems) > 0 {
+			missing = append(missing, finalReadinessIncompleteTodos(c.incompleteTodoItems))
+		} else {
+			missing = append(missing, "the current task list still has incomplete items")
+		}
+	}
+	if c.missingTaskProgress > 0 {
+		missing = append(missing, "the last response explicitly deferred remaining implementation work")
+	}
+	return strings.Join(missing, "; ")
+}
+
+// finalReadinessControlProjection separates everything the host observed from
+// the smaller set it is allowed to drive automatically. Closed-loop execution
+// keeps the complete readiness contract. Standard only owns mutation, current
+// todo completion, and explicit implementation deferrals for a controller-marked task.
+func (a *Agent) finalReadinessControlProjection(facts finalReadinessCheck, assistantText string) finalReadinessCheck {
+	if a == nil {
+		return facts
+	}
+	if a.loopGuardAllowsFinal() {
+		return finalReadinessCheck{applies: true}
+	}
+	if a.fullReadinessControlActive() {
+		return facts
+	}
+	if !a.turn.automaticReadinessContinuation {
+		return finalReadinessCheck{}
+	}
+	out := finalReadinessCheck{missingMutation: facts.missingMutation}
+	if a.task.ledger != nil {
+		incomplete, hasCurrentTodos := a.task.ledger.IncompleteLatestTodos()
+		_, hasMutation := a.task.ledger.LatestSuccessfulMutationIndex()
+		if hasMutation && hasCurrentTodos && len(incomplete) > 0 {
+			out.incompleteTodos = len(incomplete)
+			out.incompleteTodoItems = append([]evidence.TodoStepMatch(nil), incomplete...)
+		}
+		if a.standardMutationExpected() && hasMutation && !hasCurrentTodos && looksLikePendingAction(assistantText) {
+			out.missingTaskProgress = 1
+		}
+	}
+	out.reason = out.taskProgressReason()
+	if out.reason == "" {
+		return finalReadinessCheck{}
+	}
+	out.applies = true
+	out.continuationTaskProgress = true
+	return out
+}
+
+func (a *Agent) fullReadinessControlActive() bool {
+	if a == nil {
+		return false
+	}
+	return a.turn.constraints.PolicyFloor == taskcontract.PolicyFloorDelivery ||
+		a.turn.deliveryScopeActive || a.planContractSnapshot() != nil
+}
+
+func (a *Agent) finalReadinessProgressKey(check finalReadinessCheck) string {
+	if check.continuationClass() == ReadinessContinuationTaskProgress && a != nil && a.task.ledger != nil {
+		return a.task.ledger.SuccessfulProgressFingerprint()
+	}
+	return check.progressSignature()
+}
+
 func (c finalReadinessCheck) missingIDs() []string {
-	missing := make([]string, 0, 9)
+	missing := make([]string, 0, 10)
 	add := func(id string, count int) {
 		if count > 0 {
 			missing = append(missing, id)
@@ -58,6 +199,7 @@ func (c finalReadinessCheck) missingIDs() []string {
 	add("signoff", c.missingSignoff)
 	add("action", c.missingActionEvidence)
 	add("mutation", c.missingMutation)
+	add("task", c.missingTaskProgress)
 	add("capability", c.missingCapabilities)
 	return missing
 }
@@ -89,16 +231,18 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		a.turn.engine.SyncReceipts(a.task.ledger.Receipts(), a.writeWorkspaceRoot, a.turn.constraints.ForbidTests)
 	}
 	var missing []string
-	out := finalReadinessCheck{}
+	out := finalReadinessCheck{continuationUnsafe: a.turn.constraints.ForbidTests}
 	if a.planMode.Load() {
 		return out
 	}
 	incomplete, hasTodos := a.task.ledger.IncompleteLatestTodos()
-	if !hasTodos && a.task.ledger.HasAnySuccessfulReceipt() {
+	currentTurnHasTodos := hasTodos
+	if a.closedLoopActive() && !hasTodos && a.task.ledger.HasAnySuccessfulReceipt() {
 		incomplete, hasTodos = a.incompleteCanonicalTodos()
 	}
 	if msg := a.capabilityGateFailure(); msg != "" {
 		out.applies = true
+		out.continuationUnsafe = true
 		out.missingCapabilities++
 		missing = append(missing, msg)
 	}
@@ -106,9 +250,25 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	if mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		writer, hasWriter = mutation, true
 	}
-	if hasWriter && hasTodos && len(incomplete) > 0 {
+	_, hasMutation := a.task.ledger.LatestSuccessfulMutationIndex()
+	mutationExpected := a.standardMutationExpected()
+	if mutationExpected && !hasMutation {
 		out.applies = true
+		out.missingMutation++
+		missing = append(missing, "no successful state change was observed for the requested modification")
+	}
+	// Incomplete todos contradict closed-loop delivery. In Standard they are
+	// task-progress gaps only when the current ledger proves both a mutation and
+	// a successful todo_write; historical canonical state remains display-only.
+	standardTaskTodo := !a.closedLoopActive() && a.turn.automaticReadinessContinuation &&
+		hasMutation && currentTurnHasTodos && len(incomplete) > 0
+	if (a.closedLoopActive() && hasWriter && hasTodos && len(incomplete) > 0) || standardTaskTodo {
+		out.applies = true
+		if a.closedLoopActive() {
+			out.continuationHighConfidence = true
+		}
 		out.incompleteTodos = len(incomplete)
+		out.incompleteTodoItems = append([]evidence.TodoStepMatch(nil), incomplete...)
 		missing = append(missing, finalReadinessIncompleteTodos(incomplete))
 	}
 	for _, check := range a.projectChecks {
@@ -120,12 +280,16 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			continue
 		}
 		if !a.task.ledger.HasSuccessfulCommandAfter(command, writer) {
+			out.continuationHighConfidence = true
 			out.missingProjectChecks++
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
 	if hasWriter {
 		outstanding := a.outstandingPlanCriteria()
+		if len(outstanding) > 0 {
+			out.continuationHighConfidence = true
+		}
 		out.missingAcceptanceCriteria += len(outstanding)
 		missing = append(missing, outstanding...)
 	}
@@ -135,7 +299,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		stop = a.turn.engine.BeforeStop(runtimepolicy.StopContext{
 			GoalActive:     a.turn.deliveryScopeActive,
 			ApprovedPlan:   a.planContractSnapshot() != nil,
-			IncompleteTodo: hasTodos && len(incomplete) > 0,
+			IncompleteTodo: a.closedLoopActive() && hasTodos && len(incomplete) > 0,
 			Opts: taskcontract.StopOptions{
 				LoopGuard:        a.loopGuardAllowsFinal(),
 				EnvUnavailable:   a.turn.constraints.ForbidTests,
@@ -144,18 +308,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		})
 		for _, o := range a.turn.engine.Snapshot().Unsatisfied() {
 			missing = append(missing, obligationGap(o))
-			switch o.Kind {
-			case taskcontract.ObligationTargetedVerify, taskcontract.ObligationFullVerify:
-				out.missingVerification++
-			case taskcontract.ObligationDiffReview, taskcontract.ObligationIndependentReview, taskcontract.ObligationSecurityReview:
-				out.missingReview++
-			case taskcontract.ObligationSignoff:
-				out.missingSignoff++
-			case taskcontract.ObligationActionReceipt:
-				out.missingActionEvidence++
-			case taskcontract.ObligationCriteria:
-				out.missingAcceptanceCriteria++
-			}
+			out.observeObligation(o)
 		}
 	}
 	if a.loopGuardAllowsFinal() {
@@ -181,6 +334,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		out.reason = strings.Join(missing, "; ")
 		return a.applyPartialCheckWaiver(out)
 	case taskcontract.StopBlocked:
+		out.continuationUnsafe = true
 		out.reason = strings.Join(missing, "; ")
 		return out
 	case taskcontract.StopContinue:
@@ -191,7 +345,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			a.turn.engine.NoteRecoveryAttempt()
 		}
 		out.reason = strings.Join(missing, "; ")
-		if !a.closedLoopActive() {
+		if !a.turn.automaticReadinessContinuation && !a.closedLoopActive() {
 			return a.applyPartialCheckWaiver(out)
 		}
 		return out
@@ -201,6 +355,11 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	}
 	out.reason = strings.Join(missing, "; ")
 	return a.applyPartialCheckWaiver(out)
+}
+
+func (a *Agent) standardMutationExpected() bool {
+	return a != nil && a.turn.mutationExpected && a.turn.automaticReadinessContinuation &&
+		!a.readOnlyExecution && !a.turn.constraints.ForbidMutation && registryHasWriterTools(a.svc.tools)
 }
 
 func obligationGap(o taskcontract.Obligation) string {

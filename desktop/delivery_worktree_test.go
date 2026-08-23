@@ -63,7 +63,10 @@ func TestCreateDeliveryWorktreeRegistersAndOpensManagedProject(t *testing.T) {
 	if result.Tab.WorkspaceRoot != isolatedRoot || !result.Tab.IsolatedWorktree || !result.Tab.Active {
 		t.Fatalf("opened tab = %+v", result.Tab)
 	}
-	if result.Tab.TokenMode != "full" {
-		t.Fatalf("isolated worktree tokenMode = %q, want pinned full (must not force delivery)", result.Tab.TokenMode)
+	if result.Tab.TokenMode != "delivery" {
+		t.Fatalf("isolated worktree tokenMode = %q, want delivery (inferred floor)", result.Tab.TokenMode)
+	}
+	if result.Tab.QualityFloor != "delivery" || !result.Tab.FloorInferred {
+		t.Fatalf("isolated worktree floor = %q inferred=%v, want delivery/inferred", result.Tab.QualityFloor, result.Tab.FloorInferred)
 	}
 }

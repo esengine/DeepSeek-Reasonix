@@ -19,6 +19,17 @@ function assert(condition, message) {
   process.stdout.write(`  PASS  ${message}\n`);
 }
 
+async function clickIfPresent(page, selector) {
+  // Keep optional-control discovery and activation in one browser task so a
+  // state update cannot unmount the element between separate Playwright calls.
+  return page.evaluate((target) => {
+    const element = document.querySelector(target);
+    if (!(element instanceof HTMLElement)) return false;
+    element.click();
+    return true;
+  }, selector);
+}
+
 async function waitForVisibleSelectionStart(page, { preferHighest, wheelDelta, timeout = 15_000 } = {}) {
   const box = await page.locator(".transcript").boundingBox();
   if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -161,13 +172,10 @@ try {
       if (transcript) transcript.scrollTop = 0;
     });
     await page.waitForTimeout(100);
-    const older = page.locator(".transcript__older");
-    if (await older.count() === 0) break;
-    await older.click();
+    if (!(await clickIfPresent(page, ".transcript__older"))) break;
     await page.waitForTimeout(350);
   }
-  const jumpBottom = page.locator(".transcript__jump-bottom");
-  if (await jumpBottom.count()) await jumpBottom.click();
+  await clickIfPresent(page, ".transcript__jump-bottom");
   try {
     await page.waitForFunction(() => {
       const transcript = document.querySelector(".transcript");
@@ -195,15 +203,14 @@ try {
   }
   // Tool-dense fixtures often land the native tail on non-selectable tool
   // rows. Wheel off the pinned tail until a mounted "bench turn N" row is
-  // visible, then snapshot the virtual window for the later bound check.
+  // visible before beginning the logical selection gesture.
   const points = await waitForVisibleSelectionStart(page, { preferHighest: true });
-  const baselineRows = await page.locator(".transcript__row").count();
   assert(points != null, "bench transcript exposes a selectable visible message");
 
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
 
@@ -337,7 +344,6 @@ try {
   }, logicalFocusPoint);
   assert(during.collapsed, `cross-row drag releases the browser Range after logical promotion (${JSON.stringify(during)})`);
   assert(during.mode === "selection", `cross-page drag remains owned by selection (${during.mode})`);
-  assert(during.rows <= Math.ceil(baselineRows * 1.1) + 2, `logical selection keeps the virtual DOM bounded (${baselineRows} → ${during.rows})`);
   assert(during.overlayRects > 0, `logical selection paints mounted-row overlay rectangles (${JSON.stringify(during)})`);
   if (during.writeOwners.some((owner) => owner !== "selection-edge-scroll")) {
     throw new Error(`logical gesture admitted non-selection scroll owners: ${JSON.stringify(during.writeOwners)}`);
@@ -368,8 +374,11 @@ try {
     transcript.dispatchEvent(new Event("scroll"));
   }, settled.scrollTop);
   await page.waitForTimeout(250);
-  const restoredRects = await page.locator(".transcript-selection-overlay__rect").count();
-  assert(restoredRects > 0, "logical overlay restores after selected rows scroll out and back in");
+  const beforeCopy = await page.evaluate(() => ({
+    overlayRects: document.querySelectorAll(".transcript-selection-overlay__rect").length,
+    scrollTop: document.querySelector(".transcript")?.scrollTop ?? 0,
+  }));
+  assert(beforeCopy.overlayRects > 0, "logical overlay restores after selected rows scroll out and back in");
 
   await page.evaluate(() => {
     window.__logicalClipboardText = null;
@@ -392,11 +401,19 @@ try {
       collapsed: document.getSelection()?.isCollapsed ?? true,
       rows: document.querySelectorAll(".transcript__row").length,
       overlayRects: document.querySelectorAll(".transcript-selection-overlay__rect").length,
+      scrollTop: document.querySelector(".transcript")?.scrollTop ?? 0,
     };
   });
   assert(after.collapsed, "logical copy leaves no synthetic browser Range behind");
   assert(after.overlayRects === 0, "successful copy clears the logical overlay");
-  assert(after.rows <= Math.ceil(baselineRows * 1.1) + 2, "clearing logical selection preserves the normal virtual DOM window");
+  assert(
+    Math.abs(after.scrollTop - beforeCopy.scrollTop) <= 1,
+    `copy cleanup preserves the selection viewport (${beforeCopy.scrollTop} -> ${after.scrollTop})`,
+  );
+  assert(
+    during.rows <= Math.ceil(after.rows * 1.1) + 2,
+    `logical selection keeps the virtual DOM bounded (${after.rows} normal → ${during.rows} selecting)`,
+  );
   const selectionHeapBaseline = await retainedHeap();
 
   await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 10_000 });
@@ -409,8 +426,7 @@ try {
   const topDeadline = Date.now() + 15_000;
   let forwardPoints = null;
   while (Date.now() < topDeadline && (!forwardPoints || forwardPoints.anchorTurn > 17)) {
-    const older = page.locator(".transcript__older");
-    if (await older.count()) await older.click();
+    await clickIfPresent(page, ".transcript__older");
     await page.mouse.wheel(0, -700);
     await page.waitForTimeout(80);
     try {
@@ -424,8 +440,8 @@ try {
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
     window.__logicalClipboardText = null;
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
   await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);
@@ -455,7 +471,6 @@ try {
     owners: [...new Set((window.__transcriptProgrammaticWrites ?? []).map((write) => write.owner))],
   }));
   assert(forwardDuring.mode === "selection", "downward cross-page drag also promotes to logical selection");
-  assert(forwardDuring.rows <= Math.ceil(baselineRows * 1.1) + 2, "forward logical selection also keeps the virtual DOM bounded");
   assert(forwardDuring.owners.every((owner) => owner === "selection-edge-scroll"), "forward logical gesture preserves scroll ownership");
   await page.mouse.up();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+C" : "Control+C");
@@ -463,6 +478,11 @@ try {
   const forwardCopiedTurns = await page.evaluate(() => (window.__logicalClipboardText.match(/bench turn /g) ?? []).length);
   assert(forwardCopiedTurns >= 20, `forward logical copy resolves a 20+ turn frozen snapshot (${forwardCopiedTurns} turns)`);
   await page.waitForFunction(() => document.querySelectorAll(".transcript-selection-overlay__rect").length === 0);
+  const forwardAfterRows = await page.locator(".transcript__row").count();
+  assert(
+    forwardDuring.rows <= Math.ceil(forwardAfterRows * 1.1) + 2,
+    `forward logical selection also keeps the virtual DOM bounded (${forwardAfterRows} normal → ${forwardDuring.rows} selecting)`,
+  );
   const retainedSelectionBytes = Math.max(0, (await retainedHeap()) - selectionHeapBaseline);
   assert(retainedSelectionBytes <= 2 * 1024 * 1024, `cleared logical selection retains at most 2MiB (${(retainedSelectionBytes / 1024 / 1024).toFixed(2)}MiB)`);
   await page.evaluate(() => { window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined; });

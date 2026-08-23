@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	SchemaVersion = 7
+	SchemaVersion = 8
 	DefaultLimit  = 50
 	MaxLimit      = 200
 )
@@ -65,8 +65,14 @@ type Status struct {
 	RecoveryBranches int64  `json:"recoveryBranches"`
 	RecoveryDiverged int64  `json:"recoveryDiverged"`
 	CleanupEligible  int64  `json:"cleanupEligible"`
-	LastError        string `json:"lastError,omitempty"`
-	QuarantinedPath  string `json:"quarantinedPath,omitempty"`
+	// RepairReason records the last integrity condition that caused a
+	// directory to be scanned instead of trusting its persisted projection.
+	// It is diagnostic-only; the transcript and sidecars remain authoritative.
+	RepairReason    string `json:"repairReason,omitempty"`
+	SourceCount     int64  `json:"sourceCount"`
+	LastRepairAt    int64  `json:"lastRepairAt,omitempty"`
+	LastError       string `json:"lastError,omitempty"`
+	QuarantinedPath string `json:"quarantinedPath,omitempty"`
 }
 
 type Options struct {
@@ -191,6 +197,10 @@ type TopicPageRequest struct {
 	Query         string `json:"query,omitempty"`
 	TimeFilter    string `json:"timeFilter,omitempty"`
 	SortMode      string `json:"sortMode,omitempty"`
+	// ManualOrder makes sort_order the primary key within each pinned bucket.
+	// It is intentionally request-scoped: users who have never reordered keep
+	// the activity/created ordering even though metadata rows have a sort value.
+	ManualOrder bool `json:"manualOrder,omitempty"`
 }
 
 type TopicPage struct {
@@ -217,8 +227,8 @@ type SessionPage struct {
 }
 
 // DefaultPath is the disposable cache file under CacheDir ("" when unavailable).
-// v4.sqlite is independent of the v1-v3 caches so a new build never trusts a
-// polluted lineage projection produced before content-based canonical selection.
+// v5.sqlite is independent of all older caches so a new build never trusts a
+// polluted or incomplete lineage projection produced by an older desktop.
 // Session JSONL/WAL/sidecars remain authoritative and older binaries may keep
 // using their own disposable cache without cross-writing this one.
 func DefaultPath() string {
@@ -226,5 +236,5 @@ func DefaultPath() string {
 	if cache == "" {
 		return ""
 	}
-	return filepath.Join(cache, "session-catalog", "v4.sqlite")
+	return filepath.Join(cache, "session-catalog", "v5.sqlite")
 }

@@ -29,6 +29,12 @@ type pathBoundCapabilityProxy struct {
 	resolver tool.CallResolver
 }
 
+func (p pathBoundCapabilityProxy) bindToolResultSession(session func() *Session) {
+	if binder, ok := p.inner.(toolResultSessionBinder); ok {
+		binder.bindToolResultSession(session)
+	}
+}
+
 func (p pathBoundCapabilityProxy) Name() string            { return p.inner.Name() }
 func (p pathBoundCapabilityProxy) Description() string     { return p.inner.Description() }
 func (p pathBoundCapabilityProxy) Schema() json.RawMessage { return p.inner.Schema() }
@@ -83,6 +89,14 @@ func (w pathBoundWriter) DeclareWriteAccess(args json.RawMessage) (tool.WriteAcc
 		return d.DeclareWriteAccess(args)
 	}
 	return tool.WriteAccessDeclaration{}, nil
+}
+
+func (w pathBoundWriter) ResolveAnchoredTextTarget(ctx context.Context, args json.RawMessage) (tool.AnchoredTextTargetInfo, error) {
+	resolver, ok := w.inner.(tool.AnchoredTextTarget)
+	if !ok {
+		return tool.AnchoredTextTargetInfo{}, fmt.Errorf("tool %q does not expose an anchored target", w.inner.Name())
+	}
+	return resolver.ResolveAnchoredTextTarget(ctx, args)
 }
 
 func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {

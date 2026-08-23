@@ -17,15 +17,19 @@ import (
 // Versioned from day one: this format is shared infrastructure for every
 // policy experiment (EBM, reasoning governor, delegation admission, rollback).
 type ForkBundle struct {
-	Version       int                `json:"version"`
-	Policy        string             `json:"policy"`
-	Input         string             `json:"input"`
-	EligibleRound int                `json:"eligible_round"`
-	BlindAtFork   int                `json:"blind_at_fork"`
-	DebtAtFork    int                `json:"debt_at_fork"`
-	MutatedBases  []string           `json:"mutated_bases,omitempty"`
-	LocalExecSeen bool               `json:"local_exec_seen,omitempty"`
-	Messages      []provider.Message `json:"messages"`
+	Version        int                `json:"version"`
+	Policy         string             `json:"policy"`
+	Input          string             `json:"input"`
+	EligibleRound  int                `json:"eligible_round"`
+	BlindAtFork    int                `json:"blind_at_fork"`
+	DebtAtFork     int                `json:"debt_at_fork"`
+	MutatedBases   []string           `json:"mutated_bases,omitempty"`
+	LocalExecSeen  bool               `json:"local_exec_seen,omitempty"`
+	RunwayBalance  int                `json:"runway_balance,omitempty"`
+	RunwayDry      int                `json:"runway_dry,omitempty"`
+	RunwayIdle     int                `json:"runway_idle,omitempty"`
+	RunwayObserved bool               `json:"runway_observed,omitempty"`
+	Messages       []provider.Message `json:"messages"`
 }
 
 const forkBundleVersion = 1
@@ -105,7 +109,10 @@ func (p *forkCaptureProvider) Stream(ctx context.Context, req provider.Request) 
 			Input:         forkTurnInput(messages),
 			EligibleRound: a.task.ebm.captureRound, BlindAtFork: seed.BlindMutations,
 			DebtAtFork: seed.DebtAge, MutatedBases: seed.MutatedBases,
-			LocalExecSeen: seed.LocalExecSeen, Messages: messages,
+			LocalExecSeen: seed.LocalExecSeen,
+			RunwayBalance: seed.RunwayBalance, RunwayDry: seed.RunwayDry,
+			RunwayIdle: seed.RunwayIdle, RunwayObserved: seed.RunwayObserved,
+			Messages: messages,
 		}
 		if err := writeForkBundle(os.Getenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR"), b); err != nil {
 			fmt.Fprintln(os.Stderr, "fork capture:", err)
@@ -222,6 +229,8 @@ func (a *Agent) armForkContinuation(b *ForkBundle, nudge string) {
 		a.task.outcome = evidence.RestoreOutcomeTracker(evidence.OutcomeSeed{
 			MutatedBases: b.MutatedBases, DebtAge: b.DebtAtFork,
 			BlindMutations: b.BlindAtFork, LocalExecSeen: b.LocalExecSeen,
+			RunwayBalance: b.RunwayBalance, RunwayDry: b.RunwayDry,
+			RunwayIdle: b.RunwayIdle, RunwayObserved: b.RunwayObserved,
 		})
 		a.task.ebm = ebmState{fired: true, captured: true, captureRound: b.EligibleRound}
 	}

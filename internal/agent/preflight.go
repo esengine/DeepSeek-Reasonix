@@ -66,6 +66,7 @@ func (a *Agent) InvalidateProjection() {
 	a.sess.compactionState = CompactionState{}
 	a.sess.compactionMu.Unlock()
 	a.sess.compaction.stuck = false
+	a.sess.compaction.stuckInputHash = ""
 	a.sess.compaction.consecutive = 0
 	a.sess.compaction.failedTurn.Store(0)
 	a.sess.compaction.lastTurn.Store(0)
@@ -128,10 +129,10 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	if a.sess.conversation != nil {
 		msgs, preRepair = a.sess.conversation.projectionValidationMessages()
 	}
+	needsNormalization := migratePromotedCoveredPrefixHash(&st, msgs)
 	a.sess.compactionMu.Lock()
 	key := a.currentPromptCacheKeyLocked()
 	normalized, keyOK := lineageKeyCompatible(st.PromptCacheKey, key)
-	needsNormalization := false
 	// Keep receipt-only blocked/failed sidecars (no projection body) and legacy
 	// top-level BlockedInputHash so generation-scoped suppressions survive restart.
 	hasMaintenanceSignal := st.Projection.CoveredPrefixHash != "" ||
@@ -234,6 +235,7 @@ func (a *Agent) BindSessionPath(path string, loadSidecar bool) {
 	a.sess.cacheState = CacheStateUnknown
 	a.sess.compactionMu.Unlock()
 	a.sess.compaction.stuck = false
+	a.sess.compaction.stuckInputHash = ""
 	a.sess.compaction.consecutive = 0
 	a.sess.compaction.failedTurn.Store(0)
 	a.sess.compaction.lastTurn.Store(0)

@@ -133,7 +133,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalDesktopLanguage := cfg.Desktop.Language
 	globalPricingCurrency := cfg.Desktop.Currency
 	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
-	globalTelemetry := cfg.Telemetry
+	globalTelemetry, globalLegacyAnchorSafetyGate := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate
 
 	tomlSources = append(tomlSources, projectTOML)
 	projectMeta, err := mergeTOML(cfg, projectTOML)
@@ -168,7 +168,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
 	// CLI telemetry is an explicit user-global privacy choice. Project config
 	// cannot opt a user in or out, including when the global value is absent.
-	cfg.Telemetry = globalTelemetry
+	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate = globalTelemetry, globalLegacyAnchorSafetyGate
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -1757,6 +1757,7 @@ func legacyMimoConfigRefs(c *Config) []string {
 	refs := []string{
 		c.DefaultModel,
 		c.Agent.PlannerModel,
+		c.Agent.VisionModel,
 		c.Agent.SubagentModel,
 		c.Bot.Model,
 	}
@@ -1917,6 +1918,7 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	}
 	addRef(c.DefaultModel)
 	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.VisionModel)
 	addRef(c.Agent.SubagentModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
@@ -2463,6 +2465,7 @@ func firstKnownModel(current string, models []string, fallback string) string {
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
 	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
 	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.VisionModel = retargetDesktopOfficialRef(c.Agent.VisionModel, access)
 	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
 	for skill, ref := range c.Agent.SubagentModels {
 		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)

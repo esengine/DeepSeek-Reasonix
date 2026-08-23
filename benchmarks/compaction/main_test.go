@@ -2,15 +2,14 @@ package main
 
 import "testing"
 
-// The cost arm is deterministic, so it doubles as the regression guard for the
-// property it was written to measure: a session that keeps growing must keep
-// folding, and no single summarizer call may outgrow the window.
+// The cost arm is deterministic, so it doubles as the regression guard for a
+// growing session whose complete summary prefix still fits the model window.
 func TestRepeatedFoldsStayBoundedAndKeepSucceeding(t *testing.T) {
 	const (
-		window   = 64_000
+		window   = 1_000_000
 		gens     = 6
 		reserve  = 8192 // summaryOutputReserve: the digest the call must still return
-		maxCalls = 7    // maxSummarySpans + the merge pass
+		maxCalls = 1    // Harness-style folding issues one complete-prefix request
 	)
 	res, err := runCost(gens, window, arms{})
 	if err != nil {
@@ -35,6 +34,32 @@ func TestRepeatedFoldsStayBoundedAndKeepSucceeding(t *testing.T) {
 	}
 	if last := res[len(res)-1]; last.CanonicalTokens <= res[0].CanonicalTokens {
 		t.Fatalf("canonical did not grow across generations: %d -> %d", res[0].CanonicalTokens, last.CanonicalTokens)
+	}
+}
+
+// Harness-style compaction never privately slices an oversized prefix or
+// fabricates a digest. Admission failure is explicit and installs no summary.
+func TestOversizedSummaryPrefixFailsWithoutPrivateShortening(t *testing.T) {
+	const window = 64_000
+	res, err := runCost(1, window, arms{})
+	if err != nil {
+		t.Fatalf("runCost: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("generations = %d, want 1", len(res))
+	}
+	r := res[0]
+	if r.Error == "" {
+		t.Fatal("oversized complete prefix unexpectedly succeeded")
+	}
+	if r.SummarizerCalls != 1 {
+		t.Fatalf("summarizer calls = %d, want one failed request", r.SummarizerCalls)
+	}
+	if r.LargestCall <= window {
+		t.Fatalf("largest call = %d, want an input over window %d", r.LargestCall, window)
+	}
+	if r.ProjectionTokens != 0 {
+		t.Fatalf("failed oversized fold installed a %d-token projection", r.ProjectionTokens)
 	}
 }
 

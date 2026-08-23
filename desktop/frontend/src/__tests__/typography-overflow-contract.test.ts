@@ -206,7 +206,7 @@ for (const selector of [
   ".context-panel__section-head span",
   ".context-panel__metric span",
   ".context-panel__metric strong",
-  ".app--creation .context-panel__mini-stat span",
+  ".app--creation .context-panel__mini-stat-label",
   ".app--creation .context-panel__mini-stat strong",
   ".topbar__model",
   ".composer-modebar__item span",
@@ -237,6 +237,9 @@ ok(
   finalDeclaration(".app--creation .context-panel__mini-stat strong", "max-width") !== "14ch",
   "creation overview values are not capped to a fixed 14ch width",
 );
+eq(finalDeclaration(".context-panel__mini-stat-head", "display"), "flex", "session metric labels and rate badges share a compact header row");
+eq(finalDeclaration(".context-panel__rate-band", "flex"), "0 0 auto", "rate badges remain visible without truncating the amount row");
+eq(finalDeclaration(".context-panel__rate-band", "white-space"), "nowrap", "rate badge labels stay intact");
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
 eq(finalDeclaration(".composer-meta__control--intent", "max-width"), "72px", "task method selector keeps its current state visible at narrow widths");

@@ -524,9 +524,9 @@ func TestCompactRewriteVersionFeedsCacheDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
+func TestCompactSummarizesMidSessionUserTurns(t *testing.T) {
 	// Small window so the recent-tail budget cannot swallow the mid-session
-	// user turn (production 32K floor only applies to large windows).
+	// user turn under the fixed retained-tail budget.
 	const window = 8_000
 	// ~1500 tokens of work after the mid-fact pushes it out of the ~800-token tail.
 	big := strings.Repeat("work output line with detail. ", 250)
@@ -577,14 +577,8 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 			projMidVerbatim = true
 		}
 	}
-	if !projFirst {
-		t.Fatalf("fixed early user turn missing from projection: %+v", proj)
-	}
-	if !projMidVerbatim {
-		t.Fatalf("mid-session user turn must stay verbatim, not depend on the digest: %+v", proj)
-	}
-	if !strings.Contains(joinContents(proj), "pnpm") {
-		t.Fatalf("mid-session fact lost from projection: %+v", proj)
+	if projFirst || projMidVerbatim {
+		t.Fatalf("old user turns were retained verbatim (first=%v mid=%v): %+v", projFirst, projMidVerbatim, proj)
 	}
 	if strings.Contains(joinContents(proj), big) {
 		t.Errorf("assistant/tool work was not folded out of projection")
@@ -638,12 +632,12 @@ func TestCompactKeepsPriorDigests(t *testing.T) {
 		t.Fatalf("rolling summary lost prior fact: %+v", proj)
 	}
 	// Prior digest body was part of the fold sent to the summarizer.
-	if len(prov.got) < 2 || !strings.Contains(prov.got[1].Content, "orion_prod_42") {
+	if !strings.Contains(joinContents(prov.got), "orion_prod_42") {
 		t.Fatalf("prior digest not folded into summarizer input: %+v", prov.got)
 	}
 }
 
-func TestCompactKeepsErrorMessages(t *testing.T) {
+func TestCompactSummarizesErrorMessagesDespiteDeprecatedKeep(t *testing.T) {
 	prov := &fakeProvider{reply: "- normal work summarized"}
 	big := strings.Repeat("normal work output ", 200)
 	sess := &Session{Messages: []provider.Message{
@@ -670,26 +664,23 @@ func TestCompactKeepsErrorMessages(t *testing.T) {
 	}
 	proj := visibleContext(a)
 	var keptErr bool
-	for i, m := range proj {
+	for _, m := range proj {
 		if m.Role == provider.RoleTool && m.Content == "error: command failed" {
 			keptErr = true
-			if i == 0 || proj[i-1].Role != provider.RoleAssistant || len(proj[i-1].ToolCalls) == 0 {
-				t.Fatalf("kept error lost its assistant tool call: %+v", proj)
-			}
 		}
 	}
-	if !keptErr {
-		t.Fatalf("error tool result not kept in projection: %+v", proj)
+	if keptErr {
+		t.Fatalf("error tool result was kept verbatim in projection: %+v", proj)
 	}
-	if strings.Contains(prov.got[1].Content, "error: command failed") {
-		t.Fatalf("kept error was still folded into summary input:\n%s", prov.got[1].Content)
+	if !strings.Contains(joinContents(prov.got), "error: command failed") {
+		t.Fatalf("error did not reach summary input:\n%s", joinContents(prov.got))
 	}
 }
 
-func TestCompactKeepsUserMarkedMessages(t *testing.T) {
+func TestCompactSummarizesUserMarkedMessagesDespiteDeprecatedKeep(t *testing.T) {
 	prov := &fakeProvider{reply: "- unmarked work summarized"}
-	// Keep-marked text stays in the projection as protected content; surrounding
-	// work must be large enough that folding it still reduces the candidate.
+	// Marked text is no longer protected; surrounding work keeps the fixture
+	// large enough that the summary candidate reduces the request.
 	marked := "[[keep]] exact requirement " + strings.Repeat("must stay verbatim ", 40)
 	big := strings.Repeat("unmarked work output ", 300)
 	sess := &Session{Messages: []provider.Message{
@@ -725,11 +716,11 @@ func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 	if !keptCanonical {
 		t.Fatalf("marked message missing from canonical: %+v", sess.Messages)
 	}
-	if !keptProj {
-		t.Fatalf("marked message not kept in projection: %+v", visibleContext(a))
+	if keptProj {
+		t.Fatalf("marked message was kept verbatim in projection: %+v", visibleContext(a))
 	}
-	if strings.Contains(prov.got[1].Content, "exact requirement") {
-		t.Fatalf("marked message was still folded into summary input:\n%s", prov.got[1].Content)
+	if !strings.Contains(joinContents(prov.got), "exact requirement") {
+		t.Fatalf("marked message did not reach summary input:\n%s", joinContents(prov.got))
 	}
 }
 

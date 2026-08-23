@@ -84,6 +84,22 @@ export function captureTranscriptLayoutAnchor(
   );
 }
 
+/** Steady-state variant: only anchors on a row that actually intersects the
+ *  viewport. The nearest-row fallback in chooseTranscriptLayoutAnchor exists
+ *  for blank-viewport restores; using it for viewport compensation would
+ *  measure drift against an offscreen row and yank the reading position. */
+export function captureVisibleTranscriptLayoutAnchor(
+  element: HTMLElement,
+): Extract<TranscriptLayoutAnchor, { mode: "manual" }> | undefined {
+  const rect = element.getBoundingClientRect();
+  const viewport = { top: rect.top, bottom: rect.bottom };
+  const visible = readTranscriptRowRects(element)
+    .filter((row) => rowIntersectsViewport(row, viewport))
+    .sort((left, right) => left.top - right.top);
+  const anchor = visible.find((row) => row.top >= viewport.top) ?? visible[0];
+  return anchor ? { mode: "manual", rowKey: anchor.rowKey, offset: anchor.top - viewport.top } : undefined;
+}
+
 export function transcriptElementViewportIsBlank(element: HTMLElement): boolean {
   const rect = element.getBoundingClientRect();
   if (rect.bottom <= rect.top) return false;

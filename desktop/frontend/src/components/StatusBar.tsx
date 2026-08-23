@@ -7,6 +7,7 @@ import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import { appendRateBand, rateBandLabel } from "../lib/costRateBand";
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import type { ExtensionStatusEntry } from "../lib/useController";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
@@ -172,6 +173,7 @@ export function StatusBar({
   lastTurnOutputEstimated = false,
   lastRequestTps,
   turnCost,
+  turnRateBand,
   cost,
   currency,
   modelLabel,
@@ -206,6 +208,7 @@ export function StatusBar({
   lastTurnOutputEstimated?: boolean;
   lastRequestTps?: number | null; // Null means the latest request was not measurable.
   turnCost?: number;
+  turnRateBand?: string;
   cost?: number;
   currency?: string;
   modelLabel?: string;
@@ -241,7 +244,7 @@ export function StatusBar({
   const turnEstimated = usage?.estimated === true;
   const sessionEstimated = context.estimated === true;
   const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
-  const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, currency, { locale }), turnEstimated);
+  const turnCostLabel = appendRateBand(markEstimated(formatMoneyLocalized(turnCost, currency, { locale }), turnEstimated), turnRateBand, t);
   const costLabel = markEstimated(formatMoneyLocalized(cost, currency, { locale }), sessionEstimated);
   const displayWorkspacePath = (workspacePath || workspaceName || "").trim();
   const workspaceLabel = compactPath(displayWorkspacePath, workspaceName);
@@ -254,13 +257,17 @@ export function StatusBar({
   const statusBucketed = statusQuote?.displayStatus === "bucketed" || statusQuote?.aggregateMode === "currency_buckets";
   const statusUnavailable = context.sessionCostComplete === false || statusQuote?.displayStatus === "unavailable" || statusQuote?.costComplete === false;
   const statusSelectedAmount = statusQuote?.selected?.amount ? Number(statusQuote.selected.amount) : NaN;
-  const statusCostLabel = statusBucketed
+  const rawStatusCostLabel = statusBucketed
     ? t("context.sessionCostBucketed")
     : statusUnavailable
       ? "-"
       : Number.isFinite(statusSelectedAmount) && statusSelectedAmount > 0
         ? markEstimated(formatMoneyLocalized(statusSelectedAmount, statusQuote?.selected?.currency || context.sessionCurrency || currency, { locale }), statusQuote?.estimated !== false)
         : costLabel;
+  const statusCostLabel = appendRateBand(rawStatusCostLabel, statusQuote?.rateBand, t);
+  const rateBandTooltip = t("billing.rateBand.tooltip");
+  const turnCostTooltip = rateBandLabel(turnRateBand, t) ? `${t("status.turnCostTitle")} ${rateBandTooltip}` : t("status.turnCostTitle");
+  const sessionCostTooltip = rateBandLabel(statusQuote?.rateBand, t) ? `${t("status.spendTitle")} ${rateBandTooltip}` : t("status.spendTitle");
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const balanceTitle = balance?.available
     ? (balance.detail
@@ -339,7 +346,7 @@ export function StatusBar({
       </Tooltip>
     ),
     turn_cost: (
-      <Tooltip label={t("status.turnCostTitle")} className="statusbar__metric statusbar__metric--turn-cost">
+      <Tooltip label={turnCostTooltip} className="statusbar__metric statusbar__metric--turn-cost">
         <span className="stat statusbar__turn-cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.turnCostLabel")} />
           <b>{turnCostLabel}</b>
@@ -410,7 +417,7 @@ export function StatusBar({
       </Tooltip>
     ),
     cost: (
-      <Tooltip label={t("status.spendTitle")} className="statusbar__metric statusbar__metric--cost">
+      <Tooltip label={sessionCostTooltip} className="statusbar__metric statusbar__metric--cost">
         <span className="stat statusbar__cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
           <b>{statusCostLabel}</b>

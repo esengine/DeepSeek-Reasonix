@@ -258,6 +258,11 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
           ),
         );
       });
+      // Virtuoso and the lazy Markdown/live-region surfaces can schedule a
+      // second commit after the initial act (especially on a loaded CI
+      // runner). Drain one extra frame so render() promises a settled DOM to
+      // callers that intentionally assert immediately after rendering.
+      await flush();
       await flush();
     },
     flush,
@@ -269,6 +274,11 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
       await act(async () => current?.unmount());
     },
     close: async () => {
+      // React.lazy Markdown chunks may resolve just after the last act() in a
+      // block. Let those requests settle before tearing down Vite's SSR
+      // module runner; otherwise the runner reports a transport disconnect
+      // even though every assertion completed.
+      await new Promise((resolve) => setTimeout(resolve, 100));
       await server.close();
     },
     loadModule: <T,>(path: string) => server.ssrLoadModule(path) as Promise<T>,

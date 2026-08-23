@@ -73,7 +73,7 @@ runtime: turns 57 · requests 143 · tokens 2800000 · work time 42m
 新 API 将其解释为 `0`。新的 `budget_spend`（用户显式预算）不会被自动迁移；manual pause、evaluator
 failure、legacy archive block 和真实 blocker 同样不自动解锁。
 
-上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 85%）触发一次内容驱动摘要 checkpoint，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
+上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 80%）触发 Harness 风格的 prune/摘要维护，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
 
 ### 任务合约
 
@@ -149,15 +149,15 @@ Prometheus 会逐个问澄清问题：
 Delivery 收敛为纯 readiness 服务，宿主可消费的结构化结果为
 `ReadinessResult{Ready, Missing, Reason, ProgressKey}`：
 
-- Canonical todos（当前 todo 列表）
+- Canonical todos（Goal、已批准 Plan 或 strict obligation 等闭环回合可跨轮回退；Standard 只读取当前任务证据 ledger 中成功 `todo_write` 的最新列表，不用历史列表判定新任务）
 - Project checks（来自 AGENTS.md 的 verify 指令）
 - Delivery 专属验收项（mutation、verification、review、complete_step 签收、capability 门禁）
 
-Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合在第一次未满足的最终回答后立即结束并显示恢复卡；Goal + Delivery 回合由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
+Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合可由宿主针对已确认的缺失项做 1 次通用或最多 2 次高置信有界续跑。Standard 对明确修改但尚无成功 mutation、本任务已 mutation 且当前 ledger 的 Todo 仍未完成，或已 mutation、没有本轮 Todo 且最终文本明确延后了实施动作，最多做 12 次 task-progress 续跑。每次新宿主进展会重置停滞计数；连续 2 轮没有新进展即暂停。历史 canonical Todo 不参与 Standard 新任务判定，已完成或显式清空的本轮 Todo 仍为权威状态，verification/review/signoff 缺口也不会让 Standard 自动续跑。所有类别遇到新用户输入、取消、Steer 或待处理 inbox 时立即让路，仍未满足才显示恢复卡。Goal + Delivery 回合仍由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
 
 ### 进展签名
 
-只有宿主可验证且对当前 Goal **新颖**的信息才能重置停滞计数：新的读取/搜索结果、todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。读取和查询由规范化工具名、参数及宿主观测到的结果摘要标识；完全相同的重复调用、仅改变措辞的回答或重复 continue 理由都不能伪造进展。证据摘要以有界窗口持久化，不保存工具输出正文。
+只有宿主可验证且对当前任务或 Goal **新颖**的信息才能重置停滞计数：新的读取/搜索结果、todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。Standard task-progress 在内存中对成功 receipt 指纹去重；读取和查询由规范化工具名、参数及宿主观测到的结果摘要标识。完全相同的重复调用、仅改变措辞的回答或重复 continue 理由都不能伪造进展。Goal 的证据摘要以有界窗口持久化，不保存工具输出正文；Standard 的续跑指纹不写入 transcript 或 wire payload。
 
 ### Todo 状态流
 

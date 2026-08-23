@@ -248,6 +248,7 @@ func (readOnlyBash) ReadOnly() bool { return true }
 type TaskTool struct {
 	prov                          provider.Provider
 	pricing                       *provider.Pricing
+	quoteContext                  *event.QuoteContext
 	parentReg                     *tool.Registry
 	maxSteps                      int
 	contextWindow                 int
@@ -303,6 +304,7 @@ type TaskTool struct {
 type TaskToolOptions struct {
 	Provider                              provider.Provider
 	Pricing                               *provider.Pricing
+	QuoteContext                          *event.QuoteContext
 	ParentRegistry                        *tool.Registry
 	MaxSteps                              int
 	ContextWindow                         int
@@ -336,6 +338,7 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 	return &TaskTool{
 		prov:                    opts.Provider,
 		pricing:                 opts.Pricing,
+		quoteContext:            opts.QuoteContext,
 		parentReg:               opts.ParentRegistry,
 		maxSteps:                opts.MaxSteps,
 		contextWindow:           opts.ContextWindow,
@@ -906,11 +909,12 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			}()
 			// Queue for a concurrency/write slot here — not before Start —
 			// so the parent tool call returns a job id immediately.
-			releaseSlot, slotErr := t.acquireSlot(jobCtx, slotReq)
+			releaseSlot, claimID, slotErr := t.acquireSlot(jobCtx, slotReq)
 			if slotErr != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(slotErr, t.transcripts.SaveFailed(run))
 			}
 			defer releaseSlot()
+			jobCtx = WithSubagentClaimID(jobCtx, claimID)
 			trk.running()
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
 			if err != nil {
@@ -936,13 +940,14 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	}
 
 	// Foreground: acquire a slot (queue if needed), then run synchronously.
-	releaseSlot, err := t.acquireSlot(ctx, acquireReq)
+	releaseSlot, claimID, err := t.acquireSlot(ctx, acquireReq)
 	if err != nil {
 		run.Release()
 		return "", err
 	}
 	defer releaseSlot()
 	defer run.Release()
+	ctx = WithSubagentClaimID(ctx, claimID)
 	answer, err := runSession(ctx, trk.wrap(), false)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
@@ -956,12 +961,12 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	return GuardSubagentHostDecisionText(answer), nil
 }
 
-func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest) (func(), error) {
+func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest) (func(), int64, error) {
 	noop := func() {}
 	if t.scheduler == nil {
-		return noop, nil
+		return noop, 0, nil
 	}
-	return t.scheduler.Acquire(ctx, req)
+	return t.scheduler.AcquireWithID(ctx, req)
 }
 
 func (t *TaskTool) bashCanEnforceWriteRoots() bool {
@@ -1176,6 +1181,9 @@ func (t *restrictedCapabilityProxy) check(args json.RawMessage) error {
 	if id == "" {
 		return fmt.Errorf("capability_id is required")
 	}
+	if id == sessionToolResultCapabilityID {
+		return nil
+	}
 	if !t.allowed[id] {
 		return fmt.Errorf("capability %q is outside this subagent's allowed-tools", id)
 	}
@@ -1216,55 +1224,6 @@ func (t *restrictedCapabilityProxy) Execute(ctx context.Context, args json.RawMe
 		return filterCapabilityListResult(out, t.servers), nil
 	}
 	return out, nil
-}
-
-// emptyCapabilityListResult is the fail-closed list payload: no server metadata.
-func emptyCapabilityListResult(note string) string {
-	if strings.TrimSpace(note) == "" {
-		note = "list is filtered to this subagent's allowed MCP servers."
-	}
-	b, err := json.MarshalIndent(map[string]any{
-		"servers": []listServerInfo{},
-		"note":    note,
-	}, "", "  ")
-	if err != nil {
-		return `{"servers":[],"note":"list is filtered to this subagent's allowed MCP servers."}`
-	}
-	return string(b)
-}
-
-// filterCapabilityListResult keeps only servers in the allowlist for restricted
-// proxies. Empty allowlist or unreadable payloads fail closed (empty server
-// list) so discovery never leaks the full configured MCP inventory.
-func filterCapabilityListResult(raw string, servers map[string]bool) string {
-	const baseNote = "list is filtered to this subagent's allowed MCP servers."
-	if len(servers) == 0 {
-		return emptyCapabilityListResult(baseNote + " No allowed MCP servers were resolved from the profile allowlist.")
-	}
-	var payload struct {
-		Servers []listServerInfo `json:"servers"`
-		Note    string           `json:"note"`
-	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return emptyCapabilityListResult(baseNote + " List payload was unreadable; returning no servers (fail-closed).")
-	}
-	filtered := make([]listServerInfo, 0, len(payload.Servers))
-	for _, s := range payload.Servers {
-		if servers[strings.TrimSpace(s.Name)] {
-			filtered = append(filtered, s)
-		}
-	}
-	payload.Servers = filtered
-	if payload.Note == "" {
-		payload.Note = baseNote
-	} else if !strings.Contains(payload.Note, "Filtered to this subagent") {
-		payload.Note = payload.Note + " Filtered to this subagent's allowed MCP servers."
-	}
-	b, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return emptyCapabilityListResult(baseNote + " Failed to encode filtered list (fail-closed).")
-	}
-	return string(b)
 }
 
 // validMCPServerCapabilityID accepts mcp-server:<non-empty-name> only.
@@ -1360,10 +1319,7 @@ func newSubagentCapabilityFrontend(parent *tool.Registry, runtime *MCPCapability
 	if !ok {
 		return nil
 	}
-	if uc, ok := inner.(*UseCapabilityTool); ok {
-		return uc.CloneForAgent(nil, nil)
-	}
-	return inner
+	return cloneCapabilityFrontend(inner)
 }
 
 // mcpCapabilityAllowlist converts profile/call tool names into capability IDs
@@ -1608,6 +1564,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		MaxSteps:                 maxSteps,
 		Temperature:              t.temperature,
 		Pricing:                  pricing,
+		QuoteContext:             t.quoteContext,
 		UsageSource:              event.UsageSourceSubagent,
 		Gate:                     t.gate,
 		ContextWindow:            ctxWin,
@@ -1794,6 +1751,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	ctx, releaseTemp := withSubagentSessionTemp(ctx)
 	defer releaseTemp()
+	opts.SessionTemp = sessiontemp.FromContext(ctx)
 	if opts.SubagentDepth > 0 {
 		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
 	}

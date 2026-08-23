@@ -37,6 +37,7 @@ type Options struct {
 	QueueCapacity     int
 	MissingGrace      time.Duration
 	ReconcileInterval time.Duration
+	MaxBytes          int64 // on-disk index cap; 0 = history_search.max_mb or DefaultMaxBytes
 	Now               func() time.Time
 	OnRevision        func(Status, []string, string)
 }

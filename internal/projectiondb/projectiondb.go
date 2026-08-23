@@ -66,6 +66,9 @@ type OpenOptions struct {
 	Now          func() time.Time
 	SecureDelete bool
 	AutoVacuum   bool
+	// RetainBackup keeps the previous database at its generated .replaced-
+	// timestamp path so disposable projections can offer a rollback point.
+	RetainBackup bool
 }
 
 type Handle struct {
@@ -490,7 +493,7 @@ func Rebuild(ctx context.Context, opts OpenOptions, populate func(context.Contex
 		return fmt.Errorf("install projection replacement: %w", err)
 	}
 	_ = os.Chmod(opts.Path, 0o600)
-	if hadOld {
+	if hadOld && !opts.RetainBackup {
 		_ = os.Remove(backup)
 		_ = os.Remove(backup + "-wal")
 		_ = os.Remove(backup + "-shm")

@@ -14,6 +14,8 @@ import { Markdown } from "./Markdown";
 import { ReasoningSummary } from "./ReasoningSummary";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
+import { resolveToolCardDefaultOpen } from "../lib/transcriptRowGeometry";
+import type { SearchSourcePresentation } from "../lib/searchSourcesPresentation";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -216,8 +218,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // also opens while streaming and closes on finish.
   const subagentReasoningRunning = sp?.phase === "reasoning";
   const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
-  const keepSubagentReasoningExpanded = reasoningDisplayMode === "expanded" && Boolean(sp?.reasoning);
-  const defaultOpen = (hasNested && item.status === "running") || (liveFollow && subagentReasoningRunning) || keepSubagentReasoningExpanded;
+  const defaultOpen = resolveToolCardDefaultOpen(item, nested.length, reasoningDisplayMode);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);
@@ -259,8 +260,23 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
   const execution = fullData?.execution ?? item.execution;
+  const isWebSearch = item.name === "web_search";
+  const [searchPresentation, setSearchPresentation] = useState<SearchSourcePresentation | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!isWebSearch) { setSearchPresentation(null); return () => { cancelled = true; }; }
+    void import("../lib/searchSourcesPresentation").then(({ normalizeSearchSources }) => {
+      if (!cancelled) setSearchPresentation(normalizeSearchSources(item.searchSources));
+    });
+    return () => { cancelled = true; };
+  }, [isWebSearch, item.searchSources]);
+  const searchVisibleCount = searchPresentation?.visible.length ?? item.searchSources?.length ?? 0;
+  const searchHiddenCount = searchPresentation?.hiddenCount ?? 0;
+  const searchResultLabel = isWebSearch && searchVisibleCount === 0 && searchHiddenCount > 0
+    ? t("sources.noValid")
+    : t("tool.searchResults", { n: searchVisibleCount });
   const isShellCard = Boolean(item.isShell || item.name === "bash" || execution);
-  const displayOutput = toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
+  const displayOutput = isWebSearch || toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
   const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
   const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
@@ -278,7 +294,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled.
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
-  const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
+  const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (isWebSearch
+    ? Boolean(effectiveArgs || searchVisibleCount || searchHiddenCount)
+    : Boolean(effectiveArgs || displayOutput || hasArchivedOnDemandBody));
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = isShellCard && displayOutput ? displayOutput : null;
@@ -321,7 +339,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
     : "";
   const summary = item.status === "running"
     ? streamingArgs
-    : (verificationLabel || item.summary || summarizeFileDiff(item.fileDiff) || (item.error ? (tailSummary || errorSummary) : archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, displayOutput, item.error)));
+    : (isWebSearch
+      ? (item.error ? (tailSummary || errorSummary) : searchResultLabel)
+      : (verificationLabel || item.summary || summarizeFileDiff(item.fileDiff) || (item.error ? (tailSummary || errorSummary) : archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, displayOutput, item.error))));
   const a11yLabel = isShellCard
     ? `${shellName} ${item.status}${shellSummary || summary ? ` ${shellSummary || summary}` : ""}`
     : undefined;
@@ -331,7 +351,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   useCollapseAnimation(toolBodyRef, open);
 
   return (
-    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`} data-entrance={item.id} data-shell={isShellCard ? execution?.shell || "bash" : undefined}>
+    <div
+      className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`}
+      data-entrance={item.id}
+      data-shell={isShellCard ? execution?.shell || "bash" : undefined}
+      data-transcript-layout-variant={open && hasBody ? "tool-expanded" : "tool-collapsed"}
+    >
       <button
         type="button"
         className="tool__head"
@@ -489,7 +514,17 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           </details>
         )}
 
-        {!shellPreview && hasArgsOrOutput && (
+        {isWebSearch && hasArgsOrOutput && (
+          <div className="tool__search-summary">
+            {subject && <div className="tool__search-query">{t("tool.searchQuery", { query: subject })}</div>}
+            <div className="tool__search-count">
+              {searchResultLabel}
+              {searchHiddenCount > 0 && ` · ${t("sources.hidden", { n: searchHiddenCount })}`}
+            </div>
+          </div>
+        )}
+
+        {!isWebSearch && !shellPreview && hasArgsOrOutput && (
           <>
             {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
             {displayOutput && (

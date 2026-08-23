@@ -359,6 +359,8 @@ type DeliveryCheckpoint struct {
 type Ledger struct {
 	mu               sync.Mutex
 	receipts         []Receipt
+	observations     []TextObservation
+	nextSequence     uint64
 	backgroundLeases []BackgroundLease
 }
 
@@ -372,6 +374,8 @@ func (l *Ledger) Reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.receipts = nil
+	l.observations = nil
+	l.nextSequence = 0
 	l.backgroundLeases = nil
 }
 
@@ -440,6 +444,8 @@ func (l *Ledger) Record(r Receipt) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.nextSequence++
+	r.Sequence = l.nextSequence
 	if r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
 		if match := latestTodoStep(r.Step, l.receipts); match.Found {
 			r.TodoStep = &match

@@ -219,8 +219,8 @@ func WithTeardownGrace(d time.Duration) Option {
 }
 
 // WithJobStartObserver observes every registered background job before its
-// goroutine starts. Delivery uses this to retain a workspace writer lease until
-// the job is truly terminal. The callback must return quickly.
+// goroutine starts. Delivery uses this to retain a workspace writer lease over
+// the job's opening writes. The callback must return quickly.
 func WithJobStartObserver(observer func(done <-chan struct{})) Option {
 	return func(m *Manager) { m.onJobStart = observer }
 }

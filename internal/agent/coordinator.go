@@ -690,7 +690,7 @@ Executor instructions:
 - If the planner output is a user-facing explanation, summary, question, or manual guidance that needs no workspace/file/command action from you, relay that guidance directly and finish. Do not invent local tool calls only to satisfy the handoff.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
-- **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then for EACH sub-task execute it and call complete_step with evidence. The host advances the list for you — it marks the sub-task completed and moves the next to in_progress, so you don't need another todo_write to mark completions. Sign off one sub-task at a time; never batch completions.
+- **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then execute each sub-task and call complete_step with evidence. You may sign off multiple sub-tasks in one tool-call round, but only in Todo order and only when each step's work and evidence already exist. The host processes complete_step calls sequentially, marks each signed-off sub-task completed, and moves the next to in_progress; skipped or out-of-order sign-offs are rejected. You don't need another todo_write to mark completions.
 
 Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock)
 }

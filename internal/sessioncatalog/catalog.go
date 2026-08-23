@@ -58,9 +58,11 @@ type sessionPathRequest struct {
 }
 
 type pageCursor struct {
-	Pinned   int    `json:"p"`
-	Activity int64  `json:"a"`
-	TopicID  string `json:"t"`
+	Pinned      int    `json:"p"`
+	ManualOrder bool   `json:"m,omitempty"`
+	SortOrder   int64  `json:"o,omitempty"`
+	Activity    int64  `json:"a"`
+	TopicID     string `json:"t"`
 }
 
 func Open(ctx context.Context, opts Options) (*Catalog, error) {
@@ -190,8 +192,33 @@ func (c *Catalog) refreshCounts(ctx context.Context) {
 	c.status.RecoveryBranches = branches
 	c.status.RecoveryDiverged = diverged
 	c.status.CleanupEligible = cleanup
+	c.status.SourceCount = total
 	c.status.Revision = c.revision.Load()
 	c.statusMu.Unlock()
+}
+
+func (c *Catalog) markRepair(reason string, at int64) {
+	if c == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	if at <= 0 {
+		at = time.Now().UnixMilli()
+	}
+	c.statusMu.Lock()
+	c.status.RepairReason = strings.TrimSpace(reason)
+	c.status.LastRepairAt = at
+	c.statusMu.Unlock()
+}
+
+// MarkRepairReason records a lifecycle-level repair cause (for example, a
+// clean index-generation cutover) without touching the authoritative session
+// files. Integrity checks use the internal helper so they can attach their
+// timestamp at the point of detection.
+func (c *Catalog) MarkRepairReason(reason string) {
+	if c == nil {
+		return
+	}
+	c.markRepair(reason, c.opts.Now().UnixMilli())
 }
 
 func normalizeScope(scope, root string) (string, string) {
@@ -305,6 +332,14 @@ func (c *Catalog) UpsertSession(ctx context.Context, record SessionRecord) error
 }
 
 func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
+	return c.upsertSessionsWithNotification(ctx, records, generations, reason, true)
+}
+
+func (c *Catalog) upsertSessionsWithoutNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
+	return c.upsertSessionsWithNotification(ctx, records, generations, reason, false)
+}
+
+func (c *Catalog) upsertSessionsWithNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string, notify bool) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -390,6 +425,10 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 		if record.TopicID != "" {
 			affected[TopicKey{Scope: record.Scope, WorkspaceRoot: record.WorkspaceRoot, TopicID: record.TopicID}] = struct{}{}
 		}
+		if err := updateFoldedTopicTombstones(ctx, tx, previous, record, c.opts.Now().UnixMilli()); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 		roots[record.WorkspaceRoot] = struct{}{}
 	}
 	for key := range affected {
@@ -406,7 +445,11 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	c.publishRevision(revision, mapKeys(roots), reason)
+	if notify {
+		c.publishRevision(revision, mapKeys(roots), reason)
+	} else {
+		c.rememberRevision(revision)
+	}
 	c.refreshCounts(ctx)
 	return nil
 }
@@ -485,13 +528,17 @@ func bumpRevision(ctx context.Context, tx *sql.Tx) (uint64, error) {
 }
 
 func (c *Catalog) publishRevision(revision uint64, roots []string, reason string) {
+	c.rememberRevision(revision)
+	if c.opts.OnRevision != nil {
+		c.opts.OnRevision(revision, roots, reason)
+	}
+}
+
+func (c *Catalog) rememberRevision(revision uint64) {
 	c.revision.Store(revision)
 	c.statusMu.Lock()
 	c.status.Revision = revision
 	c.statusMu.Unlock()
-	if c.opts.OnRevision != nil {
-		c.opts.OnRevision(revision, roots, reason)
-	}
 }
 
 func mapKeys(values map[string]struct{}) []string {
@@ -501,127 +548,6 @@ func mapKeys(values map[string]struct{}) []string {
 	}
 	return out
 }
-func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPage, error) {
-	out := TopicPage{Items: []TopicRecord{}, Revision: c.revision.Load()}
-	req.Scope, req.WorkspaceRoot = normalizeScope(req.Scope, req.WorkspaceRoot)
-	if req.Limit <= 0 {
-		req.Limit = DefaultLimit
-	}
-	if req.Limit > MaxLimit {
-		req.Limit = MaxLimit
-	}
-	cursor, err := decodeCursor(req.Cursor)
-	if err != nil {
-		return out, err
-	}
-	args := []any{req.Scope, req.WorkspaceRoot}
-	where := `scope=? AND workspace_root=?`
-	if query := strings.TrimSpace(req.Query); query != "" {
-		where += ` AND lower(title) LIKE ?`
-		args = append(args, "%"+strings.ToLower(query)+"%")
-	}
-	if cutoff := timeFilterCutoff(req.TimeFilter, c.opts.Now()); cutoff > 0 {
-		where += ` AND last_activity_at>=?`
-		args = append(args, cutoff)
-	}
-	sortExpression := topicPageSortExpression(req.SortMode)
-	scanCursor := cursor
-	scanLimit := max(req.Limit+1, 64)
-	for len(out.Items) <= req.Limit {
-		pageWhere := where
-		pageArgs := append([]any(nil), args...)
-		if scanCursor != nil {
-			pageWhere += ` AND (pinned<? OR (pinned=? AND ` + sortExpression + `<?) OR (pinned=? AND ` + sortExpression + `=? AND topic_id>?))`
-			pageArgs = append(pageArgs, scanCursor.Pinned, scanCursor.Pinned, scanCursor.Activity,
-				scanCursor.Pinned, scanCursor.Activity, scanCursor.TopicID)
-		}
-		pageArgs = append(pageArgs, scanLimit)
-		rows, err := c.db.QueryContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,sort_order,
-            turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
-            recovery_unresolved_count,recovery_cleanup_eligible_count,health
-            FROM catalog_topics WHERE `+pageWhere+`
-			ORDER BY pinned DESC,`+sortExpression+` DESC,topic_id ASC LIMIT ?`, pageArgs...)
-		if err != nil {
-			return out, err
-		}
-		// Drain the page before hydrating sessions: an open cursor holds a
-		// connection, and listTopicSessions needs a second one, so nesting them
-		// deadlocks whenever the pool is saturated (always in memory mode).
-		scanned := make([]TopicRecord, 0, scanLimit)
-		for rows.Next() {
-			var item TopicRecord
-			if err := rows.Scan(&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
-				&item.TitleSource, &item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
-				&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.RecoveryBranchCount,
-				&item.RecoveryUnresolvedCount, &item.RecoveryCleanupEligibleCount, &item.Health); err != nil {
-				_ = rows.Close()
-				return out, err
-			}
-			scanned = append(scanned, item)
-		}
-		rowsErr := rows.Err()
-		_ = rows.Close()
-		if rowsErr != nil {
-			return out, rowsErr
-		}
-		rawCount := len(scanned)
-		overflow := false
-		for _, item := range scanned {
-			sessions, err := c.listTopicSessions(ctx, TopicKey{
-				Scope: item.Scope, WorkspaceRoot: item.WorkspaceRoot, TopicID: item.TopicID,
-			})
-			if err != nil {
-				return TopicPage{Items: []TopicRecord{}, Revision: out.Revision}, err
-			}
-			if len(sessions) == 0 {
-				continue
-			}
-			// Skip pure recovery-shell topics that lost their ordinary
-			// representative after lineage re-anchoring. Prevents empty pages
-			// and flash of conflict rows while catalog rebuilds.
-			hasOrdinary := false
-			for _, session := range sessions {
-				if session.OrdinaryVisible || (!session.Recovered && !session.RecoveryCopy) {
-					hasOrdinary = true
-					break
-				}
-			}
-			if !hasOrdinary && !item.Pinned {
-				continue
-			}
-			item.Sessions = sessions
-			hydrateTopicDisplay(&item)
-			out.Items = append(out.Items, item)
-			if len(out.Items) > req.Limit {
-				overflow = true
-				break
-			}
-		}
-		if overflow || rawCount < scanLimit || rawCount == 0 {
-			break
-		}
-		lastScanned := scanned[rawCount-1]
-		pinned := 0
-		if lastScanned.Pinned {
-			pinned = 1
-		}
-		scanCursor = &pageCursor{Pinned: pinned, Activity: topicPageSortValue(lastScanned, req.SortMode), TopicID: lastScanned.TopicID}
-	}
-	more := len(out.Items) > req.Limit
-	if more {
-		out.Items = out.Items[:req.Limit]
-	}
-	if more && len(out.Items) > 0 {
-		last := out.Items[len(out.Items)-1]
-		pinned := 0
-		if last.Pinned {
-			pinned = 1
-		}
-		out.NextCursor = encodeCursor(pageCursor{Pinned: pinned, Activity: topicPageSortValue(last, req.SortMode), TopicID: last.TopicID})
-	}
-	return out, nil
-}
-
 func (c *Catalog) listTopicSessions(ctx context.Context, key TopicKey) ([]SessionRecord, error) {
 	out := []SessionRecord{}
 	var cursor *sessionPageCursor
@@ -673,7 +599,8 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 	key.Scope, key.WorkspaceRoot = normalizeScope(key.Scope, key.WorkspaceRoot)
 	key.TopicID = strings.TrimSpace(key.TopicID)
 	item := TopicRecord{Sessions: []SessionRecord{}}
-	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,sort_order,
+	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,
+		CASE WHEN metadata_present=1 THEN sort_order ELSE -1 END,
         turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
         recovery_unresolved_count,recovery_cleanup_eligible_count,health
         FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`,
@@ -734,6 +661,20 @@ func topicRepresentativePath(sessions []SessionRecord) string {
 // same cursor shape catalog.ListTopics emits.
 func EncodeTopicCursor(pinned int, lastActivityAt int64, topicID string) string {
 	return encodeCursor(pageCursor{Pinned: pinned, Activity: lastActivityAt, TopicID: topicID})
+}
+
+// EncodeOrderedTopicCursor builds a cursor for a workspace with explicit
+// manual topic ordering. A negative sortOrder places metadata-free/runtime
+// topics after every explicitly ranked topic in the same pinned bucket.
+func EncodeOrderedTopicCursor(pinned, sortOrder int, lastActivityAt int64, topicID string) string {
+	manualSortOrder := int64(sortOrder)
+	if sortOrder < 0 {
+		manualSortOrder = unrankedTopicSortOrder
+	}
+	return encodeCursor(pageCursor{
+		Pinned: pinned, ManualOrder: true, SortOrder: manualSortOrder,
+		Activity: lastActivityAt, TopicID: topicID,
+	})
 }
 
 func encodeCursor(cursor pageCursor) string {

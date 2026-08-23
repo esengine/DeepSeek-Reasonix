@@ -335,6 +335,9 @@ func (c *webView2RecoveryCoordinator) startGuidance(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+		if c.app != nil {
+			c.app.showMainWindowFrom("webview2_recovery_guidance")
+		}
 		showWindowsWebView2RecoveryGuidance(ctx)
 		_ = c.journal.append("guidance_shown", "crash_loop_guard")
 	}()

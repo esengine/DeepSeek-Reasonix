@@ -91,10 +91,7 @@ func projectionTokens(a *Agent) int {
 	return estimateMessagesTokens(provider.ModelMessages(modelVisibleFromProjection(a.sess.compactionState.Projection, msgs)))
 }
 
-// The 90s summary bound is deliberately not retried, so a summarizer that never
-// answers is the original reason a mechanical fold exists. Where the fold is the
-// only way out, its timeout must free the context rather than strand the turn.
-func TestSummarizerTimeoutWhereFoldIsTheOnlyWayOutDegrades(t *testing.T) {
+func TestSummarizerCancellationAtOverflowPropagatesWithoutFallback(t *testing.T) {
 	sess := foldableSessionOverForce(6)
 	a := agentOverForce(t, &fakeProvider{hang: true}, sess)
 	before := estimateMessagesTokens(provider.ModelMessages(sess.Messages))
@@ -102,60 +99,49 @@ func TestSummarizerTimeoutWhereFoldIsTheOnlyWayOutDegrades(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	if err := prepareContext(ctx, a, CompactionTriggerOverflow); err != nil {
-		t.Fatalf("prepare = %v, want a degraded fold instead of a hard failure", err)
+	if err := prepareContext(ctx, a, CompactionTriggerOverflow); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("prepare = %v, want context deadline", err)
 	}
-	after := projectionTokens(a)
-	t.Logf("degraded fold: est %d -> %d tokens", before, after)
-	if after >= before {
-		t.Fatalf("degraded fold freed no context: %d -> %d", before, after)
-	}
-	if !degradedFold(a) {
-		t.Errorf("no degraded fold committed: receipt=%+v digest=%q",
-			a.sess.compactionState.LastReceipt, latestDigest(a.sess.compactionState.Projection.Messages))
+	if after := projectionTokens(a); after != 0 {
+		t.Fatalf("cancellation installed projection tokens=%d (source=%d)", after, before)
 	}
 }
 
 // Overflow is the trigger that reports ErrCompactionRequired, so it is where a
 // failed summary turns into "context exceeds provider limit and compaction
-// failed" and blocks every further message. A mechanical fold answers it.
-func TestOverflowSummarizerFailureDegradesInsteadOfBlockingTheTurn(t *testing.T) {
+// failed" without installing fabricated fallback content.
+func TestOverflowSummarizerFailureRequiresCompaction(t *testing.T) {
 	sess := foldableSessionOverForce(6)
 	a := agentOverForce(t, &fakeProvider{streamErr: errors.New("provider down")}, sess)
 	before := estimateMessagesTokens(provider.ModelMessages(sess.Messages))
 
-	if err := prepareContext(context.Background(), a, CompactionTriggerOverflow); err != nil {
-		t.Fatalf("prepare = %v, want a degraded fold instead of ErrCompactionRequired", err)
+	if err := prepareContext(context.Background(), a, CompactionTriggerOverflow); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("prepare = %v, want ErrCompactionRequired", err)
 	}
-	if after := projectionTokens(a); after >= before {
-		t.Fatalf("degraded fold freed no context: %d -> %d", before, after)
-	}
-	if !degradedFold(a) {
-		t.Errorf("no degraded fold committed: receipt=%+v", a.sess.compactionState.LastReceipt)
+	if after := projectionTokens(a); after != 0 {
+		t.Fatalf("failed summary installed projection: %d (source=%d)", after, before)
 	}
 }
 
-// A fold too large for one request is shortened before it is sent, which is a
-// second way into the same failure. That path must degrade like a plain
-// summarizer failure rather than strand the turn.
-func TestSummarizerFailureOnOversizedFoldDegrades(t *testing.T) {
+// An oversized complete-prefix request fails admission and must not fabricate
+// a summary or privately shorten its input.
+func TestSummarizerFailureOnOversizedFoldDoesNotFabricateDigest(t *testing.T) {
 	sess := foldableSessionOverForce(120)
 	a := agentOverForceWindow(t, &fakeProvider{streamErr: errors.New("provider exploded")}, sess, 60000)
 	if tokens, budget := a.guardedSummaryInputTokens(foldRegionOf(a)), a.summaryInputBudget(""); budget <= 0 || tokens <= budget {
 		t.Fatalf("fixture fold is %d tokens against a %d budget; the shortening path is not exercised", tokens, budget)
 	}
 
-	if err := prepareContext(context.Background(), a, CompactionTriggerOverflow); err != nil {
-		t.Fatalf("prepare = %v, want a degraded fold", err)
+	if err := prepareContext(context.Background(), a, CompactionTriggerOverflow); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("prepare = %v, want ErrCompactionRequired", err)
 	}
-	if !degradedFold(a) {
-		t.Errorf("no degraded fold committed: receipt=%+v", a.sess.compactionState.LastReceipt)
+	if degradedFold(a) || latestDigest(a.sess.compactionState.Projection.Messages) != "" {
+		t.Errorf("failed summary fabricated a digest: receipt=%+v", a.sess.compactionState.LastReceipt)
 	}
 }
 
 // Below the hard ceiling the turn still goes out, so a failed summary must stay
-// a failure: degrading here would fold a recoverable view without a summary and
-// spend the mechanical fold on a turn that never needed it.
+// a failure: the recoverable view proceeds unchanged below the hard ceiling.
 func TestPressureBelowHardCeilingKeepsTheFailure(t *testing.T) {
 	sess := foldableSessionOverForce(6)
 	a := agentOverForce(t, &fakeProvider{streamErr: errors.New("provider down")}, sess)
@@ -176,10 +162,9 @@ func TestPressureBelowHardCeilingKeepsTheFailure(t *testing.T) {
 
 // The receipt recorded below the ceiling must not outlive the ceiling itself:
 // once growing usage crosses the hard ceiling the fold is the only way out, so
-// recovery has to run even with a standing failed receipt — a summarizer that
-// is still down degrades mechanically instead of stranding every later turn
-// past the provider limit.
-func TestFailedSummaryReceiptStillRecoversAtHardCeiling(t *testing.T) {
+// recovery has to run even with a standing failed receipt. If the summarizer is
+// still down, hard pressure returns ErrCompactionRequired without a fake digest.
+func TestFailedSummaryReceiptRetriesAtHardCeilingWithoutFallback(t *testing.T) {
 	sess := foldableSessionOverForce(6)
 	a := agentOverForce(t, &fakeProvider{streamErr: errors.New("provider down")}, sess)
 	a.activeTurnCreatedAt.Store(42)
@@ -205,14 +190,11 @@ func TestFailedSummaryReceiptStillRecoversAtHardCeiling(t *testing.T) {
 		t.Fatalf("grown fixture estimates %d tokens against a %d ceiling; it is not past it", est, hard)
 	}
 
-	if err := prepareContext(context.Background(), a, CompactionTriggerPressure); err != nil {
-		t.Fatalf("over-ceiling prepare = %v, want recovery to run despite the receipt", err)
+	if err := prepareContext(context.Background(), a, CompactionTriggerPressure); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("over-ceiling prepare = %v, want ErrCompactionRequired", err)
 	}
-	if !degradedFold(a) {
-		t.Fatalf("no degraded fold committed: receipt=%+v", a.sess.compactionState.LastReceipt)
-	}
-	if after, hard := projectionTokens(a), a.hardInputCeiling(); after >= hard {
-		t.Fatalf("recovered view %d tokens still at or above the ceiling %d", after, hard)
+	if degradedFold(a) {
+		t.Fatal("hard-ceiling failure installed a mechanical digest")
 	}
 }
 
@@ -241,11 +223,15 @@ func TestCeilingRecoveryClearsStuckLatch(t *testing.T) {
 	// One big append jumps from under the trigger straight past it, still
 	// below the ceiling: the pressure round must compact, not coast.
 	big := strings.Repeat("word ", 400)
-	for range 4 {
+	for range 20 {
 		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
 		sess.Add(provider.Message{Role: provider.RoleUser, Content: "continue"})
+		current := a.contextManager().currentPrepared()
+		if current.InputTokens >= a.compactTrigger() && current.InputTokens < a.hardInputCeiling() {
+			break
+		}
 	}
-	if est, fold := a.estimatedPromptTokens(sess.Messages), a.compactTrigger(); est < fold {
+	if est, fold := a.contextManager().currentPrepared().InputTokens, a.compactTrigger(); est < fold {
 		t.Fatalf("grown fixture estimates %d tokens, below fold %d", est, fold)
 	}
 	if err := prepareContext(context.Background(), a, CompactionTriggerPressure); err != nil {

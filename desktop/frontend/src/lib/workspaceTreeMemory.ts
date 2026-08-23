@@ -12,6 +12,7 @@ export interface WorkspaceTreeMemorySnapshot {
   scrollTop: number;
   dockTreeWidth: number | null;
   dockPreviewWidth: number | null;
+  recentPaths: string[];
 }
 
 type PersistedWorkspaceState = Omit<WorkspaceTreeMemorySnapshot, "openDirs" | "visitId"> & {
@@ -26,6 +27,7 @@ interface PersistedWorkspaceEnvelope {
 
 const STORAGE_KEY = "reasonix.workspaceState.v2";
 const MAX_PERSISTED_PROJECTS = 50;
+const MAX_RECENT_PATHS = 10;
 const workspaceTreeMemory = new Map<string, WorkspaceTreeMemorySnapshot>();
 let storageHydrated = false;
 let activeWorkspaceTreeKey = "";
@@ -42,6 +44,7 @@ function defaultSnapshot(visitId = 0): WorkspaceTreeMemorySnapshot {
     scrollTop: 0,
     dockTreeWidth: null,
     dockPreviewWidth: null,
+    recentPaths: [],
   };
 }
 
@@ -80,6 +83,9 @@ function hydrateWorkspaceTreeMemory(): void {
         dockPreviewWidth: typeof state.dockPreviewWidth === "number" && Number.isFinite(state.dockPreviewWidth) && state.dockPreviewWidth > 0
           ? state.dockPreviewWidth
           : null,
+        recentPaths: Array.isArray(state.recentPaths)
+          ? state.recentPaths.filter((path): path is string => typeof path === "string").slice(0, MAX_RECENT_PATHS)
+          : [],
       });
     }
   } catch {
@@ -103,6 +109,7 @@ function persistWorkspaceTreeMemory(recentKey: string): void {
           scrollTop: snapshot.scrollTop,
           dockTreeWidth: snapshot.dockTreeWidth,
           dockPreviewWidth: snapshot.dockPreviewWidth,
+          recentPaths: snapshot.recentPaths,
           updatedAt: key === recentKey ? now : 0,
         },
       }))

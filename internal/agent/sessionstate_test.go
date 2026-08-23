@@ -136,6 +136,7 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	a.sess.cacheMiss.Store(7)
 	a.sess.missingReasoning = missingReasoningWatch{active: true, stateRecorded: true, healthyStreak: 2}
 	a.sess.compaction.stuck = true
+	a.sess.compaction.stuckInputHash = "old-input"
 	a.sess.compaction.consecutive = 3
 	a.sess.compaction.failedTurn.Store(8)
 	a.sess.compaction.lastTurn.Store(9)
@@ -154,10 +155,10 @@ func TestSetSessionRestartsTheConversationState(t *testing.T) {
 	if a.sess.missingReasoning != (missingReasoningWatch{}) {
 		t.Errorf("missingReasoning = %+v, want the incident to end with its conversation", a.sess.missingReasoning)
 	}
-	if a.sess.compaction.stuck || a.sess.compaction.consecutive != 0 ||
+	if a.sess.compaction.stuck || a.sess.compaction.stuckInputHash != "" || a.sess.compaction.consecutive != 0 ||
 		a.sess.compaction.failedTurn.Load() != 0 || a.sess.compaction.lastTurn.Load() != 0 {
-		t.Errorf("compaction progress = stuck:%t consecutive:%d failedTurn:%d lastTurn:%d, want it restarted",
-			a.sess.compaction.stuck, a.sess.compaction.consecutive,
+		t.Errorf("compaction progress = stuck:%t hash:%q consecutive:%d failedTurn:%d lastTurn:%d, want it restarted",
+			a.sess.compaction.stuck, a.sess.compaction.stuckInputHash, a.sess.compaction.consecutive,
 			a.sess.compaction.failedTurn.Load(), a.sess.compaction.lastTurn.Load())
 	}
 	if a.sess.cacheState != CacheStateUnknown {

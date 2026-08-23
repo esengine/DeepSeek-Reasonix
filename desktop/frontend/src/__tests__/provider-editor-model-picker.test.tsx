@@ -51,13 +51,17 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
 
-function renderPicker(candidates: string[], visionCapability: "configurable" | "unsupported" = "configurable") {
+function renderPicker(
+  candidates: string[],
+  visionCapability: "configurable" | "unsupported" = "configurable",
+  visionModels: string[] = [],
+) {
   return (
     <LocaleProvider>
       <ProviderEditorModelPicker
         candidates={candidates}
         selectedModels={[]}
-        visionModels={[]}
+        visionModels={visionModels}
         visionCapability={visionCapability}
         contextWindows={{}}
         disabled={false}
@@ -101,6 +105,22 @@ await act(async () => {
 });
 ok(rootEl.textContent?.includes("No image input") === true, "known text-only DeepSeek models show a read-only image capability");
 ok(rootEl.querySelectorAll('input[type="checkbox"]').length === 1, "text-only model card does not render a second image checkbox");
+await act(async () => {
+  root.render(renderPicker(["deepseek-v4-flash-vision-exp"], "unsupported", ["deepseek-v4-flash-vision-exp"]));
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("No image input") !== true, "pinned DeepSeek vision SKU does not show the text-only image label");
+ok(rootEl.querySelectorAll('input[type="checkbox"]').length === 1, "pinned DeepSeek vision SKU does not render a configurable image checkbox");
+await act(async () => {
+  root.render(renderPicker(
+    ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
+    "configurable",
+    ["deepseek-v4-flash-vision-exp"],
+  ));
+  await flushPromises();
+});
+ok(rootEl.querySelectorAll('input[type="checkbox"]').length === 4, "configurable DeepSeek models expose image-input checkboxes");
+ok(rootEl.textContent?.includes("No image input") !== true, "configurable DeepSeek models do not use the read-only image-unsupported label");
 ok(providerSupportsServerWebSearch("responses", "https://api.deepseek.com"), "DeepSeek Responses exposes server-side web search");
 ok(providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com/anthropic"), "DeepSeek Anthropic exposes server-side web search");
 ok(!providerSupportsServerWebSearch("openai", "https://api.deepseek.com"), "DeepSeek Chat Completions does not expose server-side web search");
@@ -137,12 +157,12 @@ ok(
   "backend vision capability overrides frontend endpoint inference",
 );
 ok(
-  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://api.deepseek.com" }) === "unsupported",
-  "older backend payloads retain the endpoint-based vision fallback",
+  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://api.deepseek.com" }) === "configurable",
+  "official DeepSeek Settings uses the same image-input checkboxes as other providers",
 );
 ok(
-  providerVisionCapabilityForView({ kind: "anthropic", baseUrl: "https://eu.deepseek.com/anthropic" }) === "unsupported",
-  "older backend payloads treat regional DeepSeek subdomains as text-only",
+  providerVisionCapabilityForView({ kind: "anthropic", baseUrl: "https://eu.deepseek.com/anthropic" }) === "configurable",
+  "regional DeepSeek Settings also expose per-model image-input checkboxes",
 );
 ok(
   providerVisionCapabilityForView({ kind: "responses", baseUrl: "https://deepseek.com" }) === "configurable",
@@ -257,6 +277,8 @@ const providerUrlLabel = Array.from(rootEl.querySelectorAll<HTMLLabelElement>("l
 );
 ok(Boolean(providerUrlLabel) && providerUrlInput?.getAttribute("aria-describedby") !== null, "provider URL input has a programmatic label and description");
 ok(rootEl.textContent?.includes("Reasonix uses it unchanged.") === true, "provider URL helper explains exact request behavior");
+ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.disabled !== true, "new custom provider name stays editable");
+ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.nextElementSibling?.classList.contains("mem-hint") !== true, "new custom provider editor omits the rename hint");
 
 await act(async () => {
   root.render(<div />);
@@ -269,7 +291,8 @@ await act(async () => {
 const webSearchSwitch = rootEl.querySelector<HTMLInputElement>('input[role="switch"]');
 ok(rootEl.textContent?.includes("Server-side web search") === true, "DeepSeek Responses editor separates service capabilities from model selection");
 ok(webSearchSwitch?.checked === true, "curated DeepSeek Responses capability is enabled in the editor");
-ok(rootEl.textContent?.includes("No image input") === true, "DeepSeek Responses editor labels image input as unsupported");
+ok(rootEl.textContent?.includes("Image input") === true, "DeepSeek Responses editor exposes per-model image-input checkboxes");
+ok(rootEl.textContent?.includes("No image input") !== true, "DeepSeek Responses editor does not use the read-only image-unsupported label");
 
 await act(async () => {
   root.render(renderProviderEditor(longCatAnthropicProvider));
@@ -289,6 +312,8 @@ ok(
 const customProviderUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
 ok(rootEl.querySelectorAll('input[type="radio"]').length === 0, "existing custom providers no longer expose an address mode selector");
 ok(customProviderUrlInput?.value === "https://eu.deepseek.com/v1/chat/completions", "legacy base-only providers display their previously effective request URL");
+ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.disabled === true, "existing custom provider name is locked");
+ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.nextElementSibling?.textContent === "Changing the provider name is not supported yet", "existing custom provider editor shows the rename hint");
 
 let migratedProvider: ProviderView | undefined;
 await act(async () => {

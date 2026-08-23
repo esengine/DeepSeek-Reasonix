@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -71,7 +73,20 @@ func (d deleteRange) Preview(ctx context.Context, args json.RawMessage) (diff.Ch
 	return change, err
 }
 
-func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Change, editSource, error) {
+type deleteRangeTarget struct {
+	path         string
+	inclusive    bool
+	source       editSource
+	original     string
+	lines        []string
+	startLine    int
+	endLine      int
+	deleteStart  int
+	deleteEnd    int
+	deletesLines bool
+}
+
+func (d deleteRange) resolveTarget(ctx context.Context, args json.RawMessage) (deleteRangeTarget, error) {
 	var p struct {
 		Path        string `json:"path"`
 		StartAnchor string `json:"start_anchor"`
@@ -79,16 +94,16 @@ func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Ch
 		Inclusive   *bool  `json:"inclusive"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
-		return diff.Change{}, editSource{}, fmt.Errorf("invalid args: %w", err)
+		return deleteRangeTarget{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
-		return diff.Change{}, editSource{}, fmt.Errorf("path is required")
+		return deleteRangeTarget{}, fmt.Errorf("path is required")
 	}
 	if p.StartAnchor == "" {
-		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor is required")
+		return deleteRangeTarget{}, fmt.Errorf("start_anchor is required")
 	}
 	if p.EndAnchor == "" {
-		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor is required")
+		return deleteRangeTarget{}, fmt.Errorf("end_anchor is required")
 	}
 
 	inclusive := true
@@ -98,72 +113,101 @@ func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Ch
 
 	p.Path = resolveIn(d.workDir, p.Path)
 	if err := confinePreview(effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
-		return diff.Change{}, editSource{}, err
+		return deleteRangeTarget{}, err
 	}
 
 	src, err := readEditSource(ctx, d.overlay, p.Path)
 	if err != nil {
-		return diff.Change{}, editSource{}, fmt.Errorf("read %s: %w", p.Path, err)
+		return deleteRangeTarget{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
 	original := src.content
-
-	// Detect line ending style so we can preserve it on write.
-	lineSep := "\n"
-	if strings.Contains(original, "\r\n") {
-		lineSep = "\r\n"
-	}
 
 	// Strip \r for matching (split on \n after removing \r).
 	lines := strings.Split(strings.ReplaceAll(original, "\r", ""), "\n")
 	startLine := findUniqueLine(lines, p.StartAnchor)
 	if startLine == -2 {
-		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.StartAnchor, 5))
+		return deleteRangeTarget{}, fmt.Errorf("start_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.StartAnchor, 5))
 	}
 	if startLine == -1 {
-		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor not found in %s", p.Path)
+		return deleteRangeTarget{}, fmt.Errorf("start_anchor not found in %s", p.Path)
 	}
 	endLine := findUniqueLine(lines, p.EndAnchor)
 	if endLine == -2 {
-		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.EndAnchor, 5))
+		return deleteRangeTarget{}, fmt.Errorf("end_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.EndAnchor, 5))
 	}
 	if endLine == -1 {
-		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor not found in %s", p.Path)
+		return deleteRangeTarget{}, fmt.Errorf("end_anchor not found in %s", p.Path)
 	}
 	if startLine > endLine {
-		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor appears after end_anchor (lines %d and %d)", startLine+1, endLine+1)
+		return deleteRangeTarget{}, fmt.Errorf("start_anchor appears after end_anchor (lines %d and %d)", startLine+1, endLine+1)
 	}
 	deleteStart, deleteEnd, deletesLines, err := deletionLineInterval(startLine, endLine, inclusive, p.Path)
 	if err != nil {
-		return diff.Change{}, editSource{}, err
+		return deleteRangeTarget{}, err
 	}
 	if deletesLines && shouldValidateBraceCompleteDeletion(p.Path) {
 		if err := validateBraceCompleteDeletion(lines, deleteStart, deleteEnd, p.Path); err != nil {
-			return diff.Change{}, editSource{}, err
+			return deleteRangeTarget{}, err
 		}
+	}
+	return deleteRangeTarget{
+		path: p.Path, inclusive: inclusive, source: src, original: original,
+		lines: lines, startLine: startLine, endLine: endLine,
+		deleteStart: deleteStart, deleteEnd: deleteEnd, deletesLines: deletesLines,
+	}, nil
+}
+
+func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Change, editSource, error) {
+	target, err := d.resolveTarget(ctx, args)
+	if err != nil {
+		return diff.Change{}, editSource{}, err
+	}
+	lineSep := "\n"
+	if strings.Contains(target.original, "\r\n") {
+		lineSep = "\r\n"
 	}
 
 	// Build new content
 	var keep []string
-	if inclusive {
-		keep = append(keep, lines[:startLine]...)
-		keep = append(keep, lines[endLine+1:]...)
+	if target.inclusive {
+		keep = append(keep, target.lines[:target.startLine]...)
+		keep = append(keep, target.lines[target.endLine+1:]...)
 	} else {
 		// Same line for both anchors: the kept prefix and suffix would overlap at
 		// that line and duplicate it. There is nothing strictly between a line and
 		// itself, so the exclusive deletion is contradictory — reject it.
-		if startLine == endLine {
-			return diff.Change{}, editSource{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", p.Path)
+		if target.startLine == target.endLine {
+			return diff.Change{}, editSource{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", target.path)
 		}
-		keep = append(keep, lines[:startLine+1]...)
-		keep = append(keep, lines[endLine:]...)
+		keep = append(keep, target.lines[:target.startLine+1]...)
+		keep = append(keep, target.lines[target.endLine:]...)
 	}
 	newContent := strings.Join(keep, lineSep)
 	// Preserve trailing newline if original had one.
-	if newContent != "" && strings.HasSuffix(original, lineSep) && !strings.HasSuffix(newContent, lineSep) {
+	if newContent != "" && strings.HasSuffix(target.original, lineSep) && !strings.HasSuffix(newContent, lineSep) {
 		newContent += lineSep
 	}
 
-	return diff.Build(p.Path, original, newContent, diff.Modify), src, nil
+	return diff.Build(target.path, target.original, newContent, diff.Modify), target.source, nil
+}
+
+// ResolveAnchoredTextTarget exposes the same validated target used by Preview
+// and Execute, without adding anything to the provider-visible tool contract.
+func (d deleteRange) ResolveAnchoredTextTarget(ctx context.Context, args json.RawMessage) (tool.AnchoredTextTargetInfo, error) {
+	target, err := d.resolveTarget(ctx, args)
+	if err != nil {
+		return tool.AnchoredTextTargetInfo{}, err
+	}
+	hashes := make([]string, 0, target.endLine-target.startLine+1)
+	for _, line := range target.lines[target.startLine : target.endLine+1] {
+		sum := sha256.Sum256([]byte(line))
+		hashes = append(hashes, hex.EncodeToString(sum[:]))
+	}
+	return tool.AnchoredTextTargetInfo{
+		Path: target.path, Inclusive: target.inclusive,
+		StartLine: target.startLine + 1, EndLine: target.endLine + 1,
+		LineHashes: hashes,
+	}, nil
 }
 
 // findUniqueLine returns the index of the line that equals target.

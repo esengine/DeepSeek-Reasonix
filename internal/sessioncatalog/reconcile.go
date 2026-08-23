@@ -36,7 +36,7 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 		c.failDirectoryScan(ctx, target.Path, err)
 		return err
 	}
-	if unchanged, err := c.directoryScanCanSkip(ctx, target.Path, signature); err != nil {
+	if unchanged, err := c.directoryScanCanSkip(ctx, target, signature); err != nil {
 		return err
 	} else if unchanged {
 		return nil
@@ -79,7 +79,7 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 			records = append(records, record)
 			generations[record.Path] = generation
 		}
-		if err := c.upsertSessions(ctx, records, generations, "reconcile"); err != nil {
+		if err := c.upsertSessionsWithoutNotification(ctx, records, generations, "reconcile"); err != nil {
 			c.failDirectoryScan(context.Background(), target.Path, err)
 			return err
 		}
@@ -145,25 +145,6 @@ func directorySignature(dir string) (string, error) {
 		_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%d\x00%d\n", name, info.Size(), info.ModTime().UnixNano(), info.Mode())
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func (c *Catalog) directoryScanCanSkip(ctx context.Context, path, signature string) (bool, error) {
-	var previous, state string
-	err := c.db.QueryRowContext(ctx, `SELECT signature,state FROM catalog_directories WHERE path=?`, path).Scan(&previous, &state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if previous != signature || state != "ready" {
-		return false, nil
-	}
-	var missing int
-	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE directory=? AND missing_since>0`, path).Scan(&missing); err != nil {
-		return false, err
-	}
-	return missing == 0, nil
 }
 
 func (c *Catalog) directoryLock(path string) *sync.Mutex {
@@ -723,9 +704,10 @@ func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Statu
 		return status, nil
 	}
 	err := projectiondb.Rebuild(ctx, projectiondb.OpenOptions{
-		Path:       path,
-		MemoryName: "session-catalog-rebuild",
-		Migrations: sessionMigrations(),
+		Path:         path,
+		MemoryName:   "session-catalog-rebuild",
+		Migrations:   sessionMigrations(),
+		RetainBackup: true,
 	}, func(ctx context.Context, db *sql.DB) error {
 		// Populate through a catalog that owns this temporary database handle
 		// without starting background repair workers.

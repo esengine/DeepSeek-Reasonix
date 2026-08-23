@@ -9,6 +9,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import MarkdownHistory from "../components/MarkdownHistory";
+import { TranscriptScrollWriteProvider } from "../components/TranscriptLayoutIntentContext";
 import { parseMarkdown, markdownContentRevision } from "../lib/markdownPipeline";
 import {
   disposeMarkdownWorkerClient,
@@ -219,8 +220,16 @@ console.log("\nmarkdown history rendering");
   };
   const text = Array.from({ length: 420 }, (_, i) => `Paragraph ${i} with some *content*.`).join("\n\n");
   const root5 = createRoot(rootEl);
+  const writeTranscriptOffset = (_owner: "block-window-prepend", top: number) => {
+    rootEl.scrollTop = top;
+    return true;
+  };
   await act(async () => {
-    root5.render(<MarkdownHistory text={text} entryId="md-history-huge" fallback={null} />);
+    root5.render(
+      <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
+        <MarkdownHistory text={text} entryId="md-history-huge" fallback={null} />
+      </TranscriptScrollWriteProvider>,
+    );
   });
   await flush();
   const container = rootEl.querySelector(".md[data-markdown-blocks]");
@@ -267,7 +276,11 @@ console.log("\nmarkdown history rendering");
 
   const replacement = Array.from({ length: 420 }, (_, i) => `Replacement ${i} with some *content*.`).join("\n\n");
   await act(async () => {
-    root5.render(<MarkdownHistory text={replacement} entryId="md-history-huge-replacement" fallback={null} />);
+    root5.render(
+      <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
+        <MarkdownHistory text={replacement} entryId="md-history-huge-replacement" fallback={null} />
+      </TranscriptScrollWriteProvider>,
+    );
   });
   await flush();
   eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "24", "an equal-sized replacement document resets to its own tail");

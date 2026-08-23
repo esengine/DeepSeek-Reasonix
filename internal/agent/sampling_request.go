@@ -15,8 +15,45 @@ type samplingRequest struct {
 	req provider.Request
 }
 
+// modelInputMessages derives the stable provider-visible view from durable
+// storage. Tool Content is the first-visible bounded result; RawContent stays
+// local and is available only through the explicit session result reader.
+func modelInputMessages(msgs []provider.Message) []provider.Message {
+	return provider.ModelMessages(msgs)
+}
+
+// normalizeModelRequestMessages is shared by ordinary sampling and compaction
+// replay so their cacheable prefix has the same role projection and metadata
+// cleanup. Interceptors deliberately remain outside this helper.
+func (a *Agent) normalizeModelRequestMessages(msgs []provider.Message) []provider.Message {
+	requestMessages := a.providerProjectionMessages(modelInputMessages(msgs))
+	// ModelMessages intentionally has a zero-copy fast path for clean input.
+	// Detach before removing local metadata from the request-only representation.
+	requestMessages = append([]provider.Message(nil), requestMessages...)
+	for i := range requestMessages {
+		requestMessages[i].CreatedAt = 0
+		if requestMessages[i].Role == provider.RoleUser {
+			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
+		}
+	}
+	return requestMessages
+}
+
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	return a.svc.prov.Stream(ctx, req)
+	ch, err := a.svc.prov.Stream(ctx, req)
+	if err != nil {
+		if limit := provider.AsOutputLimitError(err); limit != nil && req.MaxTokens > limit.MaxOutputTokens {
+			a.learnOutputBudget(limit.MaxOutputTokens)
+			retryReq := req
+			retryReq.MaxTokens = limit.MaxOutputTokens
+			return a.svc.prov.Stream(ctx, retryReq)
+		}
+		return nil, err
+	}
+	// HTTP-level output-limit errors are returned before a stream channel is
+	// created by SendWithRetry. Preserve the original channel directly so
+	// cancellation and live chunk timing remain unchanged.
+	return ch, nil
 }
 
 func (a *Agent) handleSamplingError(
@@ -58,10 +95,14 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	}
 	if err := a.applyAdmissionToRequest(&frozen.req); err != nil {
 		// One-shot physical overflow recovery. Do not loop.
+		startProjectionVersion := a.currentProjectionVersion()
 		if _, perr := a.contextManager().Prepare(ctx, ContextPreparePolicy{
 			Trigger: CompactionTriggerOverflow,
 			Force:   true,
 		}); perr != nil {
+			return samplingRequest{}, err
+		}
+		if a.currentProjectionVersion() <= startProjectionVersion {
 			return samplingRequest{}, err
 		}
 		rebuilt, rerr := a.buildSamplingRequest(ctx, CompactionTriggerPressure)
@@ -88,14 +129,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	if err != nil {
 		return samplingRequest{}, err
 	}
-	requestMessages := append([]provider.Message(nil), provider.ModelMessages(prepared.Messages)...)
-	requestMessages = a.providerProjectionMessages(requestMessages)
-	for i := range requestMessages {
-		requestMessages[i].CreatedAt = 0
-		if requestMessages[i].Role == provider.RoleUser {
-			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
-		}
-	}
+	requestMessages := a.normalizeModelRequestMessages(prepared.Messages)
 	// context.prepare: extensions may rewrite the message copy feeding THIS
 	// request. The session log is never touched — the replacement is
 	// ephemeral, so the next request starts from the unmodified history.
@@ -125,8 +159,12 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 // explicit range compression can continue to resolve anchors across calls.
 func (a *Agent) providerProjectionMessages(msgs []provider.Message) []provider.Message {
 	if a != nil {
-		if repaired, changed := repairUnreplayableReasoningHistory(a.svc.prov, msgs); changed {
-			msgs = repaired
+		// The provider-declared fallback owns this tool loop. Strict projection
+		// here would erase its completed tool round before adapter serialization.
+		if !a.sess.missingReasoning.fallbackActive || !provider.SupportsMissingReasoningFallback(a.svc.prov) {
+			if repaired, changed := provider.ProjectReplaySafeMessages(a.svc.prov, msgs); changed {
+				msgs = repaired
+			}
 		}
 		if a.strictAlternatingRoles {
 			return coalesceProjectionUserRuns(msgs)

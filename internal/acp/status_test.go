@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/billing"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -320,7 +320,7 @@ func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 	}
 }
 
-func TestStatusWorkModeSetConfigOptionIsDeprecatedNoop(t *testing.T) {
+func TestStatusWorkModeSetConfigOptionSwitchesQualityFloor(t *testing.T) {
 	factory := &runtimeTrackingFactory{configurableFactory: &configurableFactory{}}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -344,8 +344,18 @@ func TestStatusWorkModeSetConfigOptionIsDeprecatedNoop(t *testing.T) {
 		if err := json.Unmarshal(resp.Result, &set); err != nil {
 			t.Fatalf("set work mode %q result: %v", value, err)
 		}
-		if set.DeprecatedNotice != agentpreset.DeprecatedNotice {
-			t.Fatalf("set work mode %q deprecatedNotice = %q", value, set.DeprecatedNotice)
+		want := control.QualityFloorStandard
+		if value == "delivery" {
+			want = control.QualityFloorDelivery
+		}
+		var floorOpt *SessionConfigOption
+		for i := range set.ConfigOptions {
+			if set.ConfigOptions[i].ID == "quality_floor" {
+				floorOpt = &set.ConfigOptions[i]
+			}
+		}
+		if floorOpt == nil || floorOpt.CurrentValue != want {
+			t.Fatalf("quality floor option after work_mode %q = %+v, want %q", value, floorOpt, want)
 		}
 		status := getStatus(t, client, sessionID)
 		if status.WorkMode != "balanced" || status.PlannerMode != "on" {

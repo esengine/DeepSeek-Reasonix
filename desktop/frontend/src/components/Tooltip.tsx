@@ -41,6 +41,7 @@ export function Tooltip({
   block = false,
   disabled = false,
   className,
+  delay = 180,
 }: {
   label?: ReactNode;
   children: ReactNode;
@@ -49,6 +50,7 @@ export function Tooltip({
   block?: boolean;
   disabled?: boolean;
   className?: string;
+  delay?: number;
 }) {
   const id = useId();
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -148,7 +150,7 @@ export function Tooltip({
   const triggerProps = {
     className: triggerClass,
     "aria-describedby": open ? id : undefined,
-    onMouseEnter: () => show(),
+    onMouseEnter: () => show(delay),
     onMouseLeave: hide,
     onPointerDownCapture: hide,
     onFocus: () => show(0),

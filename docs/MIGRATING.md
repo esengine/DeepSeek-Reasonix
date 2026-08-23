@@ -201,8 +201,7 @@ LE/BE, and GB18030 (a superset of GBK). This matches v1's behavior.
 
 ## Reporting issues
 
-Issues and PRs are labelled by line: **`v1`** (legacy TypeScript) and **`v2`**
-(Go). File new reports against the line you're using. The legacy `v1` line is in
-maintenance mode — bug fixes only, no new features.
+Issues and PRs are labelled by line: **`v2`** (Go, `main-v2`) and **`v3`**
+(Studio, `studio`). File new reports against the line you're using.
 
 Questions? Open a [Discussion](https://github.com/esengine/DeepSeek-Reasonix/discussions).

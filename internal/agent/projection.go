@@ -48,6 +48,12 @@ const (
 	CompactionModeSnip       = "snip"
 )
 
+const (
+	SummaryInputCachePrefix        = "cache_prefix"
+	SummaryInputExtensionRewritten = "extension_rewritten"
+	SummaryInputNonPrefix          = "non_prefix"
+)
+
 // ContextProjection is the model-visible view of a session. The canonical
 // transcript in Session.Messages is never replaced by this structure.
 type ContextProjection struct {
@@ -151,6 +157,7 @@ type CompactionTelemetry struct {
 	CacheWriteTokens  int    `json:"cache_write_tokens"`
 	RequestCount      int    `json:"request_count"`
 	ProviderRequestID string `json:"provider_request_id,omitempty"`
+	SummaryInputMode  string `json:"summary_input_mode,omitempty"`
 	Error             string `json:"error,omitempty"`
 }
 
@@ -244,16 +251,115 @@ func summaryContentHash(summary string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// coveredPrefixHash fingerprints the provider-visible prefix of msgs[:n].
-// ModelMessages strips local fields and SanitizeToolPairing applies the same
-// deterministic repair used on the wire, keeping hashes stable when LoadSession
-// persists an equivalent repair while still detecting real prefix edits.
+// coveredPrefixHash fingerprints the current model-visible prefix of msgs[:n].
+// Tool Content is the stable bounded provider representation; RawContent is
+// local-only. SanitizeToolPairing applies the same deterministic repair used on
+// the wire, keeping hashes stable when LoadSession repairs a transcript.
 func coveredPrefixHash(msgs []provider.Message, n int) string {
+	if n <= 0 || n > len(msgs) {
+		return ""
+	}
+	visible := modelInputMessages(msgs[:n])
+	return providerVisibleFingerprint(provider.SanitizeToolPairing(visible))
+}
+
+// boundedCoveredPrefixHash is the v3 bounded provider fingerprint. Keep the
+// named helper for old sidecar and load-repair compatibility tests.
+func boundedCoveredPrefixHash(msgs []provider.Message, n int) string {
 	if n <= 0 || n > len(msgs) {
 		return ""
 	}
 	visible := provider.ModelMessages(msgs[:n])
 	return providerVisibleFingerprint(provider.SanitizeToolPairing(visible))
+}
+
+// promotedCoveredPrefixHash reproduces the temporary v3 behavior that promoted
+// full tool RawContent into every provider request.
+func promotedCoveredPrefixHash(msgs []provider.Message, n int) string {
+	if n <= 0 || n > len(msgs) {
+		return ""
+	}
+	promoted := append([]provider.Message(nil), msgs[:n]...)
+	for i := range promoted {
+		if promoted[i].Role == provider.RoleTool && promoted[i].RawContent != "" {
+			promoted[i].Content = promoted[i].RawContent
+		}
+	}
+	return providerVisibleFingerprint(provider.SanitizeToolPairing(provider.ModelMessages(promoted)))
+}
+
+// normalizePromotedProjectionToolBodies converts the provider-visible tool
+// bodies persisted by the temporary RawContent-promoting implementation back
+// to canonical bounded Content. Every tool message must match a canonical tool
+// result exactly by identity and old provider-visible body. Duplicate call IDs
+// are safe only when every matching candidate maps to the same bounded body.
+func normalizePromotedProjectionToolBodies(projection, canonical []provider.Message, n int) ([]provider.Message, bool) {
+	if n <= 0 || n > len(canonical) {
+		return nil, false
+	}
+	normalized := append([]provider.Message(nil), projection...)
+	for i, projected := range normalized {
+		if projected.Role != provider.RoleTool {
+			continue
+		}
+		visibleBody := projected.Content
+		if projected.ProviderContent != "" {
+			visibleBody = projected.ProviderContent
+		}
+		boundedBody := ""
+		matched := false
+		for _, candidate := range canonical[:n] {
+			if candidate.Role != provider.RoleTool || candidate.ToolCallID != projected.ToolCallID || candidate.Name != projected.Name {
+				continue
+			}
+			matchesBounded := visibleBody == candidate.Content
+			matchesPromoted := candidate.RawContent != "" && visibleBody == candidate.RawContent
+			if !matchesBounded && !matchesPromoted {
+				continue
+			}
+			if matched && boundedBody != candidate.Content {
+				return nil, false
+			}
+			boundedBody = candidate.Content
+			matched = true
+		}
+		if !matched {
+			return nil, false
+		}
+		normalized[i].Content = boundedBody
+		normalized[i].RawContent = ""
+		normalized[i].ProviderContent = ""
+	}
+	return normalized, true
+}
+
+// migratePromotedCoveredPrefixHash normalizes a sidecar written while full tool
+// RawContent was model-visible. Migration is exact and atomic: both its hash and
+// retained tool bodies must match the historical form. Unrelated, stale, or
+// ambiguous sidecars stay invalid so callers drop only their projection body.
+func migratePromotedCoveredPrefixHash(st *CompactionState, msgs []provider.Message) bool {
+	if st == nil {
+		return false
+	}
+	n := st.Projection.CoveredCount
+	stored := st.Projection.CoveredPrefixHash
+	currentHash := coveredPrefixHash(msgs, n)
+	if stored == "" || currentHash == "" || stored == currentHash ||
+		stored != promotedCoveredPrefixHash(msgs, n) {
+		return false
+	}
+	normalizedMessages, ok := normalizePromotedProjectionToolBodies(st.Projection.Messages, msgs, n)
+	if !ok {
+		return false
+	}
+	st.Projection.Messages = normalizedMessages
+	st.Projection.CoveredPrefixHash = currentHash
+	if st.LastReceipt != nil && st.LastReceipt.CoveredPrefixHash == stored {
+		receipt := *st.LastReceipt
+		receipt.CoveredPrefixHash = currentHash
+		st.LastReceipt = &receipt
+	}
+	return true
 }
 
 // legacyCoveredPrefixHash reproduces the v1.25.2 fingerprint. It is used only
@@ -280,9 +386,9 @@ func migrateLegacyCoveredPrefixHash(st *CompactionState, current, preRepair []pr
 	if stored == "" || legacyCoveredPrefixHash(preRepair, n) != stored {
 		return false
 	}
-	preRepairWireHash := coveredPrefixHash(preRepair, n)
+	preRepairWireHash := boundedCoveredPrefixHash(preRepair, n)
 	currentHash := coveredPrefixHash(current, n)
-	if currentHash == "" || preRepairWireHash != currentHash {
+	if currentHash == "" || preRepairWireHash != boundedCoveredPrefixHash(current, n) {
 		return false
 	}
 	st.Projection.CoveredPrefixHash = currentHash

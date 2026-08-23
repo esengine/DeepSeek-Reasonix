@@ -46,6 +46,7 @@ const (
 	ReasonUserConstraint ReasonCode = "user_constraint"
 	ReasonPlanBoundary   ReasonCode = "plan_boundary"
 	ReasonTestsForbidden ReasonCode = "tests_forbidden"
+	ReasonPolicyFloor    ReasonCode = "policy_floor"
 	ReasonConflict       ReasonCode = "constraint_conflict"
 )
 

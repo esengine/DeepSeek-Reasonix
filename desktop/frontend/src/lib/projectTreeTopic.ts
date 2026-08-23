@@ -38,6 +38,15 @@ export function isTopicNode(node: ProjectNode): boolean {
   return node.kind === "topic" || node.kind === "global_topic";
 }
 
+// projectTreeTopicRecoveryCopyCount is the folded recovery-copy badge count for
+// a topic row. Runtime session rows and non-positive/missing counts render no
+// badge; the copies themselves stay folded behind the canonical row (#8525).
+export function projectTreeTopicRecoveryCopyCount(node: ProjectNode): number {
+  if (!isTopicNode(node)) return 0;
+  const count = node.recoveryCopyCount ?? 0;
+  return count > 0 ? Math.floor(count) : 0;
+}
+
 export function projectTreeRevisionIsFresh(currentRevision: number, incomingRevision: number): boolean {
   return incomingRevision >= currentRevision;
 }
@@ -85,6 +94,25 @@ export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectN
   return next;
 }
 
+// A directory scan commits catalog rows in batches, but an incomplete page is
+// not authoritative for replacement, deletion, timestamps, or order. Keep the
+// last complete resident rows byte-for-byte and append only newly discovered
+// keys until a complete page can replace the canonical first page.
+export function mergeIncompleteProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[]): ProjectNode[] {
+  const residentKeys = new Set(current.map((node) => node.key));
+  const discovered = incoming.filter((node) => !residentKeys.has(node.key));
+  return discovered.length === 0 ? current : [...current, ...discovered];
+}
+
+export function projectTreeTopicPageSignature(
+  query: string,
+  timeFilter: string,
+  sortMode: WorkbenchSortMode,
+  limit: number,
+): string {
+  return [query.trim(), timeFilter, sortMode, String(limit)].join("\u001f");
+}
+
 // Topic page loads rewrite children, so a signature keyed only on the project
 // shells lets the debounced reload effect observe arrivals without re-arming
 // itself on its own writes.
@@ -117,6 +145,35 @@ export function projectTreeWithoutTopics(tree: ProjectNode[], topicIds: Readonly
     if (filteredChildren !== children) {
       changed = true;
       next.push({ ...node, children: filteredChildren });
+    } else {
+      next.push(node);
+    }
+  }
+  return changed ? next : tree;
+}
+
+// After a successful rename, paint the new label immediately instead of
+// waiting for the catalog event round-trip.
+export function projectTreeWithTopicTitle(tree: ProjectNode[], topicId: string, title: string): ProjectNode[] {
+  const id = topicId.trim();
+  if (!id) return tree;
+  let changed = false;
+  const next: ProjectNode[] = [];
+  for (const node of tree) {
+    if (node.topicId === id && (isTopicNode(node) || isRuntimeSessionNode(node))) {
+      if (node.label !== title) {
+        changed = true;
+        next.push({ ...node, label: title });
+      } else {
+        next.push(node);
+      }
+      continue;
+    }
+    const children = asArray(node.children);
+    const renamedChildren = projectTreeWithTopicTitle(children, id, title);
+    if (renamedChildren !== children) {
+      changed = true;
+      next.push({ ...node, children: renamedChildren });
     } else {
       next.push(node);
     }

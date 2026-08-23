@@ -2,13 +2,50 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type projectTreeRuntimeState struct {
 	revision atomic.Uint64
+	// activityAt records the last activity-status event per tab ID. The TTL
+	// watchdog reaps a live status that sees no terminating event; the state
+	// lives here (not on WorkspaceTab) to keep tabs.go within budget.
+	watchdogOnce sync.Once
+	activityMu   sync.Mutex
+	activityAt   map[string]time.Time
+}
+
+// noteActivityStatus refreshes a tab's activity timestamp on every status
+// event, even an unchanged one: the TTL watchdog measures silence, not how
+// long a status has been displayed, so a long but active turn is never reaped.
+func (s *projectTreeRuntimeState) noteActivityStatus(a *App, tabID string) {
+	s.setActivityAt(tabID, time.Now())
+	// The watchdog starts lazily with the first status event — before that
+	// there is nothing to reap.
+	s.watchdogOnce.Do(func() { a.watchTopicActivityStatus() })
+}
+
+func (s *projectTreeRuntimeState) setActivityAt(tabID string, at time.Time) {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	if s.activityAt == nil {
+		s.activityAt = map[string]time.Time{}
+	}
+	s.activityAt[tabID] = at
+}
+
+func (s *projectTreeRuntimeState) activityAtSnapshot() map[string]time.Time {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	out := make(map[string]time.Time, len(s.activityAt))
+	maps.Copy(out, s.activityAt)
+	return out
 }
 
 func syncRuntimeWorkspaceRootSpelling(tab *WorkspaceTab, projects []desktopProject) bool {
@@ -140,4 +177,110 @@ func (a *App) emitRuntimeEvent(name string, payload ...any) {
 	if a != nil && a.ctx != nil {
 		a.runtimeEvents.Emit(a.ctx, name, payload...)
 	}
+}
+
+const (
+	// topicActivityStatusTTL bounds how long a live spinner status may go
+	// without any turn event before it is treated as orphaned. A flat TTL is
+	// used instead of a per-session P99: turn durations are not tracked
+	// per session in this package, and simplicity wins (#8528/#8555/#8859).
+	topicActivityStatusTTL = 10 * time.Minute
+	// topicActivityReapInterval is how often the watchdog scans for orphans.
+	topicActivityReapInterval = 30 * time.Second
+)
+
+// liveTopicActivityStatus reports statuses that must be terminated by a
+// TurnDone event; if that event is lost the spinner would run forever.
+// waiting_confirmation is excluded: it waits on the user, not on turn events.
+func liveTopicActivityStatus(status string) bool {
+	switch status {
+	case topicStatusThinking, topicStatusStreaming:
+		return true
+	}
+	return false
+}
+
+// watchTopicActivityStatus reaps live activity statuses that have seen no
+// turn event for longer than the TTL — the missed-TurnDone safety net.
+func (a *App) watchTopicActivityStatus() {
+	a.goSafe("topicActivityWatchdog", func() {
+		ticker := time.NewTicker(topicActivityReapInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-a.bootContext().Done():
+				return
+			case now := <-ticker.C:
+				a.reapStaleTopicActivityStatus(now)
+			}
+		}
+	})
+}
+
+func (a *App) reapStaleTopicActivityStatus(now time.Time) {
+	activityAt := a.projectTreeRuntime.activityAtSnapshot()
+	a.mu.Lock()
+	var reaped []string
+	for _, tab := range a.runtimeTabsLocked() {
+		if tab == nil || !liveTopicActivityStatus(tab.ActivityStatus) {
+			continue
+		}
+		if at := activityAt[tab.ID]; at.IsZero() || now.Sub(at) < topicActivityStatusTTL {
+			continue
+		}
+		reaped = append(reaped, tab.ID+":"+tab.ActivityStatus)
+		tab.ActivityStatus = ""
+	}
+	a.mu.Unlock()
+	if len(reaped) == 0 {
+		return
+	}
+	slog.Warn("desktop: cleared stale topic activity status (no turn event within TTL)",
+		"tabs", reaped, "ttl", topicActivityStatusTTL.String())
+	a.emitProjectTreeRuntimeChangedWithLegacy()
+}
+
+// reconcileTabActivityStatus clears a live spinner status the session's
+// controller does not corroborate — a TurnDone missed while the session was
+// detached would otherwise spin forever after reopen. The controller query
+// takes the controller's own lock, so it runs outside App.mu (the same lock
+// order rule as catalogRuntimeSnapshots).
+func (a *App) reconcileTabActivityStatus(tab *WorkspaceTab) bool {
+	if a == nil || tab == nil {
+		return false
+	}
+	a.mu.RLock()
+	status := tab.ActivityStatus
+	ctrl := tab.Ctrl
+	a.mu.RUnlock()
+	if ctrl == nil || !liveTopicActivityStatus(status) || ctrl.Running() {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if tab.ActivityStatus != status {
+		// A new turn (or its TurnDone) landed while the locks were dropped.
+		return false
+	}
+	tab.ActivityStatus = ""
+	slog.Warn("desktop: cleared stale topic activity status on session open", "tab", tab.ID, "status", status)
+	return true
+}
+
+// setTabActivityStatus records the project-tree status for a tab's in-flight
+// turn and notes the event time for the TTL watchdog.
+func (a *App) setTabActivityStatus(tabID, status string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tab := a.tabByEventSinkIDLocked(tabID)
+	if tab == nil {
+		return false
+	}
+	a.projectTreeRuntime.noteActivityStatus(a, tab.ID)
+	status = normalizeTopicStatus(status)
+	if tab.ActivityStatus == status {
+		return false
+	}
+	tab.ActivityStatus = status
+	return true
 }

@@ -32,7 +32,7 @@ model = "x"
 	registerBootTokenProfileTestProvider()
 
 	var surfaces [][]string
-	for _, mode := range []string{"", TokenModeEconomy, TokenModeFull, TokenModeDelivery, "light", "balanced"} {
+	for _, mode := range []string{"", "economy", TokenModeFull, TokenModeDelivery, "light", "balanced"} {
 		prov := testutil.NewMock("ucap-"+mode, testutil.Turn{Text: "done"})
 		setBootTokenProfileTestProvider(t, prov)
 		ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: mode, AgentPreset: mode})

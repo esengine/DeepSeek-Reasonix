@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"reasonix/internal/extension/protocol"
 	"reasonix/internal/extension/providerconv"
@@ -104,6 +105,7 @@ func (r *Resolver) open(ctx context.Context, p *Provider, client ProviderClient,
 		deliveryWake:  make(chan struct{}, 1),
 		nextSeq:       1,
 		pending:       make(map[int64]provider.Chunk),
+		activity:      make(chan struct{}, 1),
 	}
 	r.mu.Lock()
 	r.streams[id] = stream
@@ -132,7 +134,12 @@ func (r *Resolver) open(ctx context.Context, p *Provider, client ProviderClient,
 	if p.effort != nil {
 		effort = *p.effort
 	}
-	opened, err := client.ProviderStreamOpen(ctx, protocol.StreamOpenParams{
+	idleTimeout := r.idleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultStreamIdleTimeout
+	}
+	openCtx, cancelOpen := context.WithTimeout(ctx, idleTimeout)
+	opened, err := client.ProviderStreamOpen(openCtx, protocol.StreamOpenParams{
 		StreamID:    id,
 		ProviderRef: p.ref,
 		Model:       p.descriptor.Model,
@@ -140,6 +147,7 @@ func (r *Resolver) open(ctx context.Context, p *Provider, client ProviderClient,
 		Request:     providerconv.RequestToProtocol(request),
 		SeqBase:     1,
 	})
+	cancelOpen()
 	if err != nil {
 		r.removeStream(id, stream)
 		go client.ProviderStreamCancel(id)
@@ -191,19 +199,47 @@ func mapStreamOpenError(client ProviderClient, err error) error {
 // disconnect keeps draining buffered chunks before the terminal interruption,
 // mirroring the broker's detach semantics.
 func (r *Resolver) watchStream(ctx context.Context, id string, stream *extensionStream) {
-	select {
-	case <-stream.done:
-		return
-	case <-stream.client.Disconnected():
-		r.mu.Lock()
-		if r.streams[id] == stream {
-			r.finishLocked(id, stream, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
-				Err: fmt.Errorf("extension sidecar %s disconnected", stream.client.PluginID()),
-			}})
+	idleTimeout := r.idleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultStreamIdleTimeout
+	}
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-stream.done:
+			return
+		case <-stream.activity:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idleTimeout)
+			continue
+		case <-stream.client.Disconnected():
+			r.mu.Lock()
+			if r.streams[id] == stream {
+				r.finishLocked(id, stream, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
+					Err: fmt.Errorf("extension sidecar %s disconnected", stream.client.PluginID()),
+				}})
+			}
+			r.mu.Unlock()
+			return
+		case <-ctx.Done():
+		case <-timer.C:
+			r.mu.Lock()
+			if r.streams[id] == stream {
+				r.finishLocked(id, stream, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
+					Err: fmt.Errorf("extension provider stream stalled: no activity for %s", idleTimeout),
+				}})
+			}
+			r.mu.Unlock()
+			go stream.client.ProviderStreamCancel(id)
+			return
 		}
-		r.mu.Unlock()
-		return
-	case <-ctx.Done():
+		break
 	}
 	r.mu.Lock()
 	if r.streams[id] == stream {

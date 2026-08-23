@@ -77,6 +77,33 @@ func (c *Config) SetPlannerModel(name string) error {
 	return nil
 }
 
+// SetVisionModel sets (or clears) the optional image-understanding fallback.
+// "auto" is resolved by the runtime within the active provider; an explicit
+// value must be a configured vision-capable model.
+func (c *Config) SetVisionModel(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		c.Agent.VisionModel = ""
+		return nil
+	}
+	if strings.EqualFold(name, "auto") {
+		c.Agent.VisionModel = "auto"
+		return nil
+	}
+	entry, ok := c.ResolveModel(name)
+	if !ok {
+		return fmt.Errorf("set vision model: no such model %q (configured: %s)", name, c.providerNames())
+	}
+	if !EffectiveVision(entry) {
+		return fmt.Errorf("set vision model: %q does not support image input", name)
+	}
+	if !entry.Configured() {
+		return fmt.Errorf("set vision model: provider %q has no key", entry.Name)
+	}
+	c.Agent.VisionModel = entry.Name + "/" + entry.Model
+	return nil
+}
+
 // SetAutoPlan is retained for source compatibility with older desktop clients.
 // Automatic plan mode is retired: "off" is an idempotent compatibility write,
 // while every attempt to enable it is rejected explicitly.
@@ -544,7 +571,8 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 
 	fallback := ""
-	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+	visionRefsProvider := c.modelRefTargetsProvider(c.Agent.VisionModel, name)
+	if defaultRefsProvider || plannerRefsProvider || visionRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
 		fallback = c.providerRemovalFallback(name)
 	}
 	if defaultRefsProvider && fallback == "" {
@@ -558,6 +586,9 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 	if plannerRefsProvider {
 		c.Agent.PlannerModel = fallback
+	}
+	if visionRefsProvider {
+		c.Agent.VisionModel = ""
 	}
 	if subagentRefsProvider {
 		c.Agent.SubagentModel = fallback

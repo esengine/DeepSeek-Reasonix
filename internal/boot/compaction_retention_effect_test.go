@@ -12,8 +12,8 @@ import (
 
 // compactionEffectProvider answers ordinary turns with enough text to drive the
 // window past the compaction trigger, and summarizer turns with a digest that
-// deliberately records nothing — so a constraint can only reach a later request
-// by surviving verbatim.
+// deliberately records nothing. This proves old user turns are summary-owned
+// rather than silently pinned verbatim by the host.
 type compactionEffectProvider struct {
 	mu   sync.Mutex
 	reqs []provider.Request
@@ -27,7 +27,7 @@ func (p *compactionEffectProvider) Stream(_ context.Context, req provider.Reques
 	p.reqs = append(p.reqs, req)
 	p.mu.Unlock()
 	text := p.bulk
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting the earlier part") {
+	if len(req.Messages) > 0 && strings.HasPrefix(req.Messages[len(req.Messages)-1].Content, "Compact the preceding conversation prefix") {
 		text = "## Standing facts\n- none recorded"
 	}
 	ch := make(chan provider.Chunk, 2)
@@ -43,12 +43,11 @@ func (p *compactionEffectProvider) requests() []provider.Request {
 	return append([]provider.Request(nil), p.reqs...)
 }
 
-// TestEffectConstraintSurvivesCompactionThroughRealBuild is the final-boundary
-// proof: a constraint stated on an early turn must still appear verbatim in a
-// provider request issued after compaction folded that turn's neighbourhood.
-// The summarizer here records nothing, so a digest cannot carry it — component
-// correctness in the partition is not the same as the model still being told.
-func TestEffectConstraintSurvivesCompactionThroughRealBuild(t *testing.T) {
+// TestOldConstraintIsSummaryOwnedAfterCompactionThroughRealBuild proves an old
+// user constraint enters the summary region and is not separately preserved.
+// A useful summarizer should retain it; this deliberately lossy fixture makes
+// accidental host-side verbatim protection observable.
+func TestOldConstraintIsSummaryOwnedAfterCompactionThroughRealBuild(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -57,8 +56,7 @@ func TestEffectConstraintSurvivesCompactionThroughRealBuild(t *testing.T) {
 	provider.Register("boot-compaction-effect", func(provider.Config) (provider.Provider, error) {
 		return rec, nil
 	})
-	// 32000 stays under the 64K threshold where the recent tail takes its 32K
-	// floor, which would otherwise swallow the whole transcript and never fold.
+	// 32000 leaves enough history outside the fixed 16% retained tail to fold.
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -80,9 +78,8 @@ context_window = 32000
 	}
 	defer ctrl.Close()
 
-	// The constraint is the *second* user turn on purpose: the first one is
-	// pinned into the stable prefix, so only a later turn exercises the fold-
-	// region retention this test is about.
+	// The constraint is the second user turn so it exercises the old-history
+	// fold region rather than the system prefix.
 	const constraint = "standing constraint: never change the public API"
 	for _, prompt := range []string{"start the task", constraint,
 		"keep going", "keep going", "keep going", "keep going", "keep going"} {
@@ -110,8 +107,8 @@ context_window = 32000
 			found = true
 		}
 	}
-	if !found {
-		t.Fatalf("constraint absent from the post-compaction request; the model was never told it.\nmessages=%s",
+	if found {
+		t.Fatalf("old user constraint was preserved verbatim outside the deliberately lossy summary.\nmessages=%s",
 			messageDigest(reqs[compacted].Messages))
 	}
 }

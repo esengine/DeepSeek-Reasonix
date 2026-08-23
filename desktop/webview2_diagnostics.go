@@ -37,6 +37,7 @@ type webRuntimeDiagnostic struct {
 	FailureSourceModule string `json:"failureSourceModule,omitempty"`
 	RuntimeVersion      string `json:"runtimeVersion"`
 	GPUMode             string `json:"gpuMode"`
+	CompatibilityMode   bool   `json:"compatibilityMode,omitempty"`
 	Recovery            string `json:"recovery"`
 }
 

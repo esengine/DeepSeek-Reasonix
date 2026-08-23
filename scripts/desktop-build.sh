@@ -166,7 +166,10 @@ build_args+=(-platform "$PLATFORM" -ldflags "$ldflags")
 [ "$os" = linux ] && build_args+=(-tags webkit2_41)
 
 echo "==> wails build ${build_args[*]}"
-wails build "${build_args[@]}"
+# Vite receives the channel through the environment, while the Go shell gets it
+# through ldflags. Keep both identities aligned so preview/canary test packages
+# expose test-only frontend diagnostics instead of silently compiling as stable.
+REASONIX_CHANNEL="$CHANNEL" wails build "${build_args[@]}"
 if [ "$os" != windows ]; then
 	# Linux still ships a one-shot migrator named reasonix-guard in the portable
 	# tarball so 1.18–1.19.1 updaters can hand off. macOS does not bundle Guard.

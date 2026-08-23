@@ -5,7 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import type { TranscriptScrollMode } from "../lib/transcriptScrollController";
+import type { TranscriptScrollMode } from "../lib/transcriptScrollArbiter";
 import { transcriptSelectionStore, type TranscriptSelectableRow } from "../lib/transcriptSelectionStore";
 
 type RetentionApi = ReturnType<typeof useTranscriptSelectionRetention>;

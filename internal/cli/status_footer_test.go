@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
@@ -41,6 +42,47 @@ func TestTurnReceiptKeepsCompletePerTurnBreakdown(t *testing.T) {
 	}
 	if strings.Contains(got, "\033[") {
 		t.Fatalf("NO_COLOR turn receipt contains escapes: %q", got)
+	}
+}
+
+func TestTurnReceiptShowsOccurrenceRateBand(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	defer i18n.DetectLanguage("en")
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	i18n.DetectLanguage("zh")
+	u := &provider.Usage{PromptTokens: 1, TotalTokens: 1}
+	q := &billing.CostQuote{Original: billing.Money{Amount: "0.01", Currency: "CNY"}, CostComplete: true, RateBand: billing.RateBandOffPeak}
+	if got := ansi.Strip(renderQuotedTurnReceipt(u, q, nil)); !strings.Contains(got, "低峰") {
+		t.Fatalf("receipt = %q, want low-rate label", got)
+	}
+	q.RateBand = ""
+	if got := ansi.Strip(renderQuotedTurnReceipt(u, q, nil)); strings.Contains(got, "低峰") || strings.Contains(got, "高峰") {
+		t.Fatalf("legacy receipt invented a rate band: %q", got)
+	}
+}
+
+func TestSessionCostStatusAggregatesRateBandsWithoutRepricing(t *testing.T) {
+	defer i18n.DetectLanguage("en")
+	i18n.DetectLanguage("zh")
+	quote := func(amount, band string) *billing.CostQuote {
+		selected := billing.Money{Amount: amount, Currency: "CNY"}
+		return &billing.CostQuote{
+			Original: selected, Selected: &selected, Valuations: map[string]billing.Valuation{
+				"CNY": {Money: selected, Basis: billing.BasisIdentity},
+			},
+			CostComplete: true, DisplayComplete: true, Complete: true, RateBand: band,
+		}
+	}
+	var m chatTUI
+	m.addSessionCostQuote(quote("1", billing.RateBandPeak))
+	m.addSessionCostQuote(quote("2", billing.RateBandOffPeak))
+	if got := ansi.Strip(m.sessionCostStatus()); !strings.Contains(got, "¥3.0000") || !strings.Contains(got, "混合档位") {
+		t.Fatalf("session cost = %q", got)
+	}
+	m.addSessionCostQuote(quote("1", ""))
+	if got := ansi.Strip(m.sessionCostStatus()); strings.Contains(got, "混合档位") || strings.Contains(got, "高峰") || strings.Contains(got, "低峰") {
+		t.Fatalf("unknown member retained a claimed band: %q", got)
 	}
 }
 

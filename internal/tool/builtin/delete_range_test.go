@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,5 +308,28 @@ func TestDeleteRangePreview(t *testing.T) {
 	}
 	if change.OldText != body {
 		t.Errorf("OldText = %q, want %q", change.OldText, body)
+	}
+}
+
+func TestDeleteRangeResolvesClosedAnchorTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(path, []byte("before\nstart\nmiddle\nend\nafter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target, err := (deleteRange{workDir: dir}).ResolveAnchoredTextTarget(context.Background(), argsJSON(t, map[string]any{
+		"path": "target.txt", "start_anchor": "start", "end_anchor": "end", "inclusive": false,
+	}))
+	if err != nil {
+		t.Fatalf("ResolveAnchoredTextTarget: %v", err)
+	}
+	if target.Path != path || target.StartLine != 2 || target.EndLine != 4 || target.Inclusive || len(target.LineHashes) != 3 {
+		t.Fatalf("target = %+v, want canonical path and closed lines 2-4", target)
+	}
+	for i, line := range []string{"start", "middle", "end"} {
+		sum := sha256.Sum256([]byte(line))
+		if target.LineHashes[i] != hex.EncodeToString(sum[:]) {
+			t.Fatalf("line %d hash = %q, want %q", i, target.LineHashes[i], hex.EncodeToString(sum[:]))
+		}
 	}
 }

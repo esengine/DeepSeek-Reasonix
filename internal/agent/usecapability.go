@@ -421,6 +421,11 @@ type UseCapabilityTool struct {
 	ledger   *capability.Ledger
 	audit    *capability.Audit
 	catalog  func() capability.Catalog
+	// toolResultSession is bound by Agent.New to that frontend's own session.
+	// CloneForAgent intentionally leaves it empty so parent transcripts cannot
+	// leak into planner or child frontends before their Agent binds them.
+	toolResultMu      sync.RWMutex
+	toolResultSession func() *Session
 	// state is session-shared connection observation when built via
 	// MCPCapabilityRuntime; nil falls back to a private map for tests.
 	state *mcpProxySharedState
@@ -594,6 +599,16 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=inspect")
 		}
+		if id == sessionToolResultCapabilityID {
+			out, err := t.inspectSessionToolResult()
+			if err != nil {
+				return tool.ResolvedCall{}, err
+			}
+			base.SkipExecute = true
+			base.Result = out
+			base.ReadOnly = true
+			return base, nil
+		}
 		out, err := t.inspect(ctx, id)
 		if err != nil {
 			if t.audit != nil {
@@ -641,6 +656,9 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 	case "call":
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=call")
+		}
+		if id == sessionToolResultCapabilityID {
+			return t.resolveSessionToolResult(p.Arguments, base)
 		}
 		return t.resolveCall(ctx, id, p.Arguments, base)
 	default:
@@ -724,6 +742,12 @@ func (t *UseCapabilityTool) listCapabilities() (string, error) {
 		Description string `json:"description,omitempty"`
 	}
 	var caps []capInfo
+	if t.currentToolResultTarget() != nil {
+		caps = append(caps, capInfo{
+			ID: sessionToolResultCapabilityID, Kind: "session", Name: "tool_result", Status: "ready", ReadOnly: true,
+			Description: "Read one bounded page from a complete tool result retained in this agent's current session.",
+		})
+	}
 	if t.catalog != nil {
 		for _, e := range t.catalog().Entries {
 			// Skip provider-visible core tools — they are already top-level.

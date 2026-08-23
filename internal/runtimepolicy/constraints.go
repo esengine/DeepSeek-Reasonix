@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"reasonix/internal/shellparse"
+	"reasonix/internal/taskcontract"
 )
 
 // Constraints are explicit user or host limits. They never encode task
@@ -16,7 +17,10 @@ type Constraints struct {
 	ForbidExternal          bool
 	RequireFullVerification bool
 	PlanModeReadOnly        bool
-	Notes                   []string
+	// PolicyFloor is the session quality floor, set from session state only —
+	// never parsed from user text. It stamps receipts at write time.
+	PolicyFloor taskcontract.PolicyFloor
+	Notes       []string
 }
 
 // ParseConstraints accepts only explicit forbid/limit phrasing.

@@ -34,6 +34,9 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 		if plan.releaseParentWrite != nil {
 			plan.releaseParentWrite()
 		}
+		if plan.releaseLease != nil {
+			plan.releaseLease()
+		}
 		if plan.resolvedMeta == nil {
 			return
 		}
@@ -98,7 +101,7 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 			errMsg:  loopGuardBlockErrMsg,
 		}, true
 	}
-	if out, blocked := a.staleAnchorEditBlock(plan.call); blocked {
+	if out, blocked := a.staleAnchorEditBlock(ctx, plan.call); blocked {
 		return toolOutcome{
 			output:  out,
 			blocked: true,
@@ -540,50 +543,14 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 // PreToolUse hooks and preview checkpoints, and injects call context. All of
 // this happens after permission and before the concrete Execute call.
 func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
-	// Acquire after permission is granted but before PreToolUse: hooks are user
-	// shell code and can themselves change the workspace. This keeps readers
-	// concurrent and avoids holding the workspace during an approval prompt while
-	// still covering every write-side action that follows authorization.
-	// Lazy workspace lease on the first real writer for every role setting.
-	if plan.effects.WorkspaceMutation && a.svc.workspaceLease != nil {
-		if err := a.svc.workspaceLease.AcquireWrite(ctx); err != nil {
-			return toolOutcome{
-				output:  fmt.Sprintf("blocked: the workspace did not become available for writing: %v", err),
-				blocked: true,
-				errMsg:  "blocked: workspace write lease unavailable",
-			}, true
-		}
-	}
-	// Resolve the concrete execution target before hooks. A proxy may carry a
-	// different target/name/argument set than the provider-visible call.
-	plan.runTool = plan.execTool
-	plan.runArgs = plan.execArgs
-	if plan.resolved.Target != nil {
-		plan.runTool = plan.resolved.Target
-		plan.runArgs = plan.resolved.Args
-		if len(plan.runArgs) == 0 {
-			plan.runArgs = json.RawMessage(`{}`)
-		}
-	}
-	// Hold the parent claim before PreToolUse: hooks are user shell code and may
-	// mutate the same workspace. The reservation remains live through hooks,
-	// checkpointing, and the concrete Execute call, closing both hook-side and
-	// check-before-write TOCTOU windows. Dynamic Economy/MCP tools are covered
-	// here after registry lookup without schema-changing wrappers.
-	// executeOne defers plan.releaseParentWrite so every return path releases.
-	if releaseParentWrite, perr := a.reserveParentWrite(plan.runTool, plan.runArgs, !plan.effects.WorkspaceMutation); perr != nil {
-		return toolOutcome{
-			output:  "blocked: " + perr.Error(),
-			blocked: true,
-			errMsg:  "blocked: write path claimed by background subagent",
-		}, true
-	} else if releaseParentWrite != nil {
-		plan.releaseParentWrite = releaseParentWrite
+	if blocked, early := a.prepareWriteCoordination(ctx, plan); early {
+		return blocked, true
 	}
 	// Acquire the checkpoint barrier before preimage capture and any hook. It is
 	// held through post hooks and AfterMutation so rewind cannot interleave with
 	// writer-side user code.
-	if plan.effects.WorkspaceMutation && a.svc.mutationObserver != nil && a.svc.mutationObserver.Store() != nil {
+	if (plan.effects.WorkspaceMutation || plan.hooksMayMutateWorkspace) &&
+		a.svc.mutationObserver != nil && a.svc.mutationObserver.Store() != nil {
 		barrier := a.svc.mutationObserver.Store().Barrier()
 		if err := barrier.EnterWrite(); err != nil {
 			return toolOutcome{output: "blocked: " + err.Error(), blocked: true, errMsg: "blocked: mutation barrier unavailable"}, true
@@ -598,9 +565,9 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if plan.effects.WorkspaceMutation {
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != ""
-		if toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
-			a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
-		}
+	}
+	if plan.hooksMayMutateWorkspace && a.svc.mutationObserver != nil {
+		a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
 	if a.svc.hooks != nil {
@@ -746,6 +713,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// change the previewed path even when the concrete tool returned an error.
 	a.finalizeObservedToolReceipts(plan, result, execution, err)
 	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
+	if err == nil && readOnly {
+		a.recordModelTextObservation(plan, result)
+	}
 	if err != nil {
 		detail := result
 		// Malformed-args failures are a transient model JSON glitch (e.g. options
@@ -802,6 +772,11 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if obs != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil && change.Path != "" {
+				if evidence.ClassifyWriteScope(change.Path, a.writeWorkspaceRoot, a.scratchRoots()) == evidence.WriteScopeScratch {
+					obs.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapScratch, Tool: toolName, Path: change.Path, Detail: "scratch path is not a project file"})
+					plan.mutationPath = change.Path
+					return
+				}
 				obs.BeforeMutationFromChange(change, toolName)
 				plan.mutationPath = change.Path
 				return

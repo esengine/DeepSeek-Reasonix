@@ -14,8 +14,9 @@ import (
 // fold stopped reducing, how many ran back to back, and which retries already
 // ran in the active turn. The fields are cleared together on lineage resets.
 type compactionProgress struct {
-	stuck       bool // a fold landed above the trigger, so pressure retries are pointless
-	consecutive int  // back-to-back folds since one last helped
+	stuck          bool   // a fold landed above the trigger, so the same-view pressure retry is pointless
+	stuckInputHash string // provider-visible view covered by stuck; changed input may retry
+	consecutive    int    // back-to-back folds since one last helped
 	// failedTurn backs off changed-view retries within one active tool loop.
 	// A later user turn may retry, while hard-ceiling recovery bypasses it.
 	failedTurn atomic.Int64
@@ -65,12 +66,17 @@ func (m ContextManager) ObserveUsage(u *provider.Usage) {
 }
 
 // Prepare is the sole automatic maintenance entry. Below compact_ratio it does
-// nothing. At or above the trigger it runs one summary transaction that either
-// installs a checkpoint or records a generation-scoped blocked/failed receipt.
+// nothing. At or above the trigger it runs one single-flight prune/summary
+// transaction, with at most two successful summary attempts under pressure.
 func (m ContextManager) Prepare(ctx context.Context, policy ContextPreparePolicy) (PreparedContext, error) {
 	if policy.Trigger == "" {
 		policy.Trigger = CompactionTriggerPressure
 	}
+	if m.agent == nil {
+		return PreparedContext{}, nil
+	}
+	m.agent.sess.compactionRunMu.Lock()
+	defer m.agent.sess.compactionRunMu.Unlock()
 	return m.prepareOnce(ctx, policy)
 }
 
@@ -100,9 +106,8 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		prepared.InputTokens = est
 	}
 	inputHash := a.contextMaintenanceInputHash(visible)
-	// Receipts back off sub-critical retries only: at a physical recovery point
-	// (overflow, or a view at/above the hard ceiling) the fold must still run —
-	// degradeFoldSummary guarantees mustFree progress.
+	// Receipts back off sub-critical retries only. Physical overflow may retry
+	// maintenance once, but a failed summary never fabricates fallback content.
 	if blocked, _ := a.contextMaintenanceBlocked(inputHash); blocked && policy.Trigger != CompactionTriggerManual &&
 		policy.Trigger != CompactionTriggerOverflow && est < hard {
 		return prepared, nil
@@ -110,7 +115,15 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 	if est < fold {
 		a.sess.compaction.consecutive = 0
 		a.sess.compaction.stuck = false
+		a.sess.compaction.stuckInputHash = ""
 		a.sess.compaction.failedTurn.Store(0)
+	}
+	if a.sess.compaction.stuck && a.sess.compaction.stuckInputHash != inputHash {
+		// The previous projection could not reclaim enough from its exact view,
+		// but newly appended messages create a new fold boundary and may retry.
+		a.sess.compaction.stuck = false
+		a.sess.compaction.stuckInputHash = ""
+		a.sess.compaction.consecutive = 0
 	}
 	if a.sess.compaction.stuck && policy.Trigger == CompactionTriggerPressure && est < hard {
 		return prepared, nil
@@ -121,74 +134,95 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		return prepared, nil
 	}
 
+	if policy.Trigger == CompactionTriggerPressure || policy.Trigger == CompactionTriggerOverflow {
+		applied, err := a.pruneToolResultsToProjectionLocked(policy.Trigger)
+		if err != nil {
+			return PreparedContext{}, err
+		}
+		if applied {
+			prepared = m.currentPrepared()
+			est = prepared.InputTokens
+			inputHash = a.contextMaintenanceInputHash(prepared.Messages)
+			if (policy.Trigger == CompactionTriggerPressure && est < fold) ||
+				(policy.Trigger == CompactionTriggerOverflow && est < hard) {
+				return prepared, nil
+			}
+		}
+	}
+
 	return m.foldContext(ctx, prepared, policy, inputHash, est, fold, hard, forceFold)
 }
 
 func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContext, policy ContextPreparePolicy, inputHash string, est, fold, hard int, forceFold bool) (PreparedContext, error) {
 	a := m.agent
-	// Where this function would answer ErrCompactionRequired, the fold is the
-	// only way out and a failed summary must degrade rather than strand the turn.
-	mustFree := policy.Trigger != CompactionTriggerManual && (policy.Trigger == CompactionTriggerOverflow || est >= hard)
-	outcome, err := a.compactToProjection(ctx, policy.Trigger, policy.Instructions, forceFold, mustFree)
-	if err != nil {
-		if errors.Is(err, errCompressStaleContext) && policy.Trigger != CompactionTriggerManual {
-			// Transcript changed during the summary call: discard the candidate
-			// and block this generation so we do not pay for a second summary.
-			reason := "context changed during summary; automatic retry blocked for this generation"
+	maxSummaries := 1
+	if policy.Trigger == CompactionTriggerPressure {
+		maxSummaries = 2
+	}
+	result := prepared
+	for range maxSummaries {
+		mustFree := policy.Trigger != CompactionTriggerManual && (policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard)
+		outcome, err := a.compactToProjectionLocked(ctx, policy.Trigger, policy.Instructions, forceFold, mustFree)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return PreparedContext{}, err
+			}
+			if errors.Is(err, errCompressStaleContext) && policy.Trigger != CompactionTriggerManual {
+				reason := "context changed during summary; automatic retry blocked for this generation"
+				a.recordContextMaintenanceBlocked(inputHash, policy.Trigger, "summary", reason)
+				if policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard {
+					return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
+				}
+				return m.currentPrepared(), nil
+			}
+			status := "failed"
+			if errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, errCheckpointRejected) {
+				status = "blocked"
+			}
+			reason := fmt.Sprintf("context summary failed: %v", err)
+			a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", status, reason)
+			if policy.Trigger == CompactionTriggerManual {
+				return PreparedContext{}, err
+			}
+			latest := m.currentPrepared()
+			if policy.Trigger == CompactionTriggerOverflow || latest.InputTokens >= hard {
+				return PreparedContext{}, fmt.Errorf("%w: %w", ErrCompactionRequired, err)
+			}
+			return latest, nil
+		}
+		if outcome == CompactionNoop {
+			reason := "context is above the maintenance threshold but no foldable region remains"
 			a.recordContextMaintenanceBlocked(inputHash, policy.Trigger, "summary", reason)
-			if policy.Trigger == CompactionTriggerOverflow || est >= hard {
+			latest := m.currentPrepared()
+			if policy.Trigger == CompactionTriggerOverflow || policy.Force || latest.InputTokens >= hard {
 				return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
 			}
-			return prepared, nil
+			return latest, nil
 		}
-		status := "failed"
-		if errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, errCheckpointRejected) {
-			status = "blocked"
+
+		result = m.currentPrepared()
+		if policy.Trigger == CompactionTriggerManual || result.InputTokens < fold ||
+			(policy.Trigger == CompactionTriggerOverflow && result.InputTokens < hard) {
+			a.sess.compaction.stuck = false
+			a.sess.compaction.stuckInputHash = ""
+			a.sess.compaction.consecutive = 0
+			a.sess.compaction.failedTurn.Store(0)
+			return result, nil
 		}
-		reason := fmt.Sprintf("context summary failed: %v", err)
-		a.recordContextMaintenanceOutcome(inputHash, policy.Trigger, "summary", status, reason)
-		if policy.Trigger == CompactionTriggerManual {
-			return PreparedContext{}, err
-		}
-		if policy.Trigger == CompactionTriggerOverflow || est >= hard {
-			return PreparedContext{}, fmt.Errorf("%w: %w", ErrCompactionRequired, err)
-		}
-		return prepared, nil
-	}
-	if outcome == CompactionNoop {
-		canonical, _ := a.sess.conversation.snapshotMessagesVersion()
-		if policy.Trigger == CompactionTriggerPressure && a.activeTurnStart(canonical) >= 0 {
-			return prepared, nil
-		}
-		reason := "context is above the maintenance threshold but no foldable region remains"
-		a.recordContextMaintenanceBlocked(inputHash, policy.Trigger, "summary", reason)
-		if policy.Trigger == CompactionTriggerOverflow || policy.Force || est >= hard {
-			return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
-		}
-		return prepared, nil
+		forceFold = false
+		inputHash = a.contextMaintenanceInputHash(result.Messages)
 	}
 
-	result := m.currentPrepared()
-	if result.InputTokens < fold {
-		// A fold that landed under the trigger proves compaction reduces again;
-		// a stale stuck latch must not suppress the next pressure round.
-		a.sess.compaction.stuck = false
-		a.sess.compaction.consecutive = 0
-		a.sess.compaction.failedTurn.Store(0)
+	reason := fmt.Sprintf("summary result remains above fold trigger after %d attempts (%d >= %d)", maxSummaries, result.InputTokens, fold)
+	blockedInputHash := a.contextMaintenanceInputHash(result.Messages)
+	a.recordContextMaintenanceBlocked(blockedInputHash, policy.Trigger, "summary", reason)
+	a.sess.compaction.stuck = true
+	a.sess.compaction.stuckInputHash = blockedInputHash
+	a.sess.compaction.consecutive += maxSummaries
+	if policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard {
+		return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
 	}
-	if policy.Trigger == CompactionTriggerManual {
-		return result, nil
-	}
-	if result.InputTokens >= fold {
-		reason := fmt.Sprintf("summary result remains above fold trigger (%d >= %d)", result.InputTokens, fold)
-		a.recordContextMaintenanceBlocked(a.contextMaintenanceInputHash(result.Messages), policy.Trigger, "summary", reason)
-		a.sess.compaction.stuck = true
-		a.sess.compaction.consecutive++
-		if policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard {
-			return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
-		}
-		slog.Info("agent: context maintenance paused below hard ceiling", "reason", reason)
-	}
+	slog.Info("agent: context maintenance paused below hard ceiling", "reason", reason)
 	return result, nil
 }
 
@@ -211,10 +245,7 @@ func (a *Agent) estimatedVisibleRequestTokens(visible []provider.Message) int {
 	if a == nil {
 		return 0
 	}
-	msgs := a.providerProjectionMessages(provider.ModelMessages(append([]provider.Message(nil), visible...)))
-	for i := range msgs {
-		msgs[i].CreatedAt = 0
-	}
+	msgs := a.normalizeModelRequestMessages(visible)
 	var tools []provider.ToolSchema
 	if a.svc.tools != nil {
 		tools = a.svc.tools.Schemas()

@@ -60,9 +60,12 @@ fleet(tasks=[
 - `task` / `fleet` 项上的 `profile` 按名称解析 `runAs: subagent` Skill（显式名称可调用
   `invocation: manual` Profile）。
 - Profile 正文成为子智能体的**完整**系统提示词，不再隐式叠加 concise 默认提示。
-- `write_paths` 声明互不重叠的写入目标，使多个写入子智能体可共享同一工作区并行。
-  写入任务若省略 `write_paths`，则声明整个工作区（与其他写入 claim 互斥）。
-  在 `fleet` 中，多个整工作区 claim 或任何路径重叠会在预检阶段整批失败，不会启动任何任务。
+- `write_paths` 声明写入目标，使多个写入子智能体可共享同一工作区并行。文件声明
+  必须互不重叠才能同时开工。目录声明可以同时开工，只有落盘到同一文件时才互斥。
+  写入任务若省略 `write_paths`，开工时声明整个工作区。若之后只有路径型写入，
+  预留会收窄到已写文件；`bash`/MCP 会重新变为整区。在 `fleet` 中，省略路径的并发
+  项会在调度器里排队，不再预检失败；并发的目录声明可以同时开工。整区 writer
+  一旦进入队列，后到的 writer 不得越过它。
 - 会话默认：`agent.max_subagent_concurrency = 6`、`agent.max_parallel_writers = 3`
   （均可配置为 1–32，且写入上限不得超过总上限）。
 

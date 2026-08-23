@@ -2,6 +2,7 @@ import { memo, type RefObject, useCallback, useEffect, useId, useLayoutEffect, u
 import { createPortal } from "react-dom";
 import { AlertCircle, Code2, Maximize2, Minimize2, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { CopyButton } from "./CopyButton";
+import { createMermaidPanZoom, type MermaidPanZoomInstance, type MermaidPanZoomOptions } from "./mermaidPanZoom";
 import { openExternal } from "../lib/bridge";
 import { markdownImageSource } from "../lib/markdownImage";
 
@@ -25,17 +26,9 @@ type MermaidRenderAdapter = (
   signal: AbortSignal,
 ) => Promise<string>;
 
-type PanZoomInstance = {
-  destroy(): void;
-  resize(): unknown;
-  fit(): unknown;
-  center(): unknown;
-  zoomIn(): unknown;
-  zoomOut(): unknown;
-  reset(): unknown;
-};
+type PanZoomInstance = MermaidPanZoomInstance;
 
-type PanZoomFactory = (svg: SVGSVGElement, options?: Record<string, unknown>) => PanZoomInstance;
+type PanZoomFactory = (svg: SVGSVGElement, options?: MermaidPanZoomOptions) => PanZoomInstance;
 
 const MAX_TEXT_SIZE = 100000;
 const MIN_ZOOM = 0.3;
@@ -46,8 +39,6 @@ const XLINK_NS = "http://www.w3.org/1999/xlink";
 let mermaidApi: MermaidApi | null = null;
 let initPromise: Promise<MermaidApi> | null = null;
 let renderQueue: Promise<void> = Promise.resolve();
-let panZoomFactory: PanZoomFactory | null = null;
-let panZoomPromise: Promise<PanZoomFactory | null> | null = null;
 let renderAdapterForTest: MermaidRenderAdapter | null = null;
 let panZoomFactoryForTest: PanZoomFactory | null | undefined;
 
@@ -210,15 +201,7 @@ async function renderMermaid(
 
 async function ensurePanZoomFactory(): Promise<PanZoomFactory | null> {
   if (panZoomFactoryForTest !== undefined) return panZoomFactoryForTest;
-  if (panZoomFactory) return panZoomFactory;
-  if (!panZoomPromise) {
-    panZoomPromise = import("svg-pan-zoom").then((mod) => {
-      const factory = (("default" in mod ? mod.default : mod) as unknown) as PanZoomFactory;
-      panZoomFactory = factory;
-      return factory;
-    }).catch(() => null);
-  }
-  return panZoomPromise;
+  return createMermaidPanZoom;
 }
 
 export function isSafeMermaidHref(href: string | null | undefined): boolean {
@@ -317,7 +300,7 @@ function destroyPanZoom(instance: PanZoomInstance | null): void {
   try {
     instance.destroy();
   } catch {
-    /* svg-pan-zoom cleanup is best-effort across browser and test DOMs. */
+    /* pan/zoom listener cleanup is best-effort across browser and test DOMs. */
   }
 }
 
@@ -332,9 +315,8 @@ export function safelyRunPanZoom(instance: PanZoomInstance | null, action: () =>
     action();
     return true;
   } catch {
-    // svg-pan-zoom asks SVGMatrix.inverse() to invert the current transform.
-    // Hidden/zero-sized layouts can produce a singular matrix in WebKit and
-    // Chromium; keep that library detail out of the global crash surface.
+    // Pan/zoom math reads live layout (getBoundingClientRect); a detached or
+    // zero-sized surface must never reach the global crash surface (#8068).
     return false;
   }
 }
@@ -429,14 +411,6 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
         destroyPanZoom(panZoomRef.current);
         try {
           instance = factory(svg, {
-            zoomEnabled: true,
-            panEnabled: true,
-            controlIconsEnabled: false,
-            dblClickZoomEnabled: true,
-            // Fitting inside the constructor can run before the portal/layout has
-            // dimensions, which is the matrix-inverse crash seen in diagnostics.
-            fit: false,
-            center: false,
             minZoom: MIN_ZOOM,
             maxZoom: MAX_ZOOM,
             zoomScaleSensitivity: 0.3,

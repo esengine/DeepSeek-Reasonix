@@ -1,31 +1,55 @@
-import { AlertTriangle, MessageSquarePlus, PanelBottomClose, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, MessageSquare, MessageSquarePlus, PanelBottomClose, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
+import {
+  detectShortcutPlatform,
+  formatShortcutCombo,
+  onShortcutsChanged,
+  resolvedShortcutCombo,
+  useGlobalShortcut,
+} from "../lib/keyboardShortcuts";
 import { useT } from "../lib/i18n";
 import { startTerminalEventBridge } from "../lib/terminalEvents";
 import { useTerminalStore } from "../store/terminal";
 import { TerminalSessionRail } from "./TerminalSessionRail";
-import { TerminalView } from "./TerminalView";
+import { TerminalView, type TerminalSelectionAction, type TerminalViewHandle } from "./TerminalView";
+
+const SELECTION_ACTION_EDGE_GAP = 8;
 
 export function TerminalPanel({
   tabId,
   cwd,
   readOnly,
+  open,
+  fitEnabled = true,
   onClose,
   onAddOutput,
+  onAddToChat,
 }: {
   tabId: string;
   cwd?: string;
   readOnly: boolean;
+  open: boolean;
+  fitEnabled?: boolean;
   onClose: () => void;
   onAddOutput: (sessionId: string) => void;
+  onAddToChat: (text: string) => void;
 }) {
   const t = useT();
   const [selectedShellId, setSelectedShellId] = useState("default");
-  const workspace = useTerminalStore((state) => state.workspace);
-  const loading = useTerminalStore((state) => state.loading);
-  const error = useTerminalStore((state) => state.error);
-  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
+  const [selectionAction, setSelectionAction] = useState<TerminalSelectionAction | null>(null);
+  const [actionPoint, setActionPoint] = useState<{ left: number; top: number } | null>(null);
+  const selectionActionRef = useRef<HTMLDivElement>(null);
+  const terminalViewRef = useRef<TerminalViewHandle>(null);
+  // App can render the new tab before this panel's sync effect advances the
+  // process-wide terminal store. Never expose the previous tab's terminal in
+  // that gap: even one painted frame could route input or a stale overlay to
+  // the new tab with the old session id.
+  const workspace = useTerminalStore((state) => state.tabId === tabId ? state.workspace : null);
+  const loading = useTerminalStore((state) => state.tabId === tabId ? state.loading : true);
+  const error = useTerminalStore((state) => state.tabId === tabId ? state.error : null);
+  const activeSessionId = useTerminalStore((state) => state.tabId === tabId ? state.activeSessionId : null);
   const syncWorkspace = useTerminalStore((state) => state.syncWorkspace);
   const ensureReady = useTerminalStore((state) => state.ensureReady);
   const createSession = useTerminalStore((state) => state.createSession);
@@ -33,6 +57,79 @@ export function TerminalPanel({
   const clearError = useTerminalStore((state) => state.clearError);
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const capabilityRef = useRef({ tabId, readOnly });
+  const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
+  const [shortcutRevision, setShortcutRevision] = useState(0);
+  useEffect(() => onShortcutsChanged(() => setShortcutRevision((value) => value + 1)), []);
+  const addShortcut = useMemo(
+    () => formatShortcutCombo(resolvedShortcutCombo("selection.addToChat", shortcutPlatform), shortcutPlatform),
+    // shortcutRevision re-resolves the combo after the user changes it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shortcutPlatform, shortcutRevision],
+  );
+
+  useLayoutEffect(() => {
+    if (!selectionAction) {
+      setActionPoint(null);
+      return;
+    }
+    const rect = selectionActionRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setActionPoint(selectionAction.point);
+      return;
+    }
+    setActionPoint({
+      left: Math.min(
+        Math.max(SELECTION_ACTION_EDGE_GAP, selectionAction.point.left),
+        Math.max(SELECTION_ACTION_EDGE_GAP, window.innerWidth - rect.width - SELECTION_ACTION_EDGE_GAP),
+      ),
+      top: Math.min(
+        Math.max(SELECTION_ACTION_EDGE_GAP, selectionAction.point.top),
+        Math.max(SELECTION_ACTION_EDGE_GAP, window.innerHeight - rect.height - SELECTION_ACTION_EDGE_GAP),
+      ),
+    });
+  }, [selectionAction]);
+
+  // The floating action only outlives the gesture when the terminal keeps its
+  // focus: Escape, an outside click, a resize, or a scroll dismisses it.
+  useEffect(() => {
+    if (!selectionAction) return;
+    const close = () => setSelectionAction(null);
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && selectionActionRef.current?.contains(event.target)) return;
+      setSelectionAction(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectionAction(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [selectionAction]);
+
+  useEffect(() => {
+    if (!open) setSelectionAction(null);
+  }, [open]);
+
+  const addSelectionToChat = useCallback(() => {
+    if (!selectionAction) return;
+    onAddToChat(selectionAction.text);
+    terminalViewRef.current?.clearSelection();
+    setSelectionAction(null);
+  }, [onAddToChat, selectionAction]);
+
+  useGlobalShortcut(
+    "selection.addToChat",
+    addSelectionToChat,
+    [],
+    open && Boolean(selectionAction),
+  );
 
   useEffect(() => {
     startTerminalEventBridge();
@@ -57,6 +154,10 @@ export function TerminalPanel({
     : [{ id: "default", label: t("terminal.defaultShell") }];
   const active = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const terminalReadOnly = readOnly || Boolean(workspace?.readOnly);
+
+  useLayoutEffect(() => {
+    setSelectionAction(null);
+  }, [active?.id, tabId]);
 
   return (
     <section className="terminal-panel" aria-label={t("terminal.title")}>
@@ -114,11 +215,32 @@ export function TerminalPanel({
             />
           )}
           <div className="terminal-panel__content">
-            {active ? <TerminalView key={active.id} tabId={tabId} session={active} /> : (
+            {active ? <TerminalView key={active.id} ref={terminalViewRef} tabId={tabId} session={active} open={open} fitEnabled={fitEnabled} onSelectionActionChange={setSelectionAction} onAddToChat={onAddToChat} /> : (
               <div className="terminal-empty terminal-empty--action"><TerminalSquare size={22} /><p>{t("terminal.empty")}</p><button type="button" className="btn btn--secondary btn--small" onClick={newSession}><Plus size={14} />{t("terminal.newSession")}</button></div>
             )}
           </div>
         </div>
+      )}
+      {open && selectionAction && typeof document !== "undefined" && createPortal(
+        <div
+          ref={selectionActionRef}
+          className="transcript-selection-action"
+          role="toolbar"
+          aria-label={t("selection.actions")}
+          style={{
+            left: actionPoint?.left ?? selectionAction.point.left,
+            top: actionPoint?.top ?? selectionAction.point.top,
+            visibility: actionPoint ? "visible" : "hidden",
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <button type="button" onClick={addSelectionToChat}>
+            <MessageSquare size={14} aria-hidden="true" />
+            <span>{t("selection.addToChat")}</span>
+            <kbd>{addShortcut}</kbd>
+          </button>
+        </div>,
+        document.body,
       )}
     </section>
   );

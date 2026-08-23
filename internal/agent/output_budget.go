@@ -3,7 +3,10 @@ package agent
 import (
 	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/nilutil"
@@ -18,6 +21,18 @@ const contextWindowSourceExplicit = "explicit"
 // contextWindowSourceDefault matches config.ContextWindowSourceDefault.
 const contextWindowSourceDefault = "default"
 
+const learnedOutputBudgetTTL = 24 * time.Hour
+
+type learnedOutputBudgetCacheEntry struct {
+	completionBudget int
+	expiresAt        time.Time
+}
+
+var learnedOutputBudgetCache = struct {
+	sync.Mutex
+	entries map[string]learnedOutputBudgetCacheEntry
+}{entries: make(map[string]learnedOutputBudgetCacheEntry)}
+
 type outputBudgetState struct {
 	outputBudget int
 	// lastUsage caches the latest provider telemetry for per-turn readouts.
@@ -31,8 +46,10 @@ type outputBudgetState struct {
 }
 
 // learnedContextBudget is an Agent-local observation of the live provider/model
-// window. It is never persisted and dies with the Agent (model/tab rebuild),
-// but survives transcript swaps handled by SetSession.
+// window. Completion limits are additionally shared through the short-lived
+// provider/model cache below so a model rebuild does not immediately repeat a
+// known over-limit request. The cache is deliberately in-memory and expires
+// after one day; it is not a persisted global provider limit.
 type learnedContextBudget struct {
 	windowTokens     int
 	completionBudget int
@@ -145,6 +162,73 @@ func contextBudgetPolicyOf(p provider.Provider) provider.ContextBudgetPolicy {
 		return provider.ContextBudgetPolicy{}
 	}
 	return provider.ResolveContextBudgetPolicy(p)
+}
+
+func (a *Agent) learnOutputBudget(limit int) {
+	if a == nil || limit <= 0 {
+		return
+	}
+	cacheLearnedOutputBudget(outputBudgetCacheKey(a), limit)
+	current := a.sess.output.learned.Load()
+	if current != nil && current.completionBudget > 0 && current.completionBudget <= limit {
+		return
+	}
+	learned := &learnedContextBudget{completionBudget: limit}
+	if current != nil {
+		learned.windowTokens = current.windowTokens
+	}
+	a.sess.output.learned.Store(learned)
+}
+
+func outputBudgetCacheKey(a *Agent) string {
+	if a == nil {
+		return ""
+	}
+	providerName := ""
+	if !nilutil.IsNil(a.svc.prov) {
+		providerName = strings.TrimSpace(a.svc.prov.Name())
+	}
+	modelRef := strings.TrimSpace(a.modelRef)
+	if providerName == "" && modelRef == "" {
+		return ""
+	}
+	// Provider names are route-specific for the built-in OpenCode Go entries;
+	// retaining modelRef as a second component keeps custom routes isolated too.
+	return providerName + "|" + modelRef
+}
+
+func cacheLearnedOutputBudget(key string, limit int) {
+	if strings.TrimSpace(key) == "" || limit <= 0 {
+		return
+	}
+	now := time.Now()
+	learnedOutputBudgetCache.Lock()
+	defer learnedOutputBudgetCache.Unlock()
+	if current, ok := learnedOutputBudgetCache.entries[key]; ok && current.expiresAt.After(now) && current.completionBudget > 0 && current.completionBudget <= limit {
+		return
+	}
+	learnedOutputBudgetCache.entries[key] = learnedOutputBudgetCacheEntry{
+		completionBudget: limit,
+		expiresAt:        now.Add(learnedOutputBudgetTTL),
+	}
+}
+
+func cachedLearnedOutputBudget(key string) int {
+	if strings.TrimSpace(key) == "" {
+		return 0
+	}
+	now := time.Now()
+	learnedOutputBudgetCache.Lock()
+	defer learnedOutputBudgetCache.Unlock()
+	entry, ok := learnedOutputBudgetCache.entries[key]
+	if !ok {
+		return 0
+	}
+	if !entry.expiresAt.After(now) {
+		delete(learnedOutputBudgetCache.entries, key)
+		return 0
+	}
+	return entry.completionBudget
 }
 
 func sharedWindowInputPolicyOf(p provider.Provider) provider.SharedWindowInputPolicy {
@@ -330,8 +414,17 @@ func (a *Agent) learnedCompletionBudget() int {
 	if a == nil {
 		return 0
 	}
+	cached := cachedLearnedOutputBudget(outputBudgetCacheKey(a))
 	if snap := a.sess.output.learned.Load(); snap != nil {
+		if cached > 0 && (snap.completionBudget <= 0 || cached < snap.completionBudget) {
+			a.learnOutputBudget(cached)
+			return cached
+		}
 		return snap.completionBudget
+	}
+	if cached > 0 {
+		a.learnOutputBudget(cached)
+		return cached
 	}
 	return 0
 }
@@ -444,6 +537,14 @@ func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error
 	}
 	if policy.AutoOutputTokens <= 0 && a.learnedCompletionBudget() > 0 {
 		policy.AutoOutputTokens = a.learnedCompletionBudget()
+	}
+	if learned := a.learnedCompletionBudget(); learned > 0 {
+		if policy.AutoOutputTokens <= 0 || learned < policy.AutoOutputTokens {
+			policy.AutoOutputTokens = learned
+		}
+		if policy.MaxOutputTokens <= 0 || learned < policy.MaxOutputTokens {
+			policy.MaxOutputTokens = learned
+		}
 	}
 	adm.WindowMode = policy.WindowMode.String()
 	adm.LimitMode = policy.LimitMode.String()

@@ -181,7 +181,12 @@ const readinessNotice = readinessState.items[readinessState.items.length - 1];
 eq(readinessNotice.kind, "notice", "final readiness appends a notice");
 eq(readinessNotice.kind === "notice" && readinessNotice.level, "info", "final readiness uses informational severity");
 eq(readinessNotice.kind === "notice" && readinessNotice.variant, "delivery", "final readiness uses the delivery status treatment");
-eq(readinessNotice.kind === "notice" && readinessNotice.title, "Task completion checks are not complete", "final readiness uses localized product copy");
+eq(readinessNotice.kind === "notice" && readinessNotice.title, "The assistant replied, but task completion checks have not passed", "final readiness distinguishes assistant prose from host-owned completion state");
+eq(
+  readinessNotice.kind === "notice" && readinessNotice.text,
+  "The response above is assistant-generated text, not the system check result. Reasonix still found required completion steps that are not complete; expand Details to see the exact gaps.",
+  "final readiness explains why a completed-sounding answer can still be gated",
+);
 eq(readinessNotice.kind === "notice" && readinessNotice.detail, "Still needed: verification, change review", "structured requirements produce localized detail");
 eq(readinessNotice.kind === "notice" && readinessNotice.action, "continue_delivery", "final readiness offers a recovery action");
 const readinessUser = readinessState.items.find((it) => it.kind === "user");

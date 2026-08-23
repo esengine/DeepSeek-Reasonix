@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"reasonix/internal/config"
 )
 
 // topic_activation.go implements the two-phase topic activation used by the
@@ -352,13 +354,14 @@ type TabMetaRefreshEvent struct {
 // by the workspace root the values were computed for: a root mismatch serves
 // empty values rather than another root's branch/capability. model keys the
 // image-input computation so a model switch invalidates it without
-// invalidating the (root-scoped) git branch.
+// invalidating the (root-scoped) git branch or fallback setting.
 type tabMetaExtras struct {
-	workspaceRoot     string
-	model             string
-	gitBranch         string
-	imageInputEnabled bool
-	fetchedAt         time.Time
+	workspaceRoot         string
+	model                 string
+	gitBranch             string
+	imageInputEnabled     bool
+	visionFallbackEnabled bool
+	fetchedAt             time.Time
 }
 
 // tabMetaExtrasFor returns the cached extras valid for (root, model) and
@@ -427,7 +430,17 @@ func (a *App) refreshTabMetaExtras(tab *WorkspaceTab) {
 	if root != "" {
 		gitBranch = workspaceGitBranch(root)
 	}
-	imageInputEnabled := a.imageInputEnabledForRootModel(root, model)
+	imageInputEnabled := false
+	visionFallbackEnabled := false
+	if cfg, err := a.loadConfigForVision(root); err == nil && cfg != nil {
+		if model == "" {
+			model = cfg.DefaultModel
+		}
+		if entry, ok := cfg.ResolveModel(model); ok {
+			imageInputEnabled = config.EffectiveVision(entry)
+		}
+		visionFallbackEnabled = strings.TrimSpace(cfg.Agent.VisionModel) != ""
+	}
 
 	a.mu.Lock()
 	if a.tabs[tab.ID] != tab {
@@ -435,11 +448,12 @@ func (a *App) refreshTabMetaExtras(tab *WorkspaceTab) {
 		return
 	}
 	tab.metaExtras.Store(&tabMetaExtras{
-		workspaceRoot:     root,
-		model:             model,
-		gitBranch:         gitBranch,
-		imageInputEnabled: imageInputEnabled,
-		fetchedAt:         time.Now(),
+		workspaceRoot:         root,
+		model:                 model,
+		gitBranch:             gitBranch,
+		imageInputEnabled:     imageInputEnabled,
+		visionFallbackEnabled: visionFallbackEnabled,
+		fetchedAt:             time.Now(),
 	})
 	a.mu.Unlock()
 

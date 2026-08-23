@@ -41,7 +41,7 @@ temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
-compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (steady) / 0.85 (recommended default)
+compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (recommended default) / 0.85 (late)
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
@@ -79,8 +79,10 @@ context_window = 1000000
 # billing_currency = "USD"   # frozen list-price currency: CNY|USD
 # billing_mode = "payg"      # payg | subscription_equivalent (e.g. MiMo Token Plan)
 # Set prices explicitly only when you want to pin custom rates (always protected).
-# prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
-# DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
+# The stored official anchors are peak prices; Reasonix applies the documented
+# half-price off-peak windows automatically at occurrence time.
+# prices = { "deepseek-v4-flash" = { cache_hit = 0.10, input = 3, output = 9, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.30, input = 9, output = 27, currency = "¥" } }   # per 1M tokens
+# DeepSeek thinking is on by default; effort: disabled | low | high | max. Omit for auto (provider default high).
 effort      = "high"
 
 # A single-model provider still works (use `model = "..."`) — pick this form when
@@ -90,7 +92,7 @@ effort      = "high"
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"
 # (or unset) resolves to. Leave both commented to keep the built-in defaults
-# (DeepSeek models: high|max; Anthropic: low|medium|high|xhigh|max). DeepSeek
+# (DeepSeek models: low|high|max; Anthropic: low|medium|high|xhigh|max). DeepSeek
 # models behind a proxy are detected by model name; set reasoning_protocol =
 # "none" to disable that or "openai" to force ordinary reasoning_effort.
 # Other OpenAI-compatible providers don't expose /effort unless you opt in here.

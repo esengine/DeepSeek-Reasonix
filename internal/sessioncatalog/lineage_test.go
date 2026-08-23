@@ -361,7 +361,7 @@ func TestRecoveryFilenameParentID(t *testing.T) {
 }
 
 func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
-	// Simulates 1.24.2-style multi-topic recovery storm → new v4 projection →
+	// Simulates 1.24.2-style multi-topic recovery storm → new v5 projection →
 	// discard cache → reindex. Ordinary list stays one row; JSONL/meta bytes
 	// are never rewritten (the 1.23.0→new-version reinstall path).
 	ctx := context.Background()
@@ -428,9 +428,9 @@ func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
 			t.Fatalf("authority file mutated during catalog rebuild: %s", path)
 		}
 	}
-	// v4 path is independent of older disposable caches.
-	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v4.sqlite") && DefaultPath() != "" {
-		t.Fatalf("DefaultPath = %q, want v4.sqlite", DefaultPath())
+	// v5 path is independent of all older disposable caches.
+	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v5.sqlite") && DefaultPath() != "" {
+		t.Fatalf("DefaultPath = %q, want v5.sqlite", DefaultPath())
 	}
 }
 

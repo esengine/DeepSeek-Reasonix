@@ -46,6 +46,7 @@ func TestClassifyToolCallSeparatesMutationDomains(t *testing.T) {
 		{"env prefixed test", "bash", `{"command":"GOROOT=/x go test ./..."}`, false, ToolEffects{Known: true}},
 		{"unknown shell", "bash", `{"command":"custom-tool --run"}`, false, ToolEffects{StateMutation: true, WorkspaceMutation: true, ContentMutation: true}},
 		{"trusted reader", "read_file", `{}`, true, ToolEffects{Known: true}},
+		{"fleet meta tool", "fleet", `{}`, false, ToolEffects{Known: true}},
 		{"session title", "set_session_title", `{"title":"Current task"}`, false, ToolEffects{Known: true, StateMutation: true, Reason: "host session metadata write"}},
 		{"generic writer", "edit_file", `{}`, false, ToolEffects{Known: true, StateMutation: true, WorkspaceMutation: true, ContentMutation: true}},
 	}

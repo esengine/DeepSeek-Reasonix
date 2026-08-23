@@ -26,6 +26,8 @@ type syncSink struct {
 	inner Sink
 }
 
+var _ OptionalSinkCapabilities = (*syncSink)(nil)
+
 func (s *syncSink) Emit(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -44,6 +46,12 @@ func (s *syncSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	if rs, ok := s.inner.(ReadinessAuditSink); ok {
 		rs.RecordReadinessAudit(a)
 	}
+}
+
+func (s *syncSink) RecordAnchorSafetyAudit(a AnchorSafetyAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordAnchorSafetyAudit(s.inner, a)
 }
 
 func (s *syncSink) RecordTurnCompletion() {
@@ -106,4 +114,10 @@ func (s *syncSink) RecordWorkspaceMutation(m WorkspaceMutation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	RecordWorkspaceMutation(s.inner, m)
+}
+
+func (s *syncSink) RecordRunBudget(sample RunBudgetSample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordRunBudget(s.inner, sample)
 }

@@ -25,8 +25,8 @@ export async function commitRewindWithPreview(
         conflicts: plan?.conflicts,
       };
     }
-    if (scope !== "conversation" && (plan.coverage === "partial" || (plan.coverageGaps?.length ?? 0) > 0)) {
-      const gaps = (plan.coverageGaps || []).join("\n");
+    if (scope !== "conversation" && rewindNeedsCoverageConfirm(plan)) {
+      const gaps = (plan.coverageGaps || []).filter((gap) => !isScratchCoverageGap(gap)).join("\n");
       if (!window.confirm(t("rewind.confirmPartialCoverage", { gaps: gaps || t("rewind.partialCoverageUnknown") }))) {
         return { ok: false, error: "rewind cancelled" };
       }
@@ -41,6 +41,16 @@ export function partialRewindNotice(result: RewindResultView): string {
   const detail = result.error
     || (result.conflicts?.length ? result.conflicts.join("; ") : "");
   return detail ? `${summary} ${detail}` : summary;
+}
+
+function isScratchCoverageGap(gap: string): boolean {
+  return gap === "scratch" || gap.startsWith("scratch:");
+}
+
+function rewindNeedsCoverageConfirm(plan: { coverage?: string; coverageGaps?: string[]; expiredFilePayload?: boolean; legacy?: boolean }): boolean {
+  if (plan.expiredFilePayload || plan.legacy) return true;
+  const projectGaps = (plan.coverageGaps || []).filter((gap) => !isScratchCoverageGap(gap));
+  return projectGaps.length > 0 || (plan.coverage === "partial" && projectGaps.length > 0);
 }
 
 export function rewindFailureDetail(result?: RewindResultView | null): string {

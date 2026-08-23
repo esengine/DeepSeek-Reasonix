@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -134,6 +136,140 @@ func TestDeniedDeliveryWriterDoesNotAcquireWorkspaceLease(t *testing.T) {
 	probeOwner.EndRun()
 }
 
+func TestReadOnlyBashDoesNotTakeWorkspaceLease(t *testing.T) {
+	root, locks := t.TempDir(), t.TempDir()
+	holder, err := workspacelease.New(root, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readerOwner, err := workspacelease.New(root, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.BeginRun()
+	if err := holder.AcquireWrite(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.EndRun()
+	bash := &workspaceLeaseTestTool{name: "bash"}
+	a := deliveryLeaseTestAgent(t, readerOwner, bash)
+	readerOwner.BeginRun()
+	defer readerOwner.EndRun()
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:        "st",
+		Name:      "bash",
+		Arguments: `{"command":"git status"}`,
+	})
+	if out.blocked || out.errMsg != "" {
+		t.Fatalf("read-only bash was blocked by a writer: %+v", out)
+	}
+}
+
+func TestPathWriteReleasesLeaseAfterToolReturns(t *testing.T) {
+	repo, locks := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first, err := workspacelease.New(repo, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspacelease.New(repo, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w1 := &recordingWriter{name: "write_file"}
+	w2 := &recordingWriter{name: "write_file"}
+	reg1 := tool.NewRegistry()
+	reg1.Add(w1)
+	a1 := New(nil, reg1, NewSession(""), Options{WorkspaceLease: first, WriteWorkspaceRoot: repo}, event.Discard)
+	a1.turn.deliveryCriteriaEstablished = true
+	a1.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
+	reg2 := tool.NewRegistry()
+	reg2.Add(w2)
+	a2 := New(nil, reg2, NewSession(""), Options{WorkspaceLease: second, WriteWorkspaceRoot: repo}, event.Discard)
+	a2.turn.deliveryCriteriaEstablished = true
+	a2.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
+	first.BeginRun()
+	second.BeginRun()
+	defer first.EndRun()
+	defer second.EndRun()
+	out1 := a1.executeOne(context.Background(), &a1.turn, provider.ToolCall{
+		ID: "w1", Name: "write_file",
+		Arguments: string(mustJSON(t, map[string]string{"path": filepath.Join(repo, "a.go"), "content": "a"})),
+	})
+	if out1.blocked || out1.errMsg != "" {
+		t.Fatalf("first write: %+v", out1)
+	}
+	out2 := a2.executeOne(context.Background(), &a2.turn, provider.ToolCall{
+		ID: "w2", Name: "write_file",
+		Arguments: string(mustJSON(t, map[string]string{"path": filepath.Join(repo, "b.go"), "content": "b"})),
+	})
+	if out2.blocked || out2.errMsg != "" {
+		t.Fatalf("second write after first tool returned: %+v", out2)
+	}
+}
+
 func providerToolCall(id, name string) provider.ToolCall {
 	return provider.ToolCall{ID: id, Name: name, Arguments: `{}`}
+}
+
+func TestNestedRepoWriteFileLeasesDoNotBlock(t *testing.T) {
+	parent, locks := t.TempDir(), t.TempDir()
+	repoA := filepath.Join(parent, "A")
+	repoB := filepath.Join(parent, "B")
+	for _, repo := range []string{repoA, repoB} {
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := workspacelease.New(parent, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := workspacelease.New(parent, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w1 := &recordingWriter{name: "write_file"}
+	w2 := &recordingWriter{name: "write_file"}
+	reg1 := tool.NewRegistry()
+	reg1.Add(w1)
+	a1 := New(nil, reg1, NewSession(""), Options{
+		WorkspaceLease: first, WriteWorkspaceRoot: parent,
+	}, event.Discard)
+	a1.turn.deliveryCriteriaEstablished = true
+	a1.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
+	reg2 := tool.NewRegistry()
+	reg2.Add(w2)
+	a2 := New(nil, reg2, NewSession(""), Options{
+		WorkspaceLease: second, WriteWorkspaceRoot: parent,
+	}, event.Discard)
+	a2.turn.deliveryCriteriaEstablished = true
+	a2.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
+	first.BeginRun()
+	second.BeginRun()
+	defer first.EndRun()
+	defer second.EndRun()
+
+	out1 := a1.executeOne(context.Background(), &a1.turn, provider.ToolCall{
+		ID:   "w1",
+		Name: "write_file",
+		Arguments: string(mustJSON(t, map[string]string{
+			"path": filepath.Join(repoA, "a.go"), "content": "a",
+		})),
+	})
+	if out1.blocked || out1.errMsg != "" {
+		t.Fatalf("first nested write: %+v", out1)
+	}
+	out2 := a2.executeOne(context.Background(), &a2.turn, provider.ToolCall{
+		ID:   "w2",
+		Name: "write_file",
+		Arguments: string(mustJSON(t, map[string]string{
+			"path": filepath.Join(repoB, "b.go"), "content": "b",
+		})),
+	})
+	if out2.blocked || out2.errMsg != "" {
+		t.Fatalf("second nested write should not wait on the first: %+v", out2)
+	}
 }

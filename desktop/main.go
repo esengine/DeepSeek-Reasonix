@@ -82,6 +82,9 @@ func windowsWebview2GPUDisabled() bool {
 }
 
 func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
+	if linuxRendererCompatibilityMode() {
+		return linux.WebviewGpuPolicyNever
+	}
 	matches, err := filepath.Glob(pattern)
 	if err == nil {
 		for _, path := range matches {
@@ -103,6 +106,7 @@ func preparePrimaryDesktopRuntime(app *App) {
 }
 
 func main() {
+	prepareLinuxRendererCompatibilityEnvironment()
 	// Detached macOS self-update child: wait for the old PID, hold the shared
 	// repair mutation lock, then swap the .app bundle. Must run before Wails.
 	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {

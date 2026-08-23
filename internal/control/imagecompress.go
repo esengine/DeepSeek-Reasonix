@@ -18,7 +18,7 @@ const maxVisionDim = 1568
 
 // maxDecodePixels guards against decompression-bomb attachments: a tiny file can
 // declare enormous dimensions. Beyond this we skip decoding and send as-is (still
-// bounded by the 10 MB file cap).
+// bounded by the 64 MB file cap).
 const maxDecodePixels = 50_000_000
 
 // compressForVision downscales an oversized image to maxVisionDim and re-encodes

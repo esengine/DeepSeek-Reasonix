@@ -38,4 +38,5 @@ type agentConfig struct {
 	compactRatio         float64
 	recentKeep           int
 	archiveDir           string
+	legacyAnchorSafetyGate bool
 }

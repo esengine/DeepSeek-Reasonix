@@ -14,6 +14,18 @@ type DirectoryScanStatus struct {
 	Error string
 }
 
+// CountDirectorySessions reports the number of non-missing rows currently
+// projected for a directory. It is intentionally content-free so diagnostics
+// can compare the disposable projection with authoritative file enumeration.
+func (c *Catalog) CountDirectorySessions(ctx context.Context, path string) (int64, error) {
+	if c == nil || c.db == nil {
+		return 0, nil
+	}
+	var count int64
+	err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE directory=? AND missing_since=0`, filepath.Clean(strings.TrimSpace(path))).Scan(&count)
+	return count, err
+}
+
 // DirectoryStatus exposes only scan completeness, never session contents.
 // Desktop uses it to publish a per-workspace partial/complete projection while
 // allowing already-indexed rows to remain visible during another directory's
@@ -36,7 +48,7 @@ func (c *Catalog) DirectoryStatus(ctx context.Context, path string) DirectorySca
 }
 
 // DirectoryScanReady reports whether this directory has finished at least one
-// catalog scan. An opened-but-unscanned v4 cache is not ready: ListTopics would
+// catalog scan. An opened-but-unscanned v5 cache is not ready: ListTopics would
 // otherwise treat "no rows yet" as "the user has no conversations".
 func (c *Catalog) DirectoryScanReady(ctx context.Context, path string) bool {
 	return c.DirectoryStatus(ctx, path).State == "ready"
@@ -44,7 +56,7 @@ func (c *Catalog) DirectoryScanReady(ctx context.Context, path string) bool {
 
 // HasWorkspaceRecords reports whether any non-missing session is already
 // projected for this workspace. Used so an in-progress scan that has written
-// rows stays authoritative, while a brand-new empty v4 cache does not.
+// rows stays authoritative, while a brand-new empty v5 cache does not.
 func (c *Catalog) HasWorkspaceRecords(ctx context.Context, scope, workspaceRoot string) bool {
 	if c == nil || c.db == nil {
 		return false

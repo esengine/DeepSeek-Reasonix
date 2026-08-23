@@ -120,9 +120,11 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 85% as the built-in default. Lower values
+The editable range is 65–85%, with 80% as the built-in default. Lower values
 compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Project `reasonix.toml` takes precedence over
+more context before compaction. Below the threshold, complete tool results may
+increase ordinary request cost; at pressure they are durably pruned before the
+cache-aligned summary runs. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
 keeps the threshold it loaded at startup.
 
@@ -426,7 +428,9 @@ use the terminal paste shortcut because the remote process cannot read the local
 clipboard; `/mouse` restores the terminal's native right-click menu. Image paste
 is application-owned: use `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or
 `/paste-image`; the footer shows `Pasting image…` until the attachment token is
-ready.
+ready. Where the terminal forwards that shortcut instead of pasting itself, a
+clipboard holding no image falls back to a text paste, so the key never swallows
+plain text.
 
 ## In-session commands
 

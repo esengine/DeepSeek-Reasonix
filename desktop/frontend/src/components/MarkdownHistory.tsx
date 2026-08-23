@@ -21,6 +21,7 @@ import { getMarkdownWorkerClient } from "../lib/markdownWorkerClient";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { createComponents } from "./markdownComponents";
 import { VirtualMarkdownSourceTable } from "./MarkdownTable";
+import { useTranscriptScrollOffsetWrite } from "./TranscriptLayoutIntentContext";
 
 // A history surface opens at the newest transcript content. Keep the same
 // ownership inside a giant Markdown row: mount a small tail, then move a
@@ -180,6 +181,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
   const [blockWindow, moveBlockWindow] = useProgressiveBlockWindow(totalBlocks, blocks);
   const rootRef = useRef<HTMLDivElement>(null);
   const pendingAnchorRef = useRef<PendingScrollAnchor | null>(null);
+  const writeTranscriptOffset = useTranscriptScrollOffsetWrite();
   const moveFromBoundary = useCallback((direction: "older" | "newer", sentinel: HTMLSpanElement) => {
     if (!blocks) return;
     if (pendingAnchorRef.current?.identity === blocks) return;
@@ -212,8 +214,11 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     const anchor = rootRef.current?.querySelector<HTMLElement>(`[data-markdown-scroll-anchor="${pending.index}"]`);
     pendingAnchorRef.current = null;
     if (!anchor || !pending.scroller?.isConnected) return;
-    pending.scroller.scrollTop += anchor.getBoundingClientRect().top - pending.top;
-  }, [blockWindow.end, blockWindow.start, blocks]);
+    const delta = anchor.getBoundingClientRect().top - pending.top;
+    if (delta !== 0 && writeTranscriptOffset) {
+      writeTranscriptOffset("block-window-prepend", pending.scroller.scrollTop + delta);
+    }
+  }, [blockWindow.end, blockWindow.start, blocks, writeTranscriptOffset]);
 
   // JSX per block depends only on the block and the components map; build it
   // lazily so viewport-window growth never re-converts settled blocks.

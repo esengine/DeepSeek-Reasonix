@@ -36,7 +36,7 @@ type Event struct {
 	CheckpointTurn  *int                `json:"checkpointTurn,omitempty"`
 	RetryAttempt    int                 `json:"retryAttempt,omitempty"`
 	RetryMax        int                 `json:"retryMax,omitempty"`
-	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream" | "protocol"; omit for older clients
 	StreamAttempt   *StreamAttempt      `json:"streamAttempt,omitempty"`
 	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
 	// session-inbox entry. Empty for legacy text-only guidance.
@@ -59,6 +59,8 @@ type CompletionSummary struct {
 	Review             string   `json:"review"`
 	GapKinds           []string `json:"gap_kinds,omitempty"`
 	ConstraintDegraded bool     `json:"constraint_degraded"`
+	Floor              string   `json:"floor,omitempty"`
+	Attention          bool     `json:"attention"`
 }
 
 type WorkspaceChanged struct {
@@ -208,6 +210,8 @@ func ToWire(e event.Event) Event {
 				Review:             c.Review,
 				GapKinds:           append([]string(nil), c.GapKinds...),
 				ConstraintDegraded: c.ConstraintDegraded,
+				Floor:              c.Floor,
+				Attention:          c.Attention,
 			}
 		}
 	}

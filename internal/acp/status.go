@@ -209,21 +209,6 @@ func (a *usageAccumulator) addQuoted(u *provider.Usage, pricing *provider.Pricin
 		}
 		return
 	}
-	if pricing != nil {
-		currency := billing.NormalizeCurrency(pricing.Currency)
-		if currency == "" {
-			currency = pricing.Symbol()
-		}
-		if a.pricedEvents == 0 {
-			a.currency = currency
-			a.costComplete = true
-		} else if a.currency != currency {
-			a.currency = ""
-			a.costComplete = false
-		}
-		a.estimatedCost += pricing.Cost(u)
-		a.pricedEvents++
-	}
 }
 
 func (a usageAccumulator) wire() ReasonixUsage {

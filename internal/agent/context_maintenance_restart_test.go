@@ -38,7 +38,7 @@ func largeRestartToolHistory(results int) []provider.Message {
 
 func newRestartMaintenanceAgent(path string, messages []provider.Message, sink event.Sink) *Agent {
 	// Explicit 0.80 matches the v1.22.0 user scenario and the plan's regression
-	// fixture. New configs default to 0.85; users who set 0.80 keep 0.80.
+	// fixture. New configs default to 0.80; explicit legacy ratios remain unchanged.
 	return New(nil, tool.NewRegistry(), &Session{Messages: append([]provider.Message(nil), messages...)}, Options{
 		ContextWindow: restartMaintenanceWindow,
 		CompactRatio:  0.80,
@@ -125,7 +125,7 @@ func TestContextMaintenanceRestoresAppliedProjectionWithoutReapplying(t *testing
 	if got := appliedMaintenanceEvents(firstSink); got != 1 {
 		t.Fatalf("first maintenance applied events = %d, want 1", got)
 	}
-	// Content-driven checkpoint should land well under the 50% ceiling.
+	// Content-driven checkpoint should materially shrink the visible request.
 	after := first.ContextMaintenanceSnapshot()
 	if after.ProjectedTokens > after.HardInputCeiling/2 && after.ProjectedTokens > 300_000 {
 		t.Fatalf("checkpoint projected tokens = %d, want content-driven low occupancy", after.ProjectedTokens)

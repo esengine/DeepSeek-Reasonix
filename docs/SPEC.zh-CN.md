@@ -121,6 +121,11 @@ type Tool interface {
 
 当 `agent.planner_model` 与 executor 不同时，planner 与 executor 使用独立 session：
 
+图片理解兜底由 `agent.vision_model` 控制：空值保持现有行为，`auto` 只在当前执行器
+服务商内选择视觉模型，显式 `provider/model` 可跨服务商选择。视觉执行器先生成版本化的
+图片描述/OCR 摘要，摘要作为隐藏的当前用户回合内容持久化；当前模型本身支持图片时
+直接发送图片，不额外执行摘要请求。
+
 - 宿主使用原始用户文本和可信回合元数据做确定性路由，默认 executor-only；不调用
   classifier 模型，不从措辞、文件数量或关键词推断复杂度，也不从 controller 注入的
   prompt block 猜测宿主状态。独立 Planner 只响应显式先规划 / 规划再执行、显式等待批准、
@@ -146,30 +151,19 @@ type Tool interface {
 transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **checkpoint**。
 
 - 每个 provider 声明 `context_window`（tokens）。唯一自动触发值是
-  `agent.compact_ratio`（默认 **0.85**；预设 0.70 / 0.80 / 0.85；范围 0.65–0.85）。
+  `agent.compact_ratio`（默认 **0.80**；预设 0.70 / 0.80 / 0.85；范围 0.65–0.85）。
   `triggerTokens = floor(context_window × compact_ratio)`。
-- **阈值以下**绝不改写历史：不摘要、不安装 prune/snip projection、不写 sidecar、
-  不增加 projection version、不发维护事件。任何改写都会使该点之后的 prompt 缓存失效。
-- **达到阈值**时运行 **一次** 摘要事务：
-  `稳定前缀 + 一个结构化摘要 + 最近原文尾部`。
-  正常验收：候选 ≤ 窗口 50%、严格小于源、且低于 `triggerTokens`；**不会**向 50% 回填。
-  典型落地约占窗口 10%–30%。
-  内部构造预算（非用户设置）：
-  `recentTailBudget = clamp(window×10%, 32K, 96K)`，摘要输出上限 **16K**。
-- **用户轮次不交给摘要器裁决**：折叠区内的每条 user turn 在预算内原样保留（单条
-  ≤1500 tokens，合计 `min(8192, window×5%)`，从最旧开始）。理由是丢失的不对称
-  性——第 4 轮说的"不许改 public API"只存在于 transcript 里，它约束的代码却能从
-  工作区重新推导。预算是必须的：无上限地保留会把候选撑过验收天花板，使压缩直接
-  失败而非降级。该保护不以最近一次 digest 为界，因此能跨多次压缩存活；超出预算的
-  轮次可用 `[[keep]]` 前缀（keep 策略 `user_marked`，默认开启）强制原样保留。
-  丢弃不是静默的：压缩 telemetry 带 `user_kept` / `user_dropped` 计数，且已提交的
-  checkpoint 若折叠了用户轮次会发出提示 `[[keep]]` 的警告——两种情况下 projection
-  读起来都是完整的，计数是唯一能区分它们的东西。
-- **失败保护必须跨多次折叠成立**：`KeepErrors` 依据宿主的 `ToolExecution` 记录而非
-  文本判定失败（真实 `go test` 日志以 `=== RUN` 开头，前缀匹配看不见它），因此存储的
-  projection 保留该记录，而发往 provider 的请求不带。剥离发生在 provider 边界
-  (`ModelMessages`)，projection 写入用 `ProjectionMessages` 保留——否则下一次折叠
-  将无法分类上一次刚刚保护下来的失败。
+- **阈值以下**普通请求保持 append-only，不写 projection。所有 provider 请求只使用
+  持久化且有界的 tool `Content`；本地 `RawContent` 不会进入 sampling、重试、摘要或 replay。
+- **达到阈值**后，单飞维护事务先持久剪枝：所有超过 8192 个 Unicode code point
+  的工具结果变为 `4096 头部 + "[... tool result middle pruned ...]" + 1024 尾部`。
+  若已解除压力则不调摘要模型；否则将连续旧前缀摘要，并仅原样保留最近
+  **16%** 窗口，边界不拆分 assistant tool-call/tool-result 组。
+- 摘要请求复用原 system、选中消息前缀和普通请求的 tools schema，只在最后追加
+  user compaction instruction，以复用 provider KV Cache。输出上限为 **8192 tokens**。
+  pressure 最多两次成功摘要，overflow 最多一次摘要且原请求最多重试一次。
+- 候选必须严格小于被替换请求。摘要 timeout/error/空输出/token cap 都不会伪造
+  机械 digest；硬上限或 overflow 下 prune 仍不足时返回 `ErrCompactionRequired`。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限，**绝不**改变 `triggerTokens` / `compact_ratio`。
@@ -177,9 +171,10 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   - 官方 DeepSeek Chat/Responses 在剩余共享窗口还能放下 384K 自动预算时继续省略字段，只在临界时注入裁剪值。官方 Anthropic 兼容层因 `max_tokens` 必填，仍发送 384K 或裁剪值。
   - 官方 OpenCode Go 预设会主动发送 `min(模型上限, 物理剩余)`，使用通用 `max_tokens` / `max_output_tokens`。第三方兼容 API 在可信上下文 400 之前不假设共享窗口。
   - 正数是用户显式控费上限，仍可按物理剩余继续下调。负数表示明确省略可选 wire 字段；已知自动预算放不下时压缩，而不是覆盖用户选择。
-- 巨型工具结果只在**第一次**进入模型前限长：`Content` 为稳定 ≤32KB 可见版；
-  超限时 `RawContent` 保存完整原文。后续维护不得回头改写。`ModelMessages` 会去掉
-  `RawContent`，provider 序列化与缓存 hash 永不包含它。
+- canonical 工具存储保持向后兼容：`Content` 是稳定的 provider 可见 ≤32KB 表示，
+  `RawContent` 保存本地完整原文。只有模型显式分页调用 `use_capability` 的
+  `session:tool_result` 后，完整结果页才会进入上下文；sampling、流重试、摘要与 projection
+  replay 均使用同一份有界 `Content`。prune projection 不改写两个 canonical 字段。
 - 自动维护只在 `ContextManager.Prepare` 中规划一次，输入为当前 projection 加上
   append-only canonical tail；canonical 永不改写。后续阈值合并
   **上一摘要 + 新增历史** 为单条 digest（无 multi-span、无应用层重试）。
@@ -189,8 +184,8 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   `compact_force_ratio`、`cold_resume_prune`、`context_editing`）在普通启动时删除，
   运行时忽略。不再使用 provider 原生 tool clearing；所有 provider 走本地 summary
   checkpoint。
-- `keep` / `recent_keep` 与活跃工具轮次仍受保护。重启只恢复既有 checkpoint，
-  不重新摘要、不重放时间线卡片。
+- `keep` / `recent_keep` 仍可读取并 round-trip，但已弃用且不参与压缩。旧 user、失败
+  工具结果和 `[[keep]]` 都进入摘要前缀。重启只恢复既有 checkpoint。
 - 完整历史保留在会话 transcript 中；`history` tool 提供 BM25 检索。新 checkpoint
   不再创建 prune archive。
 
@@ -277,7 +272,7 @@ Profile 描述的是 worker，不是一次运行。委派由五个彼此独立�
 - host 无法路径化约束的写工具（自定义、未知）被丢弃；
 - 运行结束后，host 用自己记录的变更与声明比对，任何越界路径都会写进该子智能体的 host receipts 交还给父智能体。
 
-省略 `write_paths` 并不等于不受约束：该次运行会声明整个 workspace，因而与其他所有写入声明串行。那是纯调度边界——workspace 内部不拒绝任何写入，因为同一时刻不可能有另一个持有重叠声明的并发写入者。但离开 workspace 的写入仍会被记为越界。
+省略 `write_paths` 并不等于不受约束：该次运行开工时声明整个 workspace，因此不能和其他 writer 同时开工。若整段只有路径型写入，调度预留会收窄到已写文件，父代理或兄弟任务可以写其他文件。`bash` / MCP 一旦产生 workspace 变更，预留重新变为整区。目录声明可以同时开工，只有落盘到同一文件时才互斥。能力上界（sandbox / `AllowsPath`）仍是声明本身，不会随预留收窄。离开 workspace 的写入仍会被记为越界。
 
 声明路径换来的是并行能力；代价是在 OS sandbox 无法强制写根的宿主上失去 `bash`。
 
@@ -407,8 +402,10 @@ name           = "deepseek"
 kind           = "anthropic"
 base_url       = "https://api.deepseek.com/anthropic"
 # request_url  = "https://proxy.example.com/anthropic/v1/messages" # 可选：完整请求地址
-models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
+models         = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
 default        = "deepseek-v4-flash"
+# vision_models = ["deepseek-v4-flash-vision-exp"]  # 设置里的「图片输入」勾选；线上仍只有这一枚 SKU 会发图
+# 官方 DeepSeek 视觉支持内联 base64、http(s) 图片 URL、以及 Files API file_id。
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000

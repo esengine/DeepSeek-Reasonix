@@ -56,20 +56,25 @@ function clampStoredSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampRightDockPreviewWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
+export function clampRightDockPreviewWidth(width: number, maxWidth = RIGHT_DOCK_MAX_WIDTH): number {
+  // Cap at maxWidth (which may be below the default maximum when the viewport
+  // is narrow) while never dropping below the applicable minimum.
+  return Math.min(Math.max(maxWidth, RIGHT_DOCK_PREVIEW_MIN_WIDTH), Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+export function clampRightDockTreeWidth(width: number, maxWidth = RIGHT_DOCK_TREE_MAX_WIDTH): number {
+  return Math.min(Math.max(maxWidth, RIGHT_DOCK_TREE_MIN_WIDTH), Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampCreationRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+export function clampCreationRightDockTreeWidth(width: number, maxWidth = RIGHT_DOCK_TREE_MAX_WIDTH): number {
+  return Math.min(Math.max(maxWidth, CREATION_RIGHT_DOCK_TREE_MIN_WIDTH), Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
 }
 
 function clampStoredRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+  // Stored widths are validated again against the live viewport at load time
+  // (resolveWorkspacePanelWidth clamps to the chat pane's 400px floor), so
+  // persistence only guards the sane lower bound and integer form.
+  return Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width));
 }
 
 export function defaultSidebarWidth(): number {
@@ -202,21 +207,31 @@ export function clampTerminalHeight(height: number, viewportHeight: number): num
   return Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, Math.round(height)));
 }
 
-function loadWorkspacePanelOpen(): boolean {
+function workspacePanelOpenStorageKey(workspaceRoot: string): string {
+  return workspaceRoot ? `${WORKSPACE_PANEL_OPEN_KEY}.${workspaceRoot}` : WORKSPACE_PANEL_OPEN_KEY;
+}
+
+export function loadWorkspacePanelOpen(workspaceRoot: string): boolean {
   if (typeof window === "undefined") return WORKSPACE_PANEL_DEFAULT_OPEN;
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_PANEL_OPEN_KEY);
-    if (raw === null) return WORKSPACE_PANEL_DEFAULT_OPEN;
-    return raw !== "0";
+    const raw = window.localStorage.getItem(workspacePanelOpenStorageKey(workspaceRoot));
+    if (raw !== null) return raw !== "0";
+    // Migration: the legacy single global key predates per-project keys.
+    // When a project has no stored preference yet, seed it from the old
+    // global value so an upgrade does not flip a user's existing choice
+    // (e.g. they had the dock closed; first open of any project stays closed).
+    const legacyRaw = window.localStorage.getItem(WORKSPACE_PANEL_OPEN_KEY);
+    if (legacyRaw !== null) return legacyRaw !== "0";
+    return WORKSPACE_PANEL_DEFAULT_OPEN;
   } catch {
     return WORKSPACE_PANEL_DEFAULT_OPEN;
   }
 }
 
-export function saveWorkspacePanelOpen(open: boolean): void {
+export function saveWorkspacePanelOpen(open: boolean, workspaceRoot = ""): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(WORKSPACE_PANEL_OPEN_KEY, open ? "1" : "0");
+    window.localStorage.setItem(workspacePanelOpenStorageKey(workspaceRoot), open ? "1" : "0");
   } catch {
     /* ignore storage failures */
   }
@@ -250,7 +265,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
-  workspacePanelOpen: loadWorkspacePanelOpen(),
+  workspacePanelOpen: loadWorkspacePanelOpen(""),
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
   rightDockMode: "context",

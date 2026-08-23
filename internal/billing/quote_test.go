@@ -6,9 +6,9 @@ import (
 )
 
 func testInput(currency, provider, model string) QuoteInput {
-	rates := RateCard{Input: 1, Output: 2, Currency: currency}
+	rates := RateCard{CacheHit: 0.10, Input: 3, Output: 9, Currency: currency}
 	if currency == "USD" {
-		rates = RateCard{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: currency}
+		rates = RateCard{CacheHit: 0.014, Input: 0.44, Output: 1.32, Currency: currency}
 	}
 	return QuoteInput{
 		Usage:           UsageTokens{PromptTokens: 1000, CompletionTokens: 2000},
@@ -76,6 +76,41 @@ func TestAggregateExplicitDisplayFallsBackToSameOriginal(t *testing.T) {
 	}
 	if !q.CostComplete || q.DisplayComplete || q.Complete {
 		t.Fatalf("fallback completeness = %+v", q)
+	}
+}
+
+func TestAggregateRateBands(t *testing.T) {
+	base := func(band string) CostQuote {
+		return CostQuote{Original: Money{Amount: "1", Currency: "CNY"}, Valuations: map[string]Valuation{
+			"CNY": {Money: Money{Amount: "1", Currency: "CNY"}, Basis: BasisIdentity},
+		}, CostComplete: true, DisplayComplete: true, Complete: true, RateBand: band}
+	}
+	if got := AggregateQuotes([]CostQuote{base(RateBandPeak), base(RateBandPeak)}, ""); got.RateBand != RateBandPeak {
+		t.Fatalf("same band = %q", got.RateBand)
+	}
+	if got := AggregateQuotes([]CostQuote{base(RateBandPeak), base(RateBandOffPeak)}, ""); got.RateBand != RateBandMixed {
+		t.Fatalf("mixed band = %q", got.RateBand)
+	}
+	if got := AggregateQuotes([]CostQuote{base(RateBandPeak), base("")}, ""); got.RateBand != "" {
+		t.Fatalf("unknown member band = %q", got.RateBand)
+	}
+}
+
+func TestLedgerBucketAggregationClearsSingleRatedAt(t *testing.T) {
+	l := NewLedger()
+	q := CostQuote{
+		Original: Money{Amount: "1", Currency: "CNY"}, Valuations: map[string]Valuation{
+			"CNY": {Money: Money{Amount: "1", Currency: "CNY"}, Basis: BasisIdentity},
+		},
+		CostComplete: true, DisplayComplete: true, Complete: true,
+		PricingFingerprint: "peak-card", RateBand: RateBandPeak, RatedAt: "2026-08-17T01:00:00Z",
+	}
+	l.Add(q, UsageTokens{PromptTokens: 1}, time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC))
+	l.Add(q, UsageTokens{PromptTokens: 1}, time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC))
+	for _, entry := range l.Entries {
+		if entry.Quote.RateBand != RateBandPeak || entry.Quote.RatedAt != "" {
+			t.Fatalf("aggregated bucket quote = %+v", entry.Quote)
+		}
 	}
 }
 

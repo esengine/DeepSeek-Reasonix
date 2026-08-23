@@ -1,12 +1,48 @@
 package agent
 
 import (
+	"context"
 	"slices"
 	"strings"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+func (a *Agent) runMissingReasoningFallback(
+	ctx context.Context,
+	turn int,
+	frozen *samplingRequest,
+	attemptID string,
+	attempt int,
+	billable *provider.Usage,
+	discarded ...*deferredStreamSink,
+) (streamedTurn, bool) {
+	if !a.activateMissingReasoningFallback() {
+		return streamedTurn{}, false
+	}
+	for _, sink := range discarded {
+		if sink != nil {
+			sink.Discard()
+		}
+	}
+	event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+	a.emitProtocolRetry(2, true)
+	fallbackSink := newDeferredStreamSink(a.svc.sink)
+	fallback := a.runSamplingAttempt(ctx, turn, fallbackSink, frozen, attemptID)
+	billable = mergeSamplingUsage(billable, fallback.usage)
+	a.storeLatestRequestUsage(fallback.usage)
+	fallback.usage = finalizeSamplingUsage(billable, fallback.usage)
+	if fallback.err != nil {
+		fallbackSink.Discard()
+		a.emitReasoningReplayAttemptOutcome(attemptID, attempt, fallback.err)
+		return fallback, true
+	}
+	fallbackSink.Flush()
+	event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+	a.emitReasoningReplayAttemptOutcome(attemptID, attempt, nil)
+	return fallback, true
+}
 
 func (a *Agent) preserveRawReasoning(signature, reasoningID, reasoningStatus string, calls []provider.ToolCall, searches []provider.ServerSearchCall) bool {
 	if signature != "" || reasoningID != "" || reasoningStatus != "" {
@@ -26,6 +62,9 @@ func (a *Agent) emitReasoningReplayAttemptOutcome(id string, attempt int, err er
 }
 
 func (a *Agent) reasoningReplayIssue(result streamedTurn) ReasoningReplayFailure {
+	if a.sess.missingReasoning.fallbackActive && provider.SupportsMissingReasoningFallback(a.svc.prov) {
+		return ""
+	}
 	if !provider.RequiresAssistantReasoningReplay(a.svc.prov, result.assistantMessage()) {
 		return ""
 	}
@@ -68,13 +107,17 @@ func (a *Agent) finishUnreplayableReasoning(result streamedTurn, sink *deferredS
 		sink.Flush()
 		return result
 	}
-	if len(result.calls) > 0 && !provider.AllowsEmptyReasoningFallback(a.svc.prov) {
+	// Empty can replace reasoning the provider never emitted, never reasoning
+	// truncated by the client limit: preserved-thinking protocols require the
+	// returned content to remain complete and unchanged.
+	allowsFallback := issue == ReasoningReplayMissing && provider.AllowsEmptyReasoningFallback(a.svc.prov)
+	if len(result.calls) > 0 && !allowsFallback {
 		sink.Discard()
 		event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryClientToolRejected})
 		result.err = &ReasoningReplayError{Kind: issue}
 		return result
 	}
-	if len(result.serverSearch) > 0 && !provider.AllowsEmptyReasoningFallback(a.svc.prov) {
+	if len(result.serverSearch) > 0 && !allowsFallback {
 		if strings.TrimSpace(result.text) == "" {
 			sink.Discard()
 			result.err = &ReasoningReplayError{Kind: issue}
@@ -91,7 +134,7 @@ func (a *Agent) finishUnreplayableReasoning(result streamedTurn, sink *deferredS
 		event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryServerSearchSalvaged})
 		return result
 	}
-	if provider.RequiresReasoningRoundTrip(a.svc.prov) && !provider.AllowsEmptyReasoningFallback(a.svc.prov) {
+	if provider.RequiresReasoningRoundTrip(a.svc.prov) && !allowsFallback {
 		sink.Discard()
 		result.err = &ReasoningReplayError{Kind: issue}
 		return result
@@ -105,63 +148,12 @@ func (a *Agent) finishUnreplayableReasoning(result streamedTurn, sink *deferredS
 // CanReplayAssistantMessage lets the controller apply the provider-specific
 // half of interrupted-turn validation without exposing the provider itself.
 func (a *Agent) CanReplayAssistantMessage(m provider.Message) bool {
-	if a == nil || provider.AllowsEmptyReasoningFallback(a.svc.prov) || !provider.RequiresAssistantReasoningReplay(a.svc.prov, m) {
+	if a == nil || provider.AllowsEmptyReasoningFallback(a.svc.prov) ||
+		(a.sess.missingReasoning.fallbackActive && provider.SupportsMissingReasoningFallback(a.svc.prov)) ||
+		!provider.RequiresAssistantReasoningReplay(a.svc.prov, m) {
 		return true
 	}
 	return strings.TrimSpace(m.ReasoningContent) != ""
-}
-
-// repairUnreplayableReasoningHistory returns the provider-visible projection
-// for histories written by older versions that committed tool activity without
-// the reasoning required to replay it. Canonical session messages are never
-// modified. Healthy histories retain their backing slice for cache stability.
-func repairUnreplayableReasoningHistory(p provider.Provider, msgs []provider.Message) ([]provider.Message, bool) {
-	if provider.AllowsEmptyReasoningFallback(p) {
-		return msgs, false
-	}
-	needsRepair := false
-	for _, m := range msgs {
-		if m.Role == provider.RoleAssistant && provider.RequiresAssistantReasoningReplay(p, m) && strings.TrimSpace(m.ReasoningContent) == "" {
-			needsRepair = true
-			break
-		}
-	}
-	if !needsRepair {
-		return msgs, false
-	}
-
-	out := make([]provider.Message, 0, len(msgs))
-	for i := 0; i < len(msgs); {
-		m := msgs[i]
-		bad := m.Role == provider.RoleAssistant && provider.RequiresAssistantReasoningReplay(p, m) && strings.TrimSpace(m.ReasoningContent) == ""
-		if !bad {
-			out = append(out, m)
-			i++
-			continue
-		}
-
-		// Preserve any final/user-visible text as a plain assistant message, but
-		// never replay the malformed activity or provider-bound metadata.
-		if strings.TrimSpace(m.Content) != "" {
-			plain := m
-			plain.ReasoningContent = ""
-			plain.ReasoningSignature = ""
-			plain.ReasoningID = ""
-			plain.ReasoningStatus = ""
-			plain.ToolCalls = nil
-			plain.ServerSearch = nil
-			out = append(out, plain)
-		}
-		i++
-		if len(m.ToolCalls) > 0 {
-			// Tool results belong to the omitted assistant tool turn. They are
-			// contiguous in canonical sessions; stop at the next non-tool role.
-			for i < len(msgs) && msgs[i].Role == provider.RoleTool && !msgs[i].LocalOnly {
-				i++
-			}
-		}
-	}
-	return out, true
 }
 
 // ensureUnreplayableHistoryRecovery installs one existing-format LocalOnly
@@ -172,7 +164,8 @@ func (a *Agent) ensureUnreplayableHistoryRecovery() {
 	if a == nil || a.sess.conversation == nil {
 		return
 	}
-	if provider.AllowsEmptyReasoningFallback(a.svc.prov) {
+	if provider.AllowsEmptyReasoningFallback(a.svc.prov) ||
+		(a.sess.missingReasoning.fallbackActive && provider.SupportsMissingReasoningFallback(a.svc.prov)) {
 		return
 	}
 	msgs := a.sess.conversation.Snapshot()

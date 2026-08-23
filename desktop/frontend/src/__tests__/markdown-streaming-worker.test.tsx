@@ -136,6 +136,51 @@ console.log("\nmarkdown streaming → worker final parse");
   delete (globalThis as { Worker?: unknown }).Worker;
 }
 
+console.log("\nstreaming code fence tail styling");
+
+// An unclosed fence stays in the streaming tail (never committed early) and
+// renders with code-block styling until the closing fence arrives (#8843).
+{
+  const root = createRoot(rootEl);
+
+  await act(async () => {
+    root.render(<Markdown text={"intro\n\n"} streaming />);
+    await flush();
+  });
+
+  await act(async () => {
+    root.render(<Markdown text={"intro\n\n```js\nconst a = 1;"} streaming />);
+    await flush();
+  });
+  const tail = rootEl.querySelector(".md--stream-tail");
+  ok(tail, "an open code fence keeps the uncommitted tail mounted");
+  const pre = tail?.querySelector("pre.code.md--stream-tail-code");
+  ok(pre, "an open code fence renders with code styling before the closing fence arrives");
+  eq(pre?.getAttribute("data-lang"), "js", "the streaming code block carries the fence language");
+  eq(pre?.textContent, "const a = 1;", "the streaming code block shows the fence body without the opener line");
+
+  await act(async () => {
+    root.render(<Markdown text={"intro\n\n```js\nconst a = 1;\nconst b = 2;"} streaming />);
+    await flush();
+  });
+  eq(rootEl.querySelector(".md--stream-tail pre code")?.textContent, "const a = 1;\nconst b = 2;", "the streaming code body grows in place");
+
+  await act(async () => {
+    root.render(<Markdown text={"intro\n\n```js\nconst a = 1;\nconst b = 2;\n```\ndone"} streaming />);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+  // The closed fence commits on the next animation frame after the parse
+  // budget; let that frame run inside act before asserting.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  const settledTail = rootEl.querySelector(".md--stream-tail");
+  ok(!settledTail?.querySelector("pre.md--stream-tail-code"), "a closed fence leaves the code styling to the parsed renderer");
+  eq(settledTail?.textContent, "done", "text after the closing fence rides the plain tail");
+
+  await act(async () => root.unmount());
+}
+
 await server.close();
 dom.window.close();
 

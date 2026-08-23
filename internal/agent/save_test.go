@@ -61,6 +61,33 @@ func TestSaveLoadPreservesLegacyContentAndRawUserContent(t *testing.T) {
 	}
 }
 
+func TestSaveLoadPreservesBoundedToolContentAndCompleteRawContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	full := strings.Repeat("完整工具结果-🧪", 6000)
+	bounded, notice := truncateToolOutputFor(full, "read_file", "call-save")
+	if notice == "" {
+		t.Fatal("fixture did not produce a bounded tool result")
+	}
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-save", Name: "read_file", Arguments: `{}`}}})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "read_file", ToolCallID: "call-save", Content: bounded, RawContent: full})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := loaded.Snapshot()[2]
+	if stored.Content != bounded || stored.RawContent != full {
+		t.Fatalf("tool result changed across save/load: content=%d raw=%d", len(stored.Content), len(stored.RawContent))
+	}
+	model := provider.ModelMessages(loaded.Snapshot())
+	if model[2].Content != bounded || model[2].RawContent != "" {
+		t.Fatalf("provider projection after resume is not bounded: content=%d raw=%d", len(model[2].Content), len(model[2].RawContent))
+	}
+}
+
 func TestLoadSessionMigratesLegacyInjectedUserContentWithoutChangingProviderBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	const raw = "fix the bug"
@@ -1019,7 +1046,7 @@ func TestSaveSnapshotAppendsEventLogAndDisplayReadModel(t *testing.T) {
 	if !os.SameFile(checkpointBefore, checkpointAfter) {
 		t.Fatal("append-only snapshot replaced the display read model")
 	}
-	checkpoint, err := loadSessionMessagesFromJSONL(path)
+	checkpoint, err := loadSessionMessagesFromJSONL(path, nil)
 	if err != nil {
 		t.Fatalf("read display read model: %v", err)
 	}
@@ -1078,7 +1105,7 @@ func TestSaveRewriteAppendsReplaceEventAndRefreshesCheckpoint(t *testing.T) {
 	}
 	// Rewrites refresh the compatibility checkpoint so direct .jsonl readers
 	// and older binaries stay bounded-stale instead of frozen at first save.
-	anchor, err := loadSessionMessagesFromJSONL(path)
+	anchor, err := loadSessionMessagesFromJSONL(path, nil)
 	if err != nil {
 		t.Fatalf("read checkpoint after rewrite: %v", err)
 	}

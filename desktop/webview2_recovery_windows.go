@@ -9,7 +9,6 @@ import (
 )
 
 func showWindowsWebView2RecoveryGuidance(ctx context.Context) {
-	runtime.WindowShow(ctx)
 	_, _ = runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:  runtime.WarningDialog,
 		Title: "Reasonix WebView2 recovery / WebView2 恢复",

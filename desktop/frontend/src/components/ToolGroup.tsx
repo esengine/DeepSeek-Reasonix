@@ -129,7 +129,12 @@ export const ToolGroup = memo(function ToolGroup({
   if (items.length === 0) return null;
 
   return (
-    <div className={`tool-group tool-group--${kind}${open ? " tool-group--open" : ""}`} data-kind={kind} data-entrance={items[0]?.id}>
+    <div
+      className={`tool-group tool-group--${kind}${open ? " tool-group--open" : ""}`}
+      data-kind={kind}
+      data-entrance={items[0]?.id}
+      data-transcript-layout-variant={open ? "tool-group-expanded" : "tool-group-collapsed"}
+    >
       <button type="button" className="tool-group__head" onClick={() => { beginUserResize(); setOpen((value) => !value); }} aria-expanded={open}>
         <span className="tool-group__title">{titleFor(kind, t)}</span>
         <span className="tool-group__summary">{groupSummary(kind, items, t)}</span>

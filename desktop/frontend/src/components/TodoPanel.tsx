@@ -85,23 +85,20 @@ export function TodoPanel({
       badges={<PromptBadge>{done}/{todos.length}</PromptBadge>}
       meta={summary}
       role="region"
+      cardClassName="prompt-shelf--todo"
+      cardCollapsible
+      collapsed={!open}
+      onToggleCollapse={() => setOpen((value) => {
+        const next = !value;
+        saveOpenState(stateKey, next);
+        return next;
+      })}
       headerActions={
-        <>
-          <PromptHeaderAction
-            onClick={() => setOpen((value) => {
-              const next = !value;
-              saveOpenState(stateKey, next);
-              return next;
-            })}
-          >
-            {open ? t("common.collapse") : t("common.expand")}
+        allDone && (
+          <PromptHeaderAction onClick={onDismiss}>
+            {t("common.close")}
           </PromptHeaderAction>
-          {allDone && (
-            <PromptHeaderAction onClick={onDismiss}>
-              {t("common.close")}
-            </PromptHeaderAction>
-          )}
-        </>
+        )
       }
     >
       {open && (

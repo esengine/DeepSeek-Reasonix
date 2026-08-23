@@ -72,6 +72,7 @@ func Open(ctx context.Context, opts Options) (*Catalog, error) {
 		// the interval longer so large installs are not re-walked every minute.
 		opts.ReconcileInterval = 5 * time.Minute
 	}
+	opts.MaxBytes = resolveMaxBytes(opts.MaxBytes, configuredMaxMB())
 	handle, err := projectiondb.Open(ctx, projectiondb.OpenOptions{
 		Path: opts.Path, MemoryName: "history-search", Migrations: migrations(), InMemory: opts.InMemory,
 		MaxOpenConns: 4, Now: opts.Now, SecureDelete: true, AutoVacuum: true,
@@ -103,6 +104,15 @@ func Open(ctx context.Context, opts Options) (*Catalog, error) {
 	c.refreshStatus(ctx)
 	c.wg.Add(1)
 	go c.worker()
+	// A far-over-cap index from before the cap existed (#8717) is cheaper to
+	// rebuild than to evict session-by-session; wipe async so startup never
+	// blocks. Registered roots rescan afterwards and re-index truncated.
+	if !opts.InMemory && strings.TrimSpace(opts.Path) != "" &&
+		historyDBFileSize(opts.Path) > rebuildOversizeFactor*opts.MaxBytes {
+		c.wg.Go(func() {
+			c.wipeForRebuild(c.ctx)
+		})
+	}
 	return c, nil
 }
 
@@ -118,12 +128,9 @@ func (c *Catalog) ensureTokenizerVersion(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, statement := range []string{`DELETE FROM history_fts`, `DELETE FROM history_documents`,
-		`DELETE FROM history_sources`, `DELETE FROM history_roots`} {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
+	if err := wipeProjectionRows(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE history_state SET tokenizer_version=?,revision=revision+1 WHERE id=1`, TokenizerVersion); err != nil {
 		_ = tx.Rollback()
@@ -239,6 +246,7 @@ func (c *Catalog) worker() {
 			return
 		case <-ticker.C:
 			c.markAllRootsDirty()
+			c.governSize(c.ctx)
 		case done := <-c.flushCh:
 			c.drainPending(c.ctx)
 			close(done)
@@ -471,22 +479,25 @@ func (c *Catalog) indexPath(ctx context.Context, root Root, path string, generat
 	if identityErr == nil && known {
 		digest, revision = state.DigestHex, state.Revision
 	}
-	var oldFingerprint, oldMetaFingerprint, oldDigest string
+	var oldFingerprint, oldMetaFingerprint, oldDigest, oldHealth string
 	var oldGeneration, oldRevision int64
 	var oldMessageCount int
 	err := c.db.QueryRowContext(ctx, `SELECT content_fingerprint,meta_fingerprint,content_digest,seen_generation,
-		content_revision,indexed_message_count FROM history_sources WHERE path=?`, path).Scan(
-		&oldFingerprint, &oldMetaFingerprint, &oldDigest, &oldGeneration, &oldRevision, &oldMessageCount)
+		content_revision,indexed_message_count,health FROM history_sources WHERE path=?`, path).Scan(
+		&oldFingerprint, &oldMetaFingerprint, &oldDigest, &oldGeneration, &oldRevision, &oldMessageCount, &oldHealth)
 	if sourceProjectionUnchanged(err, oldFingerprint, contentFingerprint, oldMetaFingerprint, metaFingerprint, oldDigest, digest) {
 		if generation != 0 && oldGeneration != generation {
-			_, _ = c.db.ExecContext(ctx, `UPDATE history_sources SET seen_generation=?,missing_since=0,health='ok' WHERE path=?`, generation, path)
+			// Keep evicted rows evicted: an unchanged file must not re-enter the index.
+			_, _ = c.db.ExecContext(ctx, `UPDATE history_sources SET seen_generation=?,missing_since=0,
+				health=CASE WHEN health='evicted' THEN 'evicted' ELSE 'ok' END WHERE path=?`, generation, path)
 		}
 		return nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if err == nil && known && appendFrom >= 0 {
+	// An evicted projection has no prefix to append onto; fall through to a full reload.
+	if err == nil && known && appendFrom >= 0 && oldHealth != "evicted" {
 		handled, appendErr := c.tryAppendPath(ctx, root, path, generation, appendFrom, oldMessageCount, oldRevision,
 			revision, digest, contentFingerprint, metaFingerprint)
 		if appendErr != nil {

@@ -375,7 +375,7 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
+          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
 
       - name: Build frontend
         run: |
@@ -389,8 +389,10 @@ jobs:
           pnpm --dir frontend test:terminal
           pnpm --dir frontend test:task-monitor
           pnpm --dir frontend test:workspace
+          pnpm --dir frontend test:stream
           pnpm --dir frontend test:motion
           pnpm --dir frontend test:motion-browser
+          pnpm --dir frontend test:composer
           pnpm --dir frontend test:transcript
           pnpm --dir frontend test:transcript-browser
 
@@ -443,7 +445,7 @@ jobs:
       - name: Install WebKitGTK 4.1 build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
+          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
 
       - name: Build and test WebKitGTK 4.1 observer
         run: go test -tags webkit2_41 ./...
@@ -452,7 +454,7 @@ jobs:
         run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags 'webkit2_41 reasonix_webkit_smoke' . -run '^TestWebKitNativeRecoverySmoke$'
 
   # desktop/ is a separate module, so the root macOS matrix above does not
-  # compile or exercise the native PTY implementation.
+  # compile or exercise the native PTY and FSEvents implementations.
   desktop-macos:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
@@ -469,8 +471,16 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - name: Test integrated terminal and PTY lifecycle
-        run: go test -race -run 'Test(ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+      - name: Test integrated terminal, PTY, and FSEvents lifecycle
+        run: go test -race -run 'Test(DarwinWorkspaceWatcher|WorkspaceChangeHub|ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+
+      # The production Wails build uses CGO. Keep the explicit unavailable
+      # backend buildable as a fail-closed portability contract instead of
+      # silently falling back to kqueue's per-file descriptor usage.
+      - name: Test macOS build without CGO
+        env:
+          CGO_ENABLED: "0"
+        run: go test -run '^TestDarwinWorkspaceWatcherWithoutCGOIsUnavailable$' .
 
       # desktop/*_darwin.go is the one build-tag set the lint job cannot reach:
       # the main-thread watchdog is cgo, so it only type-checks with a real

@@ -34,7 +34,11 @@ export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabI
   if (!label || items.length === 0) return null;
 
   return (
-    <div className={`readonly-batch${open ? " readonly-batch--open" : ""}`} data-entrance={items[0]?.id}>
+    <div
+      className={`readonly-batch${open ? " readonly-batch--open" : ""}`}
+      data-entrance={items[0]?.id}
+      data-transcript-layout-variant={open ? "tool-batch-expanded" : "tool-batch-collapsed"}
+    >
       <button type="button" className="reasoning__head" onClick={() => { beginUserResize(); setOpen((v) => !v); }} aria-expanded={open}>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="readonly-batch__label" data-creation-label={t("creation.toolCallsLabel")}>{label}</span>

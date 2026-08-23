@@ -180,7 +180,7 @@ func TestContextLimitRecoveryPublishesUnknownGatewayBudget(t *testing.T) {
 	}
 }
 
-func TestContextLimitRecoveryStopsAfterBudgetAndCompact(t *testing.T) {
+func TestContextLimitRecoveryRetriesOriginalRequestOnlyOnce(t *testing.T) {
 	limit := issue8909Limit()
 	limit.PromptTokens = 1_040_000
 	limit.CompletionTokens = 20_000
@@ -202,6 +202,11 @@ func TestContextLimitRecoveryStopsAfterBudgetAndCompact(t *testing.T) {
 	}
 	if provider.AsContextLimitError(got.err) == nil && !errors.Is(got.err, ErrCompactionRequired) {
 		t.Fatalf("terminal err = %v", got.err)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if got := len(prov.reqs); got != 2 {
+		t.Fatalf("provider requests = %d, want initial request plus one retry", got)
 	}
 }
 

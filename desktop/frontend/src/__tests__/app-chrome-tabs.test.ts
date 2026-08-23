@@ -279,10 +279,10 @@ ok(
 
 ok(
   /const WORKSPACE_PANEL_DEFAULT_OPEN = true;/.test(layoutStoreSource) &&
-    /workspacePanelOpen:\s*loadWorkspacePanelOpen\(\)/.test(layoutStoreSource) &&
-    /export function saveWorkspacePanelOpen\(open: boolean\)/.test(layoutStoreSource) &&
+    /workspacePanelOpen:\s*loadWorkspacePanelOpen\(""\)/.test(layoutStoreSource) &&
+    /export function saveWorkspacePanelOpen\(open: boolean, workspaceRoot = ""\)/.test(layoutStoreSource) &&
     /reasonix\.workspacePanel\.open/.test(layoutStoreSource),
-  "right dock open state is restored from localStorage with expanded first-launch default",
+  "right dock open state is restored from per-project localStorage with expanded first-launch default",
 );
 
 ok(
@@ -502,7 +502,7 @@ ok(
 
 ok(
   /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
-    /hydrating=\{transcriptHydrating\}/.test(appSource),
+    /hydrating=\{runtimeTransitioning \|\| transcriptHydrating\}/.test(appSource),
   "Welcome is suppressed only until transcript history has loaded",
 );
 
@@ -517,7 +517,7 @@ ok(
 );
 
 ok(
-  /if \(heroMode\) \{[\s\S]*?const maxHeight = 96;[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
+  /if \(heroMode\) \{[\s\S]*?const maxHeight = composerHeroInputMaxHeight\(\);[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
     !/if \(heroMode\) \{\s*setTextareaAutoHeight\(20\);/.test(composerSource),
   "Creation hero composer auto-grows multi-line drafts instead of clipping at 20px",
 );
@@ -566,12 +566,20 @@ ok(
 );
 
 ok(
+  /const enterChatViewForTabNavigation = useCallback\(\(\) => \{\s*setMainView\("chat"\);/.test(appSource) &&
+    /const enqueueTabSwitch = useCallback\([\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?enqueueNavigationRequest/.test(appSource) &&
+    /const revealBackgroundRuntime = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealBackgroundRuntime/.test(appSource) &&
+    /const revealWorkspaceWriter = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealWorkspaceWriterForTab/.test(appSource),
+  "every direct tab activation returns overlay pages to the chat view",
+);
+
+ok(
   !/await resumeSession\(session\.path, targetTab\.id\);/.test(navigationBlock),
   "history navigation does not re-resume a session that OpenTopicSession already pinned",
 );
 
 ok(
-  /<HeartbeatPanel[\s\S]*onOpenTopic=\{\(scope, workspaceRoot, topicId\) => \{[\s\S]*void handleOpenTopic\(scope, workspaceRoot, topicId\);[\s\S]*\}\}/.test(appSource),
+  /<HeartbeatView[\s\S]*onOpenTopic=\{\(scope, workspaceRoot, topicId\) => \{[\s\S]*void handleOpenTopic\(scope, workspaceRoot, topicId\);[\s\S]*\}\}/.test(appSource),
   "heartbeat topic navigation uses the guarded open-topic path",
 );
 
@@ -689,8 +697,8 @@ ok(
 );
 
 ok(
-  finalDeclaration(":root[data-theme-style] .workbench-dock__tab--active::after", "bottom") === "1px",
-  "active dock underline stays inside the visible dock edge",
+  finalDeclaration(":root[data-theme-style] .workbench-dock__tab--active::after", "display") === "none",
+  "active dock tab underline is removed in favor of the rounded-rect selected state",
 );
 
 for (const selector of [

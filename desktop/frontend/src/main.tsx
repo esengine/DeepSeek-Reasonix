@@ -72,12 +72,13 @@ installMessageSelectionCopy(document);
 
 // Inside the Wails shell, suppress the webview's default right-click menu — its
 // Reload / Back / Inspect entries are easy to hit by accident and can reset or
-// navigate away from the app. Text inputs keep their native Cut/Copy/Paste menu.
+// navigate away from the app. Text inputs keep their native Cut/Copy/Paste menu;
+// the terminal area is exempt so its own context menu can offer copy/paste.
 // Left alone in a plain browser (pnpm dev) so devtools stay reachable.
 if (typeof window !== "undefined" && window.runtime) {
   window.addEventListener("contextmenu", (e) => {
     const target = e.target as HTMLElement | null;
-    if (!target?.closest("input, textarea")) e.preventDefault();
+    if (!target?.closest("input, textarea") && !target?.closest(".terminal-view")) e.preventDefault();
   });
 }
 

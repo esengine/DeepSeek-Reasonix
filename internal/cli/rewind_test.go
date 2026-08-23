@@ -114,6 +114,11 @@ func TestPartialCoverageRequiresExplicitConfirmation(t *testing.T) {
 	if control.RewindPlanRequiresConfirmation(conversationOnly) {
 		t.Fatal("conversation-only rewind should not warn about file coverage")
 	}
+	scratchOnly := partial
+	scratchOnly.CoverageGaps = []checkpoint.CoverageGap{{Reason: checkpoint.GapScratch, Path: "/tmp/btc_klines.py"}}
+	if control.RewindPlanRequiresConfirmation(scratchOnly) {
+		t.Fatal("scratch-only coverage must not require extra confirmation")
+	}
 
 	m := chatTUI{width: 80, rewind: &rewindPicker{
 		metas:       []checkpoint.Meta{{Turn: 0, Prompt: "change files"}},

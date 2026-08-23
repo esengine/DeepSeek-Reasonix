@@ -11,7 +11,9 @@ import (
 
 var deprecatedModeNoticeOnce sync.Once
 
-// acceptDeprecatedModeFlag validates and ignores a compatibility value.
+// acceptDeprecatedModeFlag validates a role value; the caller applies the
+// returned floor to the controller. Unknown values error; light folds to
+// standard silently.
 func acceptDeprecatedModeFlag(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -20,7 +22,7 @@ func acceptDeprecatedModeFlag(raw string) error {
 		return err
 	}
 	deprecatedModeNoticeOnce.Do(func() {
-		fmt.Fprintln(os.Stderr, agentpreset.DeprecatedNotice)
+		fmt.Fprintln(os.Stderr, agentpreset.FloorNotice)
 	})
 	return nil
 }

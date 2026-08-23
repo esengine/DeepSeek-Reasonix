@@ -9,6 +9,7 @@ import { ProcessBrainIcon } from "./ProcessCard";
 import { ReasoningSummary } from "./ReasoningSummary";
 import { StreamingReasoningText } from "./StreamingReasoningText";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
+import { resolveReasoningLayoutVariant } from "../lib/transcriptRowGeometry";
 
 export function InlineAssistantReasoning({ item, onManualOpen }: { item: AssistantItem; onManualOpen?: () => void }) {
   const t = useT();
@@ -44,8 +45,14 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
   }, [beginUserResize, onManualOpen, open]);
   const reasoning = shown.reasoning.trim();
   if (!reasoning) return null;
+  const layoutVariant = open
+    ? "reasoning-expanded"
+    : resolveReasoningLayoutVariant(displayMode, running) ?? "reasoning-heading-only";
   return (
-    <div className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}>
+    <div
+      className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}
+      data-transcript-layout-variant={layoutVariant}
+    >
       <button type="button" className="turn-collapse__reasoning-head" data-running={running ? "" : undefined} onClick={toggle} aria-expanded={open}>
         <ProcessBrainIcon size={12} />
         <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>

@@ -151,6 +151,8 @@ type CompletionSummaryInfo struct {
 	Review             string // none | passed | warned | failed | unavailable
 	GapKinds           []string
 	ConstraintDegraded bool
+	Floor              string // standard | delivery; empty on legacy events
+	Attention          bool   // authoritative when Floor is non-empty
 }
 
 // StreamAttemptAction is the lifecycle phase of a local sampling attempt.
@@ -162,13 +164,15 @@ const (
 	StreamAttemptCommit  StreamAttemptAction = "commit"
 )
 
-// RetryScope distinguishes connection+header retries from body-phase stream
-// retries. Older clients ignore the empty/unknown value.
+// RetryScope distinguishes connection+header retries, body-phase stream
+// retries, and host-classified protocol recovery. Older clients ignore an
+// unknown value and still render the generic retry state.
 type RetryScope string
 
 const (
-	RetryScopeHeaders RetryScope = "headers"
-	RetryScopeStream  RetryScope = "stream"
+	RetryScopeHeaders  RetryScope = "headers"
+	RetryScopeStream   RetryScope = "stream"
+	RetryScopeProtocol RetryScope = "protocol"
 )
 
 // StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
@@ -604,6 +608,33 @@ type WorkspaceChangedPayload struct {
 // about readiness audit receipts can implement only Sink and will ignore them.
 type ReadinessAuditSink interface {
 	RecordReadinessAudit(evidence.ReadinessAudit)
+}
+
+// AnchorSafetyAudit is a content-free shadow decision for an anchor-based
+// writer. It contains only bounded enums/counts; paths, anchors, source text,
+// and digests never leave the host-side observation ledger.
+type AnchorSafetyAudit struct {
+	Mode                  string
+	TaskMode              string
+	RangeLines            int
+	ObservationAge        int
+	LegacyAllowed         bool
+	ShadowAllowed         bool
+	Reason                string
+	SameBatchReadRejected bool
+}
+
+type AnchorSafetyAuditSink interface {
+	RecordAnchorSafetyAudit(AnchorSafetyAudit)
+}
+
+func RecordAnchorSafetyAudit(s Sink, a AnchorSafetyAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if as, ok := s.(AnchorSafetyAuditSink); ok {
+		as.RecordAnchorSafetyAudit(a)
+	}
 }
 
 // TurnCompletionSink is an optional sink capability for synchronous controller

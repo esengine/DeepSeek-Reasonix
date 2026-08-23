@@ -244,7 +244,7 @@ func TestReasoningHistoryRepairKeepsHealthyAndEmptyFallbackBytes(t *testing.T) {
 		ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{}`}},
 	}}
 	strict := strictAssistantReasoningProvider{testutil.NewMock("strict")}
-	if got, changed := repairUnreplayableReasoningHistory(strict, healthy); changed || &got[0] != &healthy[0] {
+	if got, changed := provider.ProjectReplaySafeMessages(strict, healthy); changed || &got[0] != &healthy[0] {
 		t.Fatal("healthy replay history must keep its exact backing slice")
 	}
 
@@ -253,7 +253,7 @@ func TestReasoningHistoryRepairKeepsHealthyAndEmptyFallbackBytes(t *testing.T) {
 		ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{}`}},
 	}}
 	openAIStyle := toolCallReasoningRequiredProvider{testutil.NewMock("openai")}
-	if got, changed := repairUnreplayableReasoningHistory(openAIStyle, emptyFallback); changed || &got[0] != &emptyFallback[0] {
+	if got, changed := provider.ProjectReplaySafeMessages(openAIStyle, emptyFallback); changed || &got[0] != &emptyFallback[0] {
 		t.Fatal("empty-key fallback history must remain byte-identical")
 	}
 }

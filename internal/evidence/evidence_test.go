@@ -899,7 +899,7 @@ func TestAdvanceSerialTodoAdvancesOrphanSubStep(t *testing.T) {
 	}
 }
 
-func TestSuccessfulProgressSignaturesIgnoreExactRepeatsAndBookkeeping(t *testing.T) {
+func TestSuccessfulProgressSignaturesIgnoreExactRepeatsAndTrackTodoClear(t *testing.T) {
 	ledger := NewLedger()
 	read := ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true)
 	read.OutputBytes = 10
@@ -910,13 +910,13 @@ func TestSuccessfulProgressSignaturesIgnoreExactRepeatsAndBookkeeping(t *testing
 	ledger.Record(ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, false))
 
 	sigs := ledger.SuccessfulProgressSignaturesSince(0)
-	if len(sigs) != 4 {
-		t.Fatalf("progress signatures = %d, want two reads plus mutation and command", len(sigs))
+	if len(sigs) != 5 {
+		t.Fatalf("progress signatures = %d, want two reads plus todo clear, mutation, and command", len(sigs))
 	}
 	if sigs[0] != sigs[1] {
 		t.Fatalf("exact repeated reads should have the same signature: %q != %q", sigs[0], sigs[1])
 	}
-	if sigs[1] == sigs[2] || sigs[2] == sigs[3] {
+	if sigs[1] == sigs[2] || sigs[2] == sigs[3] || sigs[3] == sigs[4] {
 		t.Fatalf("distinct host work collapsed to one signature: %v", sigs)
 	}
 }

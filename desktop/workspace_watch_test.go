@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,7 @@ func TestWorkspaceChangeHubDoesNotDropFilesystemWriteAfterAgentMutation(t *testi
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
 
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions.Content
 	app.workspaceHub.observeAgentMutation("a", contentWorkspaceMutation([]string{"file.txt"}, false))
 	key := canonicalWorkspaceRoot(root)
@@ -121,6 +123,7 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	app := &App{tabs: map[string]*WorkspaceTab{"a": {ID: "a", WorkspaceRoot: root}}}
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions
 
 	app.workspaceHub.observeAgentMutation("a", event.WorkspaceMutation{WorkingTree: true, GitMeta: true})
@@ -133,11 +136,35 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	}
 }
 
+func waitForWorkspaceHubStartupToSettle(t *testing.T, app *App, tabID string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	last := app.WorkspaceRevisionForTab(tabID).Revisions
+	stableSince := time.Now()
+	deadline := stableSince.Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		current := app.WorkspaceRevisionForTab(tabID).Revisions
+		if current != last {
+			last = current
+			stableSince = time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= 250*time.Millisecond {
+			return
+		}
+	}
+	t.Fatal("workspace watcher startup events did not settle")
+}
+
 func TestTabEventSinkForwardsImmediateWorkspaceMutation(t *testing.T) {
 	root := t.TempDir()
 	app := &App{tabs: map[string]*WorkspaceTab{"a": {ID: "a", WorkspaceRoot: root}}}
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	sink := event.Sync(&tabEventSink{tabID: "a", app: app})
 	before := app.WorkspaceRevisionForTab("a").Revisions
 

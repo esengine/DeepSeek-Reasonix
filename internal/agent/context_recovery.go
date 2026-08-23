@@ -9,8 +9,7 @@ import (
 )
 
 type contextRecoveryBudget struct {
-	budgetRetries  int
-	compactRetries int
+	retries int
 }
 
 func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest, err error, budget *contextRecoveryBudget) (samplingRequest, bool, string) {
@@ -40,13 +39,13 @@ func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest,
 		prompt = a.estimatedRequestTokens(frozen.req)
 	}
 	physical := window - prompt - outputBudgetReserve
-	if physical > 0 && budget.budgetRetries == 0 {
+	if physical > 0 && budget.retries == 0 {
 		next := freezeProviderRequest(frozen.req)
 		next.MaxTokens = physical
 		if frozen.req.MaxTokens > 0 && frozen.req.MaxTokens < physical {
 			next.MaxTokens = frozen.req.MaxTokens
 		}
-		budget.budgetRetries++
+		budget.retries++
 		// Publish the request that will actually be retried, not the stale
 		// pre-error admission. The Context Panel reads this atomic snapshot while
 		// the turn is still active and after it completes.
@@ -71,11 +70,16 @@ func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest,
 		a.sess.output.activeReqShape.Store(&shape)
 		return samplingRequest{req: next}, true, contextRecoveryLearnedRetry
 	}
-	if budget.compactRetries == 0 {
+	if physical <= 0 && budget.retries == 0 {
+		startProjectionVersion := a.currentProjectionVersion()
 		if _, perr := a.contextManager().Prepare(ctx, ContextPreparePolicy{
 			Trigger: CompactionTriggerOverflow,
 			Force:   true,
 		}); perr != nil {
+			a.setLastRecovery(contextRecoveryFailed)
+			return samplingRequest{}, false, contextRecoveryFailed
+		}
+		if a.currentProjectionVersion() <= startProjectionVersion {
 			a.setLastRecovery(contextRecoveryFailed)
 			return samplingRequest{}, false, contextRecoveryFailed
 		}
@@ -88,7 +92,7 @@ func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest,
 			a.setLastRecovery(contextRecoveryFailed)
 			return samplingRequest{}, false, contextRecoveryFailed
 		}
-		budget.compactRetries++
+		budget.retries++
 		a.setLastRecovery(contextRecoveryCompacted)
 		a.emitContextRecoveryNotice(contextRecoveryCompacted, limit, rebuilt.req.MaxTokens)
 		shape := a.requestCalibrationShape(rebuilt.req)

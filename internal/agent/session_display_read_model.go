@@ -26,13 +26,17 @@ func LoadSessionDisplayMessages(path string) ([]provider.Message, PersistedState
 }
 
 func loadSessionDisplayMessagesUnlocked(path string) ([]provider.Message, PersistedState, bool, error) {
-	msgs, _, damaged, err := loadSessionMessages(path)
+	hasher := newSessionTranscriptHasher()
+	msgs, _, damaged, err := loadSessionMessagesWithLimits(path, defaultSessionReplayLimits, hasher)
 	if err != nil {
 		return nil, PersistedState{}, false, err
 	}
-	digest, err := digestSessionMessages(msgs)
-	if err != nil {
-		return nil, PersistedState{}, false, err
+	digest, digestOK := hasher.sum()
+	if !digestOK {
+		digest, err = digestSessionMessages(msgs)
+		if err != nil {
+			return nil, PersistedState{}, false, err
+		}
 	}
 	revision, ledgerDigest, err := sessionContentRevision(path)
 	if err != nil {

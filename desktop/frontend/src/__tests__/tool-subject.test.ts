@@ -97,6 +97,8 @@ const searchHistory = historyMessagesToItems([{
 eq(searchHistory[0]?.kind, "tool", "server search hydrates as a tool card before the answer");
 eq(searchHistory[0]?.kind === "tool" ? searchHistory[0].name : "", "web_search", "server search card uses web_search");
 eq(searchHistory[0]?.kind === "tool" ? subjectOf("web_search", searchHistory[0].args) : "", "bitcoin", "search card subject is the query");
+eq(searchHistory[0]?.kind === "tool" ? searchHistory[0].searchSources?.length : 0, 1, "search card keeps structured sources for display");
+eq(searchHistory[0]?.kind === "tool" ? searchHistory[0].output : "", "新闻本文\nhttps://example.com/a", "search card preserves raw output for replay/history");
 eq(searchHistory[1]?.kind, "assistant", "model text stays a separate assistant item");
 eq(searchHistory[1]?.kind === "assistant" ? searchHistory[1].text : "", "answer only", "answer text does not include search results");
 eq(searchHistory[1]?.kind === "assistant" ? searchHistory[1].searchSources?.[0]?.title : "", "新闻本文", "answer hydrates search footnotes");

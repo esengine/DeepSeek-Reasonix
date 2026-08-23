@@ -273,7 +273,7 @@ function convertRecord(
   }
   if (m.role === "user") {
     if (m.content.trim() !== "") {
-      items.push({ kind: "user", id, text: m.content, submitText: m.submitText, createdAt: m.createdAt, checkpointTurn: m.checkpointTurn });
+      items.push({ kind: "user", id, text: m.content, submitText: m.submitText, createdAt: m.createdAt, checkpointTurn: m.checkpointTurn, historyTurn: rec.turn > 0 ? rec.turn : undefined });
     }
     return { items, claims, unresolvedIds, pendingPositional, matches };
   }
@@ -784,7 +784,7 @@ export class TranscriptStore {
   async loadLatest(
     tabId: string,
     sessionPath: string,
-    options: { turns?: number; preferResident?: boolean; expectedRevision?: number; expectedDigest?: string } = {},
+    options: { turns?: number; entries?: number; bytes?: number; preferResident?: boolean; expectedRevision?: number; expectedDigest?: string } = {},
   ): Promise<TranscriptProjection | undefined> {
     const key = sessionKeyFor(tabId, sessionPath);
     const existing = this.sessions.get(key);
@@ -802,13 +802,13 @@ export class TranscriptStore {
     this.sessions.set(key, session);
     this.touch(session);
 
-    const turns = options.turns;
-    let slice = await this.fetchSlice(tabId, { cursor: "", turns });
+    const { turns, entries, bytes } = options;
+    let slice = await this.fetchSlice(tabId, { cursor: "", turns, entries, bytes });
     if (this.sessions.get(key) !== session || session.generation !== generation) return undefined;
     if (slice.stale) {
       // cursor "" cannot bind a stale identity, but a concurrent rewrite may
       // still report one — retry once against the settled revision.
-      slice = await this.fetchSlice(tabId, { cursor: "", turns });
+      slice = await this.fetchSlice(tabId, { cursor: "", turns, entries, bytes });
       if (this.sessions.get(key) !== session || session.generation !== generation) return undefined;
     }
     this.replaceRecords(session, asArray<HistoryEntry>(slice.entries));
@@ -833,7 +833,7 @@ export class TranscriptStore {
   async loadOlder(
     tabId: string,
     sessionPath: string,
-    options: { turns?: number } = {},
+    options: { turns?: number; entries?: number; bytes?: number } = {},
   ): Promise<LoadOlderResult | undefined> {
     const key = sessionKeyFor(tabId, sessionPath);
     const session = this.sessions.get(key);
@@ -847,7 +847,7 @@ export class TranscriptStore {
     session.olderInFlight = true;
     const generation = session.generation;
     try {
-      const slice = await this.fetchSlice(tabId, { cursor: session.nextCursor, turns: options.turns });
+      const slice = await this.fetchSlice(tabId, { cursor: session.nextCursor, ...options });
       if (this.sessions.get(key) !== session || session.generation !== generation) return undefined;
       if (slice.stale) {
         const projection = await this.loadLatest(tabId, sessionPath, options);

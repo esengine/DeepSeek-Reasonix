@@ -52,6 +52,8 @@ type coalescer struct {
 	draining    bool
 }
 
+var _ OptionalSinkCapabilities = (*coalescer)(nil)
+
 // isStreamDelta reports whether e is a pure streaming delta: merging is only
 // safe when no other field carries meaning. The zero-probe comparison keeps
 // this true by construction as Event grows fields.
@@ -153,6 +155,13 @@ func (c *coalescer) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	RecordReadinessAudit(c.inner, a)
 }
 
+func (c *coalescer) RecordAnchorSafetyAudit(a AnchorSafetyAudit) {
+	c.mu.Lock()
+	c.enqueueFlushLocked()
+	c.drainAndUnlock()
+	RecordAnchorSafetyAudit(c.inner, a)
+}
+
 func (c *coalescer) RecordTurnCompletion() {
 	c.mu.Lock()
 	c.enqueueFlushLocked()
@@ -207,4 +216,11 @@ func (c *coalescer) RecordWorkspaceMutation(m WorkspaceMutation) {
 	c.enqueueFlushLocked()
 	c.drainAndUnlock()
 	RecordWorkspaceMutation(c.inner, m)
+}
+
+func (c *coalescer) RecordRunBudget(sample RunBudgetSample) {
+	c.mu.Lock()
+	c.enqueueFlushLocked()
+	c.drainAndUnlock()
+	RecordRunBudget(c.inner, sample)
 }

@@ -107,6 +107,22 @@ var vendorTable = map[string]vendorCapabilities{
 		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
 		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
+	// StepFun's Responses API accepts reasoning items only with a `summary`
+	// list and silently ignores previous_response_id (verified live: a
+	// continuation request billed only the new-turn tokens and the model
+	// hallucinated unrelated context), so it is stateless like DeepSeek but
+	// needs the summary field like DashScope. Only step-3.7-flash is enabled
+	// server-side; the wire shape is identical on the standard and step_plan
+	// hosts, so one entry covers both.
+	"stepfun": {
+		stateless:              true,
+		sessionCacheHeader:     false,
+		toolCallReasoning:      true,
+		singleSegmentReasoning: false,
+		ignoresTemperature:     false,
+		summaryRequired:        true,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
+	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
 	// Unknown gateways deliberately do NOT inherit a large max-output default.
 }
@@ -132,6 +148,8 @@ func DetectVendor(baseURL string) string {
 		return "deepseek"
 	case host == "api.xiaomimimo.com", strings.HasSuffix(host, ".xiaomimimo.com"):
 		return "mimo"
+	case host == "api.stepfun.com", host == "api.stepfun.ai":
+		return "stepfun"
 	default:
 		return ""
 	}

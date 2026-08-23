@@ -37,10 +37,13 @@ type BranchMeta struct {
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	CustomTitle      string    `json:"custom_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
-	// TokenMode is a deprecated dual-write field; new writes pin it to "full".
-	TokenMode string `json:"token_mode,omitempty"`
-	// AgentPreset is a deprecated dual-write field; new writes pin it to "balanced".
-	AgentPreset      string `json:"agent_preset,omitempty"`
+	// TokenMode and AgentPreset are deprecated dual-write fields derived from
+	// QualityFloor; delivery writes "delivery", standard writes "full"/"".
+	TokenMode   string `json:"token_mode,omitempty"`
+	AgentPreset string `json:"agent_preset,omitempty"`
+	// QualityFloor is the session delivery floor (standard|delivery). Loading
+	// a meta without it maps legacy AgentPreset/TokenMode "delivery" here.
+	QualityFloor     string `json:"quality_floor,omitempty"`
 	Mode             string `json:"mode,omitempty"`
 	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
 	Goal             string `json:"goal,omitempty"`

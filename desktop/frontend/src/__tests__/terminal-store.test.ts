@@ -122,6 +122,40 @@ if (useTerminalStore.getState().workspace?.readOnly) {
 process.stdout.write("PASS forced capability refresh supersedes an in-flight same-tab request\n");
 
 resetTerminalStoreForTests();
+calls = 0;
+const paintedWorkspace: Workspace = {
+  available: true,
+  readOnly: false,
+  sessions: [{
+    id: "painted",
+    title: "zsh",
+    shell: "default",
+    cwd: ".",
+    createdAt: 1,
+    running: true,
+  }],
+  shells: [{ id: "default", label: "Default shell" }],
+};
+useTerminalStore.setState({
+  tabId: "warm-tab",
+  workspace: paintedWorkspace,
+  loading: false,
+  activeSessionId: "painted",
+});
+const warmRefresh = useTerminalStore.getState().syncWorkspace("warm-tab");
+await Promise.resolve();
+if (useTerminalStore.getState().workspace?.sessions[0]?.id !== "painted") {
+  throw new Error("same-tab refresh cleared the painted workspace before the response landed");
+}
+if (useTerminalStore.getState().loading !== true) {
+  throw new Error("same-tab refresh should still mark loading while the request is in flight");
+}
+pending.get("warm-tab")?.(paintedWorkspace);
+await warmRefresh;
+if (calls !== 1) throw new Error(`same-tab refresh expected one workspace call, got ${calls}`);
+process.stdout.write("PASS same-tab refresh keeps the painted workspace warm\n");
+
+resetTerminalStoreForTests();
 createPending.length = 0;
 const readyWorkspace: Workspace = {
   available: true,

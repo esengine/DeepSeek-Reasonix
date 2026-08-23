@@ -136,6 +136,7 @@ var slashCommands = map[string]bool{
 	"/answer":          true,
 	"/yolo":            true,
 	"/mode":            true,
+	"/model":           true,
 	"/queue":           true,
 	"/projects":        true,
 	"/use":             true,

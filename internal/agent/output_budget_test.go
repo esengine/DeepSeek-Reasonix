@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -19,6 +20,112 @@ type sharedWindowTestProvider struct {
 	last   provider.Request
 	calls  int
 	finish string
+}
+
+type outputLimitRetryProvider struct {
+	calls []provider.Request
+}
+
+type namedOutputBudgetProvider struct{ name string }
+
+func (p *namedOutputBudgetProvider) Name() string { return p.name }
+
+func (*namedOutputBudgetProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	return nil, errors.New("unused")
+}
+
+func (*outputLimitRetryProvider) Name() string { return "output-limit-retry" }
+
+func (p *outputLimitRetryProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.calls = append(p.calls, req)
+	if len(p.calls) == 1 {
+		return nil, &provider.OutputLimitError{
+			APIError:        &provider.APIError{Status: 400, Body: "max_tokens is too large"},
+			RequestedTokens: req.MaxTokens,
+			MaxOutputTokens: 131_072,
+		}
+	}
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+func TestStreamProviderRequestRetriesOutputLimitBeforeAnyOutput(t *testing.T) {
+	prov := &outputLimitRetryProvider{}
+	a := &Agent{svc: agentServices{prov: prov}, sess: sessionRuntime{}}
+	ch, err := a.streamProviderRequest(context.Background(), provider.Request{MaxTokens: 384_000})
+	if err != nil {
+		t.Fatalf("streamProviderRequest: %v", err)
+	}
+	var text strings.Builder
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkText {
+			text.WriteString(chunk.Text)
+		}
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("retry stream emitted error: %v", chunk.Err)
+		}
+	}
+	if text.String() != "ok" || len(prov.calls) != 2 || prov.calls[1].MaxTokens != 131_072 {
+		t.Fatalf("retry calls = %+v, text=%q", prov.calls, text.String())
+	}
+	if got := a.learnedCompletionBudget(); got != 131_072 {
+		t.Fatalf("learned completion budget = %d, want 131072", got)
+	}
+}
+
+func TestLearnedOutputBudgetCacheIsScopedToProviderRouteAndModel(t *testing.T) {
+	providerName := "output-budget-cache-provider-unique"
+	modelRef := "opencode-go/deepseek-v4-flash-cache-unique"
+	first := &Agent{
+		agentConfig: agentConfig{modelRef: modelRef},
+		svc:         agentServices{prov: &namedOutputBudgetProvider{name: providerName}},
+		sess:        sessionRuntime{},
+	}
+	first.learnOutputBudget(131_072)
+
+	sameModel := &Agent{
+		agentConfig: agentConfig{modelRef: modelRef},
+		svc:         agentServices{prov: &namedOutputBudgetProvider{name: providerName}},
+		sess:        sessionRuntime{},
+	}
+	if got := sameModel.learnedCompletionBudget(); got != 131_072 {
+		t.Fatalf("same provider/route/model budget = %d, want 131072", got)
+	}
+
+	differentRoute := &Agent{
+		agentConfig: agentConfig{modelRef: modelRef},
+		svc:         agentServices{prov: &namedOutputBudgetProvider{name: providerName + "-responses"}},
+		sess:        sessionRuntime{},
+	}
+	if got := differentRoute.learnedCompletionBudget(); got != 0 {
+		t.Fatalf("different route inherited budget %d", got)
+	}
+
+	differentModel := &Agent{
+		agentConfig: agentConfig{modelRef: modelRef + "-other"},
+		svc:         agentServices{prov: &namedOutputBudgetProvider{name: providerName}},
+		sess:        sessionRuntime{},
+	}
+	if got := differentModel.learnedCompletionBudget(); got != 0 {
+		t.Fatalf("different model inherited budget %d", got)
+	}
+
+	key := outputBudgetCacheKey(first)
+	learnedOutputBudgetCache.Lock()
+	entry := learnedOutputBudgetCache.entries[key]
+	entry.expiresAt = time.Now().Add(-time.Minute)
+	learnedOutputBudgetCache.entries[key] = entry
+	learnedOutputBudgetCache.Unlock()
+	if got := (&Agent{
+		agentConfig: agentConfig{modelRef: modelRef},
+		svc:         agentServices{prov: &namedOutputBudgetProvider{name: providerName}},
+		sess:        sessionRuntime{},
+	}).learnedCompletionBudget(); got != 0 {
+		t.Fatalf("expired budget = %d, want 0", got)
+	}
 }
 
 func (*sharedWindowTestProvider) Name() string { return "shared-window-test" }
@@ -82,11 +189,11 @@ func TestSessionSwapKeepsPromptCalibration(t *testing.T) {
 	}
 }
 
-func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
+func TestSharedWindowFoldDoesNotPrivatelyShortenOversizedInput(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	// Oversized tool bodies are deterministically shortened for the single
-	// summarizer request (no multi-span). The guard must still fit one call.
+	// Manual summary input is not privately shortened. An unfittable request is
+	// rejected before the provider call.
 	toolBody := strings.Repeat("file line content here. ", 20_000) // ~480K chars
 	fold := []provider.Message{
 		{Role: provider.RoleUser, Content: "read large files"},
@@ -96,22 +203,11 @@ func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: toolBody},
 	}
 
-	if _, err := a.foldToSummary(context.Background(), fold, ""); err != nil {
-		t.Fatalf("foldToSummary: %v", err)
+	if _, err := a.foldToSummary(context.Background(), fold, ""); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("foldToSummary = %v, want admission failure", err)
 	}
-	if prov.calls == 0 || len(prov.last.Messages) < 2 {
-		t.Fatalf("guarded fold produced no summarizer request: calls=%d request=%+v", prov.calls, prov.last)
-	}
-	got := prov.last.Messages[1].Content
-	if len(got) >= len(renderTranscript(fold)) {
-		t.Fatalf("oversized tool fold was not shortened before summarize: len=%d original=%d", len(got), len(renderTranscript(fold)))
-	}
-	// Snip / omit markers prove the temporary request was bounded for the guard.
-	if !strings.Contains(got, "omitted") && !strings.Contains(got, "retained") && !strings.Contains(got, "snip") {
-		t.Fatalf("shortened fold missing a truncation marker:\n%.200q", got)
-	}
-	if got := prov.last.MaxTokens; got < summaryOutputReserve {
-		t.Fatalf("summarizer MaxTokens = %d, below summaryOutputReserve %d", got, summaryOutputReserve)
+	if prov.calls != 0 {
+		t.Fatalf("unfittable fold called provider %d times", prov.calls)
 	}
 }
 
@@ -122,8 +218,8 @@ func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
 	_, err := a.foldToSummary(context.Background(), fold, "")
-	if err == nil || !strings.Contains(err.Error(), "exceeds single-request budget") {
-		t.Fatalf("foldToSummary err = %v, want single-request budget failure", err)
+	if !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("foldToSummary err = %v, want context admission failure", err)
 	}
 	if prov.calls != 0 {
 		t.Fatalf("over-budget unshortenable fold still called summarizer %d times", prov.calls)

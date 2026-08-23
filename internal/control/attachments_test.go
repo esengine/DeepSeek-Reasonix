@@ -2,7 +2,9 @@ package control
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,4 +250,154 @@ func mustBase64(t *testing.T, s string) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func stubClipboardTools(t *testing.T, look func(string) (string, error), run func(string, ...string) ([]byte, []byte, error)) {
+	t.Helper()
+	previousLook := lookClipboardTool
+	previousRun := runClipboardTool
+	t.Cleanup(func() {
+		lookClipboardTool = previousLook
+		runClipboardTool = previousRun
+	})
+	lookClipboardTool = look
+	runClipboardTool = run
+}
+
+func TestSaveLinuxClipboardImageSeparatesNoImageFromMissingTools(t *testing.T) {
+	t.Chdir(t.TempDir())
+	stubClipboardTools(t,
+		func(string) (string, error) { return "", exec.ErrNotFound },
+		func(string, ...string) ([]byte, []byte, error) {
+			t.Fatal("missing tools must not run")
+			return nil, nil, nil
+		},
+	)
+	_, err := saveLinuxClipboardImage()
+	if err == nil || errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("missing tools reported as an empty clipboard: %v", err)
+	}
+	if !strings.Contains(err.Error(), "needs wl-paste") {
+		t.Fatalf("missing tools lost their actionable message: %v", err)
+	}
+
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(_ string, args ...string) ([]byte, []byte, error) {
+			if len(args) != 1 || args[0] != "--list-types" {
+				t.Fatalf("text clipboard unexpectedly read as an image: %v", args)
+			}
+			return []byte("text/plain\nUTF8_STRING\n"), nil, nil
+		},
+	)
+	if _, err := saveLinuxClipboardImage(); !errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("text-only clipboard reported as a broken setup: %v", err)
+	}
+}
+
+func TestSaveLinuxClipboardImagePreservesProbeFailure(t *testing.T) {
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(string, ...string) ([]byte, []byte, error) {
+			return nil, []byte("failed to connect to display"), errors.New("display unavailable")
+		},
+	)
+
+	_, err := saveLinuxClipboardImage()
+	if err == nil || errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("clipboard probe failure reported as no image: %v", err)
+	}
+	if !strings.Contains(err.Error(), "probe wl-paste clipboard types") {
+		t.Fatalf("clipboard probe failure lost its operation: %v", err)
+	}
+}
+
+func TestSaveLinuxClipboardImagePreservesImageReadFailure(t *testing.T) {
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(_ string, args ...string) ([]byte, []byte, error) {
+			if len(args) == 1 && args[0] == "--list-types" {
+				return []byte("text/plain\nimage/png\n"), nil, nil
+			}
+			return nil, nil, errors.New("selection changed")
+		},
+	)
+
+	_, err := saveLinuxClipboardImage()
+	if err == nil || errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("clipboard image read failure reported as no image: %v", err)
+	}
+	if !strings.Contains(err.Error(), "read clipboard image with wl-paste") {
+		t.Fatalf("clipboard image read failure lost its operation: %v", err)
+	}
+}
+
+func TestSaveLinuxClipboardImageTreatsEmptySelectionAsNoImage(t *testing.T) {
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(string, ...string) ([]byte, []byte, error) {
+			return nil, []byte("Nothing is copied\n"), errors.New("exit status 1")
+		},
+	)
+
+	if _, err := saveLinuxClipboardImage(); !errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("empty clipboard = %v, want ErrNoClipboardImage", err)
+	}
+}
+
+func TestSaveDarwinClipboardImagePreservesOperationalFailure(t *testing.T) {
+	want := errors.New("attachment directory unavailable")
+	_, err := saveDarwinClipboardImageWith(func(string) (string, error) {
+		return "", want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("darwin clipboard operational failure = %v, want %v", err, want)
+	}
+}
+
+func TestSaveDarwinClipboardImageReturnsNoImageOnlyAfterBothTypesMiss(t *testing.T) {
+	var classes []string
+	_, err := saveDarwinClipboardImageWith(func(class string) (string, error) {
+		classes = append(classes, class)
+		return "", ErrNoClipboardImage
+	})
+	if !errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("darwin empty clipboard = %v, want ErrNoClipboardImage", err)
+	}
+	if got, want := strings.Join(classes, ","), "PNGf,JPEG"; got != want {
+		t.Fatalf("darwin clipboard classes = %q, want %q", got, want)
+	}
+}
+
+func TestClassifyDarwinClipboardResultDistinguishesMissingTypeFromFailure(t *testing.T) {
+	const marker = "__NO_IMAGE__"
+	if err := classifyDarwinClipboardResult([]byte(marker+"\n"), nil, marker); !errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("darwin no-image marker = %v, want ErrNoClipboardImage", err)
+	}
+
+	want := errors.New("osascript failed")
+	err := classifyDarwinClipboardResult([]byte("clipboard service unavailable\n"), want, marker)
+	if !errors.Is(err, want) || errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("darwin operational failure = %v, want wrapped %v", err, want)
+	}
 }

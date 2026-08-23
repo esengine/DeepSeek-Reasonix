@@ -48,6 +48,19 @@ func TestExplainError(t *testing.T) {
 		}
 	}
 
+	formatMismatch := explainError(&provider.AuthError{
+		Provider: "opencode-go-anthropic", KeyEnv: "OPENCODE_GO_API_KEY", Status: 401, HasKey: true,
+		Body: `{"error":{"message":"Model grok-4.5 is not supported for format anthropic"}}`,
+	})
+	for _, want := range []string{i18n.M.ProviderErrModelFormatMismatch, i18n.M.ProviderErrOpenCodeGoGrokRoute, "not supported for format anthropic"} {
+		if !strings.Contains(formatMismatch.Error(), want) {
+			t.Errorf("format mismatch = %q, want it to contain %q", formatMismatch.Error(), want)
+		}
+	}
+	if strings.Contains(formatMismatch.Error(), i18n.M.ProviderErrAuthRejected) {
+		t.Errorf("format mismatch must not be classified as a rejected API key: %q", formatMismatch.Error())
+	}
+
 	authEcho := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401, HasKey: true, Body: `{"error":{"message":"Authentication Fails, Your api key: ****ae54 is invalid"}}`})
 	if !strings.Contains(authEcho.Error(), "Authentication Fails") {
 		t.Errorf("401 should keep the readable reason, got %q", authEcho.Error())

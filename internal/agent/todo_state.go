@@ -34,6 +34,20 @@ func (a *Agent) CanonicalTodoState() []evidence.TodoItem {
 	return append([]evidence.TodoItem(nil), a.sess.todoState...)
 }
 
+// CurrentTaskTodoState returns only the latest successful todo_write retained
+// in the current evidence ledger. Unlike CanonicalTodoState, it never falls
+// back to a prior user turn.
+func (a *Agent) CurrentTaskTodoState() []evidence.TodoItem {
+	if a == nil || a.task.ledger == nil {
+		return nil
+	}
+	todos, ok := a.task.ledger.LatestTodos()
+	if !ok {
+		return nil
+	}
+	return append([]evidence.TodoItem(nil), todos...)
+}
+
 // consumeTodoOnlyReadinessMarkerIfResolved retires a pending final-readiness
 // marker whose only gap was unfinished todos once the canonical list shows
 // every item completed, so a reload no longer replays the stale wrap-up card.

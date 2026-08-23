@@ -883,7 +883,7 @@ func TestTaskToolBackgroundCapRefusesFanOut(t *testing.T) {
 	}
 }
 
-func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
+func TestTaskToolBackgroundRunPublishesEvidenceForCollection(t *testing.T) {
 	reg := evidenceRegistry()
 	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "done, explanations added"}, {Type: provider.ChunkDone}}
 	sub := &scriptedProvider{name: "sub", turns: [][]provider.Chunk{
@@ -910,8 +910,8 @@ func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
 	}
 	jobID := extractJobID(out)
 	res := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, 5)
-	if len(res) != 1 || res[0].Status != jobs.Done || !strings.Contains(res[0].Output, "[unverified]") {
-		t.Fatalf("background salvage = %+v, want done unverified result", res)
+	if len(res) != 1 || res[0].Status != jobs.Done {
+		t.Fatalf("background task = %+v, want done", res)
 	}
 	if parentLedger.Summary().HasMutation() {
 		t.Fatal("background goroutine wrote directly into the parent turn ledger")

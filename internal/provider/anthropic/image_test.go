@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
@@ -37,6 +38,84 @@ func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	blocks := req.Messages[0].Content
 	if len(blocks) != 1 || blocks[0].Type != "text" {
 		t.Fatalf("blocks = %+v, want [text] only when vision is off", blocks)
+	}
+}
+
+func TestOfficialDeepSeekVisionSKUEmbedsUserImages(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   openai.OfficialDeepSeekVisionModel,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.vision {
+		t.Fatal("pinned official DeepSeek vision SKU must enable user image serialization")
+	}
+	req := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "describe",
+		Images: []string{"data:image/jpeg;base64,ZZZZ"},
+	}}})
+	blocks := req.Messages[0].Content
+	if len(blocks) != 2 || blocks[0].Type != "text" || blocks[1].Type != "image" {
+		t.Fatalf("blocks = %+v, want [text, image]", blocks)
+	}
+	src := blocks[1].Source
+	if src == nil || src.Type != "base64" || src.MediaType != "image/jpeg" || src.Data != "ZZZZ" {
+		t.Fatalf("image source = %+v", src)
+	}
+}
+
+func TestOfficialDeepSeekVisionSKUEmbedsURLAndFileID(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   openai.OfficialDeepSeekVisionModel,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	req := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
+		Role:    provider.RoleUser,
+		Content: "describe",
+		Images: []string{
+			"https://cdn.example.com/cat.png",
+			"file-api-0a1b2c3d4e5f6071",
+		},
+	}}})
+	blocks := req.Messages[0].Content
+	if len(blocks) != 3 || blocks[1].Type != "image" || blocks[2].Type != "image" {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+	if blocks[1].Source == nil || blocks[1].Source.Type != "url" || blocks[1].Source.URL != "https://cdn.example.com/cat.png" {
+		t.Fatalf("url source = %+v", blocks[1].Source)
+	}
+	if blocks[2].Source == nil || blocks[2].Source.Type != "file" || blocks[2].Source.FileID != "file-api-0a1b2c3d4e5f6071" {
+		t.Fatalf("file source = %+v", blocks[2].Source)
+	}
+}
+
+func TestOfficialDeepSeekVisionSKUOmitsToolImages(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   openai.OfficialDeepSeekVisionModel,
+		Extra:   map[string]any{"vision": true},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), `"type":"image"`) || strings.Contains(string(body), "QUFB") {
+		t.Fatalf("official DeepSeek vision SKU leaked tool image payload: %s", body)
 	}
 }
 

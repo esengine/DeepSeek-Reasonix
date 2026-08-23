@@ -270,6 +270,7 @@ func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, r
 }
 
 type cliBuildOverrides struct {
+	Preset               string
 	Effort               *string
 	PermissionAllow      []string
 	AdditionalDirs       []string
@@ -307,6 +308,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		RequireKey:           requireKey,
 		Sink:                 sink,
 		SessionDir:           resolveCLISessionDir(),
+		AgentPreset:          overrides.Preset,
 		WorkspaceRoot:        overrides.WorkspaceRoot,
 		EffortOverride:       overrides.Effort,
 		PermissionAllow:      overrides.PermissionAllow,
@@ -391,19 +393,19 @@ func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride i
 	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, overrides))
 }
 
-// parseRuntimeProfile validates a deprecated execution-mode flag value. The
-// returned label is accepted for one compatibility version and ignored: the
-// adaptive standard execution policy derives from task risk, never a flag.
+// parseRuntimeProfile validates a role-flag value and maps it onto the
+// session quality floor: light folds to standard silently, delivery sets the
+// delivery floor.
 func parseRuntimeProfile(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "balanced", boot.TokenModeFull:
-		return "balanced", nil
-	case boot.TokenModeEconomy, "light", "lite", "eco":
-		return "light", nil
+	case "", "balanced", "standard", boot.TokenModeFull:
+		return "standard", nil
+	case "economy", "light", "lite", "eco":
+		return "standard", nil
 	case boot.TokenModeDelivery, "deliver", "quality":
 		return "delivery", nil
 	default:
-		return "", fmt.Errorf("unknown execution setting %q (accepted for compatibility: light, balanced, delivery; legacy: economy, full)", value)
+		return "", fmt.Errorf("unknown execution setting %q (accepted: standard, delivery; legacy light folds to standard)", value)
 	}
 }
 
@@ -683,6 +685,7 @@ func runAgent(args []string, version string) int {
 	// UI can answer; unattended writes require explicit --auto/-y,
 	// --permission-mode auto, or yolo.
 	overrides := cliBuildOverrides{
+		Preset:               deprecatedMode,
 		Effort:               effortOverride,
 		PermissionAllow:      allowedTools,
 		AdditionalDirs:       additionalDirs,
@@ -929,6 +932,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// The loopback-only provider setup surface stores the missing credential and
 	// rebuilds this controller in place before the normal web UI is exposed.
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, cliBuildOverrides{
+		Preset:             deprecatedMode,
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	})
 	if err != nil {
@@ -1120,6 +1124,7 @@ func chatREPL(args []string, version string) int {
 		effortOverride = effort
 	}
 	overrides := cliBuildOverrides{
+		Preset:             deprecatedMode,
 		Effort:             effortOverride,
 		PermissionAllow:    allowedTools,
 		AdditionalDirs:     additionalDirs,

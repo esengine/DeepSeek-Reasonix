@@ -1,6 +1,8 @@
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, Bot as BotIcon, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, MessageCircle, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
+import { ArrowRight, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { CHANNEL_ICONS } from "./channelIcons";
+import { botAccessEntryCount, botAccessReady, botConnectionCredentialSummary, botConnectionLabel, botConnectionScopeLabel, botConnectionSecretEnv, botConnectionSecretPatch, botInstallTargetForConnection, botInstallTargetMatchesConnection, botTargetHint, botTargetLabel, diagnosticMessage, diagnosticReportDetail, firstConnectionRemote, formatInstallTimeLeft, formatInstallUserCode, qqBotAdded, type BotInstallTarget, type BotOfficialInstallTarget } from "./botConnectionSettings";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
@@ -76,6 +78,7 @@ import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 import { SettingsNavigation, SETTINGS_NAV_TABS } from "./SettingsNavigation";
 import { StatusBarItemsEditor } from "./StatusBarItemsEditor";
+import { DesktopCloseBehaviorHint } from "./DesktopCloseBehaviorHint";
 export type SettingsInitialFocus =
   | { target: "bot-allowlist"; connectionId?: string; requestId?: number }
   | { target: "model-access"; requestId?: number }
@@ -1112,6 +1115,7 @@ function defaultBotSettings(): BotSettingsView {
       qq: [],
       feishu: [],
       weixin: [],
+      dingtalk: [],
     },
     control: {
       enabled: false,
@@ -1139,6 +1143,10 @@ function defaultBotSettings(): BotSettingsView {
       qqGroups: [],
       feishuGroups: [],
       weixinGroups: [],
+      dingtalkUsers: [],
+      dingtalkApprovers: [],
+      dingtalkAdmins: [],
+      dingtalkGroups: [],
     },
     qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
     feishu: {
@@ -1158,6 +1166,18 @@ function defaultBotSettings(): BotSettingsView {
       tokenEnv: "WEIXIN_BOT_TOKEN",
       tokenSet: false,
       apiBase: "https://ilinkai.weixin.qq.com",
+    },
+    dingtalk: {
+      enabled: false,
+      clientId: "",
+      clientSecretEnv: "DINGTALK_CLIENT_SECRET",
+      secretSet: false,
+      botName: "",
+      requireMention: true,
+      model: "",
+      toolApprovalMode: "",
+      workspaceRoot: "",
+      access: defaultBotAccess(),
     },
     connections: [],
   };
@@ -1209,6 +1229,7 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
       qq: asArray(selfUserIds.qq),
       feishu: asArray(selfUserIds.feishu),
       weixin: asArray(selfUserIds.weixin),
+      dingtalk: asArray(selfUserIds.dingtalk),
     },
     control: {
       enabled: Boolean(control.enabled),
@@ -1236,6 +1257,10 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
       qqGroups: asArray(allowlist.qqGroups),
       feishuGroups: asArray(allowlist.feishuGroups),
       weixinGroups: asArray(allowlist.weixinGroups),
+      dingtalkUsers: asArray(allowlist.dingtalkUsers),
+      dingtalkApprovers: asArray(allowlist.dingtalkApprovers),
+      dingtalkAdmins: asArray(allowlist.dingtalkAdmins),
+      dingtalkGroups: asArray(allowlist.dingtalkGroups),
     },
     qq: {
       ...fallback.qq,
@@ -1247,6 +1272,12 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
     },
     feishu: { ...fallback.feishu, ...bot?.feishu, domain: bot?.feishu?.domain === "lark" ? "lark" : "feishu", mode },
     weixin: { ...fallback.weixin, ...bot?.weixin },
+    dingtalk: {
+      ...fallback.dingtalk,
+      ...bot?.dingtalk,
+      toolApprovalMode: normalizeBotToolApprovalMode(bot?.dingtalk?.toolApprovalMode),
+      access: normalizeBotAccess(bot?.dingtalk?.access, fallback.dingtalk.access),
+    },
     connections: asArray(bot?.connections).map(normalizeBotConnection),
   };
 }
@@ -1364,10 +1395,10 @@ export function normalizeProviderView(p: ProviderView): ProviderView {
   };
 }
 
-type ProviderPresetStatus = NonNullable<ProviderPresetView["status"]>;
+type ProviderPresetStatus = NonNullable<ProviderPresetView["status"]> | "partial";
 
 function normalizeProviderPresetStatus(status: ProviderPresetView["status"] | undefined, added: boolean): ProviderPresetStatus {
-  if (status === "installed" || status === "installed_modified" || status === "name_conflict" || status === "similar_existing") return status;
+  if (status === "installed" || status === "installed_modified" || status === "partial" || status === "name_conflict" || status === "similar_existing") return status;
   return added ? "installed" : "available";
 }
 
@@ -1383,9 +1414,10 @@ function normalizeProviderPresetView(p: ProviderPresetView): ProviderPresetView 
     keyEnv: String(p.keyEnv ?? "").trim(),
     providerNames: asArray(p.providerNames),
     models: asArray(p.models),
-    added: Boolean(p.added || status === "installed" || status === "installed_modified" || status === "name_conflict"),
+    added: Boolean(p.added || status === "installed" || status === "installed_modified" || status === "partial" || status === "name_conflict"),
     status,
     statusProviderNames: asArray(p.statusProviderNames),
+    missingProviderNames: asArray(p.missingProviderNames),
     keySet: Boolean(p.keySet),
     requiresKey,
     configured,
@@ -1404,12 +1436,12 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.80 };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
-  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.85;
+  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.80;
   agent.effectiveCompactRatio = Number.isFinite(agent.effectiveCompactRatio) && Number(agent.effectiveCompactRatio) > 0
     ? Number(agent.effectiveCompactRatio)
     : agent.compactRatio;
@@ -1592,7 +1624,6 @@ function thinkingModeLabel(mode: string, t: ReturnType<typeof useT>): string {
       return t("settings.thinkingMode.auto");
   }
 }
-
 function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
@@ -1739,7 +1770,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       </SettingsSection>
 
       <SettingsSection title={t("settings.general.sectionSystem")} description={t("settings.general.sectionSystemHint")}>
-      <SettingsField label={t("settings.closeBehavior")} hint={t("settings.closeBehaviorHint")} icon={<Power size={18} />}>
+      <SettingsField label={t("settings.closeBehavior")} hint={<DesktopCloseBehaviorHint backgroundSelected={closeBehavior === "background"} hint={t("settings.closeBehaviorHint")} unavailableHint={t("settings.closeBehaviorUnavailable")} />} icon={<Power size={18} />}>
         <div className="set-seg">
           {(["background", "quit"] as const).map((mode) => (
             <button
@@ -2067,8 +2098,6 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
-type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
 const BOT_ALLOWLIST_TEXT_KEYS = [
   "qqUsers",
   "feishuUsers",
@@ -2082,6 +2111,10 @@ const BOT_ALLOWLIST_TEXT_KEYS = [
   "qqGroups",
   "feishuGroups",
   "weixinGroups",
+  "dingtalkUsers",
+  "dingtalkApprovers",
+  "dingtalkAdmins",
+  "dingtalkGroups",
 ] as const;
 type BotAllowlistTextKey = typeof BOT_ALLOWLIST_TEXT_KEYS[number];
 type BotSelfUserTextKey = keyof BotSettingsView["selfUserIds"];
@@ -2092,12 +2125,13 @@ type BotInstallState = {
   timeLeft: number;
   message: string;
 };
-const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin"];
+const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin", "dingtalk"];
 const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 const DEFAULT_QQ_SECRET_ENV = "QQ_BOT_APP_SECRET";
 const QQ_CONNECTION_ID = "__qq_bot__";
-const BOT_PLATFORM_KEYS = ["qq", "feishu", "weixin"] as const;
+const DINGTALK_CONNECTION_ID = "__dingtalk_bot__";
+const BOT_PLATFORM_KEYS = ["qq", "feishu", "weixin", "dingtalk"] as const;
 type BotPlatformKey = typeof BOT_PLATFORM_KEYS[number];
 const BOT_ALLOWLIST_ROLES = ["Users", "Groups", "Approvers", "Admins"] as const;
 type BotAllowlistRole = typeof BOT_ALLOWLIST_ROLES[number];
@@ -2110,12 +2144,14 @@ function botAllowlistKey(platform: BotPlatformKey, role: BotAllowlistRole): BotA
 function botConnectionPlatform(connection: BotConnectionView): BotPlatformKey {
   if (connection.provider === "weixin") return "weixin";
   if (connection.provider === "qq") return "qq";
+  if (connection.provider === "dingtalk") return "dingtalk";
   return "feishu";
 }
 
 function botPlatformLabel(platform: BotPlatformKey, t: ReturnType<typeof useT>): string {
   if (platform === "qq") return "QQ";
   if (platform === "weixin") return t("settings.botWeixin");
+  if (platform === "dingtalk") return t("settings.botDingtalk");
   return t("settings.botPlatformFeishuLark");
 }
 
@@ -2139,6 +2175,9 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
   const [accessText, setAccessText] = useState<Record<string, string>>({});
   const [qqSecretValue, setQQSecretValue] = useState("");
+  const [dingtalkSecretValue, setDingtalkSecretValue] = useState("");
+  const [dingtalkTesting, setDingtalkTesting] = useState(false);
+  const [runtimePlatforms, setRuntimePlatforms] = useState<Record<string, string>>({});
   const [expandedConnectionId, setExpandedConnectionId] = useState("");
   const [advancedMode, setAdvancedMode] = useState(false);
   const installRef = useRef(install);
@@ -2160,6 +2199,24 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setQQSecretValue("");
     setTestTargets({});
   }, [s.bot]);
+  // 轮询 bot runtime 的真实平台连接状态，用于 channel 在线徽章（如钉钉黄/绿点）。
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      if (typeof app.BotRuntimeStatus !== "function") return;
+      void app.BotRuntimeStatus()
+        .then((status) => {
+          if (!cancelled) setRuntimePlatforms(status.platforms ?? {});
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const id = window.setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
   const focusAccessStep = () => {
     if (!expandedConnectionId && connectionItems.length > 0) {
       const first = connectionItems[0];
@@ -2262,6 +2319,14 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     updateQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
   const persistQQAccess = (patch: Partial<BotAccessView>) =>
     persistQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
+  const updateDingtalk = (patch: Partial<BotSettingsView["dingtalk"]>) =>
+    setDraft((prev) => ({ ...prev, dingtalk: { ...prev.dingtalk, ...patch } }));
+  const persistDingtalk = (patch: Partial<BotSettingsView["dingtalk"]>) =>
+    persistBotDraft({ ...draft, dingtalk: { ...draft.dingtalk, ...patch } });
+  const updateDingtalkAccess = (patch: Partial<BotAccessView>) =>
+    updateDingtalk({ access: normalizeBotAccess({ ...draft.dingtalk.access, ...patch }) });
+  const persistDingtalkAccess = (patch: Partial<BotAccessView>) =>
+    persistDingtalk({ access: normalizeBotAccess({ ...draft.dingtalk.access, ...patch }) });
   const updateConnectionAccess = (id: string, patch: Partial<BotAccessView>) =>
     setConnections((items) => items.map((item) => item.id === id ? { ...item, access: normalizeBotAccess({ ...item.access, ...patch }) } : item));
   const persistConnectionAccess = (connection: BotConnectionView, patch: Partial<BotAccessView>) =>
@@ -2294,6 +2359,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const installQrURL = install.result?.url ?? "";
   const installQrIsImage = installQrURL.startsWith("data:image/");
   const isQQInstallTarget = installTarget === "qq";
+  const isDingtalkInstallTarget = installTarget === "dingtalk";
   const selectedInstallLabel = botTargetLabel(installTarget, t);
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
   const qqSecretEnv = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
@@ -2304,12 +2370,17 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const nativeRuntimeAvailable = typeof window !== "undefined" && Boolean(window.runtime);
   const browserPreviewBotConfigured = !nativeRuntimeAvailable && (qqAdded || draft.connections.length > 0);
   const qqOnline = qqConfigured && nativeRuntimeAvailable;
+  const dingtalkSecretEnv = draft.dingtalk.clientSecretEnv.trim() || "DINGTALK_CLIENT_SECRET";
+  const dingtalkConfigured = Boolean(draft.dingtalk.enabled && draft.dingtalk.clientId.trim() && dingtalkSecretEnv && draft.dingtalk.secretSet);
+  // 保存按钮仅在用户输入了新的密钥后才可点；已保存过密钥但没有新输入时置灰。
+  const dingtalkCanSaveAndEnable = Boolean(draft.dingtalk.clientId.trim() && dingtalkSecretEnv && dingtalkSecretValue.trim());
+  const dingtalkOnline = runtimePlatforms["dingtalk"] === "running" || runtimePlatforms["dingtalk"] === "degraded";
   const connectionItems: BotConnectionListItem[] = [
     ...(qqAdded ? [{ kind: "qq" as const }] : []),
     ...draft.connections.map((connection) => ({ kind: "connection" as const, connection })),
   ];
-  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
-  const selectedChannelConfigured = isQQInstallTarget ? qqAdded : Boolean(selectedInstallConnection);
+  const selectedInstallConnection = isQQInstallTarget || isDingtalkInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
+  const selectedChannelConfigured = isQQInstallTarget ? qqAdded : isDingtalkInstallTarget ? dingtalkConfigured : Boolean(selectedInstallConnection);
   const routeConnectionOptions = [
     ...(qqAdded ? [{ id: "qq", label: "QQ" }] : []),
     ...draft.connections.map((connection) => ({
@@ -2439,6 +2510,15 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
       }));
     }
   };
+  const testDingtalkBot = async () => {
+    setDingtalkTesting(true);
+    try {
+      const diag = await app.TestDingtalkBot();
+      setDiagnostics((prev) => ({ ...prev, dingtalk: diag }));
+    } finally {
+      setDingtalkTesting(false);
+    }
+  };
   const ensureReportableDiagnostic = async (connection: BotConnectionView) => {
     return diagnoseConnection(connection.id);
   };
@@ -2495,6 +2575,15 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     });
     setQQSecretValue("");
   };
+  const clearDingtalkSecret = async () => {
+    const env = draft.dingtalk.clientSecretEnv.trim() || "DINGTALK_CLIENT_SECRET";
+    if (!env) return;
+    await apply(async () => {
+      await saveBot();
+      await app.ClearBotSecret(env);
+    });
+    setDingtalkSecretValue("");
+  };
   const focusQQAccessSettings = () => {
     setDiagnostics((prev) => ({ ...prev, [QQ_CONNECTION_ID]: t("settings.botQQAccessRequired") }));
     setExpandedConnectionId(QQ_CONNECTION_ID);
@@ -2524,6 +2613,38 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setDraft(nextDraft);
     setQQSecretValue("");
   };
+  const saveDingtalkAndEnable = async () => {
+    const env = draft.dingtalk.clientSecretEnv.trim() || "DINGTALK_CLIENT_SECRET";
+    const secret = dingtalkSecretValue.trim();
+    const nextDraft = botDraftWithDerivedGatewayState({
+      ...draft,
+      dingtalk: {
+        ...draft.dingtalk,
+        enabled: true,
+        clientId: draft.dingtalk.clientId.trim(),
+        clientSecretEnv: env,
+        secretSet: draft.dingtalk.secretSet || Boolean(secret),
+      },
+    });
+    await apply(async () => {
+      await app.SetBotSettings(nextDraft);
+      if (secret) await app.SetBotSecret(env, secret);
+    });
+    setDraft(nextDraft);
+    setDingtalkSecretValue("");
+  };
+  const removeDingtalkBot = async () => {
+    const env = draft.dingtalk.clientSecretEnv.trim() || "DINGTALK_CLIENT_SECRET";
+    const nextDraft = botDraftWithDerivedGatewayState({
+      ...draft,
+      dingtalk: { enabled: false, clientId: "", clientSecretEnv: "DINGTALK_CLIENT_SECRET", secretSet: false, botName: "", requireMention: true, model: "", toolApprovalMode: "", workspaceRoot: "", access: defaultBotAccess() },
+    });
+    await apply(async () => {
+      await app.SetBotSettings(nextDraft);
+      if (draft.dingtalk.secretSet) await app.ClearBotSecret(env);
+    });
+    setDraft(nextDraft);
+  };
   const removeQQBot = async () => {
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const nextDraft = botDraftWithDerivedGatewayState({
@@ -2539,7 +2660,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setExpandedConnectionId("");
   };
   const selectedQQ = isQQInstallTarget && qqAdded;
-  const selectedConnection = isQQInstallTarget ? null : selectedInstallConnection ?? null;
+  const selectedConnection = isQQInstallTarget || isDingtalkInstallTarget ? null : selectedInstallConnection ?? null;
+  const selectedDingtalk = isDingtalkInstallTarget && dingtalkConfigured;
   const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
   const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
@@ -2555,9 +2677,9 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const platformFilterAvailable = connectedPlatforms.size > 0 &&
     BOT_PLATFORM_KEYS.some((platform) => !connectedPlatforms.has(platform) && !platformHasAllowlistText(platform));
   const botChannelConnectionForTarget = (target: BotInstallTarget) =>
-    target === "qq" ? null : draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
+    target === "qq" || target === "dingtalk" ? null : draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
   const botChannelIsConfigured = (target: BotInstallTarget) =>
-    target === "qq" ? qqAdded : Boolean(botChannelConnectionForTarget(target));
+    target === "qq" ? qqAdded : target === "dingtalk" ? dingtalkConfigured : Boolean(botChannelConnectionForTarget(target));
   const openBotChannel = (target: BotInstallTarget) => {
     setInstallTarget(target);
     const connection = botChannelConnectionForTarget(target);
@@ -2856,6 +2978,208 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     </article>
   );
 
+  const dingtalkDetailCard = (
+    <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+      <div className="bot-detail-card__head">
+        <div className="bot-detail-card__identity">
+          <div className="bot-detail-card__title" id="bot-detail-title">
+            DingTalk Bot
+            <span className="badge badge--neutral">DingTalk</span>
+            <span className={`badge ${dingtalkOnline ? "badge--project" : dingtalkConfigured ? "badge--feedback" : "badge--feedback"}`}>
+              {dingtalkOnline ? t("settings.botConnectionConnected") : dingtalkConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}
+            </span>
+          </div>
+          <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
+        </div>
+        <div className="bot-detail-card__actions">
+          <button type="button" className="btn btn--small" disabled={busy || !dingtalkConfigured || dingtalkTesting} onClick={() => void testDingtalkBot()}>
+            {dingtalkTesting ? t("settings.botTesting") : t("settings.botTest")}
+          </button>
+        </div>
+      </div>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+        <div className="bot-detail-summary">
+          <div>
+            <span>{t("settings.botConnectionColumnChannel")}</span>
+            <strong>DingTalk</strong>
+          </div>
+          <div>
+            <span>{t("settings.botDingtalkClientId")}</span>
+            <code title={draft.dingtalk.clientId.trim() || undefined}>{draft.dingtalk.clientId.trim() || "—"}</code>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnScope")}</span>
+            <strong>{t("settings.botScopeGlobal")}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnStatus")}</span>
+            <strong>{dingtalkOnline ? t("settings.botConnectionConnected") : dingtalkConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--runtime-primary">
+        <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
+          <ToggleSegment
+            value={draft.dingtalk.enabled}
+            disabled={busy}
+            onChange={(enabled) => {
+              updateDingtalk({ enabled });
+              void persistDingtalk({ enabled });
+            }}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+          <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+            {TOOL_APPROVAL_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={normalizeBotToolApprovalMode(draft.dingtalk.toolApprovalMode, true) === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                disabled={busy}
+                onClick={() => {
+                  updateDingtalk({ toolApprovalMode: mode });
+                  // 热更新运行中 gateway，不重启 bot runtime（避免面板跳变）。
+                  void app.SetBotDingtalkToolApprovalMode(mode).catch((e) => {
+                    console.warn("set dingtalk approval mode failed", e);
+                  });
+                }}
+              >
+                {t(`settings.botToolApprovalMode.${mode}` as DictKey)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={toRef(draft.dingtalk.model, s)}
+            disabled={busy}
+            emptyOptionLabel={t("settings.botChannelModelAuto")}
+            emptyOptionHint={settingsModelMeta(s, t)}
+            onPick={(model) => {
+              updateDingtalk({ model });
+              void persistDingtalk({ model });
+            }}
+          />
+        </SettingsField>
+      </section>
+
+      {renderBotAccessSection(DINGTALK_CONNECTION_ID, draft.dingtalk.access, updateDingtalkAccess, (patch) => void persistDingtalkAccess(patch))}
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+        <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+          <input
+            className="mem-input"
+            value={draft.dingtalk.workspaceRoot}
+            disabled={busy}
+            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+            spellCheck={false}
+            onChange={(event) => updateDingtalk({ workspaceRoot: event.target.value })}
+            onBlur={(event) => void persistDingtalk({ workspaceRoot: event.currentTarget.value })}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botDingtalkBotName")} hint={t("settings.botDingtalkBotNameHint")}>
+          <input
+            className="mem-input"
+            value={draft.dingtalk.botName}
+            disabled={busy}
+            placeholder={t("settings.botDingtalkBotName")}
+            spellCheck={false}
+            onChange={(event) => updateDingtalk({ botName: event.target.value })}
+            onBlur={(event) => void persistDingtalk({ botName: event.currentTarget.value })}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botDingtalkRequireMention")} hint={t("settings.botDingtalkRequireMentionHint")}>
+          <ToggleSegment
+            value={draft.dingtalk.requireMention}
+            disabled={busy}
+            onLabel={t("settings.toggleOn")}
+            offLabel={t("settings.toggleOff")}
+            onChange={(requireMention) => {
+              updateDingtalk({ requireMention });
+              void persistDingtalk({ requireMention });
+            }}
+          />
+        </SettingsField>
+      </section>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+        <div className="bot-credential-stack">
+          <div className="bot-credential-line">
+            <span>{draft.dingtalk.clientId.trim() ? t("settings.botCredentialClientId", { value: draft.dingtalk.clientId.trim() }) : t("settings.botCredentialConfigured")}</span>
+            <strong>{draft.dingtalk.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+          </div>
+          <div className="bot-secret-row bot-secret-row--dingtalk">
+            <input
+              className="mem-input"
+              value={draft.dingtalk.clientId}
+              disabled={busy}
+              placeholder={t("settings.botDingtalkClientId")}
+              spellCheck={false}
+              aria-label={t("settings.botDingtalkClientId")}
+              onChange={(event) => updateDingtalk({ clientId: event.target.value })}
+              onBlur={(event) => void persistDingtalk({ clientId: event.currentTarget.value })}
+            />
+            <input
+              className="mem-input"
+              value={draft.dingtalk.clientSecretEnv || "DINGTALK_CLIENT_SECRET"}
+              disabled={busy}
+              placeholder="DINGTALK_CLIENT_SECRET"
+              spellCheck={false}
+              aria-label={t("settings.botSecretEnv")}
+              onChange={(event) => updateDingtalk({ clientSecretEnv: event.target.value })}
+              onBlur={(event) => void persistDingtalk({ clientSecretEnv: event.currentTarget.value || "DINGTALK_CLIENT_SECRET" })}
+            />
+            <input
+              className="mem-input"
+              type="password"
+              value={dingtalkSecretValue}
+              disabled={busy}
+              placeholder={draft.dingtalk.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+              aria-label={t("settings.botDingtalkClientSecret")}
+              onChange={(event) => setDingtalkSecretValue(event.target.value)}
+            />
+            <div className="bot-secret-row__actions">
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !dingtalkCanSaveAndEnable} onClick={() => void saveDingtalkAndEnable()}>
+                {draft.dingtalk.secretSet ? t("settings.saveKey") : t("settings.botSaveAndEnable")}
+              </button>
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !draft.dingtalk.secretSet} onClick={() => void clearDingtalkSecret()}>
+                {t("settings.clearKey")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {diagnosticMessage(diagnostics.dingtalk) ? (
+        <div className="bot-detail-notice">
+          <span>{diagnosticMessage(diagnostics.dingtalk)}</span>
+        </div>
+      ) : null}
+
+      <section className="bot-detail-section bot-detail-section--danger">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+          <p>{t("settings.deleteBotHint")}</p>
+        </div>
+        <InlineConfirmButton
+          label={t("settings.deleteBot")}
+          confirmLabel={t("settings.confirmDeleteBot")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={() => void removeDingtalkBot()}
+        />
+      </section>
+    </article>
+  );
+
   const connectionDetailCard = selectedConnection ? (
     <article className="bot-detail-card" aria-labelledby="bot-detail-title">
       <div className="bot-detail-card__head">
@@ -3005,12 +3329,14 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                 placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
                 onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
               />
-              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
-                {t("settings.saveKey")}
-              </button>
-              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
-                {t("settings.clearKey")}
-              </button>
+              <div className="bot-secret-row__actions">
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
+                  {t("settings.saveKey")}
+                </button>
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
+                  {t("settings.clearKey")}
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -3084,6 +3410,71 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                 </button>
               </div>
               {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
+            </div>
+          </div>
+        </div>
+      ) : isDingtalkInstallTarget ? (
+        <div className="bot-connect-panel bot-connect-panel--manual bot-connect-panel--dingtalk">
+          <div className="bot-connect-panel__body">
+            <div className="bot-qq-simple__head">
+              <div>
+                <strong>{selectedInstallLabel}</strong>
+                <p>{t("settings.botInstallManualDingtalk")}</p>
+              </div>
+              <span className={`bot-qq-simple__status${dingtalkConfigured ? " bot-qq-simple__status--ready" : ""}`}>
+                {dingtalkConfigured ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
+                {draft.dingtalk.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}
+              </span>
+            </div>
+            <div className="bot-manual-form bot-manual-form--dingtalk">
+              <div className="bot-card-field">
+                <span>{t("settings.botDingtalkClientId")}</span>
+                <div>
+                  <input
+                    className="mem-input"
+                    aria-label={t("settings.botDingtalkClientId")}
+                    value={draft.dingtalk.clientId}
+                    disabled={busy}
+                    spellCheck={false}
+                    onChange={(event) => updateDingtalk({ clientId: event.target.value })}
+                    onBlur={(event) => void persistDingtalk({ clientId: event.currentTarget.value })}
+                  />
+                </div>
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botDingtalkClientSecret")}</span>
+                <div>
+                  <input
+                    className="mem-input"
+                    type="password"
+                    value={dingtalkSecretValue}
+                    disabled={busy}
+                    placeholder={draft.dingtalk.secretSet ? t("settings.botSecretSavedOptional") : t("settings.botSecretPaste")}
+                    spellCheck={false}
+                    aria-label={t("settings.botDingtalkClientSecret")}
+                    onChange={(event) => setDingtalkSecretValue(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botDingtalkBotName")}</span>
+                <div>
+                  <input
+                    className="mem-input"
+                    aria-label={t("settings.botDingtalkBotName")}
+                    value={draft.dingtalk.botName}
+                    disabled={busy}
+                    spellCheck={false}
+                    onChange={(event) => updateDingtalk({ botName: event.target.value })}
+                    onBlur={(event) => void persistDingtalk({ botName: event.currentTarget.value })}
+                  />
+                </div>
+              </div>
+              <div className="bot-qq-simple__actions">
+                <button type="button" className="btn btn--primary btn--small" disabled={busy || !dingtalkCanSaveAndEnable} onClick={() => void saveDingtalkAndEnable()}>
+                  {t("settings.botSaveAndEnable")}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3179,7 +3570,10 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                 onClick={() => openBotChannel(target)}
               >
                 <span className="bot-channel-tab__icon" aria-hidden="true">
-                  {target === "qq" || target === "weixin" ? <MessageCircle size={24} /> : <BotIcon size={24} />}
+                  {(() => {
+                    const Icon = CHANNEL_ICONS[target];
+                    return <Icon className="bot-channel-tab__brand" />;
+                  })()}
                 </span>
                 <span className="bot-channel-tab__text">
                   <strong>{botTargetLabel(target, t)}</strong>
@@ -3204,6 +3598,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
             </article>
           ) : selectedQQ ? (
             qqDetailCard
+          ) : selectedDingtalk ? (
+            dingtalkDetailCard
           ) : selectedConnection ? (
             connectionDetailCard
           ) : (
@@ -3650,114 +4046,6 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   );
 }
 
-function diagnosticMessage(diag?: BotConnectionDiagnostic | string): string {
-  if (typeof diag === "string") return diag;
-  return diag?.message || diag?.status || "";
-}
-
-function diagnosticReportDetail(diag?: BotConnectionDiagnostic | string): string {
-  if (typeof diag === "string") return "";
-  return diag?.reportDetail || "";
-}
-
-function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): string {
-  switch (target) {
-    case "qq": return "QQ";
-    case "lark": return "Lark";
-    case "weixin": return t("settings.botWeixin");
-    default: return t("settings.botFeishu");
-  }
-}
-
-function botTargetHint(target: BotInstallTarget, t: ReturnType<typeof useT>): string {
-  switch (target) {
-    case "qq": return t("settings.botInstallQQHint");
-    case "lark": return t("settings.botInstallLarkHint");
-    case "weixin": return t("settings.botInstallWeixinHint");
-    default: return t("settings.botInstallFeishuHint");
-  }
-}
-
-function qqBotAdded(qq: BotSettingsView["qq"]): boolean {
-  return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
-}
-
-function botAccessEntryCount(access: BotAccessView): number {
-  return [
-    ...asArray(access.users),
-    ...asArray(access.groups),
-    ...asArray(access.approvers),
-    ...asArray(access.admins),
-  ].filter((value) => value.trim()).length;
-}
-
-function botAccessReady(access: BotAccessView): boolean {
-  if (access.allowAll || access.pairingEnabled) return true;
-  if (!access.enabled) return false;
-  return botAccessEntryCount(access) > 0;
-}
-
-function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
-  if (target === "weixin") return connection.provider === "weixin";
-  if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
-  return connection.provider === "feishu" && connection.domain !== "lark";
-}
-
-function botInstallTargetForConnection(connection: BotConnectionView): BotInstallTarget {
-  if (connection.provider === "weixin") return "weixin";
-  if (connection.provider === "feishu" && connection.domain === "lark") return "lark";
-  if (connection.provider === "qq") return "qq";
-  return "feishu";
-}
-
-function formatInstallUserCode(code: string): string {
-  const compact = code.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 8);
-  if (compact.length <= 4) return compact;
-  return `${compact.slice(0, 4)}-${compact.slice(4)}`;
-}
-
-function formatInstallTimeLeft(seconds: number): string {
-  const value = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(value / 60);
-  const rest = value % 60;
-  return `${minutes}:${String(rest).padStart(2, "0")}`;
-}
-
-function botConnectionLabel(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
-  if (connection.domain === "lark") return "Lark";
-  if (connection.provider === "weixin") return t("settings.botWeixin");
-  if (connection.provider === "qq") return "QQ";
-  return t("settings.botFeishu");
-}
-
-function firstConnectionRemote(connection: BotConnectionView): string {
-  return connection.sessionMappings.find((mapping) => mapping.remoteId.trim())?.remoteId ?? "";
-}
-
-function botConnectionScopeLabel(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
-  return connection.workspaceRoot.trim() ? t("settings.botScopeProject") : t("settings.botScopeGlobal");
-}
-
-function botConnectionSecretEnv(connection: BotConnectionView): string {
-  return connection.provider === "weixin" ? connection.credential.tokenEnv : connection.credential.appSecretEnv;
-}
-
-function botConnectionSecretPatch(connection: BotConnectionView, value: string): Partial<BotConnectionView["credential"]> {
-  return connection.provider === "weixin" ? { tokenEnv: value } : { appSecretEnv: value };
-}
-
-function botConnectionCredentialSummary(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
-  if (connection.provider === "weixin") {
-    return connection.credential.accountId
-      ? t("settings.botCredentialAccount", { value: connection.credential.accountId })
-      : t("settings.botCredentialLocalWeixin");
-  }
-  if (connection.credential.appId) {
-    return t("settings.botCredentialApp", { value: connection.credential.appId });
-  }
-  return t("settings.botCredentialConfigured");
-}
-
 function ToggleSegment({
   value,
   disabled,
@@ -3840,6 +4128,7 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       qq: uniqueStrings(bot.selfUserIds.qq.map((v) => v.trim())),
       feishu: uniqueStrings(bot.selfUserIds.feishu.map((v) => v.trim())),
       weixin: uniqueStrings(bot.selfUserIds.weixin.map((v) => v.trim())),
+      dingtalk: uniqueStrings(bot.selfUserIds.dingtalk.map((v) => v.trim())),
     },
     control: {
       enabled: bot.control.enabled,
@@ -3866,6 +4155,10 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       qqGroups: uniqueStrings(bot.allowlist.qqGroups.map((v) => v.trim())),
       feishuGroups: uniqueStrings(bot.allowlist.feishuGroups.map((v) => v.trim())),
       weixinGroups: uniqueStrings(bot.allowlist.weixinGroups.map((v) => v.trim())),
+      dingtalkUsers: uniqueStrings(bot.allowlist.dingtalkUsers.map((v) => v.trim())),
+      dingtalkApprovers: uniqueStrings(bot.allowlist.dingtalkApprovers.map((v) => v.trim())),
+      dingtalkAdmins: uniqueStrings(bot.allowlist.dingtalkAdmins.map((v) => v.trim())),
+      dingtalkGroups: uniqueStrings(bot.allowlist.dingtalkGroups.map((v) => v.trim())),
     },
     qq: {
       ...bot.qq,
@@ -3891,6 +4184,14 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       tokenEnv: bot.weixin.tokenEnv.trim(),
       apiBase: bot.weixin.apiBase.trim().replace(/\/+$/, ""),
     },
+    dingtalk: {
+      ...bot.dingtalk,
+      clientId: bot.dingtalk.clientId.trim(),
+      clientSecretEnv: bot.dingtalk.clientSecretEnv.trim(),
+      botName: bot.dingtalk.botName.trim(),
+      toolApprovalMode: normalizeBotToolApprovalMode(bot.dingtalk.toolApprovalMode),
+      access: sanitizeBotAccess(bot.dingtalk.access),
+    },
     connections: bot.connections.map((conn) => ({ ...normalizeBotConnection(conn), access: sanitizeBotAccess(conn.access) })).filter((conn) => conn.id && conn.provider),
   };
 }
@@ -3910,7 +4211,7 @@ function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsVie
   const bot = sanitizeBotDraft(draft);
   return {
     ...bot,
-    enabled: bot.qq.enabled || bot.connections.some((connection) => connection.enabled),
+    enabled: bot.qq.enabled || bot.dingtalk.enabled || bot.connections.some((connection) => connection.enabled),
   };
 }
 
@@ -3937,6 +4238,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
   const subagentRef = toRef(s.subagentModel, s);
+  const visionRef = s.visionModel === "auto" ? "auto" : toRef(s.visionModel, s);
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider] = defaultRef.split("/");
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
@@ -3945,8 +4247,8 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
-  const compactRatio = agent.compactRatio ?? 0.85;
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.80 };
+  const compactRatio = agent.compactRatio ?? 0.80;
   const compactRatioPercent = Math.round(compactRatio * 1000) / 10;
   const [compactRatioDraft, setCompactRatioDraft] = useState(() => String(compactRatioPercent));
   const [compactRatioCustomOpen, setCompactRatioCustomOpen] = useState(false);
@@ -3979,6 +4281,20 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const parallelWriters = Number.isFinite(agent.maxParallelWriters) && agent.maxParallelWriters > 0
     ? Math.max(1, Math.min(subagentConcurrency, Math.floor(agent.maxParallelWriters)))
     : Math.min(3, subagentConcurrency);
+  const visionRefs = useMemo(() => {
+    const defaultProviderName = defaultRef.split("/")[0];
+    const candidates = refs.filter((ref) => {
+      const [provider, ...parts] = ref.split("/");
+      const model = parts.join("/");
+      const view = s.providers.find((item) => item.name === provider);
+      return Boolean(view?.visionModels?.includes(model));
+    });
+    return candidates.sort((a, b) => {
+      const aSame = a.startsWith(`${defaultProviderName}/`);
+      const bSame = b.startsWith(`${defaultProviderName}/`);
+      return aSame === bSame ? a.localeCompare(b) : aSame ? -1 : 1;
+    });
+  }, [defaultRef, refs, s.providers]);
 
   useEffect(() => {
     setCompactRatioDraft(String(compactRatioPercent));
@@ -4147,6 +4463,19 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
                 disabled={busy}
                 includeSameDefault
                 onPick={(ref) => void apply(() => app.SetPlannerModel(ref))}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("settings.imageUnderstandingModel")} hint={t("settings.visionModelsHint")}>
+              <ModelPicker
+                s={s}
+                refs={visionRefs}
+                value={visionRef}
+                disabled={busy}
+                ariaLabel={t("settings.imageUnderstandingModel")}
+                emptyOptionLabel={t("common.none")}
+                autoOptionLabel={t("common.auto")}
+                onPick={(ref) => void apply(() => app.SetVisionModel(ref))}
               />
             </SettingsField>
 
@@ -4359,6 +4688,8 @@ export function ModelPicker({
   ariaLabel,
   emptyOptionLabel,
   emptyOptionHint,
+  autoOptionLabel,
+  autoOptionHint,
   onPick,
 }: {
   s: SettingsView;
@@ -4369,6 +4700,8 @@ export function ModelPicker({
   ariaLabel?: string;
   emptyOptionLabel?: string;
   emptyOptionHint?: string;
+  autoOptionLabel?: string;
+  autoOptionHint?: string;
   onPick: (ref: string) => void;
 }) {
   const t = useT();
@@ -4385,16 +4718,23 @@ export function ModelPicker({
   const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
   const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
   const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
+  const autoLabel = autoOptionLabel;
+  const autoHint = autoOptionHint;
   const selected = refs.includes(value) ? modelOptionFromRef(value, s) : null;
-  const selectedLabel = value === "" && emptyLabel
+  const selectedLabel = value === "auto" && autoLabel
+    ? autoLabel
+    : value === "" && emptyLabel
     ? emptyLabel
     : selected?.model || value || t("common.none");
-  const selectedMeta = value === "" && emptyLabel
+  const selectedMeta = value === "auto" && autoLabel
+    ? autoHint || ""
+    : value === "" && emptyLabel
     ? emptyMeta || ""
     : selected
     ? modelOptionMeta(selected, t)
     : t("settings.noModelsConfigured");
   const emptyOptionVisible = Boolean(emptyLabel) && (!q || `${emptyLabel} ${emptyHint || ""}`.toLowerCase().includes(q));
+  const autoOptionVisible = Boolean(autoLabel) && (!q || `${autoLabel} ${autoHint || ""}`.toLowerCase().includes(q));
 
   const groups = useMemo(() => {
     const providerOrder: string[] = [];
@@ -4491,6 +4831,21 @@ export function ModelPicker({
               {value === "" && <Check size={14} />}
             </button>
           )}
+          {autoOptionVisible && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={value === "auto"}
+              className={`settings-model-picker__option settings-model-picker__option--pinned${value === "auto" ? " settings-model-picker__option--selected" : ""}`}
+              onClick={() => pick("auto")}
+            >
+              <span>
+                <strong>{autoLabel}</strong>
+                {autoHint && <small>{autoHint}</small>}
+              </span>
+              {value === "auto" && <Check size={14} />}
+            </button>
+          )}
           {groups.map((group) => (
             <div className="settings-model-picker__group" key={group.groupID}>
               <div className="settings-model-picker__group-title">
@@ -4515,7 +4870,7 @@ export function ModelPicker({
               ))}
             </div>
           ))}
-          {!emptyOptionVisible && groups.length === 0 && <div className="settings-model-picker__empty">{t("settings.noMatchingModels")}</div>}
+          {!emptyOptionVisible && !autoOptionVisible && groups.length === 0 && <div className="settings-model-picker__empty">{t("settings.noMatchingModels")}</div>}
         </div>
       </AnchoredPopover>
     </div>
@@ -4553,11 +4908,18 @@ function modelOptionGroupID(option: ModelPickerOption): string {
 }
 
 function uniqueModelOptions(options: ModelPickerOption[]): ModelPickerOption[] {
-  const seen = new Set<string>();
+  const indexByModel = new Map<string, number>();
   const out: ModelPickerOption[] = [];
   for (const option of options) {
-    if (seen.has(option.model)) continue;
-    seen.add(option.model);
+    const existingIndex = indexByModel.get(option.model);
+    if (existingIndex !== undefined) {
+      const existing = out[existingIndex];
+      if (!existing?.providerView?.webSearch && option.providerView?.webSearch) {
+        out[existingIndex] = option;
+      }
+      continue;
+    }
+    indexByModel.set(option.model, out.length);
     out.push(option);
   }
   return out;
@@ -4657,7 +5019,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
     const visionCapability = providerVisionCapabilityForView(p);
     const visionSource = visionCapability === "unsupported"
-      ? []
+      ? p.visionModels
       : (p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates));
     return {
       providerName: p.name,
@@ -4816,7 +5178,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       await app.SaveProvider({
         ...provider,
         models,
-        visionModels: draft.visionCapability === "unsupported" ? [] : visionModels,
+        visionModels,
         visionModelsConfigured: true,
         default: providerDefaultModel(provider.default, models),
       });
@@ -4910,6 +5272,17 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             }}
             onSaveDraftModels={() => void saveModelDraft(group)}
             onToggleWebSearch={(enabled) => {
+              if (group.id === "custom:opencode-go") {
+                const searchProviderNames = group.providers
+                  .map((provider) => provider.name)
+                  .filter((name) => name.startsWith("opencode-go-deepseek-"));
+                if (enabled) {
+                  void apply(() => app.AddProviderPresetAccess("opencode-go-deepseek-responses", ""));
+                } else if (searchProviderNames.length > 0) {
+                  void apply(() => app.RemoveProviderAccesses(searchProviderNames));
+                }
+                return;
+              }
               const providerNames = group.providers.map((provider) => provider.name);
               if (providerNames.length === 0) return;
               void apply(() => app.SetProviderWebSearch(providerNames, enabled));
@@ -4982,17 +5355,23 @@ const OFFICIAL_PROVIDER_CHOICES: Array<{ kind: OfficialProviderKind; labelKey: D
 
 type ProviderTemplateChoice =
   | { id: string; source: "official"; kind: OfficialProviderKind; label: string; description: string; keyEnv: string; added: boolean; keySet: boolean }
-  | { id: string; source: "preset"; presetID: string; label: string; description: string; keyEnv: string; added: boolean; status: ProviderPresetStatus; statusProviderNames: string[]; keySet: boolean };
+  | {
+    id: string; source: "preset"; presetID: string; label: string; description: string; keyEnv: string;
+    added: boolean; status: ProviderPresetStatus; statusProviderNames: string[]; missingProviderNames: string[]; keySet: boolean;
+    recommended: boolean; billingMode: string; displayGroup: string; displaySection: string;
+    displayTier: string; routeKind: string; optional: boolean; displayOrder: number;
+  };
 
 function providerTemplateCanAdd(choice: ProviderTemplateChoice | undefined): boolean {
   if (!choice) return false;
   if (choice.source === "official") return !choice.added;
-  return choice.status !== "installed" && choice.status !== "installed_modified" && choice.status !== "name_conflict";
+  return choice.status === "installed_modified" ? choice.missingProviderNames.length > 0 : choice.status !== "installed" && choice.status !== "name_conflict";
 }
 
 function providerTemplateStatusBadge(choice: ProviderTemplateChoice, t: ReturnType<typeof useT>): string {
   if (choice.source === "official") return choice.added ? t("settings.addProvider.addedBadge") : "";
   if (choice.status === "installed") return t("settings.addProvider.addedBadge");
+  if (choice.status === "partial") return t("settings.addProvider.partialBadge");
   if (choice.status === "installed_modified") return t("settings.addProvider.modifiedBadge");
   if (choice.status === "name_conflict") return t("settings.addProvider.nameConflictBadge");
   if (choice.status === "similar_existing") return t("settings.addProvider.similarExistingBadge");
@@ -5002,6 +5381,7 @@ function providerTemplateStatusBadge(choice: ProviderTemplateChoice, t: ReturnTy
 function providerTemplateActionLabel(choice: ProviderTemplateChoice | undefined, t: ReturnType<typeof useT>): string {
   if (!choice) return t("settings.addProvider.confirm");
   if (choice.source === "preset" && choice.status === "name_conflict") return t("settings.addProvider.nameConflictAction");
+  if (choice.source === "preset" && (choice.status === "partial" || (choice.status === "installed_modified" && choice.missingProviderNames.length > 0))) return t("settings.addProvider.completeBundleAction");
   if (!providerTemplateCanAdd(choice)) return t("settings.addProvider.alreadyAddedAction");
   return t("settings.addProvider.confirm");
 }
@@ -5068,7 +5448,7 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.zaiCodingPlanGlobalDesc");
     case "zai-coding-plan-global-anthropic":
       return t("settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc");
-    case "opencode-go": case "opencode-go-anthropic":
+    case "opencode-go-recommended": case "opencode-go": case "opencode-go-anthropic": case "opencode-go-responses":
     case "opencode-go-deepseek-anthropic": case "opencode-go-deepseek-responses":
       return t(opencodeGoPresetDescriptionKeys[preset.id]);
     case "opencode-zen-anthropic":
@@ -5089,6 +5469,12 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.stepfunDesc");
     case "stepfun-anthropic":
       return t("settings.addProvider.preset.stepfunAnthropicDesc");
+    case "stepfun-responses":
+      return t("settings.addProvider.preset.stepfunResponsesDesc");
+    case "stepfun-api":
+      return t("settings.addProvider.preset.stepfunApiDesc");
+    case "stepfun-api-anthropic":
+      return t("settings.addProvider.preset.stepfunApiAnthropicDesc");
     case "novita":
       return t("settings.addProvider.preset.novitaDesc");
     case "gmi":
@@ -5114,13 +5500,46 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
 
 function providerPresetLabel(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
   switch (preset.id) {
+    case "opencode-go-recommended":
+      return t("settings.addProvider.opencodeGoRecommendedLabel");
+    case "opencode-go":
+      return t("settings.addProvider.opencodeGoCompatibilityLabel");
     case "deepseek-responses":
       return t("settings.addProvider.preset.deepseekResponsesLabel");
     case "token-rhythm":
       return t("settings.addProvider.preset.tokenRhythmLabel");
+    case "stepfun":
+      return t("settings.addProvider.preset.stepfunLabel");
+    case "stepfun-anthropic":
+      return t("settings.addProvider.preset.stepfunAnthropicLabel");
+    case "stepfun-responses":
+      return t("settings.addProvider.preset.stepfunResponsesLabel");
+    case "stepfun-api":
+      return t("settings.addProvider.preset.stepfunApiLabel");
+    case "stepfun-api-anthropic":
+      return t("settings.addProvider.preset.stepfunApiAnthropicLabel");
     default:
       return preset.label;
   }
+}
+
+function isOpenCodeProductChoice(
+  choice: ProviderTemplateChoice,
+): choice is Extract<ProviderTemplateChoice, { source: "preset" }> {
+  return choice.source === "preset"
+    && choice.displayGroup === "opencode"
+    && choice.displayTier === "primary";
+}
+
+function isFeaturedProviderChoice(choice: ProviderTemplateChoice): boolean {
+  return choice.source === "official"
+    || (choice.source === "preset" && choice.presetID === "opencode-go-recommended");
+}
+
+function isHiddenOpenCodeRouteChoice(choice: ProviderTemplateChoice): boolean {
+  return choice.source === "preset"
+    && choice.displayGroup === "opencode"
+    && !isOpenCodeProductChoice(choice);
 }
 
 export function AddProviderPanel({
@@ -5170,19 +5589,101 @@ export function AddProviderPanel({
       added: preset.added,
       status: normalizeProviderPresetStatus(preset.status, preset.added),
       statusProviderNames: asArray(preset.statusProviderNames),
+      missingProviderNames: asArray(preset.missingProviderNames),
       keySet: preset.keySet,
+      recommended: Boolean(preset.recommended),
+      billingMode: String(preset.billingMode ?? ""),
+      displayGroup: String(preset.displayGroup ?? ""),
+      displaySection: String(preset.displaySection ?? ""),
+      displayTier: String(preset.displayTier ?? ""),
+      routeKind: String(preset.routeKind ?? ""),
+      optional: Boolean(preset.optional),
+      displayOrder: Number(preset.displayOrder ?? 0),
     })),
   ], [officialProviders, providerPresets, t]);
-  const [templateID, setTemplateID] = useState("official:deepseek");
+  const visibleTemplateChoices = useMemo(
+    () => templateChoices.filter((choice) => !isHiddenOpenCodeRouteChoice(choice)),
+    [templateChoices],
+  );
+  const firstAvailableTemplateID = visibleTemplateChoices.find((choice) => choice.source === "preset" && choice.recommended && providerTemplateCanAdd(choice))?.id
+    ?? visibleTemplateChoices.find(providerTemplateCanAdd)?.id
+    ?? visibleTemplateChoices[0]?.id
+    ?? "";
+  const [templateID, setTemplateID] = useState(() => firstAvailableTemplateID);
   const [key, setKey] = useState("");
-  const firstAvailableTemplateID = templateChoices.find(providerTemplateCanAdd)?.id ?? templateChoices[0]?.id ?? "";
-  const selected = templateChoices.find((choice) => choice.id === templateID) ?? templateChoices.find((choice) => choice.id === firstAvailableTemplateID) ?? templateChoices[0];
+  const [showProviderCatalog, setShowProviderCatalog] = useState(false);
+  const selected = visibleTemplateChoices.find((choice) => choice.id === templateID)
+    ?? visibleTemplateChoices.find((choice) => choice.id === firstAvailableTemplateID)
+    ?? visibleTemplateChoices[0];
   useEffect(() => {
-    const current = templateChoices.find((choice) => choice.id === templateID);
+    const current = visibleTemplateChoices.find((choice) => choice.id === templateID);
     if (firstAvailableTemplateID && (!current || (!providerTemplateCanAdd(current) && firstAvailableTemplateID !== templateID))) {
       setTemplateID(firstAvailableTemplateID);
     }
-  }, [firstAvailableTemplateID, templateChoices, templateID]);
+  }, [firstAvailableTemplateID, templateID, visibleTemplateChoices]);
+
+  const renderTemplateChoice = (choice: ProviderTemplateChoice): ReactNode => {
+    const canAdd = providerTemplateCanAdd(choice);
+    const badge = providerTemplateStatusBadge(choice, t);
+    const recommendationBadge = choice.source === "preset" && choice.recommended ? t("settings.recommended") : "";
+    const conflictProviderName = providerTemplateConflictProviderName(choice);
+    if (choice.source === "preset" && (choice.status === "name_conflict" || (choice.status === "installed_modified" && choice.missingProviderNames.length === 0))) {
+      return (
+        <div
+          key={choice.id}
+          className={`provider-template-card${providerTemplateStatusClass(choice)}`}
+        >
+          <strong>
+            {choice.label}
+            {recommendationBadge ? ` · ${recommendationBadge}` : ""}
+            {badge ? ` · ${badge}` : ""}
+          </strong>
+          <span>{choice.description}</span>
+          <div className="provider-template-card__actions">
+            <button
+              type="button"
+              className="btn btn--small"
+              disabled={busy || !conflictProviderName}
+              onClick={() => onViewPresetConflict(conflictProviderName)}
+            >
+              {choice.status === "installed_modified" ? t("settings.addProvider.viewPresetProvider") : t("settings.addProvider.viewConflictProvider")}
+            </button>
+            <InlineConfirmButton
+              label={t("settings.addProvider.resetPreset")}
+              confirmLabel={t("settings.addProvider.confirmResetPreset")}
+              cancelLabel={t("common.cancel")}
+              disabled={busy}
+              danger
+              onConfirm={() => onResetPreset(choice.presetID)}
+            />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button
+        key={choice.id}
+        type="button"
+        className={`provider-template-card${selected?.id === choice.id ? " provider-template-card--active" : ""}${providerTemplateStatusClass(choice)}`}
+        disabled={busy || !canAdd}
+        onClick={() => {
+          setTemplateID(choice.id);
+          if (isFeaturedProviderChoice(choice)) setShowProviderCatalog(false);
+        }}
+      >
+        <strong>
+          {choice.label}
+          {recommendationBadge ? ` · ${recommendationBadge}` : ""}
+          {badge ? ` · ${badge}` : ""}
+        </strong>
+        <span>{choice.description}</span>
+      </button>
+    );
+  };
+
+  const featuredProviderChoices = visibleTemplateChoices.filter(isFeaturedProviderChoice);
+  const otherChoices = visibleTemplateChoices.filter((choice) => !isFeaturedProviderChoice(choice));
+  const focusedFeaturedProvider = selected && isFeaturedProviderChoice(selected) && !showProviderCatalog ? selected : null;
 
   const header = (
     <div className="provider-add-panel__head">
@@ -5221,65 +5722,85 @@ export function AddProviderPanel({
   );
 
   if (mode === "official") {
+    if (focusedFeaturedProvider) {
+      const canConnect = providerTemplateCanAdd(focusedFeaturedProvider)
+        && (focusedFeaturedProvider.keySet || key.trim().length > 0);
+      const setupHint = focusedFeaturedProvider.source === "official"
+        ? t("settings.addProvider.official.deepseekDesc")
+        : focusedFeaturedProvider.presetID === "opencode-go-recommended"
+          ? t("settings.addProvider.openCodeGoQuickSetupHint")
+          : t("settings.addProvider.zenCredentialHint");
+      const connect = () => {
+        if (focusedFeaturedProvider.source === "official") {
+          void onAddOfficial(focusedFeaturedProvider.kind, key.trim());
+        } else {
+          void onAddPreset(focusedFeaturedProvider.presetID, key.trim());
+        }
+      };
+      return (
+        <div className="provider-add-panel">
+          {header}
+          <section className="provider-quick-setup" aria-labelledby="provider-quick-setup-title">
+            <div className="provider-featured-picker">
+              <span className="provider-featured-picker__label">{t("settings.addProvider.featuredProviders")}</span>
+              <div className="provider-featured-grid">
+                {featuredProviderChoices.map(renderTemplateChoice)}
+              </div>
+            </div>
+            <div className="provider-quick-setup__intro">
+              <strong id="provider-quick-setup-title">{focusedFeaturedProvider.label}</strong>
+              <span>{setupHint}</span>
+            </div>
+            <label className="set-label" htmlFor="provider-quick-setup-key">API Key</label>
+            <input
+              id="provider-quick-setup-key"
+              className="mem-input provider-quick-setup__key"
+              type="password"
+              autoFocus
+              placeholder={t("settings.setKey", { env: focusedFeaturedProvider.keyEnv })}
+              value={key}
+              disabled={busy || !providerTemplateCanAdd(focusedFeaturedProvider)}
+              onChange={(event) => setKey(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && canConnect) {
+                  connect();
+                }
+              }}
+            />
+            <div className="provider-quick-setup__actions">
+              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setShowProviderCatalog(true)}>
+                {t("settings.addProvider.chooseAnotherProvider")}
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary btn--small"
+                disabled={busy || !canConnect}
+                onClick={connect}
+              >
+                {t("settings.addProvider.connectAndStart")}
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
     return (
       <div className="provider-add-panel">
         {header}
         {modeSwitch}
         <div className="provider-add-panel__hint">{t("settings.addProvider.officialHint")}</div>
-        <div className="provider-template-grid">
-          {templateChoices.map((choice) => {
-            const canAdd = providerTemplateCanAdd(choice);
-            const badge = providerTemplateStatusBadge(choice, t);
-            const conflictProviderName = providerTemplateConflictProviderName(choice);
-            if (choice.source === "preset" && (choice.status === "name_conflict" || choice.status === "installed_modified")) {
-              return (
-                <div
-                  key={choice.id}
-                  className={`provider-template-card${providerTemplateStatusClass(choice)}`}
-                >
-                  <strong>
-                    {choice.label}
-                    {badge ? ` · ${badge}` : ""}
-                  </strong>
-                  <span>{choice.description}</span>
-                  <div className="provider-template-card__actions">
-                    <button
-                      type="button"
-                      className="btn btn--small"
-                      disabled={busy || !conflictProviderName}
-                      onClick={() => onViewPresetConflict(conflictProviderName)}
-                    >
-                      {choice.status === "installed_modified" ? t("settings.addProvider.viewPresetProvider") : t("settings.addProvider.viewConflictProvider")}
-                    </button>
-                    <InlineConfirmButton
-                      label={t("settings.addProvider.resetPreset")}
-                      confirmLabel={t("settings.addProvider.confirmResetPreset")}
-                      cancelLabel={t("common.cancel")}
-                      disabled={busy}
-                      danger
-                      onConfirm={() => onResetPreset(choice.presetID)}
-                    />
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <button
-                key={choice.id}
-                type="button"
-                className={`provider-template-card${selected?.id === choice.id ? " provider-template-card--active" : ""}${providerTemplateStatusClass(choice)}`}
-                disabled={busy || !canAdd}
-                onClick={() => setTemplateID(choice.id)}
-              >
-                <strong>
-                  {choice.label}
-                  {badge ? ` · ${badge}` : ""}
-                </strong>
-                <span>{choice.description}</span>
-              </button>
-            );
-          })}
-        </div>
+        {featuredProviderChoices.length > 0 ? (
+          <div className="provider-preset-group">
+            <h4>{t("settings.addProvider.featuredProviders")}</h4>
+            <div className="provider-featured-grid">{featuredProviderChoices.map(renderTemplateChoice)}</div>
+          </div>
+        ) : null}
+        {otherChoices.length > 0 ? (
+          <div className="provider-preset-group">
+            <h4>{t("settings.addProvider.otherProviders")}</h4>
+            <div className="provider-template-grid">{otherChoices.map(renderTemplateChoice)}</div>
+          </div>
+        ) : null}
         <label className="set-label">{t("settings.providerKeyOptional")}</label>
         <input
           className="mem-input"
@@ -5379,14 +5900,46 @@ export function ProviderAccessCard({
 }) {
   const t = useT();
   const editableProvider = group.providers[0];
+  const isOpenCodeGoConnection = group.id === "custom:opencode-go";
   const isDefault = group.providers.some((p) => p.name === defaultProvider);
   const editingProvider = group.providers.find((p) => editing === p.name);
   const upgradeProvider = group.providers.find((p) => p.recommendedUpgradeAvailable);
   const primaryProviderExpanded = Boolean(editableProvider && editing === editableProvider.name);
-  const supportsServerWebSearch = group.providers.length > 0 && group.providers.every(providerSupportsServerWebSearchForView);
-  const webSearchEnabled = supportsServerWebSearch && group.providers.every((provider) => Boolean(provider.webSearch));
+  const supportsServerWebSearch = isOpenCodeGoConnection
+    || (group.providers.length > 0 && group.providers.every(providerSupportsServerWebSearchForView));
+  const webSearchEnabled = supportsServerWebSearch && (isOpenCodeGoConnection
+    ? group.providers.some((provider) => provider.name.startsWith("opencode-go-deepseek-") && Boolean(provider.webSearch))
+    : group.providers.every((provider) => Boolean(provider.webSearch)));
   const visibleModels = group.models.slice(0, 6);
   const hiddenModelCount = Math.max(0, group.models.length - visibleModels.length);
+  const providerProfiles = (
+    <div className="provider-profiles">
+      {group.providers.map((p) => {
+        const profileExpanded = editing === p.name;
+        return (
+          <div className="provider-profile-row" key={p.name}>
+            <span>{p.name}</span>
+            <span>{p.models.join(", ") || t("common.none")}</span>
+            <button
+              className="btn btn--small provider-profile-row__refresh"
+              disabled={busy || fetching || !p.baseUrl || !providerIsConfigured(p)}
+              onClick={() => onRefresh(p)}
+            >
+              {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+            </button>
+            <button
+              className="btn btn--small provider-profile-row__configure"
+              disabled={busy}
+              aria-expanded={profileExpanded}
+              onClick={() => profileExpanded ? onCancelEdit() : onEdit(p.name)}
+            >
+              {profileExpanded ? t("common.collapse") : t("settings.configureProfile")}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
   return (
     <article className={`provider-access-card${group.builtIn ? " provider-access-card--builtin" : ""}`}>
       <div className="provider-access-card__head">
@@ -5402,7 +5955,7 @@ export function ProviderAccessCard({
           </div>
         </div>
         <div className="provider-access-card__actions">
-          {editableProvider && (
+          {editableProvider && !isOpenCodeGoConnection && (
             <button
               className="btn btn--small"
               disabled={busy}
@@ -5502,34 +6055,12 @@ export function ProviderAccessCard({
 
       <ProviderTechnicalDetails group={group} />
 
-      {group.providers.length > 1 && (
-        <div className="provider-profiles">
-          {group.providers.map((p) => {
-            const profileExpanded = editing === p.name;
-            return (
-              <div className="provider-profile-row" key={p.name}>
-                <span>{p.name}</span>
-                <span>{p.models.join(", ") || t("common.none")}</span>
-                <button
-                  className="btn btn--small provider-profile-row__refresh"
-                  disabled={busy || fetching || !p.baseUrl || !providerIsConfigured(p)}
-                  onClick={() => onRefresh(p)}
-                >
-                  {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
-                </button>
-                <button
-                  className="btn btn--small provider-profile-row__configure"
-                  disabled={busy}
-                  aria-expanded={profileExpanded}
-                  onClick={() => profileExpanded ? onCancelEdit() : onEdit(p.name)}
-                >
-                  {profileExpanded ? t("common.collapse") : t("settings.configureProfile")}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {group.providers.length > 1 && (isOpenCodeGoConnection ? (
+        <details className="provider-route-settings">
+          <summary>{t("settings.addProvider.manageRoutes")}</summary>
+          {providerProfiles}
+        </details>
+      ) : providerProfiles)}
 
       {editingProvider && (
         <ProviderEditor
@@ -5777,7 +6308,7 @@ function ProviderModelDraftPicker({
               ) : (
                 <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
                   <span>{t("settings.textInput")}</span>
-                  <span>{t("settings.imageInputUnsupported")}</span>
+                  <span>{vision.has(model) ? t("settings.visionModel") : t("settings.imageInputUnsupported")}</span>
                 </div>
               )}
             </div>
@@ -5854,7 +6385,7 @@ function ProviderServiceCapabilities({
   );
 }
 
-function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof useT>): ProviderAccessGroup[] {
+export function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof useT>): ProviderAccessGroup[] {
   const groups = new Map<string, ProviderAccessGroup>();
   for (const p of providers) {
     const id = providerGroupID(p);
@@ -5905,10 +6436,6 @@ function providerBaseHost(baseUrl: string): string {
 
 type ProviderVisionCapability = "configurable" | "unsupported";
 
-function isDeepSeekOfficialEndpoint(baseUrl: string): boolean {
-  return providerBaseHost(baseUrl).endsWith(".deepseek.com");
-}
-
 export function providerSupportsServerWebSearch(kind: string, baseUrl: string): boolean {
   try {
     const endpoint = new URL(baseUrl.trim());
@@ -5944,25 +6471,13 @@ export function providerSupportsServerWebSearchForView(
   return providerSupportsServerWebSearch(provider.kind, provider.baseUrl);
 }
 
-function providerVisionCapability(kind: string, baseUrl: string): ProviderVisionCapability {
-  if (!isDeepSeekOfficialEndpoint(baseUrl)) return "configurable";
-  switch (kind.trim().toLowerCase()) {
-    case "openai":
-    case "responses":
-    case "anthropic":
-      return "unsupported";
-    default:
-      return "configurable";
-  }
-}
-
 export function providerVisionCapabilityForView(
   provider: Pick<ProviderView, "kind" | "baseUrl" | "visionCapability">,
 ): ProviderVisionCapability {
-  if (provider.visionCapability === "unsupported" || provider.visionCapability === "configurable") {
-    return provider.visionCapability;
+  if (provider.visionCapability === "unsupported") {
+    return "unsupported";
   }
-  return providerVisionCapability(provider.kind, provider.baseUrl);
+  return "configurable";
 }
 
 function canonicalOfficialProviderName(name: string): string {
@@ -5986,12 +6501,16 @@ function officialProviderKind(p: ProviderView): string {
 function providerGroupID(p: ProviderView): string {
   const official = officialProviderKind(p);
   if (official) return `builtin:${official}`;
+  if (isOpenCodeGoProviderName(p.name)) return "custom:opencode-go";
+  if (p.name === "opencode-zen-anthropic") return "custom:opencode-zen";
   return `custom:${p.name}`;
 }
 
 function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {
   const id = providerGroupID(p);
   if (id === "builtin:deepseek") return t ? t("settings.providerLabel.deepseek") : "DeepSeek";
+  if (id === "custom:opencode-go") return t ? t("settings.providerLabel.opencodeGo") : "OpenCode Go";
+  if (id === "custom:opencode-zen") return t ? t("settings.providerLabel.opencodeZen") : "OpenCode Zen";
   return p.name;
 }
 
@@ -6000,7 +6519,22 @@ function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): 
   if (id === "builtin:deepseek") {
     return p.recommendedUpgradeAvailable ? "" : t("settings.providerDesc.deepseek");
   }
+  if (id === "custom:opencode-go") return t("settings.providerDesc.opencodeGo");
+  if (id === "custom:opencode-zen") return t("settings.providerDesc.opencodeZen");
   return "";
+}
+
+function isOpenCodeGoProviderName(name: string): boolean {
+  switch (name.trim()) {
+    case "opencode-go":
+    case "opencode-go-anthropic":
+    case "opencode-go-responses":
+    case "opencode-go-deepseek-anthropic":
+    case "opencode-go-deepseek-responses":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -6036,6 +6570,10 @@ function botAllowlistTextValues(allowlist: BotAllowlistView): Record<BotAllowlis
     qqGroups: allowlist.qqGroups.join("\n"),
     feishuGroups: allowlist.feishuGroups.join("\n"),
     weixinGroups: allowlist.weixinGroups.join("\n"),
+    dingtalkUsers: allowlist.dingtalkUsers.join("\n"),
+    dingtalkApprovers: allowlist.dingtalkApprovers.join("\n"),
+    dingtalkAdmins: allowlist.dingtalkAdmins.join("\n"),
+    dingtalkGroups: allowlist.dingtalkGroups.join("\n"),
   };
 }
 
@@ -6044,6 +6582,7 @@ function botSelfUserTextValues(selfUserIds: BotSettingsView["selfUserIds"]): Rec
     qq: selfUserIds.qq.join("\n"),
     feishu: selfUserIds.feishu.join("\n"),
     weixin: selfUserIds.weixin.join("\n"),
+    dingtalk: selfUserIds.dingtalk.join("\n"),
   };
 }
 
@@ -6148,7 +6687,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
               ) : (
                 <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
                   <span>{t("settings.textInput")}</span>
-                  <span>{t("settings.imageInputUnsupported")}</span>
+                  <span>{vision.has(model) ? t("settings.visionModel") : t("settings.imageInputUnsupported")}</span>
                 </div>
               )}
               <div className="provider-model-draft__context-field">
@@ -6209,6 +6748,8 @@ export function ProviderEditor({
     initial?.requestUrl ?? "",
     initial?.chatUrl ?? "",
   ));
+  const providerNameInputId = useId();
+  const providerNameHelpId = useId();
   const providerUrlInputId = useId();
   const providerUrlHelpId = useId();
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
@@ -6595,8 +7136,21 @@ export function ProviderEditor({
 
   return (
     <div className={`provider-editor${isNewCustomProvider ? " provider-editor--wizard" : ""}`}>
-      <label className="set-label">{t("settings.customProviderName")}</label>
-      <input className="mem-input" placeholder={t("settings.customProviderNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
+      <label className="set-label" htmlFor={providerNameInputId}>{t("settings.customProviderName")}</label>
+      <input
+        id={providerNameInputId}
+        className="mem-input provider-name-input"
+        aria-describedby={initial ? providerNameHelpId : undefined}
+        placeholder={t("settings.customProviderNamePlaceholder")}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        disabled={!!initial}
+      />
+      {initial && (
+        <div id={providerNameHelpId} className="mem-hint provider-name-readonly-hint">
+          {t("settings.customProviderNameReadonlyHint")}
+        </div>
+      )}
       <label className="set-label">{t("settings.providerProtocol")}</label>
       <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
         {providerKindChoices.map((choice) => (

@@ -5,7 +5,7 @@ import type { Todo } from "./tools";
 import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 import type { WireApproval } from "./approvalTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
-export type { ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionReference } from "./sessionCatalogTypes";
+export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
 export type EventKind =
   | "turn_started"
   | "reasoning"
@@ -167,6 +167,8 @@ export interface CostQuote {
   usageSource?: string;
   pricingFingerprint?: string;
   rateDate?: string;
+  rateBand?: "peak" | "off_peak" | "mixed" | string;
+  ratedAt?: string;
   incompleteReason?: string;
   legacyEstimate?: boolean;
   catalogSource?: string;
@@ -352,6 +354,8 @@ export interface WireEvent {
   completion?: WireCompletionSummary;
   tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
+  /** Unix milliseconds recorded by the desktop host when this turn began. */
+  turnStartedAt?: number;
   sessionHitTokens?: number;
   sessionMissTokens?: number;
   sessionCost?: number;
@@ -370,6 +374,10 @@ export interface WireCompletionSummary {
   review: string;
   gap_kinds?: string[];
   constraint_degraded: boolean;
+  /** Turn-time policy floor. Missing on historical events. */
+  floor?: "standard" | "delivery" | string;
+  /** Backend decision; authoritative when floor is present. */
+  attention?: boolean;
 }
 
 export type WorkspaceWatchState = "active" | "degraded" | "unavailable";
@@ -442,6 +450,8 @@ export interface TabMeta {
   ready: boolean;
   runtime?: SessionRuntimeView;
   running: boolean;
+  /** Unix milliseconds for the currently active foreground turn. */
+  turnStartedAt?: number;
   pendingPrompt?: boolean;
   backgroundJobs?: number;
   cancelRequested?: boolean;
@@ -450,8 +460,9 @@ export interface TabMeta {
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   recovered?: boolean;
@@ -504,6 +515,7 @@ export interface ProjectNode {
   running?: boolean;
   status?: ProjectTopicStatus;
   pinned?: boolean;
+  sortOrder?: number;
   recovered?: boolean;
   recoveryReason?: string;
   recoveryDigest?: string;
@@ -512,7 +524,9 @@ export interface ProjectNode {
   recoveryBranchCount?: number;
   recoveryUnresolvedCount?: number;
   recoveryCleanupEligibleCount?: number;
+  recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
   isolatedWorktree?: boolean;
+  runtimeOnly?: boolean;
   children?: ProjectNode[];
 }
 
@@ -913,13 +927,15 @@ export interface Meta {
   workspacePath?: string;
   gitBranch?: string;
   imageInputEnabled?: boolean;
+  visionFallbackEnabled?: boolean;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
@@ -928,11 +944,12 @@ export interface Meta {
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
-// TokenMode is the dual-write wire value for Agent role settings (角色设定).
-// Canonical product ids are light|balanced|delivery; economy/full remain one
-// compatibility version of persisted/API values.
+// TokenMode is the dual-write wire value for the session quality floor.
+// The floor itself is standard|delivery; light and its aliases fold to
+// standard, and full/economy remain one compatibility version of old values.
 export type TokenMode = "full" | "economy" | "delivery" | "light" | "balanced";
 export type AgentPreset = "light" | "balanced" | "delivery";
+export type QualityFloor = "standard" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
 // Optional Goal runtime summary; absent for old hosts or when no goal is active.
 export interface GoalRuntime {
@@ -1812,11 +1829,20 @@ export interface ProviderPresetView {
   label: string;
   description: string;
   keyEnv: string;
+  recommended?: boolean;
+  billingMode?: string;
+  displayGroup?: string;
+  displaySection?: string;
+  displayTier?: "primary" | "advanced" | "compatibility" | string;
+  routeKind?: string;
+  optional?: boolean;
+  displayOrder?: number;
   providerNames: string[];
   models: string[];
   added: boolean;
-  status?: "available" | "installed" | "installed_modified" | "name_conflict" | "similar_existing";
+  status?: "available" | "installed" | "installed_modified" | "partial" | "name_conflict" | "similar_existing";
   statusProviderNames?: string[];
+  missingProviderNames?: string[];
   keySet: boolean;
   requiresKey?: boolean;
   configured?: boolean;
@@ -1942,8 +1968,8 @@ export interface BackgroundRuntimeView {
 
 export interface WorkspaceConflictView {
   state: "none" | "local" | "external";
-  ownerTabId?: string;
-  ownerTitle?: string;
+  ownerTabId?: string; ownerTitle?: string;
+  ownerScope?: string; ownerLabel?: string;
   ownerWork: ActiveWorkView;
   canReveal: boolean;
   canCreateWorktree: boolean;
@@ -2011,6 +2037,10 @@ export interface BotAllowlistView {
   qqGroups: string[];
   feishuGroups: string[];
   weixinGroups: string[];
+  dingtalkUsers: string[];
+  dingtalkApprovers: string[];
+  dingtalkAdmins: string[];
+  dingtalkGroups: string[];
 }
 
 export interface BotAccessView {
@@ -2027,6 +2057,7 @@ export interface BotSelfUserIDsView {
   qq: string[];
   feishu: string[];
   weixin: string[];
+  dingtalk: string[];
 }
 
 export interface BotPairingView {
@@ -2085,6 +2116,19 @@ export interface WeixinBotView {
   apiBase: string;
 }
 
+export interface DingtalkBotView {
+  enabled: boolean;
+  clientId: string;
+  clientSecretEnv: string;
+  secretSet: boolean;
+  botName: string;
+  requireMention: boolean;
+  model: string;
+  toolApprovalMode: string;
+  workspaceRoot: string;
+  access: BotAccessView;
+}
+
 export interface BotConnectionCredentialView {
   appId: string;
   appSecretEnv: string;
@@ -2141,6 +2185,7 @@ export interface BotSettingsView {
   qq: QQBotView;
   feishu: FeishuBotView;
   weixin: WeixinBotView;
+  dingtalk: DingtalkBotView;
   connections: BotConnectionView[];
 }
 
@@ -2150,6 +2195,7 @@ export interface BotRuntimeStatusView {
   message: string;
   connections: number;
   startedAt: string;
+  platforms: Record<string, string>;
 }
 
 export interface BotInstallStartResult {
@@ -2207,6 +2253,7 @@ export interface BotConnectionDiagnostic {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
+  visionModel: string;
   subagentModel: string;
   subagentEffort: string;
   autoPlan: string;

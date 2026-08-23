@@ -23,6 +23,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/bot"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -88,25 +89,35 @@ type ProviderModelCatalogUpdate struct {
 }
 
 type ProviderPresetView struct {
-	ID                  string   `json:"id"`
-	Label               string   `json:"label"`
-	Description         string   `json:"description"`
-	KeyEnv              string   `json:"keyEnv"`
-	ProviderNames       []string `json:"providerNames"`
-	Models              []string `json:"models"`
-	Added               bool     `json:"added"`
-	Status              string   `json:"status"`
-	StatusProviderNames []string `json:"statusProviderNames"`
-	KeySet              bool     `json:"keySet"`
-	RequiresKey         bool     `json:"requiresKey"`
-	Configured          bool     `json:"configured"`
-	KeySource           string   `json:"keySource,omitempty"`
-	KeySourcePath       string   `json:"keySourcePath,omitempty"`
+	ID                   string   `json:"id"`
+	Label                string   `json:"label"`
+	Description          string   `json:"description"`
+	KeyEnv               string   `json:"keyEnv"`
+	Recommended          bool     `json:"recommended,omitempty"`
+	BillingMode          string   `json:"billingMode,omitempty"`
+	DisplayGroup         string   `json:"displayGroup,omitempty"`
+	DisplaySection       string   `json:"displaySection,omitempty"`
+	DisplayTier          string   `json:"displayTier,omitempty"`
+	RouteKind            string   `json:"routeKind,omitempty"`
+	Optional             bool     `json:"optional,omitempty"`
+	DisplayOrder         int      `json:"displayOrder,omitempty"`
+	ProviderNames        []string `json:"providerNames"`
+	Models               []string `json:"models"`
+	Added                bool     `json:"added"`
+	Status               string   `json:"status"`
+	StatusProviderNames  []string `json:"statusProviderNames"`
+	MissingProviderNames []string `json:"missingProviderNames,omitempty"`
+	KeySet               bool     `json:"keySet"`
+	RequiresKey          bool     `json:"requiresKey"`
+	Configured           bool     `json:"configured"`
+	KeySource            string   `json:"keySource,omitempty"`
+	KeySourcePath        string   `json:"keySourcePath,omitempty"`
 }
 
 const (
 	providerPresetStatusAvailable         = "available"
 	providerPresetStatusInstalled         = "installed"
+	providerPresetStatusPartial           = "partial"
 	providerPresetStatusInstalledModified = "installed_modified"
 	providerPresetStatusNameConflict      = "name_conflict"
 	providerPresetStatusSimilarExisting   = "similar_existing"
@@ -171,20 +182,24 @@ type AgentView struct {
 }
 
 type BotAllowlistView struct {
-	Enabled         bool     `json:"enabled"`
-	AllowAll        bool     `json:"allowAll"`
-	QQUsers         []string `json:"qqUsers"`
-	FeishuUsers     []string `json:"feishuUsers"`
-	WeixinUsers     []string `json:"weixinUsers"`
-	QQApprovers     []string `json:"qqApprovers"`
-	FeishuApprovers []string `json:"feishuApprovers"`
-	WeixinApprovers []string `json:"weixinApprovers"`
-	QQAdmins        []string `json:"qqAdmins"`
-	FeishuAdmins    []string `json:"feishuAdmins"`
-	WeixinAdmins    []string `json:"weixinAdmins"`
-	QQGroups        []string `json:"qqGroups"`
-	FeishuGroups    []string `json:"feishuGroups"`
-	WeixinGroups    []string `json:"weixinGroups"`
+	Enabled           bool     `json:"enabled"`
+	AllowAll          bool     `json:"allowAll"`
+	QQUsers           []string `json:"qqUsers"`
+	FeishuUsers       []string `json:"feishuUsers"`
+	WeixinUsers       []string `json:"weixinUsers"`
+	QQApprovers       []string `json:"qqApprovers"`
+	FeishuApprovers   []string `json:"feishuApprovers"`
+	WeixinApprovers   []string `json:"weixinApprovers"`
+	QQAdmins          []string `json:"qqAdmins"`
+	FeishuAdmins      []string `json:"feishuAdmins"`
+	WeixinAdmins      []string `json:"weixinAdmins"`
+	QQGroups          []string `json:"qqGroups"`
+	FeishuGroups      []string `json:"feishuGroups"`
+	WeixinGroups      []string `json:"weixinGroups"`
+	DingtalkUsers     []string `json:"dingtalkUsers"`
+	DingtalkApprovers []string `json:"dingtalkApprovers"`
+	DingtalkAdmins    []string `json:"dingtalkAdmins"`
+	DingtalkGroups    []string `json:"dingtalkGroups"`
 }
 
 type BotAccessView struct {
@@ -198,9 +213,10 @@ type BotAccessView struct {
 }
 
 type BotSelfUserIDsView struct {
-	QQ     []string `json:"qq"`
-	Feishu []string `json:"feishu"`
-	Weixin []string `json:"weixin"`
+	QQ       []string `json:"qq"`
+	Feishu   []string `json:"feishu"`
+	Weixin   []string `json:"weixin"`
+	Dingtalk []string `json:"dingtalk"`
 }
 
 type BotPairingView struct {
@@ -259,6 +275,19 @@ type WeixinBotView struct {
 	APIBase   string `json:"apiBase"`
 }
 
+type DingtalkBotView struct {
+	Enabled          bool          `json:"enabled"`
+	ClientID         string        `json:"clientId"`
+	ClientSecretEnv  string        `json:"clientSecretEnv"`
+	SecretSet        bool          `json:"secretSet"`
+	BotName          string        `json:"botName"`
+	RequireMention   bool          `json:"requireMention"`
+	Model            string        `json:"model"`
+	ToolApprovalMode string        `json:"toolApprovalMode"`
+	WorkspaceRoot    string        `json:"workspaceRoot"`
+	Access           BotAccessView `json:"access"`
+}
+
 type BotSettingsView struct {
 	Enabled            bool                `json:"enabled"`
 	Model              string              `json:"model"`
@@ -277,6 +306,7 @@ type BotSettingsView struct {
 	QQ                 QQBotView           `json:"qq"`
 	Feishu             FeishuBotView       `json:"feishu"`
 	Weixin             WeixinBotView       `json:"weixin"`
+	Dingtalk           DingtalkBotView     `json:"dingtalk"`
 	Connections        []BotConnectionView `json:"connections"`
 }
 
@@ -284,6 +314,7 @@ type BotSettingsView struct {
 type SettingsView struct {
 	DefaultModel                 string               `json:"defaultModel"`
 	PlannerModel                 string               `json:"plannerModel"`
+	VisionModel                  string               `json:"visionModel"`
 	SubagentModel                string               `json:"subagentModel"`
 	SubagentEffort               string               `json:"subagentEffort"`
 	AutoPlan                     string               `json:"autoPlan"`
@@ -738,33 +769,43 @@ func providerPresetViewsForRootWithResolver(cfg *config.Config, root string, res
 		if keyEnv != "" {
 			key = resolver.ResolveGlobalFirst(keyEnv)
 		}
-		status, statusNames := classifyProviderPresetStatus(cfg, preset)
+		status, statusNames, missingNames := classifyProviderPresetStatus(cfg, preset)
 		added := status == providerPresetStatusInstalled || status == providerPresetStatusInstalledModified || status == providerPresetStatusNameConflict
 		out = append(out, ProviderPresetView{
-			ID:                  preset.ID,
-			Label:               preset.Label,
-			Description:         preset.Description,
-			KeyEnv:              keyEnv,
-			ProviderNames:       nonNil(names),
-			Models:              nonNil(models),
-			Added:               added,
-			Status:              status,
-			StatusProviderNames: nonNil(statusNames),
-			KeySet:              key.Set,
-			RequiresKey:         requiresKey,
-			Configured:          !requiresKey || key.Set,
-			KeySource:           key.Source.Label,
-			KeySourcePath:       key.Source.Path,
+			ID:                   preset.ID,
+			Label:                preset.Label,
+			Description:          preset.Description,
+			KeyEnv:               keyEnv,
+			Recommended:          preset.Recommended,
+			BillingMode:          preset.BillingMode,
+			DisplayGroup:         preset.DisplayGroup,
+			DisplaySection:       preset.DisplaySection,
+			DisplayTier:          preset.DisplayTier,
+			RouteKind:            preset.RouteKind,
+			Optional:             preset.Optional,
+			DisplayOrder:         preset.DisplayOrder,
+			ProviderNames:        nonNil(names),
+			Models:               nonNil(models),
+			Added:                added,
+			Status:               status,
+			StatusProviderNames:  nonNil(statusNames),
+			MissingProviderNames: nonNil(missingNames),
+			KeySet:               key.Set,
+			RequiresKey:          requiresKey,
+			Configured:           !requiresKey || key.Set,
+			KeySource:            key.Source.Label,
+			KeySourcePath:        key.Source.Path,
 		})
 	}
 	return out
 }
 
-func classifyProviderPresetStatus(cfg *config.Config, preset config.ProviderPreset) (string, []string) {
+func classifyProviderPresetStatus(cfg *config.Config, preset config.ProviderPreset) (string, []string, []string) {
 	if cfg == nil {
-		return providerPresetStatusAvailable, nil
+		return providerPresetStatusAvailable, nil, nil
 	}
 	installed := make([]string, 0)
+	missing := make([]string, 0)
 	modified := make([]string, 0)
 	conflicts := make([]string, 0)
 	similar := make([]string, 0)
@@ -776,24 +817,28 @@ func classifyProviderPresetStatus(cfg *config.Config, preset config.ProviderPres
 		}
 		existing, ok := cfg.Provider(name)
 		if !ok {
+			missing = append(missing, name)
 			continue
 		}
-		if providerEntryMatchesPreset(*existing, entry, presetID) {
+		if providerEntryCoreMatches(*existing, entry) {
 			installed = append(installed, name)
-		} else if providerEntryUsesPresetID(*existing, presetID) {
+		} else if providerEntryBelongsToPreset(*existing, preset, entry) {
 			modified = append(modified, name)
 		} else {
 			conflicts = append(conflicts, name)
 		}
 	}
 	if len(conflicts) > 0 {
-		return providerPresetStatusNameConflict, uniqueNonEmptyStrings(conflicts)
+		return providerPresetStatusNameConflict, uniqueNonEmptyStrings(conflicts), uniqueNonEmptyStrings(missing)
 	}
 	if len(modified) > 0 {
-		return providerPresetStatusInstalledModified, uniqueNonEmptyStrings(modified)
+		return providerPresetStatusInstalledModified, uniqueNonEmptyStrings(modified), uniqueNonEmptyStrings(missing)
+	}
+	if len(installed) > 0 && len(missing) > 0 {
+		return providerPresetStatusPartial, uniqueNonEmptyStrings(installed), uniqueNonEmptyStrings(missing)
 	}
 	if len(installed) > 0 {
-		return providerPresetStatusInstalled, uniqueNonEmptyStrings(installed)
+		return providerPresetStatusInstalled, uniqueNonEmptyStrings(installed), nil
 	}
 	for i := range cfg.Providers {
 		existing := cfg.Providers[i]
@@ -812,19 +857,9 @@ func classifyProviderPresetStatus(cfg *config.Config, preset config.ProviderPres
 		}
 	}
 	if len(similar) > 0 {
-		return providerPresetStatusSimilarExisting, uniqueNonEmptyStrings(similar)
+		return providerPresetStatusSimilarExisting, uniqueNonEmptyStrings(similar), nil
 	}
-	return providerPresetStatusAvailable, nil
-}
-
-func providerEntryMatchesPreset(existing, preset config.ProviderEntry, presetID string) bool {
-	if strings.TrimSpace(existing.PresetID) != "" {
-		if providerEntryUsesPresetID(existing, presetID) {
-			return providerEntryCoreMatches(existing, preset)
-		}
-		return false
-	}
-	return providerEntryCoreMatches(existing, preset)
+	return providerPresetStatusAvailable, nil, nil
 }
 
 func providerEntrySimilarToPreset(existing, preset config.ProviderEntry, presetID string) bool {
@@ -837,6 +872,17 @@ func providerEntrySimilarToPreset(existing, preset config.ProviderEntry, presetI
 func providerEntryUsesPresetID(existing config.ProviderEntry, presetID string) bool {
 	presetID = strings.TrimSpace(presetID)
 	return presetID != "" && strings.TrimSpace(existing.PresetID) == presetID
+}
+
+func providerEntryBelongsToPreset(existing config.ProviderEntry, preset config.ProviderPreset, entry config.ProviderEntry) bool {
+	if providerEntryUsesPresetID(existing, preset.ID) {
+		return true
+	}
+	// The recommended OpenCode Go bundle was introduced after the individual
+	// route presets. Treat a modified legacy route as part of the bundle so the
+	// one-step installer can preserve it and add only the missing routes.
+	return strings.TrimSpace(preset.ID) == "opencode-go-recommended" &&
+		strings.TrimSpace(existing.PresetID) == strings.TrimSpace(entry.Name)
 }
 
 func providerEntryCoreMatches(existing, preset config.ProviderEntry) bool {
@@ -968,6 +1014,7 @@ func (a *App) Settings() SettingsView {
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
+		VisionModel:       cfg.Agent.VisionModel,
 		SubagentModel:     cfg.Agent.SubagentModel,
 		SubagentEffort:    cfg.Agent.SubagentEffort,
 		AutoPlan:          "off", // deprecated JSON compatibility for older frontends
@@ -1086,9 +1133,10 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 		QueueDrop:          b.QueueDrop,
 		IgnoreSelfMessages: b.IgnoreSelfMessages,
 		SelfUserIDs: BotSelfUserIDsView{
-			QQ:     nonNil(b.SelfUserIDs.QQ),
-			Feishu: nonNil(b.SelfUserIDs.Feishu),
-			Weixin: nonNil(b.SelfUserIDs.Weixin),
+			QQ:       nonNil(b.SelfUserIDs.QQ),
+			Feishu:   nonNil(b.SelfUserIDs.Feishu),
+			Weixin:   nonNil(b.SelfUserIDs.Weixin),
+			Dingtalk: nonNil(b.SelfUserIDs.Dingtalk),
 		},
 		Control: BotControlView{
 			Enabled:  b.Control.Enabled,
@@ -1102,20 +1150,24 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 		},
 		Routes: botRouteViews(b.Routes),
 		Allowlist: BotAllowlistView{
-			Enabled:         b.Allowlist.Enabled,
-			AllowAll:        b.Allowlist.AllowAll,
-			QQUsers:         nonNil(b.Allowlist.QQUsers),
-			FeishuUsers:     nonNil(b.Allowlist.FeishuUsers),
-			WeixinUsers:     nonNil(b.Allowlist.WeixinUsers),
-			QQApprovers:     nonNil(b.Allowlist.QQApprovers),
-			FeishuApprovers: nonNil(b.Allowlist.FeishuApprovers),
-			WeixinApprovers: nonNil(b.Allowlist.WeixinApprovers),
-			QQAdmins:        nonNil(b.Allowlist.QQAdmins),
-			FeishuAdmins:    nonNil(b.Allowlist.FeishuAdmins),
-			WeixinAdmins:    nonNil(b.Allowlist.WeixinAdmins),
-			QQGroups:        nonNil(b.Allowlist.QQGroups),
-			FeishuGroups:    nonNil(b.Allowlist.FeishuGroups),
-			WeixinGroups:    nonNil(b.Allowlist.WeixinGroups),
+			Enabled:           b.Allowlist.Enabled,
+			AllowAll:          b.Allowlist.AllowAll,
+			QQUsers:           nonNil(b.Allowlist.QQUsers),
+			FeishuUsers:       nonNil(b.Allowlist.FeishuUsers),
+			WeixinUsers:       nonNil(b.Allowlist.WeixinUsers),
+			QQApprovers:       nonNil(b.Allowlist.QQApprovers),
+			FeishuApprovers:   nonNil(b.Allowlist.FeishuApprovers),
+			WeixinApprovers:   nonNil(b.Allowlist.WeixinApprovers),
+			QQAdmins:          nonNil(b.Allowlist.QQAdmins),
+			FeishuAdmins:      nonNil(b.Allowlist.FeishuAdmins),
+			WeixinAdmins:      nonNil(b.Allowlist.WeixinAdmins),
+			QQGroups:          nonNil(b.Allowlist.QQGroups),
+			FeishuGroups:      nonNil(b.Allowlist.FeishuGroups),
+			WeixinGroups:      nonNil(b.Allowlist.WeixinGroups),
+			DingtalkUsers:     nonNil(b.Allowlist.DingtalkUsers),
+			DingtalkApprovers: nonNil(b.Allowlist.DingtalkApprovers),
+			DingtalkAdmins:    nonNil(b.Allowlist.DingtalkAdmins),
+			DingtalkGroups:    nonNil(b.Allowlist.DingtalkGroups),
 		},
 		QQ: QQBotView{
 			Enabled:          b.QQ.Enabled,
@@ -1145,6 +1197,18 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 			TokenEnv:  b.Weixin.TokenEnv,
 			TokenSet:  strings.TrimSpace(b.Weixin.TokenEnv) != "" && os.Getenv(b.Weixin.TokenEnv) != "",
 			APIBase:   b.Weixin.APIBase,
+		},
+		Dingtalk: DingtalkBotView{
+			Enabled:          b.Dingtalk.Enabled,
+			ClientID:         b.Dingtalk.ClientID,
+			ClientSecretEnv:  b.Dingtalk.SecretEnv,
+			SecretSet:        (strings.TrimSpace(b.Dingtalk.SecretEnv) != "" && os.Getenv(b.Dingtalk.SecretEnv) != "") || strings.TrimSpace(b.Dingtalk.ClientSecret) != "",
+			BotName:          b.Dingtalk.BotName,
+			RequireMention:   b.Dingtalk.RequireMention,
+			Model:            strings.TrimSpace(b.Dingtalk.Model),
+			ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.Dingtalk.ToolApprovalMode),
+			WorkspaceRoot:    strings.TrimSpace(b.Dingtalk.WorkspaceRoot),
+			Access:           botAccessViewFromConfig(b.Dingtalk.Access),
 		},
 		Connections: botConnectionViews(b.Connections),
 	}
@@ -1327,11 +1391,23 @@ func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.C
 	}
 	if err := a.rebuildSetting(setting); err != nil {
 		if warning, ok := a.deferredRebuildWarning(setting, err); ok {
+			a.refreshActiveTabMetaExtras()
 			return warning, nil
 		}
 		return "", err
 	}
+	a.refreshActiveTabMetaExtras()
 	return "", nil
+}
+
+// refreshActiveTabMetaExtras invalidates the cached model capability snapshot
+// after a settings rebuild. In particular, changing Agent.VisionModel should
+// immediately suppress the text-only image warning in the composer instead of
+// waiting for the normal metadata cache TTL.
+func (a *App) refreshActiveTabMetaExtras() {
+	if tab := a.activeTab(); tab != nil {
+		a.scheduleTabMetaExtrasRefresh(tab.ID)
+	}
 }
 
 // applyGlobalProviderConfigChange persists a provider-wide setting and refreshes
@@ -1653,14 +1729,14 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 		(strings.TrimSpace(bot.Control.Addr) != "" && bot.Control.Addr != defaults.Control.Addr) ||
 		(strings.TrimSpace(bot.Control.TokenEnv) != "" && bot.Control.TokenEnv != defaults.Control.TokenEnv) ||
 		len(bot.Routes) > 0 ||
-		len(bot.SelfUserIDs.QQ)+len(bot.SelfUserIDs.Feishu)+len(bot.SelfUserIDs.Weixin) > 0 {
+		len(bot.SelfUserIDs.QQ)+len(bot.SelfUserIDs.Feishu)+len(bot.SelfUserIDs.Weixin)+len(bot.SelfUserIDs.Dingtalk) > 0 {
 		return true
 	}
 	if bot.Allowlist.AllowAll ||
-		len(bot.Allowlist.QQUsers)+len(bot.Allowlist.FeishuUsers)+len(bot.Allowlist.WeixinUsers) > 0 ||
-		len(bot.Allowlist.QQApprovers)+len(bot.Allowlist.FeishuApprovers)+len(bot.Allowlist.WeixinApprovers) > 0 ||
-		len(bot.Allowlist.QQAdmins)+len(bot.Allowlist.FeishuAdmins)+len(bot.Allowlist.WeixinAdmins) > 0 ||
-		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
+		len(bot.Allowlist.QQUsers)+len(bot.Allowlist.FeishuUsers)+len(bot.Allowlist.WeixinUsers)+len(bot.Allowlist.DingtalkUsers) > 0 ||
+		len(bot.Allowlist.QQApprovers)+len(bot.Allowlist.FeishuApprovers)+len(bot.Allowlist.WeixinApprovers)+len(bot.Allowlist.DingtalkApprovers) > 0 ||
+		len(bot.Allowlist.QQAdmins)+len(bot.Allowlist.FeishuAdmins)+len(bot.Allowlist.WeixinAdmins)+len(bot.Allowlist.DingtalkAdmins) > 0 ||
+		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups)+len(bot.Allowlist.DingtalkGroups) > 0 {
 		return true
 	}
 	if bot.QQ.Enabled ||
@@ -1687,6 +1763,15 @@ func desktopBotConfigConfigured(bot config.BotConfig) bool {
 		bot.Weixin.AccountID != defaults.Weixin.AccountID ||
 		bot.Weixin.TokenEnv != defaults.Weixin.TokenEnv ||
 		bot.Weixin.APIBase != defaults.Weixin.APIBase {
+		return true
+	}
+	if bot.Dingtalk.Enabled ||
+		strings.TrimSpace(bot.Dingtalk.ClientID) != "" ||
+		strings.TrimSpace(bot.Dingtalk.ClientSecret) != "" ||
+		strings.TrimSpace(bot.Dingtalk.ClientIDEnv) != "" ||
+		strings.TrimSpace(bot.Dingtalk.SecretEnv) != "" ||
+		strings.TrimSpace(bot.Dingtalk.BotName) != "" ||
+		bot.Dingtalk.RequireMention != defaults.Dingtalk.RequireMention {
 		return true
 	}
 	return false
@@ -2086,9 +2171,10 @@ func (a *App) SetDefaultModel(ref string) error {
 		if err != nil {
 			return err
 		}
-		c.DefaultModel = resolved
+		ref = resolved
+		c.DefaultModel = ref
 		a.mu.Lock()
-		tab.model = resolved
+		tab.model = ref
 		a.mu.Unlock()
 		return nil
 	}); err != nil {
@@ -2097,7 +2183,7 @@ func (a *App) SetDefaultModel(ref string) error {
 		a.mu.Unlock()
 		return err
 	}
-	return nil
+	return a.persistTabModelIfCurrent(tab, ref)
 }
 
 // SetPlannerModel sets (or, with "", clears) the two-model planner.
@@ -2111,6 +2197,23 @@ func (a *App) SetPlannerModel(ref string) error {
 			ref = resolved
 		}
 		c.Agent.PlannerModel = ref
+		return nil
+	})
+}
+
+// SetVisionModel sets (or clears) the optional image-understanding fallback.
+func (a *App) SetVisionModel(ref string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || strings.EqualFold(ref, "auto") {
+			c.Agent.VisionModel = strings.ToLower(ref)
+			return nil
+		}
+		resolved, err := selectableDesktopVisionModelRef(c, ref)
+		if err != nil {
+			return err
+		}
+		c.Agent.VisionModel = resolved
 		return nil
 	})
 }
@@ -2141,6 +2244,23 @@ func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 	}
 	if !entry.Configured() {
 		return "", fmt.Errorf("model %q is not available because provider %q has no key", ref, entry.Name)
+	}
+	return entry.Name + "/" + entry.Model, nil
+}
+
+func selectableDesktopVisionModelRef(c *config.Config, ref string) (string, error) {
+	entry, ok := c.ResolveModel(strings.TrimSpace(ref))
+	if !ok {
+		return "", fmt.Errorf("unknown vision model %q", ref)
+	}
+	if !modelProviderAccessAllowed(c.Desktop.ProviderAccess, entry.Name) {
+		return "", fmt.Errorf("vision model %q is not available because provider %q is not added", ref, entry.Name)
+	}
+	if !entry.Configured() {
+		return "", fmt.Errorf("vision model %q is not available because provider %q has no key", ref, entry.Name)
+	}
+	if !config.EffectiveVision(entry) {
+		return "", fmt.Errorf("model %q does not support image input", ref)
 	}
 	return entry.Name + "/" + entry.Model, nil
 }
@@ -2340,7 +2460,7 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			Prices:          config.DeepSeekV4PricesForCurrency("USD"),
 			ModelOverrides: map[string]config.ProviderModelOverride{
 				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
 			},
 		}}, "DEEPSEEK_API_KEY", nil
 	default:
@@ -2757,8 +2877,12 @@ func (a *App) AddProviderPresetAccess(id, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if existing := existingProviderNames(cfg, preset.Entries); len(existing) > 0 {
-		return "", providerPresetAlreadyAddedError(preset.ID, existing)
+	missing, _, conflicts := providerPresetInstallPlan(cfg, preset)
+	if len(conflicts) > 0 {
+		return "", providerPresetAlreadyAddedError(preset.ID, conflicts)
+	}
+	if len(missing) == 0 {
+		return "", nil
 	}
 	keyEnv := strings.TrimSpace(preset.KeyEnv)
 	if keyEnv == "" {
@@ -2769,31 +2893,48 @@ func (a *App) AddProviderPresetAccess(id, key string) (string, error) {
 		}
 	}
 	keyWarning := ""
-	if strings.TrimSpace(key) != "" && keyEnv != "" {
-		var err error
-		keyWarning, err = a.saveProviderCredential(keyEnv, key)
-		if err != nil {
-			return "", err
-		}
-	}
 	rebuildWarning, err := a.applyConfigChangeWithWarning("provider access", func(c *config.Config) error {
-		if existing := existingProviderNames(c, preset.Entries); len(existing) > 0 {
-			return providerPresetAlreadyAddedError(preset.ID, existing)
+		missing, _, conflicts := providerPresetInstallPlan(c, preset)
+		if len(conflicts) > 0 {
+			return providerPresetAlreadyAddedError(preset.ID, conflicts)
 		}
-		names := make([]string, 0, len(preset.Entries))
-		for _, e := range preset.Entries {
+		if len(missing) == 0 {
+			return nil
+		}
+		if strings.TrimSpace(key) != "" && keyEnv != "" {
+			var err error
+			keyWarning, err = a.saveProviderCredential(keyEnv, key)
+			if err != nil {
+				return err
+			}
+		}
+		names := make([]string, 0, len(missing))
+		for _, e := range missing {
 			if err := c.UpsertProvider(e); err != nil {
 				return err
 			}
 			names = append(names, e.Name)
 		}
 		addProviderAccess(c, names...)
+		if preset.ID == "opencode-go-recommended" && providerDefaultNeedsReplacement(c) {
+			if err := c.SetDefaultModel("opencode-go/glm-5.3"); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
 	return appendSettingsWarning(keyWarning, rebuildWarning), nil
+}
+
+func providerDefaultNeedsReplacement(c *config.Config) bool {
+	if c == nil || strings.TrimSpace(c.DefaultModel) == "" {
+		return true
+	}
+	entry, ok := c.ResolveModel(c.DefaultModel)
+	return !ok || !entry.Configured()
 }
 
 // ResetProviderPresetAccess intentionally overwrites same-name provider entries
@@ -2850,6 +2991,37 @@ func existingProviderNames(c *config.Config, entries []config.ProviderEntry) []s
 		}
 	}
 	return names
+}
+
+// providerPresetInstallPlan makes preset installation idempotent while still
+// refusing to overwrite a same-name provider that belongs to another route.
+// Existing entries that match the preset's provider identity are preserved;
+// modified entries are reported separately, and only missing entries are
+// returned for installation.
+func providerPresetInstallPlan(c *config.Config, preset config.ProviderPreset) (missing, modified []config.ProviderEntry, conflicts []string) {
+	if c == nil {
+		return append([]config.ProviderEntry(nil), preset.Entries...), nil, nil
+	}
+	for _, entry := range preset.Entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		existing, ok := c.Provider(name)
+		if !ok {
+			missing = append(missing, entry)
+			continue
+		}
+		if providerEntryCoreMatches(*existing, entry) {
+			continue
+		}
+		if providerEntryBelongsToPreset(*existing, preset, entry) {
+			modified = append(modified, entry)
+			continue
+		}
+		conflicts = append(conflicts, name)
+	}
+	return missing, modified, conflicts
 }
 
 func providerPresetAlreadyAddedError(id string, names []string) error {
@@ -3126,9 +3298,10 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 		c.Bot.QueueDrop = strings.TrimSpace(b.QueueDrop)
 		c.Bot.IgnoreSelfMessages = b.IgnoreSelfMessages
 		c.Bot.SelfUserIDs = config.BotSelfUserIDs{
-			QQ:     trimList(b.SelfUserIDs.QQ),
-			Feishu: trimList(b.SelfUserIDs.Feishu),
-			Weixin: trimList(b.SelfUserIDs.Weixin),
+			QQ:       trimList(b.SelfUserIDs.QQ),
+			Feishu:   trimList(b.SelfUserIDs.Feishu),
+			Weixin:   trimList(b.SelfUserIDs.Weixin),
+			Dingtalk: trimList(b.SelfUserIDs.Dingtalk),
 		}
 		c.Bot.Control = config.BotControlConfig{
 			Enabled:  b.Control.Enabled,
@@ -3142,20 +3315,24 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 		}
 		c.Bot.Routes = botRouteConfigs(b.Routes)
 		c.Bot.Allowlist = config.BotAllowlist{
-			Enabled:         b.Allowlist.Enabled,
-			AllowAll:        b.Allowlist.AllowAll,
-			QQUsers:         trimList(b.Allowlist.QQUsers),
-			FeishuUsers:     trimList(b.Allowlist.FeishuUsers),
-			WeixinUsers:     trimList(b.Allowlist.WeixinUsers),
-			QQApprovers:     trimList(b.Allowlist.QQApprovers),
-			FeishuApprovers: trimList(b.Allowlist.FeishuApprovers),
-			WeixinApprovers: trimList(b.Allowlist.WeixinApprovers),
-			QQAdmins:        trimList(b.Allowlist.QQAdmins),
-			FeishuAdmins:    trimList(b.Allowlist.FeishuAdmins),
-			WeixinAdmins:    trimList(b.Allowlist.WeixinAdmins),
-			QQGroups:        trimList(b.Allowlist.QQGroups),
-			FeishuGroups:    trimList(b.Allowlist.FeishuGroups),
-			WeixinGroups:    trimList(b.Allowlist.WeixinGroups),
+			Enabled:           b.Allowlist.Enabled,
+			AllowAll:          b.Allowlist.AllowAll,
+			QQUsers:           trimList(b.Allowlist.QQUsers),
+			FeishuUsers:       trimList(b.Allowlist.FeishuUsers),
+			WeixinUsers:       trimList(b.Allowlist.WeixinUsers),
+			QQApprovers:       trimList(b.Allowlist.QQApprovers),
+			FeishuApprovers:   trimList(b.Allowlist.FeishuApprovers),
+			WeixinApprovers:   trimList(b.Allowlist.WeixinApprovers),
+			QQAdmins:          trimList(b.Allowlist.QQAdmins),
+			FeishuAdmins:      trimList(b.Allowlist.FeishuAdmins),
+			WeixinAdmins:      trimList(b.Allowlist.WeixinAdmins),
+			QQGroups:          trimList(b.Allowlist.QQGroups),
+			FeishuGroups:      trimList(b.Allowlist.FeishuGroups),
+			WeixinGroups:      trimList(b.Allowlist.WeixinGroups),
+			DingtalkUsers:     trimList(b.Allowlist.DingtalkUsers),
+			DingtalkApprovers: trimList(b.Allowlist.DingtalkApprovers),
+			DingtalkAdmins:    trimList(b.Allowlist.DingtalkAdmins),
+			DingtalkGroups:    trimList(b.Allowlist.DingtalkGroups),
 		}
 		c.Bot.QQ = config.QQBotConfig{
 			Enabled:          b.QQ.Enabled,
@@ -3184,6 +3361,7 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			TokenEnv:  strings.TrimSpace(b.Weixin.TokenEnv),
 			APIBase:   strings.TrimRight(strings.TrimSpace(b.Weixin.APIBase), "/"),
 		}
+		c.Bot.Dingtalk = dingtalkConfigFromView(b.Dingtalk, c.Bot.Dingtalk)
 		c.Bot.Connections = botConnectionConfigs(b.Connections)
 		return nil
 	})
@@ -3220,6 +3398,25 @@ func (a *App) SetBotConnectionToolApprovalMode(connID, mode string) error {
 	}
 	if a.botRuntime != nil {
 		a.botRuntime.updateConnectionToolApprovalMode(runtimeConnID, mode)
+	}
+	return nil
+}
+
+// SetBotDingtalkToolApprovalMode 更新 legacy [bot.dingtalk] 的工具审批模式，
+// 不重启 bot runtime：写入配置并热更新运行中 gateway 的
+// ConnectionChannels["dingtalk"]（由 desktopBotChannelsWithLegacyDingtalk 注入），
+// 已建会话同步生效。用于设置面板的权限选择（避免全量 SetBotSettings 的重启跳变）。
+func (a *App) SetBotDingtalkToolApprovalMode(mode string) error {
+	mode = normalizeBotConnectionToolApprovalMode(mode)
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		c.Bot.Dingtalk.ToolApprovalMode = mode
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if a.botRuntime != nil {
+		a.botRuntime.updateConnectionToolApprovalMode(string(bot.PlatformDingtalk), mode)
 	}
 	return nil
 }

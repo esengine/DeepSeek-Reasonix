@@ -119,7 +119,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     tabId: "single-surface-tab",
     sessionKey: "session:project:/repo:topic-a:session-a",
     onSend: () => {},
-    onCancel: () => undefined,
+    onCancel: async () => ({ discardedItemIds: [] }),
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},
@@ -271,9 +271,42 @@ console.log("\ncomposer image capability");
   });
 
   eq(sent.length, 1, "switching to a text-only model still sends the image ref for tool use");
-  ok(toastText().includes("will not receive images directly"), "text-only send warns about direct image input without blocking");
+  ok(toastText().includes("image-understanding model") || toastText().includes("图片理解模型"), "text-only send points to the image-understanding setting");
   eq(document.querySelector(".composer__prompt") === null, true, "image-input warning does not render inside the composer layout");
   ok(sent[0]?.submit?.includes("@.reasonix/attachments/mock.png") === true, "submitted text retains the local image attachment ref");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const sent: string[] = [];
+  installBridgeApp({
+    SavePastedImage: async () => ".reasonix/attachments/mock.png",
+    AttachmentDataURL: async () => "data:image/png;base64,iVBORw0KGgo=",
+  });
+  const { root } = await renderComposer({
+    imageInputEnabled: false,
+    imageUnderstandingEnabled: true,
+    onSend: (display) => sent.push(display),
+  });
+  const file = new File(["img"], "photo.png", { type: "image/png", lastModified: 1 });
+
+  await act(async () => {
+    textarea().dispatchEvent(imagePasteEvent(file));
+    await flushTimers();
+    await flushTimers();
+  });
+  await waitFor(() => contextItemCount() === 1);
+  await act(async () => {
+    sendButton().click();
+    await flushTimers();
+  });
+  eq(sent.length, 1, "configured image-understanding fallback still sends the image turn");
+  eq(toastText(), "", "configured image-understanding fallback suppresses the obsolete warning");
 
   await act(async () => {
     root.unmount();

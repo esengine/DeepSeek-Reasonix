@@ -59,6 +59,20 @@ re-check existence, SHA-256, and mode before publish. A mismatch returns
 ## Worktree fallback
 
 Delivery worktrees stay optional. Non-isolated directories use the workspace
-lease (`filelock`). Conflict cards can recommend an existing worktree. Git is
-never required; Windows without Git still serializes writers through the
-workspace lease.
+lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,
+shared hierarchy stripes through the concrete path, and an exclusive file
+stripe for the duration of that tool. Whole-workspace writers take their exact
+root and hierarchy stripe exclusively. Parent workspaces and directly opened
+nested repositories therefore intersect, while two sessions can still write
+different files (including in the same repo) at once. `bash`/MCP mutations take
+the whole-workspace locks only for that command. Any tool call does the same
+when a configured tool hook may write undeclared paths. File and hierarchy
+identities map into bounded stripe sets; collisions may serialize unrelated
+work but cannot weaken protection. Read-only bash does not take a write lease.
+On macOS, folded domains coordinate case aliases while exact-case root locks
+remain compatible with older binaries. An older process still recognizes only
+the path spelling it opened; cross-spelling coexistence requires both processes
+to use the folded protocol.
+Conflict cards name the file or workspace being written. Git is never required.
+A finished conversation does not keep the write lease; use a worktree when you
+need a long-lived isolated tree.

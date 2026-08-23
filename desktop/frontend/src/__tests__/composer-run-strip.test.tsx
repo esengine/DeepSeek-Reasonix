@@ -196,9 +196,8 @@ console.log("\ncomposer run strip");
   dom.window.close();
 }
 
-// Execution modes are gone. Composer keeps collaboration (direct/plan/goal)
-// and tool-approval controls; it must not render a Light/Balanced/Delivery
-// execution-setting trigger or menu.
+// Execution modes are gone. Composer keeps collaboration, tool approval, and
+// the independent quality floor, but no execution-setting trigger or menu.
 {
   const dom = installDom();
   const { root } = await renderComposer();
@@ -207,7 +206,6 @@ console.log("\ncomposer run strip");
   eq(document.querySelector(".composer-profile-menu"), null, "composer has no execution-setting menu");
   const chrome = document.body.textContent ?? "";
   eq(chrome.includes("Execution setting"), false, "composer chrome does not mention execution setting");
-  eq(chrome.includes("Delivery"), false, "composer chrome does not mention Delivery mode");
 
   const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
   if (!intentTrigger) throw new Error("task intent trigger did not render");
@@ -514,8 +512,8 @@ console.log("\ncomposer run strip");
 
 // Resize consistency: --composer-height always carries the logical height in
 // every writer (React render, live drag, keyboard), with the run strip's
-// reservation isolated in a CSS calc — so dragging a resized composer during a
-// running turn cannot flash-shrink the card.
+// reservation isolated in a CSS calc. A manual height is the draft's minimum,
+// so content can grow above it without changing the saved resize baseline.
 {
   const stylesSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../styles.css"), "utf8");
   ok(
@@ -556,6 +554,48 @@ console.log("\ncomposer run strip");
   await rerender({ running: false, turnStartAt: undefined });
   eq(card.style.getPropertyValue("--composer-run-strip-reserved"), "0px", "idle card releases the strip reservation");
   eq(card.style.getPropertyValue("--composer-height"), "124px", "idle card keeps the user's logical height");
+
+  const textarea = document.querySelector(".composer__input") as HTMLTextAreaElement;
+  let measuredDraftHeight = 108;
+  Object.defineProperty(textarea, "scrollHeight", {
+    configurable: true,
+    get: () => measuredDraftHeight,
+  });
+  const updateDraft = async (value: string) => {
+    await act(async () => {
+      textarea.focus();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const paste = new window.Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, "clipboardData", {
+        configurable: true,
+        value: {
+          files: [],
+          items: [],
+          types: ["text/plain"],
+          getData: (kind: string) => (kind === "text" || kind === "text/plain" ? value : ""),
+        },
+      });
+      textarea.dispatchEvent(paste);
+      await flushTimers();
+    });
+  };
+
+  await updateDraft("a longer pasted draft");
+  eq(card.style.getPropertyValue("--composer-height"), "166px", "longer draft grows above the manual baseline");
+  eq(textarea.style.height, "108px", "content-derived input height reveals the longer draft");
+  eq(textarea.style.overflowY, "hidden", "draft stays scrollbar-free below the cap");
+
+  measuredDraftHeight = 22;
+  await updateDraft("short");
+  eq(card.style.getPropertyValue("--composer-height"), "124px", "shorter draft returns to the manual baseline");
+  eq(textarea.style.height, "66px", "manual baseline remains available to short drafts");
+
+  measuredDraftHeight = 420;
+  await updateDraft("an oversized pasted draft");
+  const viewportCap = Math.min(360, Math.floor(window.innerHeight * 0.4));
+  eq(card.style.getPropertyValue("--composer-height"), `${viewportCap}px`, "oversized draft stops at the viewport-aware cap");
+  eq(textarea.style.height, `${viewportCap - 58}px`, "oversized input uses the capped content viewport");
+  eq(textarea.style.overflowY, "auto", "oversized draft scrolls only after reaching the cap");
 
   await act(async () => {
     root.unmount();

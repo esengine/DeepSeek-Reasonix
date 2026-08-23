@@ -21,6 +21,7 @@ export function historySearchCards(
       args: search.query ? JSON.stringify({ query: search.query }) : "",
       readOnly: true,
       status: "done",
+      searchSources: (search.results ?? []).map((hit) => ({ title: hit.title, url: hit.url })),
       output: lines.join("\n"),
     });
   }
@@ -74,7 +75,18 @@ export function isBatchedReadOnlyTool(name: string, readOnly: boolean): boolean 
   return readOnly && name !== "todo_write" && name !== "web_search";
 }
 
-export function attachWebSearchOutput<T extends SearchState>(s: T, name: string, output?: string, err?: string): T {
+export function attachWebSearchOutput<T extends SearchState>(s: T, name: string, output?: string, err?: string, toolId?: string): T {
   if (name !== "web_search" || !output || err) return s;
-  return attachSearchSources(s, parseSearchSources(output));
+  const sources = parseSearchSources(output);
+  const withTool = toolId
+    ? {
+        ...s,
+        items: s.items.map((it) =>
+          it.kind === "tool" && it.id === toolId
+            ? { ...it, searchSources: mergeSearchSources(it.searchSources, sources) }
+            : it,
+        ),
+      }
+    : s;
+  return attachSearchSources(withTool, sources);
 }

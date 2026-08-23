@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
 import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, type Item } from "../lib/useController";
+import { historyPageRequestBudget, historyTurnsToLoad } from "../lib/historyPaging";
 import { shouldReconcileStaleTurn } from "../lib/useStaleTurnWatchdog";
 import { parseTodos } from "../lib/tools";
 import { resolveTodoPanelTodos } from "../lib/todoVisibility";
@@ -273,6 +274,12 @@ console.log("\nuse controller meta");
 }
 
 {
+  eq(historyTurnsToLoad(941, 1_000, 1), 500, "a distant question jump uses the bounded 500-turn history window");
+  eq(historyTurnsToLoad(441, 1_000, 1), 440, "the follow-up jump page reaches the requested turn without overfetching");
+  eq(historyTurnsToLoad(2, 61), 60, "ordinary automatic history loading keeps the standard page size");
+  eq(JSON.stringify(historyPageRequestBudget(941, 1_000, 1)), JSON.stringify({ turns: 500, entries: 1000 }), "a distant jump uses the backend's bounded entry capacity");
+  eq(JSON.stringify(historyPageRequestBudget(2, 61)), JSON.stringify({ turns: 60 }), "ordinary history loading keeps the default entry and byte budgets");
+
   let s = reducer(initialState, {
     type: "event",
     e: { kind: "notice", level: "warn", code: "session_recovery_depth_cap", text: "reworded recovery maintenance" },
@@ -364,6 +371,7 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
   eq(sameMeta(meta({ imageInputEnabled: true }), meta({ imageInputEnabled: false })), false, "image input capability changes invalidate meta equality");
+  eq(sameMeta(meta({ visionFallbackEnabled: true }), meta({ visionFallbackEnabled: false })), false, "image-understanding fallback changes invalidate meta equality");
   eq(
     sameMeta(
       meta({ canonicalTodos: [{ content: "Ship", status: "in_progress" }] }),
@@ -485,6 +493,38 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const optimistic = reducer(initialState, { type: "user", text: "hello", seq: 0, submissionId: "watchdog-submit" });
   eq(optimistic.turnActive, false, "optimistic send starts before turn_started arrives");
   eq(shouldReconcileStaleTurn(optimistic, 0, optimistic.turnStartAt + 30_000), true, "optimistic send reconciles even when turn_started is missed");
+}
+
+{
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "user", text: "keep timing", seq: 0, submissionId: "timing-submit" });
+    now = 8_000;
+    s = reducer(s, {
+      type: "event",
+      e: { kind: "turn_started", submissionId: "timing-submit", turnStartedAt: 1_200 },
+    });
+    eq(s.turnStartAt, 1_200, "a delayed turn_started event keeps the backend turn start instead of restarting the timer");
+
+    now = 12_000;
+    s = reducer(initialState, {
+      type: "backend_status",
+      running: true,
+      cancellable: true,
+      turnStartedAt: 1_200,
+    });
+    eq(s.turnStartAt, 1_200, "a rehydrated running tab restores the backend turn start instead of restarting the timer");
+
+    now = 13_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    now = 20_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+    eq(s.turnStartAt, 20_000, "a legacy turn_started event begins a new remote turn instead of reusing completed-turn timing");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 {
@@ -688,12 +728,17 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
     },
   });
   eq(s.items.some((item) => item.kind === "user" && item.text === "recent prompt"), true, "history page replace renders the latest window");
-  eq(s.historyStartTurn, 60, "history page stores the older cursor");
+  eq(s.historyStartTurn, 61, "legacy history page converts its zero-based cursor to the first absolute turn");
   eq(s.historyHasOlder, true, "history page records older availability");
   const recentUser = s.items.find((item) => item.kind === "user" && item.text === "recent prompt");
   eq(recentUser?.kind === "user" && recentUser.checkpointTurn, 1060, "paged history hydrates its authoritative checkpoint turn");
+  eq(recentUser?.kind === "user" && recentUser.historyTurn, 61, "legacy history page preserves the absolute question turn");
   s = reducer(s, { type: "history_older_start" });
   eq(s.historyOlderLoading, true, "older history request marks loading");
+  s = reducer(s, { type: "history_older_error", error: "read failed" });
+  eq(s.historyOlderError, "read failed", "older history failures remain available to the retry UI");
+  s = reducer(s, { type: "history_older_start" });
+  eq(s.historyOlderError, undefined, "retrying older history clears the previous failure");
   s = reducer(s, {
     type: "history_page",
     mode: "prepend",
@@ -711,6 +756,8 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const users = s.items.filter((item) => item.kind === "user");
   eq(users[0]?.kind === "user" && users[0].text, "older prompt", "older history prepends before the current window");
   eq(users[1]?.kind === "user" && users[1].text, "recent prompt", "older history keeps the current window");
+  eq(users[0]?.kind === "user" && users[0].historyTurn, 1, "legacy prepend starts at absolute turn one");
+  eq(users[1]?.kind === "user" && users[1].historyTurn, 61, "legacy prepend keeps the recent page's absolute turn");
   eq(s.historyHasOlder, false, "older history clears hasOlder when all pages are loaded");
   eq(s.historyOlderLoading, false, "older history clears loading");
 }

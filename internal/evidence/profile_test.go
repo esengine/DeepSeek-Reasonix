@@ -2,6 +2,8 @@ package evidence
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -59,6 +61,17 @@ func TestClassifyEffectFileAndMCP(t *testing.T) {
 	opaque := ClassifyEffect(EffectInput{ToolName: "mcp__srv__write", Args: json.RawMessage(`{}`)})
 	if opaque.Known || !opaque.OpaqueWriter() {
 		t.Fatalf("unknown MCP writer must fail closed: %+v", opaque)
+	}
+}
+
+func TestClassifyWriteScopeScratchWriteFile(t *testing.T) {
+	workspace := t.TempDir()
+	scratchPath := filepath.Join(os.TempDir(), "reasonix-scope-probe.py")
+	if got := ClassifyWriteScope(scratchPath, workspace, nil); got != WriteScopeScratch {
+		t.Fatalf("write_file /tmp = %s, want scratch", got)
+	}
+	if got := ClassifyWriteScope("internal/agent/agent.go", workspace, nil); got != WriteScopeWorkspace {
+		t.Fatalf("workspace edit = %s, want workspace", got)
 	}
 }
 

@@ -256,6 +256,7 @@ func hasLegacyProviderWrapper(content string) bool {
 const (
 	HostRecoveryGuidanceToolFailedPrefix = "A tool failed. Use read-only diagnosis as needed"
 	HostRecoveryGuidanceTransientPrefix  = "The tool timed out or hit a transient execution limit."
+	ReadinessContinuationPrefix          = "This turn ended with work still outstanding:"
 )
 
 // SyntheticUserPrefixes lists the openings of host-injected user-role messages
@@ -269,6 +270,7 @@ var SyntheticUserPrefixes = []string{
 	"<reasoning-language>",
 	"Plan approved — plan mode is off",
 	"Host final-answer readiness check failed",
+	ReadinessContinuationPrefix,
 	"You are already in the executor phase",
 	"The previous assistant response was interrupted while a tool call",
 	"The previous assistant response was interrupted during streaming",

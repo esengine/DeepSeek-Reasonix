@@ -6,8 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/completion"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
@@ -69,6 +73,31 @@ func TestCompletionSummaryEmittedOnMutationContract(t *testing.T) {
 	}
 	if len(sink.summaries) != 1 || !slices.Contains(sink.summaries[0].GapKinds, "unreviewed_change") {
 		t.Fatalf("completion summaries = %+v, want host-reported unreviewed change", sink.summaries)
+	}
+}
+
+func TestCompletionSummaryFlagsFailedMutationCheck(t *testing.T) {
+	sink := &phaseSink{}
+	ledger := evidence.NewLedger()
+	failed := evidence.Receipt{
+		ToolName: "write_file",
+		Mutation: true,
+		Write:    true,
+		Paths:    []string{"a.go"},
+		Success:  false,
+	}
+	ledger.Record(failed)
+	c := taskcontract.Atomic("add a.go helper")
+	c.AbsorbReceipt(1, failed, "", false, false)
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{sink: sink},
+		turn: turnRuntime{constraints: runtimepolicy.Constraints{PolicyFloor: taskcontract.PolicyFloorNone}},
+	}
+	report := completion.Build(c, ledger)
+	a.emitCompletionSummary(c, report)
+	if len(sink.summaries) != 1 || !sink.summaries[0].Attention || sink.summaries[0].ChecksFailed != 1 {
+		t.Fatalf("summaries = %+v, want one attention summary with one failed check", sink.summaries)
 	}
 }
 

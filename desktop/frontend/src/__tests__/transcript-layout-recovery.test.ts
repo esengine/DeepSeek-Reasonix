@@ -29,7 +29,7 @@ const patched = reducer(
   { ...initialState, items: [preview] },
   { type: "history_items_patch", patches: { [preview.id]: resolved } },
 );
-check(patched.historyLayoutRevision === 1, "resolved history content invalidates the transcript layout");
+check(patched.historyLayoutRevision === 1, "resolved history content bumps the transcript content version");
 const ignored = reducer(
   patched,
   { type: "history_items_patch", patches: { missing: resolved } },
