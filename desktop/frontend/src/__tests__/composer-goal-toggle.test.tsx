@@ -284,39 +284,22 @@ console.log("\ncomposer goal toggle");
   eq(textarea.value, "/reviewer ship the release notes", "prefix insert preserves the draft as a subagent task");
   eq(calls.send.length, 0, "prefix insert does not send the subagent task");
 
-  const intentButton = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
-  if (!intentButton) throw new Error("composer intent button did not render");
-  eq(intentButton.textContent?.trim(), "Standard", "execution method trigger shows only the current method");
-  eq(intentButton.getAttribute("aria-label"), "Execution method · Standard", "execution method trigger keeps its full accessible name");
-  const intentTooltipTrigger = intentButton.closest(".tooltip-trigger");
-  if (!intentTooltipTrigger) throw new Error("composer intent tooltip trigger did not render");
+  const mainMenuButton = document.querySelector(".composer-menu-trigger") as HTMLButtonElement | null;
+  if (!mainMenuButton) throw new Error("composer main menu button did not render");
+  eq(document.querySelector(".composer-profile-trigger"), null, "execution method trigger is gone");
+
   await act(async () => {
-    intentTooltipTrigger.dispatchEvent(new Event("focusin", { bubbles: true }));
-    await flushTimers();
-  });
-  await waitFor("execution method tooltip", () => document.querySelector('[role="tooltip"]') !== null);
-  eq(document.querySelector('[role="tooltip"]')?.textContent, "Execution method · Standard: Analyze and act as you go", "execution method tooltip combines category, value, and summary");
-  await act(async () => {
-    intentTooltipTrigger.dispatchEvent(new Event("focusout", { bubbles: true }));
+    mainMenuButton.click();
     await flushTimers();
   });
 
-  await act(async () => {
-    intentButton.click();
-    await flushTimers();
-  });
-
-  const taskModeItems = document.querySelectorAll(".composer-intent-menu__item");
-  eq(taskModeItems.length, 3, "task method menu exposes three mutually exclusive choices");
-  eq(document.querySelectorAll(".composer-intent-switch").length, 0, "task method menu does not present independent switches");
-  const planButton = taskModeItems[1] as HTMLButtonElement | undefined;
+  const taskModeItems = document.querySelectorAll('.composer-main-menu [role="menuitemradio"]');
+  eq(taskModeItems.length, 2, "main menu exposes plan and goal as the only execution choices");
+  const planButton = taskModeItems[0] as HTMLButtonElement | undefined;
   if (!planButton) throw new Error("composer Plan menu item did not render");
   ok(planButton.textContent?.includes("tool use follows current permissions and sandbox settings") === true, "Plan menu explains that permissions and sandbox still govern tools");
   ok(planButton.textContent?.toLowerCase().includes("read-only") === false, "Plan menu does not present Plan as a read-only permission mode");
-  const askApprovalButton = document.querySelector(".composer-modebar__item--ask") as HTMLButtonElement | null;
-  if (!askApprovalButton) throw new Error("composer Ask approval button did not render");
-  ok(askApprovalButton.title.includes("Ask is not read-only"), "Ask tooltip distinguishes approval policy from read-only sandboxing");
-  const goalButton = taskModeItems[2] as HTMLButtonElement | undefined;
+  const goalButton = taskModeItems[1] as HTMLButtonElement | undefined;
   if (!goalButton) throw new Error("composer goal menu item did not render");
 
   await act(async () => {
@@ -327,6 +310,19 @@ console.log("\ncomposer goal toggle");
   eq(calls.send.length, 0, "enabling goal mode with a draft does not send");
   eq(calls.setCollaborationMode.join(","), "goal", "enabling goal mode switches only the collaboration axis");
   eq(textarea.value, "/reviewer ship the release notes", "enabling goal mode preserves the prefixed draft text");
+
+  const askApprovalButton = document.querySelector(".composer-approval-trigger") as HTMLButtonElement | null;
+  if (!askApprovalButton) throw new Error("composer Ask approval trigger did not render");
+  await act(async () => {
+    askApprovalButton.click();
+    await flushTimers();
+  });
+  const askMenuItem = document.querySelector('.composer-approval-popup__item[title*="Ask is not read-only"]') as HTMLButtonElement | null;
+  ok(askMenuItem !== null, "Ask tooltip distinguishes approval policy from read-only sandboxing");
+  await act(async () => {
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushTimers();
+  });
 
   await act(async () => {
     root.unmount();
@@ -701,16 +697,17 @@ console.log("\ncomposer goal toggle");
     goal: "finish the migration",
   });
 
-  const intentButton = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
-  if (!intentButton) throw new Error("active goal task method trigger did not render");
-  ok(intentButton.textContent?.includes("Goal") === true, "task method trigger exposes an active goal");
+  const mainMenuButton = document.querySelector(".composer-menu-trigger") as HTMLButtonElement | null;
+  if (!mainMenuButton) throw new Error("active goal main menu trigger did not render");
+  const goalPill = document.querySelector(".composer-goal-trigger") as HTMLButtonElement | null;
+  ok(goalPill !== null && goalPill.textContent?.includes("finish the migration") === true, "goal pill exposes an active goal");
 
   await act(async () => {
-    intentButton.click();
+    mainMenuButton.click();
     await flushTimers();
   });
 
-  const goalActions = Array.from(document.querySelectorAll(".composer-intent-menu__stop")) as HTMLButtonElement[];
+  const goalActions = Array.from(document.querySelectorAll(".composer-main-menu__goal-stop")) as HTMLButtonElement[];
   const stopGoal = goalActions.find((b) => b.textContent === "End goal");
   if (!stopGoal) throw new Error("explicit end-goal action did not render");
   ok(goalActions.some((b) => b.textContent === "Pause goal"), "running goal offers a pause action");
@@ -736,7 +733,7 @@ console.log("\ncomposer goal toggle");
     turnStartAt: Date.now(),
   });
 
-  const stopButton = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  const stopButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stopButton) throw new Error("composer stop button did not render");
 
   await act(async () => {
@@ -1067,6 +1064,7 @@ console.log("\ncomposer goal toggle");
     guidanceQueuePreviewItems: ["confirm the send lifecycle", "keep steer protocol unchanged", "add a hanging submit regression"],
   });
 
+  await waitFor("compact guidance preview", () => document.querySelectorAll(".composer-guidance-item").length === 2);
   let guidanceItems = Array.from(document.querySelectorAll(".composer-guidance-item"));
   eq(guidanceItems.length, 2, "running guidance preview shows a compact queue preview");
   ok(guidanceItems[0]?.textContent?.includes("confirm the send lifecycle") === true, "guidance preview shows the first seeded item");
@@ -1145,10 +1143,11 @@ console.log("\ncomposer goal toggle");
   if (!sendButton) throw new Error("running composer send button did not render");
 
   eq(textarea.placeholder, "Running — type guidance, Enter adds it to the queue", "running composer explains queued guidance input");
-  ok(sendButton.classList.contains("composer__btn--steer"), "running composer marks send button as steer");
-  ok(sendButton.disabled === true, "running steer button stays disabled without input");
+  ok(!sendButton.classList.contains("composer__btn--steer"), "running empty submit renders the stop variant, not steer");
+  ok(sendButton.disabled === false, "running stop variant stays clickable without input");
 
   await rerender({ insertRequest: { id: 4, text: "keep the files small", mode: "replace" } });
+  ok(sendButton.classList.contains("composer__btn--steer"), "running composer marks send button as steer once text is present");
   ok(sendButton.disabled === false, "running steer button enables after text input");
 
   await act(async () => {
@@ -1424,7 +1423,7 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
 
-  const stopButton = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  const stopButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stopButton) throw new Error("running composer stop button did not render");
   await act(async () => {
     stopButton.click();
@@ -2179,21 +2178,21 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
 
-  const contentTrigger = document.querySelector(".composer-content-trigger") as HTMLButtonElement | null;
-  if (!contentTrigger) throw new Error("content menu trigger did not render");
+  const contentTrigger = document.querySelector(".composer-menu-trigger") as HTMLButtonElement | null;
+  if (!contentTrigger) throw new Error("main menu trigger did not render");
   await act(async () => {
     contentTrigger.click();
     await flushTimers();
   });
-  ok(Boolean(document.querySelector(".composer-content-menu")), "plus trigger opens the add-content menu");
-  const initialContentItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item"));
-  eq(initialContentItems.length, 4, "add-content menu exposes four focused actions");
+  ok(Boolean(document.querySelector(".composer-main-menu")), "plus trigger opens the main menu");
+  const addSection = document.querySelector(".composer-main-menu .composer-access-menu__section") as HTMLElement | null;
+  const initialContentItems = Array.from((addSection ?? document).querySelectorAll<HTMLButtonElement>(".composer-main-menu__item")).slice(0, 4);
+  eq(initialContentItems.length, 4, "main menu exposes four focused add actions");
   const contentItemIcons = initialContentItems.map((item) => item.querySelector("svg")?.getAttribute("class") ?? "");
   ok(contentItemIcons[0]?.includes("lucide-file-plus"), "attachment action uses the file attachment icon");
   ok(contentItemIcons[1]?.includes("lucide-at-sign"), "workspace action uses the mention icon");
   ok(contentItemIcons[2]?.includes("lucide-hash"), "recent-session action uses the history reference icon");
   eq(initialContentItems[3]?.querySelector(".composer-content-menu__trigger-icon")?.textContent, "/", "command action uses the literal slash trigger icon");
-  ok(!document.querySelector(".composer-content-menu__divider"), "add-content actions remain one unified group without a divider");
   ok(initialContentItems.every((item) => !item.querySelector("kbd")), "add-content actions do not duplicate their trigger icons on the right");
 
   const attachmentButton = initialContentItems[0];
@@ -2214,10 +2213,11 @@ console.log("\ncomposer goal toggle");
     contentTrigger.click();
     await flushTimers();
   });
-  ok(!document.querySelector(".slashmenu"), "opening add-content closes the active suggestion panel");
-  ok(Boolean(document.querySelector(".composer-content-menu")), "add-content remains the only open composer surface");
+  ok(!document.querySelector(".slashmenu"), "opening main menu closes the active suggestion panel");
+  ok(Boolean(document.querySelector(".composer-main-menu")), "main menu remains the only open composer surface");
 
-  const sessionButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[2];
+  const sessionButton = (document.querySelector(".composer-main-menu .composer-access-menu__section") as HTMLElement | null)
+    ?.querySelectorAll<HTMLButtonElement>(".composer-main-menu__item")[2] ?? null;
   if (!sessionButton) throw new Error("recent-session action did not render");
   await act(async () => {
     sessionButton.click();
@@ -2225,7 +2225,7 @@ console.log("\ncomposer goal toggle");
   });
   await waitFor("direct recent-session picker", () => Boolean(document.querySelector(".slashmenu__search")));
   eq(textarea.value, "@ #", "recent-session action inserts # at the remembered caret");
-  ok(!document.querySelector(".composer-content-menu"), "recent-session picker replaces the add-content menu");
+  ok(!document.querySelector(".composer-main-menu"), "recent-session picker replaces the main menu");
   const sessionSearch = document.querySelector(".slashmenu__search") as HTMLInputElement | null;
   if (!sessionSearch) throw new Error("recent-session search did not render");
   await act(async () => {
@@ -2239,21 +2239,23 @@ console.log("\ncomposer goal toggle");
     contentTrigger.click();
     await flushTimers();
   });
-  const commandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  const commandButton = (document.querySelector(".composer-main-menu .composer-access-menu__section") as HTMLElement | null)
+    ?.querySelectorAll<HTMLButtonElement>(".composer-main-menu__item")[3] ?? null;
   if (!commandButton) throw new Error("command action did not render");
   await act(async () => {
     commandButton.click();
     await flushTimers();
   });
   eq(textarea.value, "/", "command action inserts / at the caret");
-  await waitFor("slash menu from add-content action", () => Boolean(document.querySelector(".slashmenu")));
+  await waitFor("slash menu from main-menu action", () => Boolean(document.querySelector(".slashmenu")));
 
   await replaceComposerDraft(rerender, 3003, "existing text");
   await act(async () => {
     contentTrigger.click();
     await flushTimers();
   });
-  const disabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  const disabledCommandButton = (document.querySelector(".composer-main-menu .composer-access-menu__section") as HTMLElement | null)
+    ?.querySelectorAll<HTMLButtonElement>(".composer-main-menu__item")[3] ?? null;
   if (!disabledCommandButton) throw new Error("command action did not render for non-empty input");
   ok(disabledCommandButton.disabled, "command action is disabled while the composer has text");
   await act(async () => {
@@ -2263,16 +2265,17 @@ console.log("\ncomposer goal toggle");
   eq(textarea.value, "existing text", "disabled command action does not insert / into existing text");
 
   await rerender({ running: true });
-  await waitFor("content menu closes when a run starts", () => !document.querySelector(".composer-content-menu"));
+  await waitFor("main menu closes when a run starts", () => !document.querySelector(".composer-main-menu"));
   await rerender({ running: false });
-  ok(!document.querySelector(".composer-content-menu"), "content menu stays closed after the run ends");
+  ok(!document.querySelector(".composer-main-menu"), "main menu stays closed after the run ends");
 
   await replaceComposerDraft(rerender, 3004, "");
   await act(async () => {
     contentTrigger.click();
     await flushTimers();
   });
-  const runningSessionButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[2];
+  const runningSessionButton = (document.querySelector(".composer-main-menu .composer-access-menu__section") as HTMLElement | null)
+    ?.querySelectorAll<HTMLButtonElement>(".composer-main-menu__item")[2] ?? null;
   if (!runningSessionButton) throw new Error("recent-session action did not render before running");
   await act(async () => {
     runningSessionButton.click();

@@ -24,7 +24,7 @@ function samePosition(a: PopoverPosition | null, b: PopoverPosition): boolean {
 function calculatePosition(
   anchor: DOMRect,
   menu: DOMRect,
-  align: "start" | "end",
+  align: "start" | "center" | "end",
   offset: number,
   placement: "auto" | "bottom",
 ): PopoverPosition {
@@ -37,7 +37,9 @@ function calculatePosition(
     : preferredTop >= EDGE_GAP
     ? preferredTop
     : Math.min(fallbackTop, Math.max(EDGE_GAP, viewportHeight - menu.height - EDGE_GAP));
-  const rawLeft = align === "end" ? anchor.right - menu.width : anchor.left;
+  const rawLeft = align === "end" ? anchor.right - menu.width
+    : align === "center" ? anchor.left + (anchor.width - menu.width) / 2
+    : anchor.left;
   const left = clamp(rawLeft, EDGE_GAP, Math.max(EDGE_GAP, viewportWidth - menu.width - EDGE_GAP));
   return { left, top: clamp(top, EDGE_GAP, Math.max(EDGE_GAP, viewportHeight - menu.height - EDGE_GAP)) };
 }
@@ -45,6 +47,7 @@ function calculatePosition(
 export function AnchoredPopover({
   open,
   anchorRef,
+  containmentRef,
   onClose,
   className,
   children,
@@ -53,23 +56,30 @@ export function AnchoredPopover({
   placement = "auto",
   style,
   closing = false,
+  matchAnchorWidth = false,
+  closeMs = ANCHORED_POPOVER_CLOSE_MS,
 }: {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
+  containmentRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   className: string;
   children: ReactNode;
-  align?: "start" | "end";
+  align?: "start" | "center" | "end";
   offset?: number;
   placement?: "auto" | "bottom";
   style?: CSSProperties;
   closing?: boolean;
+  matchAnchorWidth?: boolean;
+  closeMs?: number;
 }) {
   const [phase, setPhase] = useState<PopoverPhase>(open ? "open" : "closed");
   const [position, setPosition] = useState<PopoverPosition | null>(null);
+  const [anchorWidth, setAnchorWidth] = useState<number | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const phaseRef = useRef<PopoverPhase>(phase);
   const positionRef = useRef<PopoverPosition | null>(position);
+  const anchorWidthRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     let id: number | undefined;
@@ -87,7 +97,7 @@ export function AnchoredPopover({
       setPhase("closed");
       positionRef.current = null;
       setPosition(null);
-    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+    }, reduceMotion ? 0 : closeMs);
     return () => {
       if (id !== undefined) window.clearTimeout(id);
     };
@@ -126,6 +136,10 @@ export function AnchoredPopover({
         return;
       }
       initialMeasurementRetries = 0;
+      if (matchAnchorWidth && Math.abs((anchorWidthRef.current ?? -1) - anchor.width) > 0.5) {
+        anchorWidthRef.current = anchor.width;
+        setAnchorWidth(anchor.width);
+      }
       const next = calculatePosition(anchor, menu, align, offset, placement);
       positionRef.current = next;
       setPosition((current) => (samePosition(current, next) ? current : next));
@@ -153,7 +167,7 @@ export function AnchoredPopover({
       window.visualViewport?.removeEventListener("scroll", scheduleUpdate);
       window.visualViewport?.removeEventListener("resize", scheduleUpdate);
     };
-  }, [rendered, anchorRef, align, offset, placement]);
+  }, [rendered, anchorRef, align, offset, placement, matchAnchorWidth, closeMs]);
 
   useEffect(() => {
     if (!open || closing) return;
@@ -163,7 +177,8 @@ export function AnchoredPopover({
     const closeOnOutsideClick = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (popoverRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      const within = containmentRef?.current ?? anchorRef.current;
+      if (popoverRef.current?.contains(target) || within?.contains(target)) return;
       onClose();
     };
     const closeOnViewportChange = () => onClose();
@@ -175,7 +190,7 @@ export function AnchoredPopover({
       document.removeEventListener("click", closeOnOutsideClick);
       window.removeEventListener("resize", closeOnViewportChange);
     };
-  }, [anchorRef, onClose, open]);
+  }, [anchorRef, containmentRef, onClose, open]);
 
   if (!rendered) return null;
 
@@ -189,6 +204,7 @@ export function AnchoredPopover({
       className={`anchored-popover ${className}`}
       style={{
         ...style,
+        ...(matchAnchorWidth && anchorWidth !== null ? { width: anchorWidth } : {}),
         left: position?.left ?? EDGE_GAP,
         top: position?.top ?? EDGE_GAP,
         visibility: "visible",

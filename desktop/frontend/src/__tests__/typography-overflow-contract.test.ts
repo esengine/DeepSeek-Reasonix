@@ -209,7 +209,7 @@ for (const selector of [
   ".app--creation .context-panel__mini-stat-label",
   ".app--creation .context-panel__mini-stat strong",
   ".topbar__model",
-  ".composer-modebar__item span",
+  ".composer-goal-trigger__label",
   ".composer-more-menu__item span",
 ]) {
   clipsSingleLine(selector);
@@ -241,9 +241,12 @@ eq(finalDeclaration(".context-panel__mini-stat-head", "display"), "flex", "sessi
 eq(finalDeclaration(".context-panel__rate-band", "flex"), "0 0 auto", "rate badges remain visible without truncating the amount row");
 eq(finalDeclaration(".context-panel__rate-band", "white-space"), "nowrap", "rate badge labels stay intact");
 
-eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
-eq(finalDeclaration(".composer-meta__control--intent", "max-width"), "72px", "task method selector keeps its current state visible at narrow widths");
-eq(finalDeclaration(".composer-task-mode-trigger__value", "text-overflow"), "ellipsis", "task method selector truncates its value only when constrained");
+eq(finalDeclaration(".composer-approval-trigger", "display"), "inline-flex", "approval trigger keeps its label on one line");
+ok(
+  /@container \(max-width: 760px\)\s*\{[\s\S]*?\.composer-meta__control--goal\s*\{[^}]*flex-basis:\s*120px;[^}]*min-width:\s*110px;[^}]*max-width:\s*120px;/.test(styles),
+  "goal pill keeps its current state visible at narrow widths",
+);
+eq(finalDeclaration(".composer-goal-trigger__label", "text-overflow"), "ellipsis", "goal pill truncates its value only when constrained");
 eq(finalDeclaration(".composer-meta .modelsw__trigger", "font-weight"), "var(--composer-control-font-weight)", "model selector uses the shared control weight");
 eq(finalDeclaration(".composer-meta__divider", "height"), "18px", "execution policy and model settings have a compact visual divider");
 ok(
@@ -251,18 +254,17 @@ ok(
   "composer enters icon-only mode before model and effort controls overlap",
 );
 ok(
-  /@container \(max-width: 760px\)\s*\{[\s\S]*?\.composer-meta__control--approval \.composer-modebar--approval\s*\{[^}]*flex:\s*1 1 auto;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/.test(styles),
-  "approval mode switcher shrinks with its compact composer container",
+  /@container \(max-width: 760px\)\s*\{[\s\S]*?\.composer-meta__control--approval-popup\s*\{[^}]*flex-basis:\s*178px;[^}]*min-width:\s*164px;[^}]*max-width:\s*178px;/.test(styles),
+  "approval trigger shrinks with its compact composer container",
 );
-eq(finalDeclaration(".composer-modebar--approval", "--composer-modebar-active-bg"), "var(--mode-auto-bg)", "ask approval restores the solid semantic fill");
-eq(finalDeclaration('.composer-modebar--approval[data-mode="auto"]', "--composer-modebar-active-fg"), "#fff", "auto approval keeps high-contrast text on its solid fill");
-eq(finalDeclaration('.composer-modebar--approval[data-mode="yolo"]', "--composer-modebar-active-bg"), "var(--mode-yolo-bg)", "yolo approval restores the solid warning fill");
-eq(finalDeclaration(".composer-intent-menu", "width"), "min(284px, calc(100vw - 16px))", "task method menu uses the shared menu width");
-eq(finalDeclaration(".composer-access-menu__desc", "white-space"), "normal", "menu descriptions can wrap onto a second line");
-eq(finalDeclaration(".composer-access-menu__desc", "text-overflow"), "clip", "menu descriptions no longer use single-line ellipsis");
-eq(finalDeclaration(".composer-task-mode-trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "task method selector uses the shared keyboard focus ring");
+eq(finalDeclaration(".composer-approval-trigger", "color"), "var(--fg-dim)", "ask approval keeps the neutral trigger color");
+eq(finalDeclaration(".composer-approval-trigger--yolo", "color"), "#E25606", "yolo approval keeps the solid warning color");
+eq(finalDeclaration(".composer-access-menu", "border-radius"), "16px", "shared menu uses the rounded access-menu chrome");
+eq(finalDeclaration(".composer-access-menu__desc", "white-space"), "nowrap", "menu descriptions stay on one line");
+eq(finalDeclaration(".composer-access-menu__desc", "text-overflow"), "ellipsis", "menu descriptions clip with ellipsis");
+eq(finalDeclaration(".composer-menu-trigger:focus-visible", "background"), "var(--bg-soft)", "main menu trigger keeps a visible focus state");
 eq(finalDeclaration(".composer-meta .modelsw__trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "model and effort selectors use the shared keyboard focus ring");
-eq(finalDeclaration(":root[data-theme-style] .composer-modebar__item--active:focus-visible", "box-shadow"), "var(--focus-ring)", "active permission options retain keyboard focus feedback");
+eq(finalDeclaration(".composer-approval-trigger:focus-visible", "background"), "var(--bg-soft)", "approval trigger keeps a visible focus state");
 eq(
   finalDeclaration(".app--creation .msg--assistant .msg__body", "font-size"),
   "var(--font-content)",
@@ -393,7 +395,7 @@ eq(
   "collapsed creation tool bodies do not paint hidden tool text",
 );
 ok(
-  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta__control--intent\s*\{[\s\S]*?max-width\s*:\s*128px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
+  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?min-width\s*:\s*0[\s\S]*?\.composer-meta__control--approval-popup\s*\{[\s\S]*?flex-basis\s*:\s*178px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
   "composer compact controls activate at the capped theme width",
 );
 eq(finalDeclaration(".md-table-scroll", "overflow-x"), "auto", "markdown table wrapper scrolls horizontally");
