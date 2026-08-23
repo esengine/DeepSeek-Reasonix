@@ -34,9 +34,27 @@ func (a *App) DeleteProvider(name string) error {
 }
 
 // RemoveProviderAccess hides one provider access card. The plural form keeps
-// official provider profiles represented by a single card failure-atomic.
+// provider profiles represented by a single card failure-atomic.
 func (a *App) RemoveProviderAccess(name string) error {
 	return a.RemoveProviderAccesses([]string{name})
+}
+
+func isOpenCodeGoProviderAccessGroup(names []string) bool {
+	if len(names) < 2 {
+		return false
+	}
+	for _, name := range names {
+		switch strings.TrimSpace(name) {
+		case "opencode-go",
+			"opencode-go-anthropic",
+			"opencode-go-responses",
+			"opencode-go-deepseek-anthropic",
+			"opencode-go-deepseek-responses":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (a *App) RemoveProviderAccesses(rawNames []string) error {
@@ -49,6 +67,7 @@ func (a *App) RemoveProviderAccesses(rawNames []string) error {
 		return err
 	}
 	officialKind := ""
+	openCodeGoGroup := isOpenCodeGoProviderAccessGroup(names)
 	for _, name := range names {
 		p, ok := cfg.Provider(name)
 		if !ok {
@@ -59,12 +78,18 @@ func (a *App) RemoveProviderAccesses(rawNames []string) error {
 			if len(names) == 1 {
 				return a.deleteProviderAndRetargetTabs(name)
 			}
-			return fmt.Errorf("remove provider access: custom provider %q cannot be removed as part of a group", name)
+			if !openCodeGoGroup {
+				return fmt.Errorf("remove provider access: custom provider %q cannot be removed as part of a group", name)
+			}
+			continue
 		}
 		if officialKind != "" && kind != officialKind {
 			return fmt.Errorf("remove provider access: providers do not belong to one official group")
 		}
 		officialKind = kind
+	}
+	if openCodeGoGroup {
+		return a.deleteProvidersAndRetargetTabs(names)
 	}
 	return a.removeBuiltInProviderAccessAndRetargetTabs(names)
 }
@@ -262,12 +287,14 @@ func (a *App) planProviderRemoval(names []string, official bool) (providerRemova
 			return providerRemovalPlan{}, err
 		}
 	} else {
-		p, ok := cfg.Provider(names[0])
-		if !ok {
-			return providerRemovalPlan{}, fmt.Errorf("remove provider: %q not found", names[0])
-		}
-		if isOfficialBuiltInProvider(*p) {
-			return providerRemovalPlan{}, fmt.Errorf("remove provider: %q is now an official provider; retry", names[0])
+		for _, name := range names {
+			p, ok := cfg.Provider(name)
+			if !ok {
+				return providerRemovalPlan{}, fmt.Errorf("remove provider: %q not found", name)
+			}
+			if isOfficialBuiltInProvider(*p) {
+				return providerRemovalPlan{}, fmt.Errorf("remove provider: %q is now an official provider; retry", name)
+			}
 		}
 	}
 	targets := names
@@ -375,7 +402,7 @@ func (a *App) commitOfficialProviderRemoval(plan providerRemovalPlan, names []st
 	return fallbackRef, fresh.SaveTo(path)
 }
 
-func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string) (string, error) {
+func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, names []string) (string, error) {
 	unlock, err := lockProviderRemovalState()
 	if err != nil {
 		return "", err
@@ -385,12 +412,14 @@ func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string)
 	if err != nil {
 		return "", err
 	}
-	p, ok := fresh.Provider(name)
-	if !ok {
-		return "", fmt.Errorf("provider configuration changed while removing %q; retry", name)
-	}
-	if isOfficialBuiltInProvider(*p) {
-		return "", fmt.Errorf("provider configuration changed while removing %q; it is now an official provider; retry", name)
+	for _, name := range names {
+		p, ok := fresh.Provider(name)
+		if !ok {
+			return "", fmt.Errorf("provider configuration changed while removing %q; retry", name)
+		}
+		if isOfficialBuiltInProvider(*p) {
+			return "", fmt.Errorf("provider configuration changed while removing %q; it is now an official provider; retry", name)
+		}
 	}
 	if err := validateProviderRemovalFingerprint(fresh, plan.fingerprint); err != nil {
 		return "", err
@@ -407,10 +436,12 @@ func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string)
 		persistedFallback = providerName
 	}
 	retargetProviderReferences(fresh, plan.targets, persistedFallback)
-	if err := fresh.RemoveProvider(name); err != nil {
-		return "", err
+	for _, name := range names {
+		if err := fresh.RemoveProvider(name); err != nil {
+			return "", err
+		}
 	}
-	removeProviderAccess(fresh, name)
+	removeProviderAccess(fresh, names...)
 	return fallbackRef, fresh.SaveTo(path)
 }
 
@@ -541,6 +572,10 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	if name == "" {
 		return fmt.Errorf("remove provider: empty provider name")
 	}
+	return a.deleteProvidersAndRetargetTabs([]string{name})
+}
+
+func (a *App) deleteProvidersAndRetargetTabs(names []string) error {
 	defer a.lockRuntimeMutation("delete-provider")()
 	releaseGates, err := a.lockRuntimeTurnGates("provider", nil)
 	if err != nil {
@@ -548,26 +583,27 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	}
 	defer releaseGates()
 
-	plan, err := a.planProviderRemoval([]string{name}, false)
+	plan, err := a.planProviderRemoval(names, false)
 	if err != nil {
 		return err
 	}
-	affected, referencesRemoved, err := a.affectedProviderRemovalTabs(plan, name, "deleting the provider")
+	label := strings.Join(names, ", ")
+	affected, referencesRemoved, err := a.affectedProviderRemovalTabs(plan, label, "deleting the provider")
 	if err != nil {
 		return err
 	}
 	if plan.fallbackRef == "" && referencesRemoved {
-		return fmt.Errorf("remove provider: %q is in use and no other configured provider exists", name)
+		return fmt.Errorf("remove provider: %q is in use and no other configured provider exists", label)
 	}
 	if len(affected) == 0 {
 		if err := a.ensureActiveTabRebuildAllowed("provider"); err != nil {
 			return err
 		}
 	}
-	if err := snapshotProviderRemovalTabs(affected, name, "deleting provider"); err != nil {
+	if err := snapshotProviderRemovalTabs(affected, label, "deleting provider"); err != nil {
 		return err
 	}
-	fallbackRef, err := a.commitCustomProviderRemoval(plan, name)
+	fallbackRef, err := a.commitCustomProviderRemoval(plan, names)
 	if err != nil {
 		return err
 	}
