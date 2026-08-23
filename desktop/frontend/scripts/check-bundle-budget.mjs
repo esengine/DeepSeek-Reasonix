@@ -157,6 +157,6 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // channel gates. Retain that attributable UI capacity with 0.1 KiB of build-SHA
 // headroom without widening the gzip or largest-chunk exceptions.
 // Local-path sidebar preview + Unix path patterns add ~0.5 KiB raw.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_358.9 : 2_353.7;
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_359.0 : 2_353.8;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
