@@ -2999,6 +2999,45 @@ export default function App() {
 
   const verificationRevealSequenceRef = useRef(0);
   const [verificationRevealRequest, setVerificationRevealRequest] = useState<WorkspaceVerificationRevealRequest | null>(null);
+  const revealPathSeqRef = useRef(0);
+  const [fileRevealRequest, setFileRevealRequest] = useState<{ id: number; path: string } | null>(null);
+  // Opening the right dock reflows the chat pane (grid-template-columns
+  // transition), which re-wraps every rendered history row and reads as a
+  // vertical jump. Reveal-open skips the transition so the width lands
+  // immediately; the flag clears once the open animation window has passed.
+  const [instantWorkspacePanelOpen, setInstantWorkspacePanelOpen] = useState(false);
+  // Listen for local path clicks from chat markdown links — reveal the file
+  // in the workspace panel (sidebar preview).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent).detail;
+      if (typeof path !== "string" || !path) return;
+      revealPathSeqRef.current += 1;
+      setFileRevealRequest({ id: revealPathSeqRef.current, path });
+      // The grid transition only reflows the chat pane when the dock's
+      // width is about to change: opening a closed dock, or collapsing a
+      // maximized dock back to the docked width. An already-open docked
+      // dock keeps its width, so no instant flag is needed.
+      if (!workspacePanelOpen || workspacePanelMaximized) setInstantWorkspacePanelOpen(true);
+      openWorkspacePanel("files");
+    };
+    window.addEventListener("app:reveal-path", handler);
+    return () => window.removeEventListener("app:reveal-path", handler);
+  }, [openWorkspacePanel, workspacePanelMaximized, workspacePanelOpen]);
+  // Clear the reveal request after the panel has processed it, so the next
+  // click on the same path re-triggers the reveal. The delay outlasts the
+  // dock open transition so the reset does not re-render mid-animation.
+  useEffect(() => {
+    if (!fileRevealRequest) return;
+    const id = setTimeout(() => setFileRevealRequest(null), 400);
+    return () => clearTimeout(id);
+  }, [fileRevealRequest]);
+  useEffect(() => {
+    if (!instantWorkspacePanelOpen) return;
+    const id = setTimeout(() => setInstantWorkspacePanelOpen(false), 400);
+    return () => clearTimeout(id);
+  }, [instantWorkspacePanelOpen]);
   const openTurnVerification = useCallback((summary: WireCompletionSummary) => {
     openRightDockMode("changed");
     verificationRevealSequenceRef.current += 1;
@@ -4418,6 +4457,7 @@ export default function App() {
           terminalResizing ? "layout--terminal-resizing" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
+          instantWorkspacePanelOpen ? "layout--workspace-instant" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -5330,6 +5370,7 @@ export default function App() {
                     qualityFloor={composerProfile.qualityFloor}
                     showViewTabs={false}
                     creationMode={sidebarCreation}
+                    revealPathRequest={fileRevealRequest}
                   />
                 </Suspense>
               )}

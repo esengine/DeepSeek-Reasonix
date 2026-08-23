@@ -204,6 +204,7 @@ export const en = {
   "externalOpener.saveAs": "Save as…",
   "externalOpener.saved": "Saved to {path}",
   "externalOpener.persistFailed": "Opened, but could not save {name} as default: {error}",
+  "externalOpener.previewInSidebar": "Preview in sidebar",
 
   // scope labels
   "scope.global": "Scope: Global",

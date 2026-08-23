@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { Copy, ExternalLink, FolderOpen, Mail, Save } from "lucide-react";
+import { Copy, ExternalLink, Eye, FolderOpen, Mail, Save } from "lucide-react";
 import { app, openExternal } from "../lib/bridge";
 import { writeClipboardText } from "../lib/clipboard";
 import { t } from "../lib/i18n";
@@ -110,12 +110,25 @@ function LinkMark({ kind }: { kind: LinkIconKind }) {
   return <ExternalLink aria-hidden="true" size={13} strokeWidth={2} />;
 }
 
+function openInSidebar(path: string) {
+  try {
+    const CustomEvent = window.CustomEvent;
+    if (CustomEvent) {
+      window.dispatchEvent(new CustomEvent("app:reveal-path", { detail: path }));
+    }
+  } catch {
+    // Fallback: JSDOM and other non-browser environments may not support
+    // CustomEvent dispatch. The event is purely a UI hint — losing it is safe.
+  }
+}
+
 function openLink(href: string | undefined) {
   const local = localPathFromHref(href);
   if (local !== null) {
     // Local paths (linkified plain text or explicit file:/// links) open in
-    // the OS default app via the native binding, never in the system browser.
-    void app.OpenLocalPath(local).catch(() => {});
+    // the sidebar (workspace panel preview) via a custom event, never in the
+    // system browser. The OS default app is available via the context menu.
+    openInSidebar(local);
     return;
   }
   if (href) openExternal(href);
@@ -177,12 +190,21 @@ function LocalPathMarkdownLink({
     }));
     return [
       {
+        key: "preview-sidebar",
+        icon: <Eye size={13} />,
+        label: t("externalOpener.previewInSidebar"),
+        onSelect: () => {
+          closeMenu();
+          openInSidebar(path);
+        },
+      },
+      {
         key: "open-default",
         icon: <ExternalLink size={13} />,
         label: t("externalOpener.openDefault"),
         onSelect: () => {
           closeMenu();
-          openLink(href);
+          void app.OpenLocalPath(path).catch(() => {});
         },
       },
       ...(openerItems.length > 0
@@ -252,7 +274,6 @@ function LocalPathMarkdownLink({
           refreshOpeners();
         }}
       >
-        <ExternalLink aria-hidden="true" size={13} strokeWidth={2} />
         <span className="md-rich-link__label">{children}</span>
       </a>
       <ContextMenu
