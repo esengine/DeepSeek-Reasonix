@@ -80,15 +80,47 @@ function writeDetailCache(cache: DetailCache | null) {
   }
 }
 
+// 过滤状态缓存：搜索词/状态筛选/范围筛选在切换对话或视图导致面板 unmount
+// 后重新进入时恢复（与详情缓存 reasonix-heartbeat-detail 同一模式）。
+const FILTER_CACHE_KEY = "reasonix-heartbeat-filter";
+
+interface FilterCache {
+  searchQuery: string;
+  statusFilter: "all" | "enabled" | "disabled";
+  scopeFilter: string;
+}
+
+function readFilterCache(): FilterCache | null {
+  try {
+    const raw = localStorage.getItem(FILTER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as FilterCache;
+    if (typeof parsed.searchQuery !== "string") return null;
+    if (parsed.statusFilter !== "all" && parsed.statusFilter !== "enabled" && parsed.statusFilter !== "disabled") return null;
+    if (typeof parsed.scopeFilter !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeFilterCache(cache: FilterCache) {
+  try {
+    localStorage.setItem(FILTER_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Storage may be unavailable in hardened webviews; in-memory state still works.
+  }
+}
+
 export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   const t = useHeartbeatT();
   const [tasks, setTasks] = useState<HeartbeatTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [mutationError, setMutationError] = useState(false);
   const [editing, setEditing] = useState<HeartbeatTask | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState(() => readFilterCache()?.searchQuery ?? "");
+  const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">(() => readFilterCache()?.statusFilter ?? "all");
+  const [scopeFilter, setScopeFilter] = useState<string>(() => readFilterCache()?.scopeFilter ?? "all");
   const [scopeFilterOpen, setScopeFilterOpen] = useState(false);
   const scopeFilterRef = useRef<HTMLButtonElement>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
@@ -238,8 +270,6 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   useEffect(() => {
     restoreBlockedRef.current = false;
     setEditing(null);
-    setSearchQuery("");
-    setStatusFilter("all");
     void loadTasks().then((taskList) => {
       if (!taskList || restoreBlockedRef.current) return;
       // 恢复上次查看的详情：切换对话/视图导致面板 unmount 后重新进入时，
@@ -253,6 +283,12 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
       }
     });
   }, [loadTasks]);
+
+  // 过滤状态变化时写缓存（首次渲染写入恢复值，幂等）。切换对话/视图导致
+  // 面板 unmount 后重新挂载时，搜索词与筛选条件从缓存恢复。
+  useEffect(() => {
+    writeFilterCache({ searchQuery, statusFilter, scopeFilter });
+  }, [searchQuery, statusFilter, scopeFilter]);
 
   // Clear editing when the edited task is no longer in the filtered list.
   // Unsaved drafts (created via Add/scoped-Add/startNew) are not yet in
