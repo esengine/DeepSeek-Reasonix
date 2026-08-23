@@ -20,6 +20,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -63,9 +64,21 @@ type HeartbeatTask struct {
 // HeartbeatPrecheckRun records a single precheck gate execution outcome.
 type HeartbeatPrecheckRun struct {
 	At      int64  `json:"at"`      // unix millis execution time
-	Passed  bool   `json:"passed"`  // true = gate passed and the task proceeded
-	Summary string `json:"summary"` // human-readable outcome (skip reason or pass note)
+	Status  string `json:"status"`  // "passed" | "skipped" | "failed"
+	Summary string `json:"summary"` // human-readable outcome (pass note, skip reason, or failure detail)
 }
+
+// precheckOutcome classifies a precheck gate result into the three states the
+// engine acts on: pass (run the task), skip (business decision, e.g. no tasks
+// waiting), and fail (the gate itself is broken — also blocks the run but is
+// recorded distinctly so a broken script is not mistaken for a normal skip).
+type precheckOutcome int
+
+const (
+	precheckPass precheckOutcome = iota
+	precheckSkip
+	precheckFail
+)
 
 // HeartbeatRun records a single successful execution of a heartbeat task.
 // TopicID is the conversation created/reused by that run (may be empty if
@@ -418,17 +431,30 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 	// tick instead of hammering the command every 30s. Every gate outcome is
 	// recorded so the UI can show recent pass/skip history.
 	if t.Precheck != "" {
-		ok, summary := e.runPrecheck(t)
+		outcome, summary := e.runPrecheck(t)
 		now := time.Now().UnixMilli()
-		t.PrecheckHistory = append(t.PrecheckHistory, HeartbeatPrecheckRun{At: now, Passed: ok, Summary: summary})
+		status := "passed"
+		switch outcome {
+		case precheckSkip:
+			status = "skipped"
+		case precheckFail:
+			status = "failed"
+		}
+		t.PrecheckHistory = append(t.PrecheckHistory, HeartbeatPrecheckRun{At: now, Status: status, Summary: summary})
 		if len(t.PrecheckHistory) > maxPrecheckHistory {
 			t.PrecheckHistory = t.PrecheckHistory[len(t.PrecheckHistory)-maxPrecheckHistory:]
 		}
-		if !ok {
+		if outcome != precheckPass {
 			t.LastSkippedAt = now
-			t.LastSkippedReason = summary
+			if status == "failed" {
+				// A broken gate must not masquerade as a normal skip: it still
+				// blocks the run, but the recorded reason is clearly marked.
+				t.LastSkippedReason = "precheck failed: " + summary
+			} else {
+				t.LastSkippedReason = summary
+			}
 			t.LastRunAt = now
-			log.Printf("[heartbeat] task %q skipped by precheck: %s", t.Title, summary)
+			log.Printf("[heartbeat] task %q precheck %s: %s", t.Title, status, summary)
 			return t
 		}
 	}
@@ -549,7 +575,7 @@ type precheckPayload struct {
 // reason when the gate fails (non-zero exit, timeout, or spawn error). The
 // command runs with the task's workspace root as cwd (the process cwd for
 // global tasks) and receives a JSON payload on stdin, mirroring hooks.
-func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
+func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (precheckOutcome, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), heartbeatPrecheckTimeout)
 	defer cancel()
 	var shell, flag string
@@ -572,7 +598,7 @@ func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
 		TaskTitle:     t.Title,
 	})
 	if err != nil {
-		return false, "cannot build precheck payload: " + err.Error()
+		return precheckFail, "cannot build precheck payload: " + err.Error()
 	}
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
@@ -586,7 +612,7 @@ func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
 		if summary == "" {
 			summary = "passed"
 		}
-		return true, truncateHeartbeatReason(summary)
+		return precheckPass, truncateHeartbeatReason(summary)
 	}
 	reason := strings.TrimSpace(stderr.String())
 	if reason == "" {
@@ -597,8 +623,15 @@ func (e *HeartbeatEngine) runPrecheck(t HeartbeatTask) (bool, string) {
 	}
 	if ctx.Err() == context.DeadlineExceeded {
 		reason = "precheck timed out after " + heartbeatPrecheckTimeout.String() + ": " + reason
+		return precheckFail, truncateHeartbeatReason(reason)
 	}
-	return false, truncateHeartbeatReason(reason)
+	// exit 2 is the business "skip" signal (e.g. no tasks waiting); any other
+	// non-zero exit or a spawn error is a gate failure.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return precheckSkip, truncateHeartbeatReason(reason)
+	}
+	return precheckFail, truncateHeartbeatReason(reason)
 }
 
 // truncateHeartbeatReason caps a skipped-reason string for display/storage.

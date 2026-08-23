@@ -71,6 +71,7 @@ export const heartbeatFeatureEn = {
   "heartbeat.precheckPassed": "passed",
   "heartbeat.precheckPlaceholder": "e.g. node ~/.reasonix/hooks/precheck.js",
   "heartbeat.precheckSkipped": "skipped",
+  "heartbeat.precheckFailed": "failed",
   "heartbeat.viewGrouped": "Group by project",
 } as const;
 
@@ -151,6 +152,7 @@ const heartbeatFeatureZh = {
   "heartbeat.precheckPassed": "通过",
   "heartbeat.precheckPlaceholder": "例如 node ~/.reasonix/hooks/precheck.js",
   "heartbeat.precheckSkipped": "跳过",
+  "heartbeat.precheckFailed": "失败",
   "heartbeat.viewGrouped": "按项目分组",
 } satisfies Record<HeartbeatFeatureKey, string>;
 
@@ -224,6 +226,7 @@ const heartbeatFeatureZhTW = {
   "heartbeat.precheckPassed": "通過",
   "heartbeat.precheckPlaceholder": "例如 node ~/.reasonix/hooks/precheck.js",
   "heartbeat.precheckSkipped": "略過",
+  "heartbeat.precheckFailed": "失敗",
   "heartbeat.viewGrouped": "按專案分組",
 } satisfies Record<HeartbeatFeatureKey, string>;
 

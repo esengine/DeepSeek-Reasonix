@@ -784,7 +784,7 @@ func TestHeartbeatExternalDeletionDoesNotResurrectTasks(t *testing.T) {
 	}
 }
 
-func TestHeartbeatPrecheckSkipsTaskWhenGateFails(t *testing.T) {
+func TestHeartbeatPrecheckSkipsTaskWhenGateSkips(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()
 	app.ctx = context.Background()
@@ -798,31 +798,59 @@ func TestHeartbeatPrecheckSkipsTaskWhenGateFails(t *testing.T) {
 		ID:                     "gated",
 		Title:                  "Gated",
 		Prompt:                 "ping",
-		Precheck:               "exit 1",
+		Precheck:               "exit 2",
 		NewConversationEachRun: true,
 		ApprovalMode:           "auto",
 	}
 	got := engine.executeTask(seed)
 	if got.TopicID != "" {
-		t.Fatalf("gated task should not create a topic, got %q", got.TopicID)
+		t.Fatalf("skipped task should not create a topic, got %q", got.TopicID)
 	}
 	if len(got.RunHistory) != 0 {
-		t.Fatalf("gated task should not record a run, got %v", got.RunHistory)
+		t.Fatalf("skipped task should not record a run, got %v", got.RunHistory)
 	}
 	if got.LastRunAt == 0 {
-		t.Fatal("gated task should advance LastRunAt so it is re-evaluated next interval")
+		t.Fatal("skipped task should advance LastRunAt so it is re-evaluated next interval")
 	}
 	if got.LastSkippedAt == 0 {
-		t.Fatal("gated task should record LastSkippedAt")
+		t.Fatal("skipped task should record LastSkippedAt")
 	}
-	if got.LastSkippedReason == "" {
-		t.Fatal("gated task should record LastSkippedReason")
+	if len(got.PrecheckHistory) != 1 || got.PrecheckHistory[0].Status != "skipped" || got.PrecheckHistory[0].Summary == "" {
+		t.Fatalf("skipped task should record one skipped outcome, got %+v", got.PrecheckHistory)
 	}
-	if len(got.PrecheckHistory) != 1 || got.PrecheckHistory[0].Passed || got.PrecheckHistory[0].Summary == "" {
-		t.Fatalf("gated task should record one failed precheck outcome, got %+v", got.PrecheckHistory)
+	if strings.HasPrefix(got.LastSkippedReason, "precheck failed:") {
+		t.Fatalf("business skip must not be marked as a failure, got %q", got.LastSkippedReason)
 	}
 	if len(engine.pendingTopics) != 0 {
-		t.Fatalf("gated task should not leave a pending topic, got %v", engine.pendingTopics)
+		t.Fatalf("skipped task should not leave a pending topic, got %v", engine.pendingTopics)
+	}
+}
+
+func TestHeartbeatPrecheckFailMarkedDistinctly(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
+	engine := &HeartbeatEngine{
+		app:           app,
+		pendingTopics: map[string]heartbeatPendingTopic{},
+	}
+	seed := HeartbeatTask{
+		ID:       "gated-fail",
+		Title:    "Gated Fail",
+		Prompt:   "ping",
+		Precheck: "exit 1",
+	}
+	got := engine.executeTask(seed)
+	if len(got.PrecheckHistory) != 1 || got.PrecheckHistory[0].Status != "failed" {
+		t.Fatalf("failing gate should record a failed outcome, got %+v", got.PrecheckHistory)
+	}
+	if !strings.HasPrefix(got.LastSkippedReason, "precheck failed:") {
+		t.Fatalf("broken gate must be marked as a failure, got %q", got.LastSkippedReason)
+	}
+	if got.TopicID != "" {
+		t.Fatalf("failing gate must not run the task, got topic %q", got.TopicID)
 	}
 }
 
@@ -848,7 +876,7 @@ func TestHeartbeatPrecheckHistoryCapsRecentOutcomes(t *testing.T) {
 		t.Fatalf("precheck history should stay capped at %d, got %d", maxPrecheckHistory, len(got.PrecheckHistory))
 	}
 	last := got.PrecheckHistory[len(got.PrecheckHistory)-1]
-	if last.Passed || last.At == 0 {
+	if last.Status != "failed" || last.At == 0 {
 		t.Fatalf("newest outcome should be the failed run just executed, got %+v", last)
 	}
 }
@@ -931,7 +959,7 @@ func TestHeartbeatPrecheckGatePassesAndReceivesPayloadAndCwd(t *testing.T) {
 	if len(ctrl.submitted) != 1 || ctrl.submitted[0] != "ping" {
 		t.Fatalf("submitted prompts = %v, want [ping]", ctrl.submitted)
 	}
-	if len(got.PrecheckHistory) != 1 || !got.PrecheckHistory[0].Passed {
+	if len(got.PrecheckHistory) != 1 || got.PrecheckHistory[0].Status != "passed" {
 		t.Fatalf("passing gate should record one passed outcome, got %+v", got.PrecheckHistory)
 	}
 }

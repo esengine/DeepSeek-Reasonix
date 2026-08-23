@@ -1203,6 +1203,10 @@
   color: var(--warn, #b45309);
 }
 
+.heartbeat-precheck-history__badge--failed {
+  color: var(--danger, #b91c1c);
+}
+
 .heartbeat-precheck-history__summary {
   color: var(--fg);
   word-break: break-all;

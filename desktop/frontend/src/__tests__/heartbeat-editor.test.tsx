@@ -219,8 +219,9 @@ await act(async () => {
     id: "precheck-task",
     precheck: "node ~/.reasonix/hooks/precheck.js",
     precheckHistory: [
-      { at: 1700000000000, passed: false, summary: "任务看板无 todo 任务，跳过本次认领" },
-      { at: 1700000060000, passed: true, summary: "任务看板有 2 个 todo 任务待认领" },
+      { at: 1700000000000, status: "skipped", summary: "任务看板无 todo 任务，跳过本轮认领" },
+      { at: 1700000060000, status: "passed", summary: "任务看板有 2 个 todo 任务待认领" },
+      { at: 1700000120000, status: "failed", summary: "taskctl issue list 失败，禁止执行" },
     ],
   }, async () => true, "precheck");
   await flush();
@@ -229,9 +230,11 @@ const precheckInput = document.querySelector<HTMLInputElement>(".heartbeat-edito
 ok(precheckInput?.value === "node ~/.reasonix/hooks/precheck.js", "precheck input shows the configured gate command");
 ok(document.querySelector(".heartbeat-precheck-history") != null, "precheck history renders when the task has a precheck");
 const historyItems = Array.from(document.querySelectorAll(".heartbeat-precheck-history__item"));
-ok(historyItems.length === 2, "precheck history lists recent gate outcomes");
-ok(historyItems[0]?.textContent?.includes("passed") === true && historyItems[0]?.textContent?.includes("2 个 todo 任务") === true, "newest passed outcome shows first with its pass note");
-ok(historyItems[1]?.textContent?.includes("skipped") === true && historyItems[1]?.textContent?.includes("无 todo 任务") === true, "skipped outcome shows with its skip reason");
+ok(historyItems.length === 3, "precheck history lists recent gate outcomes");
+ok(historyItems[0]?.textContent?.includes("failed") === true && historyItems[0]?.textContent?.includes("taskctl") === true, "newest failed outcome shows first in red");
+ok(historyItems[1]?.textContent?.includes("passed") === true && historyItems[1]?.textContent?.includes("2 个 todo 任务") === true, "passed outcome shows with its pass note");
+ok(historyItems[2]?.textContent?.includes("skipped") === true && historyItems[2]?.textContent?.includes("无 todo 任务") === true, "skipped outcome shows with its skip reason");
+ok(historyItems[0]?.classList.contains("heartbeat-precheck-history__item--failed") === true, "failed outcome gets the failed item class");
 
 await act(async () => root.unmount());
 dom.window.close();

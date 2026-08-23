@@ -7,8 +7,8 @@ export interface HeartbeatRun {
 
 export interface HeartbeatPrecheckRun {
   at: number;       // unix millis execution time
-  passed: boolean;  // true = gate passed and the task proceeded
-  summary: string;  // human-readable outcome (skip reason or pass note)
+  status: "passed" | "skipped" | "failed"; // precheck gate outcome
+  summary: string;  // human-readable outcome (pass note, skip reason, or failure detail)
 }
 
 export interface HeartbeatTask {

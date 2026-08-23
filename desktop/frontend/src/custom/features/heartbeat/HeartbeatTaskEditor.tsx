@@ -543,10 +543,10 @@ export function TaskEditor({
           </div>
           <div className="heartbeat-precheck-history__list">
             {[...task.precheckHistory].reverse().map((run, i) => (
-              <div key={`${run.at}-${i}`} className={`heartbeat-precheck-history__item${run.passed ? "" : " heartbeat-precheck-history__item--skipped"}`}>
+              <div key={`${run.at}-${i}`} className={`heartbeat-precheck-history__item heartbeat-precheck-history__item--${run.status}`}>
                 <span className="heartbeat-precheck-history__time">{formatRelativeTime(run.at, Date.now(), t)}</span>
-                <span className={`heartbeat-precheck-history__badge${run.passed ? " heartbeat-precheck-history__badge--pass" : " heartbeat-precheck-history__badge--skip"}`}>
-                  {run.passed ? t("heartbeat.precheckPassed") : t("heartbeat.precheckSkipped")}
+                <span className={`heartbeat-precheck-history__badge heartbeat-precheck-history__badge--${run.status}`}>
+                  {run.status === "passed" ? t("heartbeat.precheckPassed") : run.status === "failed" ? t("heartbeat.precheckFailed") : t("heartbeat.precheckSkipped")}
                 </span>
                 {run.summary && <span className="heartbeat-precheck-history__summary">{run.summary}</span>}
               </div>
