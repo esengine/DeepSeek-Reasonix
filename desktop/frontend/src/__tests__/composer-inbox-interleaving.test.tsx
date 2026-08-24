@@ -205,7 +205,7 @@ console.log("\ncomposer inbox interleaving");
       return cancelAReceipt.promise;
     },
   });
-  let stopButton = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  let stopButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stopButton) throw new Error("session A stop button did not render");
   await act(async () => {
     stopButton?.click();
@@ -221,7 +221,7 @@ console.log("\ncomposer inbox interleaving");
       return { discardedItemIds: [] };
     },
   });
-  stopButton = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  stopButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stopButton) throw new Error("session B stop button did not render");
   ok(stopButton.disabled === false, "session B stop stays enabled while session A cancellation settles");
   await act(async () => {

@@ -38,6 +38,14 @@ function flushTimers(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function waitFor(label: string, check: () => boolean) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (check()) return;
+    await act(async () => { await flushTimers(); });
+  }
+  ok(false, label);
+}
+
 class TestResizeObserver {
   observe() {}
   unobserve() {}
@@ -179,11 +187,17 @@ console.log("\ncomposer run strip");
   const { root, calls } = await renderComposer();
 
   eq(document.querySelector(".composer-run-strip"), null, "idle composer renders no run strip");
-  eq(document.querySelector(".composer__btn--stop"), null, "idle composer renders no stop button");
+  eq(document.querySelector(".composer__btn--steer"), null, "idle composer renders no steer/stop variant of send");
   ok(document.querySelector(".composer__btn--send") !== null, "idle composer keeps the send button");
   eq(document.querySelector(".composer-toolbar--status-only"), null, "floating status pill is gone");
-  const yolo = document.querySelector<HTMLButtonElement>(".composer-modebar__item--yolo");
-  ok(yolo !== null, "approval bar always exposes Yolo alongside Ask and Auto");
+  const approvalTrigger = document.querySelector<HTMLButtonElement>(".composer-approval-trigger");
+  ok(approvalTrigger !== null, "approval trigger is visible");
+  await act(async () => {
+    approvalTrigger?.click();
+    await flushTimers();
+  });
+  const yolo = document.querySelector<HTMLButtonElement>(".composer-approval-popup__item--yolo");
+  ok(yolo !== null, "approval popup always exposes Yolo alongside Ask and Auto");
   await act(async () => {
     yolo?.click();
     await flushTimers();
@@ -207,14 +221,14 @@ console.log("\ncomposer run strip");
   const chrome = document.body.textContent ?? "";
   eq(chrome.includes("Execution setting"), false, "composer chrome does not mention execution setting");
 
-  const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
-  if (!intentTrigger) throw new Error("task intent trigger did not render");
+  const mainTrigger = document.querySelector(".composer-menu-trigger") as HTMLButtonElement | null;
+  if (!mainTrigger) throw new Error("main menu trigger did not render");
   await act(async () => {
-    intentTrigger.click();
+    mainTrigger.click();
     await flushTimers();
   });
-  eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu does not own a work-mode section");
-  eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
+  eq(document.querySelector(".composer-main-menu")?.textContent?.includes("Work mode"), false, "main menu does not own a work-mode section");
+  eq(document.querySelectorAll('.composer-main-menu [role="menuitemradio"]').length, 2, "main menu exposes plan and goal as the only execution choices");
 
   await act(async () => {
     root.unmount();
@@ -222,40 +236,42 @@ console.log("\ncomposer run strip");
   dom.window.close();
 }
 
-// A short Creation hover must stay a no-op. In particular, leaving before the
-// 120ms open delay must not manufacture a closing-only popover or flash the
-// trigger's open styling 140ms later.
+// The main menu opens on click, not hover: a stray hover must stay a no-op,
+// and clicking the trigger toggles the popover without manufacturing a
+// closing-only menu.
 {
   const dom = installDom();
   const timers = installWindowTimerQueue();
   const { root } = await renderComposer({ showContextWindowRing: true });
 
-  for (const selector of [".composer-task-mode-trigger"]) {
-    const trigger = document.querySelector(selector) as HTMLButtonElement | null;
-    if (!trigger) throw new Error(`missing Creation hover trigger: ${selector}`);
+  const trigger = document.querySelector(".composer-menu-trigger") as HTMLButtonElement | null;
+  if (!trigger) throw new Error("missing main menu trigger");
 
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
-      timers.advance(119);
-      trigger.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
-      timers.advance(140);
-    });
-
-    ok(!trigger.classList.contains(`${selector.slice(1)}--open`), `${selector} stays visually closed after a short hover`);
-    ok(
-      document.querySelector(".composer-intent-menu") === null,
-      `${selector} does not render a closing-only menu`,
-    );
-  }
-
-  const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
-  if (!intentTrigger) throw new Error("missing Creation intent trigger");
   await act(async () => {
-    intentTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
-    timers.advance(120);
+    trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+    timers.advance(200);
+    trigger.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+    timers.advance(140);
   });
-  ok(intentTrigger.classList.contains("composer-task-mode-trigger--open"), "a sustained Creation hover still opens the trigger");
-  ok(document.querySelector(".composer-intent-menu") !== null, "a sustained Creation hover still renders the menu");
+
+  ok(!trigger.classList.contains("composer-menu-trigger--open"), "trigger stays visually closed after a hover-only pass");
+  ok(document.querySelector(".composer-main-menu") === null, "hover alone does not render the main menu");
+
+  await act(async () => {
+    trigger.click();
+    await flushTimers();
+  });
+  ok(trigger.classList.contains("composer-menu-trigger--open"), "clicking the trigger opens the menu");
+  ok(document.querySelector(".composer-main-menu") !== null, "clicking the trigger renders the main menu");
+
+  await act(async () => {
+    trigger.click();
+    await flushTimers();
+  });
+  await act(async () => {
+    timers.advance(200);
+  });
+  ok(document.querySelector(".composer-main-menu") === null, "clicking the open trigger closes the menu");
 
   timers.restore();
   await act(async () => {
@@ -269,12 +285,12 @@ console.log("\ncomposer run strip");
 {
   const dom = installDom();
   const { root } = await renderComposer({ disabled: true, goal: "ship it", collaborationMode: "goal" });
-  const task = document.querySelector<HTMLButtonElement>(".composer-task-mode-trigger");
-  const approvals = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-modebar--approval button"));
+  const task = document.querySelector<HTMLButtonElement>(".composer-menu-trigger");
+  const approvals = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-approval-trigger"));
   const send = document.querySelector<HTMLButtonElement>(".composer__btn--send");
   eq(document.querySelector(".composer-profile-trigger"), null, "runtime transition has no execution-setting control");
   ok(Boolean(task?.disabled), "runtime transition disables Goal mode changes");
-  ok(approvals.length === 3 && approvals.every((button) => button.disabled), "runtime transition disables Ask/Auto/Yolo changes");
+  ok(approvals.length === 1 && approvals.every((button) => button.disabled), "runtime transition disables the approval trigger");
   ok(Boolean(send?.disabled), "runtime transition disables submit");
 
   await act(async () => {
@@ -296,13 +312,38 @@ console.log("\ncomposer run strip");
   eq(live?.textContent, "Reasonix is working", "live region announces the stable state text only");
   ok(document.querySelector(".composer-card--running") !== null, "running card keeps its running modifier");
 
-  const stop = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  const stop = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stop) throw new Error("running composer stop button did not render");
+  ok(stop.textContent === "" || stop.querySelector("svg") !== null, "running empty submit renders the stop icon in send");
   await act(async () => {
     stop.click();
     await flushTimers();
   });
-  eq(calls.cancel, 1, "stop button next to send cancels the turn");
+  eq(calls.cancel, 1, "send button turns into stop and cancels the turn");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Running turns keep the approval popup usable: the trigger stays enabled
+// mid-run (pending-approval can pause the turn) and the popup must open
+// instead of swallowing the click (P2 regression guard).
+{
+  const dom = installDom();
+  const { root } = await renderComposer({ running: true, turnStartAt: Date.now() });
+
+  const approvalTrigger = document.querySelector(".composer-approval-trigger") as HTMLButtonElement | null;
+  if (!approvalTrigger) throw new Error("approval trigger did not render while running");
+  ok(!approvalTrigger.disabled, "approval trigger stays enabled during a running turn");
+  await act(async () => {
+    approvalTrigger.click();
+    await flushTimers();
+  });
+  ok(document.querySelector(".composer-approval-popup") !== null, "approval popup opens during a running turn");
+  const yolo = document.querySelector(".composer-approval-popup__item--yolo") as HTMLButtonElement | null;
+  ok(yolo !== null && !yolo.disabled, "Yolo option stays selectable during a running turn");
 
   await act(async () => {
     root.unmount();
@@ -325,8 +366,8 @@ console.log("\ncomposer run strip");
   eq(document.querySelector(".composer-card--running"), null, "waiting card hands the running accent off to the prompt card");
   ok(document.querySelector(".composer-card--waiting") !== null, "waiting card takes the waiting modifier");
 
-  const modeButtons = [...document.querySelectorAll(".composer-modebar--approval .composer-modebar__item")] as HTMLButtonElement[];
-  ok(modeButtons.length === 3 && modeButtons.every((b) => !b.disabled), "approval bar stays usable while its own prompt disables the composer");
+  const approvalTrigger = document.querySelector(".composer-approval-trigger") as HTMLButtonElement | null;
+  ok(approvalTrigger !== null && !approvalTrigger.disabled, "approval trigger stays usable while its own prompt disables the composer");
 
   await rerender({ pendingApprovalLabel: null, pendingAsk: true });
   eq(
@@ -335,8 +376,8 @@ console.log("\ncomposer run strip");
     "pending ask question shows the ask waiting state",
   );
   ok(
-    modeButtons.every((b) => b.disabled),
-    "approval bar stays disabled for non-approval reasons",
+    approvalTrigger !== null && approvalTrigger.disabled,
+    "approval trigger stays disabled for non-approval reasons",
   );
 
   await rerender({ pendingAsk: false, disabled: false });
@@ -361,9 +402,9 @@ console.log("\ncomposer run strip");
     guidanceQueuePreviewItems: ["数到一半改用英文", "最后给出一句总结"],
   });
 
-  ok(document.querySelector(".composer-guidance-shelf") !== null, "queued guidance renders in the shelf");
+  await waitFor("queued guidance shelf", () => document.querySelector(".composer-guidance-shelf") !== null);
 
-  const stop = document.querySelector(".composer__btn--stop") as HTMLButtonElement | null;
+  const stop = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!stop) throw new Error("stop button did not render");
   await act(async () => {
     stop.click();

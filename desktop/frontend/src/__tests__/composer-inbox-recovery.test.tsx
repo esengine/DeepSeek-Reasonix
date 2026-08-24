@@ -763,7 +763,7 @@ console.log("\ncomposer inbox recovery");
     onCancel: async () => ({ discardedItemIds: ["withdrawn"] }),
   });
   await waitFor("mixed cancel queue rendered", () => document.querySelectorAll(".composer-guidance-item").length === 2);
-  const stop = document.querySelector(".composer__btn--stop") as HTMLButtonElement;
+  const stop = document.querySelector(".composer__btn--send") as HTMLButtonElement;
   await act(async () => { stop.click(); await flushTimers(); });
   const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
   ok(textarea.value.includes("restore me") && !textarea.value.includes("do not restore me"), "stop restores only backend-confirmed withdrawn messages");

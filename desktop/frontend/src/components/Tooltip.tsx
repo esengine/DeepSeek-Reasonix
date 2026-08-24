@@ -9,6 +9,13 @@ const EDGE_PAD = 8;
 const ARROW_SIZE = 7;
 const ARROW_PAD = 12;
 
+// Shared across all Tooltip instances: when a tooltip was last hidden, so
+// moving between multiple buttons shows the next tooltip instantly (no delay)
+// while the first hover still has the normal delay.
+const lastTooltipHideMs = { current: 0 };
+const TOOLTIP_COOLDOWN_MS = 500;
+const DEFAULT_HOVER_DELAY_MS = 1000;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -41,7 +48,7 @@ export function Tooltip({
   block = false,
   disabled = false,
   className,
-  delay = 180,
+  delay = DEFAULT_HOVER_DELAY_MS,
 }: {
   label?: ReactNode;
   children: ReactNode;
@@ -66,14 +73,18 @@ export function Tooltip({
     showTimerRef.current = null;
   };
 
-  const show = (delay = 180) => {
+  const show = (delay = DEFAULT_HOVER_DELAY_MS) => {
     if (!active) return;
     clearTimer();
-    showTimerRef.current = window.setTimeout(() => setOpen(true), delay);
+    // If another tooltip was just hidden (user moving between buttons), show
+    // instantly instead of waiting for the full hover delay.
+    const actualDelay = (Date.now() - lastTooltipHideMs.current < TOOLTIP_COOLDOWN_MS) ? 0 : delay;
+    showTimerRef.current = window.setTimeout(() => setOpen(true), actualDelay);
   };
 
   const hide = () => {
     clearTimer();
+    lastTooltipHideMs.current = Date.now();
     setOpen(false);
   };
 

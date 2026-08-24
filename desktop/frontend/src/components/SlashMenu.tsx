@@ -91,6 +91,7 @@ export function SlashMenu({
       activeIndex={activeRowIndex}
       itemKey={slashMenuRowKey}
       estimateSize={(row) => row.type === "group" ? 26 : 34}
+      className="slashmenu--at"
       renderItem={(row) => row.type === "group" ? (
         <div className="slashmenu__group" role="separator" aria-label={row.label}>
           {row.label}

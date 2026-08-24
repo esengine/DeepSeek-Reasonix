@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, Gauge } from "lucide-react";
 import { asArray } from "../lib/array";
+import { useT } from "../lib/i18n";
 import type { EffortInfo } from "../lib/types";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
+import { Tooltip } from "./Tooltip";
 
 export function EffortSwitcher({
   effort,
@@ -17,6 +19,7 @@ export function EffortSwitcher({
   const [closing, setClosing] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const t = useT();
   const levels = asArray(effort?.levels);
   const current = effort?.current || "auto";
 
@@ -56,18 +59,20 @@ export function EffortSwitcher({
 
   return (
     <div className="modelsw effortsw">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`modelsw__trigger effortsw__trigger ${current !== "auto" ? "effortsw__trigger--explicit" : ""}`}
-        disabled={disabled}
-        aria-expanded={open && !closing}
-        onClick={() => (open || closing ? closeMenu() : openMenu())}
-      >
-        <Gauge size={14} className="modelsw__kind" />
-        <span className="modelsw__label">{current}</span>
-        <ChevronsUpDown size={11} />
-      </button>
+      <Tooltip label={t("status.effortTriggerTooltip", { level: current })}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className={`modelsw__trigger effortsw__trigger ${current !== "auto" ? "effortsw__trigger--explicit" : ""}`}
+          disabled={disabled}
+          aria-expanded={open && !closing}
+          onClick={() => (open || closing ? closeMenu() : openMenu())}
+        >
+          <Gauge size={14} className="modelsw__kind" />
+          <span className="modelsw__label">{current}</span>
+          <ChevronsUpDown size={11} />
+        </button>
+      </Tooltip>
       <AnchoredPopover
         open={open && !disabled}
         closing={closing}

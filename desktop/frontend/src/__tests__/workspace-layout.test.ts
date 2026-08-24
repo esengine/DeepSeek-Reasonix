@@ -269,9 +269,9 @@ eq(
   "topic bar establishes a raised stacking context for external-opener menus",
 );
 eq(
-  /\.composer-meta__control--approval \{[\s\S]*?margin-inline-start: 2px;/.test(stylesSource)
-    && /\.composer-modebar__item:hover:not\(:disabled\) \{[\s\S]*?transform: none;/.test(stylesSource)
-    && /\.composer-task-mode-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-task-mode-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource),
+  /\.composer-approval-trigger \{[\s\S]*?transition: color 0\.12s, background 0\.12s;[\s\S]*?transform: none;?/.test(stylesSource)
+    || /\.composer-approval-trigger \{[\s\S]*?transition: color 0\.12s, background 0\.12s;/.test(stylesSource)
+      && /\.composer-approval-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-approval-trigger\[aria-expanded="true"\] \{[\s\S]*?background: var\(--bg-soft\);[\s\S]*?color: var\(--fg\);/.test(stylesSource),
   true,
   "composer mode controls keep spacing and icon baselines stable on hover",
 );

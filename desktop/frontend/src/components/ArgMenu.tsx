@@ -22,7 +22,7 @@ export function ArgMenu({
     activeRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
   return (
-    <div className="slashmenu" role="listbox">
+    <div className="slashmenu slashmenu--at" role="listbox">
       {items.map((it, i) => (
         <button
           key={it.label}

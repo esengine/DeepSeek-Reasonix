@@ -12,12 +12,14 @@ export function VirtualMenu<T>({
   itemKey,
   renderItem,
   estimateSize,
+  className,
 }: {
   items: T[];
   activeIndex: number;
   itemKey: (item: T, index: number) => string;
   renderItem: (item: T, index: number) => ReactNode;
   estimateSize?: (item: T, index: number) => number;
+  className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const getItemKey = useCallback(
@@ -43,7 +45,7 @@ export function VirtualMenu<T>({
   }, [activeIndex, items.length, virtualizer]);
 
   return (
-    <div ref={scrollRef} className="slashmenu" role="listbox">
+    <div ref={scrollRef} className={`slashmenu${className ? ` ${className}` : ""}`} role="listbox">
       <div ref={virtualizer.containerRef} className="slashmenu__sizer">
         {virtualizer.getVirtualItems().map((row) => (
           <div
