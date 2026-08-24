@@ -72,6 +72,95 @@ func TestRemoveProviderAccessesRemovesGroupedOfficialAliasesAtomically(t *testin
 	}
 }
 
+func TestRemoveProviderAccessesRemovesOpenCodeGoGroupAtomically(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OPENCODE_GO_API_KEY", "sk-test")
+	setDesktopTestCredential(t, "FALLBACK_KEY", "sk-test")
+
+	preset, ok := config.CuratedProviderPreset("opencode-go-recommended")
+	if !ok || len(preset.Entries) != 3 {
+		t.Fatalf("recommended OpenCode Go preset = %+v, found=%v", preset, ok)
+	}
+	names := make([]string, 0, len(preset.Entries))
+	for _, entry := range preset.Entries {
+		names = append(names, entry.Name)
+	}
+	fallback := config.ProviderEntry{
+		Name: "fallback", Kind: "openai", BaseURL: "https://fallback.example.invalid/v1",
+		Model: "fallback-model", APIKeyEnv: "FALLBACK_KEY",
+	}
+	cfg := config.Default()
+	cfg.DefaultModel = "opencode-go/glm-5.3"
+	cfg.Agent.PlannerModel = "opencode-go-responses/grok-4.5"
+	cfg.Agent.VisionModel = "opencode-go/kimi-k3"
+	cfg.Agent.SubagentModel = "opencode-go-anthropic/qwen3.7-plus"
+	cfg.Agent.SubagentModels = map[string]string{"review": "opencode-go-responses/grok-4.5"}
+	cfg.Desktop.ProviderAccess = append(append([]string(nil), names...), fallback.Name)
+	cfg.Providers = append(append([]config.ProviderEntry(nil), preset.Entries...), fallback)
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "opencode", Scope: "global", model: cfg.DefaultModel, Label: cfg.DefaultModel}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	if err := app.RemoveProviderAccesses(names); err != nil {
+		t.Fatalf("RemoveProviderAccesses: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	for _, name := range names {
+		if _, ok := got.Provider(name); ok {
+			t.Fatalf("OpenCode Go provider %q still exists", name)
+		}
+	}
+	if _, ok := got.Provider(fallback.Name); !ok {
+		t.Fatal("fallback provider was removed with the OpenCode Go group")
+	}
+	if access := providerAccessSet(got.Desktop.ProviderAccess); len(access) != 1 || !access[fallback.Name] {
+		t.Fatalf("provider_access = %+v, want only %q", got.Desktop.ProviderAccess, fallback.Name)
+	}
+	if got.DefaultModel != fallback.Name || got.Agent.PlannerModel != fallback.Name || got.Agent.SubagentModel != fallback.Name || got.Agent.SubagentModels["review"] != fallback.Name {
+		t.Fatalf("grouped provider refs were not retargeted: default=%q planner=%q subagent=%q skills=%+v", got.DefaultModel, got.Agent.PlannerModel, got.Agent.SubagentModel, got.Agent.SubagentModels)
+	}
+	if got.Agent.VisionModel != "" {
+		t.Fatalf("vision_model = %q, want cleared removed provider reference", got.Agent.VisionModel)
+	}
+	fallbackRef := fallback.Name + "/" + fallback.Model
+	if tab.model != fallbackRef || tab.Label != fallbackRef {
+		t.Fatalf("tab model/label = %q/%q, want %q", tab.model, tab.Label, fallbackRef)
+	}
+}
+
+func TestRemoveProviderAccessesRejectsOpenCodeGoMixedWithCustomProvider(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.Default()
+	cfg.DefaultModel = "opencode-go/glm-5.3"
+	cfg.Desktop.ProviderAccess = []string{"opencode-go", "custom"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "opencode-go", Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", Model: "glm-5.3"},
+		{Name: "custom", Kind: "openai", BaseURL: "https://custom.example.invalid/v1", Model: "custom-model"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	err := NewApp().RemoveProviderAccesses([]string{"opencode-go", "custom"})
+	if err == nil || !strings.Contains(err.Error(), `custom provider "opencode-go" cannot be removed as part of a group`) {
+		t.Fatalf("RemoveProviderAccesses error = %v, want mixed custom-group rejection", err)
+	}
+	got := config.LoadForEdit(config.UserConfigPath())
+	if _, ok := got.Provider("opencode-go"); !ok {
+		t.Fatal("OpenCode Go provider was partially removed after rejection")
+	}
+	if _, ok := got.Provider("custom"); !ok {
+		t.Fatal("custom provider was partially removed after rejection")
+	}
+}
+
 func TestDeleteProviderKeepsOldControllerWhenFallbackBuildFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "REASONIX_TEST_KEY", "sk-test")
