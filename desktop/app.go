@@ -881,9 +881,10 @@ func (a *App) domReady(_ context.Context) {
 	state, ok := loadWindowState()
 	if ok {
 		// Validate saved position against current screens. Wails v2 doesn't
-		// expose per-screen origin (x,y offsets) so we can only do a basic
-		// sanity check. Windows border insets (commonly x=-8,y=-8) are legal;
-		// large off-screen positions (unplugged external display) re-center.
+		// expose per-screen origin (x,y offsets) so on platforms without
+		// monitor rects we can only do a basic sanity check. Windows border
+		// insets (commonly x=-8,y=-8) are legal; large off-screen positions
+		// (unplugged external display) re-center.
 		maxW, maxH := 0, 0
 		screens, err := runtime.ScreenGetAll(a.ctx)
 		if err == nil {
@@ -896,7 +897,7 @@ func (a *App) domReady(_ context.Context) {
 				}
 			}
 		}
-		if windowPositionRestorable(state, maxW, maxH) {
+		if windowPositionRestorable(state, maxW, maxH, monitorScreenRects()) {
 			runtime.WindowSetPosition(a.ctx, state.X, state.Y)
 		} else {
 			runtime.WindowCenter(a.ctx)

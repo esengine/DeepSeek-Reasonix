@@ -42,16 +42,52 @@ func TestParseWindowStateJSONCorruptPayload(t *testing.T) {
 
 func TestWindowPositionRestorableAllowsBorderAndRejectsOffscreen(t *testing.T) {
 	border := DesktopWindowState{Width: 1240, Height: 720, X: -8, Y: -8}
-	if !windowPositionRestorable(border, 1920, 1080) {
+	if !windowPositionRestorable(border, 1920, 1080, nil) {
 		t.Fatal("border origin should restore")
 	}
 	offscreen := DesktopWindowState{Width: 1240, Height: 720, X: 10_000, Y: 40}
-	if windowPositionRestorable(offscreen, 1920, 1080) {
+	if windowPositionRestorable(offscreen, 1920, 1080, nil) {
 		t.Fatal("far off-screen origin should not restore")
 	}
 	tooNegative := DesktopWindowState{Width: 1240, Height: 720, X: -200, Y: 40}
-	if windowPositionRestorable(tooNegative, 1920, 1080) {
+	if windowPositionRestorable(tooNegative, 1920, 1080, nil) {
 		t.Fatal("deeply negative origin should not restore")
+	}
+}
+
+func TestWindowPositionRestorableValidatesAgainstMonitorRects(t *testing.T) {
+	primary := []screenRect{{X: 0, Y: 0, W: 1920, H: 1080}}
+
+	// Saved on a right-side external display that is no longer connected:
+	// positive coordinates far below the size-based bound, so only the
+	// monitor rect check catches it (issue #9251).
+	unplugged := DesktopWindowState{Width: 800, Height: 600, X: 2000, Y: 120}
+	if windowPositionRestorable(unplugged, 1920, 1080, primary) {
+		t.Fatal("origin on an unplugged right-side display must not restore")
+	}
+
+	// Partially visible windows stay restorable so users can drag them back.
+	partial := DesktopWindowState{Width: 800, Height: 600, X: 1500, Y: 100}
+	if !windowPositionRestorable(partial, 1920, 1080, primary) {
+		t.Fatal("partially visible origin should restore")
+	}
+
+	// Windows border origin still restores with rects present.
+	border := DesktopWindowState{Width: 1240, Height: 720, X: -8, Y: -8}
+	if !windowPositionRestorable(border, 1920, 1080, primary) {
+		t.Fatal("border origin should restore against rects")
+	}
+
+	// A second connected display to the right keeps the origin valid.
+	dual := []screenRect{primary[0], {X: 1920, Y: 0, W: 1920, H: 1080}}
+	if !windowPositionRestorable(unplugged, 1920, 1080, dual) {
+		t.Fatal("origin on a connected second display should restore")
+	}
+
+	// Same scenario as `unplugged` but judged by the legacy size heuristic
+	// (platforms without monitor rects): the old behavior is preserved.
+	if !windowPositionRestorable(unplugged, 1920, 1080, nil) {
+		t.Fatal("nil rects must keep the size-only heuristic")
 	}
 }
 

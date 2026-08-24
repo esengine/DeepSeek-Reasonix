@@ -100,11 +100,31 @@ func validateWindowState(s DesktopWindowState) error {
 	return nil
 }
 
+// screenRect is one monitor's rect in Wails logical-pixel space.
+type screenRect struct {
+	X, Y, W, H int
+}
+
 // windowPositionRestorable reports whether a saved origin is safe to apply.
 // Slightly negative coordinates (Windows border insets) are accepted; large
 // off-screen positions force a center fallback.
-func windowPositionRestorable(s DesktopWindowState, maxScreenW, maxScreenH int) bool {
+//
+// When monitorRects is available (Windows enumerates them via EnumDisplayMonitors)
+// the saved window rect must intersect at least one monitor: a position saved
+// on an external display that is no longer connected otherwise restores onto a
+// region of the virtual desktop where no pixels are visible. Wails v2 reports
+// no per-screen origin, so without rects the call falls back to the coarse
+// size-based bound below.
+func windowPositionRestorable(s DesktopWindowState, maxScreenW, maxScreenH int, monitorRects []screenRect) bool {
 	if s.X < minWindowOrigin || s.Y < minWindowOrigin {
+		return false
+	}
+	if len(monitorRects) > 0 {
+		for _, m := range monitorRects {
+			if s.X < m.X+m.W && s.X+s.Width > m.X && s.Y < m.Y+m.H && s.Y+s.Height > m.Y {
+				return true
+			}
+		}
 		return false
 	}
 	if maxScreenW > 0 && s.X > maxScreenW*2 {
