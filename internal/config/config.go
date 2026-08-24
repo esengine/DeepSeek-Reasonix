@@ -1372,6 +1372,7 @@ type ProviderEntry struct {
 	ModelsURL     string            `toml:"models_url"`  // auto-fetch models from this URL on startup
 	Default       string            `toml:"default"`     // default model when Models is set (else Models[0])
 	APIKeyEnv     string            `toml:"api_key_env"`
+	Auth          string            `toml:"auth"`           // "adc": bearer tokens from Application Default Credentials (GCE metadata or GOOGLE_APPLICATION_CREDENTIALS) instead of api_key_env
 	PresetID      string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
 	PresetVersion int               `toml:"preset_version"` // curated preset schema version for future migrations.
 	Headers       map[string]string `toml:"headers"`        // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.

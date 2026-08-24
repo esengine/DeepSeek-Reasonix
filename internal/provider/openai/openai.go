@@ -38,6 +38,8 @@ import (
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
+
+	"golang.org/x/oauth2"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go without any
@@ -72,6 +74,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
+	adcTS, errADC := resolveADCTokenSource(cfg.Extra)
+	if errADC != nil {
+		return nil, errADC
+	}
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort == "auto" {
@@ -234,6 +240,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		apiKey:          cfg.APIKey,
 		keyEnv:          keyEnv,
 		keySource:       keySource,
+		adcTokenSource:  adcTS,
 		baseURL:         strings.TrimRight(cfg.BaseURL, "/"),
 		chatURL:         chatURL,
 		prefixChatURL:   prefixChatURL,
@@ -270,8 +277,9 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 type client struct {
 	name            string
 	apiKey          string
-	keyEnv          string // api_key_env name, surfaced in auth errors
-	keySource       string // source of keyEnv, surfaced in auth errors
+	adcTokenSource  oauth2.TokenSource // non-nil: bearer tokens from Application Default Credentials instead of apiKey
+	keyEnv          string             // api_key_env name, surfaced in auth errors
+	keySource       string             // source of keyEnv, surfaced in auth errors
 	baseURL         string
 	chatURL         string
 	prefixChatURL   string // official DeepSeek Beta endpoint; empty for custom gateways
@@ -364,7 +372,7 @@ func (c *client) sendOpts() provider.SendOptions {
 		Provider:   c.name,
 		KeyEnv:     c.keyEnv,
 		KeySource:  c.keySource,
-		KeyPresent: c.apiKey != "",
+		KeyPresent: c.apiKey != "" || c.adcTokenSource != nil,
 		RetryAuth:  c.authed.Load(),
 	}
 }
@@ -395,24 +403,6 @@ func cleanCustomHeaders(in map[string]string) map[string]string {
 		return nil
 	}
 	return out
-}
-
-func applyCustomHeaders(h http.Header, headers map[string]string) {
-	for name, value := range cleanCustomHeaders(headers) {
-		h.Set(name, value)
-	}
-}
-
-func applyAPIKeyHeader(h http.Header, baseURL, apiKey string) {
-	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
-		return
-	}
-	if IsMiMo(baseURL) {
-		h.Set("api-key", apiKey)
-		return
-	}
-	h.Set("Authorization", "Bearer "+apiKey)
 }
 
 func cleanExtraBody(in map[string]any) map[string]any {
@@ -485,13 +475,18 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 	copy(body, buf.Bytes())
 	bufPool.Put(buf)
 
+	key, errKey := c.bearerToken()
+	if errKey != nil {
+		return nil, errKey
+	}
+
 	newReq := func(ctx context.Context) (*http.Request, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		applyAPIKeyHeader(httpReq.Header, c.baseURL, c.apiKey)
+		applyAPIKeyHeader(httpReq.Header, c.baseURL, key)
 		httpReq.Header.Set("Accept", "text/event-stream")
 		applyCustomHeaders(httpReq.Header, c.headers)
 		return httpReq, nil
