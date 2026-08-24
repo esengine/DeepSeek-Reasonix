@@ -136,8 +136,6 @@ describe("diagnostics v2 compatibility and privacy", () => {
         reports: ["webview2", "web_runtime"],
         pings: ["os_build", "os_revision", "distro_id", "session_type", "runtime_engine", "gpu_mode"],
         cli_pings: ["os_build", "os_revision", "distro_id", "session_type", "runtime_engine", "gpu_mode"],
-        metric_users: ["arch", "os_build", "os_revision", "distro_id", "session_type", "runtime_engine", "gpu_mode", "event_count"],
-        cli_metric_users: ["arch", "os_build", "os_revision", "distro_id", "session_type", "runtime_engine", "gpu_mode", "event_count"],
       };
       for (const [table, expected] of Object.entries(additiveColumns)) {
         expect(columns(migrated, table)).toEqual(expect.arrayContaining(expected));
@@ -147,7 +145,7 @@ describe("diagnostics v2 compatibility and privacy", () => {
       for (const table of ["report_daily", "report_installations", "report_event_dimensions", "diagnostics_meta"]) {
         expect(columns(migrated, table)).toEqual(columns(fresh, table));
       }
-      for (const table of ["cli_pings", "cli_metric_users"]) {
+      for (const table of ["cli_pings"]) {
         expect(columns(runtimeBootstrap, table)).toEqual(columns(fresh, table));
       }
       expect(classifyDiagnosticsV2Schema(

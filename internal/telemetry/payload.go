@@ -21,9 +21,8 @@ type pingPayload struct {
 }
 
 type metricsPayload struct {
-	InstallID string    `json:"installId,omitempty"`
-	Version   string    `json:"version"`
-	OS        string    `json:"os"`
-	Surface   string    `json:"surface"`
-	Counters  []Counter `json:"counters"`
+	Version  string    `json:"version"`
+	OS       string    `json:"os"`
+	Surface  string    `json:"surface"`
+	Counters []Counter `json:"counters"`
 }

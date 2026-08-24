@@ -567,11 +567,6 @@ function navLink(href: string, label: { en: string; zh: string }, active = false
   return `<a${active ? ` class="active" aria-current="page"` : ""} href="${esc(href)}">${i18n(label.en, label.zh)}</a>`;
 }
 
-function preferencePanel(title: string, body: string, active: boolean): string {
-  return `<section class="module-panel preference-panel${active ? " active" : ""}"${active ? ` aria-current="true"` : ""}>
-<h3>${title}</h3>${body}</section>`;
-}
-
 function reportGroups(rows: CrashRow[], compact = false): string {
   if (!rows.length) return `<div class="empty">${i18n("No diagnostic reports yet — that's the good kind of empty", "还没有诊断报告，这是好消息")}</div>`;
   return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span title="${i18n("Window events and affected installs; lifetime count remains visible for historical context", "窗口事件数和受影响安装数；同时保留全生命周期累计次数")}">${i18n("window / lifetime", "窗口 / 累计")}</span></div>${rows
@@ -599,10 +594,7 @@ export function renderStats(
     crashes: CrashRow[];
     metrics: MetricRow[];
     previousMetrics: MetricRow[];
-    metricUsers: MetricRow[];
-    metricUsersUnavailable: boolean;
     /** Oldest computed_at in the rollup; empty when the window was queried live. */
-    metricUsersComputedAt: string;
     sources: { label: string; users: number }[];
     diagnosticFacets?: {
       osBuilds: BarRow[];
@@ -649,7 +641,6 @@ export function renderStats(
       newLatest: boolean;
       regressed: boolean;
       windowDays: 7 | 30;
-      preferenceMode: "users" | "opens";
     };
   },
   user: User,
@@ -667,12 +658,10 @@ export function renderStats(
   const anyPing = days.some((d) => d.opens > 0);
   const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
   const previousAgentMetrics = data.previousMetrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
-  const agentMetricUsers = data.metricUsers.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
   const isSettingsSignal = (signal: string) =>
     signal === "client_surface" || signal === "client_version" || signal.startsWith("settings_") ||
     ["cli_mode", "cli_profile", "cli_permission_mode", "cli_session_mode"].includes(signal);
   const settingsMetrics = data.metrics.filter((r) => isSettingsSignal(r.signal));
-  const settingsMetricUsers = data.metricUsers.filter((r) => isSettingsSignal(r.signal));
   const cache = cacheHitRate(agentMetrics);
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
@@ -716,7 +705,6 @@ export function renderStats(
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
     if (data.filters.windowDays === 7) params.set("window", "7d");
-    if (module === "preferences" && data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
       else params.delete(k);
@@ -736,14 +724,6 @@ export function renderStats(
   const surfaceControls = `<div class="segmented" aria-label="Client surface">
 <a class="${data.filters.surface === "desktop" ? "active" : ""}"${data.filters.surface === "desktop" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "" }))}">${i18n("Desktop", "桌面端")}</a>
 <a class="${data.filters.surface === "cli" ? "active" : ""}"${data.filters.surface === "cli" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "cli" }))}">CLI</a>
-</div>`;
-  const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
-<a class="${data.filters.preferenceMode === "users" ? "active" : ""}"${data.filters.preferenceMode === "users" ? ` aria-current="true"` : ""} href="${esc(
-    filterQS({ prefs: "" }, "preferences"),
-  )}">${i18n("Installs", "按安装")}</a>
-<a class="${data.filters.preferenceMode === "opens" ? "active" : ""}"${data.filters.preferenceMode === "opens" ? ` aria-current="true"` : ""} href="${esc(
-    filterQS({ prefs: "opens" }, "preferences"),
-  )}">${i18n("Opens", "按启动")}</a>
 </div>`;
   const overviewTone = topSeverityTone(data.overview.openReports, data.overview.regressedReports, data.overview.criticalOpenReports);
   const isDevelopmentDiagnostic = (row: CrashRow) => row.development ?? row.fingerprint.startsWith("dev:");
@@ -807,49 +787,10 @@ ${developmentDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML(
 ${filters}
 <section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
 </section>`;
-  const sevenDayHref = esc(filterQS({ window: "7d" }, "preferences"));
-  const unavailableNotice =
-    range === 30
-      ? i18nHTML(
-          `The 30-day deduplication is precomputed hourly and has not reached every signal yet. <a href="${sevenDayHref}">Use 7d</a> meanwhile.`,
-          `30 天去重统计由后台每小时预聚合，目前还没覆盖到全部信号。<a href="${sevenDayHref}">先看 7 天</a>。`,
-        )
-      : i18nHTML(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`);
-  // A precomputed window can silently go stale if the rollup cron stops, so the
-  // heading carries how old the least recently recomputed signal is.
-  const computedAt = data.metricUsersComputedAt
-    ? ` <b>${esc(data.metricUsersComputedAt.slice(0, 16).replace("T", " "))}Z</b>`
-    : "";
-  const healthComputedAt = data.metricUsersComputedAt
-    ? ` ${esc(data.metricUsersComputedAt.slice(0, 16).replace("T", " "))}Z`
-    : "";
-  const installsPanel = preferencePanel(
-    i18nHTML(
-      `Deduplicated installs <b>— ${rangeText}</b>${computedAt ? ` computed${computedAt}` : ""}`,
-      `按安装去重 <b>— ${rangeText}</b>${computedAt ? ` 统计于${computedAt}` : ""}`,
-    ),
-    data.metricUsersUnavailable
-      ? `<div class="empty">${unavailableNotice}</div>`
-      : settingsDashboard(settingsMetricUsers, { collapseSections: true }),
-    data.filters.preferenceMode === "users",
-  );
-  const opensPanel = preferencePanel(
-    i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`),
-    settingsDashboard(settingsMetrics, { collapseSections: true }),
-    data.filters.preferenceMode === "opens",
-  );
-  const preferencePanels = data.filters.preferenceMode === "opens" ? `${opensPanel}${installsPanel}` : `${installsPanel}${opensPanel}`;
-  const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div><div class="module-actions">${preferenceControls}</div></div>
-<div class="preference-compare">${preferencePanels}</div></section>`;
+  const preferencesModule = `<section id="preferences" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Settings preferences", "设置偏好")}</h2></div></div>
+<section class="module-panel"><h3>${i18nHTML(`Launch/open snapshots <b>— ${rangeText}</b>`, `启动/开启快照 <b>— ${rangeText}</b>`)}</h3>${settingsDashboard(settingsMetrics, { collapseSections: true })}</section></section>`;
   const healthModule = `<section id="health" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Agent health", "运行健康")}</h2></div><div class="module-actions"><a class="module-action" href="${esc(filterQS({}, "preferences"))}">${i18n("Preferences", "设置偏好")}</a></div></div>
 <section class="module-panel"><h3>${i18nHTML(`Health summary <b>— ${rangeText}, compared with previous window</b>`, `健康摘要 <b>— ${rangeText}，对比上一窗口</b>`)}</h3>${agentHealth(agentMetrics, previousAgentMetrics)}</section>
-<section class="module-panel"><h3>${i18nHTML(`Affected installs <b>— ${rangeText}, deduplicated${healthComputedAt ? `, computed ${healthComputedAt}` : ""}</b>`, `受影响安装 <b>— ${rangeText}，按安装去重${healthComputedAt ? `，统计于 ${healthComputedAt}` : ""}</b>`)}</h3>${
-    data.metricUsersUnavailable
-      ? `<div class="empty">${range === 30
-          ? i18nHTML(`The 30-day deduplication is not ready. <a href="${esc(filterQS({ window: "7d" }, "health"))}">Use 7d</a> meanwhile.`, `30 天去重统计尚未就绪。<a href="${esc(filterQS({ window: "7d" }, "health"))}">先看 7 天</a>。`)
-          : i18n(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`)}</div>`
-          : metricsCards(agentMetricUsers, ["desktop_hang", "desktop_hang_age", "desktop_web_runtime_failure", "desktop_webview2_failure", "desktop_restore", "desktop_exit"])
-  }</section>
 <section class="module-panel"><h3>${i18nHTML(`Signal distributions <b>— ${rangeText}, opt-in aggregate</b>`, `信号分布 <b>— ${rangeText}，opt-in 汇总</b>`)}</h3>${metricsCards(agentMetrics)}</section>
 </section>`;
   const activeModuleHTML: Record<StatsModule, string> = {

@@ -131,30 +131,6 @@ CREATE TABLE IF NOT EXISTS cli_metrics (
   PRIMARY KEY (date, version, os, signal, bucket)
 );
 
--- Deduplicated Desktop DAU for opt-in metric buckets. install_id is the same
--- random anonymous install id used by launch pings; it is not an account id.
-CREATE TABLE IF NOT EXISTS metric_users (
-  date TEXT NOT NULL,
-  signal TEXT NOT NULL,
-  bucket TEXT NOT NULL,
-  install_id TEXT NOT NULL,
-  version TEXT NOT NULL,
-  os TEXT NOT NULL,
-  arch TEXT NOT NULL DEFAULT '',
-  os_build INTEGER NOT NULL DEFAULT 0,
-  os_revision INTEGER NOT NULL DEFAULT 0,
-  channel TEXT NOT NULL DEFAULT '',
-  distro_id TEXT NOT NULL DEFAULT '',
-  distro_version TEXT NOT NULL DEFAULT '',
-  kernel_version TEXT NOT NULL DEFAULT '',
-  session_type TEXT NOT NULL DEFAULT '',
-  runtime_engine TEXT NOT NULL DEFAULT '',
-  runtime_version TEXT NOT NULL DEFAULT '',
-  gpu_mode TEXT NOT NULL DEFAULT '',
-  event_count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (date, signal, bucket, install_id)
-);
-
 CREATE TABLE IF NOT EXISTS report_daily (
   date TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
@@ -236,48 +212,6 @@ CREATE TABLE IF NOT EXISTS diagnostics_meta (
 
 INSERT OR IGNORE INTO diagnostics_meta (key, value)
 VALUES ('installation_linked_since', date('now'));
-
-CREATE TABLE IF NOT EXISTS cli_metric_users (
-  date TEXT NOT NULL,
-  signal TEXT NOT NULL,
-  bucket TEXT NOT NULL,
-  install_id TEXT NOT NULL,
-  version TEXT NOT NULL,
-  os TEXT NOT NULL,
-  arch TEXT NOT NULL DEFAULT '',
-  os_build INTEGER NOT NULL DEFAULT 0,
-  os_revision INTEGER NOT NULL DEFAULT 0,
-  channel TEXT NOT NULL DEFAULT '',
-  distro_id TEXT NOT NULL DEFAULT '',
-  distro_version TEXT NOT NULL DEFAULT '',
-  kernel_version TEXT NOT NULL DEFAULT '',
-  session_type TEXT NOT NULL DEFAULT '',
-  runtime_engine TEXT NOT NULL DEFAULT '',
-  runtime_version TEXT NOT NULL DEFAULT '',
-  gpu_mode TEXT NOT NULL DEFAULT '',
-  event_count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (date, signal, bucket, install_id)
-);
-
--- Cron-built answer to the preferences module's 30-day deduplication, which
--- spans ~28M rows of metric_users: too many to count per request, and not
--- summable from daily totals. refreshMetricUserRollup fills it one signal at a
--- time. The worker creates both tables at runtime, so existing databases need
--- no manual migration.
-CREATE TABLE IF NOT EXISTS metric_user_rollup (
-  window_days INTEGER NOT NULL,
-  signal TEXT NOT NULL,
-  bucket TEXT NOT NULL,
-  total INTEGER NOT NULL,
-  computed_at TEXT NOT NULL,
-  PRIMARY KEY (window_days, signal, bucket)
-);
-
-CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  next_signal INTEGER NOT NULL,
-  updated_at TEXT NOT NULL
-);
 
 -- Legacy local auth — superseded by id.reasonix.io identity + the `access`
 -- table below. Kept during the transition; migrate-access.sql copies roles over.

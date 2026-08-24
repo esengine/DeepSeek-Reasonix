@@ -14,12 +14,8 @@ routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
 # secret of the same name by deploy-crash-worker.yml on every deploy — set it
 # under repo Settings → Secrets → Actions, no Cloudflare login needed. The
 # sentinel expression must stay in sync with SENTINEL_CRON in src/index.ts.
-# Third entry: hourly metric_user rollup (refreshMetricUserRollup) — the
-# preferences module reads it instead of a 30-day query D1 will not finish. Each
-# run advances a cursor through the signal list, so a full pass takes several
-# hours. Must stay in sync with ROLLUP_CRON in src/index.ts.
 [triggers]
-crons = ["47 19 * * *", "17 1,7,13,19 * * *", "23 * * * *"]
+crons = ["47 19 * * *", "17 1,7,13,19 * * *"]
 
 [vars]
 # Emails force-promoted to dashboard admin — the owner is never locked out even

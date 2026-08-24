@@ -134,14 +134,13 @@ func TestFlushPendingAggregatesAndDeletesOnlyAfterSuccess(t *testing.T) {
 		}
 	}
 	requests := 0
-	var client *Client
-	client = testClient(home, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	client := testClient(home, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		requests++
 		var payload metricsPayload
 		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Surface != "cli" || payload.OS != "android" || payload.InstallID != client.installID {
+		if payload.Surface != "cli" || payload.OS != "android" {
 			t.Fatalf("metrics payload = %+v", payload)
 		}
 		got := map[string]int{}
