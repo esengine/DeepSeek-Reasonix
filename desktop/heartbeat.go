@@ -49,6 +49,7 @@ type HeartbeatTask struct {
 	TimeWindowStart        string         `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
 	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
 	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
+	Model                  string         `json:"model,omitempty"`           // optional "provider/model" ref; empty = keep the topic's current model
 }
 
 // HeartbeatRun records a single successful execution of a heartbeat task.
@@ -65,6 +66,7 @@ const maxRunHistory = 20
 // heartbeatSchemaVersion is the current on-disk config schema version.
 // v1 (schemaVersion absent/0): interval-only tasks, no runHistory.
 // v2: adds runHistory per task (execution history, capped at maxRunHistory).
+// v3: adds Model per task (optional per-task "provider/model" ref).
 //
 // Migration boundary: configs written by v2+ binaries are read fine by older
 // binaries (unknown fields are ignored by json.Unmarshal), but an older
@@ -73,7 +75,7 @@ const maxRunHistory = 20
 // upgrade — once a v2+ binary has saved, do not run an older binary that
 // writes the config. writeTasks refuses to overwrite a config with a
 // schemaVersion newer than this binary understands (forward protection).
-const heartbeatSchemaVersion = 2
+const heartbeatSchemaVersion = 3
 
 // heartbeatConfig is the on-disk format.
 type heartbeatConfig struct {
@@ -135,6 +137,10 @@ type HeartbeatEngine struct {
 	done           chan struct{}
 	running        bool
 	app            *App // back-reference for topic creation, tab routing, and prompt submission
+	// applyTaskModel switches a task's tab to its configured model before the
+	// prompt is submitted. Defaults to the app model switch; injectable in
+	// tests, where a full controller rebuild is not available.
+	applyTaskModel func(tabID, model string) error
 }
 
 type heartbeatPendingTopic struct {
@@ -444,6 +450,11 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 		}
 		e.mu.Unlock()
 		return e.executeTaskOwned(t)
+	}
+
+	t, ok = e.applyConfiguredModel(t, tabMeta.ID)
+	if !ok {
+		return t
 	}
 
 	// Set the task's approval mode only after confirming the controller is idle.

@@ -22,4 +22,5 @@ export interface HeartbeatTask {
   timeWindowStart?: string; // "HH:MM" — interval tasks only run after this time
   timeWindowEnd?: string;   // "HH:MM" — interval tasks only run before this time
   notifyChannels?: boolean; // true = push to bot channels; false/nil = skip
+  model?: string;           // optional "provider/model" ref; empty = keep the topic's current model
 }
