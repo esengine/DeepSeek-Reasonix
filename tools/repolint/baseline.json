@@ -2,10 +2,10 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2013,
-    "essay": 1980,
-    "file-size": 107997,
-    "function-size": 8672,
+    "complexity": 2005,
+    "essay": 1979,
+    "file-size": 107967,
+    "function-size": 8663,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
@@ -25,7 +25,7 @@
     "desktop/app.go": {
       "complexity": 58,
       "essay": 64,
-      "file-size": 11128,
+      "file-size": 11111,
       "function-size": 365,
       "struct-state": 15
     },
@@ -123,7 +123,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 7277
+      "file-size": 7269
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 43
@@ -379,7 +379,7 @@
     "internal/agent/agent.go": {
       "complexity": 31,
       "essay": 25,
-      "file-size": 2044,
+      "file-size": 2042,
       "function-size": 104,
       "struct-state": 2
     },
@@ -439,8 +439,7 @@
       "test-file-size": 973
     },
     "internal/agent/final_readiness.go": {
-      "complexity": 21,
-      "function-size": 14
+      "complexity": 12
     },
     "internal/agent/fleet.go": {
       "essay": 3,
@@ -485,7 +484,7 @@
       "essay": 1
     },
     "internal/agent/run_loop.go": {
-      "essay": 15,
+      "essay": 14,
       "function-size": 3
     },
     "internal/agent/run_usage.go": {
@@ -564,7 +563,7 @@
     "internal/boot/boot.go": {
       "complexity": 264,
       "essay": 82,
-      "file-size": 2078,
+      "file-size": 2079,
       "function-size": 1726,
       "narrative": 3
     },
@@ -816,7 +815,7 @@
     },
     "internal/config/config.go": {
       "essay": 24,
-      "file-size": 1547,
+      "file-size": 1548,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1221,10 +1220,10 @@
       "test-file-size": 252
     },
     "internal/provider/openai/openai.go": {
-      "complexity": 67,
+      "complexity": 68,
       "essay": 35,
-      "file-size": 541,
-      "function-size": 250,
+      "file-size": 536,
+      "function-size": 255,
       "struct-state": 9
     },
     "internal/provider/openai/openai_test.go": {
