@@ -1311,7 +1311,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Transcript scroll keys work in any state (PgUp/PgDn are never text).
 		switch msg.String() {
-		case "pgup", "pgdown":
+		case "pgup", "shift+pgup", "shift+up", "pgdown", "shift+pgdown", "shift+down":
 			if m.scrollTranscript(msg.String()) {
 				m.syncScrollModeAfterGesture()
 				return m, finalize(m, cmds)
@@ -2168,6 +2168,14 @@ func (m *chatTUI) scrollTranscript(key string) bool {
 		m.viewport.PageUp()
 	case "pgdown":
 		m.viewport.PageDown()
+	case "shift+pgup":
+		m.viewport.HalfPageUp()
+	case "shift+pgdown":
+		m.viewport.HalfPageDown()
+	case "shift+up":
+		m.viewport.ScrollUp(1)
+	case "shift+down":
+		m.viewport.ScrollDown(1)
 	default:
 		return false
 	}
