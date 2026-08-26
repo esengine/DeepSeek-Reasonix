@@ -22,7 +22,7 @@ import {
   getTelegramConnectIntent,
   getTelegramStatusLabel,
   type TelegramDesktopSettingsState,
-} from "../telegram-settings";
+} from "../../src/telegram-settings";
 import {
   FONT_FAMILY,
   FONT_SCALE,

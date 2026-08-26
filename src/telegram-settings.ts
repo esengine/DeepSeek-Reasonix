@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t } from "../desktop/src/i18n";
 
 export interface TelegramDesktopSettingsState {
   botToken?: string;

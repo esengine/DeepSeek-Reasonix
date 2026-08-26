@@ -98,7 +98,7 @@ import {
   saveDesktopTelegramSettings,
   saveDesktopTelegramEnabled,
   type TelegramDesktopSettingsState,
-} from "../../desktop/telegram-settings.js";
+} from "../../telegram-settings.js";
 import {
   loadTelegramConfig,
   saveTelegramConfig,
