@@ -97,7 +97,12 @@ import {
   loadDesktopTelegramState,
   saveDesktopTelegramSettings,
   saveDesktopTelegramEnabled,
+  type TelegramDesktopSettingsState,
 } from "../../desktop/telegram-settings.js";
+import {
+  loadTelegramConfig,
+  saveTelegramConfig,
+} from "../../config.js";
 import {
   clearQQTurnRouting,
   createQQTurnRoutingState,
@@ -1088,7 +1093,11 @@ function emitQQSettings(tab: Tab): void {
 }
 
 function emitTelegramSettings(tab: Tab): void {
-  const base = loadDesktopTelegramState();
+  const cfg = loadTelegramConfig();
+  const base = loadDesktopTelegramState({
+    botToken: cfg.botToken,
+    enabled: cfg.enabled,
+  });
   emit(
     {
       type: "$telegram_settings",
@@ -3566,7 +3575,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "telegram_config_save") {
       try {
-        saveDesktopTelegramSettings({ botToken: msg.botToken });
+        saveTelegramConfig({ botToken: msg.botToken });
         emitTelegramSettings(tab);
       } catch (err) {
         emit(

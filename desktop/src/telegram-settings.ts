@@ -1,5 +1,4 @@
 import { t } from "./i18n";
-import { loadTelegramConfig, saveTelegramConfig } from "../../src/config.js";
 
 export interface TelegramDesktopSettingsState {
   botToken?: string;
@@ -60,28 +59,26 @@ export function describeTelegramRowSummary(tg: TelegramDesktopSettingsState): st
   });
 }
 
-export function loadDesktopTelegramState(): TelegramDesktopSettingsState {
-  const config = loadTelegramConfig();
+export function loadDesktopTelegramState(partial?: Partial<TelegramDesktopSettingsState>): TelegramDesktopSettingsState {
   return {
-    botToken: config.botToken,
-    enabled: config.enabled ?? false,
-    configured: !!config.botToken,
-    runtimeState: "disconnected",
-    botTokenPreview: maskTelegramBotToken(config.botToken),
-    access: "access control configured",
+    botToken: partial?.botToken,
+    enabled: partial?.enabled ?? false,
+    configured: !!partial?.botToken,
+    runtimeState: partial?.runtimeState ?? "disconnected",
+    botTokenPreview: maskTelegramBotToken(partial?.botToken),
+    lastError: partial?.lastError,
+    access: partial?.access ?? "access control configured",
   };
 }
 
-export function saveDesktopTelegramSettings(config: {
+export function saveDesktopTelegramSettings(_config: {
   botToken?: string;
   enabled?: boolean;
 }): void {
-  saveTelegramConfig({
-    botToken: config.botToken,
-    enabled: config.enabled ?? true,
-  });
+  // Config persistence is handled by the RPC handler in desktop.ts
+  // This function just validates the shape for the UI
 }
 
-export function setDesktopTelegramEnabled(enabled: boolean): void {
-  saveDesktopTelegramSettings({ enabled });
+export function setDesktopTelegramEnabled(_enabled: boolean): void {
+  // Config persistence is handled by the RPC handler in desktop.ts
 }
