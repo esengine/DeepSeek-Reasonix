@@ -26,6 +26,6 @@
     },
     "types": ["node"]
   },
-  "include": ["src/**/*", "packages/ink/src/**/*"],
+  "include": ["src/**/*", "packages/ink/src/**/*", "desktop/src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "examples", "benchmarks"]
 }
