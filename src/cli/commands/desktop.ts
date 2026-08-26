@@ -2862,6 +2862,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSkills(tab);
     emitMemory(tab);
     emitQQSettings(tab);
+    emitTelegramSettings(tab);
     if (restoredMessages) {
       const meta = loadSessionMeta(tab.currentSession);
       emit(
@@ -3036,6 +3037,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emitSkills(t);
         emitMemory(t);
         emitQQSettings(t);
+        emitTelegramSettings(t);
         if (!hasKey) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
         else if (t.toolset) emit({ type: "$ready" }, t.id);
         void emitBalance(t);

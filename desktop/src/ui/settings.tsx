@@ -22,7 +22,7 @@ import {
   getTelegramConnectIntent,
   getTelegramStatusLabel,
   type TelegramDesktopSettingsState,
-} from "../../src/telegram-settings";
+} from "../../../src/telegram-settings";
 import {
   FONT_FAMILY,
   FONT_SCALE,
@@ -90,6 +90,11 @@ export function SettingsModal({
   onDisconnectQQ,
   onSaveQQConfig,
   onOpenQQApplyLink,
+  onLoadTelegram,
+  onConnectTelegram,
+  onDisconnectTelegram,
+  onSaveTelegramConfig,
+  tg,
   onPickWorkspace,
   onImportCcSwitchMcp,
   onAddMcpSpec,

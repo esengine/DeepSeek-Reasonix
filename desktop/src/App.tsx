@@ -61,7 +61,7 @@ import type {
   SkillInfo,
 } from "./protocol";
 import { type QQDesktopSettingsState } from "./qq-settings";
-import { type TelegramDesktopSettingsState } from "../src/telegram-settings";
+import { type TelegramDesktopSettingsState } from "../../src/telegram-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel, type ContextPanelTab } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";

@@ -65,6 +65,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     externalImportSources: [],
     settings: null,
     qq: null,
+    tg: null,
     balance: null,
     mentionResults: null,
     mentionPreview: null,

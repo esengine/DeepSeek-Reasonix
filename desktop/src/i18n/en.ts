@@ -315,6 +315,7 @@ export const en = {
     telegramAccessOpen: "Open (unbound)",
     telegramSave: "Save",
     telegramSaveAndConnect: "Save and connect",
+    telegramBack: "Back",
     mcpSection: "Configured",
     currentWorkspace: "Current workspace",
     notSelected: "(not selected)",
