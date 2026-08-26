@@ -84,6 +84,20 @@ func inboxSteerLoader(st *sessioninbox.Store, itemID string) func() (string, err
 // The agent loader only captures the item ID and re-reads the blob on consume
 // so large steer bodies do not accumulate in the agent heap.
 func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, error) {
+	return c.trySteerInboxItem(id, "")
+}
+
+// TrySteerInboxItemForTurn applies an existing durable item only to the exact
+// active turn. A stale target falls back to queued-follow-up semantics.
+func (c *Controller) TrySteerInboxItemForTurn(turnID, id string) (sessioninbox.InboxReceipt, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return sessioninbox.InboxReceipt{}, fmt.Errorf("turnId is required")
+	}
+	return c.trySteerInboxItem(id, turnID)
+}
+
+func (c *Controller) trySteerInboxItem(id, expectedTurnID string) (sessioninbox.InboxReceipt, error) {
 	c.inbox.admissionMu.Lock()
 	dispatchAfterUnlock := false
 	defer c.unlockInboxSteerAdmission(&dispatchAfterUnlock)
@@ -144,7 +158,14 @@ func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, er
 		}
 	}
 	c.mu.Lock()
-	accepted := !c.closed && !c.rotating && c.running && c.executor != nil && len(env.FrozenImages) == 0 && c.executor.SteerItem(id, loader)
+	turnMatches := true
+	if expectedTurnID != "" {
+		turnMatches = false
+		if ledger := c.turnEventLedger(); ledger != nil {
+			turnMatches = ledger.ActiveTurnID() == expectedTurnID
+		}
+	}
+	accepted := turnMatches && !c.closed && !c.rotating && c.running && c.executor != nil && len(env.FrozenImages) == 0 && c.executor.SteerItem(id, loader)
 	if accepted {
 		c.inbox.mu.Lock()
 		c.inbox.trackActive(id)

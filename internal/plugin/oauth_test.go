@@ -97,8 +97,7 @@ func TestAuthorizeHTTPMCPUsesDiscoveryPKCEAndPersistsPrivateToken(t *testing.T) 
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+			writeOAuthMCPFixtureResponse(w, r)
 		case "/.well-known/oauth-protected-resource":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"resource":              server.URL + "/mcp",
@@ -239,8 +238,8 @@ func TestAuthorizeHTTPMCPUsesDiscoveryPKCEAndPersistsPrivateToken(t *testing.T) 
 	if err != nil {
 		t.Fatalf("authenticated MCP call: %v", err)
 	}
-	if !strings.Contains(string(result), `"ok":true`) {
-		t.Fatalf("result = %s", result)
+	if string(result) != `{}` {
+		t.Fatalf("result = %s, want typed empty ping result", result)
 	}
 }
 
@@ -345,8 +344,7 @@ func TestHTTPMCPRefreshesExpiredTokenAndRotatesRefreshToken(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+			writeOAuthMCPFixtureResponse(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -431,8 +429,7 @@ func TestHTTPMCPSerializesSharedRefreshTokenRotation(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+			writeOAuthMCPFixtureResponse(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -479,6 +476,65 @@ func TestHTTPMCPSerializesSharedRefreshTokenRotation(t *testing.T) {
 	}
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want 1", got)
+	}
+}
+
+func TestMCPOAuthConcurrentUnauthorizedRefreshesUnexpiredTokenOnce(t *testing.T) {
+	stateDir := t.TempDir()
+	refreshStarted := make(chan struct{})
+	allowRefresh := make(chan struct{})
+	var refreshCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if call := refreshCalls.Add(1); call != 1 {
+			t.Errorf("refresh endpoint called %d times", call)
+		}
+		if refreshCalls.Load() == 1 {
+			close(refreshStarted)
+			<-allowRefresh
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "access-new", "refresh_token": "refresh-new", "token_type": "Bearer", "expires_in": 3600,
+		})
+	}))
+	defer server.Close()
+
+	if err := saveMCPOAuthState(stateDir, mcpOAuthState{
+		Version: 1, Resource: server.URL + "/mcp", Issuer: server.URL,
+		ClientID: "client", TokenEndpoint: server.URL + "/token",
+		AccessToken: "access-revoked", RefreshToken: "refresh-old", TokenType: "Bearer", Expiry: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client, err := newMCPOAuthClient(stateDir, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authorize := func() error {
+		request := httptest.NewRequest(http.MethodPost, server.URL+"/mcp", nil)
+		request.Header.Set("Authorization", "Bearer access-revoked")
+		response := &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("unauthorized"))}
+		return client.Authorize(t.Context(), request, response)
+	}
+	errs := make(chan error, 2)
+	go func() { errs <- authorize() }()
+	<-refreshStarted
+	go func() { errs <- authorize() }()
+	close(allowRefresh)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+	}
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want one shared refresh", got)
+	}
+	if client.state.AccessToken != "access-new" {
+		t.Fatalf("OAuth client kept stale access token %q", client.state.AccessToken)
 	}
 }
 

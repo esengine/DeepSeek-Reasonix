@@ -17,6 +17,10 @@ type turnRuntime struct {
 	handoffNudges      int
 	usedAnyTool        bool
 	contextToolRepairs int
+	protocolRepairs    int
+	finishCalls        int
+	pendingFinalAnswer bool
+	finishOutcome      FinishOutcome
 	graceRound         bool
 	recoveryGraceRound bool
 
@@ -49,9 +53,7 @@ type turnRuntime struct {
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final
 	// allowed audit can report Recovered=true.
-	readinessRecovered             bool
-	automaticReadinessContinuation bool
-	mutationExpected               bool
+	readinessRecovered bool
 
 	// recoveryTaskSummary is the bounded task text for this Agent.Run. It lets
 	// a shared recovery gate review sub-agent mutations against the child
@@ -93,6 +95,15 @@ type turnRuntime struct {
 	// lastReasoning is the previous executor round's reasoning-token spend,
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
+}
+
+// TurnFinishOutcome is read while emitting TurnDone, before the next admission
+// can reset the per-run state.
+func (a *Agent) TurnFinishOutcome() FinishOutcome {
+	if a == nil {
+		return ""
+	}
+	return a.turn.finishOutcome
 }
 
 // pendingTurn is what someone outside the Run arms for the next one: a

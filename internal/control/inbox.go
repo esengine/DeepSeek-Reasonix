@@ -705,12 +705,28 @@ func (c *Controller) onInboxUnappliedSteer(itemID string) {
 
 // TryEnqueueAndSteer is a convenience for frontends: durable steer then TrySteer.
 func (c *Controller) TryEnqueueAndSteer(req InboxRequest) (sessioninbox.InboxReceipt, error) {
+	return c.tryEnqueueAndSteerForTurn("", req)
+}
+
+// TryEnqueueAndSteerForTurn preserves the durable fallback semantics while
+// fencing the mid-turn steer against the exact lifecycle turn observed by the
+// caller. If that turn has already ended, the instruction remains a queued
+// follow-up and is never injected into a replacement turn.
+func (c *Controller) TryEnqueueAndSteerForTurn(turnID string, req InboxRequest) (sessioninbox.InboxReceipt, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return sessioninbox.InboxReceipt{}, fmt.Errorf("turnId is required")
+	}
+	return c.tryEnqueueAndSteerForTurn(turnID, req)
+}
+
+func (c *Controller) tryEnqueueAndSteerForTurn(turnID string, req InboxRequest) (sessioninbox.InboxReceipt, error) {
 	req.Intent = sessioninbox.IntentSteer
 	rec, err := c.EnqueueInbox(req)
 	if err != nil {
 		return rec, err
 	}
-	steered, err := c.TrySteerInboxItem(rec.ItemID)
+	steered, err := c.trySteerInboxItem(rec.ItemID, turnID)
 	if errors.Is(err, sessioninbox.ErrPaused) {
 		rec.Disposition = sessioninbox.DispositionQueuedFollowup
 		rec.Paused = true

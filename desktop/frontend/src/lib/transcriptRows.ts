@@ -11,6 +11,7 @@
 // "expanded"), and preference switches applying to folds already on screen.
 
 import { isHostRecoveryGuidance } from "./hostRecoverySteer";
+import { stableStringHash } from "./stableStringHash";
 import { isBatchedReadOnlyTool, isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
 import { appendTurnActionCopyText } from "./turnActionCopy";
 import { isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "../components/ToolGroup";
@@ -174,6 +175,15 @@ export interface TurnModel {
   actionText: string;
 }
 
+function turnStableIdentity(model: TurnModel): string {
+  if (model.user) {
+    const user = model.user;
+    return JSON.stringify([user.id, user.submissionId ?? "", user.createdAt ?? null, user.text, user.submitText ?? "", user.historyTurn ?? null, user.checkpointTurn ?? null]);
+  }
+  const first = model.turnItems[0];
+  return JSON.stringify(["prelude", first?.kind ?? "", first?.id ?? ""]);
+}
+
 // Keep only items the fold body will actually render — an expandable fold over
 // nothing is worse than no fold. Assistant items reach the fold stripped to
 // their reasoning (answer text renders outside), so reasoning presence is the
@@ -242,12 +252,23 @@ export function buildTurnModels(
     model.isActive = running && index === turns.length - 1;
     const segments = partitionTurnItems(model.turnItems, live);
     const turnHasOutsideContent = segments.some((segment) => segment.outsideItems.length > 0);
+    const turnIdentity = turnStableIdentity(model);
     model.segments = segments.map((segment, segmentIndex) => {
       const isLastSegment = segmentIndex === segments.length - 1;
       const displayItems = foldDisplayItems(segment.processItems, live, hideReasoning);
       const turnActive = model.isActive && isLastSegment;
       return {
-        key: segment.processItems[0]?.id ?? "",
+        // Duplicate raw ids occur in imported/merged histories. Derive the
+        // disambiguator from stable turn/item identity rather than occurrence
+        // order, so prepending older history never renames an already mounted row.
+        key: `${segment.processItems[0]?.id || "seg"}@${stableStringHash(
+          JSON.stringify([
+            turnIdentity,
+            segmentIndex,
+            segment.processItems[0]?.kind ?? "",
+            segment.processItems[0]?.id ?? "",
+          ]),
+        )}`,
         processItems: segment.processItems,
         outsideItems: segment.outsideItems,
         displayItems,
@@ -630,32 +651,33 @@ export interface BuildRowsOptions {
 
 export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRowWithLayout[] {
   const rows: TranscriptRowWithLayout[] = [];
+  const rowGroups: TranscriptRowWithLayout[][] = [];
+  const usedKeys = new Set<string>();
   const reasoningDisplayMode = options.reasoningDisplayMode ?? "auto";
   const subcallsByParent = options.subcallsByParent ?? new Map<string, readonly ToolItem[]>();
-  if (options.hasOlderHistory) {
-    rows.push({ kind: "older-history", key: OLDER_HISTORY_ROW_KEY, layoutVariant: "static" });
-  }
-  for (const model of models) {
+  for (let modelIndex = models.length - 1; modelIndex >= 0; modelIndex -= 1) {
+    const model = models[modelIndex];
+    const modelRows: TranscriptRowWithLayout[] = [];
     const user = model.user;
     // Turn numbers come from the checkpoint-aware map, not the raw question
     // index, so rewind targets survive history paging.
     const turn = user ? options.turnForUser(user) : undefined;
     if (user) {
-      rows.push({ kind: "user", key: userRowKey(user.id), item: user, turn, layoutVariant: "text-flow" });
+      modelRows.push({ kind: "user", key: userRowKey(user.id), item: user, turn, layoutVariant: "text-flow" });
     }
     for (const segment of model.segments) {
       if (segment.displayItems.length > 0) {
         const open = options.folds.get(segment.key)?.open ?? defaultFoldOpen(segment, options.foldPreference);
-        rows.push({ kind: "process-header", key: `ph:${segment.key}`, segment, open, layoutVariant: "static" });
-        if (open) rows.push(...processBodyRows(segment, options.creationMode, reasoningDisplayMode, subcallsByParent));
+        modelRows.push({ kind: "process-header", key: `ph:${segment.key}`, segment, open, layoutVariant: "static" });
+        if (open) modelRows.push(...processBodyRows(segment, options.creationMode, reasoningDisplayMode, subcallsByParent));
       }
       for (const item of segment.outsideItems) {
         if (item.kind === "extension") {
-          rows.push({ kind: "extension", key: `x:${item.id}`, item, layoutVariant: "text-flow" });
+          modelRows.push({ kind: "extension", key: `x:${item.id}`, item, layoutVariant: "text-flow" });
         } else if (item.kind === "notice") {
-          rows.push({ kind: "notice", key: `n:${item.id}`, item, layoutVariant: "text-flow" });
+          modelRows.push({ kind: "notice", key: `n:${item.id}`, item, layoutVariant: "text-flow" });
         } else {
-          rows.push({ kind: "answer", key: `a:${item.id}`, item, layoutVariant: "text-flow" });
+          modelRows.push({ kind: "answer", key: `a:${item.id}`, item, layoutVariant: "text-flow" });
         }
       }
     }
@@ -668,9 +690,17 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
       (model.actionText.trim() || options.hasCheckpointForTurn?.(turn)) &&
       user
     ) {
-      rows.push({ kind: "turn-actions", key: `ta:${user.id}`, turn, text: model.actionText, layoutVariant: "static" });
+      modelRows.push({ kind: "turn-actions", key: `ta:${user.id}`, turn, text: model.actionText, layoutVariant: "static" });
     }
+    for (let index = modelRows.length - 1; index >= 0; index -= 1) {
+      const row = modelRows[index];
+      if (usedKeys.has(row.key)) modelRows[index] = { ...row, key: `${row.key}@${stableStringHash(`${turnStableIdentity(model)}|${row.kind}|${row.key}`)}` };
+      usedKeys.add(modelRows[index].key);
+    }
+    rowGroups.push(modelRows);
   }
+  for (let index = rowGroups.length - 1; index >= 0; index -= 1) rows.push(...rowGroups[index]);
+  if (options.hasOlderHistory) rows.unshift({ kind: "older-history", key: OLDER_HISTORY_ROW_KEY, layoutVariant: "static" });
   return rows;
 }
 

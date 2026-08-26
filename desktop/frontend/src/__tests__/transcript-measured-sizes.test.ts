@@ -4,8 +4,8 @@
 // - EAW-aware text estimation: full-width scripts wrap at roughly half the
 //   character count, so CJK rows must estimate higher than the old
 //   char-based formula; half-width text stays close to the old behavior.
-// - Measured-size cache: exact rowKey hit beats kind median beats static
-//   prior; medians converge on recorded samples; clear() drops everything.
+// - Measured-size cache: exact row hits stay logical-row scoped; answer rows
+//   may use a bounded same-layout prior for first-visit stability.
 
 import {
   eastAsianWidthColumns,
@@ -179,7 +179,7 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
 }
 
 {
-  const store = createTranscriptMeasuredSizes({ maxSessions: 2, maxRowsPerSession: 2, maxCalibrationSamples: 1 });
+  const store = createTranscriptMeasuredSizes({ maxSessions: 2, maxRowsPerSession: 2 });
   const rowA = fakeRow("a", "answer", "answer A");
   rowA.layoutVariant = "text-flow";
   const environment = { contentWidth: 960, typographySignature: "font-a" };
@@ -233,7 +233,7 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
   const answer: Item = { kind: "assistant", id: "answer-1", text: "done", reasoning: "", streaming: false };
   const models = buildTurnModels([user, firstTool, secondTool, answer]);
   const folds: FoldMap = new Map([[
-    "tool-1",
+    models[0].segments[0].key,
     { open: true, userOverridden: true, running: false },
   ]]);
   const options = {
@@ -293,7 +293,7 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
   recordRow(store, fakeRow("a2", "answer", "second"), 300);
   recordRow(store, fakeRow("a3", "answer", "third"), 200);
   const unseen = fakeRow("a4", "answer", "some answer text that is long enough to matter");
-  eq(estimateFor(store, unseen), 200, "unseen row of a sampled kind uses the kind median");
+  eq(estimateFor(store, unseen), 200, "unseen answer rows use a same-layout bounded prior");
   const toolRow = fakeRow("t1", "tool", "");
   eq(estimateFor(store, toolRow), estimateTranscriptRowSize(toolRow), "unsampled kind still uses the static prior");
 }
@@ -308,7 +308,7 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
   recordRow(store, second, 400, 960);
   eq(estimateFor(store, first, 960), 632, "a later real measurement replaces the stale estimate for the same row");
   eq(estimateFor(store, second, 960), 400, "a second row keeps its own latest measurement");
-  eq(estimateFor(store, unseen, 960), 516, "kind fallback uses one latest sample per row instead of duplicate observations");
+  eq(estimateFor(store, unseen, 960), 516, "answer prior uses one latest sample per logical row");
 }
 
 {

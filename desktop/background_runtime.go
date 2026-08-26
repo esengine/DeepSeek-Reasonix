@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -75,7 +76,50 @@ func (v ActiveWorkView) active() bool {
 // ActiveWorkForTab returns the precise blocker state for one tab. It is a
 // preflight aid only; rebuild paths still re-check active work atomically.
 func (a *App) ActiveWorkForTab(tabID string) ActiveWorkView {
+	if a.isRemoteTab(tabID) {
+		view, err := a.remoteActiveWorkForTab(tabID)
+		if err != nil {
+			// A remote tab whose status cannot be observed must fail closed: the
+			// caller must not silently detach potentially mutating work.
+			return ActiveWorkView{Running: true, Cancellable: true, Jobs: []JobView{}}
+		}
+		return view
+	}
 	return activeWorkForController(a.ctrlForRuntimeTabID(tabID))
+}
+
+func (a *App) remoteActiveWorkForTab(tabID string) (ActiveWorkView, error) {
+	raw, err := a.RemoteTabStatus(tabID)
+	view := ActiveWorkView{Jobs: []JobView{}}
+	if err != nil {
+		return view, err
+	}
+	var status struct {
+		Running        bool `json:"running"`
+		PendingPrompt  bool `json:"pendingPrompt"`
+		BackgroundJobs int  `json:"backgroundJobs"`
+		Cancellable    bool `json:"cancellable"`
+		Jobs           []struct {
+			ID        string `json:"id"`
+			Kind      string `json:"kind"`
+			Label     string `json:"label"`
+			Status    string `json:"status"`
+			StartedAt int64  `json:"startedAt"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return view, err
+	}
+	view.Running = status.Running || status.BackgroundJobs > 0 || len(status.Jobs) > 0
+	view.PendingPrompt = status.PendingPrompt
+	view.Cancellable = status.Cancellable || status.Running || status.PendingPrompt || status.BackgroundJobs > 0 || len(status.Jobs) > 0
+	for _, job := range status.Jobs {
+		view.Jobs = append(view.Jobs, JobView{
+			ID: job.ID, Kind: job.Kind, Label: job.Label,
+			Status: job.Status, StartedAt: job.StartedAt,
+		})
+	}
+	return view, nil
 }
 
 // CancelJobsForTab requests cancellation for a stable tab id. The job manager
@@ -311,6 +355,55 @@ const stopAndCloseGrace = 15 * time.Second
 // CloseTabWithPolicy makes the old implicit detach behavior an explicit user
 // choice. stop_and_close never removes the tab until all owned work is idle.
 func (a *App) CloseTabWithPolicy(tabID, policy string) error {
+	a.remoteTabMu.Lock()
+	_, isRemote := a.remoteTabs[tabID]
+	a.remoteTabMu.Unlock()
+	if isRemote {
+		switch strings.TrimSpace(policy) {
+		case "keep_running":
+			return a.CloseRemoteTab(tabID)
+		case "stop_and_close":
+			work, err := a.remoteActiveWorkForTab(tabID)
+			if err != nil {
+				return fmt.Errorf("remote work status is unavailable; the task was kept open: %w", err)
+			}
+			if !work.active() {
+				return a.CloseRemoteTab(tabID)
+			}
+			if err := a.CancelRemoteTab(tabID); err != nil {
+				return err
+			}
+			ids := make([]string, 0, len(work.Jobs))
+			for _, job := range work.Jobs {
+				ids = append(ids, job.ID)
+			}
+			if len(ids) > 0 {
+				if err := a.CancelRemoteTabJobs(tabID, ids); err != nil {
+					return err
+				}
+			}
+			deadline := time.NewTimer(stopAndCloseGrace)
+			defer deadline.Stop()
+			ticker := time.NewTicker(50 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				work, err = a.remoteActiveWorkForTab(tabID)
+				if err != nil {
+					return fmt.Errorf("remote work status is unavailable; the task was kept open: %w", err)
+				}
+				if !work.active() {
+					return a.CloseRemoteTab(tabID)
+				}
+				select {
+				case <-deadline.C:
+					return fmt.Errorf("remote work did not stop within %s; the task was kept open", stopAndCloseGrace)
+				case <-ticker.C:
+				}
+			}
+		default:
+			return fmt.Errorf("unknown close policy %q", policy)
+		}
+	}
 	switch strings.TrimSpace(policy) {
 	case "keep_running":
 		return a.closeTab(tabID, true)

@@ -140,7 +140,7 @@ mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety c
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
-stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
+stalled_warning_seconds = 900   # heads-up once per background job after this many quiet seconds; a quiet job is not necessarily stuck; 0 disables
 
 # Sandbox confinement bounds the blast radius of tool calls. Writers may only
 # modify workspace_root (empty = current directory) plus allow_write. forbid_read

@@ -4,8 +4,10 @@
 // "Open Remote Web" entry, Serve progress states, the workspace home-directory
 // fallback, and the fixed remote-provider hint.
 
-import { JSDOM } from "jsdom";
 import React from "react";
+import { JSDOM } from "jsdom";
+
+import type { AppBindings } from "../lib/bridge";
 
 let passed = 0;
 let failed = 0;
@@ -48,12 +50,18 @@ onRemoteServer((s) => useRemoteStore.getState().setServer(s));
 onRemoteStatus((s) => useRemoteStore.getState().applyStatus(s));
 
 const openCalls: Array<{ hostId: string; workspace: string }> = [];
+const stopCalls: Array<{ hostId: string; workspace: string }> = [];
+const statusCalls: Array<{ hostId: string; workspace: string }> = [];
 window.go = { main: { App: {
   async RemoteLastWorkspace(hostId: string) {
     return hostId === "box" ? "/srv/app" : "";
   },
-  async RemoteServerStatus() {
-    return { hostId: "box", workspace: "/srv/app", state: "stopped" };
+  async RemoteServerStatus(hostId: string, workspace: string) {
+    statusCalls.push({ hostId, workspace });
+    // Echo the registered per-workspace view when one exists (the bound call
+    // returns the tracked entry), else a fresh stopped view.
+    return useRemoteStore.getState().servers[hostId]?.[workspace]
+      ?? { hostId, workspace, state: "stopped" };
   },
   async RemoteServerLogs() {
     return "";
@@ -61,10 +69,12 @@ window.go = { main: { App: {
   async OpenRemoteWorkspace(hostId: string, workspace: string) {
     openCalls.push({ hostId, workspace });
   },
-  async StopRemoteServer() {},
-} } };
+  async StopRemoteServer(hostId: string, workspace: string) {
+    stopCalls.push({ hostId, workspace });
+  },
+} as Partial<AppBindings> as AppBindings } };
 
-const host = { id: "box", label: "box", host: "box.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "/srv/app", serveInstall: "auto", useSSHConfig: false };
+const host = { id: "box", label: "box", host: "box.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "/srv/app", serveInstall: "auto", credentialMode: "remote", useSSHConfig: false };
 useRemoteStore.getState().setHosts([host]);
 useRemoteStore.getState().openExplorer("box");
 useRemoteStore.getState().setExplorerTab("server");
@@ -124,7 +134,7 @@ await act(async () => {
   useRemoteStore.getState().setExplorerTab("server");
   useRemoteStore.getState().setHosts([
     host,
-    { id: "bare", label: "bare", host: "bare.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", useSSHConfig: false },
+    { id: "bare", label: "bare", host: "bare.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", credentialMode: "remote", useSSHConfig: false },
   ]);
   useRemoteStore.getState().applyStatus({ hostId: "bare", state: "connected" });
   await Promise.resolve();
@@ -141,6 +151,53 @@ ok(
   openCalls.length === 2 && openCalls[1].hostId === "bare" && openCalls[1].workspace === "~",
   `fresh host opens the SSH login home (got ${JSON.stringify(openCalls)})`,
 );
+
+// ── Per-workspace management: two registered serves on one host ──
+await act(async () => {
+  useRemoteStore.getState().openExplorer("box");
+  useRemoteStore.getState().setExplorerTab("server");
+  await Promise.resolve();
+});
+await act(async () => {
+  __emitMockRemote("server", { hostId: "box", workspace: "/srv/app", state: "ready" });
+  __emitMockRemote("server", { hostId: "box", workspace: "/srv/web", state: "ready" });
+  await Promise.resolve();
+});
+const stopButton = () => Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("Stop"));
+ok(statusCalls.some((c) => c.hostId === "box" && c.workspace === "/srv/app"), "status is fetched per workspace (the input's workspace)");
+await act(async () => {
+  stopButton()?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await Promise.resolve();
+});
+ok(
+  stopCalls.length === 1 && stopCalls[0].hostId === "box" && stopCalls[0].workspace === "/srv/app",
+  `stop targets the managed workspace (got ${JSON.stringify(stopCalls)})`,
+);
+// Switching the input switches which registered serve the panel manages; the
+// other workspace's entry is untouched in the store.
+{
+  const wsInput = document.querySelector<HTMLInputElement>('input[placeholder="~"]');
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(wsInput, "/srv/web");
+    wsInput?.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  ok(stopButton()?.hasAttribute("disabled") === false, "switching the workspace keeps the other ready serve manageable");
+  await act(async () => {
+    stopButton()?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+  ok(
+    stopCalls.length === 2 && stopCalls[1].workspace === "/srv/web",
+    `stop follows the workspace switch (got ${JSON.stringify(stopCalls)})`,
+  );
+  const servers = useRemoteStore.getState().servers;
+  ok(
+    servers.box?.["/srv/app"]?.state === "ready" && servers.box?.["/srv/web"]?.state === "ready",
+    "both workspaces keep independent entries in the store",
+  );
+}
 
 await act(async () => { root.unmount(); });
 dom.window.close();

@@ -1,5 +1,18 @@
 import type { TabMeta } from "./types";
 
+export function seedActiveTabMetaList(current: TabMeta[], tab: TabMeta): TabMeta[] {
+  const seeded = { ...tab, active: true };
+  let found = false;
+  const next = current.map((existing) => {
+    if (existing.id === tab.id) {
+      found = true;
+      return { ...existing, ...seeded };
+    }
+    return existing.active ? { ...existing, active: false } : existing;
+  });
+  return found ? next : [...next, seeded];
+}
+
 export const TAB_META_VISIBLE_FALLBACK_MS = 15_000;
 export const TAB_META_HIDDEN_FALLBACK_MS = 60_000;
 export const TAB_META_MAX_IN_FLIGHT = 2;

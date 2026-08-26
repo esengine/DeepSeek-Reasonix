@@ -53,13 +53,15 @@ type Options struct {
 // EpisodeID is host-owned temporary execution-round state. TaskScopeID continues
 // to scope Goal and task grants. Episode/generation/waiters never persist.
 type Gate struct {
-	mu      sync.Mutex
-	opts    Options
-	tasks   map[string]*taskRuntime
-	metrics Metrics
-	waiters map[string]chan resolvePayload // keyed by approval id
-	taskOf  map[string]string              // approval id -> task id
-	pending map[string]PendingProposal     // approval id -> transient proposal scope
+	mu         sync.Mutex
+	opts       Options
+	tasks      map[string]*taskRuntime
+	metrics    Metrics
+	waiters    map[string]chan resolvePayload // keyed by approval id
+	taskOf     map[string]string              // approval id -> task id
+	pending    map[string]PendingProposal     // approval id -> transient proposal scope
+	resolving  map[string]uint64              // approval id -> two-phase resolution token
+	resolveSeq uint64
 	// awaiting tracks in-flight human prompts so Phase can be derived without
 	// storing Pending on the task runtime.
 	awaiting map[string]struct{} // task ids with an open waiter
@@ -117,6 +119,7 @@ func NewGate(opts Options) *Gate {
 		waiters:        map[string]chan resolvePayload{},
 		taskOf:         map[string]string{},
 		pending:        map[string]PendingProposal{},
+		resolving:      map[string]uint64{},
 		awaiting:       map[string]struct{}{},
 		episodeSeq:     1,
 		episodeID:      "ep:1",
@@ -258,6 +261,7 @@ func (g *Gate) collectWaitersLocked(payload resolvePayload) []dismissedWaiter {
 		delete(g.waiters, id)
 		delete(g.taskOf, id)
 		delete(g.pending, id)
+		delete(g.resolving, id)
 		delete(g.awaiting, taskID)
 	}
 	return out
@@ -430,10 +434,37 @@ func (g *Gate) BindApprovalID(taskID, approvalID string) {
 	g.awaiting[taskID] = struct{}{}
 }
 
+// UnbindApprovalID rolls back a prompt that could not be durably published.
+// The provisional waiter is cleaned by the caller's EmitPrompt error path.
+func (g *Gate) UnbindApprovalID(taskID, approvalID string) {
+	if g == nil {
+		return
+	}
+	taskID = normalizeTaskID(taskID)
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return
+	}
+	g.mu.Lock()
+	delete(g.waiters, approvalID)
+	delete(g.taskOf, approvalID)
+	delete(g.pending, approvalID)
+	delete(g.resolving, approvalID)
+	delete(g.awaiting, taskID)
+	g.mu.Unlock()
+}
+
 // Resolve applies a user decision to a pending Auto Guard approval.
 // action is continue|continue_task|revise. For revise, feedback is returned through the
 // blocked tool result and the current mutation is refused in the same operation.
 func (g *Gate) Resolve(id string, action Action, feedback string) error {
+	return g.ResolveAfter(id, action, feedback, nil)
+}
+
+// ResolveAfter validates a pending decision, runs before while the decision is
+// still reserved, and only then releases the waiter. Controllers use it to
+// durably record PromptAnswered before an agent or tool can resume.
+func (g *Gate) ResolveAfter(id string, action Action, feedback string, before func() error) error {
 	if g == nil {
 		return fmt.Errorf("recovery gate is nil")
 	}
@@ -446,7 +477,10 @@ func (g *Gate) Resolve(id string, action Action, feedback string) error {
 		g.mu.Unlock()
 		return fmt.Errorf("unknown recovery approval %q", id)
 	}
-	st := g.tasks[taskID]
+	if g.resolving[id] != 0 {
+		g.mu.Unlock()
+		return fmt.Errorf("recovery approval %q is already being resolved", id)
+	}
 	rotateEpisode := false
 	switch action {
 	case ActionContinue, ActionContinueTask:
@@ -455,6 +489,47 @@ func (g *Gate) Resolve(id string, action Action, feedback string) error {
 				g.mu.Unlock()
 				return fmt.Errorf("recovery approval %q cannot grant similar actions", id)
 			}
+		}
+	case ActionRevise:
+		rotateEpisode = true
+		if strings.TrimSpace(feedback) == "" {
+			feedback = DefaultReviseFeedback
+		}
+	default:
+		g.mu.Unlock()
+		return fmt.Errorf("unknown recovery action %q", action)
+	}
+	g.resolveSeq++
+	if g.resolveSeq == 0 {
+		g.resolveSeq++
+	}
+	token := g.resolveSeq
+	g.resolving[id] = token
+	g.mu.Unlock()
+
+	if before != nil {
+		if err := before(); err != nil {
+			g.mu.Lock()
+			if g.resolving[id] == token {
+				delete(g.resolving, id)
+			}
+			g.mu.Unlock()
+			return err
+		}
+	}
+
+	g.mu.Lock()
+	if g.resolving[id] != token || g.taskOf[id] != taskID || g.waiters[id] != ch {
+		if g.resolving[id] == token {
+			delete(g.resolving, id)
+		}
+		g.mu.Unlock()
+		return fmt.Errorf("recovery approval %q is no longer pending", id)
+	}
+	st := g.tasks[taskID]
+	switch action {
+	case ActionContinue, ActionContinueTask:
+		if action == ActionContinueTask {
 			if st == nil {
 				st = &taskRuntime{episodeID: g.episodeID}
 				g.tasks[taskID] = st
@@ -469,18 +544,12 @@ func (g *Gate) Resolve(id string, action Action, feedback string) error {
 	case ActionRevise:
 		// Revise rejects the pending action and starts a fresh Recovery Episode
 		// so alternative approaches get a clean budget.
-		rotateEpisode = true
 		g.metrics.HumanRevises++
-		if strings.TrimSpace(feedback) == "" {
-			feedback = DefaultReviseFeedback
-		}
-	default:
-		g.mu.Unlock()
-		return fmt.Errorf("unknown recovery action %q", action)
 	}
 	delete(g.waiters, id)
 	delete(g.taskOf, id)
 	delete(g.pending, id)
+	delete(g.resolving, id)
 	delete(g.awaiting, taskID)
 	if !rotateEpisode {
 		if st == nil || (st.empty() && !st.hasTaskGrants()) {
@@ -1077,6 +1146,7 @@ func (g *Gate) askHuman(ctx context.Context, taskID, fp string, gen uint64, prop
 		delete(g.waiters, approvalID)
 		delete(g.taskOf, approvalID)
 		delete(g.pending, approvalID)
+		delete(g.resolving, approvalID)
 		delete(g.awaiting, taskID)
 		g.mu.Unlock()
 		g.persist()

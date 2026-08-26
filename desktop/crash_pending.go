@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/filelock"
+	"reasonix/internal/fileutil"
 )
 
 // crash_pending.go captures Go-side panics to disk and ships them on the next
@@ -25,6 +28,10 @@ const (
 	pendingCrashFile     = "crash-pending.json" // legacy single-report path
 	pendingCrashQueueDir = "crash-pending"
 	maxPendingCrashes    = 10
+	currentCrashSchema   = 3
+	crashLedgerFile      = "crash-upload-ledger-v1.json"
+	maxCrashLedger       = 512
+	crashLedgerRetention = 180 * 24 * time.Hour
 )
 
 var (
@@ -71,6 +78,9 @@ func writePendingCrash(site string, r any, stack []byte) {
 
 func writePendingReport(report crashReport, overwrite bool) bool {
 	_ = overwrite // retained for source compatibility; the queue never overwrites.
+	if ensureCrashIdentity(&report) != nil {
+		return false
+	}
 	body, err := json.Marshal(report)
 	if err != nil {
 		return false
@@ -95,12 +105,82 @@ func writePendingReport(report crashReport, overwrite bool) bool {
 		_ = os.Remove(path)
 		return false
 	}
+	return prunePendingCrashQueue(path)
+}
+
+func prunePendingCrashQueue(writtenPath string) bool {
 	paths := pendingCrashQueuePaths()
 	for len(paths) > maxPendingCrashes {
-		_ = os.Remove(paths[0])
-		paths = paths[1:]
+		victim := -1
+		for index, candidate := range paths {
+			body, err := os.ReadFile(candidate)
+			var header struct {
+				SchemaVersion int `json:"schemaVersion"`
+			}
+			if err != nil || json.Unmarshal(body, &header) != nil || header.SchemaVersion <= currentCrashSchema {
+				victim = index
+				break
+			}
+		}
+		if victim < 0 {
+			break
+		}
+		_ = os.Remove(paths[victim])
+		paths = append(paths[:victim], paths[victim+1:]...)
 	}
-	return true
+	_, err := os.Stat(writtenPath)
+	return err == nil
+}
+
+type crashUploadLedger struct {
+	Version int               `json:"version"`
+	Entries map[string]string `json:"entries"`
+}
+
+func crashLedgerPath() string {
+	return filepath.Join(config.MemoryUserDir(), "diagnostics", crashLedgerFile)
+}
+
+func crashLedgerKey(report crashReport) string {
+	return report.Version + ":" + report.DedupKey
+}
+
+func loadCrashLedger(path string, now time.Time) crashUploadLedger {
+	ledger := crashUploadLedger{Version: 1, Entries: map[string]string{}}
+	body, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(body, &ledger) != nil || ledger.Version != 1 || ledger.Entries == nil {
+		return crashUploadLedger{Version: 1, Entries: map[string]string{}}
+	}
+	cutoff := now.Add(-crashLedgerRetention)
+	for key, value := range ledger.Entries {
+		at, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil || at.Before(cutoff) {
+			delete(ledger.Entries, key)
+		}
+	}
+	return ledger
+}
+
+func saveCrashLedger(path string, ledger crashUploadLedger) error {
+	if len(ledger.Entries) > maxCrashLedger {
+		type row struct{ key, at string }
+		rows := make([]row, 0, len(ledger.Entries))
+		for key, at := range ledger.Entries {
+			rows = append(rows, row{key: key, at: at})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].at > rows[j].at })
+		for _, item := range rows[maxCrashLedger:] {
+			delete(ledger.Entries, item.key)
+		}
+	}
+	body, err := json.Marshal(ledger)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return fileutil.AtomicWriteFile(path, body, 0o600)
 }
 
 func pendingCrashQueuePaths() []string {
@@ -130,6 +210,8 @@ func removeAllPendingCrashes() {
 	_ = os.Remove(pendingCrashPath())
 	_ = os.RemoveAll(pendingCrashDir())
 	_ = os.Remove(fatalCrashCoveredPath())
+	_ = os.Remove(crashLedgerPath())
+	_ = os.Remove(crashLedgerPath() + ".lock")
 }
 
 func (a *App) goSafe(site string, fn func()) {
@@ -162,6 +244,18 @@ func (a *App) flushPendingCrash() {
 	if err != nil {
 		return
 	}
+	lockContext, cancel := context.WithTimeout(a.bootContext(), 3*time.Second)
+	defer cancel()
+	ledgerPath := crashLedgerPath()
+	if os.MkdirAll(filepath.Dir(ledgerPath), 0o700) != nil {
+		return
+	}
+	release, err := filelock.AcquireWithExternalTimeout(lockContext, ledgerPath+".lock", 2*time.Second)
+	if err != nil {
+		return
+	}
+	defer release()
+	ledger := loadCrashLedger(ledgerPath, time.Now().UTC())
 	for _, path := range paths {
 		body, readErr := readFileUTF8(path)
 		if readErr != nil {
@@ -172,7 +266,29 @@ func (a *App) flushPendingCrash() {
 			_ = os.Remove(path)
 			continue
 		}
+		if r.SchemaVersion > currentCrashSchema {
+			continue
+		}
+		identityChanged := r.EventID == "" || r.DedupKey == ""
+		if ensureCrashIdentity(&r) != nil {
+			break
+		}
+		if identityChanged {
+			updated, marshalErr := json.Marshal(r)
+			if marshalErr != nil || fileutil.AtomicWriteFile(path, updated, 0o600) != nil {
+				break
+			}
+		}
+		key := crashLedgerKey(r)
+		if _, alreadySent := ledger.Entries[key]; alreadySent {
+			_ = os.Remove(path)
+			continue
+		}
 		if postCrashReport(a.bootContext(), c, crashEndpoint, r) != nil {
+			break
+		}
+		ledger.Entries[key] = time.Now().UTC().Format(time.RFC3339Nano)
+		if saveCrashLedger(ledgerPath, ledger) != nil {
 			break
 		}
 		_ = os.Remove(path)

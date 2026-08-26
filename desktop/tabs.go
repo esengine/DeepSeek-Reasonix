@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
+	"reasonix/internal/turnevent"
 	"slices"
 	"sort"
 	"strings"
@@ -58,6 +59,8 @@ type pendingDisplayWrite struct {
 	userContent string
 	messages    []HistoryMessage
 	persist     func(string, string, string, []HistoryMessage) error
+	onPersisted func()
+	onRetry     func()
 }
 
 // displayTextAccumulator retains provider chunks without repeatedly copying
@@ -1341,6 +1344,146 @@ func recordHistoryDisplayEvent(buffer *displayTurnBuffer, e event.Event) {
 	}
 }
 
+func displayEventFromEnvelope(envelope turnevent.Envelope) (event.Event, bool) {
+	w := envelope.Event
+	e := event.Event{
+		TurnID: envelope.TurnID, Sequence: envelope.Sequence, Status: envelope.Status,
+		Text: w.Text, Detail: w.Detail, Reasoning: w.Reasoning, ItemID: envelope.ItemID, Source: envelope.Source,
+	}
+	switch envelope.Kind {
+	case "phase":
+		e.Kind = event.Phase
+	case "reasoning":
+		e.Kind = event.Reasoning
+	case "text":
+		e.Kind = event.Text
+	case "message":
+		e.Kind = event.Message
+	case "tool_dispatch":
+		e.Kind = event.ToolDispatch
+	case "tool_result":
+		e.Kind = event.ToolResult
+	case "notice":
+		e.Kind = event.Notice
+	default:
+		return event.Event{}, false
+	}
+	if w.Level == "warn" {
+		e.Level = event.LevelWarn
+	}
+	e.Code = w.Code
+	if w.Tool != nil {
+		e.Tool = event.Tool{
+			ID: w.Tool.ID, Name: w.Tool.Name, Args: w.Tool.Args, ResolvedName: w.Tool.ResolvedName,
+			CapabilityID: w.Tool.CapabilityID, Output: w.Tool.Output, Err: w.Tool.Err,
+			ReadOnly: w.Tool.ReadOnly, Truncated: w.Tool.Truncated, DurationMs: w.Tool.DurationMs,
+			StartedAt: w.Tool.StartedAt, EndedAt: w.Tool.EndedAt, Partial: w.Tool.Partial,
+			ArgChars: w.Tool.ArgChars, Refreshed: w.Tool.Refreshed, ParentID: w.Tool.ParentID,
+			AttemptID: w.Tool.AttemptID, FileDiff: event.FileDiff{Diff: w.Tool.Diff, Added: w.Tool.Added, Removed: w.Tool.Removed},
+		}
+	}
+	if len(w.MemoryCitations) > 0 {
+		e.MemoryCitations = make([]provider.MemoryCitation, 0, len(w.MemoryCitations))
+		for _, citation := range w.MemoryCitations {
+			e.MemoryCitations = append(e.MemoryCitations, provider.MemoryCitation{
+				ID: citation.ID, Source: citation.Source, LineStart: citation.LineStart,
+				LineEnd: citation.LineEnd, Note: citation.Note, Kind: citation.Kind,
+			})
+		}
+	}
+	if w.DecisionReceipt != nil {
+		e.DecisionReceipt = &provider.DecisionReceipt{
+			ID: w.DecisionReceipt.ID, Kind: w.DecisionReceipt.Kind, Tool: w.DecisionReceipt.Tool,
+			Subject: w.DecisionReceipt.Subject, Outcome: w.DecisionReceipt.Outcome,
+		}
+	}
+	return e, true
+}
+
+func displayMessagesFromProjection(projection turnevent.PendingProjection) []HistoryMessage {
+	var planner displayTurnBuffer
+	var executor displayTurnBuffer
+	for _, envelope := range projection.Events {
+		e, ok := displayEventFromEnvelope(envelope)
+		if !ok {
+			continue
+		}
+		buffer := &executor
+		if strings.TrimSpace(e.Source) == event.UsageSourcePlanner {
+			buffer = &planner
+		}
+		recordHistoryDisplayEvent(buffer, e)
+	}
+	out := planner.materialize()
+	if projection.Status == event.TurnInterrupted {
+		out = append(out, executor.materialize()...)
+		if len(out) > 0 {
+			out = append(out, HistoryMessage{
+				Role: "notice", Level: "info", Code: event.NoticeCodeCancelledTurn,
+				Content: "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
+			})
+		}
+	}
+	return out
+}
+
+func recoverPendingTurnProjections(tab *WorkspaceTab, ctrl control.SessionAPI) {
+	if tab == nil || ctrl == nil {
+		return
+	}
+	projectionCtrl, ok := ctrl.(interface {
+		PendingTurnProjections() []turnevent.PendingProjection
+		AcknowledgeTurnProjection(string) error
+	})
+	if !ok {
+		return
+	}
+	pending := projectionCtrl.PendingTurnProjections()
+	if len(pending) == 0 {
+		return
+	}
+	users := make([]string, 0)
+	for _, message := range ctrl.History() {
+		if message.Role == provider.RoleUser {
+			if text := strings.TrimSpace(agent.UserMessageText(message)); text != "" {
+				users = append(users, text)
+			}
+		}
+	}
+	firstUser := len(users) - len(pending)
+	for i, projection := range pending {
+		messages := displayMessagesFromProjection(projection)
+		if len(messages) == 0 {
+			if err := projectionCtrl.AcknowledgeTurnProjection(projection.TurnID); err != nil {
+				slog.Warn("desktop: acknowledge empty recovered projection", "err", err)
+			}
+			continue
+		}
+		userIndex := firstUser + i
+		if userIndex < 0 || userIndex >= len(users) {
+			slog.Warn("desktop: retain unacknowledged projection without matching user turn")
+			continue
+		}
+		turnID := projection.TurnID
+		persistOrEnqueueDisplayWrite(tab.displayBufferState(), &pendingDisplayWrite{
+			dir: controllerSessionDir(ctrl), sessionPath: ctrl.SessionPath(), userContent: users[userIndex], messages: messages,
+			persist: func(dir, sessionPath, userContent string, messages []HistoryMessage) error {
+				return recordSessionPlannerDisplayForTurn(dir, sessionPath, turnID, userContent, messages)
+			},
+			onPersisted: func() {
+				if err := projectionCtrl.AcknowledgeTurnProjection(turnID); err != nil {
+					slog.Warn("desktop: acknowledge recovered turn projection", "err", err)
+				}
+			},
+			onRetry: func() {
+				if observer, ok := ctrl.(interface{ ObserveTurnProjectionRetry() }); ok {
+					observer.ObserveTurnProjectionRetry()
+				}
+			},
+		})
+	}
+}
+
 func ensureDisplayAssistant(buffer *displayTurnBuffer) *bufferedHistoryMessage {
 	if n := len(buffer.messages); n > 0 && buffer.messages[n-1].message.Role == "assistant" {
 		return buffer.messages[n-1]
@@ -1424,21 +1567,29 @@ func enqueuePendingDisplayWrite(state *tabDisplayState, write *pendingDisplayWri
 	go retryPendingDisplayWrites(state)
 }
 
-func persistOrEnqueueDisplayWrite(state *tabDisplayState, write *pendingDisplayWrite) {
+func persistOrEnqueueDisplayWrite(state *tabDisplayState, write *pendingDisplayWrite) bool {
 	if state == nil || write == nil || write.persist == nil {
-		return
+		return true
 	}
 	state.mu.Lock()
 	hasPending := len(state.pendingWrites) > 0
 	state.mu.Unlock()
 	if hasPending {
 		enqueuePendingDisplayWrite(state, write)
-		return
+		return false
 	}
 	if err := write.persist(write.dir, write.sessionPath, write.userContent, write.messages); err != nil {
 		slog.Warn("desktop: persist display-only turn history; queued for retry", "err", err)
+		if write.onRetry != nil {
+			write.onRetry()
+		}
 		enqueuePendingDisplayWrite(state, write)
+		return false
 	}
+	if write.onPersisted != nil {
+		write.onPersisted()
+	}
+	return true
 }
 
 func retryPendingDisplayWrites(state *tabDisplayState) {
@@ -1457,6 +1608,9 @@ func retryPendingDisplayWrites(state *tabDisplayState) {
 			time.Sleep(time.Duration(failures*failures) * 50 * time.Millisecond)
 		}
 		if err := write.persist(write.dir, write.sessionPath, write.userContent, write.messages); err != nil {
+			if write.onRetry != nil {
+				write.onRetry()
+			}
 			failures++
 			if failures < displayPersistRetryLimit {
 				continue
@@ -1474,6 +1628,9 @@ func retryPendingDisplayWrites(state *tabDisplayState) {
 			state.pendingWrites = state.pendingWrites[1:]
 		}
 		state.mu.Unlock()
+		if write.onPersisted != nil {
+			write.onPersisted()
+		}
 		failures = 0
 	}
 }
@@ -1548,18 +1705,20 @@ func (s *tabEventSink) Emit(e event.Event) {
 		case event.TurnDone:
 			s.recordTurnDone()
 		}
+		if e.Kind == event.TurnDone {
+			s.flushDisplay(e.TurnID, e.Cancelled)
+		}
 		if m := app.metrics.Load(); m != nil {
 			m.observe(e)
 			if e.Kind == event.TurnDone {
-				// Content-free recovery counters only (no failure text).
+				// Display persistence and its projection acknowledgement run first,
+				// so successful compaction is included in this content-free snapshot.
 				if tab := app.tabByID(tabID); tab != nil && tab.Ctrl != nil {
 					observeControllerRecoveryMetrics(m, tab.Ctrl)
+					observeControllerTurnEventMetrics(m, tab.Ctrl)
 				}
 				m.persist()
 			}
-		}
-		if e.Kind == event.TurnDone {
-			s.flushDisplay(e.Cancelled)
 		}
 	}
 	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt))
@@ -2006,32 +2165,57 @@ func (s *tabEventSink) recordDisplay(e event.Event) {
 	}
 }
 
-func (s *tabEventSink) flushDisplay(cancelRequested bool) {
+func (s *tabEventSink) flushDisplay(turnID string, cancelRequested bool) bool {
 	tab, ctrl := s.eventTabAndController()
 	if tab == nil || ctrl == nil {
-		return
+		return false
 	}
 	history := ctrl.History()
 	keepExecutorDisplay := cancelRequested && (lastHistoryMessageIsUser(history) || hasPendingInterruptedRecovery(history))
 	messages := tab.takeDisplayTurn(keepExecutorDisplay)
 	if len(messages) == 0 {
-		return
+		acknowledgeProjectionForController(ctrl, turnID)
+		return true
 	}
 	sessionPath := ctrl.SessionPath()
 	if sessionPath == "" {
-		return
+		return false
 	}
 	userContent := lastUserMessageContent(history)
 	if strings.TrimSpace(userContent) == "" {
-		return
+		return false
 	}
-	persistOrEnqueueDisplayWrite(tab.displayBufferState(), &pendingDisplayWrite{
+	return persistOrEnqueueDisplayWrite(tab.displayBufferState(), &pendingDisplayWrite{
 		dir:         controllerSessionDir(ctrl),
 		sessionPath: sessionPath,
 		userContent: userContent,
 		messages:    messages,
-		persist:     recordSessionPlannerDisplay,
+		persist: func(dir, sessionPath, userContent string, messages []HistoryMessage) error {
+			return recordSessionPlannerDisplayForTurn(dir, sessionPath, turnID, userContent, messages)
+		},
+		onPersisted: func() { acknowledgeProjectionForController(ctrl, turnID) },
+		onRetry:     func() { observeProjectionRetryForController(ctrl) },
 	})
+}
+
+func observeProjectionRetryForController(ctrl control.SessionAPI) {
+	if ctrl == nil {
+		return
+	}
+	if observer, ok := ctrl.(interface{ ObserveTurnProjectionRetry() }); ok {
+		observer.ObserveTurnProjectionRetry()
+	}
+}
+
+func acknowledgeProjectionForController(ctrl control.SessionAPI, turnID string) {
+	if ctrl == nil || strings.TrimSpace(turnID) == "" {
+		return
+	}
+	if ack, ok := ctrl.(interface{ AcknowledgeTurnProjection(string) error }); ok {
+		if err := ack.AcknowledgeTurnProjection(turnID); err != nil {
+			slog.Warn("desktop: acknowledge turn display projection", "err", err)
+		}
+	}
 }
 
 func lastHistoryMessageIsUser(history []provider.Message) bool {
@@ -2139,51 +2323,6 @@ type wireEventTab struct {
 
 // Tab management on App
 
-// TabMeta is the frontend-facing shape of one tab.
-type TabMeta struct {
-	ID                string             `json:"id"`
-	Scope             string             `json:"scope"`
-	WorkspaceRoot     string             `json:"workspaceRoot"`
-	WorkspaceName     string             `json:"workspaceName"`
-	WorkspacePath     string             `json:"workspacePath,omitempty"`
-	GitBranch         string             `json:"gitBranch,omitempty"`
-	IsolatedWorktree  bool               `json:"isolatedWorktree,omitempty"`
-	TopicID           string             `json:"topicId"`
-	TopicTitle        string             `json:"topicTitle"`
-	SessionPath       string             `json:"sessionPath,omitempty"`
-	SessionRevision   int64              `json:"sessionRevision,omitempty"`
-	SessionDigest     string             `json:"sessionDigest,omitempty"`
-	SessionGeneration uint64             `json:"sessionGeneration,omitempty"`
-	ReadOnly          bool               `json:"readOnly,omitempty"`
-	ProjectColor      string             `json:"projectColor,omitempty"`
-	Label             string             `json:"label"`
-	Ready             bool               `json:"ready"`
-	Runtime           SessionRuntimeView `json:"runtime"`
-	Running           bool               `json:"running"`
-	TurnStartedAt     int64              `json:"turnStartedAt,omitempty"`
-	PendingPrompt     bool               `json:"pendingPrompt,omitempty"`
-	RemoteControlled  bool               `json:"remoteControlled,omitempty"`
-	BackgroundJobs    int                `json:"backgroundJobs,omitempty"`
-	CancelRequested   bool               `json:"cancelRequested,omitempty"`
-	Cancellable       bool               `json:"cancellable"`
-	Mode              string             `json:"mode"`
-	CollaborationMode string             `json:"collaborationMode"`
-	ToolApprovalMode  string             `json:"toolApprovalMode"`
-	TokenMode         string             `json:"tokenMode"`
-	AgentPreset       string             `json:"agentPreset,omitempty"`
-	QualityFloor      string             `json:"qualityFloor,omitempty"`
-	FloorInferred     bool               `json:"floorInferred,omitempty"`
-	Goal              string             `json:"goal,omitempty"`
-	GoalStatus        string             `json:"goalStatus,omitempty"`
-	Recovered         bool               `json:"recovered,omitempty"`
-	RecoveryReason    string             `json:"recoveryReason,omitempty"`
-	RecoveryDigest    string             `json:"recoveryDigest,omitempty"`
-	RecoveryParentID  string             `json:"recoveryParentId,omitempty"`
-	StartupErr        string             `json:"startupErr,omitempty"`
-	Active            bool               `json:"active"`
-	Cwd               string             `json:"cwd"`
-}
-
 func enrichTabMeta(meta TabMeta) TabMeta {
 	if meta.Active {
 		meta.GitBranch = workspaceGitBranchForMeta(meta.WorkspaceRoot)
@@ -2255,6 +2394,10 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.BackgroundJobs = status.BackgroundJobs
 		m.CancelRequested = status.CancelRequested
 		m.Cancellable = status.Cancellable
+		m.TurnID = status.TurnID
+		m.TurnStatus = string(status.Status)
+		m.TurnEventSeq = status.TurnEventSeq
+		m.TurnReplayAfter = status.ReplayAfterSeq
 	}
 	if a.botBridge != nil {
 		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
@@ -2280,7 +2423,7 @@ func (a *App) ListTabs() []TabMeta {
 	}
 	a.mu.RUnlock()
 	if !needsRepair {
-		return enrichTabMetas(out)
+		return a.listTabsWithRemote(out)
 	}
 
 	a.mu.Lock()
@@ -2291,7 +2434,7 @@ func (a *App) ListTabs() []TabMeta {
 		}
 	}
 	a.mu.Unlock()
-	return enrichTabMetas(out)
+	return a.listTabsWithRemote(out)
 }
 
 // syncTabWorkspaceRootSpellings repoints visible and detached project runtimes
@@ -3068,83 +3211,58 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 	return ""
 }
 
-// SetActiveTab switches the frontend's active tab. A no-op when tabID is
-// already active or unknown.
-func (a *App) SetActiveTab(tabID string) error {
-	a.mu.RLock()
-	_, ok := a.tabs[tabID]
-	alreadyActive := a.activeTabID == tabID
-	a.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("tab %q not found", tabID)
-	}
-	if alreadyActive {
-		return nil
-	}
-	a.mu.RLock()
-	active := a.tabs[a.activeTabID]
-	a.mu.RUnlock()
-	if err := a.snapshotTabForAction(active, "switching tabs"); err != nil {
-		return err
-	}
-
-	a.mu.Lock()
-	if _, ok := a.tabs[tabID]; !ok {
-		a.mu.Unlock()
-		return fmt.Errorf("tab %q not found", tabID)
-	}
-	if a.activeTabID == tabID {
-		a.mu.Unlock()
-		return nil
-	}
-	a.activeTabID = tabID
-	next := a.tabs[tabID]
-	// A direct tab click supersedes a pending ticketed activation's
-	// publication (prune + ready event), but does not cancel its build: the
-	// tab stays open in this layout, so the build may legitimately complete.
-	// Switching to the pending activation's own tab keeps it alive.
-	supersededReq, supersededTab := a.supersedePendingTopicActivationLocked(tabID, false)
-	dir, entries, activeID, version := a.saveTabsCollectLocked()
-	a.mu.Unlock()
-
-	// I/O outside the lock — disk writes can block for hundreds of ms on
-	// Windows when antivirus or the search indexer briefly locks the file.
-	a.saveTabsWrite(dir, entries, activeID, version)
-	if active != nil {
-		active.clearRuntimeDisplayCurrency()
-	}
-	if next != nil {
-		next.clearRuntimeDisplayCurrency()
-	}
-	if supersededReq != "" {
-		a.emitTopicActivation(TopicActivationEvent{RequestID: supersededReq, TabID: supersededTab, Phase: topicActivationPhaseCancelled})
-	}
-	a.kickDeferredRebuildRetry()
-	return nil
-}
-
-// ReorderTabs persists the frontend's manual tab order. The submitted order must
-// contain every currently open tab exactly once.
+// ReorderTabs persists the full local+remote strip while keeping each
+// registry's internal order independent.
 func (a *App) ReorderTabs(tabIDs []string) error {
+	a.remoteTabMu.Lock()
+	remoteCount := len(a.remoteTabs)
+	a.remoteTabMu.Unlock()
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(tabIDs) != len(a.tabs) {
+	if len(tabIDs) != len(a.tabs)+remoteCount {
+		a.mu.Unlock()
 		return fmt.Errorf("tab order length mismatch")
 	}
 	seen := make(map[string]bool, len(tabIDs))
-	next := make([]string, 0, len(tabIDs))
+	next := make([]string, 0, len(a.tabs))
+	nextRemote := make([]string, 0, remoteCount)
 	for _, id := range tabIDs {
-		if _, ok := a.tabs[id]; !ok {
-			return fmt.Errorf("tab %q not found", id)
-		}
 		if seen[id] {
+			a.mu.Unlock()
 			return fmt.Errorf("duplicate tab %q", id)
 		}
 		seen[id] = true
-		next = append(next, id)
+		if _, ok := a.tabs[id]; ok {
+			next = append(next, id)
+		} else {
+			nextRemote = append(nextRemote, id)
+		}
 	}
+	if len(next) != len(a.tabs) {
+		a.mu.Unlock()
+		return fmt.Errorf("tab order is missing local tabs")
+	}
+	a.remoteTabMu.Lock()
+	remoteOK := len(nextRemote) == len(a.remoteTabs)
+	if remoteOK {
+		for _, id := range nextRemote {
+			if a.remoteTabs[id] == nil {
+				remoteOK = false
+				break
+			}
+		}
+	}
+	if !remoteOK {
+		a.remoteTabMu.Unlock()
+		a.mu.Unlock()
+		return fmt.Errorf("tab order is missing remote tabs")
+	}
+	a.remoteTabLayout.order = append([]string(nil), nextRemote...)
+	a.remoteTabLayout.stripOrder = append([]string(nil), tabIDs...)
+	a.remoteTabMu.Unlock()
 	a.tabOrder = next
-	a.saveTabsLocked()
+	dir, entries, activeID, version := a.saveTabsCollectLocked()
+	a.mu.Unlock()
+	a.saveTabsWrite(dir, entries, activeID, version)
 	return nil
 }
 
@@ -3169,7 +3287,7 @@ func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 		a.mu.Unlock()
 		return fmt.Errorf("tab %q not found", tabID)
 	}
-	if len(a.tabs) <= 1 {
+	if len(a.tabs) <= 1 && !a.hasRemoteTabSurface() {
 		a.mu.Unlock()
 		return fmt.Errorf("cannot close the last tab")
 	}
@@ -3201,7 +3319,7 @@ func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 		}
 		return fmt.Errorf("tab %q changed while closing", tabID)
 	}
-	if len(a.tabs) <= 1 {
+	if len(a.tabs) <= 1 && !a.hasRemoteTabSurface() {
 		a.mu.Unlock()
 		return fmt.Errorf("cannot close the last tab")
 	}
@@ -4108,6 +4226,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	a.advanceSessionRuntimeEpochLocked(tab)
 	keepBuildContext = true
 	a.mu.Unlock()
+	recoverPendingTurnProjections(tab, ctrl)
 	a.emitReady(wailsCtx, tab.ID)
 }
 
@@ -4872,33 +4991,11 @@ type desktopTabEntry struct {
 }
 
 type desktopTabsFile struct {
-	Tabs      []desktopTabEntry `json:"tabs"`
-	ActiveTab string            `json:"activeTab"`
-}
-
-func singleSurfaceLayoutStyle(style string) bool {
-	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "workbench", "creation":
-		return true
-	default:
-		return false
-	}
-}
-
-func singleSurfaceTabsFile(f desktopTabsFile) desktopTabsFile {
-	if len(f.Tabs) <= 1 {
-		return f
-	}
-	chosen := f.Tabs[0]
-	if active := strings.TrimSpace(f.ActiveTab); active != "" {
-		for _, entry := range f.Tabs {
-			if entry.ID == active {
-				chosen = entry
-				break
-			}
-		}
-	}
-	return desktopTabsFile{Tabs: []desktopTabEntry{chosen}, ActiveTab: chosen.ID}
+	Tabs           []desktopTabEntry       `json:"tabs"`
+	ActiveTab      string                  `json:"activeTab"`
+	RemoteTabs     []desktopRemoteTabEntry `json:"remoteTabs,omitempty"`
+	RemoteTabOrder []string                `json:"remoteTabOrder,omitempty"`
+	TabOrder       []string                `json:"tabOrder,omitempty"`
 }
 
 func desktopConfigDir() string {
@@ -4954,7 +5051,15 @@ func (a *App) saveTabsWrite(dir string, entries []desktopTabEntry, activeID stri
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	f := desktopTabsFile{Tabs: entries, ActiveTab: activeID}
+	localIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		localIDs = append(localIDs, entry.ID)
+	}
+	remoteEntries, remoteOrder, tabOrder, remoteActive := a.remoteTabsFileEntries(localIDs)
+	if remoteActive != "" {
+		activeID = remoteActive
+	}
+	f := desktopTabsFile{Tabs: entries, ActiveTab: activeID, RemoteTabs: remoteEntries, RemoteTabOrder: remoteOrder, TabOrder: tabOrder}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return
@@ -6483,6 +6588,7 @@ type ProjectNode struct {
 	// muted "恢复副本" count badge; History still owns the full copy list.
 	RecoveryCopyCount int           `json:"recoveryCopyCount,omitempty"`
 	IsolatedWorktree  bool          `json:"isolatedWorktree,omitempty"`
+	Remote            *RemoteTabRef `json:"remote,omitempty"`
 	RuntimeOnly       bool          `json:"runtimeOnly,omitempty"`
 	Children          []ProjectNode `json:"children,omitempty"`
 }

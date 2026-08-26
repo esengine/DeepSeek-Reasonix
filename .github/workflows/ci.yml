@@ -394,7 +394,7 @@ jobs:
           pnpm --dir frontend test:motion-browser
           pnpm --dir frontend test:composer
           pnpm --dir frontend test:transcript
-          pnpm --dir frontend test:transcript-browser
+          xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -539,6 +539,18 @@ jobs:
 
       - name: Test native motion contracts
         run: pnpm --dir frontend test:motion
+
+      # Chromium is the closest deterministic browser replay available on the
+      # Windows runner; the native smoke below separately exercises the actual
+      # installed WebView2 runtime. Keep both paths so transcript geometry is
+      # covered before the shell-level smoke starts.
+      - name: Test transcript browser replay on Windows
+        timeout-minutes: 10
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/desktop/frontend/.pw-browsers
+        run: |
+          pnpm --dir frontend exec playwright install chromium
+          pnpm --dir frontend test:transcript-browser
 
       - name: Test WebView2 native smoke state machine
         shell: pwsh

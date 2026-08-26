@@ -2,14 +2,13 @@
  * Bounded, session-aware transcript geometry cache.
  *
  * Exact samples are keyed by session + row + layout state + content version +
- * readable width + typography. Stable compact rows may share a same-state
- * median; content-flow rows use a static-estimate bucket ratio so a short
- * answer can never replace the estimate for a very long one.
+ * readable width + typography. Exact samples never cross logical rows; a
+ * bounded answer-layout prior may calibrate an unseen row within the same
+ * static-estimate bucket and environment.
  */
 
 import {
   estimateTranscriptRowGeometry,
-  isStableCompactTranscriptVariant,
   transcriptRowLayoutVariant,
   type TranscriptEstimateSource,
   type TranscriptGeometryEnvironment,
@@ -19,7 +18,7 @@ import { transcriptRowMeasurementVersion, type TranscriptRow } from "./transcrip
 
 const DEFAULT_SESSION_CAP = 8;
 const DEFAULT_ROW_CAP = 4_096;
-const DEFAULT_SAMPLE_CAP = 100;
+const DEFAULT_CALIBRATION_SAMPLE_CAP = 32;
 
 type GeometrySample = {
   rowKey: string;
@@ -71,6 +70,10 @@ function medianOf(samples: readonly number[]): number | undefined {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+function calibrationBucket(staticEstimate: number): number {
+  return Math.max(0, Math.min(8, Math.floor(Math.log2(Math.max(64, staticEstimate) / 64))));
+}
+
 function normalizedWidth(width: number | undefined): number | undefined {
   return Number.isFinite(width) && (width ?? 0) > 0 ? width : undefined;
 }
@@ -81,14 +84,10 @@ function environmentMatches(sample: GeometrySample, environment: TranscriptGeome
   return width === undefined || (sample.contentWidth !== undefined && Math.abs(sample.contentWidth - width) <= 1);
 }
 
-function calibrationBucket(staticEstimate: number): number {
-  return Math.max(0, Math.min(8, Math.floor(Math.log2(Math.max(64, staticEstimate) / 64))));
-}
-
 export function createTranscriptMeasuredSizes(options: TranscriptMeasuredSizesOptions = {}): TranscriptMeasuredSizes {
   const maxSessions = Math.max(1, Math.round(options.maxSessions ?? DEFAULT_SESSION_CAP));
   const maxRowsPerSession = Math.max(1, Math.round(options.maxRowsPerSession ?? DEFAULT_ROW_CAP));
-  const maxCalibrationSamples = Math.max(1, Math.round(options.maxCalibrationSamples ?? DEFAULT_SAMPLE_CAP));
+  const maxCalibrationSamples = Math.max(1, Math.round(options.maxCalibrationSamples ?? DEFAULT_CALIBRATION_SAMPLE_CAP));
   const sessions = new Map<string, SessionMeasurements>();
 
   const touchSession = (sessionKey: string): SessionMeasurements => {
@@ -161,21 +160,11 @@ export function createTranscriptMeasuredSizes(options: TranscriptMeasuredSizesOp
         continue;
       }
 
-      if (isStableCompactTranscriptVariant(layoutVariant)) {
-        const compactMedian = medianOf(samples
-          .filter((sample) => sample.layoutVariant === layoutVariant && environmentMatches(sample, environment))
-          .slice(-maxCalibrationSamples)
-          .map((sample) => sample.height));
-        if (compactMedian !== undefined) {
-          heightEstimates.push(compactMedian);
-          estimateSources.push("compact-median");
-          continue;
-        }
-      } else {
+      if (row.kind === "answer" && layoutVariant === "text-flow") {
         const bucket = calibrationBucket(staticEstimate);
         const ratios = samples
-          .filter((sample) => sample.kind === row.kind
-            && sample.layoutVariant === layoutVariant
+          .filter((sample) => sample.kind === "answer"
+            && sample.layoutVariant === "text-flow"
             && environmentMatches(sample, environment)
             && sample.staticEstimate !== undefined
             && sample.staticEstimate > 0

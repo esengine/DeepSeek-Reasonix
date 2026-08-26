@@ -18,7 +18,7 @@ assert.match(controller, /throw new Error\(t\("history\.failedLoadHistory"\)\)/,
 assert.match(controller, /retrySessionHistory/, "retry path is exported");
 assert.match(
   transcript,
-  /if \(!virtuosoReadyRef\.current \|\| !stick\.current\) return;\n    followGrowingTail\(\);\n  \}, \[footerHeight, followGrowingTail, stick\]\);/,
+  /if \(hydrating \|\| !virtuosoReadyRef\.current \|\| !stick\.current\) return;\n    followGrowingTail\(\);\n  \}, \[footerHeight, followGrowingTail, hydrating, stick\]\);/,
   "footer resize is routed through the coalesced tail-follow path without depending on item appends",
 );
 assert.match(controller, /shouldPreferResidentHistory\(resetSurface, options\.preserveCachedHistory\)/, "retry hydrates fetch instead of serving the resident snapshot");

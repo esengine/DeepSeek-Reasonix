@@ -686,11 +686,10 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 	}
 }
 
-// TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard covers the
-// plain (non-Goal) closed-loop case: the host retries a known high-confidence
-// readiness gap once, then surfaces the recovery card when that turn makes no
-// host-observable progress instead of spending the second-turn allowance.
-func TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard(t *testing.T) {
+// TestPlainDeliveryReadinessFailureSurfacesRecoveryCard covers the plain
+// (non-Goal) closed-loop case: Delivery stops after the visible turn and leaves
+// the explicit recovery action to the user.
+func TestPlainDeliveryReadinessFailureSurfacesRecoveryCard(t *testing.T) {
 	todoWrite, _ := tool.LookupBuiltin("todo_write")
 	reg := tool.NewRegistry()
 	reg.Add(todoWrite)
@@ -699,7 +698,7 @@ func TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard(t *testing
 		{toolCallChunk("w1", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("t0", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		textTurn("premature final"),
-		textTurn("still incomplete"),
+		textTurn("must not be consumed by a hidden readiness retry"),
 	}}
 	// "implement main" is an unanchored mutation. The delivery floor is what
 	// turns its closed-loop evidence gap into a pause; the standard floor lets
@@ -724,8 +723,8 @@ func TestPlainDeliveryReadinessFailureRetriesThenSurfacesRecoveryCard(t *testing
 	if ev.Readiness == nil || len(ev.Readiness.Missing) == 0 {
 		t.Fatalf("TurnDone.Readiness = %+v, want missing requirements for the recovery card", ev.Readiness)
 	}
-	if prov.call != 4 {
-		t.Fatalf("provider calls = %d, want 4 (work + final answer + one no-progress readiness retry)", prov.call)
+	if prov.call != 3 {
+		t.Fatalf("provider calls = %d, want 3 (work + todo + final answer)", prov.call)
 	}
 	if got := c.GoalStatus(); got != GoalStatusStopped {
 		t.Fatalf("GoalStatus() = %q, want stopped (no goal involved)", got)

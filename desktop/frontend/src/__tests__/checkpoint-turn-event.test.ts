@@ -83,6 +83,28 @@ console.log("\nturn checkpoint submission binding");
 }
 
 {
+  const current = reducer(initialState, {
+    type: "history_replace",
+    items: [{ kind: "user", id: "rev-12", text: "new" }],
+    startTurn: 0,
+    totalTurns: 1,
+    hasOlder: false,
+    revision: 12,
+    digest: "digest-12",
+  });
+  const stale = reducer(current, {
+    type: "history_replace",
+    items: [{ kind: "user", id: "rev-11", text: "stale" }],
+    startTurn: 0,
+    totalTurns: 1,
+    hasOlder: false,
+    revision: 11,
+    digest: "digest-11",
+  });
+  eq(stale, current, "an older history revision cannot replace the current transcript projection");
+}
+
+{
   let state = submit(initialState, "activity A", 15);
   state = reducer(state, { type: "unsend" });
   state = submit(state, "activity B", 16);

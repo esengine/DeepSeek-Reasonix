@@ -1306,8 +1306,9 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 }
 
 // ReadinessResult is the host-consumable outcome of the Delivery final-answer
-// readiness check. The Controller reads it after each goal turn; plain turns
-// receive the same outcome as a FinalReadinessError.
+// readiness check. The Controller reads it after each Goal/approved-Plan turn;
+// plain Standard turns end after the visible answer and do not enter the Goal
+// continuation path.
 type ReadinessResult struct {
 	// Ready is true when no missing requirement remains.
 	Ready bool
@@ -1598,9 +1599,6 @@ func parseExecutorHandoff(input string) (task, plan string, ok bool) {
 func looksLikeExecutorHandoffDeferral(answer string) bool {
 	lower := strings.ToLower(strings.TrimSpace(answer))
 	if lower == "" {
-		return true
-	}
-	if looksLikePendingAction(lower) {
 		return true
 	}
 	if containsAnySubstring(lower, executorHandoffDeferralPhrases) {
@@ -2148,7 +2146,7 @@ func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
 	return out
 }
 
-func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) {
+func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) error {
 	t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
@@ -2165,7 +2163,7 @@ func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, r
 			ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
 		}
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
+	return event.EmitChecked(a.svc.sink, event.Event{Kind: event.ToolDispatch, Tool: ev})
 }
 
 // emitResolvedToolDispatch upserts the real target classification of a stable

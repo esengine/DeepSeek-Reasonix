@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, type Item } from "../lib/useController";
+import { currentTurnWaitMs, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, reducer, sameMeta, type Item } from "../lib/useController";
+import { effortSwitchNoticeText, modelSwitchNoticeText } from "../lib/controllerSwitchNotices";
 import { historyPageRequestBudget, historyTurnsToLoad } from "../lib/historyPaging";
 import { shouldReconcileStaleTurn } from "../lib/useStaleTurnWatchdog";
 import { parseTodos } from "../lib/tools";

@@ -123,6 +123,13 @@ const (
 	// render the successful state early; append-only consumers should ignore it.
 	// The later ToolResult remains the call's only terminal event.
 	ToolResultPreview
+	// TurnStatusChanged is a content-free lifecycle transition such as
+	// waiting_user, cancelling, or returning to in_progress after an answer.
+	TurnStatusChanged
+	// PromptAnswered records that a durable Ask/approval item was answered and
+	// the same turn resumed. ItemID carries the stable prompt id; answer content
+	// remains in its purpose-built decision receipt rather than diagnostics.
+	PromptAnswered
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -526,6 +533,9 @@ const (
 
 type Event struct {
 	Kind             Kind
+	TurnID           string                    // stable id of the owning top-level turn
+	Sequence         uint64                    // monotonic session-local event sequence
+	Status           TurnStatus                // lifecycle state after this event
 	Text             string                    // Reasoning / Text / Message / Notice / Phase
 	ModelRef         string                    // Usage: canonical "provider/model" ref that produced this usage
 	Detail           string                    // Notice: optional diagnostic text for expandable details
@@ -867,6 +877,30 @@ func RecordProtocolRecovery(s Sink, a ProtocolRecoveryAudit) {
 // a live reader.
 type Sink interface {
 	Emit(Event)
+}
+
+// CheckedSink is an optional durability-aware sink capability. Callers use it
+// at side-effect boundaries (tool dispatch, user prompts, terminal commits)
+// where continuing after a local journal failure would make runtime state
+// impossible to recover safely. Ordinary display-only sinks keep implementing
+// Sink; EmitChecked falls back to Emit for compatibility.
+type CheckedSink interface {
+	EmitChecked(Event) error
+}
+
+// EmitChecked emits e and returns a durability failure when the sink exposes
+// CheckedSink. It deliberately does not make every Sink fallible: most event
+// consumers are renderers, while the session lifecycle decorator is the one
+// owner that can provide a durable acknowledgement.
+func EmitChecked(s Sink, e Event) error {
+	if nilutil.IsNil(s) {
+		return nil
+	}
+	if checked, ok := s.(CheckedSink); ok {
+		return checked.EmitChecked(e)
+	}
+	s.Emit(e)
+	return nil
 }
 
 // FuncSink adapts a plain function to a Sink.

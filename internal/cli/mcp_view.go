@@ -69,6 +69,18 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 	if src := sanitizeExternalDisplayText(s.ConfigSource); src != "" {
 		meta += " · source=" + src
 	}
+	if protocol := sanitizeExternalDisplayText(s.ProtocolVersion); protocol != "" {
+		meta += " · protocol=" + protocol
+	}
+	if state := sanitizeExternalDisplayText(string(s.SessionState)); state != "" {
+		meta += " · session=" + state
+	}
+	if s.ReconnectAttempts > 0 {
+		meta += fmt.Sprintf(" · reconnect=%d/5", s.ReconnectAttempts)
+	}
+	if kind := sanitizeExternalDisplayText(string(s.LastErrorKind)); kind != "" {
+		meta += " · error=" + kind
+	}
 	invalidTools := invalidMCPTools(s.ToolList)
 	availableTools := validMCPTools(s.ToolList)
 	if len(invalidTools) > 0 {

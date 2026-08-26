@@ -39,6 +39,11 @@ const (
 	listAllow = "allow"
 	listAsk   = "ask"
 	listDeny  = "deny"
+
+	// CompactRatioMin and CompactRatioMax are the bounds shared by the
+	// programmatic config editor and all CLI/Desktop callers.
+	CompactRatioMin = 0.30
+	CompactRatioMax = 0.85
 )
 
 // SetDefaultModel points default_model at an existing model. It accepts both
@@ -428,10 +433,11 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 }
 
 // SetCompactRatio updates the sole user-controlled automatic compaction
-// threshold. Allowed range is 0.65–0.85; presets are 0.70 / 0.80 / 0.85.
+// threshold. Allowed range is CompactRatioMin–CompactRatioMax; presets are
+// 0.70 / 0.80 / 0.85.
 func (c *Config) SetCompactRatio(ratio float64) error {
-	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
-		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < CompactRatioMin || ratio > CompactRatioMax {
+		return fmt.Errorf("compact ratio %v: must be between %.2f and %.2f", ratio, CompactRatioMin, CompactRatioMax)
 	}
 	c.Agent.CompactRatio = ratio
 	return nil

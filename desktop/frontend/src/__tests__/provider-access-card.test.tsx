@@ -8,10 +8,13 @@ import {
   AddProviderPanel,
   ProviderAccessCard,
   providerAccessGroups,
+  SettingsPanel,
   type ProviderAccessGroup,
 } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
-import type { ProviderPresetView, ProviderView } from "../lib/types";
+import type { AppBindings } from "../lib/bridge";
+import type { ProviderPresetView, ProviderView, SettingsView } from "../lib/types";
+import { baseSettings } from "../test-support/settingsTestFixtures";
 
 let passed = 0;
 let failed = 0;
@@ -115,6 +118,15 @@ function group(providers: ProviderView[]): ProviderAccessGroup {
   };
 }
 
+function customGroup(provider: ProviderView): ProviderAccessGroup {
+  return {
+    ...group([provider]),
+    id: `custom:${provider.name}`,
+    label: provider.name,
+    builtIn: false,
+  };
+}
+
 function renderCard(
   providerGroup: ProviderAccessGroup,
   actions: {
@@ -128,7 +140,6 @@ function renderCard(
         group={providerGroup}
         busy={false}
         fetching={false}
-        defaultProvider=""
         editing={null}
         kinds={["anthropic", "openai"]}
         onEdit={() => undefined}
@@ -219,6 +230,121 @@ ok(
   removedProviders.join(",") === "deepseek-flash,deepseek-pro",
   "card-level removal submits every grouped provider in one action",
 );
+
+let removedCustomProviders: string[] = [];
+await act(async () => {
+  root.render(renderCard(customGroup({ ...deepSeekAnthropic, name: "my-proxy", builtIn: false }), {
+    onDelete: async (providers) => {
+      removedCustomProviders = providers.map((provider) => provider.name);
+    },
+  }));
+  await flushPromises();
+});
+const defaultCustomMoreButton = rootEl.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+ok(defaultCustomMoreButton?.disabled === false, "configured custom providers keep the removal menu available");
+await act(async () => {
+  defaultCustomMoreButton?.click();
+  await flushPromises();
+});
+let deleteDefaultCustomButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Remove access") as HTMLButtonElement | undefined;
+await act(async () => {
+  deleteDefaultCustomButton?.click();
+  await flushPromises();
+});
+deleteDefaultCustomButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Confirm delete provider") as HTMLButtonElement | undefined;
+ok(deleteDefaultCustomButton !== undefined, "configured custom provider can be confirmed for deletion");
+await act(async () => {
+  deleteDefaultCustomButton?.click();
+  await flushPromises();
+});
+ok(
+  removedCustomProviders.join(",") === "my-proxy",
+  "configured custom provider removal submits the selected provider",
+);
+
+const defaultCustomSettings: SettingsView = baseSettings("standard");
+const defaultCustomProvider: ProviderView = {
+  ...deepSeekAnthropic,
+  name: "my-proxy",
+  builtIn: false,
+  added: true,
+  kind: "openai",
+  baseUrl: "https://proxy.example/v1",
+  models: ["my-model"],
+  default: "my-model",
+  apiKeyEnv: "",
+  keySet: true,
+  configured: true,
+  webSearch: false,
+  serverWebSearchCapability: false,
+};
+defaultCustomSettings.defaultModel = "my-proxy/my-model";
+defaultCustomSettings.providers = [defaultCustomProvider];
+defaultCustomSettings.providerKinds = ["openai"];
+let removedDefaultCustomProviders: string[] = [];
+window.go = {
+  main: {
+    App: {
+      Settings: async () => defaultCustomSettings,
+      RemoveProviderAccesses: async (names: string[]) => {
+        removedDefaultCustomProviders = [...names];
+        defaultCustomSettings.providers = defaultCustomSettings.providers.filter((provider) => !names.includes(provider.name));
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+const settingsRootEl = document.createElement("div");
+document.body.appendChild(settingsRootEl);
+const settingsRoot = createRoot(settingsRootEl);
+await act(async () => {
+  settingsRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="models"
+        initialFocus={{ target: "model-access", requestId: 1 }}
+        desktopPlatform="linux"
+        onClose={() => undefined}
+        onChanged={() => undefined}
+        onUseSubagent={() => undefined}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+  await flushPromises();
+});
+const defaultCustomSettingsMoreButton = settingsRootEl.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+ok(
+  defaultCustomSettingsMoreButton?.disabled === false,
+  "current default custom provider keeps the removal menu available",
+);
+await act(async () => {
+  defaultCustomSettingsMoreButton?.click();
+  await flushPromises();
+});
+let deleteCurrentDefaultButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Remove access") as HTMLButtonElement | undefined;
+await act(async () => {
+  deleteCurrentDefaultButton?.click();
+  await flushPromises();
+});
+deleteCurrentDefaultButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Confirm delete provider") as HTMLButtonElement | undefined;
+ok(deleteCurrentDefaultButton !== undefined, "current default custom provider can be confirmed for deletion");
+await act(async () => {
+  deleteCurrentDefaultButton?.click();
+  await flushPromises();
+  await flushPromises();
+});
+ok(
+  removedDefaultCustomProviders.join(",") === "my-proxy",
+  "current default custom provider removal reaches the settings backend",
+);
+await act(async () => {
+  settingsRoot.unmount();
+});
+settingsRootEl.remove();
 
 await act(async () => {
   root.render(renderCard(group([
@@ -373,6 +499,37 @@ ok(routeSettings !== null && routeSettings.open === false, "installed OpenCode G
 ok(
   routeSettings?.querySelector("summary")?.textContent?.trim() === "Advanced route settings",
   "installed OpenCode Go exposes route controls only through an advanced disclosure",
+);
+
+let removedOpenCodeProviders: string[] = [];
+await act(async () => {
+  root.render(renderCard(openCodeGroups[0], {
+    onDelete: async (providers) => {
+      removedOpenCodeProviders = providers.map((provider) => provider.name);
+    },
+  }));
+  await flushPromises();
+});
+const openCodeMoreButton = rootEl.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+await act(async () => {
+  openCodeMoreButton?.click();
+  await flushPromises();
+});
+let removeOpenCodeButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Remove access") as HTMLButtonElement | undefined;
+await act(async () => {
+  removeOpenCodeButton?.click();
+  await flushPromises();
+});
+removeOpenCodeButton = Array.from(document.querySelectorAll("button"))
+  .find((button) => button.textContent?.trim() === "Confirm delete provider") as HTMLButtonElement | undefined;
+await act(async () => {
+  removeOpenCodeButton?.click();
+  await flushPromises();
+});
+ok(
+  removedOpenCodeProviders.join(",") === "opencode-go,opencode-go-anthropic,opencode-go-responses",
+  "OpenCode Go group removal submits every installed route atomically",
 );
 
 await act(async () => {

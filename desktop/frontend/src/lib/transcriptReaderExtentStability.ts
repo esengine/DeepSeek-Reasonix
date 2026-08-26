@@ -1,7 +1,10 @@
 import type { TranscriptLayoutAnchor } from "./transcriptVirtuosoRecovery";
 import type { TranscriptScrollEvent } from "./transcriptScrollArbiter";
 
-const MIN_REVERSE_JUMP_PX = 96;
+// A downward gesture this close to the physical bottom has no meaningful
+// reader extent to recover from. Export the policy threshold so the scroll
+// arbiter can keep the extent guard out of that wheel path.
+export const MIN_REVERSE_JUMP_PX = 96;
 const REVERSE_JUMP_VIEWPORT_RATIO = 0.5;
 const EXTENT_REBOUND_VIEWPORT_RATIO = 0.5;
 

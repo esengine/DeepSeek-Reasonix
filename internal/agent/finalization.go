@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 // landCause is why a turn was told to finalize. kind selects the pause the Run
@@ -23,6 +25,84 @@ type turnFinalizer interface {
 	finalizesTurn()
 }
 
+func (a *Agent) providerToolSchemas() []provider.ToolSchema {
+	if a == nil || a.svc.tools == nil || !provider.SupportsTools(a.svc.prov) {
+		return []provider.ToolSchema{}
+	}
+	return a.svc.tools.Schemas()
+}
+
+func (a *Agent) finishRequiredAtResponseEnd(ctx context.Context, state *turnRuntime, text string, usage *provider.Usage) (bool, error, bool) {
+	if !a.requiresStructuredFinish(ctx) {
+		return false, nil, false
+	}
+	state.pendingFinalAnswer = state.pendingFinalAnswer || hasVisibleFinalAnswer(text)
+	a.contextManager().ObserveUsage(usage)
+	if state.finishCalls == 1 && state.pendingFinalAnswer {
+		return false, nil, true
+	}
+	cont, err := a.requestProtocolRepair(state, "model ended without the required finish tool call")
+	return cont, err, true
+}
+
+func (a *Agent) rejectMixedFinishBatch(state *turnRuntime, text string, calls []provider.ToolCall, usage *provider.Usage) (bool, error, bool) {
+	if !a.containsFinishCall(calls) || a.finalizerName(calls) == "finish" {
+		return false, nil, false
+	}
+	msg := "blocked: finish must be the only tool call in its batch"
+	a.pairUnexecutedGraceCalls(calls, msg)
+	state.pendingFinalAnswer = state.pendingFinalAnswer || hasVisibleFinalAnswer(text)
+	a.contextManager().ObserveUsage(usage)
+	cont, err := a.requestProtocolRepair(state, msg)
+	return cont, err, true
+}
+
+func (a *Agent) acceptFinishCall(state *turnRuntime, text string, calls []provider.ToolCall) (bool, error) {
+	state.finishCalls++
+	if state.finishCalls != 1 {
+		return false, &ProtocolFailedError{Reason: "finish was called more than once"}
+	}
+	outcome, ok := finishOutcomeFromArgs(calls[0].Arguments)
+	if !ok {
+		return a.requestProtocolRepair(state, "finish carried an invalid outcome")
+	}
+	state.finishOutcome = outcome
+	state.pendingFinalAnswer = state.pendingFinalAnswer || hasVisibleFinalAnswer(text)
+	if !state.pendingFinalAnswer {
+		return a.requestProtocolRepair(state, "finish was called without a visible final answer")
+	}
+	return false, nil
+}
+
+func (a *Agent) repairRejectedFinish(state *turnRuntime, text string, calls []provider.ToolCall, usage *provider.Usage) (bool, error, bool) {
+	if a.finalizerName(calls) != "finish" {
+		return false, nil, false
+	}
+	state.pendingFinalAnswer = state.pendingFinalAnswer || hasVisibleFinalAnswer(text)
+	a.contextManager().ObserveUsage(usage)
+	cont, err := a.requestProtocolRepair(state, "finish was rejected; call it once with a valid outcome after the visible answer")
+	return cont, err, true
+}
+
+// ProtocolFailedError is a terminal contract failure, not an ordinary model or
+// transport failure. The controller maps it to protocol_failed so frontends do
+// not present a missing structured boundary as successful completion.
+type ProtocolFailedError struct {
+	Reason string
+}
+
+func (e *ProtocolFailedError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "turn protocol failed"
+	}
+	return "turn protocol failed: " + e.Reason
+}
+
+func IsProtocolFailed(err error) bool {
+	var target *ProtocolFailedError
+	return errors.As(err, &target)
+}
+
 func (a *Agent) singleTurnFinalizer(calls []provider.ToolCall) bool {
 	if a == nil || a.svc.tools == nil || len(calls) != 1 {
 		return false
@@ -33,6 +113,63 @@ func (a *Agent) singleTurnFinalizer(calls []provider.ToolCall) bool {
 	}
 	_, ok := t.(turnFinalizer)
 	return ok
+}
+
+func (a *Agent) finalizerName(calls []provider.ToolCall) string {
+	if !a.singleTurnFinalizer(calls) {
+		return ""
+	}
+	_, canonical, _ := a.svc.tools.ResolveCall(calls[0].Name)
+	return canonical
+}
+
+func (a *Agent) requiresStructuredFinish(ctx context.Context) bool {
+	if a == nil || a.svc.tools == nil || !provider.SupportsTools(a.svc.prov) {
+		return false
+	}
+	t, ok := a.svc.tools.Get("finish")
+	if !ok || t == nil {
+		return false
+	}
+	if contextual, ok := t.(tool.ContextualTool); ok {
+		return contextual.ProviderVisible(ctx)
+	}
+	return true
+}
+
+func (a *Agent) containsFinishCall(calls []provider.ToolCall) bool {
+	if a == nil || a.svc.tools == nil {
+		return false
+	}
+	for _, call := range calls {
+		_, canonical, ambiguous := a.svc.tools.ResolveCall(call.Name)
+		if canonical == "finish" && len(ambiguous) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) requestProtocolRepair(state *turnRuntime, reason string) (bool, error) {
+	if state.protocolRepairs >= 1 {
+		return false, &ProtocolFailedError{Reason: reason}
+	}
+	state.protocolRepairs++
+	a.svc.sink.Emit(event.Event{
+		Kind: event.Notice, Level: event.LevelWarn,
+		Text:   "The model did not complete the required turn protocol; requesting one repair.",
+		Detail: reason,
+	})
+	prompt := "Protocol repair: finish this turn now. "
+	if state.finishCalls == 1 && !state.pendingFinalAnswer {
+		prompt += "The finish call has already been accepted, so do not call it again. Provide the visible final answer now."
+	} else if state.pendingFinalAnswer {
+		prompt += "A visible final answer has already been provided, so do not repeat it. Call finish exactly once as the only tool call with outcome completed, partial, or blocked."
+	} else {
+		prompt += "Provide the visible final answer and call finish exactly once as the only tool call. If you need the user's answer instead, call ask and do not call finish."
+	}
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(prompt)})
+	return true, nil
 }
 
 func (a *Agent) allowsBoundaryTurnFinalizer(ctx context.Context, state *turnRuntime, calls []provider.ToolCall) bool {
@@ -50,6 +187,9 @@ func (a *Agent) successfulTurnFinalizer(ctx context.Context, calls []provider.To
 	outcome := batch.outcomes[0]
 	if outcome.errMsg != "" || outcome.blocked {
 		return false
+	}
+	if a.finalizerName(calls) == "finish" {
+		return true
 	}
 	submission, ok := planSubmissionFromContext(ctx)
 	if !ok {

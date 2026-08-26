@@ -8,7 +8,12 @@ import {
   type TranscriptScrollEvent,
   type TranscriptScrollState,
 } from "../lib/transcriptScrollArbiter";
-import { pinTranscriptScrollerToNativeTail, pinTranscriptTailAfterViewportShrink } from "../lib/transcriptScrollGeometry";
+import { pinTranscriptTailAfterViewportShrink } from "../lib/transcriptScrollGeometry";
+import {
+  TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX,
+  transcriptTailSettleBudgetExhausted,
+  transcriptTailShouldReaim,
+} from "../lib/transcriptTailSettle";
 
 let passed = 0;
 let failed = 0;
@@ -221,6 +226,12 @@ check(
   "delivered displacement and later growth both reconverge while tail-follow owns the viewport",
 );
 
+check(transcriptTailSettleBudgetExhausted(0) === false, "tail settle may re-aim before its bounded budget is spent");
+check(transcriptTailSettleBudgetExhausted(8) === true, "tail settle stops at its bounded re-aim budget");
+check(transcriptTailShouldReaim(null, 1_000) === true, "a fresh tail settle always re-aims");
+check(transcriptTailShouldReaim(1_000, 1_000 + TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX - 1) === false, "sub-threshold tail measurement jitter does not re-aim");
+check(transcriptTailShouldReaim(1_000, 1_000 + TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX) === true, "real tail growth re-arms the settle writer");
+
 const repeatedDisplacement = run([
   { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
   { type: "SCROLL_DELIVERED", atBottom: false, scrollable: true },
@@ -256,9 +267,9 @@ check(
 );
 
 const wrapScroller = { scrollHeight: 500, scrollTop: 400, clientHeight: 80 };
-check(pinTranscriptScrollerToNativeTail(wrapScroller) === true, "a composer-wrap viewport shrink is off-bottom and gets pinned");
-check(wrapScroller.scrollTop === 420, "pin writes the native tail top");
-check(pinTranscriptScrollerToNativeTail(wrapScroller) === false, "an already-pinned scroller is left alone");
+check(pinTranscriptTailAfterViewportShrink(wrapScroller, { contentExtent: 500, viewportExtent: 100 }, true) === 420, "a composer-wrap shrink returns the native tail target");
+check(wrapScroller.scrollTop === 400, "geometry helper does not write the native scroll position");
+check(pinTranscriptTailAfterViewportShrink(wrapScroller, { contentExtent: 500, viewportExtent: 80 }, true) === null, "the same shrink revision does not schedule a second tail write");
 
 const foldScroller = { scrollHeight: 500, scrollTop: 400, clientHeight: 80 };
 check(

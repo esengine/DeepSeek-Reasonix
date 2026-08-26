@@ -1623,7 +1623,9 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 func recoveryTranscriptPaths(paths []string) []string {
 	out := paths[:0]
 	for _, path := range paths {
-		if !strings.HasSuffix(path, ".events.jsonl") {
+		if !strings.HasSuffix(path, ".events.jsonl") &&
+			!strings.HasSuffix(path, ".turns.jsonl") &&
+			!strings.HasSuffix(path, ".turns.jsonl.damaged") {
 			out = append(out, path)
 		}
 	}
@@ -2298,7 +2300,9 @@ func TestSnapshotConflictAtRecoveryDepthCapIsolatesCurrentBranch(t *testing.T) {
 	}
 	filteredForks := forks[:0]
 	for _, fork := range forks {
-		if !strings.HasSuffix(fork, ".events.jsonl") {
+		if !strings.HasSuffix(fork, ".events.jsonl") &&
+			!strings.HasSuffix(fork, ".turns.jsonl") &&
+			!strings.HasSuffix(fork, ".turns.jsonl.damaged") {
 			filteredForks = append(filteredForks, fork)
 		}
 	}
@@ -4506,17 +4510,22 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 		})
 	}()
 
-	select {
-	case e := <-events:
-		if e.Kind != event.TurnDone {
-			t.Fatalf("expected TurnDone after panic, got %v", e.Kind)
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind != event.TurnDone {
+				continue
+			}
+			if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
+				t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
+			}
+			goto done
+		case <-deadline:
+			t.Fatal("timed out waiting for TurnDone after panic")
 		}
-		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
-			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for TurnDone after panic")
 	}
+done:
 
 	c.mu.Lock()
 	running := c.running

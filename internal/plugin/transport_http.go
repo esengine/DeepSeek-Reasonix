@@ -1,84 +1,148 @@
 package plugin
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
+	"time"
 
-	"reasonix/internal/mcpdiag"
-	"reasonix/internal/tool"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// maxHTTPBody caps how much of a JSON / SSE response body we read, so a
-// misbehaving server can't make us buffer without bound.
-const maxHTTPBody = 16 << 20 // 16 MiB
-
-// httpTransport speaks MCP's Streamable HTTP transport: every JSON-RPC message
-// is an HTTP POST to the server URL. The server replies with either
-// application/json (one response) or text/event-stream (an SSE stream carrying
-// the response plus any server notifications). The Mcp-Session-Id header, once
-// the server assigns one, is echoed on every subsequent request.
-//
-// The mutex serialises a request and its response. That means concurrent tool
-// calls to the *same* server run one at a time; calls to different servers use
-// different transports and stay concurrent. Correctness over latency for P1 —
-// it also keeps nextID and the session id race-free.
-type httpTransport struct {
-	name          string
-	url           string
-	headers       map[string]string
-	client        *http.Client
-	roots         []mcpRoot
-	progress      progressRouter
-	notifications notificationRouter
-	oauth         *mcpOAuthClient
-
-	mu      sync.Mutex
-	nextID  int
-	session string // Mcp-Session-Id, captured from responses
+func newHTTPTransport(s Spec) (*sdkSessionTransport, error) {
+	if strings.TrimSpace(s.Type) == "" {
+		s.Type = "http"
+	}
+	return newSDKSessionTransport(context.Background(), s)
 }
 
-func newHTTPTransport(s Spec) (*httpTransport, error) {
-	if s.URL == "" {
-		return nil, fmt.Errorf("http plugin %q: url is required", s.Name)
+func validateMCPURL(name, transport, raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("%s plugin %q: url is required", transport, name)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%s plugin %q: invalid url", transport, name)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return nil
+	default:
+		return fmt.Errorf("%s plugin %q: url must use http or https", transport, name)
+	}
+}
+
+func newMCPHTTPClient(lifetime context.Context, s Spec) (*http.Client, error) {
+	origin, err := url.Parse(strings.TrimSpace(s.URL))
+	if err != nil || origin == nil || origin.Host == "" {
+		return nil, fmt.Errorf("invalid MCP endpoint")
 	}
 	headers := make(map[string]string, len(s.Headers))
 	maps.Copy(headers, s.Headers)
-	var oauth *mcpOAuthClient
-	var err error
-	if !mcpdiag.HasAuthConfig(headers, s.Env, s.URL) {
-		oauth, err = newMCPOAuthClient(s.StateDir, s.OAuthHTTPClient)
-		if err != nil {
-			return nil, fmt.Errorf("http plugin %q: load OAuth state: %w", s.Name, err)
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	client := &http.Client{
+		Transport: &sameOriginMCPRoundTripper{
+			origin:   origin,
+			headers:  headers,
+			base:     base,
+			lifetime: lifetime,
+		},
+	}
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		if sameHTTPOrigin(origin, req.URL) {
+			return nil
 		}
-		if oauth != nil && !sameCanonicalResource(oauth.state.Resource, s.URL) {
-			return nil, fmt.Errorf("http plugin %q: stored OAuth token belongs to a different MCP resource; clear authentication and authorize this endpoint", s.Name)
+		return http.ErrUseLastResponse
+	}
+	return client, nil
+}
+
+type sameOriginMCPRoundTripper struct {
+	origin   *url.URL
+	headers  map[string]string
+	base     http.RoundTripper
+	lifetime context.Context
+}
+
+func (rt *sameOriginMCPRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || !sameHTTPOrigin(rt.origin, req.URL) {
+		return nil, errors.New("MCP request changed origin; configured headers were not sent")
+	}
+	requestCtx := req.Context()
+	cancelRequest := func() {}
+	stopLifetime := func() bool { return true }
+	// Keep protocol cleanup independent from the session lifetime: Close first
+	// cancels active GET/POST requests, then the SDK sends this bounded DELETE.
+	if req.Method != http.MethodDelete {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithCancel(req.Context())
+		cancelRequest = cancel
+		if rt.lifetime != nil {
+			stopLifetime = context.AfterFunc(rt.lifetime, cancelRequest)
 		}
 	}
-	return &httpTransport{
-		name:    s.Name,
-		url:     s.URL,
-		headers: headers,
-		roots:   mcpRoots(s.WorkspaceRoot),
-		oauth:   oauth,
-		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
-				return nil
-			}
-			// Do not send configured credentials to another origin. Returning
-			// ErrUseLastResponse exposes the 3xx to the normal status handling
-			// without issuing the redirected request.
-			return http.ErrUseLastResponse
-		}},
-	}, nil
+	cancelLifetimeRequest := func() {
+		stopLifetime()
+		cancelRequest()
+	}
+	request := req.Clone(requestCtx)
+	request.Header = req.Header.Clone()
+	for key, value := range rt.headers {
+		request.Header.Set(key, value)
+	}
+
+	base := rt.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if request.Method != http.MethodDelete {
+		response, err := base.RoundTrip(request)
+		return responseWithCancel(response, err, cancelLifetimeRequest)
+	}
+
+	deleteCtx, cancelDelete := context.WithTimeout(request.Context(), 2*time.Second)
+	request = request.Clone(deleteCtx)
+	response, err := base.RoundTrip(request)
+	return responseWithCancel(response, err, func() {
+		cancelDelete()
+		cancelLifetimeRequest()
+	})
+}
+
+func responseWithCancel(response *http.Response, err error, cancel func()) (*http.Response, error) {
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if response.Body == nil {
+		cancel()
+		return response, nil
+	}
+	response.Body = &cancelOnCloseBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
+}
+
+func (rt *sameOriginMCPRoundTripper) CloseIdleConnections() {
+	if closer, ok := rt.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel func()
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 func sameHTTPOrigin(a, b *url.URL) bool {
@@ -101,251 +165,61 @@ func sameHTTPOrigin(a, b *url.URL) bool {
 	return effectivePort(a) == effectivePort(b)
 }
 
-func (t *httpTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+func (t *sdkSessionTransport) newEndpoint(ctx context.Context) (sdkEndpoint, error) {
+	if t.endpointFactory != nil {
+		return t.endpointFactory(ctx)
+	}
+	switch canonicalMCPRuntimeTransport(t.spec.Type) {
+	case "stdio":
+		process, err := newStdioTransport(ctx, t.spec)
+		if err != nil {
+			return sdkEndpoint{}, err
+		}
+		return sdkEndpoint{
+			transport:     &mcpsdk.IOTransport{Reader: process.stdout, Writer: process.stdin},
+			close:         process.close,
+			startupStderr: process.startupStderr,
+		}, nil
+	case "streamable-http":
+		client, err := newMCPHTTPClient(ctx, t.spec)
+		if err != nil {
+			return sdkEndpoint{}, err
+		}
+		return sdkEndpoint{
+			transport: &mcpsdk.StreamableClientTransport{
+				Endpoint:     t.spec.URL,
+				HTTPClient:   client,
+				MaxRetries:   5,
+				OAuthHandler: t.oauth,
+			},
+			close: client.CloseIdleConnections,
+		}, nil
+	case "sse":
+		client, err := newMCPHTTPClient(ctx, t.spec)
+		if err != nil {
+			return sdkEndpoint{}, err
+		}
+		return sdkEndpoint{
+			transport: &mcpsdk.SSEClientTransport{Endpoint: t.spec.URL, HTTPClient: client},
+			close:     client.CloseIdleConnections,
+		}, nil
+	default:
+		return sdkEndpoint{}, fmt.Errorf("unknown MCP transport %q", t.spec.Type)
+	}
+}
 
-	t.nextID++
-	id := t.nextID
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
+// do is retained as a narrow HTTP security test hook. MCP protocol traffic goes
+// through the SDK transport above.
+func (t *sdkSessionTransport) do(ctx context.Context, body []byte) (*http.Response, error) {
+	client, err := newMCPHTTPClient(ctx, t.spec)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := t.do(ctx, body)
-	if err != nil {
-		return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
-	}
-	defer resp.Body.Close()
-	t.captureSession(resp)
-
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(b))
-		if isHTTPSessionExpiredResponse(resp.StatusCode, b) {
-			t.session = ""
-			return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, &httpSessionExpiredError{
-				status: resp.StatusCode,
-				body:   msg,
-			})
-		}
-		return nil, fmt.Errorf("plugin %q: %s: http %d: %s", t.name, method, resp.StatusCode, msg)
-	}
-
-	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		return t.readSSEResponse(ctx, resp.Body, id)
-	}
-	return decodeRPCResult(resp.Body, t.name)
-}
-
-func (t *httpTransport) notify(ctx context.Context, method string, params any) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
-	if err != nil {
-		return err
-	}
-	resp, err := t.do(ctx, body)
-	if err != nil {
-		return fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
-	}
-	defer resp.Body.Close()
-	t.captureSession(resp)
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPBody))
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("plugin %q: %s: http %d", t.name, method, resp.StatusCode)
-	}
-	return nil
-}
-
-func (t *httpTransport) close() {
-	t.client.CloseIdleConnections()
-}
-
-func (t *httpTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
-	return t.progress.registerProgress(token, sink)
-}
-
-// do POSTs one JSON-RPC body with the standard MCP headers, the configured
-// static headers, and the session id (once known). Caller holds t.mu.
-func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, error) {
-	return t.doOAuth(ctx, body, false)
-}
-
-func (t *httpTransport) doOAuth(ctx context.Context, body []byte, refreshed bool) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.spec.URL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	for k, v := range t.headers {
-		req.Header.Set(k, v)
-	}
-	usedOAuth := false
-	if req.Header.Get("Authorization") == "" && t.oauth != nil {
-		header, used, err := t.oauth.authorizationHeader(ctx, false)
-		if err != nil {
-			return nil, err
-		}
-		if header != "" {
-			req.Header.Set("Authorization", header)
-			usedOAuth = used
-		}
-	}
-	if t.session != "" {
-		req.Header.Set("Mcp-Session-Id", t.session)
-	}
-	resp, err := t.client.Do(req)
-	if err != nil || refreshed || resp.StatusCode != http.StatusUnauthorized || !usedOAuth || !t.oauth.canRefresh() {
-		return resp, err
-	}
-	_ = resp.Body.Close()
-	if _, _, err := t.oauth.authorizationHeader(ctx, true); err != nil {
-		return nil, err
-	}
-	return t.doOAuth(ctx, body, true)
-}
-
-func (t *httpTransport) captureSession(resp *http.Response) {
-	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
-		t.session = sid
-	}
-}
-
-type httpSessionExpiredError struct {
-	status int
-	body   string
-}
-
-func (e *httpSessionExpiredError) Error() string {
-	if e.body == "" {
-		return fmt.Sprintf("http %d: MCP session expired", e.status)
-	}
-	return fmt.Sprintf("http %d: %s", e.status, e.body)
-}
-
-func isHTTPSessionExpiredResponse(status int, body []byte) bool {
-	if status != http.StatusNotFound {
-		return false
-	}
-	var resp rpcResponse
-	if err := json.Unmarshal(bytes.TrimSpace(body), &resp); err != nil || resp.Error == nil {
-		return false
-	}
-	return resp.Error.Code == -32001 && strings.Contains(strings.ToLower(resp.Error.Message), "session not found")
-}
-
-// readSSEResponse scans an SSE stream for the JSON-RPC response matching id,
-// skipping server notifications and any other-id messages. Per the SSE spec,
-// consecutive data: lines within one event are joined with "\n" and an event is
-// dispatched on the blank line that terminates it.
-func (t *httpTransport) readSSEResponse(ctx context.Context, body io.Reader, id int) (json.RawMessage, error) {
-	sc := bufio.NewScanner(io.LimitReader(body, maxHTTPBody))
-	sc.Buffer(make([]byte, 0, 64*1024), maxHTTPBody)
-
-	var data strings.Builder
-	// match reports whether the accumulated event data is our response; it
-	// returns (result, matched, error).
-	match := func() (json.RawMessage, bool, error) {
-		if data.Len() == 0 {
-			return nil, false, nil
-		}
-		payload := data.String()
-		data.Reset()
-		message, ok := decodeInboundMessage([]byte(payload))
-		if !ok {
-			return nil, false, nil // not a JSON-RPC message we care about
-		}
-		if message.Method != "" {
-			if isNotificationID(message.ID) {
-				if message.Method == "notifications/progress" {
-					t.progress.dispatchProgress(message.Params)
-				}
-				t.notifications.dispatchNotification(message.Method, message.Params)
-				return nil, false, nil
-			}
-			if err := t.replyServerRequest(ctx, message); err != nil {
-				return nil, false, err
-			}
-			return nil, false, nil
-		}
-		var resp rpcResponse
-		if err := json.Unmarshal([]byte(payload), &resp); err != nil {
-			return nil, false, nil
-		}
-		if resp.ID != id {
-			return nil, false, nil // a notification or another call's response
-		}
-		if resp.Error != nil {
-			return nil, false, fmt.Errorf("plugin %q: %w", t.name, resp.Error)
-		}
-		return resp.Result, true, nil
-	}
-
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" { // event boundary
-			if res, ok, err := match(); err != nil || ok {
-				return res, err
-			}
-			continue
-		}
-		if v, found := strings.CutPrefix(line, "data:"); found {
-			if data.Len() > 0 {
-				data.WriteByte('\n')
-			}
-			data.WriteString(strings.TrimPrefix(v, " "))
-		}
-		// event:, id:, retry: and comments (":") are ignored
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("plugin %q: read SSE: %w", t.name, err)
-	}
-	if res, ok, err := match(); err != nil || ok { // stream ended on a final unterminated event
-		return res, err
-	}
-	return nil, fmt.Errorf("plugin %q: SSE stream ended without a response to id %d", t.name, id)
-}
-
-func (t *httpTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
-	return t.notifications.registerNotification(method, callback)
-}
-
-// replyServerRequest sends a JSON-RPC response on a separate Streamable HTTP
-// POST while the original response stream remains open. call holds t.mu here,
-// so do can safely read the current session id without taking another lock.
-func (t *httpTransport) replyServerRequest(ctx context.Context, message inboundMessage) error {
-	body, err := json.Marshal(serverRequestReply(message.ID, message.Method, t.roots))
-	if err != nil {
-		return err
-	}
-	resp, err := t.do(ctx, body)
-	if err != nil {
-		return fmt.Errorf("plugin %q: reply to %s: %w", t.name, message.Method, err)
-	}
-	defer resp.Body.Close()
-	t.captureSession(resp)
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPBody))
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("plugin %q: reply to %s: http %d", t.name, message.Method, resp.StatusCode)
-	}
-	return nil
-}
-
-// decodeRPCResult parses a single application/json JSON-RPC response body.
-func decodeRPCResult(body io.Reader, name string) (json.RawMessage, error) {
-	b, err := io.ReadAll(io.LimitReader(body, maxHTTPBody))
-	if err != nil {
-		return nil, fmt.Errorf("plugin %q: read response: %w", name, err)
-	}
-	var resp rpcResponse
-	if err := json.Unmarshal(bytes.TrimSpace(b), &resp); err != nil {
-		return nil, fmt.Errorf("plugin %q: decode response: %w", name, err)
-	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("plugin %q: %w", name, resp.Error)
-	}
-	return resp.Result, nil
+	return client.Do(req)
 }

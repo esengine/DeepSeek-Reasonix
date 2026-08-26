@@ -41,6 +41,13 @@ func (p *Provider) Name() string {
 	return p.ref
 }
 
+// SupportsTools binds the agent's structured-tool path to the extension's
+// declared provider capability. A text-only extension receives no schemas and
+// keeps the legacy visible-text completion contract.
+func (p *Provider) SupportsTools() bool {
+	return p != nil && p.descriptor.Tools
+}
+
 // RequiresToolCallReasoning reports the descriptor's replay policy, mirroring
 // the broker's hostProvider.
 func (p *Provider) RequiresToolCallReasoning() bool {

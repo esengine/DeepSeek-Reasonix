@@ -119,8 +119,9 @@ func StripReferencedContextPrefix(content string) string {
 
 // IsSyntheticUserMessage returns true if the content matches one of the known
 // synthetic user messages injected by the controller or agent loop (plan
-// approval, stream recovery, readiness retry, etc.). These should not be shown
-// in the chat UI.
+// approval, stream recovery, legacy readiness markers, etc.). These should not
+// be shown in the chat UI; the legacy marker is not a control-flow trigger for
+// ordinary Standard/Delivery turns.
 func IsSyntheticUserMessage(content string) bool {
 	if trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content)); trimmed == planApprovedMessage {
 		return true

@@ -38,6 +38,26 @@ type toolListRefreshState struct {
 	publishedRevision atomic.Uint64
 }
 
+type auxiliaryRefreshState struct {
+	revision atomic.Uint64
+	applied  atomic.Uint64
+	running  atomic.Bool
+}
+
+type auxiliaryListRefreshState struct {
+	prompt   auxiliaryRefreshState
+	resource auxiliaryRefreshState
+}
+
+type clientCapabilities struct {
+	tools                bool
+	prompts              bool
+	resources            bool
+	toolsListChanged     bool
+	promptsListChanged   bool
+	resourcesListChanged bool
+}
+
 // toolCatalogSnapshot is immutable after publication. All slices are built off
 // lock and replaced together under toolsMu, so readers see either the complete
 // old catalog or the complete new catalog.
@@ -164,6 +184,100 @@ func (h *Host) bindToolListChanges(c *Client) {
 		h.publishToolListChange(c, tools)
 	})
 	c.watchToolListChanges()
+	h.watchAuxiliaryListChanges(c)
+}
+
+func (h *Host) watchAuxiliaryListChanges(c *Client) {
+	t, ok := c.t.(notificationTransport)
+	if !ok {
+		return
+	}
+	c.refresh.mu.Lock()
+	ctx := c.refresh.ctx
+	closed := c.refresh.closed
+	c.refresh.mu.Unlock()
+	if closed {
+		return
+	}
+	var stops []func()
+	if c.capabilities.promptsListChanged {
+		stops = append(stops, t.registerNotification("notifications/prompts/list_changed", func(json.RawMessage) {
+			h.requestPromptRefresh(ctx, c)
+		}))
+	}
+	if c.capabilities.resourcesListChanged {
+		stops = append(stops, t.registerNotification("notifications/resources/list_changed", func(json.RawMessage) {
+			h.requestResourceRefresh(ctx, c)
+		}))
+	}
+	c.surfaceStopsMu.Lock()
+	if c.closed.Load() {
+		c.surfaceStopsMu.Unlock()
+		for _, stop := range stops {
+			stop()
+		}
+		return
+	}
+	c.surfaceStops = append(c.surfaceStops, stops...)
+	c.surfaceStopsMu.Unlock()
+}
+
+func (h *Host) requestPromptRefresh(ctx context.Context, c *Client) {
+	c.auxiliaryRefresh.prompt.revision.Add(1)
+	h.startPromptRefresh(ctx, c)
+}
+
+func (h *Host) startPromptRefresh(ctx context.Context, c *Client) {
+	if !c.auxiliaryRefresh.prompt.running.CompareAndSwap(false, true) {
+		return
+	}
+	if !h.goSurface(func() {
+		defer func() {
+			c.auxiliaryRefresh.prompt.running.Store(false)
+			if ctx.Err() == nil && !c.closed.Load() && c.auxiliaryRefresh.prompt.applied.Load() < c.auxiliaryRefresh.prompt.revision.Load() {
+				h.startPromptRefresh(ctx, c)
+			}
+		}()
+		for ctx.Err() == nil && !c.closed.Load() {
+			target := c.auxiliaryRefresh.prompt.revision.Load()
+			h.fetchPrompts(ctx, c, nil)
+			c.auxiliaryRefresh.prompt.applied.Store(target)
+			if c.auxiliaryRefresh.prompt.revision.Load() == target {
+				return
+			}
+		}
+	}) {
+		c.auxiliaryRefresh.prompt.running.Store(false)
+	}
+}
+
+func (h *Host) requestResourceRefresh(ctx context.Context, c *Client) {
+	c.auxiliaryRefresh.resource.revision.Add(1)
+	h.startResourceRefresh(ctx, c)
+}
+
+func (h *Host) startResourceRefresh(ctx context.Context, c *Client) {
+	if !c.auxiliaryRefresh.resource.running.CompareAndSwap(false, true) {
+		return
+	}
+	if !h.goSurface(func() {
+		defer func() {
+			c.auxiliaryRefresh.resource.running.Store(false)
+			if ctx.Err() == nil && !c.closed.Load() && c.auxiliaryRefresh.resource.applied.Load() < c.auxiliaryRefresh.resource.revision.Load() {
+				h.startResourceRefresh(ctx, c)
+			}
+		}()
+		for ctx.Err() == nil && !c.closed.Load() {
+			target := c.auxiliaryRefresh.resource.revision.Load()
+			h.fetchResources(ctx, c, nil)
+			c.auxiliaryRefresh.resource.applied.Store(target)
+			if c.auxiliaryRefresh.resource.revision.Load() == target {
+				return
+			}
+		}
+	}) {
+		c.auxiliaryRefresh.resource.running.Store(false)
+	}
 }
 
 func (h *Host) registerStartedClient(c *Client, tools []tool.Tool) ([]tool.Tool, error) {
@@ -212,7 +326,7 @@ func deliverToolListChange(subscriber *toolListSubscriber, spec Spec, tools []to
 }
 
 func (c *Client) watchToolListChanges() {
-	if !c.supportsToolListChanged {
+	if !c.capabilities.toolsListChanged {
 		return
 	}
 	t, ok := c.t.(notificationTransport)
@@ -577,7 +691,7 @@ func (c *Client) listToolsRaw(ctx context.Context) ([]mcpTool, error) {
 // window before their initial tool catalog is considered complete.
 func (c *Client) listToolsRawSettled(ctx context.Context) ([]mcpTool, error) {
 	out, err := c.listToolsRaw(ctx)
-	if err != nil || !c.hasTools || len(out) > 0 {
+	if err != nil || !c.capabilities.tools || len(out) > 0 {
 		return out, err
 	}
 	for _, delay := range advertisedToolsEmptyListRetryDelays {

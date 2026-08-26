@@ -57,8 +57,17 @@ func runACPFakeSidecar(stdin io.Reader, stdout io.Writer) {
 	streamCompletion := func(id json.RawMessage, rawParams json.RawMessage) {
 		var params struct {
 			StreamID string `json:"streamId"`
+			Request  struct {
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+			} `json:"request"`
 		}
 		_ = json.Unmarshal(rawParams, &params)
+		hasFinish := false
+		for _, schema := range params.Request.Tools {
+			hasFinish = hasFinish || schema.Name == "finish"
+		}
 		write(`{"jsonrpc":"2.0","id":%s,"result":{"accepted":true}}`, string(id))
 		go func() {
 			chunk := func(seq int, body string) {
@@ -66,8 +75,13 @@ func runACPFakeSidecar(stdin io.Reader, stdout io.Writer) {
 			}
 			chunk(1, `{"type":"text","text":"acp-fake-hello "}`)
 			chunk(2, `{"type":"text","text":"acp-fake-world"}`)
-			chunk(3, `{"type":"usage","usage":{"promptTokens":5,"completionTokens":7,"totalTokens":12,"cacheHitTokens":2,"cacheMissTokens":3,"reasoningTokens":4,"finishReason":"stop"}}`)
-			write(`{"jsonrpc":"2.0","method":"extension/provider/stream/end","params":{"streamId":%q,"lastSeq":3}}`, params.StreamID)
+			lastSeq := 3
+			if hasFinish {
+				chunk(3, `{"type":"tool_call","toolCall":{"id":"acp-fake-finish","name":"finish","arguments":"{\"outcome\":\"completed\"}"}}`)
+				lastSeq = 4
+			}
+			chunk(lastSeq, `{"type":"usage","usage":{"promptTokens":5,"completionTokens":7,"totalTokens":12,"cacheHitTokens":2,"cacheMissTokens":3,"reasoningTokens":4,"finishReason":"stop"}}`)
+			write(`{"jsonrpc":"2.0","method":"extension/provider/stream/end","params":{"streamId":%q,"lastSeq":%d}}`, params.StreamID, lastSeq)
 		}()
 	}
 

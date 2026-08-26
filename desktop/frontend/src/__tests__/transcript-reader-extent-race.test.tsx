@@ -84,7 +84,9 @@ const virtuosoHandle = {
     lastScrollByTop = options?.top ?? 0;
     scrollElement.scrollTop += lastScrollByTop;
   },
-  scrollTo: () => {},
+  scrollTo: (options?: { top?: number }) => {
+    scrollElement.scrollTop = options?.top ?? scrollElement.scrollTop;
+  },
   scrollToIndex: () => {},
   getState: () => {},
 } as unknown as VirtuosoHandle;
@@ -210,6 +212,30 @@ await act(async () => arbiter?.followGrowingTail());
 await flushFrames();
 check(scrollByCalls === 0 && scrollWrites.length === 0,
   "selection ownership cancels a pending reader transaction");
+
+// A downward wheel at the physical bottom must not arm reader-extent
+// recovery. A later extent rebound would otherwise snap the viewport upward
+// and fight the user's wheel input.
+await act(async () => arbiter?.reset());
+scrollExtent = 2_000;
+Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 725 });
+scrollElement.scrollTop = 1_275;
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.releaseTailFollow());
+scrollWrites.length = 0;
+scrollByCalls = 0;
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaMode: 0,
+  deltaX: 0,
+  deltaY: 120,
+  target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+scrollElement.scrollTop = 1_100;
+await act(async () => arbiter?.followGrowingTail());
+await flushFrames();
+check(scrollByCalls === 0 && scrollWrites.length === 0,
+  "near-bottom downward wheel does not arm the reader-extent guard");
 
 await act(async () => root.unmount());
 dom.window.close();

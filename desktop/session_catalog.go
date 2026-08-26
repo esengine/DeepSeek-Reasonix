@@ -580,6 +580,11 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 			Children: a.pinnedTopicShells("project", project.Root, project.Topics, project.PinnedTopics, project.Color, deleted),
 		})
 	}
+	// Remote projects (pinned via the connection wizard) render as project
+	// groups too; the Remote ref swaps the folder icon for a cloud icon.
+	if remoteNodes, err := a.remoteProjectNodes(); err == nil {
+		projects = append(projects, remoteNodes...)
+	}
 	projects = applyPinnedProjectOrder(applyProjectTreeOrder(projects, f.SidebarOrder), f.PinnedProjects)
 	status := a.currentSessionCatalogStatus()
 	return ProjectTreeSnapshot{

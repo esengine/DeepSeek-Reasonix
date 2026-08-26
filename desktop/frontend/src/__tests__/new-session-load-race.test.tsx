@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { initialState, reducer, useController, type Item } from "../lib/useController";
+import type { NavigationResult } from "../lib/navigationSurfaceTransition";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
@@ -335,17 +336,21 @@ await act(async () => {
 
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
 
-let resumePromise: Promise<void> | undefined;
+let resumeNavigation: NavigationResult<void> | undefined;
+let resumeSurfaceSettled = false;
 await act(async () => {
-  resumePromise = controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  resumeNavigation = controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  void resumeNavigation?.surfaceReady.then(() => { resumeSurfaceSettled = true; });
   await flushPromises();
 });
+eq(resumeSurfaceSettled, false, "Resume releases navigation acquisition before target history settles");
 eq(controller?.state.ask?.id, "pre-response-resume", "Resume accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
 await act(async () => {
   resumeRPCGate.resolve();
-  await resumePromise;
+  await resumeNavigation?.surfaceReady;
   await flushPromises();
 });
+eq(resumeSurfaceSettled, true, "Resume surfaceReady resolves after authoritative history and reconciliation");
 eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
 eq(controller?.state.ask?.id, "replayed-runtime-resumed", "Resume RPC ask emitted before return is restored after reset/history hydration");
 ok(promptReplayCalls > 0, "Resume completion performs a tab-scoped pending-prompt replay");
@@ -356,15 +361,15 @@ await act(async () => {
   await flushPromises();
 });
 const replayCallsBeforeChannelOpen = promptReplayCalls;
-let channelPromise: Promise<void> | undefined;
+let channelNavigation: NavigationResult<void> | undefined;
 await act(async () => {
-  channelPromise = controller?.openChannelSession("/sessions/channel.jsonl", "tab-a");
+  channelNavigation = controller?.openChannelSession("/sessions/channel.jsonl", "tab-a");
   await flushPromises();
 });
 eq(controller?.state.ask?.id, "pre-response-channel", "channel-open accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
 await act(async () => {
   channelRPCGate.resolve();
-  await channelPromise;
+  await channelNavigation?.surfaceReady;
   await flushPromises();
 });
 eq(controller?.state.ask?.id, "replayed-runtime-channel", "channel-open ask emitted before return is restored after reset/history hydration");

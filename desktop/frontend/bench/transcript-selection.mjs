@@ -136,9 +136,11 @@ async function waitForServer() {
   throw new Error("transcript browser preview did not become ready");
 }
 
-const preview = spawn("pnpm", ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
+const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const preview = spawn(packageManager, ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
   cwd: frontendDir,
   stdio: "ignore",
+  shell: process.platform === "win32",
 });
 
 let browser;
@@ -165,15 +167,27 @@ try {
     document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t")
       && document.querySelector(".transcript")?.textContent?.includes("pkg-41/mod.go")
   ), undefined, { timeout: 30_000 });
+  await page.waitForFunction(
+    () => !document.querySelector(".transcript-navigation-overlay"),
+    undefined,
+    { timeout: 30_000 },
+  );
   await page.waitForTimeout(300);
-  for (let pageIndex = 0; pageIndex < 8; pageIndex += 1) {
-    await page.evaluate(() => {
+  // Preload the selection fixture with real upward wheel intent. Directly
+  // assigning scrollTop used to make Virtuoso's startReached callback page in
+  // the background, but viewport paging now requires one permit per page.
+  for (let pageIndex = 0; pageIndex < 32; pageIndex += 1) {
+    const before = Number(await page.locator(".transcript").getAttribute("data-transcript-row-count") ?? 0);
+    const box = await page.locator(".transcript").boundingBox();
+    if (!box) break;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -100_000);
+    const loaded = await page.waitForFunction((previous) => {
       const transcript = document.querySelector(".transcript");
-      if (transcript) transcript.scrollTop = 0;
-    });
-    await page.waitForTimeout(100);
-    if (!(await clickIfPresent(page, ".transcript__older"))) break;
-    await page.waitForTimeout(350);
+      const current = Number(transcript?.getAttribute("data-transcript-row-count") ?? 0);
+      return current > previous;
+    }, before, { timeout: 2_000 }).then(() => true, () => false);
+    if (!loaded) break;
   }
   await clickIfPresent(page, ".transcript__jump-bottom");
   try {

@@ -80,6 +80,7 @@ var subagentRecursiveTools = []string{
 }
 
 var subagentAlwaysHiddenTools = []string{
+	"finish",
 	"parallel_tasks",
 	"fleet",
 	"read_subagent_result",

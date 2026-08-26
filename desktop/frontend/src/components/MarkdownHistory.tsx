@@ -33,6 +33,8 @@ const MARKDOWN_PREPEND_BLOCKS = 96;
 const MARKDOWN_WINDOW_BLOCKS = MARKDOWN_TAIL_BLOCKS + MARKDOWN_PREPEND_BLOCKS * 2;
 const MARKDOWN_SENTINEL_STYLE = { display: "block", height: 1 } as const;
 const MARKDOWN_ANCHOR_STYLE = { display: "block", height: 0 } as const;
+const MARKDOWN_FALLBACK_MARKER_STYLE = { display: "none" } as const;
+const MARKDOWN_PARSE_SWAP_BOTTOM_EPSILON_PX = 2;
 
 type BlockWindow = {
   identity: MarkdownBlock[] | undefined;
@@ -139,6 +141,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     return cached ? { text, blocks: cached } : undefined;
   });
   const blocks = parsed && parsed.text === text ? parsed.blocks : undefined;
+  const fallbackMarkerRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const cached = cachedBlocks(entryId, revision, text);
@@ -149,6 +152,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     }
     const handle = getMarkdownWorkerClient().parse(text);
     let cancelled = false;
+    let releaseDeferredCommit: (() => void) | undefined;
     handle.promise
       .then((result) => {
         if (cancelled || !result) return;
@@ -161,14 +165,40 @@ export const MarkdownHistory = memo(function MarkdownHistory({
             bytes: text.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks),
           });
         }
-        setParsed({ text, blocks: result.blocks });
-        onParsed?.();
+        const next = { text, blocks: result.blocks };
+        const commit = () => {
+          if (cancelled) return;
+          releaseDeferredCommit?.();
+          releaseDeferredCommit = undefined;
+          setParsed(next);
+          onParsed?.();
+        };
+        const scroller = fallbackMarkerRef.current?.closest<HTMLElement>(".transcript") ?? null;
+        const isAtBottom = () => !scroller
+          || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= MARKDOWN_PARSE_SWAP_BOTTOM_EPSILON_PX;
+        if (isAtBottom()) {
+          commit();
+          return;
+        }
+
+        // A fresh history mount uses the complete plain-text source while the
+        // worker parses. Replacing that source mid-read with the bounded tail
+        // block window removes the reader's visible blocks from the DOM and
+        // makes the native scroller jump to the end. Cache the result above,
+        // but keep the stable fallback until the reader deliberately returns
+        // to the bottom; that handoff needs no competing scroll write.
+        const handleScroll = () => {
+          if (isAtBottom()) commit();
+        };
+        scroller?.addEventListener("scroll", handleScroll, { passive: true });
+        releaseDeferredCommit = () => scroller?.removeEventListener("scroll", handleScroll);
       })
       .catch(() => {
         if (!cancelled) onError?.();
       });
     return () => {
       cancelled = true;
+      releaseDeferredCommit?.();
       handle.cancel();
     };
     // onParsed/onError are stable caller callbacks; re-running per identity
@@ -223,7 +253,14 @@ export const MarkdownHistory = memo(function MarkdownHistory({
   // JSX per block depends only on the block and the components map; build it
   // lazily so viewport-window growth never re-converts settled blocks.
   const jsxCacheRef = useRef<{ blocks: MarkdownBlock[]; nodes: Map<number, ReactNode> } | null>(null);
-  if (!blocks) return <>{fallback}</>;
+  if (!blocks) {
+    return (
+      <>
+        <span ref={fallbackMarkerRef} style={MARKDOWN_FALLBACK_MARKER_STYLE} data-markdown-fallback-marker aria-hidden="true" />
+        {fallback}
+      </>
+    );
+  }
   let cache = jsxCacheRef.current;
   if (!cache || cache.blocks !== blocks) {
     cache = { blocks, nodes: new Map<number, ReactNode>() };

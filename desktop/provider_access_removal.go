@@ -48,6 +48,9 @@ func (a *App) RemoveProviderAccesses(rawNames []string) error {
 	if err != nil {
 		return err
 	}
+	if len(names) > 1 && isAtomicCustomProviderGroup(cfg, names) {
+		return a.deleteProvidersAndRetargetTabs(names)
+	}
 	officialKind := ""
 	for _, name := range names {
 		p, ok := cfg.Provider(name)
@@ -67,6 +70,40 @@ func (a *App) RemoveProviderAccesses(rawNames []string) error {
 		officialKind = kind
 	}
 	return a.removeBuiltInProviderAccessAndRetargetTabs(names)
+}
+
+// isAtomicCustomProviderGroup identifies custom provider families that are
+// represented by one settings card but persisted as multiple routes.
+// Keep this allowlist narrow: RemoveProviderAccesses intentionally rejects
+// arbitrary custom-provider batches so callers cannot accidentally delete
+// unrelated endpoints in one operation.
+func isAtomicCustomProviderGroup(c *config.Config, names []string) bool {
+	if c == nil || len(names) < 2 {
+		return false
+	}
+	group := ""
+	for _, name := range names {
+		current := customProviderGroupKey(name)
+		if current == "" || (group != "" && current != group) {
+			return false
+		}
+		p, ok := c.Provider(name)
+		if !ok || isOfficialBuiltInProvider(*p) {
+			return false
+		}
+		group = current
+	}
+	return group != ""
+}
+
+func customProviderGroupKey(name string) string {
+	switch strings.TrimSpace(name) {
+	case "opencode-go", "opencode-go-anthropic", "opencode-go-responses",
+		"opencode-go-deepseek-anthropic", "opencode-go-deepseek-responses":
+		return "opencode-go"
+	default:
+		return ""
+	}
 }
 
 func validateOfficialProviderRemoval(c *config.Config, names []string) error {
@@ -121,11 +158,23 @@ func providerRemovalStateFingerprint(c *config.Config, credentialsRevision strin
 		_, _ = fmt.Fprintf(h, "%d:", len(value))
 		_, _ = h.Write([]byte(value))
 	}
-	write("provider-removal-state-v2")
+	write("provider-removal-state-v3")
 	write(credentialsRevision)
 	write(c.DefaultModel)
 	write(c.Agent.PlannerModel)
+	write(c.Agent.VisionModel)
+	write(c.Agent.GuardianModel)
+	write(c.Agent.RecoveryModel)
 	write(c.Agent.SubagentModel)
+	write(c.Bot.Model)
+	write(c.Bot.QQ.Model)
+	write(c.Bot.Dingtalk.Model)
+	for i := range c.Bot.Routes {
+		write(c.Bot.Routes[i].Model)
+	}
+	for i := range c.Bot.Connections {
+		write(c.Bot.Connections[i].Model)
+	}
 	for _, name := range c.Desktop.ProviderAccess {
 		write(name)
 	}
@@ -201,6 +250,15 @@ func retargetProviderReferences(c *config.Config, names []string, fallbackRef st
 	if providerRefMatchesAny(c, c.Agent.PlannerModel, names) {
 		c.Agent.PlannerModel = fallbackRef
 	}
+	if providerRefMatchesAny(c, c.Agent.VisionModel, names) {
+		c.Agent.VisionModel = ""
+	}
+	if providerRefMatchesAny(c, c.Agent.GuardianModel, names) {
+		c.Agent.GuardianModel = fallbackRef
+	}
+	if providerRefMatchesAny(c, c.Agent.RecoveryModel, names) {
+		c.Agent.RecoveryModel = fallbackRef
+	}
 	if providerRefMatchesAny(c, c.Agent.SubagentModel, names) {
 		c.Agent.SubagentModel = fallbackRef
 	}
@@ -211,6 +269,25 @@ func retargetProviderReferences(c *config.Config, names []string, fallbackRef st
 			} else {
 				c.Agent.SubagentModels[skill] = fallbackRef
 			}
+		}
+	}
+	if providerRefMatchesAny(c, c.Bot.Model, names) {
+		c.Bot.Model = fallbackRef
+	}
+	if providerRefMatchesAny(c, c.Bot.QQ.Model, names) {
+		c.Bot.QQ.Model = fallbackRef
+	}
+	if providerRefMatchesAny(c, c.Bot.Dingtalk.Model, names) {
+		c.Bot.Dingtalk.Model = fallbackRef
+	}
+	for i := range c.Bot.Routes {
+		if providerRefMatchesAny(c, c.Bot.Routes[i].Model, names) {
+			c.Bot.Routes[i].Model = fallbackRef
+		}
+	}
+	for i := range c.Bot.Connections {
+		if providerRefMatchesAny(c, c.Bot.Connections[i].Model, names) {
+			c.Bot.Connections[i].Model = fallbackRef
 		}
 	}
 }
@@ -262,12 +339,17 @@ func (a *App) planProviderRemoval(names []string, official bool) (providerRemova
 			return providerRemovalPlan{}, err
 		}
 	} else {
-		p, ok := cfg.Provider(names[0])
-		if !ok {
-			return providerRemovalPlan{}, fmt.Errorf("remove provider: %q not found", names[0])
+		if len(names) > 1 && !isAtomicCustomProviderGroup(cfg, names) {
+			return providerRemovalPlan{}, fmt.Errorf("remove provider: custom provider group is not supported")
 		}
-		if isOfficialBuiltInProvider(*p) {
-			return providerRemovalPlan{}, fmt.Errorf("remove provider: %q is now an official provider; retry", names[0])
+		for _, name := range names {
+			p, ok := cfg.Provider(name)
+			if !ok {
+				return providerRemovalPlan{}, fmt.Errorf("remove provider: %q not found", name)
+			}
+			if isOfficialBuiltInProvider(*p) {
+				return providerRemovalPlan{}, fmt.Errorf("remove provider: %q is now an official provider; retry", name)
+			}
 		}
 	}
 	targets := names
@@ -375,7 +457,7 @@ func (a *App) commitOfficialProviderRemoval(plan providerRemovalPlan, names []st
 	return fallbackRef, fresh.SaveTo(path)
 }
 
-func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string) (string, error) {
+func (a *App) commitCustomProviderRemovals(plan providerRemovalPlan) (string, error) {
 	unlock, err := lockProviderRemovalState()
 	if err != nil {
 		return "", err
@@ -385,12 +467,14 @@ func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string)
 	if err != nil {
 		return "", err
 	}
-	p, ok := fresh.Provider(name)
-	if !ok {
-		return "", fmt.Errorf("provider configuration changed while removing %q; retry", name)
-	}
-	if isOfficialBuiltInProvider(*p) {
-		return "", fmt.Errorf("provider configuration changed while removing %q; it is now an official provider; retry", name)
+	for _, name := range plan.targets {
+		p, ok := fresh.Provider(name)
+		if !ok {
+			return "", fmt.Errorf("provider configuration changed while removing %q; retry", name)
+		}
+		if isOfficialBuiltInProvider(*p) {
+			return "", fmt.Errorf("provider configuration changed while removing %q; it is now an official provider; retry", name)
+		}
 	}
 	if err := validateProviderRemovalFingerprint(fresh, plan.fingerprint); err != nil {
 		return "", err
@@ -407,10 +491,12 @@ func (a *App) commitCustomProviderRemoval(plan providerRemovalPlan, name string)
 		persistedFallback = providerName
 	}
 	retargetProviderReferences(fresh, plan.targets, persistedFallback)
-	if err := fresh.RemoveProvider(name); err != nil {
-		return "", err
+	for _, name := range plan.targets {
+		if err := fresh.RemoveProvider(name); err != nil {
+			return "", err
+		}
 	}
-	removeProviderAccess(fresh, name)
+	removeProviderAccess(fresh, plan.targets...)
 	return fallbackRef, fresh.SaveTo(path)
 }
 
@@ -537,8 +623,12 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(names []string) error {
 }
 
 func (a *App) deleteProviderAndRetargetTabs(name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
+	return a.deleteProvidersAndRetargetTabs([]string{name})
+}
+
+func (a *App) deleteProvidersAndRetargetTabs(rawNames []string) error {
+	names := uniqueNonEmptyStrings(rawNames)
+	if len(names) == 0 {
 		return fmt.Errorf("remove provider: empty provider name")
 	}
 	defer a.lockRuntimeMutation("delete-provider")()
@@ -548,26 +638,27 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	}
 	defer releaseGates()
 
-	plan, err := a.planProviderRemoval([]string{name}, false)
+	plan, err := a.planProviderRemoval(names, false)
 	if err != nil {
 		return err
 	}
-	affected, referencesRemoved, err := a.affectedProviderRemovalTabs(plan, name, "deleting the provider")
+	label := strings.Join(names, ", ")
+	affected, referencesRemoved, err := a.affectedProviderRemovalTabs(plan, label, "deleting the provider")
 	if err != nil {
 		return err
 	}
 	if plan.fallbackRef == "" && referencesRemoved {
-		return fmt.Errorf("remove provider: %q is in use and no other configured provider exists", name)
+		return fmt.Errorf("remove provider: %q is in use and no other configured provider exists", label)
 	}
 	if len(affected) == 0 {
 		if err := a.ensureActiveTabRebuildAllowed("provider"); err != nil {
 			return err
 		}
 	}
-	if err := snapshotProviderRemovalTabs(affected, name, "deleting provider"); err != nil {
+	if err := snapshotProviderRemovalTabs(affected, label, "deleting provider"); err != nil {
 		return err
 	}
-	fallbackRef, err := a.commitCustomProviderRemoval(plan, name)
+	fallbackRef, err := a.commitCustomProviderRemovals(plan)
 	if err != nil {
 		return err
 	}

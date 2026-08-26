@@ -22,7 +22,7 @@ export type TranscriptRowLayoutVariant =
   | "static"
   | "text-flow";
 
-export type TranscriptEstimateSource = "exact" | "compact-median" | "calibrated" | "static";
+export type TranscriptEstimateSource = "exact" | "calibrated" | "static";
 
 export type TranscriptGeometryEnvironment = {
   /** Actual readable transcript column, not the native window width. */

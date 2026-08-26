@@ -153,11 +153,17 @@ Delivery 收敛为纯 readiness 服务，宿主可消费的结构化结果为
 - Project checks（来自 AGENTS.md 的 verify 指令）
 - Delivery 专属验收项（mutation、verification、review、complete_step 签收、capability 门禁）
 
-Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合可由宿主针对已确认的缺失项做 1 次通用或最多 2 次高置信有界续跑。Standard 对明确修改但尚无成功 mutation、本任务已 mutation 且当前 ledger 的 Todo 仍未完成，或已 mutation、没有本轮 Todo 且最终文本明确延后了实施动作，最多做 12 次 task-progress 续跑。每次新宿主进展会重置停滞计数；连续 2 轮没有新进展即暂停。历史 canonical Todo 不参与 Standard 新任务判定，已完成或显式清空的本轮 Todo 仍为权威状态，verification/review/signoff 缺口也不会让 Standard 自动续跑。所有类别遇到新用户输入、取消、Steer 或待处理 inbox 时立即让路，仍未满足才显示恢复卡。Goal + Delivery 回合仍由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
+Delivery 和 Standard 都不会注入隐藏模型消息做 readiness 重试。普通回合在可见模型回合结束后
+立即停止并返回结构化缺口；Delivery 由前端展示显式的 `Continue checks` 恢复入口，只有用户
+主动操作才会启动恢复回合。Standard 的 verification/review/signoff 缺口只作为完成提示处理。
+Goal + Delivery 或 approved Plan 回合仍由 Goal/Plan FSM 自动续轮，不显示需要用户点击的重复卡片。
 
 ### 进展签名
 
-只有宿主可验证且对当前任务或 Goal **新颖**的信息才能重置停滞计数：新的读取/搜索结果、todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。Standard task-progress 在内存中对成功 receipt 指纹去重；读取和查询由规范化工具名、参数及宿主观测到的结果摘要标识。完全相同的重复调用、仅改变措辞的回答或重复 continue 理由都不能伪造进展。Goal 的证据摘要以有界窗口持久化，不保存工具输出正文；Standard 的续跑指纹不写入 transcript 或 wire payload。
+Goal 的停滞计数只由宿主可验证且对当前 Goal **新颖**的信息重置：新的读取/搜索结果、Todo
+状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化或
+终态 `update_goal` 报告。普通 Standard/Delivery 不再维护 task-progress 自动续跑指纹；用户的
+显式恢复回合会重新建立当前 evidence 上下文。
 
 ### Todo 状态流
 

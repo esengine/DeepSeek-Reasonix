@@ -39,10 +39,9 @@ import { fileDiffFromWire, summarizeFileDiff } from "./tools";
 import {
   historyToolError,
   isReadOnlyTool,
-  localizedNoticeText,
-  quietTranscriptNoticeKey,
   type Item,
 } from "./useController";
+import { localizedNoticeText, quietTranscriptNoticeKey } from "./controllerNotices";
 import type {
   HistoryContentChunk,
   HistoryContentRef,

@@ -23,6 +23,7 @@ export interface TopicbarMoreMenuContentProps {
   exportSession: (format: "markdown" | "json" | "pdf" | "image") => void;
   openChangedDock: () => void;
   toggleTerminal: () => void;
+  terminalEnabled?: boolean;
   prefetchTerminal?: () => void;
   openSessionSummary: () => void;
   tasksOpen: boolean;
@@ -57,6 +58,7 @@ export function TopicbarMoreMenuContent({
   exportSession,
   openChangedDock,
   toggleTerminal,
+  terminalEnabled = true,
   prefetchTerminal,
   openSessionSummary,
   tasksOpen,
@@ -172,8 +174,9 @@ export function TopicbarMoreMenuContent({
         className="topicbar__menu-item"
         type="button"
         role="menuitem"
-        onPointerEnter={prefetchTerminal}
-        onFocus={prefetchTerminal}
+        disabled={!terminalEnabled}
+        onPointerEnter={terminalEnabled ? prefetchTerminal : undefined}
+        onFocus={terminalEnabled ? prefetchTerminal : undefined}
         onClick={() => closeAndRun(toggleTerminal)}
       >
         <TerminalSquare size={14} />

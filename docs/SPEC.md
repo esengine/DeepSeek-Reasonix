@@ -130,20 +130,24 @@ type Tool interface {
 ### 3.3 Plugins (`internal/plugin`) — MCP client
 
 An external plugin is an MCP server declared in config. The wire protocol is
-**JSON-RPC 2.0** in every case; only the transport differs. A `transport`
-interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
-(handshake, `tools/list`, `tools/call`, …) is written once.
+**JSON-RPC 2.0** in every case; only the transport differs. Reasonix keeps the
+product-level client and delegates protocol negotiation, request correlation,
+cancellation, pagination, and transport framing to the official MCP Go SDK.
+One concurrency-safe session per configured server is shared by tools, prompts,
+and resources.
 
 - **Transports** (config `type`):
   - `stdio` (default) — a local subprocess; one JSON message per line over the
     child's stdin/stdout (the MCP stdio convention). Declared with
     `command` / `args` / `env`; terminated on ctx cancel / shutdown.
-  - `http` (a.k.a. `streamable-http`) — a remote server at `url`. Each request
-    is an HTTP POST; the server replies with either `application/json` (one
-    response) or `text/event-stream` (an SSE stream carrying the response plus
-    any server notifications). The `Mcp-Session-Id` response header, once seen,
-    is echoed on subsequent requests. Static `headers` (e.g. a bearer token) are
-    sent on every request. When no static `Authorization` header is configured,
+  - `http` (a.k.a. `streamable-http`) — a remote server at `url`. After
+    initialize, a long-lived GET/SSE listener receives server messages while
+    POST carries client requests; POST-only and sessionless servers remain
+    supported. The `Mcp-Session-Id` response header, once seen, is echoed on
+    subsequent GET, POST, and bounded shutdown DELETE requests. Static
+    `headers` (e.g. a bearer token) are sent to the configured origin on each
+    transport method and are never forwarded cross-origin. When no static
+    `Authorization` header is configured,
     user-initiated OAuth uses Protected Resource Metadata and Authorization
     Server Metadata discovery, dynamic client registration, PKCE S256, a
     loopback callback, resource indicators, and refresh-token rotation. Client
@@ -161,6 +165,13 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   and `headers` so secrets come from the environment, not the config file.
 - Lifecycle: `initialize` → `notifications/initialized` → `tools/list`;
   invocation via `tools/call {name, arguments}`.
+- A per-server supervisor publishes only fully initialized/listening sessions.
+  An established session that returns 404 is rebuilt once with concurrent
+  callers joining the same rebuild; a call is replayed at most once. Ambiguous
+  disconnects never replay tool calls because the server may already have
+  executed them. Terminal background disconnects use bounded reconnect delays,
+  and stale callbacks from an older session generation cannot replace current
+  state.
 - When a workspace root exists, initialize advertises `roots` and transports
   answer `roots/list` with its file URI. `tools/call` includes a per-call
   `_meta.progressToken`; matching `notifications/progress` messages stream into
@@ -191,7 +202,10 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   process sandbox remain host-controlled boundaries.
 - `prompts/list` + `prompts/get` surface as `/mcp__<server>__<prompt>` slash
   commands; `resources/list` + `resources/read` are referenced as
-  `@<server>:<uri>` in chat. `/mcp` shows connected servers and their counts.
+  `@<server>:<uri>` in chat. All list cursors are consumed while preserving
+  server order. `/mcp` shows connected servers, counts, protocol/listening state,
+  reconnect attempts, and a redacted error category; it never exposes a session
+  identifier.
 - `cmd/reasonix-plugin-example` is a runnable reference stdio server (`echo`,
   `wordcount`), driven by an end-to-end test that builds the real binary.
 
@@ -255,7 +269,8 @@ when the sole automatic threshold is crossed.
 
 - Each provider declares `context_window` (tokens). The only automatic trigger is
   `agent.compact_ratio` (default **0.80**; presets 0.70 / 0.80 / 0.85; range
-  0.65–0.85).
+  0.30–0.85). Lower values compact sooner and may increase summary cost or
+  reduce prompt-cache reuse.
   `triggerTokens = floor(context_window × compact_ratio)`.
 - **Below the trigger** ordinary requests remain append-only and no sidecar is
   written. Every provider request uses the durable, bounded tool `Content`;

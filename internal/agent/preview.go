@@ -260,7 +260,8 @@ const (
 )
 
 // SyntheticUserPrefixes lists the openings of host-injected user-role messages
-// (readiness retries, stream recovery, goal-loop nudges, compaction folds).
+// (legacy readiness markers, stream recovery, Goal-loop nudges, compaction
+// folds).
 // They are persisted with role "user" for provider-contract reasons but are not
 // user-authored: previews, titles, and user-turn counts must skip them, and the
 // chat UI never renders them as user bubbles. Keep in sync with the injection

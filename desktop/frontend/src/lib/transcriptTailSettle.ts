@@ -7,14 +7,27 @@ import {
   type TranscriptTailWriteDiagnostic,
 } from "./transcriptScrollDiagnosticProbe";
 import type { TranscriptScrollMode } from "./transcriptScrollArbiter";
-import { nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
+import { nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
 
 const TAIL_STAGNANT_FRAME_LIMIT = 2;
+const TAIL_SETTLE_MAX_ATTEMPTS = 8;
+// Ignore sub-row measurement jitter after the physical tail is already
+// pinned. Real content growth still re-arms the settle transaction.
+export const TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX = 24;
 // Ignore one-frame extent oscillation; real growth remains displaced and
 // converges on the following frame (#9028/#9089).
 const TAIL_CONFIRM_OFF_BOTTOM_FRAMES = 2;
 const JUMP_TAIL_TRANSACTION_MS = 240;
 const LAYOUT_TRANSIENT_IDLE_MS = 160;
+
+export function transcriptTailSettleBudgetExhausted(attempts: number): boolean {
+  return attempts >= TAIL_SETTLE_MAX_ATTEMPTS;
+}
+
+export function transcriptTailShouldReaim(previousBottomHeight: number | null, currentHeight: number): boolean {
+  if (previousBottomHeight == null) return true;
+  return currentHeight - previousBottomHeight >= TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX;
+}
 
 export type TranscriptTailSettle = {
   /** Native-extent tail write. Converges against real DOM geometry and avoids
@@ -54,9 +67,12 @@ export function createTranscriptTailSettle({
     distance: number;
     stagnantFrames: number;
     offBottomFrames: number;
+    attempts: number;
   } | null = null;
   let jumpTailTimer: number | null = null;
   let layoutTransientIdleTimer: number | null = null;
+  let lastBottomHeight: number | null = null;
+  let tailPinned = false;
 
   const scrollToTail = (
     behavior: "auto" | "smooth",
@@ -64,7 +80,9 @@ export function createTranscriptTailSettle({
   ) => {
     const element = scrollRef.current;
     if (!element) return;
-    const top = element.scrollHeight;
+    const top = nativeTranscriptBottomTop(element);
+    lastBottomHeight = element.scrollHeight;
+    tailPinned = false;
     if (CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && diagnostic) {
       noteTranscriptScrollWrite({
         owner: "tail-follow",
@@ -91,6 +109,8 @@ export function createTranscriptTailSettle({
     if (tailSettleFrame !== null) cancelAnimationFrame(tailSettleFrame);
     tailSettleFrame = null;
     tailSettleProgress = null;
+    lastBottomHeight = null;
+    tailPinned = false;
     if (jumpTailTimer !== null) window.clearTimeout(jumpTailTimer);
     jumpTailTimer = null;
     if (layoutTransientIdleTimer !== null) window.clearTimeout(layoutTransientIdleTimer);
@@ -146,6 +166,19 @@ export function createTranscriptTailSettle({
     }
     if (jumpTailTimer !== null) return;
     if (tailSettleFrame !== null) return;
+    // Virtuoso emits small layout updates while a mounted row settles. Once
+    // the tail has been pinned, those updates must not start another writer;
+    // only a real height revision is allowed to re-arm it.
+    const distance = nativeTranscriptDistanceFromBottom(scrollElement);
+    if (
+      !jump
+      && tailPinned
+      && distance <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX
+      && !transcriptTailShouldReaim(lastBottomHeight, scrollElement.scrollHeight)
+    ) {
+      armLayoutTransientIdle();
+      return;
+    }
     const generation = generationRef.current;
     const tick = () => {
       tailSettleFrame = null;
@@ -162,6 +195,7 @@ export function createTranscriptTailSettle({
       if (!element) return;
       const distance = nativeTranscriptDistanceFromBottom(element);
       if (distance <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) {
+        tailPinned = true;
         tailSettleProgress = null;
         armLayoutTransientIdle();
         return;
@@ -169,8 +203,14 @@ export function createTranscriptTailSettle({
       const previous = tailSettleProgress;
       const offBottomFrames = (previous?.offBottomFrames ?? 0) + 1;
       if (offBottomFrames < TAIL_CONFIRM_OFF_BOTTOM_FRAMES) {
-        tailSettleProgress = { distance, stagnantFrames: 0, offBottomFrames };
+        tailSettleProgress = { distance, stagnantFrames: 0, offBottomFrames, attempts: offBottomFrames };
         tailSettleFrame = requestAnimationFrame(tick);
+        return;
+      }
+      const attempts = (previous?.attempts ?? 0) + 1;
+      if (transcriptTailSettleBudgetExhausted(attempts)) {
+        tailSettleProgress = null;
+        armLayoutTransientIdle();
         return;
       }
       const stagnantFrames = previous && Math.abs(previous.distance - distance) <= 0.5
@@ -179,8 +219,8 @@ export function createTranscriptTailSettle({
       scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && source
         ? { source, phase: "settle", settle: { frame: offBottomFrames, offBottomFrames, stagnantFrames } }
         : undefined);
-      tailSettleProgress = { distance, stagnantFrames, offBottomFrames };
-      if (stagnantFrames < TAIL_STAGNANT_FRAME_LIMIT) tailSettleFrame = requestAnimationFrame(tick);
+      tailSettleProgress = { distance, stagnantFrames, offBottomFrames, attempts };
+      if (stagnantFrames < TAIL_STAGNANT_FRAME_LIMIT && !transcriptTailSettleBudgetExhausted(attempts)) tailSettleFrame = requestAnimationFrame(tick);
       else armLayoutTransientIdle();
     };
     tailSettleFrame = requestAnimationFrame(tick);

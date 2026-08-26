@@ -53,6 +53,10 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 	for _, info := range ordered {
 		expectedRecords = append(expectedRecords, normalizeSessionRecord(recordFromOrder(target, info)))
 	}
+	expectedRecords, err = c.preserveKnownSourceStates(ctx, path, expectedRecords)
+	if err != nil {
+		return false, err
+	}
 	for i := range expectedRecords {
 		expectedRecords[i] = classifyRecoveryLineageFromContent(expectedRecords[i])
 	}
@@ -148,5 +152,22 @@ func sameSessionProjection(got, want SessionRecord) bool {
 		got.OrdinaryVisible == want.OrdinaryVisible &&
 		got.ContentFingerprint == want.ContentFingerprint &&
 		got.MetaFingerprint == want.MetaFingerprint &&
+		got.Health == want.Health
+}
+
+// sameSessionIndexInput covers fields sourced directly from the authoritative
+// transcript/branch sidecar. Derived lineage visibility is intentionally left
+// out: reconcile owns that projection and may update it without rewriting the
+// session row for every exact-path save.
+func sameSessionIndexInput(got, want SessionRecord) bool {
+	return got.Path == want.Path && got.Directory == want.Directory &&
+		got.Scope == want.Scope && got.WorkspaceRoot == want.WorkspaceRoot &&
+		got.TopicID == want.TopicID && got.TopicTitle == want.TopicTitle &&
+		got.CustomTitle == want.CustomTitle && got.CreatedAt == want.CreatedAt &&
+		got.LastActivityAt == want.LastActivityAt && got.Preview == want.Preview &&
+		got.Turns == want.Turns && got.TurnsState == want.TurnsState &&
+		got.Recovered == want.Recovered && got.RecoveryReason == want.RecoveryReason &&
+		got.RecoveryDigest == want.RecoveryDigest && got.ParentID == want.ParentID &&
+		got.ContentFingerprint == want.ContentFingerprint && got.MetaFingerprint == want.MetaFingerprint &&
 		got.Health == want.Health
 }

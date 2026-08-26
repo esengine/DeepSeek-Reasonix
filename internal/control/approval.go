@@ -18,9 +18,12 @@ import (
 // Approve answers a pending ApprovalRequest by ID. It remains the compatibility
 // bridge for clients that do not yet call the scope-aware resolver directly.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
+	_ = c.approveChecked(id, allow, session, persist)
+}
+
+func (c *Controller) approveChecked(id string, allow, session, persist bool) error {
 	if pending := c.approval.peek(id); pending.reply != nil && pending.kind == writeAccessKind {
-		_ = c.ResolveApproval(id, allow, scopeFromApprove(allow, session, persist))
-		return
+		return c.ResolveApproval(id, allow, scopeFromApprove(allow, session, persist))
 	}
 	c.mu.Lock()
 	gate := c.recoveryGate
@@ -30,12 +33,16 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 		if allow {
 			action = agent.RecoveryActionContinue
 		}
-		_ = c.ResolveRecovery(id, action, "")
-		return
+		return c.ResolveRecovery(id, action, "")
 	}
-	pending := c.approval.resolve(id)
-	if pending.reply == nil {
-		return
+	pending, ok, err := c.approval.resolveAfter(id, func(p pendingApproval) error {
+		return c.emitTurnEventChecked(event.Event{Kind: event.PromptAnswered, ItemID: id, Status: event.TurnInProgress})
+	})
+	if err != nil {
+		return err
+	}
+	if !ok || pending.reply == nil {
+		return nil
 	}
 	outcome := "deny"
 	if pending.tool == planApprovalTool {
@@ -55,6 +62,7 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 	}
 	c.recordDecisionReceipt(pending, outcome)
 	pending.reply <- approvalReply{allow: allow, session: session, persist: persist}
+	return nil
 }
 
 // approvalManager owns the approval/ask prompt bookkeeping and the runtime
@@ -76,6 +84,8 @@ type approvalManager struct {
 	mu                       sync.Mutex
 	approvals                map[string]pendingApproval
 	asks                     map[string]pendingAsk
+	approvalResolutions      map[string]*promptResolution
+	askResolutions           map[string]*promptResolution
 	granted                  map[string]bool
 	planModeReadOnlyCommands map[string]bool
 	nextID                   int
@@ -106,11 +116,33 @@ type approvalManager struct {
 	promptEmitMu sync.Mutex
 }
 
+type promptResolution struct {
+	done     chan struct{}
+	joined   chan struct{}
+	joinOnce sync.Once
+	err      error
+}
+
+func newPromptResolution() *promptResolution {
+	return &promptResolution{done: make(chan struct{}), joined: make(chan struct{})}
+}
+
+func (r *promptResolution) wait() error {
+	if r == nil {
+		return nil
+	}
+	r.joinOnce.Do(func() { close(r.joined) })
+	<-r.done
+	return r.err
+}
+
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {
 	return approvalManager{
 		policy:                   policy,
 		approvals:                map[string]pendingApproval{},
 		asks:                     map[string]pendingAsk{},
+		approvalResolutions:      map[string]*promptResolution{},
+		askResolutions:           map[string]*promptResolution{},
 		granted:                  map[string]bool{},
 		planModeReadOnlyCommands: map[string]bool{},
 		toolApprovalMode:         mode,
@@ -405,6 +437,7 @@ func (a *approvalManager) restoreSessionAuthorizations(auth SessionAuthorization
 func (a *approvalManager) cancel(id string) {
 	a.mu.Lock()
 	delete(a.approvals, id)
+	a.cancelApprovalResolutionLocked(id)
 	a.mu.Unlock()
 }
 
@@ -414,21 +447,67 @@ func (a *approvalManager) resolve(id string) pendingApproval {
 	defer a.mu.Unlock()
 	p := a.approvals[id]
 	delete(a.approvals, id)
+	a.cancelApprovalResolutionLocked(id)
 	return p
 }
 
-// resolveTool removes id only when it belongs to the expected specialized
-// decision surface. A mismatched bridge call must not consume another approval
-// type that happens to share the same short numeric id.
-func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
+func (a *approvalManager) resolveAfter(id string, persist func(pendingApproval) error) (pendingApproval, bool, error) {
+	a.mu.Lock()
+	p, ok := a.approvals[id]
+	if !ok {
+		a.mu.Unlock()
+		return pendingApproval{}, false, nil
+	}
+	if inFlight := a.approvalResolutions[id]; inFlight != nil {
+		a.mu.Unlock()
+		return pendingApproval{}, false, inFlight.wait()
+	}
+	attempt := newPromptResolution()
+	a.approvalResolutions[id] = attempt
+	a.mu.Unlock()
+	if persist != nil {
+		if err := persist(p); err != nil {
+			a.mu.Lock()
+			a.finishApprovalResolutionLocked(id, attempt, err)
+			a.mu.Unlock()
+			return pendingApproval{}, false, err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p, ok := a.approvals[id]
-	if !ok || p.tool != tool {
-		return pendingApproval{}, false
+	current, ok := a.approvals[id]
+	if !ok || a.approvalResolutions[id] != attempt || current.reply != p.reply {
+		if a.approvalResolutions[id] == attempt {
+			a.finishApprovalResolutionLocked(id, attempt, context.Canceled)
+		}
+		return pendingApproval{}, false, attempt.err
 	}
 	delete(a.approvals, id)
-	return p, true
+	a.finishApprovalResolutionLocked(id, attempt, nil)
+	return p, true, nil
+}
+
+func (a *approvalManager) finishApprovalResolutionLocked(id string, attempt *promptResolution, err error) {
+	if attempt == nil || a.approvalResolutions[id] != attempt {
+		return
+	}
+	delete(a.approvalResolutions, id)
+	attempt.err = err
+	close(attempt.done)
+}
+
+func (a *approvalManager) cancelApprovalResolutionLocked(id string) {
+	if attempt := a.approvalResolutions[id]; attempt != nil {
+		a.finishApprovalResolutionLocked(id, attempt, context.Canceled)
+	}
+}
+
+func (a *approvalManager) resolveToolAfter(id, tool string, persist func(pendingApproval) error) (pendingApproval, bool, error) {
+	p := a.peek(id)
+	if p.reply == nil || p.tool != tool {
+		return pendingApproval{}, false, nil
+	}
+	return a.resolveAfter(id, persist)
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and
@@ -473,16 +552,59 @@ func (a *approvalManager) queuedAsks() int {
 func (a *approvalManager) cancelAsk(id string) {
 	a.mu.Lock()
 	delete(a.asks, id)
+	a.cancelAskResolutionLocked(id)
 	a.mu.Unlock()
 }
 
-// resolveAsk removes and returns the pending ask for id (AnswerQuestion path).
-func (a *approvalManager) resolveAsk(id string) (pendingAsk, bool) {
+func (a *approvalManager) resolveAskAfter(id string, persist func(pendingAsk) error) (pendingAsk, bool, error) {
+	a.mu.Lock()
+	p, ok := a.asks[id]
+	if !ok {
+		a.mu.Unlock()
+		return pendingAsk{}, false, nil
+	}
+	if inFlight := a.askResolutions[id]; inFlight != nil {
+		a.mu.Unlock()
+		return pendingAsk{}, false, inFlight.wait()
+	}
+	attempt := newPromptResolution()
+	a.askResolutions[id] = attempt
+	a.mu.Unlock()
+	if persist != nil {
+		if err := persist(p); err != nil {
+			a.mu.Lock()
+			a.finishAskResolutionLocked(id, attempt, err)
+			a.mu.Unlock()
+			return pendingAsk{}, false, err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p, ok := a.asks[id]
+	current, ok := a.asks[id]
+	if !ok || a.askResolutions[id] != attempt || current.reply != p.reply {
+		if a.askResolutions[id] == attempt {
+			a.finishAskResolutionLocked(id, attempt, context.Canceled)
+		}
+		return pendingAsk{}, false, attempt.err
+	}
 	delete(a.asks, id)
-	return p, ok
+	a.finishAskResolutionLocked(id, attempt, nil)
+	return p, true, nil
+}
+
+func (a *approvalManager) finishAskResolutionLocked(id string, attempt *promptResolution, err error) {
+	if attempt == nil || a.askResolutions[id] != attempt {
+		return
+	}
+	delete(a.askResolutions, id)
+	attempt.err = err
+	close(attempt.done)
+}
+
+func (a *approvalManager) cancelAskResolutionLocked(id string) {
+	if attempt := a.askResolutions[id]; attempt != nil {
+		a.finishAskResolutionLocked(id, attempt, context.Canceled)
+	}
 }
 
 // clearAll drops every in-flight prompt without signaling — the cancel path,
@@ -492,6 +614,12 @@ func (a *approvalManager) clearAll() {
 	defer a.mu.Unlock()
 	clear(a.approvals)
 	clear(a.asks)
+	for id := range a.approvalResolutions {
+		a.cancelApprovalResolutionLocked(id)
+	}
+	for id := range a.askResolutions {
+		a.cancelAskResolutionLocked(id)
+	}
 }
 
 // clearKind drops pending approvals of one specialized kind. Session recovery
@@ -503,6 +631,7 @@ func (a *approvalManager) clearKind(kind string) {
 	for id, pending := range a.approvals {
 		if pending.kind == kind {
 			delete(a.approvals, id)
+			a.cancelApprovalResolutionLocked(id)
 		}
 	}
 }

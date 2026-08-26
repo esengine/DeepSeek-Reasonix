@@ -26,7 +26,7 @@ function reset() {
 }
 
 useRemoteStore.getState().setHosts([
-  { id: "box", label: "box", host: "box.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "/srv/app", serveInstall: "auto", useSSHConfig: false },
+  { id: "box", label: "box", host: "box.test", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "/srv/app", serveInstall: "auto", credentialMode: "remote", useSSHConfig: false },
 ]);
 eq(useRemoteStore.getState().hosts[0]?.defaultWorkspace, "/srv/app", "configured hosts hydrate persistent UI state");
 
@@ -178,6 +178,20 @@ eq(useRemoteStore.getState().statuses.timeout?.state, "connecting", "connection 
   received = null;
   __emitMockRemote("status", { hostId: "y", state: "connected" });
   eq(received, null, "unsubscribe stops delivery");
+})();
+
+// setServer keys per-workspace entries under the host; one workspace's events
+// never overwrite another's.
+(function testPerWorkspaceServers() {
+  const set = useRemoteStore.getState().setServer;
+  set({ hostId: "box", workspace: "/srv/app", state: "ready" });
+  set({ hostId: "box", workspace: "/srv/web", state: "starting" });
+  const servers = useRemoteStore.getState().servers;
+  eq(servers.box?.["/srv/app"]?.state, "ready", "first workspace keeps its entry");
+  eq(servers.box?.["/srv/web"]?.state, "starting", "second workspace gets its own entry");
+  set({ hostId: "box", workspace: "/srv/web", state: "ready" });
+  eq(useRemoteStore.getState().servers.box?.["/srv/app"]?.state, "ready", "updating one workspace leaves the other untouched");
+  eq(useRemoteStore.getState().servers.box?.["/srv/web"]?.state, "ready", "updated workspace reflects the new state");
 })();
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

@@ -244,6 +244,7 @@ func TestConnectStatusNotifierSessionBusCancellationInterruptsAuth(t *testing.T)
 	})
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", address)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	resultCh := make(chan error, 1)
 	go func() {
 		connection, err := connectStatusNotifierSessionBus(ctx)
@@ -320,6 +321,7 @@ func TestConnectStatusNotifierSessionBusCancellationInterruptsHello(t *testing.T
 	})
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", address)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	resultCh := make(chan error, 1)
 	go func() {
 		connection, err := connectStatusNotifierSessionBus(ctx)

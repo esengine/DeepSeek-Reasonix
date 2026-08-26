@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { inferPullTargetHints } from "./generate-release-notes.mjs";
 import { loadCatalog, releaseForVersion, renderGitHubRelease, validateCatalog } from "./release-notes.mjs";
 import { validateReleaseEvent } from "./release-event.mjs";
 
@@ -26,6 +27,106 @@ test("GitHub rendering keeps product sections and source PR links", async () => 
   assert.match(markdown, /## 致谢/);
   assert.match(markdown, /\/pull\/6460/);
   assert.match(markdown, /reasonix\.io\/changelog\/v1\.17\.13/);
+});
+
+test("targeted releases render Desktop and CLI sections from one shared item", async () => {
+  const catalog = await loadCatalog();
+  const markdown = renderGitHubRelease(releaseForVersion(catalog, "1.31.4"), "zh");
+  assert.match(markdown, /## 桌面端更新/);
+  assert.match(markdown, /## CLI 端更新/);
+  assert.match(markdown, /## 其他项目更新/);
+  assert.match(markdown, /\*\*\[Service\]\*\* \*\*降低数据库读取成本\*\*/);
+  assert.equal(markdown.match(/更好的数学渲染/g)?.length, 2);
+});
+
+test("targeted release validation requires canonical item targets and matching surfaces", () => {
+  const release = {
+    version: "2.0.0",
+    targetingVersion: 1,
+    date: "2026-01-01",
+    channel: "stable",
+    title: { en: "Targeted", zh: "分类版本" },
+    summary: { en: "Summary", zh: "摘要" },
+    surfaces: ["desktop", "cli"],
+    guides: [],
+    highlights: [{
+      kind: "fixed",
+      targets: ["desktop", "cli"],
+      title: { en: "Shared fix", zh: "共享修复" },
+      body: { en: "A shared fix.", zh: "一项共享修复。" },
+      refs: [1],
+    }],
+    changes: { new: [], improved: [], fixed: [] },
+    upgrade: [],
+    risks: [],
+    contributors: [],
+    links: {
+      github: "https://example.com/release",
+      compare: "https://example.com/compare",
+      download: "https://example.com/download",
+    },
+  };
+  assert.doesNotThrow(() => validateCatalog({ schemaVersion: 1, releases: [release] }));
+  assert.throws(
+    () => validateCatalog({
+      schemaVersion: 1,
+      releases: [{ ...release, highlights: [{ ...release.highlights[0], targets: undefined }] }],
+    }),
+    /targets must be a non-empty array/,
+  );
+  assert.throws(
+    () => validateCatalog({ schemaVersion: 1, releases: [{ ...release, surfaces: ["desktop"] }] }),
+    /surfaces must equal the canonical union/,
+  );
+  assert.throws(
+    () => validateCatalog({
+      schemaVersion: 1,
+      releases: [{ ...release, highlights: [{ ...release.highlights[0], targets: ["cli", "desktop"] }] }],
+    }),
+    /targets must use canonical order/,
+  );
+});
+
+test("targeting adoption boundary preserves historical releases and rejects future legacy records", () => {
+  const release = {
+    version: "1.31.3",
+    date: "2026-01-01",
+    channel: "stable",
+    title: { en: "Legacy", zh: "旧版" },
+    summary: { en: "Summary", zh: "摘要" },
+    surfaces: ["desktop"],
+    guides: [],
+    highlights: [{
+      kind: "fixed",
+      title: { en: "Legacy fix", zh: "旧版修复" },
+      body: { en: "A historical fix.", zh: "一项历史修复。" },
+      refs: [1],
+    }],
+    changes: { new: [], improved: [], fixed: [] },
+    upgrade: [],
+    risks: [],
+    contributors: [],
+    links: {
+      github: "https://example.com/release",
+      compare: "https://example.com/compare",
+      download: "https://example.com/download",
+    },
+  };
+
+  assert.doesNotThrow(() => validateCatalog({ schemaVersion: 1, releases: [release] }));
+  for (const version of ["1.31.4", "1.32.0", "2.0.0-preview.1"]) {
+    assert.throws(
+      () => validateCatalog({ schemaVersion: 1, releases: [{ ...release, version }] }),
+      /targetingVersion must be 1 for v1\.31\.4 and newer/,
+    );
+  }
+});
+
+test("release target hints prefer explicit product labels and identify shared or service paths", () => {
+  assert.deepEqual(inferPullTargetHints(["desktop"], ["internal/sessioncatalog/catalog.go"]), ["desktop"]);
+  assert.deepEqual(inferPullTargetHints(["desktop", "tui"], ["desktop/app.go", "internal/cli/cli.go"]), ["desktop", "cli"]);
+  assert.deepEqual(inferPullTargetHints([], ["internal/agent/agent.go"]), ["desktop", "cli"]);
+  assert.deepEqual(inferPullTargetHints([], ["workers/crash-report/src/index.ts"]), ["service"]);
 });
 
 test("validation rejects bilingual drift", () => {

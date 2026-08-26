@@ -174,7 +174,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		if c.skillProfile != nil {
 			toolEvent.Profile = c.skillProfile(sk)
 		}
-		c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: toolEvent})
+		if err := event.EmitChecked(c.sink, event.Event{Kind: event.ToolDispatch, Tool: toolEvent}); err != nil {
+			return fmt.Errorf("persist skill dispatch: %w", err)
+		}
 		runCtx := agent.WithToolCallContext(ctx, callID, c.sink, c, planMode)
 		runCtx = agent.WithSubagentDepth(runCtx, 0)
 		answer, err := runner(runCtx, sk, input, skill.SubagentRunOptions{HostInitiated: true})
@@ -427,8 +429,6 @@ func (o *turnOrchestrator) runGoalLoopWithFrozenImagesRawDisplay(ctx context.Con
 
 func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn orchestratedTurn) error {
 	expectedContinuationEpoch := o.c.goals.continuationToken()
-	ctx = agent.WithAutomaticReadinessContinuation(ctx)
-	ctx = agent.WithMutationExpected(ctx, NeedsMutation(turn.raw))
 	ctx = agent.WithSubagentImageCandidates(ctx, turn.imageCandidates)
 	err := o.runOrchestratedTurn(ctx, turn)
 	if err != nil {
@@ -444,10 +444,11 @@ func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn
 			return err
 		}
 		if !o.c.goals.active() {
-			// The host knows exactly what this ordinary turn still owes. Finish
-			// it automatically instead of making the user relay "continue".
+			// Standard and Delivery stop at the readiness boundary. The frontend
+			// owns the explicit recovery action, matching the pre-auto-continuation
+			// contract; only an active Goal may continue through its FSM below.
 			o.c.goalUsageTee.setActiveRecorder(nil)
-			return o.continueUntilReady(ctx, err)
+			return err
 		}
 		// FinalReadinessError is absorbed below: the Goal FSM continues with
 		// the missing requirements as the next turn's prompt.
@@ -461,8 +462,6 @@ func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, 
 
 func (o *turnOrchestrator) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.Context, input, raw, imageRefs, display, original string) error {
 	expectedContinuationEpoch := o.c.goals.continuationToken()
-	ctx = agent.WithAutomaticReadinessContinuation(ctx)
-	ctx = agent.WithMutationExpected(ctx, NeedsMutation(raw))
 	turn := o.c.prepareOrchestratedTurnImages(orchestratedTurn{
 		input: input, raw: raw, imageRefs: imageRefs, display: display, editedOriginal: original,
 	})
@@ -480,7 +479,7 @@ func (o *turnOrchestrator) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.
 		}
 		if !o.c.goals.active() {
 			o.c.goalUsageTee.setActiveRecorder(nil)
-			return o.continueUntilReady(ctx, err)
+			return err
 		}
 	}
 	return o.continueGoal(ctx, expectedContinuationEpoch, err)

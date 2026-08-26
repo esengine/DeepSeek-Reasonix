@@ -317,8 +317,8 @@ ok(
   "browser mock exposes the Token Rhythm preset",
 );
 ok(
-  /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -2;/.test(bridgeSource),
-  "browser mock keeps the visible DeepSeek Responses preset first",
+  /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "opencode-go-recommended"\) return -3;\s*if \(id === "deepseek-responses"\) return -2;/.test(bridgeSource),
+  "browser mock keeps OpenCode Go recommended first and DeepSeek Responses next",
 );
 
 const values = new Map<string, string>();

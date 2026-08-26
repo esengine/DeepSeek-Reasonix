@@ -67,7 +67,7 @@ export type TranscriptScrollDiagnosticEvent = {
     | "tool-collapsed" | "tool-expanded" | "tool-batch-collapsed" | "tool-batch-expanded"
     | "tool-group-collapsed" | "tool-group-expanded" | "compaction-collapsed"
     | "compaction-expanded" | "static" | "text-flow";
-  estimateSource?: "exact" | "compact-median" | "calibrated" | "static";
+  estimateSource?: "exact" | "calibrated" | "static";
   relativeError?: number;
   foldState?: "none" | "open" | "closed" | "mixed";
   state?: "begin" | "suspend" | "retry" | "done" | "cancelled" | "expired";
@@ -159,7 +159,7 @@ const LAYOUT_VARIANTS = new Set([
   "tool-group-collapsed", "tool-group-expanded", "compaction-collapsed", "compaction-expanded",
   "static", "text-flow",
 ]);
-const ESTIMATE_SOURCES = new Set(["exact", "compact-median", "calibrated", "static"]);
+const ESTIMATE_SOURCES = new Set(["exact", "calibrated", "static"]);
 const FOLD_STATES = new Set(["none", "open", "closed", "mixed"]);
 const STATES = new Set(["begin", "suspend", "retry", "done", "cancelled", "expired"]);
 const REASONS = new Set(["user-takeover", "surface-switch", "superseded", "viewport-blank", "other"]);

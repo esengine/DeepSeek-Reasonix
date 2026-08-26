@@ -38,7 +38,7 @@ export type Group = {
   regressed_at: string;
 };
 
-type ReportSample = {
+export type ReportSample = {
   version: string;
   os: string;
   arch: string;
@@ -153,7 +153,13 @@ function sampleReports(reports: ReportSample[], options: { limit?: number } = {}
   return `<div class="sample-list">${visibleSamples}${history}</div>`;
 }
 
-export function renderGroup(group: Group, reports: ReportSample[], user: User, diagnostics?: GroupDiagnosticSummary): string {
+export function renderGroup(
+  group: Group,
+  reports: ReportSample[],
+  user: User,
+  diagnostics?: GroupDiagnosticSummary,
+  lifecycle?: { state: "active" | "compacted" | "archiving" | "archived"; epoch: number },
+): string {
   const samples = sampleReports(reports);
   const platform = [group.last_os, group.last_arch].filter(Boolean).join("/");
   const status = statusPill(group.status) || `<span class="pill open">${i18n("open", "未处理")}</span>`;
@@ -184,6 +190,15 @@ export function renderGroup(group: Group, reports: ReportSample[], user: User, d
         .map((row) => `<div><span>${esc(row.facet)} · ${esc(row.value)}</span><b>${row.installs} ${i18n("installs", "安装")} · ${row.events} ${i18n("events", "事件")}</b></div>`)
         .join("")}</div></div>`
     : "";
+  const lifecycleNotice = lifecycle?.state === "compacted"
+    ? `<div class="card full"><p>${i18n("Recent samples were removed by the 30-day policy; only the first retained-cycle sample remains.", "最近样本已按 30 天策略清理；仅保留当前保留周期的首个样本。")}</p></div>`
+    : lifecycle?.state === "archiving"
+      ? `<div class="card full"><p>${i18n("This group is completing its 60-day Firebase sample archive.", "该分组正在执行 60 天 Firebase 样本归档。")}</p></div>`
+      : lifecycle?.state === "archived"
+        ? `<div class="card full"><p>${i18n("Firebase raw samples were removed; D1 aggregates, status, notes, and audit history remain.", "Firebase 原始样本已清理；D1 聚合、状态、备注和审计仍保留。")}</p></div>`
+        : lifecycle && lifecycle.epoch > 1
+          ? `<div class="card full"><p>${i18nHTML(`Samples belong to retained cycle ${lifecycle.epoch}; Lifetime First Seen remains the D1 value above.`, `样本属于第 ${lifecycle.epoch} 个保留周期；Lifetime First Seen 仍以上方 D1 值为准。`)}</p></div>`
+          : "";
   return page(
     `Reasonix · ${group.fingerprint.slice(0, 8)}`,
     `stats / ${group.fingerprint.slice(0, 8)}`,
@@ -193,7 +208,8 @@ ${group.title ? `<p class="summary group-summary">${esc(group.title)}</p>` : ""}
 <div class="group-tags">${tags}</div>
 <div class="group-metrics">${metrics}</div>
 ${group.note ? `<p class="group-note">${i18n("Note", "备注")}: ${esc(group.note)}</p>` : ""}</section>
-<div class="card full sample-card"><h2>${i18nHTML("Samples <b>— newest first, first sample plus latest 5 kept</b>", "样本 <b>— 最新优先，保留首个样本和最近 5 个</b>")}</h2>${samples}</div>
+${lifecycleNotice}
+<div class="card full sample-card"><h2>${i18nHTML("Samples <b>— newest first, retained-cycle first plus latest 5 kept</b>", "样本 <b>— 最新优先，保留当前周期首个样本和最近 5 个</b>")}</h2>${samples}</div>
 ${distributions}
 ${user.role === "admin" ? manageGroup(group) : ""}
 <a class="back" href="/stats">${i18n("Back to stats", "返回统计")}</a>`,

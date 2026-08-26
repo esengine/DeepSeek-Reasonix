@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ReactNode } from "react";
 import type { ToastContextValue } from "../lib/toast";
 
 const BlankProjectFlow = lazy(() => import("./BlankProjectFlow").then((module) => ({ default: module.BlankProjectFlow })));
+const RemoteConnectWizard = lazy(() => import("./RemoteConnectWizardEntry").then((module) => ({ default: module.RemoteConnectWizard })));
 
 export function useProjectCreation({
   onAddProject,
@@ -16,9 +17,12 @@ export function useProjectCreation({
   handleAddProject: () => Promise<void>;
   openBlankProjectFlow: () => void;
   blankProjectFlow: ReactNode;
+  openRemoteConnectFlow: () => void;
+  remoteConnectFlow: ReactNode;
 } {
   const [addingProject, setAddingProject] = useState(false);
   const [blankProjectFlowOpen, setBlankProjectFlowOpen] = useState(false);
+  const [remoteFlowOpen, setRemoteFlowOpen] = useState(false);
   const handleAddProject = async () => {
     if (addingProject) return;
     setAddingProject(true);
@@ -41,6 +45,16 @@ export function useProjectCreation({
           onOpenProject={onAddProject}
           onRefresh={onRefresh}
           onClose={() => setBlankProjectFlowOpen(false)}
+        />
+      </Suspense>
+    ) : null,
+    openRemoteConnectFlow: () => setRemoteFlowOpen(true),
+    remoteConnectFlow: remoteFlowOpen ? (
+      <Suspense fallback={null}>
+        <RemoteConnectWizard
+          onRefresh={onRefresh}
+          onClose={() => setRemoteFlowOpen(false)}
+          onMerged={(message) => showToast(message, "info")}
         />
       </Suspense>
     ) : null,

@@ -71,6 +71,13 @@ func TestExplicitLegacyCompactRatioStillApplies(t *testing.T) {
 	}
 }
 
+func TestLowCompactRatioTriggerAtThirtyPercent(t *testing.T) {
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.30}}
+	if got := a.compactTrigger(); got != 300_000 {
+		t.Fatalf("compactTrigger = %d, want 300000", got)
+	}
+}
+
 func TestAcceptCheckpointCandidateRules(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.85}}
 	// 20% candidate under normal path: accept.

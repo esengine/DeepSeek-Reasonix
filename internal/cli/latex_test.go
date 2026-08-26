@@ -29,6 +29,11 @@ func TestLatexToUnicode(t *testing.T) {
 		{`\vec{v}`, "v⃗"},
 		{`a^q`, "a^q"},
 		{`f(x) = x^{2y}`, "f(x) = x²ʸ"},
+		{`\boxed{|p\uparrow\rangle}`, "|p↑⟩"},
+		{`\boxed{x}`, "x"},
+		{`\lvert x \rvert`, "∣ x ∣"},
+		{`\Vert x \Vert`, "‖ x ‖"},
+		{`\left. \frac{df}{dx} \right|_{x=0}`, " (df)/(dx) |ₓ₌₀"},
 	}
 	for _, c := range cases {
 		if got := latexToUnicode(c.in); got != c.want {

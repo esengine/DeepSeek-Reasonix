@@ -84,7 +84,7 @@ func TestLaunchCommandQuotesHostilePaths(t *testing.T) {
 		LogFile:   "/home/dev/.reasonix/remote/serve-x.log",
 	}
 	hostile := "/tmp/'; rm -rf ~; echo '"
-	cmd := LaunchCommand("/usr/bin/reasonix", hostile, paths)
+	cmd := LaunchCommand("/usr/bin/reasonix", hostile, paths, nil)
 
 	// The hostile workspace must appear only inside a quoted operand, escaped.
 	if strings.Contains(cmd, "; rm -rf ~; echo") && !strings.Contains(cmd, `'\''; rm -rf ~; echo '\''`) {
@@ -135,12 +135,21 @@ func TestStopAndServeAliveCommands(t *testing.T) {
 	if strings.Count(stop, "ours") < 3 {
 		t.Fatalf("StopCommand must revalidate ownership during TERM/KILL wait: %s", stop)
 	}
+	withModel := ServeAliveCommand(99, paths, "--model reasonix-desktop-proxy")
+	for _, want := range []string{`R0='--model reasonix-desktop-proxy'`, `"$R0"*`} {
+		if !strings.Contains(withModel, want) {
+			t.Errorf("ServeAliveCommand(requireArgs) missing %q: %s", want, withModel)
+		}
+	}
+	if strings.Contains(alive, "R0=") {
+		t.Errorf("plain ServeAliveCommand must not grow require-arg vars: %s", alive)
+	}
 }
 
 func TestLaunchCommandDetachAndLogHardening(t *testing.T) {
 	cmd := LaunchCommand("/usr/bin/reasonix", "/ws", StatePaths{
 		Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
-	})
+	}, nil)
 	// setsid must be optional (macOS lacks it) and the log created 0600 so the
 	// serve token line (already suppressed under --port-file) can't leak.
 	for _, want := range []string{"command -v setsid", "$SX nohup", "chmod 600", "umask 077", "--port-file"} {

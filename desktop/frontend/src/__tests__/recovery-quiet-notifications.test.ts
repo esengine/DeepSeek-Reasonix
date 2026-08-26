@@ -28,6 +28,7 @@ function ok(cond: boolean, label: string) {
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
+const noticesSource = readFileSync(resolve(here, "../lib/controllerNotices.ts"), "utf8");
 
 console.log("\nquiet recovery notifications");
 
@@ -38,7 +39,7 @@ ok(!appSource.includes("AcknowledgeTabRecovery"), "App does not expose recovery 
 ok(!appSource.includes("OpenTabRecoveryParent"), "App does not expose recovery compare controls");
 ok(!appSource.includes("recovery.openOriginalFailed"), "App does not carry recovery compare failure text");
 
-ok(controllerSource.includes("function quietTranscriptNoticeKey"), "controller centralizes quiet transcript notices");
+ok(noticesSource.includes("function quietTranscriptNoticeKey"), "controller centralizes quiet transcript notices");
 ok(controllerSource.includes("if (quietTranscriptNoticeKey(rawText, code))"), "raw quiet notices are skipped before localization");
 ok(controllerSource.includes("if (quietTranscriptNoticeKey(text, code))"), "localized quiet notices are skipped before rendering");
 

@@ -757,7 +757,7 @@
   font-weight: 500;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--card-bg);
+  background: var(--bg-elev);
   color: var(--fg);
   cursor: pointer;
   white-space: nowrap;
@@ -767,7 +767,7 @@
 }
 .heartbeat-btn:hover {
   background: var(--list-row-hover-bg);
-  border-color: var(--border-focus);
+  border-color: var(--button-border-hover);
 }
 .heartbeat-btn:disabled {
   opacity: 0.45;
@@ -922,7 +922,6 @@
   min-width: 120px;
   max-height: 200px;
   overflow-y: auto;
-  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px;
@@ -1589,7 +1588,7 @@
 }
 
 .heartbeat-scope-select:hover {
-  border-color: var(--border-focus);
+  border-color: var(--button-border-hover);
 }
 
 .heartbeat-project-menu {
@@ -1600,7 +1599,6 @@
   min-width: 220px;
   max-height: 240px;
   overflow-y: auto;
-  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
@@ -1853,7 +1851,6 @@
   flex-direction: column;
   gap: 2px;
   min-width: 120px;
-  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px;

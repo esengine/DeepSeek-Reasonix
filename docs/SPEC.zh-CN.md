@@ -94,15 +94,17 @@ type Tool interface {
 
 ### 3.3 插件与 MCP（`internal/plugin`）
 
-外部插件是配置中声明的 MCP server。协议统一为 JSON-RPC 2.0，传输由 `transport` 接口抽象：
+外部插件是配置中声明的 MCP server。协议统一为 JSON-RPC 2.0。Reasonix 保留产品层客户端，协议协商、请求关联、取消、分页与传输 framing 交给官方 MCP Go SDK；每个 server 的工具、Prompt 与 Resource 共用同一个并发安全会话：
 
 - `stdio`：本地持久子进程，每行一条 JSON 消息。
-- `http` / `streamable-http`：向远程 `url` POST，支持 `application/json` 和 SSE 响应，并复用 `Mcp-Session-Id`。未配置静态 `Authorization` header 时，用户可发起 OAuth：客户端按 Protected Resource Metadata / Authorization Server Metadata 发现端点，使用动态客户端注册、PKCE S256、loopback callback、resource indicator 与 refresh token 轮换。客户端凭据和 token 以 `0600` 权限保存在工作区之外的 Reasonix 私有 MCP 状态目录，并绑定到配置的 resource URL；URL 改变后不会复用旧 token。OAuth 发现、注册和 token 请求遵守 Reasonix 解析后的网络代理设置。删除声明时会清理该状态；若之后生效的 fallback 使用同一 OAuth resource，则保留该状态。
+- `http` / `streamable-http`：初始化后立即建立长期 GET/SSE 监听，POST 承载客户端请求；继续兼容 POST-only 与 sessionless server。`Mcp-Session-Id` 会用于后续 GET、POST 和有界关闭 DELETE。配置 header 仅发送到原 endpoint 的同源请求，跨域重定向不会携带敏感 header。未配置静态 `Authorization` header 时，用户可发起 OAuth：客户端按 Protected Resource Metadata / Authorization Server Metadata 发现端点，使用动态客户端注册、PKCE S256、loopback callback、resource indicator 与 refresh token 轮换。客户端凭据和 token 以 `0600` 权限保存在工作区之外的 Reasonix 私有 MCP 状态目录，并绑定到配置的 resource URL；URL 改变后不会复用旧 token。OAuth 发现、注册和 token 请求遵守 Reasonix 解析后的网络代理设置。删除声明时会清理该状态；若之后生效的 fallback 使用同一 OAuth resource，则保留该状态。
 - `sse`：兼容旧版 2024-11-05 HTTP+SSE；持久 GET 接收 server 公布的相对 POST endpoint、JSON-RPC 响应与 server 消息。为避免静态 header 泄漏，会拒绝跨域 endpoint。
 
 `${VAR}` 与 `${VAR:-default}` 可用于 `command`、`args`、`env`、`url` 和 `headers`，使 secret 留在环境中。生命周期为 `initialize` → `notifications/initialized` → `tools/list`，调用使用 `tools/call`。
 
 存在工作区根目录时，初始化会声明 `roots` 能力，并用文件 URI 响应 `roots/list`。`tools/call` 会附带逐调用 `_meta.progressToken`；匹配的 `notifications/progress` 会进入现有工具进度事件链路。
+
+每个 server 由 generation-aware 会话监督器管理：只有初始化且监听就绪的会话才会发布；已建立会话返回 404 时，并发调用只共享一次重建且最多重放一次。由于 server 可能已经执行，未知断流不会自动重放工具调用。后台终止性断流只执行有界退避重连，旧 generation 的回调不能覆盖新会话。工具、Prompt、Resource 列表都会消费全部 cursor 页面；`/mcp` 与桌面端只显示协议、监听阶段、重连次数和脱敏错误类别，不暴露 session ID。
 
 远程工具适配为 `Tool`，命名为 `mcp__<server>__<tool>`。`annotations.readOnlyHint` 映射为 `Tool.ReadOnly()`，默认 false；只有显式声明为只读的工具才进入并行读取与默认只读权限路径。MCP prompt 暴露为 slash command，resource 可通过 `@<server>:<uri>` 引用。
 
@@ -151,7 +153,8 @@ type Tool interface {
 transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **checkpoint**。
 
 - 每个 provider 声明 `context_window`（tokens）。唯一自动触发值是
-  `agent.compact_ratio`（默认 **0.80**；预设 0.70 / 0.80 / 0.85；范围 0.65–0.85）。
+  `agent.compact_ratio`（默认 **0.80**；预设 0.70 / 0.80 / 0.85；范围 0.30–0.85）。
+  数值越低越早压缩，可能增加摘要成本或降低 prompt prefix 缓存复用。
   `triggerTokens = floor(context_window × compact_ratio)`。
 - **阈值以下**普通请求保持 append-only，不写 projection。所有 provider 请求只使用
   持久化且有界的 tool `Content`；本地 `RawContent` 不会进入 sampling、重试、摘要或 replay。

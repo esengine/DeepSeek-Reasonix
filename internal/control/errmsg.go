@@ -10,6 +10,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
+	"reasonix/internal/turnevent"
 )
 
 // explainError maps a provider HTTP failure to an actionable, localized message
@@ -18,6 +19,12 @@ import (
 func explainError(err error) error {
 	if err == nil {
 		return nil
+	}
+	// Filesystem errors can satisfy net.Error on some platforms. Preserve the
+	// storage sentinel before provider retry classification so a poisoned WAL
+	// is never reported as a model-stream disconnect.
+	if errors.Is(err, turnevent.ErrTurnLedgerUnavailable) {
+		return err
 	}
 	if provider.IsStreamInterrupted(err) {
 		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())

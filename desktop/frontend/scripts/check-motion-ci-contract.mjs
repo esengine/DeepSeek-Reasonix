@@ -121,18 +121,22 @@ for (const required of ["transcript-selection.mjs", "transcript-scroll-stability
 }
 
 const transcriptCommand = "pnpm --dir frontend test:transcript";
-const transcriptRuns = workflow.match(/pnpm --dir frontend test:transcript(?:\s|$)/g)?.length ?? 0;
-if (!jobBody("desktop", "desktop-macos").includes(transcriptCommand) || transcriptRuns !== 1) {
+const desktopLinuxJob = jobBody("desktop", "desktop-macos");
+const transcriptRuns = desktopLinuxJob.match(/pnpm --dir frontend test:transcript(?:\s|$)/g)?.length ?? 0;
+if (!desktopLinuxJob.includes(transcriptCommand) || transcriptRuns !== 1) {
   throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript exactly once");
 }
 
 const transcriptBrowserCommand = "pnpm --dir frontend test:transcript-browser";
-const transcriptBrowserRuns = workflow.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
-if (!jobBody("desktop", "desktop-macos").includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
+const transcriptBrowserRuns = desktopLinuxJob.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
+if (!desktopLinuxJob.includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
   throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript-browser exactly once");
 }
-if (!jobBody("desktop", "desktop-macos").includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
+if (!desktopLinuxJob.includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
   throw new Error("motion-ci-contract: Chromium must install into the path used by frontend browser tests");
+}
+if (!windowsJob.includes(transcriptBrowserCommand)) {
+  throw new Error("motion-ci-contract: desktop-windows must run the transcript browser replay");
 }
 for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
   if (!packageJSON.scripts?.["test:transcript-browser"]?.includes(required)) {

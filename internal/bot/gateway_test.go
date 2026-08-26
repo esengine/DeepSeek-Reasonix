@@ -974,7 +974,7 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 	}
 	transcripts := matches[:0]
 	for _, path := range matches {
-		if !strings.HasSuffix(path, ".events.jsonl") && !strings.HasSuffix(path, ".conflicts.jsonl") {
+		if !strings.HasSuffix(path, ".events.jsonl") && !strings.HasSuffix(path, ".conflicts.jsonl") && !strings.HasSuffix(path, ".turns.jsonl") {
 			transcripts = append(transcripts, path)
 		}
 	}

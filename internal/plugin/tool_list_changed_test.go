@@ -112,8 +112,7 @@ func (t *controlledToolsTransport) call(ctx context.Context, method string, _ an
 	}
 }
 
-func (*controlledToolsTransport) notify(context.Context, string, any) error { return nil }
-func (*controlledToolsTransport) close()                                    {}
+func (*controlledToolsTransport) close() {}
 func (t *controlledToolsTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
 	return t.notifications.registerNotification(method, callback)
 }
@@ -130,7 +129,7 @@ func newControlledRefreshClient(t *testing.T, tr *controlledToolsTransport) (*Cl
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &Client{
-		name: "controlled", t: tr, spec: Spec{Name: "controlled"}, supportsToolListChanged: true,
+		name: "controlled", t: tr, spec: Spec{Name: "controlled"}, capabilities: clientCapabilities{toolsListChanged: true},
 		refresh: toolListRefreshState{ctx: ctx, cancel: cancel, wait: func(context.Context, time.Duration) error { return nil }},
 	}
 	tools, err := client.listTools(ctx)
@@ -538,8 +537,6 @@ func TestClientIgnoresToolListChangedWithoutAdvertisedCapability(t *testing.T) {
 	}
 }
 
-func (*notificationToolsTransport) notify(context.Context, string, any) error { return nil }
-
 func (t *notificationToolsTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
 	return t.notifications.registerNotification(method, callback)
 }
@@ -616,10 +613,10 @@ func TestClientCloseCancelsBlockedToolListRefresh(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tr := newNotificationToolsTransport()
 	client := &Client{
-		name:                    "blocked",
-		t:                       tr,
-		spec:                    Spec{Name: "blocked"},
-		supportsToolListChanged: true,
+		name:         "blocked",
+		t:            tr,
+		spec:         Spec{Name: "blocked"},
+		capabilities: clientCapabilities{toolsListChanged: true},
 		refresh: toolListRefreshState{
 			ctx:    ctx,
 			cancel: cancel,
@@ -676,7 +673,7 @@ func TestDynamicToolsHelperProcess(t *testing.T) {
 		switch request.Method {
 		case "initialize":
 			result = map[string]any{
-				"protocolVersion": protocolVersion,
+				"protocolVersion": testLegacyProtocolVersion,
 				"serverInfo":      map[string]any{"name": "dynamic", "version": "1"},
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
 			}

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func (c *mcpOAuthClient) refresh(ctx context.Context) error {
+func (c *mcpOAuthClient) refresh(ctx context.Context, force bool, rejectedAccessToken string) error {
 	releaseGate, err := acquireMCPOAuthRefreshGate(ctx, c.stateDir)
 	if err != nil {
 		return fmt.Errorf("serialize MCP OAuth token refresh: %w", err)
@@ -30,7 +30,7 @@ func (c *mcpOAuthClient) refresh(ctx context.Context) error {
 		return fmt.Errorf("MCP OAuth token refresh: stored token belongs to a different MCP resource")
 	}
 	c.state = latest
-	if oauthAccessTokenUsable(latest, time.Now()) {
+	if oauthAccessTokenUsable(latest, time.Now()) && (!force || rejectedAccessToken != "" && latest.AccessToken != rejectedAccessToken) {
 		release()
 		return nil
 	}

@@ -3,11 +3,11 @@
   top: 0;
   right: 0;
   left: 0;
-  z-index: var(--z-workspace-status);
+  z-index: var(--z-inline-sticky);
   padding: 3px 8px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  color: var(--muted);
+  color: var(--fg-faint);
   font-size: var(--text-xs);
   line-height: 1.4;
   pointer-events: none;
@@ -51,7 +51,7 @@
   :is(.app, :root[data-theme-style] .app) .layout:not(.layout--sidebar-collapsed) .sidebar {
     position: relative;
     inset: auto;
-    z-index: var(--z-flow);
+    z-index: var(--z-app-content);
     display: flex !important;
     grid-column: 1;
     width: auto;

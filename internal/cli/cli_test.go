@@ -841,6 +841,32 @@ func TestConfigCompactRatioCommandWritesUserConfigAndReportsSource(t *testing.T)
 	}
 }
 
+func TestConfigCompactRatioCommandAcceptsLowerBound(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	for _, value := range []string{"30", "64"} {
+		t.Run(value, func(t *testing.T) {
+			out := captureStdout(t, func() {
+				if rc := Run([]string{"config", "compact-ratio", value}, "test-version"); rc != 0 {
+					t.Fatalf("config compact-ratio %s rc = %d, want 0", value, rc)
+				}
+			})
+			if !strings.Contains(out, "compact_ratio = "+value+"%") {
+				t.Fatalf("config compact-ratio %s output = %q", value, out)
+			}
+			want := 0.0
+			if value == "30" {
+				want = 0.30
+			} else {
+				want = 0.64
+			}
+			if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != want {
+				t.Fatalf("saved compact ratio = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestConfigCompactRatioQueryReportsBuiltInDefault(t *testing.T) {
 	isolateCLIConfigHome(t)
 
@@ -907,14 +933,14 @@ func TestConfigCompactRatioLocalCreatesMinimalProjectOverride(t *testing.T) {
 func TestConfigCompactRatioRejectsValuesOutsideEditableRange(t *testing.T) {
 	isolateCLIConfigHome(t)
 
-	for _, value := range []string{"64", "86", "NaN", "+Inf", "not-a-number"} {
+	for _, value := range []string{"29", "86", "NaN", "+Inf", "not-a-number"} {
 		t.Run(value, func(t *testing.T) {
 			errOut := captureStderr(t, func() {
 				if rc := Run([]string{"config", "compact-ratio", value}, "test-version"); rc != 2 {
 					t.Fatalf("config compact-ratio %s rc = %d, want 2", value, rc)
 				}
 			})
-			if !strings.Contains(errOut, "percentage between 65 and 85") {
+			if !strings.Contains(errOut, "percentage between 30 and 85") {
 				t.Fatalf("config compact-ratio %s stderr = %q", value, errOut)
 			}
 		})

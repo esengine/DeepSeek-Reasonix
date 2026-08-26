@@ -26,17 +26,6 @@ export function hasTranscriptScrollableRange(
   return nativeTranscriptBottomTop(element) > threshold;
 }
 
-/** Returns true when the scroller was off-bottom and is now pinned. */
-export function pinTranscriptScrollerToNativeTail(
-  element: { scrollHeight: number; scrollTop: number; clientHeight: number },
-  threshold = TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX,
-): boolean {
-  const bottom = nativeTranscriptBottomTop(element);
-  if (bottom - element.scrollTop <= threshold) return false;
-  element.scrollTop = bottom;
-  return true;
-}
-
 export function pinTranscriptTailAfterViewportShrink(
   element: { scrollHeight: number; scrollTop: number; clientHeight: number },
   geometry: TranscriptFollowGeometry,
@@ -49,7 +38,6 @@ export function pinTranscriptTailAfterViewportShrink(
   const contentShrunk = geometry.contentExtent != null
     && isTranscriptContentShrink(element.scrollHeight - geometry.contentExtent);
   if (!tailFollow || !viewportShrunk || contentShrunk) return null;
-  return pinTranscriptScrollerToNativeTail(element)
-    ? nativeTranscriptBottomTop(element)
-    : null;
+  const bottom = nativeTranscriptBottomTop(element);
+  return bottom - element.scrollTop > TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX ? bottom : null;
 }

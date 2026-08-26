@@ -382,7 +382,7 @@
 
 .status-bar-items-editor__empty span {
   max-width: 240px;
-  font-size: var(--font-control-xsmall);
+  font-size: var(--text-xs);
   line-height: 1.55;
 }
 
@@ -411,7 +411,7 @@
 
 .status-bar-item-row__position {
   color: var(--fg-faint);
-  font-size: var(--font-control-xsmall);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-align: center;

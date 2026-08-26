@@ -40,6 +40,8 @@ export const WebRuntimeDiagnostic = z.object({
 });
 
 export const Report = z.object({
+  eventId: z.string().regex(/^[0-9a-f]{32}$/).optional(),
+  dedupKey: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   installId: z.string().regex(/^[0-9a-f]{32}$/).optional(),
   kind: z.enum(["crash", "exception", "feedback", "performance", "bot"]),
   version: z.string().min(1).max(64),

@@ -246,10 +246,7 @@ func (a *Agent) estimatedVisibleRequestTokens(visible []provider.Message) int {
 		return 0
 	}
 	msgs := a.normalizeModelRequestMessages(visible)
-	var tools []provider.ToolSchema
-	if a.svc.tools != nil {
-		tools = a.svc.tools.Schemas()
-	}
+	tools := a.providerToolSchemas()
 	return a.estimatedRequestTokens(provider.Request{
 		Messages:    msgs,
 		Tools:       tools,

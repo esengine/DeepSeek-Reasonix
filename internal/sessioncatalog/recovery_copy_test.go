@@ -87,6 +87,13 @@ func assignCatalogTopic(t *testing.T, path, topicID string) {
 	}
 }
 
+func upsertProjectedSessionForTest(t *testing.T, catalog *Catalog, record SessionRecord) {
+	t.Helper()
+	if _, err := catalog.upsertSessionsWithNotification(context.Background(), []SessionRecord{record}, nil, "test_projection", true, upsertDirectoryProjection); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReconcileMarksCoveredRecoveryCopyWithoutMutatingSessions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -178,19 +185,15 @@ func TestTopicTurnsIgnoreRecoveryCopyButKeepActivity(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
 	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC).UnixMilli()
-	if err := catalog.UpsertSession(ctx, SessionRecord{
+	upsertProjectedSessionForTest(t, catalog, SessionRecord{
 		Path: "/s/parent.jsonl", Directory: "/s", Scope: "global", TopicID: "t",
 		Turns: 3, TurnsState: TurnsValid, Health: HealthOK, LastActivityAt: base,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.UpsertSession(ctx, SessionRecord{
+	})
+	upsertProjectedSessionForTest(t, catalog, SessionRecord{
 		Path: "/s/copy.jsonl", Directory: "/s", Scope: "global", TopicID: "t",
 		Turns: 9, TurnsState: TurnsValid, Health: HealthOK, Recovered: true, RecoveryCopy: true,
 		LastActivityAt: base + 60_000,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "t"})
 	if err != nil || !ok {
 		t.Fatalf("GetTopic: ok=%v err=%v", ok, err)
@@ -216,13 +219,11 @@ func TestTopicTurnsUseMaxOfNormalLineageAndAdoptedRecovery(t *testing.T) {
 	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
 	upsert := func(path string, turns int, recovered, recoveryCopy bool) {
 		t.Helper()
-		if err := catalog.UpsertSession(ctx, SessionRecord{
+		upsertProjectedSessionForTest(t, catalog, SessionRecord{
 			Path: path, Directory: "/s", Scope: "global", TopicID: "t",
 			Turns: turns, TurnsState: TurnsValid, Health: HealthOK,
 			Recovered: recovered, RecoveryCopy: recoveryCopy,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		})
 	}
 	upsert("/s/parent.jsonl", 3, false, false)
 	upsert("/s/adopted.jsonl", 5, true, false)
@@ -254,13 +255,11 @@ func TestRecoveryOnlyTopicState(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
-	if err := catalog.UpsertSession(ctx, SessionRecord{
+	upsertProjectedSessionForTest(t, catalog, SessionRecord{
 		Path: "/s/only-copy.jsonl", Directory: "/s", Scope: "global", TopicID: "copy-only",
 		Turns: 4, TurnsState: TurnsValid, Health: HealthOK, Recovered: true, RecoveryCopy: true,
 		LastActivityAt: 100,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "copy-only"})
 	if err != nil || !ok {
 		t.Fatalf("GetTopic: ok=%v err=%v", ok, err)

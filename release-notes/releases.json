@@ -2,6 +2,263 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.31.4",
+      "targetingVersion": 1,
+      "date": "2026-08-25",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop stability and performance improvements",
+        "zh": "桌面端稳定性与性能改进"
+      },
+      "summary": {
+        "en": "This release fixes several desktop issues including corrupted session metadata recovery, background job notifications, provider deletion, and transcript scrolling. It also improves performance by retiring an expensive metrics rollup.",
+        "zh": "此版本修复了多个桌面端问题，包括损坏的会话元数据恢复、后台任务通知、模型服务删除和会话滚动。同时通过移除高成本的指标汇总提升了性能。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli",
+        "service"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Goal Enforcement Guide",
+            "zh": "目标执行指南"
+          },
+          "body": {
+            "en": "Learn how goal enforcement works in Reasonix.",
+            "zh": "了解 Reasonix 中目标执行的工作原理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/aa3688814852ebae0835ca07731ee929fbd35c7e/docs/GOAL_ENFORCEMENT.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Comprehensive guide to using Reasonix.",
+            "zh": "使用 Reasonix 的综合指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/aa3688814852ebae0835ca07731ee929fbd35c7e/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Comprehensive guide to using Reasonix in Chinese.",
+            "zh": "使用 Reasonix 的中文综合指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/aa3688814852ebae0835ca07731ee929fbd35c7e/docs/GUIDE.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Recover from corrupted session metadata",
+            "zh": "从损坏的会话元数据中恢复"
+          },
+          "body": {
+            "en": "Sessions with all-zero or whitespace-only metadata files now rebuild automatically instead of blocking saves and tab closing.",
+            "zh": "元数据文件全零或仅含空白的会话现在会自动重建，不再阻止保存和关闭标签页。"
+          },
+          "refs": [
+            9155
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Clearer background job notifications",
+            "zh": "更清晰的后台任务通知"
+          },
+          "body": {
+            "en": "Quiet long-running background jobs are no longer reported as stalled; the notice now states the job is still running and explains how to adjust the warning threshold.",
+            "zh": "安静运行的后台任务不再被报告为“卡住”；通知现在说明任务仍在运行，并解释如何调整警告阈值。"
+          },
+          "refs": [
+            9115
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Delete configured default providers",
+            "zh": "删除已配置的默认模型服务"
+          },
+          "body": {
+            "en": "You can now remove a configured custom provider even when it is the current default; the backend safely retargets references.",
+            "zh": "现在即使模型服务是当前默认值，也可以删除已配置的自定义服务；后端会安全地重新定向引用。"
+          },
+          "refs": [
+            9344
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Stable transcript scrolling",
+            "zh": "稳定的会话滚动"
+          },
+          "body": {
+            "en": "Fixed scroll bouncing, flickering, and inability to reach the bottom in long transcripts, especially during streaming output.",
+            "zh": "修复了长会话中滚动跳动、闪烁和无法到达底部的问题，尤其是在流式输出期间。"
+          },
+          "refs": [
+            9248,
+            9341
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "service"
+          ],
+          "title": {
+            "en": "Reduced database read costs",
+            "zh": "降低数据库读取成本"
+          },
+          "body": {
+            "en": "Retired an expensive metrics rollup that consumed the entire database read budget, improving overall performance.",
+            "zh": "移除了消耗全部数据库读取预算的高成本指标汇总，提升了整体性能。"
+          },
+          "refs": [
+            9379
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Better math rendering in desktop and CLI",
+              "zh": "桌面端和 CLI 中更好的数学渲染"
+            },
+            "body": {
+              "en": "Fixed boxed formula rendering in WKWebView and added support for more LaTeX commands in the CLI renderer.",
+              "zh": "修复了 WKWebView 中盒装公式的渲染，并在 CLI 渲染器中添加了对更多 LaTeX 命令的支持。"
+            },
+            "refs": [
+              9141
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Preserve sidebar activity order",
+              "zh": "保持侧栏活动顺序"
+            },
+            "body": {
+              "en": "Fixed sidebar conversation reordering when switching sessions by preserving known activity timestamps.",
+              "zh": "通过保留已知的活动时间戳，修复了切换会话时侧栏对话重新排序的问题。"
+            },
+            "refs": [
+              9314
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Stop repeated session catalog reindexing",
+              "zh": "停止会话目录反复重新索引"
+            },
+            "body": {
+              "en": "Fixed a loop where idle sessions repeatedly entered indexing/repair state, making deletion appear unavailable.",
+              "zh": "修复了空闲会话反复进入索引/修复状态导致删除不可用的循环。"
+            },
+            "refs": [
+              9312
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Atomic OpenCode Go group removal",
+              "zh": "OpenCode Go 分组原子删除"
+            },
+            "body": {
+              "en": "Fixed removal of the OpenCode Go provider card by supporting atomic deletion of its custom provider routes.",
+              "zh": "通过支持原子删除其自定义服务路由，修复了 OpenCode Go 服务卡片的移除问题。"
+            },
+            "refs": [
+              9356
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Restore explicit readiness recovery",
+              "zh": "恢复显式收尾恢复"
+            },
+            "body": {
+              "en": "Standard and Delivery turns no longer launch hidden readiness follow-up turns, reducing extra thinking rounds and provider requests.",
+              "zh": "标准回合和交付回合不再启动隐藏的收尾后续回合，减少了额外的思考轮次和服务请求。"
+            },
+            "refs": [
+              9341
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "Linearl",
+        "yuhuping",
+        "SivanCola",
+        "lightfront",
+        "esengine",
+        "wuhanwoaini521"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.31.4",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.31.3...desktop-v1.31.4",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.31.4",
+      "baseVersion": "1.31.4",
+      "status": "reviewed",
+      "previousRelease": "1.31.3",
+      "builds": {
+        "cli": "v1.31.4",
+        "desktop": "v1.31.4",
+        "npm": "1.31.4"
+      }
+    },
+    {
       "version": "1.31.3",
       "date": "2026-08-22",
       "channel": "stable",

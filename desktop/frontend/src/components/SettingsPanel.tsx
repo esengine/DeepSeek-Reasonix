@@ -4,7 +4,7 @@ import { asArray } from "../lib/array";
 import { CHANNEL_ICONS } from "./channelIcons";
 import { botAccessEntryCount, botAccessReady, botConnectionCredentialSummary, botConnectionLabel, botConnectionScopeLabel, botConnectionSecretEnv, botConnectionSecretPatch, botInstallTargetForConnection, botInstallTargetMatchesConnection, botTargetHint, botTargetLabel, diagnosticMessage, diagnosticReportDetail, firstConnectionRemote, formatInstallTimeLeft, formatInstallUserCode, qqBotAdded, type BotInstallTarget, type BotOfficialInstallTarget } from "./botConnectionSettings";
 import { useDeferredClose } from "../lib/useMountTransition";
-import { app, openExternal } from "../lib/bridge";
+import { app, COMPACT_RATIO_MAX_PERCENT, COMPACT_RATIO_MIN_PERCENT, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
@@ -4257,8 +4257,8 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const compactRatioDraftPercent = Number(compactRatioDraft);
   const compactRatioDraftValid = compactRatioDraft !== ""
     && Number.isFinite(compactRatioDraftPercent)
-    && compactRatioDraftPercent >= 65
-    && compactRatioDraftPercent <= 85;
+    && compactRatioDraftPercent >= COMPACT_RATIO_MIN_PERCENT
+    && compactRatioDraftPercent <= COMPACT_RATIO_MAX_PERCENT;
   const compactRatioDraftDirty = compactRatioDraftValid
     && Math.abs(compactRatioDraftPercent / 100 - compactRatio) > 0.0001;
   const defaultModel = defaultRef.startsWith(`${defaultProvider}/`) ? defaultRef.slice(defaultProvider.length + 1) : "";
@@ -4614,8 +4614,8 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
                         id="settings-compact-ratio-custom"
                         className="mem-input set-narrow"
                         type="number"
-                        min={65}
-                        max={85}
+                        min={COMPACT_RATIO_MIN_PERCENT}
+                        max={COMPACT_RATIO_MAX_PERCENT}
                         step={0.1}
                         inputMode="decimal"
                         value={compactRatioDraft}
@@ -4943,7 +4943,6 @@ function proxyModeLabel(mode: ProxyMode, t: ReturnType<typeof useT>): string {
 
 function ProvidersSection({ s, busy, apply }: SectionProps) {
   const t = useT();
-  const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState<AddProviderMode>(null);
   const [revealedProvider, setRevealedProvider] = useState<string | null>(null);
@@ -5245,7 +5244,6 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             fetching={fetchingProviders.has(group.id)}
             fetchResult={fetchResults[group.id]}
             modelDraft={modelDrafts[group.id]}
-            defaultProvider={defaultProvider}
             editing={editing}
             kinds={s.providerKinds}
             onEdit={setEditing}
@@ -5855,7 +5853,6 @@ export function ProviderAccessCard({
   fetching,
   fetchResult,
   modelDraft,
-  defaultProvider,
   editing,
   kinds,
   onEdit,
@@ -5879,7 +5876,6 @@ export function ProviderAccessCard({
   fetching: boolean;
   fetchResult?: ProviderFetchResult;
   modelDraft?: ProviderModelDraft;
-  defaultProvider: string;
   editing: string | null;
   kinds: string[];
   onEdit: (name: string) => void;
@@ -5901,7 +5897,6 @@ export function ProviderAccessCard({
   const t = useT();
   const editableProvider = group.providers[0];
   const isOpenCodeGoConnection = group.id === "custom:opencode-go";
-  const isDefault = group.providers.some((p) => p.name === defaultProvider);
   const editingProvider = group.providers.find((p) => editing === p.name);
   const upgradeProvider = group.providers.find((p) => p.recommendedUpgradeAvailable);
   const primaryProviderExpanded = Boolean(editableProvider && editing === editableProvider.name);
@@ -5977,7 +5972,6 @@ export function ProviderAccessCard({
           {editableProvider && onDelete && (
             <ProviderAccessMoreMenu
               busy={busy}
-              removeDisabled={isDefault && !group.builtIn}
               builtIn={group.builtIn}
               onRemove={() => onDelete(group.providers)}
             />
@@ -6161,20 +6155,18 @@ function providerProtocolDisplayName(kind: string): string {
 
 function ProviderAccessMoreMenu({
   busy,
-  removeDisabled,
   builtIn,
   onRemove,
 }: {
   busy: boolean;
-  removeDisabled: boolean;
   builtIn: boolean;
   onRemove: () => void | Promise<void>;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const disabled = busy || removeDisabled;
-  const tooltip = removeDisabled ? t("settings.cantDeleteDefault") : t("settings.themeGallery.moreActions");
+  const disabled = busy;
+  const tooltip = t("settings.themeGallery.moreActions");
 
   return (
     <div className="provider-access-more">

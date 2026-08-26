@@ -4,6 +4,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// metric_users and cli_metric_users were retired in #9379. Keeping them out of
+// this contract prevents a dropped table from looking like a partial migration.
 const columnSets = {
   reports: ["webview2", "web_runtime"],
   pings: [
@@ -13,14 +15,6 @@ const columnSets = {
   cli_pings: [
     "os_build", "os_revision", "channel", "distro_id", "distro_version",
     "kernel_version", "session_type", "runtime_engine", "runtime_version", "gpu_mode",
-  ],
-  metric_users: [
-    "arch", "os_build", "os_revision", "channel", "distro_id", "distro_version",
-    "kernel_version", "session_type", "runtime_engine", "runtime_version", "gpu_mode", "event_count",
-  ],
-  cli_metric_users: [
-    "arch", "os_build", "os_revision", "channel", "distro_id", "distro_version",
-    "kernel_version", "session_type", "runtime_engine", "runtime_version", "gpu_mode", "event_count",
   ],
 };
 

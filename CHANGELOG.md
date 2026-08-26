@@ -20,6 +20,19 @@ branch.
 
 ### Fixed
 
+- **Project MCP session reliability:** The MCP client now uses the official Go
+  SDK for stdio, legacy SSE, and Streamable HTTP while retaining Reasonix's
+  existing configuration, OAuth, process isolation, and schema-cache contracts.
+  Streamable HTTP opens its long-lived GET/SSE listener immediately after
+  initialization, so JetBrains project-level `.mcp.json` servers no longer lose
+  their pending session before the first tool call. Lost sessions converge on
+  one bounded rebuild and one replay, read-only surfaces consume every cursor
+  page, prompts/resources share the tool session, and shutdown terminates HTTP
+  sessions and local processes. MCP calls also accept a single JSON-object
+  string in `use_capability.arguments`, while rejecting arrays, scalars, invalid
+  JSON, and nested encoded strings. `/mcp` and Desktop expose redacted protocol,
+  listening, reconnect, and error-category diagnostics without session IDs.
+
 - **v1.24.2 session snapshot & recovery root fix:** Keep PR #7982's WAL/CAS/lease
   safety foundation, but replace process-level "I hold a lease" ownership with a
   generation-bound `SessionWriteAuthority`. Same-revision tool-preview/load

@@ -256,7 +256,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// CostQuote must run before every host consumer (stats recorder, CLI
 	// metrics via opts.Sink, ACP/eventwire bridges, Desktop) so all see the
 	// same occurrence-time quote. Order from the agent:
-	//   Coalesce → GoalUsageTee → Sync → CostQuote → [Recorder] → frontend
+	//   GoalUsageTee → Sync → CostQuote → [Recorder] → frontend
+	// The controller coalesces before its ledger so every consumer shares boundaries.
 	quoteCtx := &event.QuoteContext{
 		DisplayRequest: billing.DisplayRequest{
 			Currency: cfg.ExplicitDisplayCurrency(),
@@ -291,10 +292,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// from a wire-handler goroutine, and any later reassignment races it.
 	// Goal token-budget accounting: the controller detects this tee and
 	// attributes billable usage to the active goal turn's recorder. Both the
-	// tee and the delta coalescer must ride the shared sink agents emit into
-	// directly — wrapping only the controller's reference would leave the
-	// executor's per-chunk Text/Reasoning stream uncoalesced.
-	sink = control.NewGoalUsageTee(event.Coalesce(sink, event.DefaultStreamDeltaWindow))
+	// tee must ride the shared sink agents emit into directly.
+	sink = control.NewGoalUsageTee(sink)
 
 	// Extension preflight (stages 5b/7): start the installed, enabled v2 runtime
 	// packages ONCE, here, before model resolution, so plugin-namespaced refs
@@ -1189,7 +1188,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// reaches them through the Asker on the call context, which interactive
 	// frontends wire to the controller (EnableInteractiveApproval); a headless run
 	// has none, so ask resolves to "decide for yourself".
-	reg.Add(agent.NewAskTool())
+	registerInteractiveAgentTools(reg)
 
 	// Skill tools: read_only_skill is a narrow explicitly read-only entry point; the
 	// full skills source adds run_skill / install_skill plus the dedicated
@@ -1550,7 +1549,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// without inheriting dynamic mcp__* schemas.
 	var capLedger *capability.Ledger
 	var capAudit *capability.Audit
-	capSpecs := PluginSpecsForRootWithOptions(cfg.Plugins, root, pluginSpecOptions)
+	capEntries, capSpecs := capabilityServerInventory(cfg.Plugins, root, pluginSpecOptions, extraSpecs, enabledMCPNames)
 	cachedTools, cacheKeyOK := capability.LoadCachedToolsForSpecs(capSpecs)
 	skillStore.ConfigureToolBindings(func(sk skill.Skill) []tool.MCPBinding {
 		return skillMCPBindings(sk, reg, capSpecs, cachedTools, cacheKeyOK)
@@ -1587,7 +1586,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Always build the capability runtime and provider-visible use_capability
 	// proxy so all three role settings share one tool schema.
 	capRuntime = agent.NewMCPCapabilityRuntime(ctx, pluginHost, capSpecs, reg, catalogFn)
-	capRuntime.ConfigureServers(cfg.Plugins, capSpecs, enabledMCPNames)
+	capRuntime.ConfigureServers(capEntries, capSpecs, enabledMCPNames)
 	capLedger = capability.NewLedger()
 	capAudit = &capability.Audit{}
 	capProxy = capRuntime.NewFrontend(capLedger, capAudit)

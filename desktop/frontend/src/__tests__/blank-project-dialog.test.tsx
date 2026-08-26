@@ -91,9 +91,14 @@ ok(cancelled === 1, "Escape cancels the dialog");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const treeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
+const addControlsSource = readFileSync(resolve(here, "../components/ProjectTreeAddControls.tsx"), "utf8");
 const flowSource = readFileSync(resolve(here, "../components/BlankProjectFlow.tsx"), "utf8");
 const creationSource = readFileSync(resolve(here, "../components/useProjectCreation.tsx"), "utf8");
-ok(/key: "blank-project"[\s\S]*openBlankProjectFlow\(\)/.test(treeSource), "workbench menu starts the blank-project flow");
+ok(
+  /onBlank: \(\) => \{ closeMenu\(\); openBlankProjectFlow\(\); \}/.test(treeSource) &&
+    /key: "blank-project"[\s\S]*onSelect: onBlank/.test(addControlsSource),
+  "workbench menu starts the blank-project flow",
+);
 ok(/CreateBlankProject\(draft\.parentDirectory, projectName\)/.test(flowSource), "the dialog delegates atomic directory creation to Go");
 ok(/await onOpenProject\(createdPath\)/.test(flowSource), "the new directory reuses workspace navigation and registration");
 ok(/lazy\(\(\) => import\("\.\/BlankProjectFlow"\)/.test(creationSource), "the creation flow stays outside the startup bundle");

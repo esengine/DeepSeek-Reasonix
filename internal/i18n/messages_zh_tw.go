@@ -507,7 +507,7 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
-  reasonix config compact-ratio [--local] [65..85]       設定自動壓縮閾值
+  reasonix config compact-ratio [--local] [30..85]       設定自動壓縮閾值
   reasonix config telemetry [auto|on|off]                設定不含內容的 CLI 使用統計
   reasonix report [list|show|send|delete] [ID]           審閱並明確傳送本機 CLI 當機報告
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器

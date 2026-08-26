@@ -20,6 +20,13 @@ func (c *Client) close() {
 		if cancelRefresh != nil {
 			cancelRefresh()
 		}
+		c.surfaceStopsMu.Lock()
+		surfaceStops := append([]func(){}, c.surfaceStops...)
+		c.surfaceStops = nil
+		c.surfaceStopsMu.Unlock()
+		for _, stop := range surfaceStops {
+			stop()
+		}
 		if c.t != nil {
 			c.t.close()
 		}

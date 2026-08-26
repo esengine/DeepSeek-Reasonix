@@ -283,7 +283,7 @@ await act(async () => {
 let customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
 if (!customCompactInput) throw new Error("custom compaction threshold input did not open");
 eq(customCompactInput.value, "80", "custom compaction threshold defaults older backends to 80 percent");
-ok(compactRootEl.textContent?.includes("65%") === true, "custom compact ratio explains the lower guard rail");
+ok(compactRootEl.textContent?.includes("30%") === true, "custom compact ratio explains the lower guard rail");
 ok(compactRootEl.textContent?.includes("85%") === true, "custom compact ratio explains the upper guard rail");
 ok(document.activeElement === customCompactInput, "opening the custom compact ratio moves focus to its input");
 ok(customCompactButton.getAttribute("aria-expanded") === "true", "custom compact ratio exposes its expanded state");
@@ -299,7 +299,7 @@ const setCustomCompactInput = (input: HTMLInputElement, value: string) => {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 };
 await act(async () => {
-  setCustomCompactInput(customCompactInput, "64");
+  setCustomCompactInput(customCompactInput, "29");
   await flushPromises();
 });
 ok(customCompactApply.disabled, "out-of-range custom compact ratio cannot be applied");

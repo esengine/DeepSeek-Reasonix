@@ -1991,6 +1991,8 @@ func migrateSessionSidecars(oldPath, newPath, newID string) error {
 		{store.SessionGoalState(oldPath), store.SessionGoalState(newPath)},
 		{store.SessionEventLog(oldPath), store.SessionEventLog(newPath)},
 		{store.SessionEventLogDamaged(oldPath), store.SessionEventLogDamaged(newPath)},
+		{store.SessionTurnEventLog(oldPath), store.SessionTurnEventLog(newPath)},
+		{store.SessionTurnEventLogDamaged(oldPath), store.SessionTurnEventLogDamaged(newPath)},
 		{store.SessionEventIndex(oldPath), store.SessionEventIndex(newPath)},
 		{store.SessionConflictLog(oldPath), store.SessionConflictLog(newPath)},
 		{store.SessionRecoveryState(oldPath), store.SessionRecoveryState(newPath)},

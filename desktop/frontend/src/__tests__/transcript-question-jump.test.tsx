@@ -238,26 +238,58 @@ console.log("\ntranscript question jump landing");
   }
 }
 
-// ── A one-turn remainder auto-loads without restoring the old fold button ───
+// ── Auto-fill runs only after a stable, genuinely short first page ──────────
 {
-  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  // Keep the viewport deliberately larger than every estimate Virtuoso may
+  // use before its first measured row. This exercises the auto-fill branch
+  // itself instead of depending on estimate tuning in the virtualizer.
+  const harness = await createTranscriptHarness({ viewportHeight: 100_000, rowHeight: 100 });
   try {
     HTMLElement.prototype.scrollIntoView = () => {};
     let loads = 0;
-    await harness.render(historyTurns(2, 61), {
+    const triggers: string[] = [];
+    await harness.render(historyTurns(61, 61), {
       running: false,
       questionNavigator: true,
       hasOlderHistory: true,
-      historyStartTurn: 2,
+      historyStartTurn: 61,
       historyTotalTurns: 61,
+      surfaceCommitToken: "navigation-1-short-surface",
+      onSurfacePaintReady: () => {},
+      onLoadOlderHistory: async (_targetTurn, trigger) => {
+        loads += 1;
+        triggers.push(trigger ?? "");
+        return true;
+      },
+    });
+    await harness.waitFor(() => loads > 0, "a short stable first page to auto-fill");
+    ok(triggers[0] === "auto-fill", "short-page loading is labeled as auto-fill");
+    ok(harness.container.querySelectorAll(".jump-item").length === 61, "the first page renders a marker for every session question");
+    ok(!harness.container.querySelector(".transcript__older"), "the ordinary show-earlier fold button is absent");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Initial Virtuoso startReached cannot cascade a full first page ──────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    let loads = 0;
+    await harness.render(historyTurns(1, 120), {
+      running: false,
+      questionNavigator: true,
+      hasOlderHistory: true,
+      historyStartTurn: 1,
+      historyTotalTurns: 120,
       onLoadOlderHistory: async () => {
         loads += 1;
         return true;
       },
     });
-    await harness.waitFor(() => loads > 0, "the final missing history turn to auto-load");
-    ok(harness.container.querySelectorAll(".jump-item").length === 61, "the first page renders a marker for every session question");
-    ok(!harness.container.querySelector(".transcript__older"), "the ordinary show-earlier fold button is absent");
+    await harness.settle();
+    ok(loads === 0, "mounting a scrollable 120-turn page requests no older history without user intent");
   } finally {
     await harness.unmount();
     await harness.close();

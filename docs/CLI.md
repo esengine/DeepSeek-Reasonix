@@ -120,9 +120,10 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 80% as the built-in default. Lower values
-compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Below the threshold, complete tool results may
+The editable range is 30–85%, with 80% as the built-in default. Lower values
+compact earlier, may increase summary calls and cost, and may reduce
+prompt-prefix cache reuse; higher values retain more context before compaction.
+Below the threshold, complete tool results may
 increase ordinary request cost; at pressure they are durably pruned before the
 cache-aligned summary runs. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session

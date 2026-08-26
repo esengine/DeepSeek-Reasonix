@@ -887,6 +887,7 @@ type sessionDisplayMap map[string]map[string]string
 type sessionPlannerDisplayMap map[string][]plannerDisplayTurn
 
 type plannerDisplayTurn struct {
+	TurnID   string           `json:"turnId,omitempty"`
 	UserHash string           `json:"userHash"`
 	Messages []HistoryMessage `json:"messages"`
 }
@@ -1008,15 +1009,28 @@ func updateSessionPlannerDisplays(dir string, recoverCorrupt bool, mutate func(s
 }
 
 func recordSessionPlannerDisplay(dir, sessionPath, userContent string, messages []HistoryMessage) error {
+	return recordSessionPlannerDisplayForTurn(dir, sessionPath, "", userContent, messages)
+}
+
+func recordSessionPlannerDisplayForTurn(dir, sessionPath, turnID, userContent string, messages []HistoryMessage) error {
 	if strings.TrimSpace(sessionPath) == "" || strings.TrimSpace(userContent) == "" || len(messages) == 0 {
 		return nil
 	}
 	key := filepath.Base(sessionPath)
 	turn := plannerDisplayTurn{
+		TurnID:   strings.TrimSpace(turnID),
 		UserHash: messageDisplayKey(userContent),
 		Messages: cloneHistoryMessages(messages),
 	}
 	return updateSessionPlannerDisplays(dir, false, func(m sessionPlannerDisplayMap) bool {
+		if turn.TurnID != "" {
+			for i := range m[key] {
+				if m[key][i].TurnID == turn.TurnID {
+					m[key][i] = turn
+					return true
+				}
+			}
+		}
 		m[key] = append(m[key], turn)
 		return true
 	})
@@ -1064,6 +1078,7 @@ func sessionPlannerDisplayTurns(dir, sessionPath string) []plannerDisplayTurn {
 			continue
 		}
 		out = append(out, plannerDisplayTurn{
+			TurnID:   turn.TurnID,
 			UserHash: turn.UserHash,
 			Messages: cloneHistoryMessages(turn.Messages),
 		})

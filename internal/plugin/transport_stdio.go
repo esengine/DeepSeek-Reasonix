@@ -1,10 +1,7 @@
 package plugin
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +16,6 @@ import (
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
-	"reasonix/internal/tool"
 )
 
 const (
@@ -27,34 +23,19 @@ const (
 	gracefulCloseWaitBudget = 750 * time.Millisecond
 )
 
-// stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
-// stdin/stdout — the MCP stdio convention (one JSON message per line, no
-// embedded newlines). A dedicated reader goroutine owns stdout and demuxes each
-// response to the waiting call by id, so a call can abandon a blocking read the
-// moment its context is cancelled (the subprocess is bound to the session, not
-// the turn, so a hung server would otherwise hang a cancelled turn forever).
-// callMu serialises a request/response round-trip over the shared pipe.
+// stdioTransport owns the Reasonix-specific subprocess lifecycle. MCP framing,
+// concurrent request correlation, cancellation, and server requests are owned
+// by the official SDK's IOTransport.
 type stdioTransport struct {
-	name   string
-	roots  []mcpRoot
-	cmd    *exec.Cmd
-	job    uintptr // Windows Job Object handle (0 elsewhere); reaps detached grandchildren on close
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr *tailBuffer
-
-	callMu  sync.Mutex // one in-flight request/response at a time over the shared pipe
-	writeMu sync.Mutex // client calls and server-request replies share stdin
-
-	mu      sync.Mutex
-	nextID  int
-	pending map[int]chan rpcResponse
-	readErr error // set once the reader goroutine exits; further calls fail fast
-
-	waitOnce      sync.Once
-	releaseSlot   func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
-	progress      progressRouter
-	notifications notificationRouter
+	name        string
+	cmd         *exec.Cmd
+	job         uintptr // Windows Job Object handle (0 elsewhere); reaps detached grandchildren on close
+	stdin       io.WriteCloser
+	stdout      io.ReadCloser
+	stderr      *tailBuffer
+	waitOnce    sync.Once
+	closeOnce   sync.Once
+	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
@@ -128,17 +109,14 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	}
 	t := &stdioTransport{
 		name:        s.Name,
-		roots:       mcpRoots(s.WorkspaceRoot),
 		cmd:         cmd,
 		job:         job,
 		stdin:       stdin,
-		stdout:      bufio.NewReader(stdout),
+		stdout:      stdout,
 		stderr:      stderr,
-		pending:     map[int]chan rpcResponse{},
 		releaseSlot: releaseSlot,
 	}
 	releaseSlot = nil // ownership transferred to t; close() releases it
-	go t.readLoop()
 	return t, nil
 }
 
@@ -545,155 +523,23 @@ func mergePathLists(primary, secondary string) string {
 	return strings.Join(out, string(os.PathListSeparator))
 }
 
-// stdioReplyQueueBound caps buffered server-request replies. The queue only
-// backs up while the reply writer is stuck behind a jammed stdin pipe, so a
-// small bound is plenty; overflow drops the reply instead of blocking readLoop.
-const stdioReplyQueueBound = 16
-
-// readLoop owns stdout for the transport's lifetime: it reads one JSON-RPC
-// message per line, routes progress notifications, answers server requests, and
-// hands each response to the call waiting on its id. On any read error it fails
-// every pending call and exits.
-func (t *stdioTransport) readLoop() {
-	// Server-request replies go through replyLoop, never directly to stdin:
-	// readLoop is the only goroutine draining stdout, and blocking it on
-	// writeMu behind a client call whose own stdin write is jammed would
-	// deadlock both pipes once the server also blocks writing stdout.
-	replies := make(chan any, stdioReplyQueueBound)
-	defer close(replies)
-	go t.replyLoop(replies)
-	for {
-		line, readErr := t.stdout.ReadBytes('\n')
-		line = bytes.TrimSpace(line)
-		if len(line) > 0 {
-			t.handleInboundLine(line, replies)
-		}
-		if readErr != nil {
-			t.failAll(readErr)
-			return
-		}
-	}
-}
-
-// replyLoop serialises server-request replies onto the shared stdin pipe. A
-// write failure is not terminal for the transport — the read side may still be
-// healthy, and pipe errors surface through the next client call's own write —
-// but it stops further replies and keeps draining so readLoop never blocks.
-func (t *stdioTransport) replyLoop(replies <-chan any) {
-	var dead bool
-	for msg := range replies {
-		if dead {
-			continue
-		}
-		if t.write(msg) != nil {
-			dead = true
-		}
-	}
-}
-
-func (t *stdioTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
-	return t.progress.registerProgress(token, sink)
-}
-
-func (t *stdioTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
-	return t.notifications.registerNotification(method, callback)
-}
-
-// failAll records the terminal read error and unblocks every pending call by
-// closing its channel; a caller distinguishes this from a real response by the
-// closed-channel receive.
-func (t *stdioTransport) failAll(err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.readErr == nil {
-		t.readErr = err
-	}
-	for id, ch := range t.pending {
-		close(ch)
-		delete(t.pending, id)
-	}
-}
-
-func (t *stdioTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	t.callMu.Lock()
-	defer t.callMu.Unlock()
-
-	t.mu.Lock()
-	if t.readErr != nil {
-		t.mu.Unlock()
-		return nil, t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, t.readErr))
-	}
-	t.nextID++
-	id := t.nextID
-	ch := make(chan rpcResponse, 1)
-	t.pending[id] = ch
-	t.mu.Unlock()
-
-	defer func() {
-		t.mu.Lock()
-		delete(t.pending, id)
-		t.mu.Unlock()
-	}()
-
-	if err := t.write(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
-		return nil, fmt.Errorf("plugin %q: write %s: %w", t.name, method, err)
-	}
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return nil, t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, t.readErr))
-		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("plugin %q: %w", t.name, resp.Error)
-		}
-		return resp.Result, nil
-	}
-}
-
-func (t *stdioTransport) notify(_ context.Context, method string, params any) error {
-	return t.write(rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
-}
-
-func (t *stdioTransport) write(v any) error {
-	b, err := json.Marshal(v) // marshaled JSON never contains a literal newline
-	if err != nil {
-		return err
-	}
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	if _, err = t.stdin.Write(append(b, '\n')); err != nil {
-		return t.withStderr(err)
-	}
-	return nil
-}
-
-func (t *stdioTransport) withStderr(err error) error {
-	if t.stderr == nil {
-		return err
-	}
-	// Reap the exited child so its stderr copy goroutine has flushed the tail.
-	// Budgeted: a surviving grandchild keeps cmd.Wait blocked forever (see
-	// close), and this path runs with callMu held — an unbounded wait here
-	// would wedge every future call on this transport.
-	waitWithBudget(t.wait, closeWaitBudget)
-	// This error is returned directly to callers outside startup as well as
-	// copied into diagnostics. Redact at the transport boundary so an early
-	// child exit cannot bypass the startup-specific redaction layer.
-	msg := secrets.RedactCredentials(t.stderr.String())
-	if msg == "" {
-		return err
-	}
-	return fmt.Errorf("%w: stderr: %s", err, msg)
-}
-
 func (t *stdioTransport) startupStderr() string {
 	if t == nil || t.stderr == nil {
 		return ""
 	}
 	return secrets.RedactCredentials(t.stderr.String())
+}
+
+func (t *stdioTransport) withStderr(err error) error {
+	if t == nil || t.stderr == nil {
+		return err
+	}
+	waitWithBudget(t.wait, closeWaitBudget)
+	message := secrets.RedactCredentials(t.stderr.String())
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%w: stderr: %s", err, message)
 }
 
 // wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy
@@ -730,24 +576,28 @@ func waitFinishedWithinBudget(wait func(), budget time.Duration) bool {
 // inherited pipes open). Both paths are budgeted so one wedged server can never
 // stall a boot or turn teardown.
 func (t *stdioTransport) close() {
-	if t.releaseSlot != nil {
-		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
-	}
-	if t.stdin != nil {
-		_ = t.stdin.Close()
-	}
-	if t.cmd == nil || t.cmd.Process == nil {
-		return
-	}
-	// Give protocol-aware servers a short chance to observe stdin EOF and clean
-	// up resources they launched outside the process group (Chrome isolated
-	// profiles are the important case). Hard-kill after the bounded grace period
-	// so an unresponsive MCP still cannot stall teardown.
-	if waitFinishedWithinBudget(t.wait, gracefulCloseWaitBudget) {
-		return
-	}
-	proc.KillTracked(t.cmd, t.job)
-	waitWithBudget(t.wait, closeWaitBudget)
+	t.closeOnce.Do(func() {
+		if t.releaseSlot != nil {
+			t.releaseSlot()
+		}
+		if t.stdin != nil {
+			_ = t.stdin.Close()
+		}
+		if t.stdout != nil {
+			_ = t.stdout.Close()
+		}
+		if t.cmd == nil || t.cmd.Process == nil {
+			return
+		}
+		// Give protocol-aware servers a short chance to observe stdin EOF and
+		// clean up resources they launched outside the process group. Hard-kill
+		// after the bounded grace period so teardown cannot wedge.
+		if waitFinishedWithinBudget(t.wait, gracefulCloseWaitBudget) {
+			return
+		}
+		proc.KillTracked(t.cmd, t.job)
+		waitWithBudget(t.wait, closeWaitBudget)
+	})
 }
 
 type tailBuffer struct {

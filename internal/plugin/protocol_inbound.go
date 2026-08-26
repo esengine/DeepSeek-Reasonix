@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -20,10 +19,9 @@ type progressTransport interface {
 	registerProgress(token string, sink tool.ProgressFunc) func()
 }
 
-// notificationTransport is implemented by native transports that can receive
-// server notifications. The callback must stay non-blocking because stdio and
-// SSE dispatch it from their read loops, while streamable HTTP dispatches it
-// while the current response owns the transport lock.
+// notificationTransport is implemented by supervised SDK transports that can
+// receive server notifications. The callback must stay non-blocking because the
+// SDK dispatches notification handlers independently from request completion.
 type notificationTransport interface {
 	registerNotification(method string, callback func(json.RawMessage)) func()
 }
@@ -92,6 +90,12 @@ func (r *progressRouter) registerProgress(token string, sink tool.ProgressFunc) 
 		delete(r.sinks, token)
 		r.mu.Unlock()
 	}
+}
+
+func (r *progressRouter) clear() {
+	r.mu.Lock()
+	r.sinks = nil
+	r.mu.Unlock()
 }
 
 func (r *progressRouter) dispatchProgress(params json.RawMessage) bool {
@@ -185,42 +189,4 @@ func mcpRoots(workspaceRoot string) []mcpRoot {
 		name = clean
 	}
 	return []mcpRoot{{URI: fileURL.String(), Name: name}}
-}
-
-type inboundMessage struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-
-func decodeInboundMessage(payload []byte) (inboundMessage, bool) {
-	var message inboundMessage
-	if err := json.Unmarshal(payload, &message); err != nil {
-		return inboundMessage{}, false
-	}
-	return message, true
-}
-
-func isNotificationID(id json.RawMessage) bool {
-	id = bytes.TrimSpace(id)
-	return len(id) == 0 || bytes.Equal(id, []byte("null"))
-}
-
-func serverRequestReply(id json.RawMessage, method string, roots []mcpRoot) any {
-	response := struct {
-		JSONRPC string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Result  any             `json:"result,omitempty"`
-		Error   *rpcError       `json:"error,omitempty"`
-	}{JSONRPC: "2.0", ID: append(json.RawMessage(nil), id...)}
-	switch method {
-	case "ping":
-		response.Result = map[string]any{}
-	case "roots/list":
-		response.Result = map[string]any{"roots": roots}
-	default:
-		response.Error = &rpcError{Code: -32601, Message: "Method not found"}
-	}
-	return response
 }

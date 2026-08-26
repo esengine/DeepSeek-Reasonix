@@ -1,9 +1,8 @@
 // Package plugin is Reasonix's MCP client. It connects to external MCP servers and
-// adapts their tools to the tool.Tool interface, so the agent treats plugin
-// tools and built-ins uniformly. The wire protocol is JSON-RPC 2.0 in every
-// case; only the transport differs (stdio subprocess, Streamable HTTP, or the
-// legacy HTTP+SSE). A transport interface hides that difference so the MCP-level
-// logic — handshake, tools/list, tools/call — is written once.
+// adapts their tools to the tool.Tool interface, so the agent treats plugin tools
+// and built-ins uniformly. The official MCP Go SDK owns protocol negotiation and
+// JSON-RPC sessions across stdio, Streamable HTTP, and legacy HTTP+SSE; Reasonix
+// retains product policy, lifecycle supervision, and transport security.
 package plugin
 
 import (
@@ -30,9 +29,6 @@ import (
 	"reasonix/internal/secrets"
 	"reasonix/internal/tool"
 )
-
-// protocolVersion is the MCP revision Reasonix advertises during initialize.
-const protocolVersion = "2024-11-05"
 
 // MCPProcessMode selects how a local stdio MCP process is launched.
 // It is an internal runtime field, not a user-facing config knob.
@@ -151,13 +147,11 @@ type Spec struct {
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
-// request and returns its result (correlating by id internally); notify sends a
-// fire-and-forget notification; close releases resources. Transports route MCP
+// request and returns its result; close releases resources. Transports route MCP
 // progress notifications to the active tool call and answer the client
 // capabilities Reasonix advertises (currently ping and roots/list).
 type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
-	notify(ctx context.Context, method string, params any) error
 	close()
 }
 
@@ -201,7 +195,8 @@ type Host struct {
 
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
-	bgWrites sync.WaitGroup
+	bgWrites  sync.WaitGroup
+	surfaceWG sync.WaitGroup
 
 	toolListChanges toolListSubscriptions
 }
@@ -404,9 +399,9 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 					_ = SaveCachedSchema(spec.Name, CachedSchema{
 						CacheKey: SchemaCacheKey(spec),
 						Capabilities: map[string]bool{
-							"tools":     c.hasTools,
-							"prompts":   c.hasPrompts,
-							"resources": c.hasResources,
+							"tools":     c.capabilities.tools,
+							"prompts":   c.capabilities.prompts,
+							"resources": c.capabilities.resources,
 						},
 						Tools: cacheableToolsOf(ts),
 					})
@@ -492,6 +487,7 @@ func (h *Host) Close() {
 			c.close()
 		}
 	}
+	h.surfaceWG.Wait()
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
 
@@ -502,6 +498,24 @@ func (h *Host) queueBackgroundWrite(write func()) {
 	h.bgWrites.Go(func() {
 		write()
 	})
+}
+
+func (h *Host) goSurface(work func()) bool {
+	if h == nil || work == nil {
+		return false
+	}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return false
+	}
+	h.surfaceWG.Add(1)
+	h.mu.Unlock()
+	go func() {
+		defer h.surfaceWG.Done()
+		work()
+	}()
+	return true
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
@@ -517,33 +531,35 @@ func (h *Host) StartPhaseB(ctx context.Context, sink event.Sink) {
 	clients := append([]*Client(nil), h.clients...)
 	h.mu.RUnlock()
 	for _, c := range clients {
-		if c.hasPrompts {
-			go h.fetchPrompts(ctx, c, sink)
+		if c.capabilities.prompts {
+			h.goSurface(func() { h.fetchPrompts(ctx, c, sink) })
 		}
-		if c.hasResources {
-			go h.fetchResources(ctx, c, sink)
+		if c.capabilities.resources {
+			h.goSurface(func() { h.fetchResources(ctx, c, sink) })
 		}
 	}
 }
 
 func (h *Host) fetchPrompts(ctx context.Context, c *Client, sink event.Sink) {
-	aux, auxCtx, cancel, err := c.auxiliaryClient(ctx)
-	if err != nil {
-		slog.Warn("plugin: start auxiliary prompt client failed", "server", c.name, "err", err)
-		return
-	}
+	auxCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
 	defer cancel()
-	defer aux.close()
 
-	ps, err := aux.listPrompts(auxCtx)
+	ps, err := c.listPrompts(auxCtx)
 	if err != nil {
-		slog.Warn("plugin: listPrompts failed", "server", c.name, "err", err)
+		if ctx.Err() == nil && !c.closed.Load() {
+			slog.Warn("plugin: listPrompts failed", "server", c.name, "err", err)
+		}
 		return
 	}
 	for i := range ps {
 		ps[i].client = c
 	}
 	h.mu.Lock()
+	if h.closed || h.lookupClientLocked(c.name) != c {
+		h.mu.Unlock()
+		return
+	}
+	h.removeClientPromptsLocked(c)
 	c.prompts = ps
 	h.prompts = append(h.prompts, ps...)
 	h.mu.Unlock()
@@ -556,20 +572,22 @@ func (h *Host) fetchPrompts(ctx context.Context, c *Client, sink event.Sink) {
 }
 
 func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
-	aux, auxCtx, cancel, err := c.auxiliaryClient(ctx)
-	if err != nil {
-		slog.Warn("plugin: start auxiliary resource client failed", "server", c.name, "err", err)
-		return
-	}
+	auxCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
 	defer cancel()
-	defer aux.close()
 
-	rs, err := aux.listResources(auxCtx)
+	rs, err := c.listResources(auxCtx)
 	if err != nil {
-		slog.Warn("plugin: listResources failed", "server", c.name, "err", err)
+		if ctx.Err() == nil && !c.closed.Load() {
+			slog.Warn("plugin: listResources failed", "server", c.name, "err", err)
+		}
 		return
 	}
 	h.mu.Lock()
+	if h.closed || h.lookupClientLocked(c.name) != c {
+		h.mu.Unlock()
+		return
+	}
+	h.removeClientResourcesLocked(c)
 	c.resources = rs
 	h.resources = append(h.resources, rs...)
 	h.mu.Unlock()
@@ -581,9 +599,28 @@ func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
 	}
 }
 
-// Client is one MCP server connection: a name plus the transport carrying its
-// JSON-RPC. The MCP-level methods (initialize, listTools, …) are transport-
-// agnostic — they go through t.
+func (h *Host) removeClientPromptsLocked(c *Client) {
+	kept := h.prompts[:0]
+	for _, prompt := range h.prompts {
+		if prompt.client != c {
+			kept = append(kept, prompt)
+		}
+	}
+	h.prompts = kept
+}
+
+func (h *Host) removeClientResourcesLocked(c *Client) {
+	kept := h.resources[:0]
+	for _, resource := range h.resources {
+		if resource.Server != c.name {
+			kept = append(kept, resource)
+		}
+	}
+	h.resources = kept
+}
+
+// Client is one MCP server connection plus Reasonix's product-facing catalogs.
+// MCP operations are transport-agnostic and go through the supervised SDK session.
 type Client struct {
 	name       string
 	instanceID uint64 // Host-local identity for RemoveIfInstance rollback
@@ -596,16 +633,9 @@ type Client struct {
 	registrationClaims    map[uint64]struct{}
 	registrationCommitted bool
 
-	// Capabilities advertised by the server at initialize. prompts/list and
-	// resources/list are only called when advertised, so we never provoke a
-	// "method not found" on a tools-only server.
-	hasTools     bool
-	hasPrompts   bool
-	hasResources bool
-	// supportsToolListChanged is true only when initialize explicitly advertises
-	// tools.listChanged. Servers that omit the capability are not allowed to
-	// drive background tools/list traffic with unsolicited notifications.
-	supportsToolListChanged bool
+	// Advertised surface and list-changed capabilities are kept together so
+	// initialization publishes one coherent capability snapshot.
+	capabilities clientCapabilities
 
 	transport string // declared transport type, for /mcp status ("stdio"/"http")
 
@@ -627,17 +657,10 @@ type Client struct {
 	closed            atomic.Bool
 	closeOnce         sync.Once
 	refresh           toolListRefreshState
+	surfaceStopsMu    sync.Mutex
+	surfaceStops      []func()
+	auxiliaryRefresh  auxiliaryListRefreshState
 	progressID        atomic.Uint64
-}
-
-func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
-	auxCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
-	aux, err := start(auxCtx, auxCtx, c.spec)
-	if err != nil {
-		cancel()
-		return nil, nil, nil, err
-	}
-	return aux, auxCtx, cancel, nil
 }
 
 // ToolInfo is the human-facing metadata returned by MCP tools/list for one tool.
@@ -656,12 +679,18 @@ type ServerStatus struct {
 	// ConfigSource is the config plane that registered this server
 	// (user_config, project_config, workspace, built-in, …). Empty when unknown.
 	// Surfaced in /mcp status so operators can tell where a tool came from (#6578).
-	ConfigSource string
-	Tools        int
-	Prompts      int
-	Resources    int
-	HasTools     bool
-	ToolList     []ToolInfo
+	ConfigSource      string
+	Tools             int
+	Prompts           int
+	Resources         int
+	HasTools          bool
+	ToolList          []ToolInfo
+	ProtocolVersion   string
+	SessionState      SessionState
+	SessionIDPresent  bool
+	ReconnectAttempts int
+	LastErrorKind     SessionErrorKind
+	LastError         string
 }
 
 // AuthorizeSpecLaunch records durable consent for an explicitly user-installed
@@ -756,10 +785,19 @@ func (h *Host) Servers() []ServerStatus {
 			Transport:    c.transport,
 			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
 			Tools:        len(c.toolCatalog.adapters),
-			HasTools:     c.hasTools,
+			HasTools:     c.capabilities.tools,
 		}
 		s.ToolList = append([]ToolInfo(nil), c.toolCatalog.infos...)
 		c.toolsMu.RUnlock()
+		if provider, ok := c.t.(sessionDiagnosticsProvider); ok {
+			diagnostics := provider.sessionDiagnostics()
+			s.ProtocolVersion = diagnostics.ProtocolVersion
+			s.SessionState = diagnostics.State
+			s.SessionIDPresent = diagnostics.SessionIDPresent
+			s.ReconnectAttempts = diagnostics.ReconnectAttempts
+			s.LastErrorKind = diagnostics.LastErrorKind
+			s.LastError = diagnostics.LastError
+		}
 		for _, p := range h.prompts {
 			if p.Server == c.name {
 				s.Prompts++
@@ -1295,11 +1333,11 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	// uses the session-scoped PluginCtx, not a per-turn ctx), so the slow list
 	// calls cannot starve a /mcp add of its return value. nil sink keeps hot-add
 	// quiet — the chat UI re-queries Host.Prompts()/Resources() on demand.
-	if c.hasPrompts {
-		go h.fetchPrompts(lifeCtx, c, nil)
+	if c.capabilities.prompts {
+		h.goSurface(func() { h.fetchPrompts(lifeCtx, c, nil) })
 	}
-	if c.hasResources {
-		go h.fetchResources(lifeCtx, c, nil)
+	if c.capabilities.resources {
+		h.goSurface(func() { h.fetchResources(lifeCtx, c, nil) })
 	}
 	return ts, nil
 }
@@ -1472,16 +1510,7 @@ func (s Spec) ServerAuthorized() bool {
 // newTransport builds the transport for a spec's declared type. Empty / unknown
 // defaults to stdio.
 func newTransport(ctx context.Context, s Spec) (transport, error) {
-	switch strings.ToLower(strings.TrimSpace(s.Type)) {
-	case "", "stdio":
-		return newStdioTransport(ctx, s)
-	case "http", "streamable-http", "streamable_http":
-		return newHTTPTransport(s)
-	case "sse":
-		return newSSETransport(ctx, s)
-	default:
-		return nil, fmt.Errorf("unknown transport type %q (want stdio|http|sse)", s.Type)
-	}
+	return newSDKSessionTransport(ctx, s)
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -1533,13 +1562,6 @@ func (c *Client) withProgress(ctx context.Context, method string, params any) (a
 }
 
 func (c *Client) callTransport(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	res, err := c.t.call(ctx, method, params)
-	if err == nil || method == "initialize" || !isHTTPSessionExpired(err) {
-		return res, err
-	}
-	if initErr := c.initializeSession(ctx, false); initErr != nil {
-		return nil, fmt.Errorf("%w; reinitialize failed: %w", err, initErr)
-	}
 	return c.t.call(ctx, method, params)
 }
 
@@ -1584,7 +1606,7 @@ func rawToolNameFromCallParams(params any) string {
 func (c *Client) timeoutError(method string, params any, timeout time.Duration) error {
 	if method == "tools/call" {
 		if raw := rawToolNameFromCallParams(params); raw != "" {
-			return fmt.Errorf("MCP tool %q timed out after %s; increase tool_timeout_seconds or call_timeout_seconds to allow longer runs: %w",
+			return fmt.Errorf("MCP tool %q timed out after %s; execution may have completed, so it was not retried automatically; increase tool_timeout_seconds or call_timeout_seconds to allow longer runs: %w",
 				c.name+"."+raw, formatTimeout(timeout), context.DeadlineExceeded)
 		}
 	}
@@ -1599,35 +1621,10 @@ func formatTimeout(timeout time.Duration) string {
 	return timeout.String()
 }
 
-func (c *Client) notify(ctx context.Context, method string, params any) error {
-	return c.t.notify(ctx, method, params)
-}
-
-func isHTTPSessionExpired(err error) bool {
-	var expired *httpSessionExpiredError
-	return errors.As(err, &expired)
-}
-
 func (c *Client) initialize(ctx context.Context) error {
-	return c.initializeSession(ctx, true)
-}
-
-func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool) error {
-	capabilities := map[string]any{}
-	if len(mcpRoots(c.spec.WorkspaceRoot)) > 0 {
-		capabilities["roots"] = map[string]any{"listChanged": false}
-	}
-	res, err := c.call(ctx, "initialize", map[string]any{
-		"protocolVersion": protocolVersion,
-		"capabilities":    capabilities,
-		"clientInfo":      map[string]any{"name": "reasonix", "version": "dev"},
-	})
+	res, err := c.call(ctx, "initialize", nil)
 	if err != nil {
 		return err
-	}
-	if !recordCapabilities {
-		// Runtime session refresh must not rewrite startup-only capability flags.
-		return c.notify(ctx, "notifications/initialized", map[string]any{})
 	}
 	// Record which optional capabilities the server advertises. Presence of the
 	// key (even with an empty object) signals support.
@@ -1638,8 +1635,8 @@ func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool)
 		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
 	}
 	toolsCapability, hasTools := ir.Capabilities["tools"]
-	c.hasTools = hasTools
-	c.supportsToolListChanged = false
+	c.capabilities.tools = hasTools
+	c.capabilities.toolsListChanged = false
 	if hasTools && len(toolsCapability) > 0 {
 		var advertised struct {
 			ListChanged bool `json:"listChanged"`
@@ -1647,13 +1644,27 @@ func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool)
 		if err := json.Unmarshal(toolsCapability, &advertised); err != nil {
 			slog.Warn("plugin: parse tools capability", "server", c.name, "err", err)
 		} else {
-			c.supportsToolListChanged = advertised.ListChanged
+			c.capabilities.toolsListChanged = advertised.ListChanged
 		}
 	}
-	_, c.hasPrompts = ir.Capabilities["prompts"]
-	_, c.hasResources = ir.Capabilities["resources"]
+	promptsCapability, hasPrompts := ir.Capabilities["prompts"]
+	c.capabilities.prompts = hasPrompts
+	c.capabilities.promptsListChanged = capabilityListChanged(promptsCapability)
+	resourcesCapability, hasResources := ir.Capabilities["resources"]
+	c.capabilities.resources = hasResources
+	c.capabilities.resourcesListChanged = capabilityListChanged(resourcesCapability)
 
-	return c.notify(ctx, "notifications/initialized", map[string]any{})
+	return nil
+}
+
+func capabilityListChanged(capability json.RawMessage) bool {
+	if len(capability) == 0 {
+		return false
+	}
+	var advertised struct {
+		ListChanged bool `json:"listChanged"`
+	}
+	return json.Unmarshal(capability, &advertised) == nil && advertised.ListChanged
 }
 
 type mcpTool struct {
@@ -1727,29 +1738,6 @@ func summarizeFailureError(err error) string {
 	}
 	return msg
 }
-
-// JSON-RPC message types (shared by every transport)
-
-type rpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id,omitempty"` // omitted for notifications (id 0 unused)
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-type rpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result"`
-	Error   *rpcError       `json:"error"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-func (e *rpcError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
 
 // remote tool adapter
 

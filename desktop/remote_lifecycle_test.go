@@ -16,6 +16,9 @@ import (
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
 	"reasonix/internal/remote/sftpfs"
+	"reasonix/internal/remote/sshtest"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type lifecycleSSHClient struct {
@@ -207,7 +210,7 @@ func TestServerLogsCancellationOnDisconnect(t *testing.T) {
 	hostCtx, hostCancel := context.WithCancel(context.Background())
 	mh := &managedHost{
 		ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil),
-		server: RemoteServerView{HostID: "box", Workspace: "/work", State: "ready"},
+		serves: map[string]*serveEntry{"/work": {view: RemoteServerView{HostID: "box", Workspace: "/work", State: "ready"}}},
 	}
 	mgr.hosts["box"] = mh
 	entered := make(chan struct{})
@@ -218,7 +221,7 @@ func TestServerLogsCancellationOnDisconnect(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := mgr.ServerLogs(context.Background(), "box", 20)
+		_, err := mgr.ServerLogs(context.Background(), "box", "/work", 20)
 		done <- err
 	}()
 	<-entered
@@ -270,7 +273,9 @@ func TestEnsureServerResultCannotMutateReplacement(t *testing.T) {
 	defer newCancel()
 	replacement := &managedHost{
 		ctx: newCtx, cancel: newCancel, client: newLifecycleSSHClient(nil),
-		server: RemoteServerView{HostID: "box", Workspace: "/new", State: "ready"}, token: "new-token",
+		serves: map[string]*serveEntry{
+			"/new": {view: RemoteServerView{HostID: "box", Workspace: "/new", State: "ready"}, token: "new-token"},
+		},
 	}
 	mgr.mu.Lock()
 	mgr.hosts["box"] = replacement
@@ -279,26 +284,29 @@ func TestEnsureServerResultCannotMutateReplacement(t *testing.T) {
 	if err := <-done; err == nil {
 		t.Fatal("stale EnsureServer unexpectedly succeeded")
 	}
-	if got := mgr.ServerStatus("box"); got.Workspace != "/new" || got.State != "ready" {
+	if got := mgr.ServerStatus("box", "/new"); got.Workspace != "/new" || got.State != "ready" {
 		t.Fatalf("replacement server state was overwritten: %+v", got)
 	}
-	if replacement.token != "new-token" {
-		t.Fatalf("replacement token = %q, want new-token", replacement.token)
+	if got := replacement.serves["/new"].token; got != "new-token" {
+		t.Fatalf("replacement token = %q, want new-token", got)
 	}
 }
 
-func TestStopServerRejectsEmptyWorkspace(t *testing.T) {
+func TestStopServerRejectsUnknownWorkspace(t *testing.T) {
 	mgr := newDesktopRemoteManager(nil)
 	hostCtx, hostCancel := context.WithCancel(context.Background())
 	defer hostCancel()
-	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil)}
+	mgr.hosts["box"] = &managedHost{
+		ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil),
+		serves: map[string]*serveEntry{"/srv/a": {view: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready"}}},
+	}
 	called := false
 	mgr.stopServe = func(context.Context, bootstrap.Conn, string) error { called = true; return nil }
-	if err := mgr.StopServer("box"); err == nil {
-		t.Fatal("StopServer accepted an empty workspace")
+	if err := mgr.StopServer("box", "/srv/missing"); err == nil {
+		t.Fatal("StopServer accepted an unknown workspace")
 	}
 	if called {
-		t.Fatal("StopServer called bootstrap.Stop with an empty workspace")
+		t.Fatal("StopServer called bootstrap.Stop for an untracked workspace")
 	}
 }
 
@@ -330,17 +338,20 @@ func TestDesktopCLIBinaryNamesAvoidWindowsPortableEntryCollision(t *testing.T) {
 
 func TestHasUsableServeForwardRequiresExactTargetAndURL(t *testing.T) {
 	entries := []forward.Entry{{
-		Spec: forward.Spec{Name: serveForwardName, TargetAddr: "127.0.0.1:9000"},
+		Spec: forward.Spec{Name: serveForwardName("/srv/a"), TargetAddr: "127.0.0.1:9000"},
 		Up:   true, BoundAddr: "127.0.0.1:45000",
 	}}
-	if !hasUsableServeForward(entries, "127.0.0.1:9000", "http://127.0.0.1:45000/") {
+	if !hasUsableServeForward(entries, serveForwardName("/srv/a"), "127.0.0.1:9000", "http://127.0.0.1:45000/") {
 		t.Fatal("exact existing serve forward was not reusable")
 	}
-	if hasUsableServeForward(entries, "127.0.0.1:9001", "http://127.0.0.1:45000/") {
+	if hasUsableServeForward(entries, serveForwardName("/srv/a"), "127.0.0.1:9001", "http://127.0.0.1:45000/") {
 		t.Fatal("stale serve target was reused")
 	}
-	if hasUsableServeForward(entries, "127.0.0.1:9000", "http://127.0.0.1:45001/") {
+	if hasUsableServeForward(entries, serveForwardName("/srv/a"), "127.0.0.1:9000", "http://127.0.0.1:45001/") {
 		t.Fatal("mismatched local URL was reused")
+	}
+	if hasUsableServeForward(entries, serveForwardName("/other"), "127.0.0.1:9000", "http://127.0.0.1:45000/") {
+		t.Fatal("another workspace's forward was reused")
 	}
 }
 
@@ -405,9 +416,9 @@ func TestHostKeyPromptsAreSerializedForGlobalDialog(t *testing.T) {
 }
 
 // TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe is the failed-
-// switch atomicity contract: when the new workspace's Serve fails to start,
-// the host's server ownership stays on the still-running previous Serve, so
-// Stop and Logs keep operating on the workspace that actually runs.
+// start isolation contract: when a new workspace's Serve fails to start, the
+// still-running previous workspace's entry stays untouched, so Stop and Logs
+// keep operating on the workspace that actually runs.
 func TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe(t *testing.T) {
 	seedLifecycleHost(t, "box")
 	mgr := newDesktopRemoteManager(nil)
@@ -416,8 +427,9 @@ func TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe(t *testing.T) {
 	client := newLifecycleSSHClient(nil)
 	mgr.hosts["box"] = &managedHost{
 		ctx: hostCtx, cancel: hostCancel, client: client,
-		server: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"},
-		token:  "token-a",
+		serves: map[string]*serveEntry{
+			"/srv/a": {view: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"}, token: "token-a"},
+		},
 	}
 	mgr.ensureServe = func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error) {
 		return bootstrap.Result{}, errors.New("serve launch failed")
@@ -435,21 +447,24 @@ func TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe(t *testing.T) {
 	if _, _, err := mgr.EnsureServer(context.Background(), "box", "/srv/b"); err == nil {
 		t.Fatal("expected the serve launch failure")
 	}
-	status := mgr.ServerStatus("box")
+	status := mgr.ServerStatus("box", "/srv/a")
 	if status.State != "ready" || status.Workspace != "/srv/a" {
-		t.Fatalf("server state after failed switch = %+v, want the previous ready /srv/a", status)
+		t.Fatalf("server state after failed start = %+v, want the previous ready /srv/a", status)
 	}
-	if got := mgr.hosts["box"].token; got != "token-a" {
-		t.Fatalf("token after failed switch = %q, want the previous token", got)
+	if got := mgr.hosts["box"].serves["/srv/a"].token; got != "token-a" {
+		t.Fatalf("token after failed start = %q, want the previous token", got)
+	}
+	if status := mgr.ServerStatus("box", "/srv/b"); status.State != "error" {
+		t.Fatalf("failed workspace state = %+v, want an error entry for /srv/b", status)
 	}
 
-	if err := mgr.StopServer("box"); err != nil {
+	if err := mgr.StopServer("box", "/srv/a"); err != nil {
 		t.Fatal(err)
 	}
 	if len(stopped) != 1 || stopped[0] != "/srv/a" {
 		t.Fatalf("StopServer operated on %v, want the previous /srv/a", stopped)
 	}
-	if _, err := mgr.ServerLogs(context.Background(), "box", 50); err != nil {
+	if _, err := mgr.ServerLogs(context.Background(), "box", "/srv/a", 50); err != nil {
 		t.Fatal(err)
 	}
 	if len(logged) != 1 || logged[0] != "/srv/a" {
@@ -474,8 +489,9 @@ func TestEnsureServerReplaceFailureKeepsOwnershipOnPreviousReadyServe(t *testing
 	client.forwards = closedForwards
 	mgr.hosts["box"] = &managedHost{
 		ctx: hostCtx, cancel: hostCancel, client: client,
-		server: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"},
-		token:  "token-a",
+		serves: map[string]*serveEntry{
+			"/srv/a": {view: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"}, token: "token-a"},
+		},
 	}
 	mgr.ensureServe = func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error) {
 		return bootstrap.Result{State: bootstrap.ServeState{Addr: "127.0.0.1:9999"}}, nil
@@ -493,12 +509,12 @@ func TestEnsureServerReplaceFailureKeepsOwnershipOnPreviousReadyServe(t *testing
 	if len(stopped) != 1 || stopped[0] != "/srv/b" {
 		t.Fatalf("cleanup stopped %v, want the failed /srv/b", stopped)
 	}
-	status := mgr.ServerStatus("box")
+	status := mgr.ServerStatus("box", "/srv/a")
 	if status.State != "ready" || status.Workspace != "/srv/a" {
-		t.Fatalf("server state after failed tunnel switch = %+v, want the previous ready /srv/a", status)
+		t.Fatalf("server state after failed tunnel bind = %+v, want the previous ready /srv/a", status)
 	}
-	if got := mgr.hosts["box"].token; got != "token-a" {
-		t.Fatalf("token after failed tunnel switch = %q, want the previous token", got)
+	if got := mgr.hosts["box"].serves["/srv/a"].token; got != "token-a" {
+		t.Fatalf("token after failed tunnel bind = %q, want the previous token", got)
 	}
 }
 
@@ -516,8 +532,220 @@ func TestEnsureServerFirstStartFailurePublishesError(t *testing.T) {
 	if _, _, err := mgr.EnsureServer(context.Background(), "box", "/srv/b"); err == nil {
 		t.Fatal("expected the serve launch failure")
 	}
-	status := mgr.ServerStatus("box")
+	status := mgr.ServerStatus("box", "/srv/b")
 	if status.State != "error" || status.Workspace != "/srv/b" {
 		t.Fatalf("server state after first-start failure = %+v, want error /srv/b", status)
+	}
+}
+
+// platformProbeClient scripts the uname probe CheckPlatform runs.
+type platformProbeClient struct {
+	*lifecycleSSHClient
+	unameOut string
+	execErr  error
+}
+
+func (c *platformProbeClient) Exec(context.Context, string) (remote.ExecResult, error) {
+	return remote.ExecResult{Stdout: []byte(c.unameOut)}, c.execErr
+}
+
+// TestCheckPlatformGatesUnsupportedOS applies the same ParseUname gate as
+// EnsureServe at connect time: Linux/macOS pass, anything else fails with one
+// clear message.
+func TestCheckPlatformGatesUnsupportedOS(t *testing.T) {
+	cases := []struct {
+		name    string
+		stdout  string
+		execErr error
+		wantErr string
+	}{
+		{name: "linux passes", stdout: "Linux x86_64\n"},
+		{name: "darwin passes", stdout: "Darwin arm64\n"},
+		{name: "mingw rejected", stdout: "MINGW64_NT-10.0-19045 x86_64\n", wantErr: "unsupported remote OS"},
+		{name: "no uname rejected", stdout: "", wantErr: "cannot detect OS"},
+		{name: "exec failure rejected", stdout: "Linux x86_64\n", execErr: errors.New("broken pipe"), wantErr: "cannot detect OS"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newDesktopRemoteManager(nil)
+			hostCtx, hostCancel := context.WithCancel(context.Background())
+			defer hostCancel()
+			cl := &platformProbeClient{
+				lifecycleSSHClient: newLifecycleSSHClient(nil),
+				unameOut:           tc.stdout,
+				execErr:            tc.execErr,
+			}
+			mgr.hosts["box"] = &managedHost{
+				ctx: hostCtx, cancel: hostCancel, client: cl,
+				status: RemoteConnectionStatusView{HostID: "box", State: "connected"},
+			}
+			err := mgr.CheckPlatform(context.Background(), "box")
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckPlatformRequiresConnection(t *testing.T) {
+	mgr := newDesktopRemoteManager(nil)
+	if err := mgr.CheckPlatform(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("err = %v, want not connected", err)
+	}
+}
+
+// multiServeEventSink records the per-workspace server views the kernel
+// publishes while keeping the status channel behavior of lifecycleEventSink.
+type multiServeEventSink struct {
+	lifecycleEventSink
+	mu      sync.Mutex
+	servers []RemoteServerView
+}
+
+func (s *multiServeEventSink) onServer(v RemoteServerView) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.servers = append(s.servers, v)
+}
+
+func (s *multiServeEventSink) readyWorkspaces() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, v := range s.servers {
+		if v.State == "ready" {
+			out = append(out, v.Workspace)
+		}
+	}
+	return out
+}
+
+// newAttachedForwardsClient returns a lifecycleSSHClient whose forward set is
+// attached to a real sshtest-backed SSH client, so EnsureServer's tunnel
+// Replace path can bind local listeners.
+func newAttachedForwardsClient(t *testing.T) *lifecycleSSHClient {
+	t.Helper()
+	srv := sshtest.Start(t, sshtest.Options{})
+	cfg := &ssh.ClientConfig{User: "t", HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 5 * time.Second}
+	sshCl, err := ssh.Dial("tcp", srv.Addr, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sshCl.Close() })
+	set := forward.NewSet(nil)
+	set.Attach(sshCl)
+	lc := newLifecycleSSHClient(nil)
+	lc.forwards = set
+	return lc
+}
+
+// TestEnsureServerTwoWorkspacesIndependentForwards: one host, two workspaces —
+// two slug-named tunnels, two ready entries, per-workspace events.
+func TestEnsureServerTwoWorkspacesIndependentForwards(t *testing.T) {
+	seedLifecycleHost(t, "box")
+	sink := &multiServeEventSink{lifecycleEventSink: lifecycleEventSink{statuses: make(chan RemoteConnectionStatusView, 8)}}
+	mgr := newDesktopRemoteManager(sink)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	cl := newAttachedForwardsClient(t)
+	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: cl, serves: map[string]*serveEntry{}}
+	mgr.ensureServe = func(_ context.Context, _ bootstrap.Conn, opts bootstrap.Options) (bootstrap.Result, error) {
+		addr := "127.0.0.1:9101"
+		if opts.Workspace == "/srv/b" {
+			addr = "127.0.0.1:9102"
+		}
+		return bootstrap.Result{State: bootstrap.ServeState{Addr: addr}, Token: "tok-" + opts.Workspace}, nil
+	}
+	mgr.localBinary = func() string { return "" }
+
+	for _, ws := range []string{"/srv/a", "/srv/b"} {
+		view, _, err := mgr.EnsureServer(context.Background(), "box", ws)
+		if err != nil || view.State != "ready" || view.LocalURL == "" {
+			t.Fatalf("EnsureServer(%s) = %+v, %v", ws, view, err)
+		}
+	}
+
+	forwards := cl.Forwards().List()
+	if len(forwards) != 2 {
+		t.Fatalf("forward count = %d, want 2 (%+v)", len(forwards), forwards)
+	}
+	names := map[string]bool{}
+	for _, f := range forwards {
+		names[f.Spec.Name] = true
+		if !f.Up {
+			t.Fatalf("forward %q is not up", f.Spec.Name)
+		}
+	}
+	if !names[serveForwardName("/srv/a")] || !names[serveForwardName("/srv/b")] {
+		t.Fatalf("forward names = %v, want per-workspace serve-%s and serve-%s", names, serveForwardName("/srv/a"), serveForwardName("/srv/b"))
+	}
+	if serveForwardName("/srv/a") == serveForwardName("/srv/b") {
+		t.Fatal("distinct workspaces share one forward name")
+	}
+
+	if got := mgr.ServerStatus("box", "/srv/a"); got.State != "ready" || got.Workspace != "/srv/a" {
+		t.Fatalf("status A = %+v", got)
+	}
+	if got := mgr.ServerStatus("box", "/srv/b"); got.State != "ready" || got.Workspace != "/srv/b" {
+		t.Fatalf("status B = %+v", got)
+	}
+	if got := mgr.ServerStatus("box", "/srv/c"); got.State != "stopped" {
+		t.Fatalf("untracked workspace status = %+v, want stopped", got)
+	}
+	ready := sink.readyWorkspaces()
+	if len(ready) != 2 {
+		t.Fatalf("ready server events = %v, want one per workspace", ready)
+	}
+}
+
+// TestStopServerOneWorkspaceKeepsOther: stopping A removes only A's tunnel and
+// entry; B keeps serving.
+func TestStopServerOneWorkspaceKeepsOther(t *testing.T) {
+	seedLifecycleHost(t, "box")
+	mgr := newDesktopRemoteManager(nil)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	cl := newAttachedForwardsClient(t)
+	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: cl, serves: map[string]*serveEntry{}}
+	mgr.ensureServe = func(_ context.Context, _ bootstrap.Conn, opts bootstrap.Options) (bootstrap.Result, error) {
+		addr := "127.0.0.1:9111"
+		if opts.Workspace == "/srv/b" {
+			addr = "127.0.0.1:9112"
+		}
+		return bootstrap.Result{State: bootstrap.ServeState{Addr: addr}, Token: "tok"}, nil
+	}
+	var stopped []string
+	mgr.stopServe = func(_ context.Context, _ bootstrap.Conn, workspace string) error {
+		stopped = append(stopped, workspace)
+		return nil
+	}
+	mgr.localBinary = func() string { return "" }
+	for _, ws := range []string{"/srv/a", "/srv/b"} {
+		if _, _, err := mgr.EnsureServer(context.Background(), "box", ws); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := mgr.StopServer("box", "/srv/a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(stopped) != 1 || stopped[0] != "/srv/a" {
+		t.Fatalf("stopServe operated on %v, want [/srv/a]", stopped)
+	}
+	forwards := cl.Forwards().List()
+	if len(forwards) != 1 || forwards[0].Spec.Name != serveForwardName("/srv/b") {
+		t.Fatalf("forwards after stop = %+v, want only /srv/b's", forwards)
+	}
+	if got := mgr.ServerStatus("box", "/srv/a"); got.State != "stopped" {
+		t.Fatalf("status A after stop = %+v", got)
+	}
+	if got := mgr.ServerStatus("box", "/srv/b"); got.State != "ready" {
+		t.Fatalf("status B after stopping A = %+v, want ready", got)
 	}
 }

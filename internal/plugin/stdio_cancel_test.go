@@ -1,302 +1,144 @@
 package plugin
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"reasonix/internal/tool"
 )
 
-type discardWriteCloser struct{}
-
-func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
-func (discardWriteCloser) Close() error                { return nil }
-
-// TestStdioCallReturnsOnContextCancel pins that a stdio call unblocks when its
-// context is cancelled even though the server never replies. The stdio child is
-// bound to the session, not the turn, so without this a hung server would hang a
-// cancelled turn forever. No reader goroutine runs here, so the reply never
-// arrives — only ctx cancellation can return the call.
-func TestStdioCallReturnsOnContextCancel(t *testing.T) {
-	tr := &stdioTransport{
-		name:    "hung",
-		stdin:   discardWriteCloser{},
-		pending: map[int]chan rpcResponse{},
+func newInMemorySDKTransport(t *testing.T, serverFactory func() *mcpsdk.Server) *sdkSessionTransport {
+	t.Helper()
+	lifeCtx, cancel := context.WithCancel(context.Background())
+	transport := &sdkSessionTransport{
+		name:            "test",
+		spec:            Spec{Name: "test", Type: "http", StartupTimeout: 2 * time.Second},
+		lifeCtx:         lifeCtx,
+		cancel:          cancel,
+		state:           SessionStateConnecting,
+		reconnectDelays: []time.Duration{time.Millisecond},
 	}
+	transport.endpointFactory = func(ctx context.Context) (sdkEndpoint, error) {
+		clientSide, serverSide := mcpsdk.NewInMemoryTransports()
+		server := serverFactory()
+		go func() { _ = server.Run(ctx, serverSide) }()
+		return sdkEndpoint{transport: clientSide}, nil
+	}
+	t.Cleanup(transport.close)
+	return transport
+}
+
+func TestSDKIOCallReturnsOnContextCancelAndNotifiesServer(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	transport := newInMemorySDKTransport(t, func() *mcpsdk.Server {
+		server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "hung", Version: "1"}, nil)
+		mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "wait"}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ map[string]any) (*mcpsdk.CallToolResult, any, error) {
+			close(started)
+			<-ctx.Done()
+			close(cancelled)
+			return nil, nil, ctx.Err()
+		})
+		return server
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := tr.call(ctx, "tools/call", map[string]any{})
+		_, err := transport.call(ctx, "tools/call", map[string]any{"name": "wait", "arguments": map[string]any{}})
 		done <- err
 	}()
-
-	time.Sleep(100 * time.Millisecond) // let the call park in its select
-	cancel()
 	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("cancelled call returned nil error")
-		}
+	case <-started:
 	case <-time.After(2 * time.Second):
-		t.Fatal("stdio call did not return within 2s of ctx cancel — a hung server hangs the turn")
+		t.Fatal("server did not receive tools/call")
 	}
-}
-
-func TestStdioCallRespectsExistingDeadline(t *testing.T) {
-	tr := &stdioTransport{
-		name:    "server",
-		stdin:   discardWriteCloser{},
-		pending: map[int]chan rpcResponse{},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := tr.call(ctx, "tools/call", map[string]any{})
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("timed-out call returned nil error")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("stdio call did not return within caller deadline")
-	}
-}
-
-func TestStdioCallCancelReturnsContextCanceled(t *testing.T) {
-	tr := &stdioTransport{
-		name:    "slow-server",
-		stdin:   discardWriteCloser{},
-		pending: map[int]chan rpcResponse{},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := tr.call(ctx, "tools/call", map[string]any{})
-		done <- err
-	}()
-
-	time.Sleep(200 * time.Millisecond)
 	cancel()
-
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("cancelled call returned nil error")
-		}
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context.Canceled, got: %v", err)
+			t.Fatalf("cancelled call error = %v, want context.Canceled", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("stdio call did not return within 2s of cancel")
-	}
-}
-
-// Some MCP servers send capability-change notifications and a ping while the
-// initialize call is in flight. The server must receive its ping response
-// before it can finish the handshake; dropping server requests deadlocks both
-// sides even though notifications themselves are harmless.
-func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
-	workspaceRoot := t.TempDir()
-	serverReads, clientWrites := io.Pipe()
-	clientReads, serverWrites := io.Pipe()
-	t.Cleanup(func() {
-		_ = clientWrites.Close()
-		_ = serverReads.Close()
-		_ = serverWrites.Close()
-		_ = clientReads.Close()
-	})
-
-	tr := &stdioTransport{
-		name:    "matlab",
-		roots:   mcpRoots(workspaceRoot),
-		stdin:   clientWrites,
-		stdout:  bufio.NewReader(clientReads),
-		stderr:  &tailBuffer{limit: 1024},
-		pending: map[int]chan rpcResponse{},
-	}
-	go tr.readLoop()
-
-	serverDone := make(chan error, 1)
-	go func() {
-		dec := json.NewDecoder(serverReads)
-		enc := json.NewEncoder(serverWrites)
-		var initialize struct {
-			ID     int    `json:"id"`
-			Method string `json:"method"`
-			Params struct {
-				Capabilities map[string]json.RawMessage `json:"capabilities"`
-			} `json:"params"`
-		}
-		if err := dec.Decode(&initialize); err != nil {
-			serverDone <- fmt.Errorf("decode initialize: %w", err)
-			return
-		}
-		if initialize.Method != "initialize" {
-			serverDone <- fmt.Errorf("first method = %q, want initialize", initialize.Method)
-			return
-		}
-		if _, ok := initialize.Params.Capabilities["roots"]; !ok {
-			serverDone <- fmt.Errorf("initialize capabilities = %v, want roots", initialize.Params.Capabilities)
-			return
-		}
-		for _, method := range []string{"notifications/tools/list_changed", "notifications/resources/list_changed"} {
-			if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "method": method}); err != nil {
-				serverDone <- fmt.Errorf("encode %s: %w", method, err)
-				return
-			}
-		}
-		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": "server-roots", "method": "roots/list"}); err != nil {
-			serverDone <- fmt.Errorf("encode roots/list: %w", err)
-			return
-		}
-		var rootsResponse struct {
-			ID     string `json:"id"`
-			Result struct {
-				Roots []mcpRoot `json:"roots"`
-			} `json:"result"`
-		}
-		if err := dec.Decode(&rootsResponse); err != nil {
-			serverDone <- fmt.Errorf("decode roots/list response: %w", err)
-			return
-		}
-		wantRoots := mcpRoots(workspaceRoot)
-		if rootsResponse.ID != "server-roots" || len(rootsResponse.Result.Roots) != 1 || rootsResponse.Result.Roots[0] != wantRoots[0] {
-			serverDone <- fmt.Errorf("roots/list response = %+v, want %+v", rootsResponse, wantRoots)
-			return
-		}
-		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": "server-ping", "method": "ping"}); err != nil {
-			serverDone <- fmt.Errorf("encode ping: %w", err)
-			return
-		}
-		var pingResponse struct {
-			ID     string         `json:"id"`
-			Result map[string]any `json:"result"`
-		}
-		if err := dec.Decode(&pingResponse); err != nil {
-			serverDone <- fmt.Errorf("decode ping response: %w", err)
-			return
-		}
-		if pingResponse.ID != "server-ping" || pingResponse.Result == nil {
-			serverDone <- fmt.Errorf("ping response = %+v", pingResponse)
-			return
-		}
-		if err := enc.Encode(map[string]any{
-			"jsonrpc": "2.0",
-			"id":      initialize.ID,
-			"result": map[string]any{
-				"protocolVersion": protocolVersion,
-				"serverInfo":      map[string]any{"name": "matlab", "version": "0.11.2"},
-				"capabilities":    map[string]any{},
-			},
-		}); err != nil {
-			serverDone <- fmt.Errorf("encode initialize response: %w", err)
-			return
-		}
-		var initialized struct {
-			Method string `json:"method"`
-		}
-		if err := dec.Decode(&initialized); err != nil {
-			serverDone <- fmt.Errorf("decode initialized notification: %w", err)
-			return
-		}
-		if initialized.Method != "notifications/initialized" {
-			serverDone <- fmt.Errorf("final method = %q, want notifications/initialized", initialized.Method)
-			return
-		}
-		serverDone <- nil
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	client := &Client{name: "matlab", t: tr, spec: Spec{WorkspaceRoot: workspaceRoot}}
-	if err := client.initialize(ctx); err != nil {
-		t.Fatalf("initialize with server notifications and ping: %v", err)
+		t.Fatal("SDK call did not return after context cancellation")
 	}
 	select {
-	case err := <-serverDone:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal("server did not complete the MCP initialization handshake")
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not receive notifications/cancelled")
 	}
 }
 
-func TestStdioToolCallRoutesProgressNotification(t *testing.T) {
-	serverReads, clientWrites := io.Pipe()
-	clientReads, serverWrites := io.Pipe()
-	t.Cleanup(func() {
-		_ = clientWrites.Close()
-		_ = serverReads.Close()
-		_ = serverWrites.Close()
-		_ = clientReads.Close()
+func TestSDKSessionRoutesConcurrentResponsesByRequestID(t *testing.T) {
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	transport := newInMemorySDKTransport(t, func() *mcpsdk.Server {
+		server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "parallel", Version: "1"}, nil)
+		mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "work"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input map[string]any) (*mcpsdk.CallToolResult, any, error) {
+			label, _ := input["label"].(string)
+			if label == "slow" {
+				close(slowStarted)
+				<-releaseSlow
+			}
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: label}}}, nil, nil
+		})
+		return server
 	})
 
-	tr := &stdioTransport{
-		name:    "worker",
-		stdin:   clientWrites,
-		stdout:  bufio.NewReader(clientReads),
-		stderr:  &tailBuffer{limit: 1024},
-		pending: map[int]chan rpcResponse{},
+	call := func(label string) (json.RawMessage, error) {
+		return transport.call(t.Context(), "tools/call", map[string]any{"name": "work", "arguments": map[string]any{"label": label}})
 	}
-	go tr.readLoop()
-
-	serverDone := make(chan error, 1)
+	slowDone := make(chan json.RawMessage, 1)
 	go func() {
-		dec := json.NewDecoder(serverReads)
-		enc := json.NewEncoder(serverWrites)
-		var request struct {
-			ID     int    `json:"id"`
-			Method string `json:"method"`
-			Params struct {
-				Meta map[string]any `json:"_meta"`
-			} `json:"params"`
-		}
-		if err := dec.Decode(&request); err != nil {
-			serverDone <- err
-			return
-		}
-		token, _ := request.Params.Meta["progressToken"].(string)
-		if request.Method != "tools/call" || token == "" {
-			serverDone <- fmt.Errorf("tools/call request = %+v, want progressToken", request)
-			return
-		}
-		if err := enc.Encode(map[string]any{
-			"jsonrpc": "2.0",
-			"method":  "notifications/progress",
-			"params": map[string]any{
-				"progressToken": token,
-				"progress":      2,
-				"total":         5,
-				"message":       "Indexing",
-			},
-		}); err != nil {
-			serverDone <- err
-			return
-		}
-		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"content": []any{}}}); err != nil {
-			serverDone <- err
-			return
-		}
-		serverDone <- nil
+		result, _ := call("slow")
+		slowDone <- result
 	}()
+	<-slowStarted
+	fastDone := make(chan json.RawMessage, 1)
+	go func() {
+		result, _ := call("fast")
+		fastDone <- result
+	}()
+	select {
+	case result := <-fastDone:
+		if !json.Valid(result) || !containsJSONText(result, "fast") {
+			t.Fatalf("fast result = %s", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fast request was serialized behind slow request")
+	}
+	close(releaseSlow)
+	select {
+	case result := <-slowDone:
+		if !containsJSONText(result, "slow") {
+			t.Fatalf("slow result = %s", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("slow request did not finish")
+	}
+}
 
+func TestSDKSessionRoutesProgressNotification(t *testing.T) {
+	transport := newInMemorySDKTransport(t, func() *mcpsdk.Server {
+		server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "progress", Version: "1"}, nil)
+		mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "index"}, func(ctx context.Context, req *mcpsdk.CallToolRequest, _ map[string]any) (*mcpsdk.CallToolResult, any, error) {
+			if token := req.Params.GetProgressToken(); token != nil {
+				_ = req.Session.NotifyProgress(ctx, &mcpsdk.ProgressNotificationParams{
+					ProgressToken: token, Progress: 2, Total: 5, Message: "Indexing",
+				})
+			}
+			return &mcpsdk.CallToolResult{}, nil, nil
+		})
+		return server
+	})
+	client := &Client{name: "progress", t: transport}
 	progress := make(chan string, 1)
-	ctx := tool.WithProgress(context.Background(), func(chunk string) { progress <- chunk })
-	client := &Client{name: "worker", t: tr}
+	ctx := tool.WithProgress(t.Context(), func(chunk string) { progress <- chunk })
 	if _, err := client.call(ctx, "tools/call", map[string]any{"name": "index", "arguments": map[string]any{}}); err != nil {
 		t.Fatalf("tools/call: %v", err)
 	}
@@ -308,56 +150,102 @@ func TestStdioToolCallRoutesProgressNotification(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("progress notification was not routed")
 	}
-	if err := <-serverDone; err != nil {
+}
+
+func TestSDKSessionConcurrentRebuildIsSingleflight(t *testing.T) {
+	var connections atomic.Int32
+	transport := newInMemorySDKTransport(t, func() *mcpsdk.Server {
+		connections.Add(1)
+		server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "singleflight", Version: "1"}, nil)
+		mcpsdk.AddTool(server, &mcpsdk.Tool{Name: "read"}, func(context.Context, *mcpsdk.CallToolRequest, map[string]any) (*mcpsdk.CallToolResult, any, error) {
+			return &mcpsdk.CallToolResult{}, nil, nil
+		})
+		return server
+	})
+	first, err := transport.acquire(t.Context())
+	if err != nil {
 		t.Fatal(err)
+	}
+	transport.invalidate(first)
+
+	const callers = 12
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			_, err := transport.acquire(t.Context())
+			errs <- err
+		}()
+	}
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := connections.Load(); got != 2 {
+		t.Fatalf("connections = %d, want initial + one shared rebuild", got)
+	}
+	transport.mu.Lock()
+	current := transport.current
+	transport.mu.Unlock()
+	if current == nil || current == first {
+		t.Fatal("rebuild did not publish a new generation")
+	}
+
+	// A stale Wait callback can arrive after the replacement has already been
+	// published. Re-run that exact callback path and prove its generation fence
+	// cannot clear the healthy current session.
+	transport.handleSessionEnd(first, mcpsdk.ErrConnectionClosed)
+	transport.mu.Lock()
+	stillCurrent := transport.current == current
+	transport.mu.Unlock()
+	if !stillCurrent {
+		t.Fatal("stale generation callback cleared the replacement session")
 	}
 }
 
-// readLoop is the only goroutine draining stdout, so it must never block on
-// the shared stdin pipe: with both pipe buffers full, waiting on writeMu would
-// deadlock against a client call whose own stdin write is jammed. Replies to
-// server requests therefore go through a bounded queue that drops on overflow.
-func TestStdioReadLoopStaysLiveWhenReplyWriterIsBlocked(t *testing.T) {
-	stdinReads, stdinWrites := io.Pipe() // nobody reads: reply writes block forever
-	stdoutReads, stdoutWrites := io.Pipe()
-	t.Cleanup(func() {
-		_ = stdinReads.Close()
-		_ = stdinWrites.Close()
-		_ = stdoutReads.Close()
-		_ = stdoutWrites.Close()
+func TestSDKSessionDropsStaleGenerationProgress(t *testing.T) {
+	transport := newInMemorySDKTransport(t, func() *mcpsdk.Server {
+		return mcpsdk.NewServer(&mcpsdk.Implementation{Name: "progress-generation", Version: "1"}, nil)
 	})
-
-	tr := &stdioTransport{
-		name:    "jammed",
-		stdin:   stdinWrites,
-		stdout:  bufio.NewReader(stdoutReads),
-		stderr:  &tailBuffer{limit: 1024},
-		pending: map[int]chan rpcResponse{},
+	first, err := transport.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
-	waiting := make(chan rpcResponse, 1)
-	tr.pending[7] = waiting
-	go tr.readLoop()
+	progress := make(chan string, 2)
+	stop := transport.registerProgress("same-token", func(chunk string) { progress <- chunk })
+	defer stop()
 
-	// Flood well past the reply queue bound while the reply writer is stuck in
-	// its first stdin write; overflow must drop, not block readLoop. The writes
-	// run off the test goroutine so a deadlocked readLoop fails the timeout
-	// below instead of hanging the whole package; Cleanup unblocks the writer.
-	go func() {
-		for i := range 2 * stdioReplyQueueBound {
-			line := fmt.Sprintf(`{"jsonrpc":"2.0","id":"srv-%d","method":"ping"}`+"\n", i)
-			if _, err := io.WriteString(stdoutWrites, line); err != nil {
-				return
-			}
-		}
-		_, _ = io.WriteString(stdoutWrites, `{"jsonrpc":"2.0","id":7,"result":{}}`+"\n")
-	}()
-
-	select {
-	case resp := <-waiting:
-		if resp.ID != 7 {
-			t.Fatalf("routed response id = %d, want 7", resp.ID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("readLoop stopped routing responses while the reply writer was blocked")
+	transport.dispatchSDKProgress(first.generation, &mcpsdk.ProgressNotificationParams{
+		ProgressToken: "same-token", Progress: 1, Total: 2, Message: "first",
+	})
+	if got := <-progress; got != "first (1/2)\n" {
+		t.Fatalf("first progress = %q", got)
 	}
+
+	transport.invalidate(first)
+	second, err := transport.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport.dispatchSDKProgress(first.generation, &mcpsdk.ProgressNotificationParams{
+		ProgressToken: "same-token", Progress: 2, Total: 2, Message: "stale",
+	})
+	if len(progress) != 0 {
+		t.Fatalf("stale generation delivered progress: %q", <-progress)
+	}
+	transport.dispatchSDKProgress(second.generation, &mcpsdk.ProgressNotificationParams{
+		ProgressToken: "same-token", Progress: 2, Total: 2, Message: "current",
+	})
+	if got := <-progress; got != "current (2/2)\n" {
+		t.Fatalf("current progress = %q", got)
+	}
+}
+
+func containsJSONText(result json.RawMessage, want string) bool {
+	var decoded struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	return json.Unmarshal(result, &decoded) == nil && len(decoded.Content) == 1 && decoded.Content[0].Text == want
 }

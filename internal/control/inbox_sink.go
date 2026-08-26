@@ -14,22 +14,38 @@ type inboxEventSink struct {
 }
 
 var _ event.OptionalSinkCapabilities = (*inboxEventSink)(nil)
+var _ event.CheckedSink = (*inboxEventSink)(nil)
 
 func (s *inboxEventSink) Emit(e event.Event) {
+	_ = s.emit(e, false)
+}
+
+func (s *inboxEventSink) EmitChecked(e event.Event) error {
+	return s.emit(e, true)
+}
+
+func (s *inboxEventSink) emit(e event.Event, checked bool) error {
 	if s == nil {
-		return
+		return nil
 	}
 	if s.inner != nil {
-		s.inner.Emit(e)
+		if checked {
+			if err := event.EmitChecked(s.inner, e); err != nil {
+				return err
+			}
+		} else {
+			s.inner.Emit(e)
+		}
 	}
 	if s.c == nil {
-		return
+		return nil
 	}
 	if e.Kind == event.Notice {
 		if e.Code == event.NoticeCodeUnappliedSteer && e.ItemID != "" {
 			s.c.onInboxUnappliedSteer(e.ItemID)
 		}
 	}
+	return nil
 }
 
 func notifyInboxChanged(sink event.Sink, snap sessioninbox.InboxSnapshot) {

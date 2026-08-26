@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -76,6 +77,7 @@ type batchExecution struct {
 	outcomes           []toolOutcome
 	images             [][]string
 	executions         []*tool.ShellExecution
+	err                error
 	recoveryStopTurn   bool
 	recoveryStopReason string
 }
@@ -94,7 +96,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		ctx = withObservationBoundary(ctx, a.task.ledger.ObservationBoundary())
 	}
 	for _, c := range calls {
-		a.emitFullToolDispatch(ctx, c, false)
+		if err := a.emitFullToolDispatch(ctx, c, false); err != nil {
+			return batchExecution{err: fmt.Errorf("persist tool dispatch %s: %w", c.ID, err)}
+		}
 	}
 
 	results := make([]string, len(calls))
@@ -113,6 +117,8 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// previews. The first writer stays on the single-preview fast path.
 	earlierWriterRan := false
 	surfaceWriters := make([]bool, len(calls))
+	var batchErr error
+	var batchErrOnce sync.Once
 	run := func(i int) {
 		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
@@ -122,7 +128,13 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			if refreshed, changed := refreshCurrentFileDiff(ctx, t, calls[i]); changed {
 				calls[i] = refreshed
 				a.sess.conversation.UpdateToolCallPreview(refreshed)
-				a.emitFullToolDispatch(ctx, refreshed, true)
+				if err := a.emitFullToolDispatch(ctx, refreshed, true); err != nil {
+					wrapped := fmt.Errorf("persist refreshed tool dispatch %s: %w", refreshed.ID, err)
+					batchErrOnce.Do(func() { batchErr = wrapped })
+					outcomes[i] = toolOutcome{output: "cancelled: tool dispatch was not durable", errMsg: wrapped.Error()}
+					results[i] = outcomes[i].output
+					return
+				}
 			}
 		}
 		start := time.Now()
@@ -392,6 +404,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		outcomes:           outcomes,
 		images:             images,
 		executions:         executions,
+		err:                batchErr,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}

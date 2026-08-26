@@ -1959,12 +1959,23 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 	if cfg.Agent.ToolResultSnipRatio != 0 || cfg.Agent.CompactForceRatio != 0 {
 		t.Fatalf("setting compact ratio revived deprecated thresholds: %+v", cfg.Agent)
 	}
+	if err := app.SetCompactRatio(0.3); err != nil {
+		t.Fatalf("SetCompactRatio lower bound: %v", err)
+	}
+	view = app.Settings()
+	if view.Agent.CompactRatio != 0.3 {
+		t.Fatalf("Settings().Agent.CompactRatio = %v, want 0.3", view.Agent.CompactRatio)
+	}
+	cfg = config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.CompactRatio != 0.3 {
+		t.Fatalf("saved compact ratio = %v, want 0.3", cfg.Agent.CompactRatio)
+	}
 
 	if err := app.SetCompactRatio(0.9); err == nil {
 		t.Fatal("SetCompactRatio should reject values outside the Desktop safety range")
 	}
 	cfg = config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.CompactRatio != 0.7 {
+	if cfg.Agent.CompactRatio != 0.3 {
 		t.Fatalf("rejected update changed saved compact ratio to %v", cfg.Agent.CompactRatio)
 	}
 }

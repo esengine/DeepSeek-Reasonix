@@ -14,6 +14,9 @@ import (
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
 	Kind            string              `json:"kind"`
+	TurnID          string              `json:"turnId,omitempty"`
+	Sequence        uint64              `json:"seq,omitempty"`
+	Status          string              `json:"status,omitempty"`
 	Text            string              `json:"text,omitempty" externalizable:"true"`
 	Detail          string              `json:"detail,omitempty" externalizable:"true"`
 	Code            string              `json:"code,omitempty"`
@@ -96,7 +99,7 @@ type StreamAttempt struct {
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
-	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID}
+	w := Event{Kind: kindNames[e.Kind], TurnID: e.TurnID, Sequence: e.Sequence, Status: string(e.Status), Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID}
 	if len(e.MemoryCitations) > 0 {
 		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
 	}
@@ -578,6 +581,8 @@ var kindNames = map[event.Kind]string{
 	event.TurnPhase:               "turn_phase",
 	event.CompletionSummary:       "completion_summary",
 	event.ToolResultPreview:       "tool_result_preview",
+	event.TurnStatusChanged:       "turn_status",
+	event.PromptAnswered:          "prompt_answered",
 }
 
 // ContextMaintenance is the JSON form of event.ContextMaintenance.

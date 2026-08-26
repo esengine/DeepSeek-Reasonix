@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { activeWorkBusyNoticeText } from "../lib/capabilityMutations";
 import { t } from "../lib/i18n";
-import { effortSwitchNoticeText, modelSwitchNoticeText } from "../lib/useController";
+import { effortSwitchNoticeText, modelSwitchNoticeText } from "../lib/controllerSwitchNotices";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);

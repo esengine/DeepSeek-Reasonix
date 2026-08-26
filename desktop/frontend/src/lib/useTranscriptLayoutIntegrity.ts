@@ -100,8 +100,13 @@ export function useTranscriptLayoutIntegrity({
   // A surface transition is a product-level view reset. Measurements may be
   // reused through the session geometry LRU, but an outgoing scrollTop never
   // crosses the transition — even if another session happens to have the same
-  // row keys. Blank-watchdog rebuilds also reject their broken size tree.
+  // row keys. Invalidate readiness synchronously during render: a newly keyed
+  // Virtuoso child can publish its first items from a layout effect before the
+  // parent Transcript layout effect runs. Letting it inherit the old surface's
+  // ready=true would skip the incoming surface's only initial tail placement.
+  // Blank-watchdog rebuilds also reject their broken size tree.
   if (surfaceStateRef.current.surfaceKey !== surfaceKey) {
+    readyRef.current = false;
     stateSnapshotRef.current = null;
     surfaceStateRef.current = { surfaceKey, rowKeys };
   } else {

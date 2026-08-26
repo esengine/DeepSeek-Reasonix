@@ -57,6 +57,9 @@ type Options struct {
 	MinVersion     string                                                        // minimum acceptable remote version
 	Progress       func(step, detail string)                                     // optional progress callback
 	Clock          func() time.Time                                              // nil => time.Now
+	// CredentialProxy installs a tunnel-backed provider and a scoped virtual
+	// token on the remote. The real provider key never leaves the desktop.
+	CredentialProxy *CredentialProxyOptions
 }
 
 func (o Options) progress(step, detail string) {
@@ -77,6 +80,10 @@ type Result struct {
 	State  ServeState
 	Token  string // the pre-shared auth token (read from or written to TokenFile)
 	Reused bool   // true when an already-running serve was reused
+	// CredentialConfigChanged is true when the credential-proxy heal rewrote
+	// the remote config while REUSING a serve — that serve's in-memory
+	// providers still reflect the previous config and must be reloaded.
+	CredentialConfigChanged bool
 }
 
 // EnsureServe returns a running serve for (host, workspace), starting one if
@@ -96,10 +103,15 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	}
 	paths := pathsFor(home, workspace)
 
+	requireLaunchArgs, credentialChanged, err := prepareCredentialProxy(ctx, conn, fs, opts, home, workspace, paths)
+	if err != nil {
+		return Result{}, err
+	}
+
 	// 1. Reuse a live process if the recorded pid is still running.
-	if st, tok, ok := tryReuse(ctx, conn, fs, paths, workspace); ok {
+	if st, tok, ok := tryReuse(ctx, conn, fs, paths, workspace, requireLaunchArgs...); ok {
 		opts.progress("reuse", st.Addr)
-		return Result{State: st, Token: tok, Reused: true}, nil
+		return Result{State: st, Token: tok, Reused: true, CredentialConfigChanged: credentialChanged}, nil
 	}
 
 	// 2. Detect remote platform.
@@ -128,9 +140,9 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer lock.release()
-	if st, tok, ok := tryReuse(ctx, conn, fs, paths, workspace); ok {
+	if st, tok, ok := tryReuse(ctx, conn, fs, paths, workspace, requireLaunchArgs...); ok {
 		opts.progress("reuse", st.Addr)
-		return Result{State: st, Token: tok, Reused: true}, nil
+		return Result{State: st, Token: tok, Reused: true, CredentialConfigChanged: credentialChanged}, nil
 	}
 
 	// 5. Generate token, write it 0600, and launch detached serve.
@@ -145,7 +157,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("bootstrap: write token: %w", err)
 	}
 	opts.progress("launch", "")
-	launchRes, err := conn.Exec(ctx, LaunchCommand(bin, workspace, paths))
+	launchRes, err := conn.Exec(ctx, LaunchCommand(bin, workspace, paths, opts.CredentialProxy))
 	if err != nil {
 		cleanupFailedLaunch(conn, fs, paths, 0)
 		return Result{}, fmt.Errorf("bootstrap: launch: %w", err)
@@ -188,6 +200,22 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	}
 	opts.progress("ready", addr)
 	return Result{State: st, Token: token}, nil
+}
+
+func prepareCredentialProxy(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Options, home, workspace string, paths StatePaths) ([]string, bool, error) {
+	if opts.CredentialProxy == nil {
+		return nil, false, nil
+	}
+	opts.progress("credential_proxy", "")
+	changed, err := ensureCredentialProvider(ctx, fs, home, opts.CredentialProxy)
+	if err != nil {
+		return nil, false, err
+	}
+	required := []string{"--model " + opts.CredentialProxy.Provider}
+	if err := stopMismatchedServe(ctx, conn, fs, paths, workspace, required); err != nil {
+		return nil, false, err
+	}
+	return required, changed, nil
 }
 
 // Status reads the recorded state and reports whether the process is alive.
@@ -269,15 +297,15 @@ func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) 
 	return err
 }
 
-func tryReuse(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, workspace ...string) (ServeState, string, bool) {
+func tryReuse(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, workspace string, requireArgs ...string) (ServeState, string, bool) {
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err != nil || st.PID <= 0 || st.Addr == "" {
 		return ServeState{}, "", false
 	}
-	if len(workspace) > 0 && st.Workspace != workspace[0] {
+	if workspace != "" && st.Workspace != workspace {
 		return ServeState{}, "", false
 	}
-	if !validServeAddr(st.Addr) || !pidIsServe(ctx, conn, st.PID, paths) {
+	if !validServeAddr(st.Addr) || !pidIsServe(ctx, conn, st.PID, paths, requireArgs...) {
 		return ServeState{}, "", false
 	}
 	// The state record is informational; the workspace-derived path is the
@@ -289,13 +317,32 @@ func tryReuse(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, w
 	return st, tok, true
 }
 
+// stopMismatchedServe TERMs a live serve whose command line lacks the
+// required launch args: reuse would route model calls under the wrong
+// credential setup, and a plain relaunch would orphan the process.
+func stopMismatchedServe(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, workspace string, requireArgs []string) error {
+	if len(requireArgs) == 0 {
+		return nil
+	}
+	st, err := readState(ctx, fs, paths.StateJSON)
+	if err != nil || st.PID <= 0 || !validServeAddr(st.Addr) || st.Workspace != workspace {
+		return nil
+	}
+	if pidIsServe(ctx, conn, st.PID, paths) && !pidIsServe(ctx, conn, st.PID, paths, requireArgs...) {
+		if _, err := conn.Exec(ctx, StopCommand(st.PID, paths)); err != nil {
+			return fmt.Errorf("bootstrap: stop mismatched serve: %w", err)
+		}
+	}
+	return nil
+}
+
 // pidIsServe reports whether pid is running AND is a reasonix serve process,
 // so PID reuse cannot make an unrelated process look like a live serve.
-func pidIsServe(ctx context.Context, conn Conn, pid int, paths StatePaths) bool {
+func pidIsServe(ctx context.Context, conn Conn, pid int, paths StatePaths, requireArgs ...string) bool {
 	if pid <= 0 {
 		return false
 	}
-	res, err := conn.Exec(ctx, ServeAliveCommand(pid, paths))
+	res, err := conn.Exec(ctx, ServeAliveCommand(pid, paths, requireArgs...))
 	if err != nil {
 		return false
 	}

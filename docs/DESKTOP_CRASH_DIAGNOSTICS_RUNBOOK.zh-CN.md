@@ -7,20 +7,63 @@
 
 ## 发布顺序
 
-1. 冻结唯一候选 SHA，已发布 tag 不得移动或重建。
-2. 备份 D1，并先用 `PRAGMA table_info` 检查生产，再应用
-   `workers/crash-report/migrate-diagnostics-v2.sql`。若 draft 字段已提前存在，停止发布，
-   另做纯加法 reconciliation migration。
-3. 验证 `report_daily`、`report_installations`、
+1. Firebase 项目保持 Spark 且不关联 Cloud Billing；只在
+   `asia-southeast1` 创建 Realtime Database，并部署
+   `workers/crash-report/firebase/database.rules.json`，确认客户端读写均被拒绝。不得启用
+   Functions、Firestore、BigQuery、Hosting、Storage 或 Secret Manager。
+2. 配置仓库 Secret：`FIREBASE_DATABASE_URL`、`FIREBASE_CLIENT_EMAIL` 和
+   `FIREBASE_PRIVATE_KEY`。服务账号必须专用于 crash 投递且仅授予 Realtime Database
+   权限。不得使用 Web Firebase 配置，也不得在 Desktop 产物中包含 Firebase SDK 或配置。
+3. 冻结唯一候选 SHA，已发布 tag 不得移动或重建。
+4. 备份 D1，并运行 `npm run migrate:diagnostics-v2`。命令会先检查完整 schema，写入前
+   记录新的 Time Travel bookmark。已退休的 `metric_users` 和 `cli_metric_users` 不再
+   是必需表；活跃 diagnostics 表出现任何 partial 状态时仍然 fail closed。
+5. 运行 `npm run migrate:firebase-crash`。命令先记录 D1 Time Travel bookmark，再依次
+   应用第一阶段 `migrate-firebase-crash.sql` 与第二阶段
+   `migrate-firebase-crash-capacity.sql`；任一阶段部分完成时 fail closed。验证 outbox、
+   receipt、兼容 lease 表、`firebase_crash_group_state` 及全部投递/生命周期索引。旧 lease
+   表只用于滚动部署兼容。
+6. 验证 `report_daily`、`report_installations`、
    `report_event_dimensions`、`diagnostics_meta`、fingerprint/date 索引、ping
    窗口索引，以及 `installation_linked_since`。
-4. 先部署 Worker；用旧 Report/Ping/Metrics、legacy `webview2`、Windows/Linux
+7. 在 **Actions > Deploy crash worker > Run workflow** 中选择 `main-v2`，并将
+   **Firebase crash history operation** 设为 `dry-run`。该任务使用现有仓库 Secret，经过
+   `canary` environment 审批，不会部署 Worker；脚本按每页 200 个 fingerprint 的 keyset
+   分页，预计预留必须不超过 700 MiB。确认结果后选择 `apply`，并输入精确确认短语
+   `APPLY_FIREBASE_CRASH_DATA`；任务会在同一 runner 内依次执行 `--apply` 和
+   `--verify-only`。后续独立核验可选择 `verify-only`。已认证的运维人员仍可在本机运行
+   `npm run migrate:firebase-data`、`npm run migrate:firebase-data -- --apply` 和
+   `npm run migrate:firebase-data -- --verify-only`。默认 checkpoint 为权限 `0600` 且已
+   gitignore 的 `.firebase-crash-migration-state.json`；可用 `--checkpoint=<path>` 改路径，
+   只有明确重跑时才用 `--reset-checkpoint`。日志只输出计数、fingerprint 前缀和摘要。
+8. Worker 先使用 `dual` 模式；用旧 Report/Ping/Metrics、legacy `webview2`、Windows/Linux
    `webRuntime` payload 做 `channel=test` smoke。
-5. 用同一 SHA 生成签名 Windows/Linux 构建；能力矩阵和性能门禁通过后才发布 feature
+9. 连续比较 7 个完整 UTC 日；fingerprint、计数、样本和脱敏结果一致后，才将
+   `CRASH_STORAGE_MODE` 从 `dual` 切换为 `firebase`。Firebase 模式下 D1 只保留聚合、
+   索引和有界 outbox，不再写入新 `reports` 原文。
+10. 用同一 SHA 生成签名 Windows/Linux 构建；能力矩阵和性能门禁通过后才发布 feature
    release。
-6. 通过管理界面保留审计地整理历史数据：忽略 `[go panic] safe` / `v9.9.9`，将
+11. 再稳定观察 7 天后归档 D1 旧原始样本。保留 `d1`、`dual`、`firebase` 三种回滚
+   模式；Worker 回滚不要求客户端升级。
+12. 通过管理界面保留审计地整理历史数据：忽略 `[go panic] safe` / `v9.9.9`，将
    `72daba81` 标记为在 `desktop-v1.19.3` 解决，忽略旧
    `desktop.abnormal_exit` replay 分组。
+
+## Spark 容量、生命周期与回滚
+
+Worker 固定执行 700 MiB 预留上限：active 每组 640 KiB、compacted 128 KiB、
+archiving 32 KiB、archived 为 0。达到 80% 时复用现有 webhook 告警并在后台提示；新组或
+扩容会越过上限时，必须在创建 outbox 前返回 `503`。不得把该上限改为可配置项。
+
+只有 resolved/ignored 分组参与生命周期：30 天无新事件后，把最近 5 个样本替换为带
+fencing 的 marker，并保留当前周期首个样本；60 天后 tombstone 全部样本路径，24 小时后
+条件删除 Firebase group。D1 的计数、状态、备注、聚合和审计继续保留。archived
+fingerprint 再出现时进入新 sample epoch，累计 count 与 lifetime first-seen 不重置。管理员
+删除复用同一 tombstone 窗口，并原子删除对应 D1 分组数据。
+
+回滚只改配置：设置 `CRASH_STORAGE_MODE=d1` 并重新部署。回滚时不要删除 outbox、receipt、
+group-state 或 Firebase 数据。修复 migration/容量/ETag 问题后，重新执行 dry-run 与
+`--verify-only`，再切回 `dual`；Desktop/CLI 无需升级。
 
 ## 隐私与兼容 smoke
 
@@ -33,6 +76,11 @@
 - 删除测试分组会删除三张诊断聚合表的对应数据；
 - 诊断事实、ping、metric user 按 30 天分块清理；
 - `channel=test` 始终位于 development namespace。
+- 重复 `eventId` 返回 `202` 且不重复增加聚合；
+- Firebase timeout、401、429 或 5xx 会保留 projected outbox，交给每 6 小时重试；
+  outbox 满时返回 `503`，客户端必须保留 pending；
+- Desktop 自动报告按版本和 dedup key 只成功上传一次，失败不进入 512 条/180 天账本；
+  用户主动提交的 Desktop/CLI 报告不受本地 fingerprint 去重限制。
 
 ## 正常体验门禁
 

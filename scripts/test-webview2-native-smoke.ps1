@@ -175,7 +175,20 @@ function Remove-NativeSmokeDirectory {
             return
         }
         try {
-            Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
+            # Windows PowerShell 5.1 still routes Remove-Item through MAX_PATH.
+            # Session inbox names can push the isolated smoke tree past that
+            # boundary, where the provider reports an existing child as
+            # DirectoryNotFound and leaves the whole profile behind. The .NET
+            # directory API accepts the extended-length prefix and preserves
+            # the same locked-file failure semantics exercised below.
+            $fullPath = [IO.Path]::GetFullPath($LiteralPath)
+            $deletePath = if ($fullPath.StartsWith("\\")) {
+                "\\?\UNC\" + $fullPath.Substring(2)
+            }
+            else {
+                "\\?\" + $fullPath
+            }
+            [IO.Directory]::Delete($deletePath, $true)
             return
         }
         catch {
@@ -245,6 +258,16 @@ function Invoke-NativeSmokeStateMachineSelfTest {
     Set-Content -LiteralPath (Join-Path $nestedCleanupPath "state.txt") -Value "cleanup-self-test"
     Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
     Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must remove an ordinary nested tree"
+
+    $longNestedCleanupPath = $cleanupRoot
+    while ($longNestedCleanupPath.Length -lt 280) {
+        $longNestedCleanupPath = Join-Path $longNestedCleanupPath "long-cleanup-segment"
+    }
+    $longNestedCleanupExtendedPath = "\\?\" + [IO.Path]::GetFullPath($longNestedCleanupPath)
+    [IO.Directory]::CreateDirectory($longNestedCleanupExtendedPath) | Out-Null
+    [IO.File]::WriteAllText(($longNestedCleanupExtendedPath + "\state.txt"), "long-cleanup-self-test")
+    Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
+    Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must remove a tree beyond MAX_PATH"
 
     New-Item -ItemType Directory -Path $cleanupRoot | Out-Null
     $lockedPath = Join-Path $cleanupRoot "locked.txt"

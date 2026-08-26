@@ -71,6 +71,10 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 			events <- "event: message\ndata: " + string(body) + "\n\n"
 		}
 		switch message.Method {
+		case "server/discover":
+			emit(map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{
+				"code": -32601, "message": "Method not found",
+			}})
 		case "initialize":
 			var params struct {
 				Capabilities map[string]json.RawMessage `json:"capabilities"`
@@ -132,7 +136,7 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 			initializeID := state.initializeID
 			state.Unlock()
 			emit(map[string]any{"jsonrpc": "2.0", "id": initializeID, "result": map[string]any{
-				"protocolVersion": protocolVersion,
+				"protocolVersion": testLegacyProtocolVersion,
 				"serverInfo":      map[string]any{"name": "legacy", "version": "1"},
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
 			}})
@@ -213,93 +217,135 @@ func TestLegacySSERejectsCrossOriginEndpoint(t *testing.T) {
 	}
 	defer transport.close()
 	_, err = transport.call(ctx, "initialize", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "cross-origin endpoint") {
-		t.Fatalf("cross-origin endpoint error = %v", err)
+	if err == nil {
+		t.Fatal("cross-origin endpoint unexpectedly connected")
 	}
 }
 
-func TestLegacySSEBoundsConcurrentServerRequestReplies(t *testing.T) {
-	events := make(chan string, 2*sseReplyQueueBound+2)
-	releasePosts := make(chan struct{})
-	postStarted := make(chan struct{})
-	var firstPost sync.Once
-	var activePosts atomic.Int32
-	var maxPosts atomic.Int32
+type acknowledgedSSEEvent struct {
+	payload string
+	done    chan struct{}
+}
+
+func TestLegacySSEDisconnectRebuildsBeforeNextCall(t *testing.T) {
+	var connections atomic.Int32
+	var streamsMu sync.Mutex
+	streams := make(map[int]chan acknowledgedSSEEvent)
+	firstClosed := make(chan struct{})
+	var closeFirst sync.Once
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		generation := int(connections.Add(1))
+		events := make(chan acknowledgedSSEEvent, 8)
+		streamsMu.Lock()
+		streams[generation] = events
+		streamsMu.Unlock()
+		defer func() {
+			streamsMu.Lock()
+			delete(streams, generation)
+			streamsMu.Unlock()
+		}()
+
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "event: endpoint\ndata: /messages\n\n")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "event: endpoint\ndata: /messages?generation=%d\n\n", generation)
 		flusher.Flush()
+		closeSignal := (<-chan struct{})(firstClosed)
+		if generation != 1 {
+			closeSignal = nil
+		}
 		for {
 			select {
 			case <-r.Context().Done():
 				return
+			case <-closeSignal:
+				return
 			case event := <-events:
-				_, _ = fmt.Fprint(w, event)
+				_, _ = fmt.Fprint(w, event.payload)
 				flusher.Flush()
+				close(event.done)
 			}
 		}
 	})
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
-		active := activePosts.Add(1)
-		defer activePosts.Add(-1)
-		for {
-			seen := maxPosts.Load()
-			if active <= seen || maxPosts.CompareAndSwap(seen, active) {
-				break
-			}
+		generation := 0
+		_, _ = fmt.Sscanf(r.URL.Query().Get("generation"), "%d", &generation)
+		streamsMu.Lock()
+		events := streams[generation]
+		streamsMu.Unlock()
+		if events == nil {
+			http.Error(w, "missing stream", http.StatusGone)
+			return
 		}
-		firstPost.Do(func() { close(postStarted) })
-		select {
-		case <-releasePosts:
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(request.ID) == 0 {
 			w.WriteHeader(http.StatusAccepted)
-		case <-r.Context().Done():
+			return
 		}
+		response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+		switch request.Method {
+		case "server/discover":
+			response["error"] = map[string]any{"code": -32601, "message": "Method not found"}
+		case "initialize":
+			response["result"] = map[string]any{
+				"protocolVersion": testLegacyProtocolVersion,
+				"serverInfo":      map[string]any{"name": "disconnect", "version": "1"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+		case "tools/list":
+			response["result"] = map[string]any{"tools": []any{}}
+		default:
+			response["error"] = map[string]any{"code": -32601, "message": "Method not found"}
+		}
+		body, _ := json.Marshal(response)
+		event := acknowledgedSSEEvent{payload: "event: message\ndata: " + string(body) + "\n\n", done: make(chan struct{})}
+		select {
+		case events <- event:
+		case <-r.Context().Done():
+			return
+		}
+		select {
+		case <-event.done:
+		case <-r.Context().Done():
+			return
+		}
+		if generation == 1 && request.Method == "tools/list" {
+			closeFirst.Do(func() { close(firstClosed) })
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	transport, err := newSSETransport(ctx, Spec{Name: "bounded", Type: "sse", URL: server.URL + "/sse"})
+	transport, err := newSSETransport(t.Context(), Spec{Name: "disconnect", Type: "sse", URL: server.URL + "/sse"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	transport.reconnectDelays = []time.Duration{time.Millisecond}
 	defer transport.close()
-	defer close(releasePosts)
-	if err := transport.waitEndpoint(ctx); err != nil {
-		t.Fatal(err)
-	}
 
-	waiting := make(chan rpcResponse, 1)
-	transport.mu.Lock()
-	transport.pending[7] = waiting
-	transport.mu.Unlock()
-	for i := range 2 * sseReplyQueueBound {
-		events <- fmt.Sprintf("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"srv-%d\",\"method\":\"ping\"}\n\n", i)
+	if _, err := transport.call(t.Context(), "tools/list", map[string]any{}); err != nil {
+		t.Fatalf("first tools/list: %v", err)
 	}
-	events <- "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n"
-
-	select {
-	case response := <-waiting:
-		if response.ID != 7 {
-			t.Fatalf("routed response id = %d, want 7", response.ID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("SSE reader stopped routing responses while a reply POST was blocked")
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if _, err := transport.call(ctx, "tools/list", map[string]any{}); err != nil {
+		t.Fatalf("tools/list after SSE EOF: %v", err)
 	}
-	select {
-	case <-postStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("SSE reply worker did not start its first POST")
-	}
-	if got := maxPosts.Load(); got != 1 {
-		t.Fatalf("concurrent reply POSTs = %d, want 1", got)
+	if got := connections.Load(); got != 2 {
+		t.Fatalf("SSE connections = %d, want initial + one replacement", got)
 	}
 }

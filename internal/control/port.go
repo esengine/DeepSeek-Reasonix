@@ -80,10 +80,12 @@ type Approvals interface {
 	Approve(id string, allow, session, persist bool)
 	ResolveApproval(id string, allow bool, scope sandbox.ApprovalScope) error
 	ResolvePlanDecision(id string, action PlanDecisionAction) error
+	ResolvePlanDecisionWithFeedback(id string, action PlanDecisionAction, feedback string) error
 	// ResolveRecovery answers an Auto Guard card: continue|continue_task|revise. Revise
 	// refuses the mutation and steers feedback.
 	ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error
 	AnswerQuestion(id string, answers []event.AskAnswer)
+	AnswerQuestionChecked(id string, answers []event.AskAnswer) error
 	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
 	ReplayPendingPrompts()
 	ReplayPendingPromptsTo(sink event.Sink)
@@ -253,6 +255,7 @@ type Settings interface {
 	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
+	ApplyComposerProfile(plan bool, toolApprovalMode, goal string) ([]string, error)
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port. A

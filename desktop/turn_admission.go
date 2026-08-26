@@ -96,6 +96,15 @@ func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (
 			abort()
 			return nil, nil, control.ErrTurnRunning
 		}
+		if metadata, ok := ctrl.(interface {
+			SetTurnEventRoutingMetadata(runtimeEpoch, submissionID string)
+		}); ok {
+			epoch := ""
+			if tab.sink != nil {
+				epoch = tab.sink.runtimeEpochSnapshot()
+			}
+			metadata.SetTurnEventRoutingMetadata(epoch, firstSubmissionID(submissionID))
+		}
 		return &tabTurnAdmission{app: a, tab: tab}, ctrl, nil
 	}
 }

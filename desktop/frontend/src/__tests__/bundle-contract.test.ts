@@ -22,6 +22,9 @@ const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
+const remoteWizardEntrySource = readFileSync(resolve(here, "../components/RemoteConnectWizardEntry.tsx"), "utf8");
+const remoteWizardSource = readFileSync(resolve(here, "../components/RemoteConnectWizard.tsx"), "utf8");
+const projectCreationSource = readFileSync(resolve(here, "../components/useProjectCreation.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
 const localPathLinksSource = readFileSync(resolve(here, "../lib/localPathLinks.ts"), "utf8");
 const i18nSource = readFileSync(resolve(here, "../lib/i18n.tsx"), "utf8");
@@ -61,6 +64,13 @@ ok(
     settingsEntrySource.includes('from "./SettingsPanel"') &&
     !settingsSource.includes('import "./CompactRatioSettings.css"'),
   "Settings CSS stays in the lazy production entry without breaking direct module tests",
+);
+ok(
+  remoteWizardEntrySource.includes('import "./RemoteConnectWizard.css"') &&
+    remoteWizardEntrySource.includes('from "./RemoteConnectWizard"') &&
+    projectCreationSource.includes('import("./RemoteConnectWizardEntry")') &&
+    !remoteWizardSource.includes('import "./RemoteConnectWizard.css"'),
+  "Remote wizard CSS stays in its lazy production entry without breaking direct module tests",
 );
 ok(
   !appSource.includes("openAllHistory") &&

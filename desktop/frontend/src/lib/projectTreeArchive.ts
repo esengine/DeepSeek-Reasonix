@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { app } from "./bridge";
-import { invalidateProjectTreeTopicLoads, projectTreeFolderKeyForTopic } from "./projectTreeTopic";
+import { invalidateProjectTreeTopicLoads, projectTreeFolderKeyForSession, projectTreeFolderKeyForTopic } from "./projectTreeTopic";
 import type { ToastContextValue } from "./toast";
 import type { ProjectNode } from "./types";
 
@@ -32,13 +32,27 @@ export function enqueueProjectTreeArchive(previous: Promise<void>, work: () => P
   return previous.catch(() => undefined).then(work);
 }
 
+export function projectTreeTopicArchiveTargetKey(
+  scope: "global" | "project",
+  workspaceRoot: string,
+  topicId: string,
+): string {
+  return JSON.stringify(["topic", scope, workspaceRoot.trim(), topicId.trim()]);
+}
+
+export function projectTreeSessionArchiveTargetKey(sessionPath: string): string {
+  return JSON.stringify(["session", sessionPath.trim()]);
+}
+
 export async function runProjectTreeArchiveJob({
   archive,
+  commit,
   reload,
   finishPending,
   recover,
 }: {
   archive: () => Promise<void>;
+  commit: () => void;
   reload: () => Promise<void>;
   finishPending: () => void;
   recover: (error: unknown) => Promise<void>;
@@ -52,6 +66,10 @@ export async function runProjectTreeArchiveJob({
     return false;
   }
   try {
+    // A tombstone is a post-commit stale-response fence, not an optimistic
+    // archive. Installing it only after backend success keeps rejected topics
+    // visible throughout the mutation and its recovery reload.
+    commit();
     // Keep the visible pending state active until the canonical folder page
     // has landed. The caller may release its stale-response tombstone once
     // that reload has acquired a newer request generation.
@@ -76,11 +94,14 @@ export function useProjectTreeArchiveState() {
   const tombstonesRef = useRef<Set<string>>(new Set());
   const [topics, setTopics] = useState<Set<string>>(new Set());
   const begin = useCallback((topicId: string) => {
-    if (topicsRef.current.has(topicId)) return false;
-    topicsRef.current = projectTreeTrashingTopics(topicsRef.current, topicId, true);
-    tombstonesRef.current = projectTreeTrashingTopics(tombstonesRef.current, topicId, true);
+    const id = topicId.trim();
+    if (!id || topicsRef.current.has(id)) return false;
+    topicsRef.current = projectTreeTrashingTopics(topicsRef.current, id, true);
     setTopics(topicsRef.current);
     return true;
+  }, []);
+  const commit = useCallback((topicId: string) => {
+    tombstonesRef.current = projectTreeTrashingTopics(tombstonesRef.current, topicId, true);
   }, []);
   const end = useCallback((topicId: string) => {
     topicsRef.current = projectTreeTrashingTopics(topicsRef.current, topicId, false);
@@ -94,6 +115,7 @@ export function useProjectTreeArchiveState() {
   return {
     trashingTopics: topics,
     beginTrashingTopic: begin,
+    commitArchiveTombstone: commit,
     endTrashingTopic: end,
     releaseArchiveTombstone: releaseTombstone,
     currentArchiveTombstones: currentTombstones,
@@ -124,10 +146,13 @@ export function useProjectTreeArchiveController({
   const {
     trashingTopics,
     beginTrashingTopic,
+    commitArchiveTombstone,
     endTrashingTopic,
     releaseArchiveTombstone,
     currentArchiveTombstones,
   } = useProjectTreeArchiveState();
+  const sessionTrashingRef = useRef<Set<string>>(new Set());
+  const [trashingSessions, setTrashingSessions] = useState<Set<string>>(new Set());
   const archiveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const trashTopic = useCallback(async (topicId: string) => {
@@ -141,34 +166,64 @@ export function useProjectTreeArchiveController({
     const invalidatedKeys = folderKey
       ? [folderKey]
       : treeRef.current.filter((node) => node.kind === "project" || node.kind === "global_folder").map((node) => node.key);
-    // Retire any request that captured the pre-archive catalog before it can
-    // reinsert the optimistic tombstone while the backend mutation is pending.
-    invalidateProjectTreeTopicLoads(topicLoadSeqRef.current, invalidatedKeys);
-    for (const key of invalidatedKeys) {
-      updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
-    }
-    optimisticallyRemoveTopic(topicId);
     closeMenu();
 
-    const queued = archiveQueueRef.current.catch(() => undefined).then(async () => {
+    const queued = enqueueProjectTreeArchive(archiveQueueRef.current, async () => {
+      await runProjectTreeArchiveJob({
+        archive: () => app.TrashTopic(topicId),
+        commit: () => {
+          commitArchiveTombstone(topicId);
+          // Fence every load that captured the catalog before backend commit,
+          // then remove the topic while the tombstone covers newer arrivals.
+          invalidateProjectTreeTopicLoads(topicLoadSeqRef.current, invalidatedKeys);
+          for (const key of invalidatedKeys) {
+            updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
+          }
+          optimisticallyRemoveTopic(topicId);
+        },
+        reload: async () => {
+          await refreshRef.current(reloadOptions);
+          await Promise.resolve(onTopicsChanged?.()).catch(() => undefined);
+        },
+        finishPending: () => endTrashingTopic(topicId),
+        recover: async (err) => {
+          showToast(err instanceof Error ? err.message : String(err), "error");
+          await refreshRef.current(reloadOptions);
+        },
+      });
+    });
+    archiveQueueRef.current = queued;
+    await queued;
+  }, [beginTrashingTopic, closeMenu, commitArchiveTombstone, endTrashingTopic, onTopicsChanged, optimisticallyRemoveTopic, refreshRef, releaseArchiveTombstone, showToast, topicLoadSeqRef, topicPageStateRef, treeRef, updateTopicPageState]);
+
+  const trashSession = useCallback(async (rawSessionPath: string) => {
+    const sessionPath = rawSessionPath.trim();
+    if (!sessionPath || sessionTrashingRef.current.has(sessionPath)) return;
+    const folderKey = projectTreeFolderKeyForSession(treeRef.current, sessionPath);
+    const reloadOptions: ProjectTreeRefreshOptions = {
+      reloadTopicKeys: folderKey ? [folderKey] : undefined,
+      reloadAllTopics: !folderKey,
+    };
+    sessionTrashingRef.current = projectTreeTrashingTopics(sessionTrashingRef.current, sessionPath, true);
+    setTrashingSessions(sessionTrashingRef.current);
+    closeMenu();
+
+    const queued = enqueueProjectTreeArchive(archiveQueueRef.current, async () => {
       try {
-        await app.TrashTopic(topicId);
-      } catch (err) {
-        endTrashingTopic(topicId);
-        showToast(err instanceof Error ? err.message : String(err), "error");
-        await refreshRef.current(reloadOptions);
-        return;
-      }
-      try {
+        await app.DeleteSession(sessionPath);
         await refreshRef.current(reloadOptions);
         await Promise.resolve(onTopicsChanged?.()).catch(() => undefined);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+        await refreshRef.current(reloadOptions).catch(() => undefined);
       } finally {
-        endTrashingTopic(topicId);
+        sessionTrashingRef.current = projectTreeTrashingTopics(sessionTrashingRef.current, sessionPath, false);
+        setTrashingSessions(sessionTrashingRef.current);
       }
     });
     archiveQueueRef.current = queued;
     await queued;
-  }, [beginTrashingTopic, closeMenu, endTrashingTopic, onTopicsChanged, optimisticallyRemoveTopic, refreshRef, releaseArchiveTombstone, showToast, topicLoadSeqRef, topicPageStateRef, treeRef, updateTopicPageState]);
+  }, [closeMenu, onTopicsChanged, refreshRef, showToast, treeRef]);
 
-  return { trashingTopics, currentArchiveTombstones, trashTopic };
+  return { trashingTopics, trashingSessions, currentArchiveTombstones, trashTopic, trashSession };
 }

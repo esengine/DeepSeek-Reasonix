@@ -15,16 +15,22 @@ import (
 
 // fakeRemoteKernel implements remoteKernel for binding-layer tests.
 type fakeRemoteKernel struct {
-	hosts           []RemoteHostView
-	statuses        []RemoteConnectionStatusView
-	writeResult     RemoteWriteResult
-	ensureView      RemoteServerView
-	ensureToken     string
-	ensureErr       error
-	resolveCalls    []bool
-	secretCalls     []remoteSecretAnswer
-	secretPromptIDs []string
-	closed          bool
+	hosts             []RemoteHostView
+	statuses          []RemoteConnectionStatusView
+	writeResult       RemoteWriteResult
+	ensureView        RemoteServerView
+	ensureToken       string
+	ensureErr         error
+	ensureCalls       int
+	switchProxyErr    error
+	switchProxyCalls  [][4]string
+	platformErr       error
+	platformChecks    []string
+	stoppedWorkspaces []string
+	resolveCalls      []bool
+	secretCalls       []remoteSecretAnswer
+	secretPromptIDs   []string
+	closed            bool
 }
 
 func TestRemoteConnectionErrorDetailsPreserveHostKeyMismatch(t *testing.T) {
@@ -102,12 +108,31 @@ func (f *fakeRemoteKernel) AddForward(string, RemoteForwardInput) (RemoteForward
 }
 func (f *fakeRemoteKernel) RemoveForward(string, string) error { return nil }
 func (f *fakeRemoteKernel) EnsureServer(context.Context, string, string) (RemoteServerView, string, error) {
+	f.ensureCalls++
 	return f.ensureView, f.ensureToken, f.ensureErr
 }
-func (f *fakeRemoteKernel) StopServer(string) error              { return nil }
-func (f *fakeRemoteKernel) ServerStatus(string) RemoteServerView { return f.ensureView }
-func (f *fakeRemoteKernel) ServerLogs(context.Context, string, int) (string, error) {
+func (f *fakeRemoteKernel) SwitchCredentialProxyModel(_ context.Context, hostID, workspace, currentRef, nextRef string) error {
+	f.switchProxyCalls = append(f.switchProxyCalls, [4]string{hostID, workspace, currentRef, nextRef})
+	return f.switchProxyErr
+}
+func (f *fakeRemoteKernel) StopServer(_ string, workspace string) error {
+	f.stoppedWorkspaces = append(f.stoppedWorkspaces, workspace)
+	return nil
+}
+func (f *fakeRemoteKernel) ServerStatus(string, string) RemoteServerView { return f.ensureView }
+func (f *fakeRemoteKernel) ServeSnapshot(string, string) (RemoteServerView, string, bool) {
+	if f.ensureErr != nil || f.ensureView.State != "ready" || f.ensureView.LocalURL == "" || f.ensureToken == "" {
+		return RemoteServerView{}, "", false
+	}
+	return f.ensureView, f.ensureToken, true
+}
+func (f *fakeRemoteKernel) ServerLogs(context.Context, string, string, int) (string, error) {
 	return "log line", nil
+}
+
+func (f *fakeRemoteKernel) CheckPlatform(_ context.Context, hostID string) error {
+	f.platformChecks = append(f.platformChecks, hostID)
+	return f.platformErr
 }
 func (f *fakeRemoteKernel) Close() error { f.closed = true; return nil }
 
@@ -146,6 +171,23 @@ func TestConfirmRemoteHostKeyDelegates(t *testing.T) {
 	}
 	if len(fake.resolveCalls) != 1 || fake.resolveCalls[0] != true {
 		t.Fatalf("resolve calls = %+v", fake.resolveCalls)
+	}
+}
+
+func TestCheckRemotePlatformDelegatesAndPropagatesError(t *testing.T) {
+	fake := &fakeRemoteKernel{platformErr: errors.New("unsupported remote OS")}
+	a := appWithFakeKernel(fake)
+	if err := a.CheckRemotePlatform("box"); err == nil || !strings.Contains(err.Error(), "unsupported remote OS") {
+		t.Fatalf("err = %v, want unsupported remote OS", err)
+	}
+	if len(fake.platformChecks) != 1 || fake.platformChecks[0] != "box" {
+		t.Fatalf("platform checks = %+v", fake.platformChecks)
+	}
+
+	ok := &fakeRemoteKernel{}
+	a2 := appWithFakeKernel(ok)
+	if err := a2.CheckRemotePlatform("box"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -479,7 +521,9 @@ func TestOpenRemoteWorkspacePersistsLastWorkspace(t *testing.T) {
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("HOME", home)
 	a := &App{ctx: context.Background()}
-	a.saveLastRemoteWorkspace("box", "/home/dev/app")
+	if err := a.saveLastRemoteWorkspace("box", "/home/dev/app"); err != nil {
+		t.Fatal(err)
+	}
 	got := a.RemoteLastWorkspace("box")
 	if got != "/home/dev/app" {
 		t.Fatalf("last workspace = %q, want /home/dev/app", got)
