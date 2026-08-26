@@ -936,3 +936,66 @@ func TestStorePathWithGlobalDir(t *testing.T) {
 		t.Fatalf("Path for file only in Dir should return Dir path, got %s", p3)
 	}
 }
+
+// TestIndexLinesExceptIn_ReadError verifies that indexLinesExceptIn does not
+// silently discard a read error — a permission-denied file must return an
+// error instead of producing an empty map that would cause data loss.
+func TestIndexLinesExceptIn_ReadError(t *testing.T) {
+	dir := t.TempDir()
+	idxPath := filepath.Join(dir, indexFile)
+
+	content := "- fact-1: 张三的生日是1月1日\n- fact-2: 李四的爱好是游泳\n"
+	if err := os.WriteFile(idxPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the file unreadable to trigger a read error.
+	if err := os.Chmod(idxPath, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(idxPath, 0o644) })
+
+	_, err := indexLinesExceptIn(dir, "fact-1")
+	if err == nil {
+		t.Fatal("expected error from unreadable index file, got nil")
+	}
+}
+
+// TestIndexLinesExceptIn_MissingFile verifies that a missing index file
+// returns an empty map with no error (first-use behavior).
+func TestIndexLinesExceptIn_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	lines, err := indexLinesExceptIn(dir, "fact-1")
+	if err != nil {
+		t.Fatalf("expected no error for missing index file, got %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("expected empty map, got %v", lines)
+	}
+}
+
+// TestFlushIndexIn_ReadError verifies that flushIndexIn returns an error when
+// the index file exists but is unreadable, instead of silently writing an
+// empty file.
+func TestFlushIndexIn_ReadError(t *testing.T) {
+	dir := t.TempDir()
+	idxPath := filepath.Join(dir, indexFile)
+
+	content := "- fact-1: 张三的生日是1月1日\n"
+	if err := os.WriteFile(idxPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the file unreadable.
+	if err := os.Chmod(idxPath, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(idxPath, 0o644) })
+
+	// flushIndexIn should fail because it can't read the existing file.
+	err := flushIndexIn(dir, map[string]string{"fact-2": "- fact-2: 李四的爱好是游泳\n"})
+	if err == nil {
+		// If no error, verify the file was not corrupted.
+		t.Fatal("expected error from flushIndexIn with unreadable file, got nil")
+	}
+}

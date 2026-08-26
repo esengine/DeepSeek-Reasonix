@@ -258,7 +258,11 @@ func (s Store) SaveWithOptions(m Memory, opts SaveOptions) (SaveResult, error) {
 			return SaveResult{}, err
 		}
 		oldDir := filepath.Dir(existingPath)
-		if err := flushIndexIn(oldDir, indexLinesExceptIn(oldDir, existing.Name)); err != nil {
+		lines, err := indexLinesExceptIn(oldDir, existing.Name)
+		if err != nil {
+			return SaveResult{}, err
+		}
+		if err := flushIndexIn(oldDir, lines); err != nil {
 			return SaveResult{}, err
 		}
 	}
@@ -277,7 +281,11 @@ func (s Store) SaveWithOptions(m Memory, opts SaveOptions) (SaveResult, error) {
 				if _, err := archiveInDir(otherDir, duplicate.Name); err != nil {
 					return SaveResult{}, err
 				}
-				if err := flushIndexIn(otherDir, indexLinesExceptIn(otherDir, duplicate.Name)); err != nil {
+				lines, err := indexLinesExceptIn(otherDir, duplicate.Name)
+				if err != nil {
+					return SaveResult{}, err
+				}
+				if err := flushIndexIn(otherDir, lines); err != nil {
 					return SaveResult{}, err
 				}
 			}
