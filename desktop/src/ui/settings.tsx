@@ -18,6 +18,12 @@ import {
   type QQDesktopSettingsState,
 } from "../qq-settings";
 import {
+  describeTelegramRowSummary,
+  getTelegramConnectIntent,
+  getTelegramStatusLabel,
+  type TelegramDesktopSettingsState,
+} from "../telegram-settings";
+import {
   FONT_FAMILY,
   FONT_SCALE,
   type FontFamily,
@@ -115,6 +121,7 @@ export function SettingsModal({
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   qq: QQDesktopSettingsState | null;
+  tg: TelegramDesktopSettingsState | null;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
@@ -123,6 +130,10 @@ export function SettingsModal({
   onDisconnectQQ: () => void;
   onSaveQQConfig: (patch: { appId?: string; appSecret?: string; sandbox: boolean }) => void;
   onOpenQQApplyLink: () => void;
+  onLoadTelegram: () => void;
+  onConnectTelegram: () => void;
+  onDisconnectTelegram: () => void;
+  onSaveTelegramConfig: (patch: { botToken?: string }) => void;
   onPickWorkspace: () => void;
   onImportCcSwitchMcp: () => Promise<void>;
   onAddMcpSpec: (spec: string) => void;
@@ -254,6 +265,13 @@ export function SettingsModal({
                     onConnectQQ();
                   }}
                   onOpenApplyLink={onOpenQQApplyLink}
+                />
+                <TelegramChannelSection
+                  tg={tg}
+                  onConnect={onConnectTelegram}
+                  onDisconnect={onDisconnectTelegram}
+                  onSaveConfig={onSaveTelegramConfig}
+                  onLoad={onLoadTelegram}
                 />
               </>
             ) : null}
@@ -1780,5 +1798,128 @@ function SectionRow({ nm, keys }: { nm: string; keys: ShortcutKey[] }): ReactNod
         <Shortcut keys={keys} />
       </div>
     </>
+  );
+}
+
+export function TelegramChannelSection({
+  tg,
+  onConnect,
+  onDisconnect,
+  onSaveConfig,
+  onLoad,
+}: {
+  tg: TelegramDesktopSettingsState | null;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onSaveConfig: (patch: { botToken?: string }) => void;
+  onLoad: () => void;
+}) {
+  const current = tg ?? {
+    botToken: undefined,
+    enabled: false,
+    configured: false,
+    runtimeState: "disconnected" as const,
+    botTokenPreview: undefined,
+    access: "access control configured",
+  };
+  const [botToken, setBotToken] = useState(current.botToken ?? "");
+  const [configureOpen, setConfigureOpen] = useState(false);
+
+  useEffect(() => {
+    setBotToken(current.botToken ?? "");
+    onLoad();
+  }, [current.botToken]);
+
+  const savePatch = { botToken };
+
+  return (
+    <section className="section">
+      <div className="stitle">{t("settings.telegramSection")}</div>
+      {!configureOpen ? (
+        <div className="setting-row qq-setting-row">
+          <div className="l">
+            <div className="n">{t("settings.telegramTitle")}</div>
+            <div className="h">{describeTelegramRowSummary(current)}</div>
+          </div>
+          <div className="qq-row-actions">
+            <button
+              type="button"
+              className={`btn qq-status-btn qq-status-${
+                current.runtimeState === "connected"
+                  ? "on"
+                  : current.runtimeState === "connecting"
+                    ? "connecting"
+                    : current.runtimeState === "failed"
+                      ? "failed"
+                      : "off"
+              }`}
+              onClick={() => {
+                if (getTelegramConnectIntent(current) === "configure") {
+                  setConfigureOpen(true);
+                  return;
+                }
+                if (current.runtimeState === "connected") {
+                  onDisconnect();
+                  return;
+                }
+                onConnect();
+              }}
+            >
+              {getTelegramStatusLabel(current)}
+            </button>
+            <button type="button" className="btn" onClick={() => setConfigureOpen(true)}>
+              {t("settings.telegramConfigure")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="qq-config-card">
+          <div className="qq-config-head">
+            <div>
+              <div className="n">{t("settings.telegramConfigureTitle")}</div>
+              <div className="h">{t("settings.telegramBotTokenHint")}</div>
+            </div>
+            <button type="button" className="btn" onClick={() => setConfigureOpen(false)}>
+              {t("settings.telegramBack")}
+            </button>
+          </div>
+          <div className="setting-row">
+            <div className="l">
+              <div className="n">{t("settings.telegramBotToken")}</div>
+            </div>
+            <input
+              className="field mono"
+              type="password"
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+            />
+          </div>
+          <div className="qq-config-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                onSaveConfig(savePatch);
+                setConfigureOpen(false);
+              }}
+            >
+              {t("settings.telegramSave")}
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                onSaveConfig(savePatch);
+                onConnect();
+                setConfigureOpen(false);
+              }}
+            >
+              {t("settings.telegramSaveAndConnect")}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

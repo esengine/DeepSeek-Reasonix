@@ -61,6 +61,7 @@ import type {
   SkillInfo,
 } from "./protocol";
 import { type QQDesktopSettingsState } from "./qq-settings";
+import { type TelegramDesktopSettingsState } from "./telegram-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel, type ContextPanelTab } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
@@ -352,6 +353,7 @@ type State = {
   externalImportSources: ExternalSessionApp[];
   settings: Settings | null;
   qq: QQDesktopSettingsState | null;
+  tg: TelegramDesktopSettingsState | null;
   balance: Balance | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
@@ -1015,6 +1017,19 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           access: ev.access,
         },
       };
+    case "$telegram_settings":
+      return {
+        ...state,
+        tg: {
+          botToken: ev.botToken,
+          enabled: ev.enabled,
+          configured: ev.configured,
+          runtimeState: ev.runtimeState,
+          lastError: ev.lastError,
+          botTokenPreview: ev.botTokenPreview,
+          access: ev.access,
+        },
+      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -1432,6 +1447,7 @@ function TabRuntime({
     externalImportSources: [],
     settings: null,
     qq: null,
+    tg: null,
     balance: null,
     mentionResults: null,
     mentionPreview: null,
@@ -1596,6 +1612,14 @@ function TabRuntime({
   const saveQQConfig = useCallback(
     (patch: { appId?: string; appSecret?: string; sandbox: boolean }) =>
       sendRpc({ cmd: "qq_config_save", ...patch }),
+    [sendRpc],
+  );
+  const loadTelegramSettings = useCallback(() => sendRpc({ cmd: "telegram_status_get" }), [sendRpc]);
+  const connectTelegram = useCallback(() => sendRpc({ cmd: "telegram_connect" }), [sendRpc]);
+  const disconnectTelegram = useCallback(() => sendRpc({ cmd: "telegram_disconnect" }), [sendRpc]);
+  const saveTelegramConfig = useCallback(
+    (patch: { botToken?: string }) =>
+      sendRpc({ cmd: "telegram_config_save", ...patch }),
     [sendRpc],
   );
   const saveApiKey = useCallback(
@@ -2189,6 +2213,11 @@ function TabRuntime({
     if (!active) return;
     loadQQSettings();
   }, [active, loadQQSettings]);
+
+  useEffect(() => {
+    if (!active) return;
+    loadTelegramSettings();
+  }, [active, loadTelegramSettings]);
 
   useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
@@ -2875,6 +2904,7 @@ function TabRuntime({
             memory={state.memory}
             memoryDetail={state.memoryDetail}
             qq={state.qq}
+            tg={state.tg}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
@@ -2882,6 +2912,10 @@ function TabRuntime({
             onConnectQQ={connectQQ}
             onDisconnectQQ={disconnectQQ}
             onSaveQQConfig={saveQQConfig}
+            onLoadTelegram={loadTelegramSettings}
+            onConnectTelegram={connectTelegram}
+            onDisconnectTelegram={disconnectTelegram}
+            onSaveTelegramConfig={saveTelegramConfig}
             onOpenQQApplyLink={() =>
               openUrl("https://q.qq.com/qqbot/openclaw/login.html").catch(() => undefined)
             }
