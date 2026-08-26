@@ -6,6 +6,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -1896,17 +1897,20 @@ func parseToolResult(res json.RawMessage) (string, []string, error) {
 			Data     string `json:"data"`
 			MimeType string `json:"mimeType"`
 		} `json:"content"`
-		IsError bool `json:"isError"`
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool            `json:"isError"`
 	}
 	if err := json.Unmarshal(res, &out); err != nil {
 		return "", nil, fmt.Errorf("decode tool result: %w", err)
 	}
 	var sb strings.Builder
+	var textBlocks []string
 	var images []string
 	for _, c := range out.Content {
 		switch c.Type {
 		case "text":
 			sb.WriteString(c.Text)
+			textBlocks = append(textBlocks, c.Text)
 		case "image":
 			placeholder, url := toolResultImage(c.MimeType, c.Data, len(images))
 			sb.WriteString(placeholder)
@@ -1915,11 +1919,66 @@ func parseToolResult(res json.RawMessage) (string, []string, error) {
 			}
 		}
 	}
-	text := sb.String()
+	text := appendStructuredContentFallback(sb.String(), textBlocks, out.StructuredContent)
 	if out.IsError {
 		return text, images, fmt.Errorf("plugin tool reported error: %s", text)
 	}
 	return text, images, nil
+}
+
+// appendStructuredContentFallback preserves the server's model-facing content
+// and adds compact structured JSON only when no TextContent block already
+// carries the same JSON value. This keeps content-only and dual-channel MCP
+// servers unchanged while making structured results visible to text consumers.
+func appendStructuredContentFallback(text string, textBlocks []string, structured json.RawMessage) string {
+	compact, ok := compactStructuredContent(structured)
+	if !ok || textContainsEquivalentJSON(textBlocks, text, structured) {
+		return text
+	}
+	if text == "" {
+		return compact
+	}
+	return text + "\n\n" + compact
+}
+
+func compactStructuredContent(raw json.RawMessage) (string, bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", false
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return "", false
+	}
+	return compact.String(), true
+}
+
+func textContainsEquivalentJSON(textBlocks []string, combined string, structured json.RawMessage) bool {
+	structuredValue, ok := decodeSingleJSONValue(structured)
+	if !ok {
+		return false
+	}
+	for _, candidate := range append(append([]string(nil), textBlocks...), combined) {
+		candidateValue, ok := decodeSingleJSONValue([]byte(candidate))
+		if ok && reflect.DeepEqual(candidateValue, structuredValue) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeSingleJSONValue(raw []byte) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, false
+	}
+	return value, true
 }
 
 // toolResultImage validates one MCP image content item and returns its text
