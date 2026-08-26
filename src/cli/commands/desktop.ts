@@ -96,7 +96,7 @@ import {
 import {
   loadDesktopTelegramState,
   saveDesktopTelegramSettings,
-  saveDesktopTelegramEnabled,
+  setDesktopTelegramEnabled,
   type TelegramDesktopSettingsState,
 } from "../../telegram-settings.js";
 import {
@@ -2199,12 +2199,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     try {
       await channel.start();
       tgRuntime.channel = channel;
-      if (shouldPersistEnabled) saveDesktopTelegramEnabled(true);
+      if (shouldPersistEnabled) saveTelegramConfig({ enabled: true });
       setTelegramRuntimeState("connected");
     } catch (err) {
       await channel.stop().catch(() => undefined);
       tgRuntime.channel = null;
-      if (shouldPersistEnabled) saveDesktopTelegramEnabled(false);
+      if (shouldPersistEnabled) saveTelegramConfig({ enabled: false });
       setTelegramRuntimeState("failed", (err as Error).message);
       throw err;
     }
@@ -2221,7 +2221,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         throw err;
       }
     }
-    if (shouldDisable) saveDesktopTelegramEnabled(false);
+    if (shouldDisable) saveTelegramConfig({ enabled: false });
     setTelegramRuntimeState("disconnected");
   }
 
