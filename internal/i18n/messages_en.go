@@ -158,7 +158,7 @@ var English = Messages{
 
 	OutputStyleNone:           "no output styles available",
 	ThemeHeader:               "themes:",
-	ThemeHint:                 "switch with /theme <auto|light|dark|style>",
+	ThemeHint:                 "↑/↓ preview · Enter confirm · Tab complete · Esc cancel",
 	ThemeChangedFmt:           "theme switched to %s / %s",
 	ThemeUnknownFmt:           "unknown theme %q",
 	LanguageHeader:            "languages:",

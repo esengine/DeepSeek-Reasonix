@@ -153,7 +153,7 @@ var ChineseTraditional = Messages{
 
 	OutputStyleNone:           "沒有可用的輸出風格",
 	ThemeHeader:               "主題：",
-	ThemeHint:                 "使用 /theme <auto|light|dark|style> 切換",
+	ThemeHint:                 "↑/↓ 預覽 · Enter 確認 · Tab 補全 · Esc 取消",
 	ThemeChangedFmt:           "已切換主題為 %s / %s",
 	ThemeUnknownFmt:           "未知主題 %q",
 	LanguageHeader:            "語言：",

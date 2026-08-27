@@ -13,7 +13,8 @@ import (
 const helpMaxDynamicItems = 8
 
 func (m *chatTUI) showHelp() {
-	m.commitLine(renderHelp(m.width, m.commands, m.skills, m.prompts()))
+	commands, skills, prompts := m.commands, m.skills, m.prompts()
+	m.commitRenderedLine(func(w int) string { return renderHelp(w, commands, skills, prompts) })
 }
 
 func renderHelp(width int, commands []command.Command, skills []skill.Skill, prompts []plugin.Prompt) string {

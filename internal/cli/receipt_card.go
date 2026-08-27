@@ -83,8 +83,8 @@ func receiptEvidenceTail(r *event.CompletionReceipt) string {
 
 // commitReceipt appends the card to the transcript.
 func (m *chatTUI) commitReceipt(r *event.CompletionReceipt) {
-	for _, line := range renderReceiptCard(r, m.width) {
-		m.commitLine(line)
+	if len(renderReceiptCard(r, m.width)) > 0 {
+		m.commitRenderedLine(func(w int) string { return strings.Join(renderReceiptCard(r, w), "\n") })
 	}
 }
 

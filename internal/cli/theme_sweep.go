@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -67,6 +68,10 @@ func (m chatTUI) frameWithTheme(p cliPalette) string {
 		activeCLITheme = prev
 		refreshCLIStyles()
 	}()
+	// The snapshot must not overwrite the live model's cached transcript.
+	m.transcript = slices.Clone(m.transcript)
+	m.transcriptSources = slices.Clone(m.transcriptSources)
+	m.refreshRuntimeTheme()
 	return m.View().Content
 }
 

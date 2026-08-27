@@ -413,7 +413,9 @@ other interaction needs attention. Narrow terminals move or compact complete
 groups instead of cutting labels in half. Visible labels follow `/language`.
 
 Use `/theme auto|light|dark` to select the terminal background mode, or choose a
-named accent from `/theme`. Both composer borders, the insertion cursor,
+named accent from `/theme`. In the picker, ↑/↓ previews the highlighted theme,
+Enter confirms and saves it, and Esc restores the previous theme. Tab only
+completes the name. Both composer borders, the insertion cursor,
 selection, scrollbar, and footer use the active CLI theme. See
 [Keyboard shortcuts](./GUIDE.md#keyboard-shortcuts) for transcript navigation,
 multiline input, rewind, and clipboard controls.

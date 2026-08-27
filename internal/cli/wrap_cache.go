@@ -136,14 +136,3 @@ func (m *chatTUI) invalidateWrapFrom(index int) {
 	m.wrapBlockCount = index
 	m.wrappedLines = flattenBlockWraps(m.wrapBlockLines)
 }
-
-// rewriteTranscriptBlock updates a block's rendered text and invalidates the
-// wrap suffix from that index. Prefer this over bare transcript[i] = … so the
-// streaming hot path never forces a full-history rebuild.
-func (m *chatTUI) rewriteTranscriptBlock(index int, rendered string) {
-	if index < 0 || index >= len(m.transcript) {
-		return
-	}
-	m.transcript[index] = rendered
-	m.invalidateWrapFrom(index)
-}

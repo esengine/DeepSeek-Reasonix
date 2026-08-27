@@ -1,11 +1,50 @@
 package cli
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"reasonix/internal/control"
 )
+
+func TestThemeSweepFrameRepaintsWithoutMutatingLiveModel(t *testing.T) {
+	t.Setenv("REASONIX_THEME", "")
+	t.Setenv("REASONIX_THEME_STYLE", "")
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.TrueColor
+	configureCLITheme("midnight")
+	original := activeCLITheme
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.started = true
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(chatTUI)
+	m.commitTranscriptSource(transcriptSource{kind: transcriptSourceUser, raw: "a user message"})
+	m.commitTranscriptSource(transcriptSource{kind: transcriptSourceMarkdown, raw: "a response"})
+	m.notice("a notice")
+	m.refreshRuntimeTheme()
+	before, wrapped := slices.Clone(m.transcript), slices.Clone(m.wrappedLines)
+	frame := m.View().Content
+	light := resolveCLITheme("glacier")
+	preview := m.frameWithTheme(light)
+	if preview == frame || !strings.Contains(preview, themeFg(light.accent, "› a user message")) || !strings.Contains(preview, themeFg(light.faint, "  · a notice")) {
+		t.Fatal("snapshot did not repaint the user message and notice with the requested palette")
+	}
+	if activeCLITheme != original || !reflect.DeepEqual(before, m.transcript) || !reflect.DeepEqual(wrapped, m.wrappedLines) || m.View().Content != frame {
+		t.Fatal("snapshot mutated the live theme, transcript, or viewport")
+	}
+	if m.startThemeSweep(original, light) == nil {
+		t.Fatal("expected a sweep in a color terminal")
+	}
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	if next.(chatTUI).themeSweep != nil {
+		t.Fatal("resize retained a frame captured at the old width")
+	}
+}
 
 func testSweepRows(width int) (before, after []string) {
 	// mix wide runes, pre-styled text and plain text

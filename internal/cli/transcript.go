@@ -41,6 +41,8 @@ type transcriptSource struct {
 	planMode bool
 	maxLines int
 	history  []provider.Message
+	// render retains display inputs so repainting never guesses colors from ANSI.
+	render func(int) string
 }
 
 func (m *chatTUI) ensureTranscriptSources() {
@@ -90,6 +92,9 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
+	if source.render != nil {
+		return source.render(terminalWidth)
+	}
 	contentWidth := transcriptContentWidth(terminalWidth, m.nativeScrollback)
 	switch source.kind {
 	case transcriptSourceMarkdown:
@@ -221,22 +226,6 @@ func renderTurnReceiptBand(receipt string, contentWidth int) string {
 	rule := indent + themeFg(activeCLITheme.border, strings.Repeat("─", innerWidth))
 	body := wrapTranscript(receipt, contentWidth)
 	return rule + "\n" + body
-}
-
-func (m *chatTUI) reflowTranscript(terminalWidth int) {
-	m.ensureTranscriptSources()
-	for i, source := range m.transcriptSources {
-		if source.kind == transcriptSourceFixed {
-			continue
-		}
-		m.transcript[i] = m.renderTranscriptSource(source, terminalWidth)
-	}
-}
-
-func (m *chatTUI) commitTranscriptSource(source transcriptSource) {
-	rendered := m.renderTranscriptSource(source, m.width)
-	*m.pendingCommit = append(*m.pendingCommit, rendered)
-	m.appendTranscriptBlock(rendered, source)
 }
 
 const (

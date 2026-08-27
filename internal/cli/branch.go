@@ -19,8 +19,8 @@ func (m *chatTUI) showBranchTree() {
 		return
 	}
 	current := agent.BranchID(m.ctrl.SessionPath())
-	tree := renderBranchTree(control.FormatBranchTree(branches, current))
-	m.commitLine(ansi.Hardwrap(tree, max(m.width, 20), false))
+	tree := control.FormatBranchTree(branches, current)
+	m.commitRenderedLine(func(w int) string { return ansi.Hardwrap(renderBranchTree(tree), max(w, 20), false) })
 }
 
 func renderBranchTree(tree string) string {
@@ -144,7 +144,7 @@ func (m *chatTUI) replayActiveBranch(title string) {
 
 	m.commitLine("")
 	if title != "" {
-		m.commitLine(dim("  -- " + title + " --"))
+		m.commitRenderedLine(func(int) string { return dim("  -- " + title + " --") })
 	}
 	m.commitTranscriptSource(transcriptSource{
 		kind:    transcriptSourceReplayBundle,
