@@ -10,10 +10,8 @@ import (
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
-// gitIgnoreMatcher is deliberately read-only and workspace-scoped. Unlike the
-// grep walker, it does not add extra hidden/vendor rules; the reference picker
-// adds only the repository's actual Git ignore rules on top of its existing
-// built-in skip list.
+// gitIgnoreMatcher reads repository Git ignore rules for the picker.
+// It adds no extra hidden or vendor rules.
 type gitIgnoreMatcher struct {
 	root     string
 	patterns []string

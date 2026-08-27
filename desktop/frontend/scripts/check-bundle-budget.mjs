@@ -126,9 +126,8 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The remote-project badge and static session rows move the shell stylesheet
 // to 114.48 KiB gzip. Keep a narrow 0.22 KiB ratchet.
-// The navigation mask's stable composer footprint measures 114.73 KiB; retain
-// less than 0.1 KiB of additional headroom. The reference-filter settings
-// controls add a bounded 0.1 KiB gzip to this deferred shell.
+// The navigation mask's stable composer footprint measures 114.73 KiB.
+// Retain less than 0.1 KiB of additional headroom.
 assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 115.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
@@ -182,10 +181,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Its failure-atomic completion paths plus the fixed navigation footer
 // footprint share that initial path. The combined build measures 2379.22 KiB,
 // 10.12 KiB (0.43%) above the navigation base; retain 0.58 KiB of deterministic
-// build/toolchain headroom. The project-scoped @ reference filter, settings
-// surface, and manual-path inspection add 2.9 KiB raw to the startup path;
-// the picker-based settings controls add another bounded 0.2 KiB. Keep both
-// increases explicit with a narrow 0.4 KiB headroom.
+// build/toolchain headroom. Reference-filter UI adds 3.1 KiB raw; keep this
+// increase explicit with narrow headroom.
 const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_383.6 : 2_383.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

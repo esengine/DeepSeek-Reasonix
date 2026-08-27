@@ -82,10 +82,8 @@ func Search(root, query string, limit int) []SearchResult {
 	return SearchWithFilter(root, query, limit, filter)
 }
 
-// SearchWithFilter is Search with the same candidate filter used by the
-// directory browser. Keeping the two paths together prevents a file from
-// appearing in bare @ search while being absent from directory navigation (or
-// the reverse).
+// SearchWithFilter applies the directory browser's candidate filter to Search.
+// This keeps browsing and bare @ search consistent.
 func SearchWithFilter(root, query string, limit int, filter Filter) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if len(query) < minQueryLen || strings.ContainsAny(query, `/\`) || limit <= 0 {

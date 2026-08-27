@@ -8,16 +8,15 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// FilterOptions describes the optional, user-controlled additions to the
-// historical file-reference filter. The built-in skip rules are always kept.
+// FilterOptions adds user-controlled rules to the historical filter.
+// Built-in skip rules are always kept.
 type FilterOptions struct {
 	FollowGitignore bool
 	ExcludePatterns []string
 }
 
-// Filter is shared by directory browsing and recursive @ search. It is a
-// candidate filter, not a read permission check: a manually typed path remains
-// available to the existing reference resolver.
+// Filter is shared by browsing and @ search.
+// It hides candidates; manually typed paths remain resolvable.
 type Filter struct {
 	custom       []string
 	gitignore    *gitIgnoreMatcher
@@ -46,9 +45,8 @@ func NewFilter(root string, options FilterOptions) (Filter, error) {
 	return f, nil
 }
 
-// NormalizeExcludePatterns trims and validates project-relative custom rules.
-// A folder rule should be stored as "folder/**"; the base folder is also added
-// internally so browsing prunes the folder before descending into it.
+// NormalizeExcludePatterns validates project-relative custom rules.
+// Folder rules are stored as "folder/**" and pruned during browsing.
 func NormalizeExcludePatterns(patterns []string) ([]string, error) {
 	out := make([]string, 0, len(patterns)*2)
 	seen := make(map[string]bool)

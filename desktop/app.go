@@ -10158,9 +10158,8 @@ type DirEntry struct {
 	DisplayPath string `json:"displayPath,omitempty"`
 }
 
-// FileRefInspection explains a manually typed @ path without changing the
-// existing resolver behavior. "hidden" means the picker filter hides it, not
-// that direct reference resolution is denied.
+// FileRefInspection reports a manually typed @ path without changing resolution.
+// "hidden" affects picker candidates only.
 type FileRefInspection struct {
 	Status string `json:"status"`
 	Path   string `json:"path"`
@@ -10384,9 +10383,8 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	return append(dirs, files...)
 }
 
-// InspectFileRefForTab checks a manually typed workspace path for completion
-// feedback. It is informational only; ResolveRefs keeps its historical direct
-// path behavior even when the status is "hidden".
+// InspectFileRefForTab reports a manually typed path for completion feedback.
+// It does not change ResolveRefs behavior, including for hidden paths.
 func (a *App) InspectFileRefForTab(tabID, rel string) FileRefInspection {
 	root, ctrl, ok := a.workspaceTargetForTab(tabID)
 	if !ok || externalFolderRefBrowserFromController(ctrl) != nil {

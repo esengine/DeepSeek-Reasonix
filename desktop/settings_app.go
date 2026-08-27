@@ -152,8 +152,8 @@ type SandboxView struct {
 	EffectiveShell         string   `json:"effectiveShell,omitempty"`
 }
 
-// ReferenceSettingsView is the project-scoped configuration for the desktop
-// @-file picker. The picker never uses these values as a read permission gate.
+// ReferenceSettingsView contains project-scoped @-picker filters.
+// These values never act as a read permission gate.
 type ReferenceSettingsView struct {
 	FollowGitignore bool     `json:"followGitignore"`
 	ExcludePatterns []string `json:"excludePatterns"`
@@ -1656,9 +1656,8 @@ func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string
 				return nil, "", err
 			}
 			mergeLegacyBotConfigInMemory(cfg, legacyCfg)
-			// Reference filters are intentionally project-scoped. The desktop
-			// settings view otherwise reads only the user config and would lose
-			// a just-saved project rule on its post-write reload.
+			// Restore project-scoped reference filters for the settings view.
+			// The base config is otherwise the user config.
 			cfg.Reference = legacyCfg.Reference
 		}
 		return cfg, userPath, nil
@@ -3280,10 +3279,8 @@ func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowW
 	})
 }
 
-// SetReferenceSettings persists only the active workspace's [reference]
-// section. Unlike runtime settings, changing picker candidates does not require
-// rebuilding any controller; the next browser/search request reloads the
-// project configuration and constructs the matching filter.
+// SetReferenceSettings saves [reference] in the active workspace.
+// Picker changes apply on the next browser or search request.
 func (a *App) SetReferenceSettings(view ReferenceSettingsView) error {
 	patterns, err := fileref.NormalizeExcludePatterns(view.ExcludePatterns)
 	if err != nil {

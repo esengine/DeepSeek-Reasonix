@@ -10,15 +10,14 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// PickReferenceFolder opens a native folder picker and returns the selected
-// folder as a workspace-relative path. Reference filters are project-scoped,
-// so selections outside the active workspace are rejected.
+// PickReferenceFolder returns the selected folder as a workspace-relative path.
+// Selections outside the active workspace are rejected.
 func (a *App) PickReferenceFolder() (string, error) {
 	return a.pickReferencePath(true)
 }
 
-// PickReferenceFile opens a native file picker and returns the selected file as
-// a workspace-relative path. The frontend stores the path as a file rule.
+// PickReferenceFile returns the selected file as a workspace-relative path.
+// The frontend stores the path as a file rule.
 func (a *App) PickReferenceFile() (string, error) {
 	return a.pickReferencePath(false)
 }
