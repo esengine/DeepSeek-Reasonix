@@ -385,6 +385,17 @@ export type QQSettingsEvent = {
   access: string;
 };
 
+export type TelegramSettingsEvent = {
+  type: "$telegram_settings";
+  botToken?: string;
+  enabled: boolean;
+  configured: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
+  botTokenPreview?: string;
+  access: string;
+};
+
 export type BalanceInfoItem = {
   currency: string;
   total: number;
@@ -548,6 +559,7 @@ export type IncomingEvent = { tabId?: string } & (
   | NeedsSetupEvent
   | SettingsEvent
   | QQSettingsEvent
+  | TelegramSettingsEvent
   | BalanceEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
@@ -602,6 +614,10 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "qq_connect" }
   | { cmd: "qq_disconnect" }
   | ({ cmd: "qq_config_save" } & QQConfigPatch)
+  | { cmd: "telegram_status_get" }
+  | ({ cmd: "telegram_config_save" } & { botToken?: string })
+  | { cmd: "telegram_connect" }
+  | { cmd: "telegram_disconnect" }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }

@@ -94,6 +94,16 @@ import {
   setDesktopQQEnabled,
 } from "../../desktop/qq-settings.js";
 import {
+  loadDesktopTelegramState,
+  saveDesktopTelegramSettings,
+  setDesktopTelegramEnabled,
+  type TelegramDesktopSettingsState,
+} from "../../telegram-settings.js";
+import {
+  loadTelegramConfig,
+  saveTelegramConfig,
+} from "../../config.js";
+import {
   clearQQTurnRouting,
   createQQTurnRoutingState,
   hasQQPendingInteraction,
@@ -125,6 +135,8 @@ import {
   timestampSuffix,
 } from "../../memory/session.js";
 import { QQChannel } from "../../qq/channel.js";
+import { TelegramChannel } from "../../telegram/channel.js";
+import { loadTelegramConfig, saveTelegramConfig } from "../../config.js";
 import {
   type ExternalSessionSource,
   discoverExternalSessionApps,
@@ -212,6 +224,16 @@ type InMessage = { tabId?: string } & (
       appSecret?: string;
       sandbox: boolean;
     }
+  // Telegram RPC commands (desktop UI ↔ Node CLI)
+  | { cmd: "telegram_status_get" }
+  | { cmd: "telegram_connect" }
+  | { cmd: "telegram_disconnect" }
+  | {
+      cmd: "telegram_config_save";
+      botToken?: string;
+      ownerUserId?: string;
+      allowlist?: readonly string[];
+    }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
@@ -297,6 +319,17 @@ interface QQSettingsEvent {
   runtimeState: "disconnected" | "connecting" | "connected" | "failed";
   lastError?: string;
   appIdPreview?: string;
+  access: string;
+}
+
+interface TelegramSettingsEvent {
+  type: "$telegram_settings";
+  botToken?: string;
+  enabled: boolean;
+  configured: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
+  botTokenPreview?: string;
   access: string;
 }
 
@@ -583,6 +616,13 @@ const desktopQqRuntimeSnapshot: {
   runtimeState: "disconnected",
 };
 
+const desktopTelegramRuntimeSnapshot: {
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
+} = {
+  runtimeState: "disconnected",
+};
+
 interface RetryResultEvent {
   type: "$retry_result";
   text: string;
@@ -618,6 +658,7 @@ type EmittableEvent =
   | NeedsSetupEvent
   | SettingsEvent
   | QQSettingsEvent
+  | TelegramSettingsEvent
   | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
@@ -1046,6 +1087,23 @@ function emitQQSettings(tab: Tab): void {
       ...base,
       runtimeState: desktopQqRuntimeSnapshot.runtimeState,
       lastError: desktopQqRuntimeSnapshot.lastError,
+    },
+    tab.id,
+  );
+}
+
+function emitTelegramSettings(tab: Tab): void {
+  const cfg = loadTelegramConfig();
+  const base = loadDesktopTelegramState({
+    botToken: cfg.botToken,
+    enabled: cfg.enabled,
+  });
+  emit(
+    {
+      type: "$telegram_settings",
+      ...base,
+      runtimeState: desktopTelegramRuntimeSnapshot.runtimeState,
+      lastError: desktopTelegramRuntimeSnapshot.lastError,
     },
     tab.id,
   );
@@ -1529,6 +1587,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     routing: createQQTurnRoutingState(),
   };
 
+  const tgRuntime = {
+    channel: null as TelegramChannel | null,
+    runtimeState: "disconnected" as "disconnected" | "connecting" | "connected" | "failed",
+    lastError: undefined as string | undefined,
+  };
+
   function currentQqSettings(): QQSettingsEvent {
     const base = loadDesktopQQState();
     return {
@@ -1556,6 +1620,35 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     desktopQqRuntimeSnapshot.runtimeState = runtimeState;
     desktopQqRuntimeSnapshot.lastError = lastError;
     broadcastQQSettings();
+  }
+
+  function currentTelegramSettings(): TelegramSettingsEvent {
+    const cfg = loadTelegramConfig();
+    return {
+      type: "$telegram_settings",
+      botToken: cfg.botToken,
+      enabled: cfg.enabled ?? false,
+      configured: !!cfg.botToken,
+      runtimeState: tgRuntime.runtimeState,
+      lastError: tgRuntime.lastError,
+      botTokenPreview: cfg.botToken ? `${cfg.botToken.slice(0, 6)}...` : undefined,
+      access: cfg.ownerUserId ? `owner ${cfg.ownerUserId}` : "access control configured",
+    };
+  }
+
+  function broadcastTelegramSettings(): void {
+    for (const tab of tabs.values()) emit(currentTelegramSettings(), tab.id);
+  }
+
+  function setTelegramRuntimeState(
+    runtimeState: "disconnected" | "connecting" | "connected" | "failed",
+    lastError?: string,
+  ): void {
+    tgRuntime.runtimeState = runtimeState;
+    tgRuntime.lastError = lastError;
+    desktopTelegramRuntimeSnapshot.runtimeState = runtimeState;
+    desktopTelegramRuntimeSnapshot.lastError = lastError;
+    broadcastTelegramSettings();
   }
 
   function sendQQInfo(message: string, tabOverride?: Tab): void {
@@ -2066,6 +2159,70 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (shouldDisable) setDesktopQQEnabled(false);
     setQQRuntimeState("disconnected");
+  }
+
+  async function startDesktopTelegram(shouldPersistEnabled = true): Promise<void> {
+    const current = loadTelegramConfig();
+    if (!current.botToken) {
+      throw new Error("Telegram bot token is required.");
+    }
+    if (tgRuntime.channel) {
+      tgRuntime.channel = tgRuntime.channel; // reuse existing
+      setTelegramRuntimeState("connected");
+      return;
+    }
+    setTelegramRuntimeState("connecting");
+    const channel = new TelegramChannel({
+      onSubmitMessage: (text) => {
+        const tab = activeDesktopTab();
+        if (!tab) return;
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        emit(
+          {
+            type: "user.message",
+            id: Date.now(),
+            ts: new Date().toISOString(),
+            turn: 0,
+            text: trimmed,
+          },
+          tab.id,
+        );
+        void runTurn(tab, trimmed, true);
+      },
+      onError: (message) => {
+        const tab = activeDesktopTab();
+        setTelegramRuntimeState("failed", message);
+        if (tab) emit({ type: "$error", message: `Telegram: ${message}` }, tab.id);
+      },
+    });
+    try {
+      await channel.start();
+      tgRuntime.channel = channel;
+      if (shouldPersistEnabled) saveTelegramConfig({ enabled: true });
+      setTelegramRuntimeState("connected");
+    } catch (err) {
+      await channel.stop().catch(() => undefined);
+      tgRuntime.channel = null;
+      if (shouldPersistEnabled) saveTelegramConfig({ enabled: false });
+      setTelegramRuntimeState("failed", (err as Error).message);
+      throw err;
+    }
+  }
+
+  async function stopDesktopTelegram(shouldDisable = true): Promise<void> {
+    const channel = tgRuntime.channel;
+    tgRuntime.channel = null;
+    if (channel) {
+      try {
+        await channel.stop();
+      } catch (err) {
+        setTelegramRuntimeState("failed", (err as Error).message);
+        throw err;
+      }
+    }
+    if (shouldDisable) saveTelegramConfig({ enabled: false });
+    setTelegramRuntimeState("disconnected");
   }
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
@@ -2705,6 +2862,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSkills(tab);
     emitMemory(tab);
     emitQQSettings(tab);
+    emitTelegramSettings(tab);
     if (restoredMessages) {
       const meta = loadSessionMeta(tab.currentSession);
       emit(
@@ -2879,6 +3037,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emitSkills(t);
         emitMemory(t);
         emitQQSettings(t);
+        emitTelegramSettings(t);
         if (!hasKey) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
         else if (t.toolset) emit({ type: "$ready" }, t.id);
         void emitBalance(t);
@@ -3409,6 +3568,95 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.id,
         );
         emitQQSettings(tab);
+      }
+      return;
+    }
+    if (msg.cmd === "telegram_status_get") {
+      emitTelegramSettings(tab);
+      return;
+    }
+    if (msg.cmd === "telegram_config_save") {
+      try {
+        saveTelegramConfig({ botToken: msg.botToken });
+        emitTelegramSettings(tab);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `telegram_config_save failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "telegram_connect") {
+      try {
+        emit(
+          {
+            type: "status",
+            id: Date.now(),
+            ts: new Date().toISOString(),
+            turn: 0,
+            text: "Telegram connecting...",
+          },
+          tab.id,
+        );
+        void startDesktopTelegram(true).then(
+          () => {
+            emit(
+              {
+                type: "status",
+                id: Date.now(),
+                ts: new Date().toISOString(),
+                turn: 0,
+                text: "Telegram connected",
+              },
+              tab.id,
+            );
+            emitTelegramSettings(tab);
+          },
+          (err) => {
+            emit(
+              { type: "$error", message: `telegram_connect failed: ${(err as Error).message}` },
+              tab.id,
+            );
+            emitTelegramSettings(tab);
+          },
+        );
+      } catch (err) {
+        emit({ type: "$error", message: `telegram_connect failed: ${(err as Error).message}` }, tab.id);
+        emitTelegramSettings(tab);
+      }
+      return;
+    }
+    if (msg.cmd === "telegram_disconnect") {
+      try {
+        void stopDesktopTelegram(true).then(
+          () => {
+            emit(
+              {
+                type: "status",
+                id: Date.now(),
+                ts: new Date().toISOString(),
+                turn: 0,
+                text: "Telegram disabled",
+              },
+              tab.id,
+            );
+            emitTelegramSettings(tab);
+          },
+          (err) => {
+            emit(
+              { type: "$error", message: `telegram_disconnect failed: ${(err as Error).message}` },
+              tab.id,
+            );
+            emitTelegramSettings(tab);
+          },
+        );
+      } catch (err) {
+        emit(
+          { type: "$error", message: `telegram_disconnect failed: ${(err as Error).message}` },
+          tab.id,
+        );
+        emitTelegramSettings(tab);
       }
       return;
     }
