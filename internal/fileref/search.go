@@ -75,6 +75,18 @@ type SearchResult struct {
 // generated/vendor directories so interactive completion stays responsive on
 // large workspaces.
 func Search(root, query string, limit int) []SearchResult {
+	filter, err := NewFilter(root, FilterOptions{})
+	if err != nil {
+		return nil
+	}
+	return SearchWithFilter(root, query, limit, filter)
+}
+
+// SearchWithFilter is Search with the same candidate filter used by the
+// directory browser. Keeping the two paths together prevents a file from
+// appearing in bare @ search while being absent from directory navigation (or
+// the reverse).
+func SearchWithFilter(root, query string, limit int, filter Filter) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if len(query) < minQueryLen || strings.ContainsAny(query, `/\`) || limit <= 0 {
 		return nil
@@ -107,7 +119,7 @@ func Search(root, query string, limit int) []SearchResult {
 				return filepath.SkipDir
 			}
 			rel = filepath.ToSlash(rel)
-			if SkipEntry(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
+			if filter.Skip(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			// Allow matching directory names so the user can select a
@@ -117,7 +129,12 @@ func Search(root, query string, limit int) []SearchResult {
 			}
 			return nil
 		}
-		if skipEntryNames[name] {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if filter.Skip(rel, name, false) {
 			return nil
 		}
 		if !showHidden && strings.HasPrefix(name, ".") {
@@ -126,11 +143,6 @@ func Search(root, query string, limit int) []SearchResult {
 		if info, err := d.Info(); err != nil || !info.Mode().IsRegular() {
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
 		nameLower := strings.ToLower(name)
 		switch {
 		case strings.Contains(nameLower, query):

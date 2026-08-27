@@ -57,6 +57,7 @@ type Config struct {
 	Tools            ToolsConfig         `toml:"tools"`
 	Permissions      PermissionsConfig   `toml:"permissions"`
 	Sandbox          SandboxConfig       `toml:"sandbox"`
+	Reference        ReferenceConfig     `toml:"reference"`
 	Network          NetworkConfig       `toml:"network"`
 	Environment      EnvironmentConfig   `toml:"environment"`
 	Plugins          []PluginEntry       `toml:"plugins"`
@@ -1171,6 +1172,21 @@ type SandboxConfig struct {
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.
 	Network bool `toml:"network"`
+}
+
+// ReferenceConfig controls which entries are offered by the desktop @-file
+// reference picker. It is intentionally project-scoped: changing a workspace
+// must not silently change the file-reference candidates in another workspace.
+// Empty values preserve the historical picker behavior.
+type ReferenceConfig struct {
+	// FollowGitignore is opt-in for compatibility. When enabled, the picker
+	// consults the repository .gitignore hierarchy, .git/info/exclude, and the
+	// effective Git global excludes file.
+	FollowGitignore bool `toml:"follow_gitignore"`
+	// ExcludePatterns are slash-separated paths or doublestar patterns relative
+	// to the workspace root. They only hide picker candidates; they do not deny
+	// a manually typed @path from being resolved.
+	ExcludePatterns []string `toml:"exclude_patterns"`
 }
 
 // WriteRoots returns the directories file-writer tools may modify: the

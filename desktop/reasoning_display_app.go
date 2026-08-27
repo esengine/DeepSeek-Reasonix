@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
@@ -37,6 +39,7 @@ func (a *App) defaultSettingsView() SettingsView {
 		ProviderKinds:   nonNil(provider.Kinds()),
 		Permissions:     PermissionsView{Mode: "ask", Allow: []string{}, Ask: []string{}, Deny: []string{}},
 		Sandbox:         SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
+		Reference:       ReferenceSettingsView{ExcludePatterns: []string{}, WorkspaceRoot: a.activeWorkspaceRoot(), ConfigPath: filepath.Join(a.activeWorkspaceRoot(), "reasonix.toml")},
 		Agent: AgentView{
 			PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth,
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,

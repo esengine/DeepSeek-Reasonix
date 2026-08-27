@@ -3,8 +3,9 @@ import { FileText, Folder } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { app } from "../lib/bridge";
+import { useT } from "../lib/i18n";
 import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToken";
-import type { DirEntry } from "../lib/types";
+import type { DirEntry, FileRefInspection } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
 
 const FILE_REF_SEARCH_CACHE_TTL_MS = 5000;
@@ -75,6 +76,7 @@ export function useFileReferenceMenu(text: string, cwd?: string, tabId?: string,
   const atFrag = token?.frag ?? "";
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [searchEntries, setSearchEntries] = useState<DirEntry[]>([]);
+  const [inspection, setInspection] = useState<FileRefInspection | null>(null);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
@@ -90,6 +92,7 @@ export function useFileReferenceMenu(text: string, cwd?: string, tabId?: string,
     searchCache.current = {};
     setEntries([]);
     setSearchEntries([]);
+    setInspection(null);
     setActive(0);
     setDismissed(false);
   }, [fileRefScopeKey]);
@@ -98,6 +101,18 @@ export function useFileReferenceMenu(text: string, cwd?: string, tabId?: string,
     setActive(0);
     setDismissed(false);
   }, [atRaw]);
+
+  useEffect(() => {
+    if (atRaw === null || (!atRaw.includes("/") && !atRaw.includes("\\")) || /[\\/]$/u.test(atRaw)) {
+      setInspection(null);
+      return;
+    }
+    let live = true;
+    app.InspectFileRefForTab(fileRefTabId, unescapeRefPath(atRaw))
+      .then((next) => { if (live) setInspection(next); })
+      .catch(() => { if (live) setInspection(null); });
+    return () => { live = false; };
+  }, [atRaw, fileRefScopeKey, fileRefTabId]);
 
   useEffect(() => {
     if (atRaw === null) return;
@@ -167,6 +182,7 @@ export function useFileReferenceMenu(text: string, cwd?: string, tabId?: string,
     setActive,
     count: atRaw !== null && !dismissed ? items.length : 0,
     open: atRaw !== null && !dismissed,
+    inspection,
     dismiss: () => setDismissed(true),
   };
 }
@@ -176,12 +192,16 @@ export function FileReferenceMenu({
   activeIndex,
   onPick,
   onHover,
+  inspection,
 }: {
   items: DirEntry[];
   activeIndex: number;
   onPick: (entry: DirEntry) => void;
   onHover: (index: number) => void;
+  inspection?: FileRefInspection | null;
 }) {
+  const t = useT();
+  const inspectionText = inspection ? fileRefInspectionText(inspection, t) : null;
   const renderEntry = (entry: DirEntry, index: number) => (
     <button
       role="option"
@@ -213,16 +233,32 @@ export function FileReferenceMenu({
             {renderEntry(entry, index)}
           </div>
         ))}
+        {inspectionText && <div className="filemenu__inspection" role="status">{inspectionText}</div>}
       </div>
     );
   }
 
   return (
-    <VirtualMenu
-      items={items}
-      activeIndex={activeIndex}
-      itemKey={fileReferenceItemKey}
-      renderItem={renderEntry}
-    />
+    <>
+      <VirtualMenu
+        items={items}
+        activeIndex={activeIndex}
+        itemKey={fileReferenceItemKey}
+        renderItem={renderEntry}
+      />
+      {inspectionText && <div className="filemenu__inspection" role="status">{inspectionText}</div>}
+    </>
   );
+}
+
+function fileRefInspectionText(inspection: FileRefInspection, t: ReturnType<typeof useT>): string {
+  const path = inspection.path || "";
+  switch (inspection.status) {
+    case "found": return t("settings.referenceStatusFound", { path });
+    case "directory": return t("settings.referenceStatusDirectory", { path });
+    case "hidden": return t("settings.referenceStatusHidden", { path });
+    case "missing": return t("settings.referenceStatusMissing", { path });
+    case "outside": return t("settings.referenceStatusOutside", { path });
+    default: return t("settings.referenceStatusInvalid", { path });
+  }
 }

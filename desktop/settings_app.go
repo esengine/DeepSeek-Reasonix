@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/fileref"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 )
@@ -149,6 +150,15 @@ type SandboxView struct {
 	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
 	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 	EffectiveShell         string   `json:"effectiveShell,omitempty"`
+}
+
+// ReferenceSettingsView is the project-scoped configuration for the desktop
+// @-file picker. The picker never uses these values as a read permission gate.
+type ReferenceSettingsView struct {
+	FollowGitignore bool     `json:"followGitignore"`
+	ExcludePatterns []string `json:"excludePatterns"`
+	WorkspaceRoot   string   `json:"workspaceRoot"`
+	ConfigPath      string   `json:"configPath"`
 }
 
 type NetworkProxyView struct {
@@ -311,33 +321,34 @@ type BotSettingsView struct {
 
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
-	DefaultModel                 string               `json:"defaultModel"`
-	PlannerModel                 string               `json:"plannerModel"`
-	VisionModel                  string               `json:"visionModel"`
-	SubagentModel                string               `json:"subagentModel"`
-	SubagentEffort               string               `json:"subagentEffort"`
-	AutoPlan                     string               `json:"autoPlan"`
-	Providers                    []ProviderView       `json:"providers"`
-	OfficialProviders            []ProviderView       `json:"officialProviders"`
-	ProviderPresets              []ProviderPresetView `json:"providerPresets"`
-	Permissions                  PermissionsView      `json:"permissions"`
-	Sandbox                      SandboxView          `json:"sandbox"`
-	Network                      NetworkView          `json:"network"`
-	Agent                        AgentView            `json:"agent"`
-	Bot                          BotSettingsView      `json:"bot"`
-	DesktopLanguage              string               `json:"desktopLanguage"`
-	DesktopCurrency              string               `json:"desktopCurrency"`
-	DesktopLayoutStyle           string               `json:"desktopLayoutStyle"`
-	DesktopTheme                 string               `json:"desktopTheme"`
-	DesktopThemeStyle            string               `json:"desktopThemeStyle"`
-	DesktopTerminalTheme         string               `json:"desktopTerminalTheme,omitempty"`
-	CloseBehavior                string               `json:"closeBehavior"`
-	DisplayMode                  string               `json:"displayMode"`
-	ReasoningDisplayMode         string               `json:"reasoningDisplayMode"`
-	ReasoningDisplayModeExplicit bool                 `json:"reasoningDisplayModeExplicit"`
-	StatusBarStyle               string               `json:"statusBarStyle"`
-	StatusBarItems               []string             `json:"statusBarItems"`
-	DefaultToolApprovalMode      string               `json:"defaultToolApprovalMode"`
+	DefaultModel                 string                `json:"defaultModel"`
+	PlannerModel                 string                `json:"plannerModel"`
+	VisionModel                  string                `json:"visionModel"`
+	SubagentModel                string                `json:"subagentModel"`
+	SubagentEffort               string                `json:"subagentEffort"`
+	AutoPlan                     string                `json:"autoPlan"`
+	Providers                    []ProviderView        `json:"providers"`
+	OfficialProviders            []ProviderView        `json:"officialProviders"`
+	ProviderPresets              []ProviderPresetView  `json:"providerPresets"`
+	Permissions                  PermissionsView       `json:"permissions"`
+	Sandbox                      SandboxView           `json:"sandbox"`
+	Reference                    ReferenceSettingsView `json:"reference"`
+	Network                      NetworkView           `json:"network"`
+	Agent                        AgentView             `json:"agent"`
+	Bot                          BotSettingsView       `json:"bot"`
+	DesktopLanguage              string                `json:"desktopLanguage"`
+	DesktopCurrency              string                `json:"desktopCurrency"`
+	DesktopLayoutStyle           string                `json:"desktopLayoutStyle"`
+	DesktopTheme                 string                `json:"desktopTheme"`
+	DesktopThemeStyle            string                `json:"desktopThemeStyle"`
+	DesktopTerminalTheme         string                `json:"desktopTerminalTheme,omitempty"`
+	CloseBehavior                string                `json:"closeBehavior"`
+	DisplayMode                  string                `json:"displayMode"`
+	ReasoningDisplayMode         string                `json:"reasoningDisplayMode"`
+	ReasoningDisplayModeExplicit bool                  `json:"reasoningDisplayModeExplicit"`
+	StatusBarStyle               string                `json:"statusBarStyle"`
+	StatusBarItems               []string              `json:"statusBarItems"`
+	DefaultToolApprovalMode      string                `json:"defaultToolApprovalMode"`
 
 	CheckUpdates      bool   `json:"checkUpdates"`
 	UpdateChannel     string `json:"updateChannel"`
@@ -1031,6 +1042,12 @@ func (a *App) Settings() SettingsView {
 			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
 		},
+		Reference: ReferenceSettingsView{
+			FollowGitignore: cfg.Reference.FollowGitignore,
+			ExcludePatterns: nonNil(cfg.Reference.ExcludePatterns),
+			WorkspaceRoot:   root,
+			ConfigPath:      filepath.Join(root, "reasonix.toml"),
+		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
 			ProxyURL:  cfg.Network.ProxyURL,
@@ -1639,6 +1656,10 @@ func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string
 				return nil, "", err
 			}
 			mergeLegacyBotConfigInMemory(cfg, legacyCfg)
+			// Reference filters are intentionally project-scoped. The desktop
+			// settings view otherwise reads only the user config and would lose
+			// a just-saved project rule on its post-write reload.
+			cfg.Reference = legacyCfg.Reference
 		}
 		return cfg, userPath, nil
 	}
@@ -3257,6 +3278,34 @@ func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowW
 		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
 		return nil
 	})
+}
+
+// SetReferenceSettings persists only the active workspace's [reference]
+// section. Unlike runtime settings, changing picker candidates does not require
+// rebuilding any controller; the next browser/search request reloads the
+// project configuration and constructs the matching filter.
+func (a *App) SetReferenceSettings(view ReferenceSettingsView) error {
+	patterns, err := fileref.NormalizeExcludePatterns(view.ExcludePatterns)
+	if err != nil {
+		return err
+	}
+	root, err := workspaceBaseFromRoot(a.activeWorkspaceRoot())
+	if err != nil {
+		return err
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	unlock, err := config.LockConfigFileEdits(projectPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := config.LoadForEditWithoutCredentialsReadOnlyStrict(projectPath)
+	if err != nil {
+		return err
+	}
+	cfg.Reference.FollowGitignore = view.FollowGitignore
+	cfg.Reference.ExcludePatterns = patterns
+	return cfg.SaveTo(projectPath)
 }
 
 // SetNetwork updates ordinary outbound proxy settings.

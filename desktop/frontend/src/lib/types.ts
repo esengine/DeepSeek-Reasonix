@@ -1101,6 +1101,12 @@ export interface DirEntry {
   displayPath?: string;
 }
 
+export interface FileRefInspection {
+  status: "found" | "directory" | "hidden" | "missing" | "outside" | "invalid" | string;
+  path: string;
+  isDir?: boolean;
+}
+
 export interface DroppedItem {
   kind: "workspace" | "attachment";
   path: string;
@@ -1548,7 +1554,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "reference" | "network" | "appearance" | "storage" | "updates";
 
 /** Extension runtime doctor report from App.RuntimeDoctor. */
 export interface RuntimeDoctorReport {
@@ -1877,6 +1883,13 @@ export interface SandboxView {
   effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
 }
 
+export interface ReferenceSettingsView {
+  followGitignore: boolean;
+  excludePatterns: string[];
+  workspaceRoot: string;
+  configPath: string;
+}
+
 export interface NetworkProxyView {
   type: string;
   server: string;
@@ -2146,6 +2159,7 @@ export interface SettingsView {
   providerPresets: ProviderPresetView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
+  reference: ReferenceSettingsView;
   network: NetworkView;
   agent: AgentView;
   bot: BotSettingsView;

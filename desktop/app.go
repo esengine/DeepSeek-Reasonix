@@ -10158,6 +10158,15 @@ type DirEntry struct {
 	DisplayPath string `json:"displayPath,omitempty"`
 }
 
+// FileRefInspection explains a manually typed @ path without changing the
+// existing resolver behavior. "hidden" means the picker filter hides it, not
+// that direct reference resolution is denied.
+type FileRefInspection struct {
+	Status string `json:"status"`
+	Path   string `json:"path"`
+	IsDir  bool   `json:"isDir,omitempty"`
+}
+
 // FilePreview is a bounded, read-only file payload for the workspace side panel.
 type FilePreview struct {
 	Path      string `json:"path"`
@@ -10254,6 +10263,22 @@ func skipWorkspaceEntry(rel, name string, isDir bool) bool {
 	return fileref.SkipEntry(workspaceEntryRel(rel, name), name, isDir)
 }
 
+func fileRefFilterForRoot(root string) fileref.Filter {
+	cfg, err := config.LoadForRootReadOnly(root)
+	if err != nil || cfg == nil {
+		filter, _ := fileref.NewFilter(root, fileref.FilterOptions{})
+		return filter
+	}
+	filter, err := fileref.NewFilter(root, fileref.FilterOptions{
+		FollowGitignore: cfg.Reference.FollowGitignore,
+		ExcludePatterns: cfg.Reference.ExcludePatterns,
+	})
+	if err != nil {
+		filter, _ = fileref.NewFilter(root, fileref.FilterOptions{})
+	}
+	return filter
+}
+
 func (a *App) activeWorkspaceBase() (string, error) {
 	return workspaceBaseFromRoot(a.activeWorkspaceRoot())
 }
@@ -10325,6 +10350,7 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	if err != nil {
 		return []DirEntry{}
 	}
+	filter := fileRefFilterForRoot(base)
 	dir := base
 	if rel != "" {
 		path, ok, err := workspacePathForBase(base, rel)
@@ -10340,7 +10366,7 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	dirs, files := []DirEntry{}, []DirEntry{}
 	for _, e := range es {
 		name := e.Name()
-		if skipWorkspaceEntry(rel, name, e.IsDir()) {
+		if filter.Skip(workspaceEntryRel(rel, name), name, e.IsDir()) {
 			continue
 		}
 		if e.IsDir() {
@@ -10358,6 +10384,44 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	return append(dirs, files...)
 }
 
+// InspectFileRefForTab checks a manually typed workspace path for completion
+// feedback. It is informational only; ResolveRefs keeps its historical direct
+// path behavior even when the status is "hidden".
+func (a *App) InspectFileRefForTab(tabID, rel string) FileRefInspection {
+	root, ctrl, ok := a.workspaceTargetForTab(tabID)
+	if !ok || externalFolderRefBrowserFromController(ctrl) != nil {
+		return FileRefInspection{Status: "invalid", Path: rel}
+	}
+	base, err := workspaceBaseFromRoot(root)
+	if err != nil || strings.TrimSpace(rel) == "" {
+		return FileRefInspection{Status: "invalid", Path: rel}
+	}
+	path, inside, err := workspacePathForBase(base, filepath.FromSlash(rel))
+	if err != nil || !inside {
+		return FileRefInspection{Status: "outside", Path: rel}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return FileRefInspection{Status: "missing", Path: filepath.ToSlash(rel)}
+		}
+		return FileRefInspection{Status: "invalid", Path: filepath.ToSlash(rel)}
+	}
+	relPath, err := filepath.Rel(base, path)
+	if err != nil {
+		return FileRefInspection{Status: "invalid", Path: filepath.ToSlash(rel)}
+	}
+	relPath = filepath.ToSlash(relPath)
+	filter := fileRefFilterForRoot(base)
+	if filter.Skip(relPath, info.Name(), info.IsDir()) {
+		return FileRefInspection{Status: "hidden", Path: relPath, IsDir: info.IsDir()}
+	}
+	if info.IsDir() {
+		return FileRefInspection{Status: "directory", Path: relPath, IsDir: true}
+	}
+	return FileRefInspection{Status: "found", Path: relPath}
+}
+
 // SearchFileRefs finds workspace files by basename for bare "@token" completion.
 func (a *App) SearchFileRefs(query string) []DirEntry {
 	return a.SearchFileRefsForTab("", query)
@@ -10373,7 +10437,8 @@ func (a *App) SearchFileRefsForTab(tabID, query string) []DirEntry {
 	if err != nil {
 		return []DirEntry{}
 	}
-	results := fileref.Search(base, query, fileRefSearchLimit)
+	filter := fileRefFilterForRoot(base)
+	results := fileref.SearchWithFilter(base, query, fileRefSearchLimit, filter)
 	out := make([]DirEntry, 0, len(results))
 	for _, r := range results {
 		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir})

@@ -59,6 +59,7 @@ import type {
   EffortInfo,
   ExtensionActionView,
   FilePreview,
+  FileRefInspection,
   ExternalOpenersView,
   HistoryMessage,
   HistoryPage,
@@ -103,6 +104,7 @@ import type {
   ProviderModelCatalogUpdate,
   ProviderPresetView,
   ProviderView,
+  ReferenceSettingsView,
   QuestionAnswer,
   ServerView,
   SessionMeta,
@@ -419,6 +421,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   PickPluginFolder(): Promise<string>;
+  PickReferenceFolder(): Promise<string>;
+  PickReferenceFile(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
   SetSkillPathEnabled(path: string, enabled: boolean): Promise<void>;
@@ -441,6 +445,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   ListDirForTab(tabID: string, rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
+  InspectFileRefForTab(tabID: string, path: string): Promise<FileRefInspection>;
   ReadFile(rel: string): Promise<FilePreview>;
   ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
   ResolveMarkdownImageForTab(tabID: string, source: string): Promise<MarkdownImageView>;
@@ -542,6 +547,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   ReloadSettings(): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
+  SetReferenceSettings(view: ReferenceSettingsView): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   SetBotConnectionToolApprovalMode(connID: string, mode: string): Promise<void>;
@@ -1690,6 +1696,7 @@ function makeMockApp(): AppBindings {
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
+    reference: { followGitignore: false, excludePatterns: [], workspaceRoot: cwd, configPath: `${cwd}/reasonix.toml` },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -3903,6 +3910,12 @@ function makeMockApp(): AppBindings {
     async PickPluginFolder() {
       return "~/plugins/superpowers";
     },
+    async PickReferenceFolder() {
+      return "node_modules";
+    },
+    async PickReferenceFile() {
+      return "package-lock.json";
+    },
     async AddSkillPath(path: string) {
       const dir = path.trim() || "~/my-skills";
       if (!capSkillRoots.some((r) => r.scope === "custom" && r.dir === dir)) {
@@ -4082,6 +4095,12 @@ function makeMockApp(): AppBindings {
     },
     async SearchFileRefsForTab(_tabID: string, query: string) {
       return this.SearchFileRefs(query);
+    },
+    async InspectFileRefForTab(_tabID: string, path: string) {
+      const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
+      const known = ["desktop/frontend/src/lib/bridge.ts", "internal/control/refs.go", "README.md", "go.mod"];
+      const found = known.includes(normalized);
+      return { status: found ? "found" : "missing", path: normalized, isDir: false } as FileRefInspection;
     },
     async ReadFile(rel: string) {
       return mockWorkspaceFile(rel);
@@ -4672,14 +4691,17 @@ function makeMockApp(): AppBindings {
       const k = list as "allow" | "ask" | "deny";
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
-        async ReloadSettings() {},
-        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
-          const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
-        },
-        async SetNetwork(n: NetworkView) {
-          settings.network = n;
-        },
+    async ReloadSettings() {},
+    async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
+      const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
+      settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
+    },
+    async SetReferenceSettings(view: ReferenceSettingsView) {
+      settings.reference = JSON.parse(JSON.stringify(view)) as ReferenceSettingsView;
+    },
+    async SetNetwork(n: NetworkView) {
+      settings.network = n;
+    },
         async SetBotSettings(b: BotSettingsView) {
           settings.bot = JSON.parse(JSON.stringify(b)) as BotSettingsView;
         },

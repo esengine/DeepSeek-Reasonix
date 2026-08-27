@@ -514,6 +514,20 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
 	b.WriteString("\n")
 
+	if scope != RenderScopeUser {
+		b.WriteString("[reference]\n")
+		b.WriteString("# Controls entries offered by the desktop @-file reference picker.\n")
+		b.WriteString("# These rules hide picker candidates only; a manually typed @path remains resolvable.\n")
+		b.WriteString("# follow_gitignore is opt-in and also reads .git/info/exclude and Git global excludes.\n")
+		fmt.Fprintf(&b, "follow_gitignore = %v\n", c.Reference.FollowGitignore)
+		if len(c.Reference.ExcludePatterns) > 0 {
+			fmt.Fprintf(&b, "exclude_patterns = %s\n", renderStringArray(c.Reference.ExcludePatterns))
+		} else {
+			b.WriteString("# exclude_patterns = [\"generated/**\", \"config.local.json\"]\n")
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("[statusline]\n")
 	b.WriteString("# A custom status line: a command whose first stdout line replaces the built-in\n")
 	b.WriteString("# data row. It receives {\"model\",\"contextUsed\",\"contextWindow\",\"cwd\"} as JSON on stdin.\n")
@@ -1205,6 +1219,18 @@ func RenderTOMLProjectDelta(c *Config) string {
 			b.WriteString(sandboxBuf.String())
 			b.WriteString("\n")
 		}
+	}
+
+	// [reference] — project-only @-file picker filtering.
+	if c.Reference.FollowGitignore || len(c.Reference.ExcludePatterns) > 0 {
+		b.WriteString("[reference]\n")
+		fmt.Fprintf(&b, "follow_gitignore = %v\n", c.Reference.FollowGitignore)
+		if len(c.Reference.ExcludePatterns) > 0 {
+			fmt.Fprintf(&b, "exclude_patterns = %s\n", renderStringArray(c.Reference.ExcludePatterns))
+		} else {
+			b.WriteString("exclude_patterns = []\n")
+		}
+		b.WriteString("\n")
 	}
 
 	// [statusline]
