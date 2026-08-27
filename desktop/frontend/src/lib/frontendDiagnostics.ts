@@ -12,7 +12,8 @@ import type { FrontendDiagnosticFields } from "./frontendDiagnosticBridge";
 
 export { isFrontendDiagnosticsBuild } from "./frontendDiagnosticsBuild";
 
-export const FRONTEND_DIAGNOSTIC_SCHEMA_VERSION = 1;
+export const FRONTEND_DIAGNOSTIC_SCHEMA_VERSION = 2;
+export const FRONTEND_DIAGNOSTIC_SUPPORTED_SCHEMA_VERSIONS = [1, 2] as const;
 export const MAX_FRONTEND_DIAGNOSTIC_EVENTS = 16_384;
 export const FRONTEND_DIAGNOSTIC_DURATION_MS = 120_000;
 
@@ -38,6 +39,7 @@ export type FrontendDiagnosticEvent = {
   previousMode?: string;
   owner?: string;
   writeKind?: string;
+  operation?: string;
   rowKind?: string;
   layoutVersion?: string;
   layoutVariant?: string;
@@ -46,6 +48,8 @@ export type FrontendDiagnosticEvent = {
   state?: string;
   errorName?: string;
   errorCode?: string;
+  direction?: string;
+  geometrySources?: string;
   width?: number;
   height?: number;
   x?: number;
@@ -132,6 +136,14 @@ export type FrontendDiagnosticEvent = {
   button?: number;
   modifiers?: number;
   intent?: number;
+  sequence?: number;
+  generation?: number;
+  geometryRevision?: number;
+  reverseDelta?: number;
+  extentDelta?: number;
+  footerHeight?: number;
+  waiting?: boolean;
+  corrected?: boolean;
 };
 
 export type FrontendDiagnosticAnomaly = {
@@ -184,14 +196,16 @@ const NUMBER_FIELDS = [
   "clientHeight", "bottomDistance", "mountedRows", "totalRows", "firstVisibleIndex", "firstVisibleTop",
   "rowIndex", "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "relativeError", "disclosureCount", "contentRevision", "tabCount", "patchCount", "button", "modifiers", "intent",
   "workspaceSessions", "visibleSessions", "hiddenSessions", "hiddenByFilter", "hiddenByCollapsed", "hiddenByTruncation", "runtimeSessions", "runtimeOnlySessions", "recoveryOnlySessions", "recoveryCopySessions", "recoveryCopies", "runningSessions", "unreadSessions", "pinnedSessions", "activeSessions", "activeVisibleSessions", "folderCount", "expandedFolders", "showAllFolders", "catalogRevision", "catalogIndexed", "catalogTotal", "repairPending", "treeRevision", "organizationRevision", "unloadedSessions", "deltaWorkspaceSessions", "deltaVisibleSessions", "deltaHiddenSessions", "deltaRecoveryCopies", "deltaRuntimeOnlySessions",
+  "sequence", "generation", "geometryRevision", "reverseDelta", "extentDelta", "footerHeight",
 ] as const;
 const BOOLEAN_FIELDS = [
   "hasActiveTab", "ready", "running", "hydrating", "runtimeTransitioning", "atBottom", "scrollable", "blank", "readerIntent", "canClaimTail", "substantial", "tailCommand", "isTrusted",
   "queryActive", "timeFilterActive", "catalogPartial", "catalogRebuilding",
+  "waiting", "corrected",
 ] as const;
 const STRING_FIELDS = [
   "source", "eventSource", "action", "target", "targetRole", "targetTag", "keyClass", "pointerType", "inputType", "visibility", "phase",
-  "reason", "status", "mode", "previousMode", "owner", "writeKind", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode",
+  "reason", "status", "mode", "previousMode", "owner", "writeKind", "operation", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode", "direction", "geometrySources",
   "directoryState", "changeReason", "outcome", "trigger", "scope", "variant", "timeFilter",
 ] as const;
 
@@ -262,6 +276,10 @@ function safeToken(value: unknown): string | undefined {
 
 function safeEventType(value: unknown): string {
   return safeToken(value) ?? "other";
+}
+
+export function isSupportedFrontendDiagnosticSchemaVersion(value: unknown): value is 1 | 2 {
+  return value === 1 || value === 2;
 }
 
 function normalizedPlatform(): FrontendDiagnosticEnvironment["platform"] {

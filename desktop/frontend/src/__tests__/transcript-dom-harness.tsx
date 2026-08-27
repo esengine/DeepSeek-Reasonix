@@ -166,10 +166,14 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     arg?: number | ScrollToOptions,
   ) {
     const max = Math.max(0, this.scrollHeight - this.clientHeight);
+    const previous = this.scrollTop;
     if (typeof arg === "number") {
       this.scrollTop = Math.max(0, Math.min(max, arg));
     } else if (arg && typeof arg.top === "number") {
       this.scrollTop = Math.max(0, Math.min(max, arg.top));
+    }
+    if (this.scrollTop !== previous) {
+      queueMicrotask(() => this.dispatchEvent(new this.ownerDocument.defaultView!.Event("scroll")));
     }
   };
   (proto as unknown as { scrollBy: (arg?: number | ScrollToOptions) => void }).scrollBy = function (
@@ -177,10 +181,14 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     arg?: number | ScrollToOptions,
   ) {
     const max = Math.max(0, this.scrollHeight - this.clientHeight);
+    const previous = this.scrollTop;
     if (typeof arg === "number") {
       this.scrollTop = Math.max(0, Math.min(max, this.scrollTop + arg));
     } else if (arg && typeof arg.top === "number") {
       this.scrollTop = Math.max(0, Math.min(max, this.scrollTop + arg.top));
+    }
+    if (this.scrollTop !== previous) {
+      queueMicrotask(() => this.dispatchEvent(new this.ownerDocument.defaultView!.Event("scroll")));
     }
   };
 

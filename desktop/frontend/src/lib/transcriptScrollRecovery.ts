@@ -28,6 +28,7 @@ export type TranscriptScrollArbiterRecoveryApi = {
 
 export type ActiveTranscriptRecovery = {
   id: number;
+  generation: number;
   spec: TranscriptRecoveryRequestSpec;
   anchor: TranscriptLayoutAnchor;
   retries: number;

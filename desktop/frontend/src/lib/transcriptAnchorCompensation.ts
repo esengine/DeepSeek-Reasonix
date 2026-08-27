@@ -14,6 +14,10 @@ import {
 const ANCHOR_COMPENSATION_BUDGET_MS = 1_000;
 const ANCHOR_COMPENSATION_STABLE_FRAMES = 2;
 const ANCHOR_COMPENSATION_TOLERANCE_PX = 1;
+// Large absolute offset corrections can land before Virtuoso commits the
+// replacement range and expose an unrelated viewport. Resolve those through
+// the still-mounted logical row instead; smaller drifts stay pixel-exact.
+const ANCHOR_COMPENSATION_INDEX_THRESHOLD_PX = 96;
 
 type ManualAnchor = Extract<TranscriptLayoutAnchor, { mode: "manual" }>;
 
@@ -131,7 +135,25 @@ export function createTranscriptAnchorCompensation({
       const correction = row.getBoundingClientRect().top - current.getBoundingClientRect().top - compensation.anchor.offset;
       if (Math.abs(correction) > ANCHOR_COMPENSATION_TOLERANCE_PX) {
         compensation.stableFrames = 0;
-        dispatch({ type: "SCROLL_TO_OFFSET", owner: "anchor-compensation", top: current.scrollTop + correction, behavior: "auto" });
+        const itemIndex = Number(row.dataset.itemIndex);
+        const anchor = Math.abs(correction) >= ANCHOR_COMPENSATION_INDEX_THRESHOLD_PX
+          && Number.isInteger(itemIndex)
+          ? { index: itemIndex, offset: -compensation.anchor.offset }
+          : undefined;
+        dispatch({
+          type: "SCROLL_TO_OFFSET",
+          owner: "anchor-compensation",
+          top: current.scrollTop + correction,
+          behavior: "auto",
+          anchor,
+        });
+        // One indexed request commits the logical row and native location as a
+        // single Virtuoso transaction. Replaying it each frame would create a
+        // second jump while the first range is still mounting.
+        if (anchor) {
+          active = null;
+          return;
+        }
       } else {
         compensation.stableFrames += 1;
       }

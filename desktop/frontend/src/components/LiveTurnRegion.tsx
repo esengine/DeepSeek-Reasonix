@@ -3,10 +3,10 @@
 // Virtuoso's measured size tree: unbounded, per-frame-growing content flows
 // right after the last history row in plain document flow, so streaming never
 // churns the list's measurements, anchors, or recovery machinery
-// (#8657/#8688). Virtuoso tracks the footer height itself and includes it in
-// totalListHeightChanged, which drives the scroll coordinator's tail-follow.
+// (#8657/#8688). Its ResizeObserver submits one coalesced geometry revision;
+// Virtuoso's totalListHeightChanged callback remains observation-only.
 
-import { memo, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { memo, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { TranscriptRow } from "../lib/transcriptRows";
 import { useT } from "../lib/i18n";
 import { useTick, workStatusLabel } from "../lib/workStatus";
@@ -33,6 +33,8 @@ export const LiveTurnRegion = memo(function LiveTurnRegion({
   tabId,
   scrollElement,
   onPointerDownCapture,
+  onGeometryChange,
+  handoff = false,
 }: {
   rows: readonly TranscriptRow[];
   renderRow: (row: TranscriptRow) => ReactNode;
@@ -42,20 +44,39 @@ export const LiveTurnRegion = memo(function LiveTurnRegion({
   tabId?: string;
   scrollElement: HTMLElement | null;
   onPointerDownCapture?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onGeometryChange?: () => void;
+  handoff?: boolean;
 }) {
   const overlayRevision = rows.map((row) => String(row.key)).join("|");
+  const regionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = regionRef.current;
+    if (!element || !onGeometryChange || typeof ResizeObserver === "undefined") return;
+    let previousHeight = element.getBoundingClientRect().height;
+    const observer = new ResizeObserver(() => {
+      const height = element.getBoundingClientRect().height;
+      if (Math.abs(height - previousHeight) <= 0.5) return;
+      previousHeight = height;
+      onGeometryChange();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onGeometryChange]);
   return (
     <div
-      className="transcript__live-region"
+      ref={regionRef}
+      className={`transcript__live-region${handoff ? " transcript__live-region--handoff" : ""}`}
       data-live-region="true"
+      data-live-handoff={handoff ? "true" : undefined}
+      aria-hidden={handoff || undefined}
       onPointerDownCapture={onPointerDownCapture}
     >
       <div className="transcript__live-content">
-        <TranscriptSelectionOverlay
+        {!handoff && <TranscriptSelectionOverlay
           tabId={tabId ?? ""}
           scrollElement={scrollElement}
           virtualRevision={overlayRevision}
-        />
+        />}
         {rows.map((row) => (
           <div key={String(row.key)} className="transcript__row" data-row-key={String(row.key)}>
             {renderRow(row)}

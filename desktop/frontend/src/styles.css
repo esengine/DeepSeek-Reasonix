@@ -3440,9 +3440,11 @@ a[href] {
 .transcript {
   /* Virtuoso sizes rows from the scroller clientWidth (padding included) but
      lays them out in the content box. Horizontal padding here therefore makes
-     right-aligned bubbles extend under the workspace dock. Keep only vertical
-     inset on the scroller; rows own --transcript-inline-pad. */
+     right-aligned bubbles extend under the workspace dock. Rows own the inline
+     inset, while the trailing inset lives in Virtuoso's measured Footer so it
+     remains part of the reachable range in every WebView engine. */
   --transcript-inline-pad: 32px;
+  --transcript-bottom-inset: 32px;
   position: relative;
   /* Virtuoso owns the logical anchor. Browser scroll anchoring reacts to
      asynchronous Markdown boxes before Virtuoso receives their size and can
@@ -3453,7 +3455,7 @@ a[href] {
   overflow-y: overlay;
   overflow-x: hidden;
   scrollbar-gutter: stable both-edges;
-  padding: 24px 0 32px;
+  padding: 24px 0 0;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
@@ -3506,10 +3508,9 @@ a[href] {
   .transcript-navigation-overlay__spinner { animation: none; }
 }
 /* The active turn streams as the virtual list's in-flow Footer: inside the
-/* The active turn streams as the virtual list's in-flow Footer: inside the
-   scroller, right after the last history row, but outside Virtuoso's
-   measured size tree — unbounded growth never reaches the list's anchors or
-   recovery machinery (#8657/#8688). */
+   scroller, right after the last history row, while its ResizeObserver emits
+   coalesced geometry revisions instead of tail writes from list-height
+   feedback (#8657/#8688). */
 .transcript__live-region {
   position: relative;
   width: 100%;
@@ -3517,6 +3518,21 @@ a[href] {
 .transcript__live-content {
   position: relative;
   width: 100%;
+}
+.transcript__live-region--handoff {
+  position: absolute;
+  z-index: var(--z-inline-sticky);
+  inset-inline: 0;
+  bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-height: calc(100% - 56px);
+  overflow: hidden;
+  pointer-events: none;
+}
+.transcript__live-region--handoff > .transcript__live-content {
+  flex: 0 0 auto;
 }
 .transcript__live-status {
   display: flex;
@@ -3587,6 +3603,15 @@ a[href] {
   max-width: var(--maxw);
   margin-left: auto;
   margin-right: auto;
+}
+.transcript__bottom-spacer {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--transcript-bottom-inset, 32px);
+  pointer-events: none;
+}
+.transcript__footer {
+  width: 100%;
 }
 .transcript__older-status {
   display: flex;
@@ -15679,7 +15704,8 @@ body > .mermaid-diagram--fullscreen {
 }
 .history-preview__body .transcript {
   --transcript-inline-pad: 14px;
-  padding: 14px 0 18px;
+  --transcript-bottom-inset: 18px;
+  padding: 14px 0 0;
 }
 .history-preview__body .transcript > * {
   max-width: none;
@@ -22084,7 +22110,8 @@ body > .mermaid-diagram--fullscreen {
   }
   .transcript {
     --transcript-inline-pad: 16px;
-    padding: 18px 0 28px;
+    --transcript-bottom-inset: 28px;
+    padding: 18px 0 0;
   }
   .jump-bar {
     display: none;
@@ -27084,6 +27111,15 @@ body > .mermaid-diagram--fullscreen {
   overscroll-behavior: contain;
 }
 
+/* The virtual transcript can replace its native extent between adjacent
+   paints. Local rubber-band is therefore not merely decorative: WKWebView can
+   expose an out-of-range blank viewport and then visibly snap back when the
+   Virtuoso range commits. Keep containment on ordinary panels, but make the
+   transcript boundary strict. */
+.transcript {
+  overscroll-behavior: none;
+}
+
 /* Disable cross-document view transitions — the webview has no navigation. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -27672,7 +27708,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .transcript {
-  padding: 24px 0 28px;
+  --transcript-bottom-inset: 28px;
+  padding: 24px 0 0;
 }
 
 .transcript > * {
@@ -28959,7 +28996,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .transcript {
-  padding: 24px 0 28px;
+  --transcript-bottom-inset: 28px;
+  padding: 24px 0 0;
 }
 
 :root[data-theme-style] .transcript--empty {
@@ -29564,6 +29602,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .history-preview__body .transcript {
   --transcript-inline-pad: 14px;
+  --transcript-bottom-inset: 0px;
   padding: 14px 0;
 }
 

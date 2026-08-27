@@ -9,7 +9,10 @@
 import { createTranscriptHarness } from "./transcript-dom-harness";
 import { QUESTION_JUMP_MAX_MARKERS } from "../components/QuestionJumpBar";
 import type { Item } from "../lib/useController";
+import type { TranscriptScrollWriteRecord } from "../lib/transcriptScrollProbe";
 import { act } from "react";
+import { unloadedQuestionJumpReplay } from "./transcript-diagnostic-replay.fixtures";
+import { settleQuestionJumpSurfaceState } from "../lib/useTranscriptQuestionNavigation";
 
 let passed = 0;
 let failed = 0;
@@ -23,6 +26,12 @@ function ok(condition: unknown, label: string) {
     failed += 1;
   }
 }
+
+let pendingSurface: { token: number } | null = { token: 2 };
+pendingSurface = settleQuestionJumpSurfaceState(pendingSurface, 1, null);
+ok(pendingSurface?.token === 2, "a superseded question-jump completion cannot release the latest mask");
+pendingSurface = settleQuestionJumpSurfaceState(pendingSurface, 2, null);
+ok(pendingSurface === null, "the matching question-jump paint terminal releases its own mask");
 
 function turns(count: number, prefix = ""): Item[] {
   const items: Item[] = [];
@@ -373,6 +382,126 @@ console.log("\ntranscript question jump landing");
       "the newly loaded question to land in the viewport",
     );
     ok(Boolean(harness.container.querySelector("#question-anchor-history-u11")), "an unloaded marker loads and lands on the selected question");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Field replay: 434 → 847 → 994 rows stays masked and lands once ─────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    HTMLElement.prototype.scrollIntoView = () => {};
+    const replay = unloadedQuestionJumpReplay;
+    const requestedTurns: Array<number | undefined> = [];
+    const writes: TranscriptScrollWriteRecord[] = [];
+    harness.dom.window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => writes.push(write);
+    const resolveLoads: Array<(loaded: boolean) => void> = [];
+    const onLoadOlderHistory = (targetTurn?: number) => {
+      requestedTurns.push(targetTurn);
+      return new Promise<boolean>((resolve) => { resolveLoads.push(resolve); });
+    };
+    const renderWindow = async (index: number, loadingOlderHistory: boolean) => {
+      const window = replay.windows[index];
+      await harness.render(historyTurns(window.firstTurn, window.lastTurn), {
+        running: false,
+        questionNavigator: true,
+        hasOlderHistory: window.hasOlderHistory,
+        loadingOlderHistory,
+        historyStartTurn: window.firstTurn,
+        historyTotalTurns: replay.totalTurns,
+        onLoadOlderHistory,
+      });
+      ok(
+        Number(harness.scrollElement().dataset.transcriptRowCount) === window.rowCount,
+        `field replay commits its ${window.rowCount}-row history window`,
+      );
+    };
+
+    await renderWindow(0, false);
+    await harness.settle();
+    const jumpScroll = stubRailGeometry(harness.container, QUESTION_JUMP_MAX_MARKERS);
+    await act(async () => {
+      jumpScroll.dispatchEvent(new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientY: railClientY(replay.targetTurn, replay.totalTurns),
+      }));
+    });
+    await harness.waitFor(
+      () => requestedTurns.includes(replay.requestedTurn),
+      "the field replay target page request",
+    );
+    await harness.flush();
+    ok(requestedTurns.length === 1, "the pending-jump effect cannot duplicate the in-flight targeted request");
+    ok(Boolean(harness.container.querySelector("[data-question-jump-mask='true']")), "the unloaded target is masked before history mutates");
+    ok(writes.filter((write) => write.owner === "jump").length === 0, "no intermediate jump is emitted for the 434-row window");
+
+    await renderWindow(1, true);
+    ok(Boolean(harness.container.querySelector("[data-question-jump-mask='true']")), "the 847-row intermediate window remains behind the mask");
+    ok(writes.filter((write) => write.owner === "jump").length === 0, "the intermediate prepend emits no target jump");
+
+    await act(async () => resolveLoads[0]?.(true));
+    await renderWindow(1, false);
+    await harness.waitFor(
+      () => requestedTurns.length === 2 && requestedTurns[1] === replay.requestedTurn,
+      "the second targeted page request",
+    );
+    await renderWindow(1, true);
+    ok(Boolean(harness.container.querySelector("[data-question-jump-mask='true']")), "the second targeted request still exposes no intermediate surface");
+
+    await act(async () => resolveLoads[1]?.(true));
+    await renderWindow(2, false);
+    await harness.waitFor(
+      () => !harness.container.querySelector("[data-question-jump-mask='true']"),
+      "the final question-jump paint commit",
+    );
+    const jumpWrites = writes.filter((write) => write.owner === "jump");
+    ok(requestedTurns.length === 2, "the replay performs only the two required targeted page requests");
+    ok(jumpWrites.length === 1, "the 434→847→994 replay emits exactly one final jump");
+    ok(Boolean(harness.container.querySelector("#question-anchor-history-u1")), "the single final jump mounts the requested question");
+  } finally {
+    harness.dom.window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── A rejected targeted request cannot strand the opaque surface ───────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    let attempts = 0;
+    await harness.render(historyTurns(81, 100), {
+      running: false,
+      questionNavigator: true,
+      hasOlderHistory: true,
+      historyStartTurn: 81,
+      historyTotalTurns: 100,
+      onLoadOlderHistory: async () => {
+        attempts += 1;
+        return false;
+      },
+    });
+    await harness.settle();
+    const jumpScroll = stubRailGeometry(harness.container, 100);
+    await act(async () => {
+      jumpScroll.dispatchEvent(new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientY: railClientY(10, 100),
+      }));
+    });
+    await harness.waitFor(() => attempts === 1, "the rejected targeted request");
+    await harness.waitFor(
+      () => !harness.container.querySelector("[data-question-jump-mask='true']"),
+      "the rejected targeted request to release its mask",
+    );
+    ok(attempts === 1, "a rejected targeted request is not retried as a paging cascade");
+    ok(!harness.container.querySelector("[data-question-jump-mask='true']"), "a rejected targeted request cannot leave permanent loading");
   } finally {
     await harness.unmount();
     await harness.close();

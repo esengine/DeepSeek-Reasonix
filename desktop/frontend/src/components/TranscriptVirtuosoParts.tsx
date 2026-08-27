@@ -1,4 +1,4 @@
-import { forwardRef, memo, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useContext, useEffect } from "react";
+import { forwardRef, memo, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useContext, useEffect, useRef } from "react";
 import { type Components, type ItemProps, type ListProps } from "react-virtuoso";
 import { Loader2, RotateCcw } from "lucide-react";
 import type { TranscriptEstimateSource, TranscriptGeometryEnvironment, TranscriptRowLayoutVariant } from "../lib/transcriptRowGeometry";
@@ -20,7 +20,6 @@ export const SHOW_SCROLL_DIAGNOSTICS = typeof __BUILD_CHANNEL__ === "undefined"
 export type TranscriptVirtuosoContext = {
   tabId?: string;
   scrollElement: HTMLDivElement | null;
-  nativeScrollbarDragging: boolean;
   overlayRevision: string;
   geometryEnvironment: TranscriptGeometryEnvironment;
   rowGeometry: {
@@ -35,7 +34,9 @@ export type TranscriptVirtuosoContext = {
     showStatus: boolean;
     turnStartAt?: number;
     onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+    onGeometryChange: () => void;
   };
+  onFooterGeometryChange: () => void;
   olderHistory: null | {
     loading: boolean;
     error?: string;
@@ -85,7 +86,6 @@ export const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<Trans
     useEffect(() => {
       if (entryId) getTranscriptStore().requestEntryFullContent(context.tabId, entryId);
     }, [context.tabId, entryId]);
-    const knownSize = Number.parseFloat(String(props["data-known-size"] ?? ""));
     const rowIndex = context.rowGeometry.rowIndexByKey.get(String(item.key)) ?? Number.NaN;
     const estimatedSize = Number.isInteger(rowIndex) && rowIndex >= 0 ? context.rowGeometry.heightEstimates[rowIndex] : undefined;
     const estimateSource = Number.isInteger(rowIndex) && rowIndex >= 0 ? context.rowGeometry.estimateSources[rowIndex] : undefined;
@@ -100,12 +100,9 @@ export const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<Trans
           "data-estimate-source": estimateSource,
         }
       : {};
-    const frozenStyle = context.nativeScrollbarDragging && Number.isFinite(knownSize) && knownSize > 0
-      ? { ...style, boxSizing: "border-box" as const, height: knownSize, overflow: "hidden" as const }
-      : style;
     const geometryStyle = Number.isFinite(rowEstimate) && (rowEstimate ?? 0) > 0
-      ? { ...frozenStyle, "--transcript-row-estimate": `${rowEstimate}px` } as CSSProperties
-      : frozenStyle;
+      ? { ...style, "--transcript-row-estimate": `${rowEstimate}px` } as CSSProperties
+      : style;
     return (
       <div
         {...props}
@@ -147,8 +144,29 @@ function TranscriptVirtuosoHeader({ context }: { context: TranscriptVirtuosoCont
 
 function TranscriptVirtuosoFooter({ context }: { context: TranscriptVirtuosoContext }) {
   const live = context.liveRegion;
-  if (!live || (live.rows.length === 0 && !live.showStatus)) return null;
-  return <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} />;
+  const showLive = live && (live.rows.length > 0 || live.showStatus);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    const element = root?.parentElement ?? root;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    let previousHeight = element.getBoundingClientRect().height;
+    const observer = new ResizeObserver(() => {
+      const height = element.getBoundingClientRect().height;
+      if (Math.abs(height - previousHeight) <= 0.5) return;
+      previousHeight = height;
+      context.onFooterGeometryChange();
+    });
+    // Observe Virtuoso's footer wrapper as well as the live child. This covers
+    // delayed WebView layout and any footer child whose size changes outside
+    // React's render pass; both signals enter the same coalesced controller.
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [context.onFooterGeometryChange]);
+  return <div ref={rootRef} className="transcript__footer">
+    {showLive && <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} onGeometryChange={live.onGeometryChange} />}
+    <div className="transcript__bottom-spacer" aria-hidden="true" />
+  </div>;
 }
 
 export const TRANSCRIPT_VIRTUOSO_COMPONENTS: Components<TranscriptRow, TranscriptVirtuosoContext> = {

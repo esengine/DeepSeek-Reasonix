@@ -92,10 +92,18 @@ function firstTextNode(root: Node): Text | null {
     // before taking manual control of the scroll position.
     await harness.settle();
     const el = harness.scrollElement();
+    // Match a reader leaving the tail (wheel-up), then wait for that gesture
+    // transaction and any already-issued Virtuoso LAST request to settle.
+    // Establish the prepend position only after manual ownership is stable so
+    // this block tests prepend anchoring rather than initial-tail handoff.
     el.scrollTop = 2000;
-    // Match a reader leaving the tail (wheel-up). A raw scrollTop write leaves
-    // the pin set, and a later LAST/undershoot path would snap back to bottom.
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, bubbles: true }));
+    dispatchScroll(el);
+    await harness.waitFor(
+      () => el.dataset.scrollMode === "manual",
+      "the reader transaction to settle before history prepends",
+    );
+    el.scrollTop = 2000;
     dispatchScroll(el);
     await harness.flush();
     const before = el.scrollTop;
@@ -109,9 +117,13 @@ function firstTextNode(root: Node): Text | null {
     ok(anchorIdBefore != null && absoluteIndexBefore != null, "found a stable mounted anchor row before the prepend");
     // Prepend five older turns (15 rows) — the reading position must follow
     // the anchor row, not the row index.
-    await harness.render([...turns(5, "old-"), ...turns(20)], { running: false });
+    await harness.render([...turns(5, "old-"), ...turns(20)], {
+      running: false,
+      historyMutation: { seq: 1, kind: "prepend" },
+    });
     await harness.waitFor(
-      () => anchorIdBefore != null && harness.container.querySelector(`#${anchorIdBefore}`) !== null,
+      () => anchorIdBefore != null
+        && harness.container.querySelector(`#${anchorIdBefore}`) !== null,
       "the pre-prepend anchor row to remount",
     );
     const delta = el.scrollTop - before;
@@ -444,6 +456,10 @@ function firstTextNode(root: Node): Text | null {
     const list = harness.container.querySelector<HTMLElement>('[data-testid="virtuoso-item-list"]');
     ok(list != null, "short transcript mounts the Virtuoso item list");
     ok(list?.style.marginTop !== "auto", `short content is not bottom-shifted (marginTop=${JSON.stringify(list?.style.marginTop ?? null)})`);
+    ok(
+      harness.container.querySelector(".transcript__bottom-spacer") != null,
+      "the trailing inset remains inside Virtuoso's measured footer",
+    );
   } finally {
     await harness.unmount();
     await harness.close();

@@ -99,6 +99,7 @@ ok(await staleAcceptedPromise === false, "a stale backend-activating result is r
 ok(reasserted === "tab.reveal-background:tab-stale", "stale reassertion receives the mutating target identity");
 
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const transcriptSource = readFileSync(new URL("../components/Transcript.tsx", import.meta.url), "utf8");
 const surfaceHookSource = readFileSync(new URL("../lib/useNavigationSurface.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 ok(surfaceHookSource.includes("flushSync(() => {"), "navigation masking commits synchronously before the Wails await");
@@ -106,6 +107,11 @@ ok(surfaceHookSource.includes("setPreserved(rendered?.items.length ? rendered : 
 ok(appSource.includes("items={visibleTranscriptItems}"), "the visible transcript is decoupled from the hydrating target");
 ok(appSource.includes("transcript-navigation-overlay"), "navigation renders a blocking transcript overlay");
 ok(/\.transcript-navigation-overlay\s*\{[\s\S]*?background:\s*var\(--chat-bg, var\(--bg\)\)/.test(stylesSource), "the navigation overlay is opaque while target rows settle");
+ok(
+  transcriptSource.includes('className="transcript-navigation-overlay transcript-question-jump-overlay"')
+    && transcriptSource.includes('data-question-jump-mask="true"'),
+  "unloaded question jumps reuse the opaque navigation mask until final paint readiness",
+);
 ok(appSource.includes("live={runtimeTransitioning ? undefined : state.live}"), "App removes source live output during navigation");
 ok(appSource.includes("composer-decision-host--footprint-hidden"), "App preserves the composer footprint during navigation");
 ok(!appSource.includes("hidden={composerSurfaceHidden || undefined}"), "navigation no longer collapses the composer footprint");

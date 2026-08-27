@@ -16,7 +16,10 @@ export type TranscriptScrollDiagnosticSource =
   | "user-scroll-intent"
   | "manual-reading"
   | "reader-intent-ended"
+  | "native-scrollbar-begin"
+  | "native-scrollbar-end"
   | "scroll-delivered"
+  | "geometry-changed"
   | "tail-content-changed"
   | "content-shrank"
   | "layout-height-changed"
@@ -46,7 +49,10 @@ function sourceForEvent(event: TranscriptScrollEvent["type"]): TranscriptScrollD
     case "USER_SCROLL_INTENT": return "user-scroll-intent";
     case "MANUAL_READING": return "manual-reading";
     case "READER_INTENT_ENDED": return "reader-intent-ended";
+    case "NATIVE_SCROLLBAR_BEGIN": return "native-scrollbar-begin";
+    case "NATIVE_SCROLLBAR_END": return "native-scrollbar-end";
     case "SCROLL_DELIVERED": return "scroll-delivered";
+    case "GEOMETRY_CHANGED": return "geometry-changed";
     case "TAIL_CONTENT_CHANGED": return "tail-content-changed";
     case "CONTENT_SHRANK": return "content-shrank";
     case "LAYOUT_HEIGHT_CHANGED": return "layout-height-changed";
@@ -71,9 +77,9 @@ export function recordTranscriptScrollTransition(
   nextState: TranscriptScrollState,
   commands: readonly TranscriptScrollCommand[],
   element: { scrollTop: number; scrollHeight: number; clientHeight: number } | null,
-): TranscriptScrollDiagnosticSource | undefined {
-  if (!CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS) return undefined;
+): TranscriptScrollDiagnosticSource {
   const source = sourceForEvent(event.type);
+  if (!CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS) return source;
   const tailCommand = commands.some((command) => command.type === "AUTOSCROLL_TO_BOTTOM" || command.type === "SCROLL_TO_LAST");
   const stateChanged = previousState.mode !== nextState.mode
     || previousState.atBottom !== nextState.atBottom

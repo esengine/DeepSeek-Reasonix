@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import {
   createTranscriptScrollDiagnostics,
+  isSupportedTranscriptScrollDiagnosticSchemaVersion,
   isTranscriptScrollDiagnosticsBuild,
 } from "../lib/transcriptScrollDiagnostics";
 
@@ -184,12 +185,36 @@ detailDiagnostics.record("scroll-state", {
 detailDiagnostics.record("scroll-write", {
   owner: "tail-follow",
   writeKind: "scrollTo",
+  operation: "scrollTo",
   source: "jump-bottom",
   phase: "settle",
   targetTop: 5_000,
   settleFrame: 2,
   offBottomFrames: 2,
   stagnantFrames: 0,
+  sequence: 7,
+  generation: 3,
+  geometryRevision: 18,
+});
+detailDiagnostics.record("geometry-revision", {
+  source: "geometry-changed",
+  geometrySources: "live-footer:row-measure",
+  geometryRevision: 18,
+  scrollHeight: 24_627,
+  clientHeight: 778,
+  footerHeight: 1_240,
+  mountedRows: 22,
+  totalRows: 418,
+});
+detailDiagnostics.record("scroll-anomaly", {
+  source: "reader-gesture",
+  owner: "reader-stability",
+  direction: "down",
+  reverseDelta: 1_949.33,
+  extentDelta: -2_485,
+  waiting: true,
+  corrected: false,
+  rowKey: "PRIVATE_ANOMALY_ROW",
 });
 const detailPayload = detailDiagnostics.stop();
 const rowMeasurement = detailPayload.events.find((event) => event.type === "row-measure");
@@ -222,14 +247,22 @@ assert.deepEqual(geometryViolation, {
   estimateSource: "static",
 });
 const detailSerialized = JSON.stringify(detailPayload);
+assert.equal(detailPayload.events.some((event) => event.type === "geometry-revision" && event.geometrySources === "live-footer:row-measure"), true,
+  "v2 preserves the coalesced geometry source set");
+assert.equal(detailPayload.events.some((event) => event.type === "scroll-anomaly" && event.owner === "reader-stability" && event.direction === "down"), true,
+  "v2 preserves content-free reader anomaly ownership");
 assert.equal(detailSerialized.includes("PRIVATE_ROW_KEY"), false, "row measurements exclude stable row keys");
 assert.equal(detailSerialized.includes("PRIVATE_TRANSCRIPT_CANARY"), false, "row measurements exclude transcript text");
 assert.equal(detailSerialized.includes("PRIVATE_ROW_KEY_2"), false, "geometry violations exclude stable row keys");
+assert.equal(detailSerialized.includes("PRIVATE_ANOMALY_ROW"), false, "reader anomalies exclude stable row keys");
 
 assert.equal(isTranscriptScrollDiagnosticsBuild("test", false), true, "test builds expose diagnostics");
 assert.equal(isTranscriptScrollDiagnosticsBuild("preview", false), true, "preview builds expose diagnostics");
 assert.equal(isTranscriptScrollDiagnosticsBuild("canary", false), true, "canary builds expose diagnostics");
 assert.equal(isTranscriptScrollDiagnosticsBuild("stable", true), true, "development server exposes diagnostics");
 assert.equal(isTranscriptScrollDiagnosticsBuild("stable", false), false, "stable production hides diagnostics");
+assert.equal(isSupportedTranscriptScrollDiagnosticSchemaVersion(1), true, "v1 scroll diagnostics remain readable");
+assert.equal(isSupportedTranscriptScrollDiagnosticSchemaVersion(2), true, "v2 scroll diagnostics are readable");
+assert.equal(isSupportedTranscriptScrollDiagnosticSchemaVersion(3), false, "future scroll schemas remain rejected");
 
 console.log("transcript scroll diagnostics tests passed");

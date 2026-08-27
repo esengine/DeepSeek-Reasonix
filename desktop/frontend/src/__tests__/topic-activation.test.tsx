@@ -149,6 +149,8 @@ let eagerActivationEvents = false;
 let failedHistoryTabId = "";
 let failSetActiveTabId = "";
 let restoredTabSeq = 0;
+let pendingTabListGate: Promise<void> | undefined;
+let resumeTabList: (() => void) | undefined;
 
 function emitActivation(event: TopicActivationEvent): void {
   for (const handler of topicActivationHandlers) handler(event);
@@ -177,7 +179,10 @@ window.runtime = {
 window.go = {
   main: {
     App: {
-      ListTabs: async () => Array.from(tabsById.values()).map((tab) => ({ ...tab, active: tab.id === backendActiveId })),
+      ListTabs: async () => {
+        if (pendingTabListGate) await pendingTabListGate;
+        return Array.from(tabsById.values()).map((tab) => ({ ...tab, active: tab.id === backendActiveId }));
+      },
       MetaForTab: async (tabID: string) => metaFor(tabsById.get(tabID) ?? tabA),
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
@@ -342,6 +347,7 @@ await act(async () => {
   await controller?.activateTopic("project", tabR.workspaceRoot, tabR.topicId ?? "");
   await flushPromises();
 });
+pendingTabListGate = new Promise<void>((resolve) => { resumeTabList = resolve; });
 await act(async () => {
   emitActivation({ requestId: requestIdByTab.get("tab-r") ?? "", tabId: "tab-r", phase: "ready" });
   await flushPromises();
@@ -385,6 +391,11 @@ await waitFor("switch-back restores the thinking transcript", () =>
 eq(controller?.state.running, true, "switch-back keeps the composer in the live turn");
 eq(controller?.state.items.some((item) => item.kind === "user" && item.text === "history tab-b") ?? false, false, "switch-back does not keep the other session as the visible transcript");
 eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "switch-back clears the foreign placeholder after live history lands");
+await act(async () => {
+  pendingTabListGate = undefined;
+  resumeTabList?.();
+  await flushPromises();
+});
 
 await act(async () => {
   root.unmount();

@@ -168,7 +168,7 @@ export function useTranscriptLayoutIntegrity({
   const safeMode = resetEpoch < 0 && recoveryBudgetRef.current[1] === 2;
   const firstItemIndex = useTranscriptVirtuosoFirstItemIndex(rows, resetKey);
   const pendingAnchor = pendingAnchorRef.current?.surfaceKey === surfaceKey ? pendingAnchorRef.current.anchor : undefined;
-  const restoreLocation = transcriptAnchorInitialLocation(pendingAnchor, rowIndexByKey, firstItemIndex);
+  const restoreLocation = transcriptAnchorInitialLocation(pendingAnchor, rowIndexByKey);
   // A usable snapshot outranks restoreLocation: Virtuoso pipes restoreStateFrom
   // into the same initial-location stream, so the two never apply together.
   const restoreSnapshot = useMemo(
@@ -209,14 +209,10 @@ export function useTranscriptLayoutIntegrity({
     retryWhenIdle();
   }, [retryRecoveryRequest]);
 
-  // Hands the pending rebuild anchor to the arbiter, which owns the actual
-  // aim/settle writes and the request's terminal state from here on.
-  const submitAnchorRecovery = useCallback((anchor: TranscriptLayoutAnchor) => {
-    if (pendingAnchorRef.current?.surfaceKey !== surfaceKey) return;
-    pendingAnchorRef.current = null;
+  const recoverAnchor = useCallback((anchor: TranscriptLayoutAnchor) => {
     const id = submitRecoveryRequest({
       anchor,
-      locate: (current) => transcriptAnchorInitialLocation(current, rowIndexByKey, firstItemIndex),
+      locate: (current) => transcriptAnchorInitialLocation(current, rowIndexByKey),
       captureUserAnchor,
       onSettle: () => {
         activeRecoveryIdRef.current = null;
@@ -238,7 +234,15 @@ export function useTranscriptLayoutIntegrity({
       },
     });
     activeRecoveryIdRef.current = id;
-  }, [armSuspendedRecoveryRetry, captureUserAnchor, clearSuspendedRecovery, firstItemIndex, rowIndexByKey, submitRecoveryRequest, surfaceKey]);
+  }, [armSuspendedRecoveryRetry, captureUserAnchor, clearSuspendedRecovery, rowIndexByKey, submitRecoveryRequest]);
+
+  // Hands the pending rebuild anchor to the arbiter, which owns the actual
+  // aim/settle writes and the request's terminal state from here on.
+  const submitAnchorRecovery = useCallback((anchor: TranscriptLayoutAnchor) => {
+    if (pendingAnchorRef.current?.surfaceKey !== surfaceKey) return;
+    pendingAnchorRef.current = null;
+    recoverAnchor(anchor);
+  }, [recoverAnchor, surfaceKey]);
 
   const scheduleBlankViewportCheck = useCallback(() => {
     if (
@@ -370,6 +374,7 @@ export function useTranscriptLayoutIntegrity({
     invalidateAnchors,
     noteUserScrollIntent,
     noteScrollActivity,
+    recoverAnchor,
     safeMode,
   };
 }

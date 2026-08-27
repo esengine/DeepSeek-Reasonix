@@ -66,13 +66,12 @@ check(
 const location = transcriptAnchorInitialLocation(
   visibleAnchor,
   new Map([["visible", 7]]),
-  1_000_000,
 );
 check(
-  typeof location === "object" && location.index === 1_000_007 && location.align === "start" && location.offset === 30,
-  "manual anchor becomes an absolute Virtuoso restore location",
+  typeof location === "object" && location.index === 7 && location.align === "start" && location.offset === 30,
+  "manual anchor becomes a zero-based Virtuoso restore location",
 );
-const tailLocation = transcriptAnchorInitialLocation({ mode: "tail" }, new Map(), 1_000_000);
+const tailLocation = transcriptAnchorInitialLocation({ mode: "tail" }, new Map());
 check(
   typeof tailLocation === "object" && tailLocation.index === "LAST" && tailLocation.align === "end",
   "tail recovery remains pinned to the last row",

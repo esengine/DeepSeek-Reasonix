@@ -3,6 +3,7 @@ import {
   analyzeFrontendDiagnosticAnomalies,
   createFrontendDiagnostics,
   isFrontendDiagnosticsBuild,
+  isSupportedFrontendDiagnosticSchemaVersion,
 } from "../lib/frontendDiagnostics";
 
 let now = 10_000;
@@ -54,6 +55,7 @@ diagnostics.record("transcript", "transcript.scroll-write", {
   source: "recovery-end",
   owner: "recovery",
   writeKind: "scrollToIndex",
+  operation: "scrollToIndex",
   targetIndex: "LAST",
   targetTop: 720,
   previousMode: "manual",
@@ -69,6 +71,7 @@ diagnostics.record("transcript", "transcript.scroll-write", {
   source: "recovery-end",
   owner: "recovery",
   writeKind: "scrollToIndex",
+  operation: "scrollToIndex",
   targetIndex: "LAST",
   targetTop: 720,
 });
@@ -92,6 +95,26 @@ diagnostics.record("workspace", "workspace.session-directory", {
   topicId: "private-topic-id",
   label: "PRIVATE_TITLE",
 });
+diagnostics.record("transcript", "transcript.geometry-revision", {
+  source: "live-footer:row-measure",
+  geometrySources: "live-footer:row-measure",
+  geometryRevision: 18,
+  scrollHeight: 24_627,
+  clientHeight: 778,
+  footerHeight: 1_240,
+  mountedRows: 22,
+  totalRows: 418,
+  transcriptText: "PRIVATE_TRANSCRIPT",
+});
+diagnostics.record("transcript", "transcript.scroll-anomaly", {
+  source: "reader-gesture",
+  direction: "down",
+  reverseDelta: 1_949.33,
+  extentDelta: -2_485,
+  waiting: true,
+  corrected: false,
+  rowKey: "PRIVATE_ROW_KEY",
+});
 
 const active = diagnostics.getSnapshot();
 assert.equal(active.status, "recording");
@@ -100,7 +123,7 @@ assert.ok(active.droppedEventCount > 0, "overflow is visible in the summary");
 assert.equal(active.markerCount, 0, "evicted markers are not counted as retained");
 
 const payload = diagnostics.stop();
-assert.equal(payload.schemaVersion, 1);
+assert.equal(payload.schemaVersion, 2);
 assert.equal(payload.manifest.platform, "windows");
 assert.equal(payload.events[payload.events.length - 1]?.type, "stop");
 const serialized = JSON.stringify(payload);
@@ -114,7 +137,13 @@ assert.equal(serialized.includes("estimateSource"), true, "height estimate sourc
 assert.equal(serialized.includes("workspace.session-directory"), true, "sidebar directory event remains available for analysis");
 assert.equal(serialized.includes("workspaceSessions"), true, "sidebar session counts remain available for analysis");
 assert.ok(Array.isArray(payload.summary.anomalies), "payload includes automatic anomaly analysis");
-for (const forbidden of ["PRIVATE_TEXT", "PRIVATE_TOKEN", "private-user", "private-tab", "path", "token", "tabId"]) {
+assert.equal(serialized.includes("transcript.geometry-revision"), true, "v2 retains coalesced geometry revisions");
+assert.equal(serialized.includes("transcript.scroll-anomaly"), true, "v2 retains reader-direction anomalies");
+assert.equal(serialized.includes("geometryRevision"), true, "v2 retains revision ownership");
+assert.equal(serialized.includes("geometrySources"), true, "v2 retains the coalesced source set");
+assert.equal(serialized.includes("reverseDelta"), true, "v2 retains anomaly displacement");
+assert.equal(serialized.includes("operation"), true, "v2 names the delivered writer operation");
+for (const forbidden of ["PRIVATE_TEXT", "PRIVATE_TOKEN", "PRIVATE_TRANSCRIPT", "PRIVATE_ROW_KEY", "private-user", "private-tab", "path", "token", "tabId", "rowKey", "transcriptText"]) {
   assert.equal(serialized.includes(forbidden), false, `payload excludes ${forbidden}`);
 }
 
@@ -127,6 +156,9 @@ assert.equal(isFrontendDiagnosticsBuild("canary", false), true);
 assert.equal(isFrontendDiagnosticsBuild("preview", false), true);
 assert.equal(isFrontendDiagnosticsBuild("stable", true), true);
 assert.equal(isFrontendDiagnosticsBuild("stable", false), false);
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(1), true, "v1 diagnostic payloads remain readable");
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(2), true, "v2 diagnostic payloads are readable");
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(3), false, "future schemas are rejected until supported");
 
 assert.deepEqual(analyzeFrontendDiagnosticAnomalies([
   { t: 0, type: "navigation.begin", intent: 7 },

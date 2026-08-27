@@ -1,7 +1,7 @@
 /**
  * Observability probe for every imperative scroll write against the
- * transcript Virtuoso handle. The single-writer contract (only the scroll
- * arbiter may call `virtuosoRef.current.scroll*`) is enforced statically by
+ * transcript Virtuoso handle. The single-writer contract (only the
+ * generation-aware gateway may call `virtuosoRef.current.scroll*`) is enforced statically by
  * scripts/check-single-scroll-writer.mjs; this probe is the runtime mirror:
  * tests and diagnostics can observe who wrote, what kind of write, and where
  * it landed, without intercepting the DOM.
@@ -17,6 +17,7 @@ export type TranscriptScrollWriteRecord = {
   kind: "scrollTo" | "scrollBy" | "scrollToIndex";
   top?: number;
   index?: number | "LAST";
+  offset?: number;
   source?: string;
   phase?: "initial" | "settle";
   scrollTop?: number;
@@ -24,6 +25,9 @@ export type TranscriptScrollWriteRecord = {
   clientHeight?: number;
   bottomDistance?: number;
   mode?: string;
+  sequence?: number;
+  generation?: number;
+  geometryRevision?: number;
   settleFrame?: number;
   offBottomFrames?: number;
   stagnantFrames?: number;
@@ -58,24 +62,32 @@ declare global {
 }
 
 export function noteTranscriptScrollWrite(write: TranscriptScrollWriteRecord): void {
-  if (CAPTURE_SCROLL_DIAGNOSTIC_DETAILS) {
-    recordTranscriptScrollDiagnostic("scroll-write", {
-      owner: write.owner,
-      writeKind: write.kind,
-      targetTop: write.top,
-      targetIndex: write.index,
-      source: write.source,
-      phase: write.phase,
-      scrollTop: write.scrollTop,
-      scrollHeight: write.scrollHeight,
-      clientHeight: write.clientHeight,
-      bottomDistance: write.bottomDistance,
-      mode: write.mode,
-      settleFrame: write.settleFrame,
-      offBottomFrames: write.offBottomFrames,
-      stagnantFrames: write.stagnantFrames,
-    });
-  }
+  const fields = {
+    owner: write.owner,
+    writeKind: write.kind,
+    operation: write.kind,
+    targetTop: write.top,
+    targetIndex: write.index,
+    targetOffset: write.offset,
+    source: write.source,
+    phase: write.phase,
+    scrollTop: write.scrollTop,
+    scrollHeight: write.scrollHeight,
+    clientHeight: write.clientHeight,
+    bottomDistance: write.bottomDistance,
+    mode: write.mode,
+    sequence: write.sequence,
+    generation: write.generation,
+    geometryRevision: write.geometryRevision,
+    settleFrame: write.settleFrame,
+    offBottomFrames: write.offBottomFrames,
+    stagnantFrames: write.stagnantFrames,
+  };
+  // The frontend recorder is opt-in and its bridge is inert when stopped, so
+  // this high-signal ownership event is safe in stable builds. The legacy
+  // per-row transcript trace remains preview/canary-only.
+  if (CAPTURE_SCROLL_DIAGNOSTIC_DETAILS) diagnosticSink?.("scroll-write", fields);
+  recordFrontendDiagnostic("transcript", "transcript.scroll-write", fields);
   window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__?.(write);
 }
 

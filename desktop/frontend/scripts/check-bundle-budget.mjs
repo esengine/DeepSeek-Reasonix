@@ -125,6 +125,37 @@ console.log("\nbundle budgets");
 // headroom with the smallest existing decimal ratchet.
 // Direct pending-prompt recovery and authoritative remote Goal state bring the
 // measured path to 445.473 KiB. Retain 0.027 KiB of bounded headroom.
+// Transcript scroll integrity adds the single-writer gateway, native reader
+// correction bridge, failure-atomic unloaded-question mask, and bounded tail
+// handoff on top of that remote-session surface. The merged build measures
+// 450.6 KiB. Persisting native-thumb bottom proof measures 450.8 KiB; retain
+// 0.1 KiB of bounded headroom without widening the per-chunk ratchet. The
+// native pre-paint closure retains the last painted row, rejects a blank
+// virtual range, and samples thumb-bottom before React delivery; the measured
+// path is 451.2 KiB. Retaining the last complete painted range closes the
+// remaining WKWebView boundary-row race at 451.6 KiB. The same-paint native
+// acknowledgement bridge, transform fence, and adaptive reader buffer measure
+// 452.1 KiB. Native-delivery direction synchronization and its correction-
+// acknowledgement fence close the controller-input WebView gap. Accepting a
+// coalesced native delivery before observation and releasing a passed forward
+// correction measure 452.473 KiB. The native blank hold, WKWebView's second
+// compositor viewport, Footer extent observer, and physical-LAST sync measure
+// 452.675 KiB. Native-thumb pointer travel closes the remaining coalesced
+// away-and-back release gap at 452.853 KiB. Synchronously retaining every
+// accepted native frame and fencing an unacknowledged correction measure
+// 452.953 KiB. The bounded settle-resend guard stays within 0.1 KiB of that
+// mark; the reading-anchor pin plus the gateway sync normalization measure
+// 453.6 KiB. Viewport-preserving indexed offsets and coalesced extent/input
+// classification retain 0.1 KiB of gzip headroom. The pre-paint native-range
+// clamp, captured thumb-travel proof, and bounded LAST fallback measure
+// 453.852 KiB; keep them with a 0.1 KiB decimal ratchet and roughly 0.048 KiB
+// of remaining headroom.
+// Confirming the native extent after a logical-LAST handoff, remounting an
+// unmounted tail before paint, and re-arming tail convergence when the
+// committed scroller replaces its hydration predecessor, plus the bounded
+// post-range native confirmation, measure 454.3 KiB.
+// Retain about 0.1 KiB of toolchain headroom without widening any per-chunk
+// budget.
 // Restored remote shells now activate their backend session immediately and
 // keep disconnected state out of the mounted surface. The merged production
 // path measures 445.614 KiB; retain 0.086 KiB of bounded build/toolchain
@@ -132,8 +163,17 @@ console.log("\nbundle budgets");
 // Runtime-aware Todo presentation plus exact-tab continuation adds 0.3 KiB gzip
 // to the always-mounted footer path. Keep the state/routing guard with a narrow
 // ratchet rather than showing idle restored work as actively running. The
-// combined path measures 445.9 KiB; retain 0.1 KiB of toolchain headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 446.0 : 446.0;
+// main-v2-only path measures 445.9 KiB. The integrated transcript and remote
+// changes measure 454.7 KiB. Synchronizing no-common reader ranges, rejecting
+// non-adjacent painted ranges, and limiting pins to extent-backed slides
+// measures 454.998 KiB; retain about 0.10 KiB of toolchain headroom.
+// The native-thumb release proof and WebView2-only second compositor viewport
+// measure 455.103 KiB; retain the same narrow 0.1 KiB toolchain allowance.
+// Retaining the pre-swap painted range across a coalesced native-direction
+// handoff and task-sampling a compositor-owned thumb measure 455.4 KiB. A
+// one-frame bottom-hold commit and the bounded GTK compatibility-release wait
+// measure 455.564 KiB; retain about 0.14 KiB of gzip/toolchain headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 455.7 : 455.7;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -151,7 +191,8 @@ if (initialCSS.length > 0) {
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
-// states bring the merged shell to roughly 115.7 KiB gzip.
+// states bring the merged shell to roughly 115.7 KiB gzip. The transcript
+// completion overlay keeps the live Footer out of Virtuoso's measured flow.
 assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
@@ -202,13 +243,54 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // runtime command dispatch bring the measured payload to 2382.9 KiB. The
 // remaining review fences measure 2383.2 KiB; retain 0.1 KiB of headroom.
 // Final remote-runtime parity measures 2384.4 KiB raw. The current main-v2
+// runtime additions bring the combined path to 2404.364 KiB; retain 0.136 KiB
+// of bounded headroom alongside the gzip ratchet above.
+// Transcript navigation and scroll integrity add target commit fencing,
+// native reader stabilization, and the privacy-safe unloaded-question replay.
+// The merged build measures 2424.5 KiB. Correction-ack validation and a real
+// wall-clock native-tail bound and release proof bring it to 2425.2 KiB;
+// the final pre-paint anchor and passive native-bottom sampler measure 2426.4
+// KiB. The complete painted-range guard, post-paint baseline fence, and
+// extent-scoped wheel proof measure 2428.0 KiB. The same-paint native bridge
+// its transform feedback fence, and adaptive reader buffer measure 2429.5 KiB.
+// Native-delivery direction synchronization, coalesced-input classification,
+// and the passed-forward-correction fence measure 2430.713 KiB raw. The
+// native blank hold, platform-bounded reader window, Footer observer, and
+// physical-LAST sync measure 2431.764 KiB; retain 0.236 KiB of headroom.
+// Retaining the preceding painted range across duplicate observer promotions,
+// sampling native-thumb movement on real scroll delivery, and carrying the
+// reader correction through its bounded tail handoff measure 2432.297 KiB.
+// Native-thumb pointer travel brings the measured path to 2432.661 KiB. The
+// accepted-frame and pending-correction fences measure 2432.735 KiB; the
+// bounded settle-resend guard measures 2433.1 KiB; the reading-anchor pin,
+// its tail-proximity gate and the gateway normalization reach 2435.8 KiB.
+// Indexed reader offsets plus opposite extent/input classification measure
+// 2436.6 KiB; the merged selection compositor bridge reaches 2436.8 KiB.
+// The native-range clamp, captured thumb proof, and bounded LAST fallback
+// measure 2437.342 KiB. Post-LAST native confirmation, unmounted-tail remount,
+// committed-scroller re-arm, and bounded post-range native confirmation bring
+// the integrated surface to 2439.1 KiB. Retain about 0.1 KiB of raw/toolchain
+// headroom without widening the per-chunk ceiling.
 // runtime additions bring the combined path to 2404.364 KiB. The final merged
 // restored-shell activation and disconnected-state revival path measures
 // 2404.898 KiB; retain 0.102 KiB of bounded headroom alongside the gzip
 // ratchet above.
 // Runtime-aware Todo status and exact-tab continuation then add to the same
-// initial path. The combined payload measures 2406.2 KiB; retain 0.1 KiB of
-// raw/toolchain headroom for both owners.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_406.3 : 2_406.3;
+// initial path. The main-v2-only payload measures 2406.2 KiB. The integrated
+// payload measures 2441.2 KiB. Retaining the last painted reader baseline
+// across several same-offset range candidates brings that path to 2441.4 KiB.
+// Synchronizing a fully replaced occupied range, rejecting non-adjacent
+// painted candidates, and retaining user-owned stable-extent slides measures
+// 2442.144 KiB. Latching native-thumb movement from real scroll delivery
+// measures 2442.3 KiB; retain about 0.1 KiB of raw/toolchain headroom.
+// The coalesced direction handoff and compositor-task thumb proof measure
+// 2442.994 KiB; retain about 0.1 KiB of raw/toolchain headroom.
+// Preserving the prior painted candidate and deferring mouse-pointer release
+// to Chromium's compatibility mouseup with a missing-event fallback measure
+// 2443.3 KiB. Preferring the newest repairable painted frame over stale range
+// history measures 2443.477 KiB. Retaining the reader buffer through its final
+// bottom-hold paint and waiting for GTK's compatibility mouseup measure
+// 2443.907 KiB; retain about 0.19 KiB of raw/toolchain headroom.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_444.1 : 2_444.1;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

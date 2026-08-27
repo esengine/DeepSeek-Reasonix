@@ -46,13 +46,14 @@ export function chooseTranscriptLayoutAnchor(
 export function transcriptAnchorInitialLocation(
   anchor: TranscriptLayoutAnchor | undefined,
   rowIndexByKey: ReadonlyMap<string, number>,
-  firstItemIndex: number,
 ): FlatIndexLocationWithAlign | undefined {
   if (!anchor) return undefined;
   if (anchor.mode === "tail") return { index: "LAST", align: "end" };
   const index = rowIndexByKey.get(anchor.rowKey);
   if (index == null) return undefined;
-  return { index: firstItemIndex + index, align: "start", offset: anchor.offset };
+  // Imperative and initial locations use the zero-based data coordinate even
+  // when rendered item callbacks expose firstItemIndex-adjusted indices.
+  return { index, align: "start", offset: anchor.offset };
 }
 
 export function transcriptViewportIsBlank(
@@ -97,6 +98,21 @@ export function captureVisibleTranscriptLayoutAnchor(
     .filter((row) => rowIntersectsViewport(row, viewport))
     .sort((left, right) => left.top - right.top);
   const anchor = visible.find((row) => row.top >= viewport.top) ?? visible[0];
+  return anchor ? { mode: "manual", rowKey: anchor.rowKey, offset: anchor.top - viewport.top } : undefined;
+}
+
+/** Reader transactions retain the leading intersecting row, including a
+ * clipped row. A replacement range can preserve only that boundary row, making
+ * it the last proof that the painted viewport moved backwards. Explicit
+ * replace/prepend mutations cancel this lease before their layout owner runs. */
+export function captureLeadingTranscriptLayoutAnchor(
+  element: HTMLElement,
+): Extract<TranscriptLayoutAnchor, { mode: "manual" }> | undefined {
+  const rect = element.getBoundingClientRect();
+  const viewport = { top: rect.top, bottom: rect.bottom };
+  const anchor = readTranscriptRowRects(element)
+    .filter((row) => rowIntersectsViewport(row, viewport))
+    .sort((left, right) => left.top - right.top)[0];
   return anchor ? { mode: "manual", rowKey: anchor.rowKey, offset: anchor.top - viewport.top } : undefined;
 }
 

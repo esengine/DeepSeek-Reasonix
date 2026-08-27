@@ -244,6 +244,8 @@ type PendingTopicActivation = {
   tabId?: string;
   placeholderItems?: Item[];
   surfacePolicy: HydrateSurfacePolicy;
+  runtimeSnapshot?: RuntimeMetaSnapshot;
+  runtimeSnapshotAt?: number;
   /** Terminal event that arrived before the ticket resolved. */
   terminal?: TopicActivationEvent;
 };
@@ -3378,7 +3380,15 @@ export function useController() {
     }
     noteActivationSettled(event.requestId, "ready");
     ensureTranscriptSubscription(tabId);
-    void loadSessionDataForTab(tabId, true, "open-topic", { placeholderItems: pending.placeholderItems, surfacePolicy: pending.surfacePolicy })
+    const hydration = loadSessionDataForTab(tabId, true, "open-topic", { placeholderItems: pending.placeholderItems, surfacePolicy: pending.surfacePolicy });
+    // replace-surface hydration resets volatile reducer state synchronously
+    // before its first history await. Re-apply the activation ticket's runtime
+    // snapshot after that reset so a live turn never exposes an idle composer
+    // while ancillary hydration and the authoritative runtime reconcile run.
+    if (pending.runtimeSnapshot) {
+      dispatchRuntimeStatusForTab(tabId, pending.runtimeSnapshot, pending.runtimeSnapshotAt);
+    }
+    void hydration
       .then(() => {
         if (!isNavigationIntentCurrent(pending.navigationSeq) || activeTabIdRef.current !== tabId) return;
         const hydrated = statesRef.current.get(tabId);
@@ -3393,7 +3403,7 @@ export function useController() {
           void restoreNavigationSource(pending.navigationSeq, tabId, t("history.failedOpenSession"));
         }
       });
-  }, [dispatchTo, ensureTranscriptSubscription, isNavigationIntentCurrent, loadSessionDataForTab, reconcileTabRuntime, restoreNavigationSource]);
+  }, [dispatchRuntimeStatusForTab, dispatchTo, ensureTranscriptSubscription, isNavigationIntentCurrent, loadSessionDataForTab, reconcileTabRuntime, restoreNavigationSource]);
 
   useEffect(() => {
     const textBatch = createRafBatch<StreamDeltaEntry>((batch) => {
@@ -4751,6 +4761,8 @@ export function useController() {
     });
     const meta = ticket.meta;
     pending.tabId = ticket.tabId;
+    pending.runtimeSnapshot = meta;
+    pending.runtimeSnapshotAt = snapshotAt;
     if (pendingTopicActivationRef.current === pending && ticket.requestId) {
       if (ticket.requestId !== pending.requestId) aliasActivationRequest(pending.requestId, ticket.requestId);
       pending.requestId = ticket.requestId;

@@ -6,9 +6,8 @@ The transcript (`frontend/src/components/Transcript.tsx`, react-virtuoso) has
 one structural rule set, earned across #8657/#8688 and the follow-up refactors.
 Keep to it when touching anything that can move the transcript viewport.
 
-- **Single writer**: only the scroll arbiter — `frontend/src/lib/useTranscriptScrollArbiter.ts`
-  and its extracted controllers (`transcriptTailSettle.ts`,
-  `transcriptAnchorCompensation.ts`) — may call
+- **Single writer**: only the generation-aware gateway
+  (`frontend/src/lib/transcriptScrollWriter.ts`) may call
   `virtuosoRef.current.scrollTo/scrollBy/scrollToIndex`, and raw
   `scroller.scrollTop` assignments on transcript surfaces are equally
   off-limits (route through the arbiter's `SCROLL_TO_OFFSET` channel, e.g.

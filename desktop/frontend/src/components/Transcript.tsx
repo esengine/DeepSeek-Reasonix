@@ -11,6 +11,7 @@ import { ArrowDown, Loader2 } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup } from "./ToolGroup";
+import { LiveTurnRegion } from "./LiveTurnRegion";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { isSteerNoticeText } from "../lib/useController";
 import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
@@ -54,7 +55,10 @@ import { LiveStreamContext } from "./LiveStreamContext";
 import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows";
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
+import { useLiveTurnHandoff } from "../lib/useLiveTurnHandoff";
+import { useTranscriptListGeometryObserver } from "../lib/useTranscriptListGeometryObserver";
 import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptScrollArbiter } from "../lib/useTranscriptScrollArbiter";
+import { TRANSCRIPT_READER_OVERSCAN_ROWS, transcriptReaderViewportBuffer } from "../lib/transcriptScrollArbiter";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import { TranscriptLayoutIntentProvider, TranscriptScrollWriteProvider } from "./TranscriptLayoutIntentContext";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
@@ -76,7 +80,6 @@ type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 const QUESTION_NAV_MIN_COUNT = 2;
 const EMPTY_CHECKPOINTS: CheckpointMeta[] = [];
 const EMPTY_INVOCATION_METADATA: InvocationMetadataMap = {};
-const NO_HELD_ROWS: readonly TranscriptRow[] = [];
 const QuestionJumpBar = lazy(() => import("./QuestionJumpBar"));
 const SHOW_FRONTEND_DIAGNOSTICS = typeof __BUILD_CHANNEL__ === "undefined"
   || __BUILD_CHANNEL__ === "test"
@@ -223,6 +226,7 @@ export function Transcript({
     scrollRef,
     itemSize,
     nativeScrollbarDragging,
+    readerBuffering,
     scrollElement,
     pinnedRef: stick,
     onWheelIntent,
@@ -236,11 +240,13 @@ export function Transcript({
     scrollerRef,
     atBottomStateChange,
     deliverScroll,
+    observeReaderExtent,
+    cancelReaderExtent,
     scrollToBottom,
-    followGrowingTail,
+    noteGeometryChange,
+    observeListHeight,
     beginUserResize,
     scrollToDataIndex,
-    releaseTailFollow,
     setMode: setScrollMode,
     writeOffset,
     reset: resetScroll,
@@ -256,6 +262,12 @@ export function Transcript({
   const virtuosoReadyRef = useRef(false);
   const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
 
+  // Replace/prepend already has a layout owner; an old reader lease must not
+  // reinterpret its authoritative movement as a native range regression.
+  useLayoutEffect(() => {
+    if (historyMutation?.kind === "replace" || historyMutation?.kind === "prepend") cancelReaderExtent();
+  }, [cancelReaderExtent, historyMutation?.kind, historyMutation?.seq]);
+
   // Lease the markdown parse worker for as long as a transcript surface is
   // mounted; the last release terminates the thread (it re-spawns lazily).
   useEffect(() => {
@@ -264,11 +276,6 @@ export function Transcript({
   }, []);
 
   const cancelStreamingAutoScroll = useCallback(() => {}, []);
-
-  const cancelStreamingAndFollow = useCallback(() => {
-    cancelStreamingAutoScroll();
-    releaseTailFollow();
-  }, [cancelStreamingAutoScroll, releaseTailFollow]);
 
   const {
     state: creationScrollbar,
@@ -303,10 +310,12 @@ export function Transcript({
     virtuosoReadyRef.current = false;
   }, [resetScroll, revealSignal, tabId]);
 
+  // Composer/footer resize is an explicit geometry producer. The coordinator
+  // coalesces it with row and live-region measurements in one animation frame.
   useEffect(() => {
-    if (hydrating || !virtuosoReadyRef.current || !stick.current) return;
-    followGrowingTail();
-  }, [footerHeight, followGrowingTail, hydrating, stick]);
+    if (hydrating || !virtuosoReadyRef.current) return;
+    noteGeometryChange("composer");
+  }, [footerHeight, hydrating, noteGeometryChange]);
 
   const refreshGeometryEnvironment = useCallback((element: HTMLElement) => {
     const next = readTranscriptGeometryEnvironment(element);
@@ -334,22 +343,26 @@ export function Transcript({
         lastWidth = width;
         setLayoutWidth(width);
         refreshGeometryEnvironment(element);
+        if (!hydrating) noteGeometryChange("viewport");
       }
       if (height !== lastHeight) {
         lastHeight = height;
-        if (!hydrating) followGrowingTail();
+        if (!hydrating) noteGeometryChange("viewport");
       }
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hydrating, scrollElement, followGrowingTail, refreshGeometryEnvironment]);
+  }, [hydrating, noteGeometryChange, scrollElement, refreshGeometryEnvironment]);
 
   // Typography settings update CSS variables synchronously. Re-read the
   // geometry signature without remounting Virtuoso; old exact samples then
   // fail their font key and static state-aware seeds take over.
   useEffect(() => onTypographyPreferencesChange(() => {
-    if (scrollElement) refreshGeometryEnvironment(scrollElement);
-  }), [refreshGeometryEnvironment, scrollElement]);
+    if (scrollElement) {
+      refreshGeometryEnvironment(scrollElement);
+      noteGeometryChange("typography");
+    }
+  }), [noteGeometryChange, refreshGeometryEnvironment, scrollElement]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
@@ -475,6 +488,7 @@ export function Transcript({
     invalidateAnchors,
     noteUserScrollIntent,
     noteScrollActivity,
+    recoverAnchor,
     safeMode: layoutSafeMode,
   } = useTranscriptLayoutIntegrity({
     surfaceKey: layoutSurfaceKey,
@@ -492,6 +506,13 @@ export function Transcript({
     geometrySessionKey: resolvedGeometrySessionKey,
     geometryEnvironment,
   });
+  useTranscriptListGeometryObserver({
+    scrollElement,
+    enabled: !hydrating,
+    surfaceKey: `${layoutSurfaceKey}:${virtuosoResetKey}`,
+    noteGeometryChange,
+    observeReaderExtent,
+  });
   const selectionRetention = useTranscriptSelectionRetention({
     tabId,
     revealSignal,
@@ -501,7 +522,10 @@ export function Transcript({
     scrollRef,
     setScrollMode,
     writeOffset,
-    cancelStreamingScroll: cancelStreamingAndFollow,
+    // Entering selection already preempts tail-follow through SELECTION_BEGIN.
+    // Do not also synthesize USER_SCROLL_INTENT: that would mount the reader
+    // buffer under the pointer even though no scrolling occurred.
+    cancelStreamingScroll: cancelStreamingAutoScroll,
   });
   const clearTranscriptSelection = selectionRetention.clear;
   const { readySurfaceKey: surfacePaintReadySurfaceKey, markItemsRendered: markSurfaceItemsRendered } = useTranscriptSurfaceCommit({
@@ -533,6 +557,10 @@ export function Transcript({
     ].join("\u0000")).join("\u0001"),
     [virtualRows],
   );
+  useEffect(() => {
+    if (hydrating || !virtuosoReadyRef.current) return;
+    noteGeometryChange("data");
+  }, [hydrating, noteGeometryChange, virtualRowsGeometryRevision]);
   const geometryEnvironmentReady = geometryEnvironment.typographySignature !== "unresolved"
     && Number.isFinite(geometryEnvironment.contentWidth)
     && (geometryEnvironment.contentWidth ?? 0) > 0;
@@ -594,14 +622,14 @@ export function Transcript({
     }
   }, [entranceRef, refreshGeometryEnvironment, scrollerRef]);
   const handleTranscriptScroll = useCallback(() => {
-    deliverScroll();
+    deliverScroll(undefined, false, true);
     noteScrollActivity();
     pagingAuthorization.noteScrollPosition();
     if (creationMode) handleCreationScroll();
     scheduleActiveQuestionSync();
     scheduleBlankViewportCheck();
   }, [creationMode, deliverScroll, handleCreationScroll, noteScrollActivity, pagingAuthorization, scheduleActiveQuestionSync, scheduleBlankViewportCheck]);
-  const [handleJumpToQuestion, handleEarlierHistoryReached, retryOlderHistory] = useTranscriptQuestionJump({
+  const [handleJumpToQuestion, handleEarlierHistoryReached, retryOlderHistory, questionJumpSurface] = useTranscriptQuestionJump({
     questions,
     loadedByTurn,
     layoutSurfaceKey,
@@ -610,10 +638,12 @@ export function Transcript({
     loadingOlderHistory,
     olderHistoryError,
     running,
+    scrollElement,
     onLoadOlderHistory,
     clearTranscriptSelection,
     invalidateAnchors,
     scrollToDataIndex,
+    recoverPlacement: recoverAnchor,
     setActiveQuestion,
     rewindSignal,
   });
@@ -796,95 +826,43 @@ export function Transcript({
   // ── Live-region completion handoff ────────────────────────────────────────
   // When the active turn settles, its rows join the virtual data in the same
   // commit that would unmount the live-region footer. While the view is at
-  // the bottom, keep painting the region's final content until Virtuoso
-  // reports the materialized tail row mounted, so completion does not flash
-  // stale history (#8657/#8688).
-  const heldLiveRowsRef = useRef<readonly TranscriptRow[]>([]);
-  const heldSurfaceRef = useRef(layoutSurfaceKey);
-  const [holdingLiveRegion, setHoldingLiveRegion] = useState(false);
-  const wasLiveActiveRef = useRef(false);
-  if (liveSplit.liveActive) {
-    wasLiveActiveRef.current = true;
-    heldSurfaceRef.current = layoutSurfaceKey;
-    heldLiveRowsRef.current = liveSplit.liveRows;
-    if (holdingLiveRegion) setHoldingLiveRegion(false);
-  } else if (wasLiveActiveRef.current) {
-    wasLiveActiveRef.current = false;
-    // Transcript is not keyed by tab: a hold captured on one surface must
-    // never paint into another after a tab switch.
-    if (heldSurfaceRef.current !== layoutSurfaceKey) heldLiveRowsRef.current = [];
-    if (heldLiveRowsRef.current.length > 0 && isAtBottom && !holdingLiveRegion) {
-      setHoldingLiveRegion(true);
-    }
-  }
-  // The materialization target can disappear mid-hold (rewind, fork, or a
-  // wholesale session replace): release immediately instead of pinning rows
-  // that are no longer in the transcript for the safety-timeout duration.
-  if (holdingLiveRegion && heldLiveRowsRef.current.length > 0) {
-    const lastHeldKey = String(heldLiveRowsRef.current[heldLiveRowsRef.current.length - 1].key);
-    if (!rows.some((row) => String(row.key) === lastHeldKey)) {
-      heldLiveRowsRef.current = [];
-      setHoldingLiveRegion(false);
-    }
-  }
-  useEffect(() => {
-    heldLiveRowsRef.current = [];
-    setHoldingLiveRegion(false);
-  }, [layoutSurfaceKey]);
-  useEffect(() => {
-    if (!holdingLiveRegion) return;
-    // Safety net: if the tail row never reports (e.g. the surface changed),
-    // release the hold instead of pinning stale content.
-    const timeout = window.setTimeout(() => {
-      heldLiveRowsRef.current = [];
-      setHoldingLiveRegion(false);
-    }, 300);
-    return () => window.clearTimeout(timeout);
-  }, [holdingLiveRegion]);
-  const heldLiveRows = heldSurfaceRef.current === layoutSurfaceKey ? heldLiveRowsRef.current : NO_HELD_ROWS;
-  const showLiveRegion = liveSplit.liveActive || (holdingLiveRegion && heldLiveRows.length > 0);
+  // the bottom, keep painting the region's final content as a zero-layout
+  // overlay until Virtuoso reports the materialized tail row mounted. The
+  // former in-flow hold counted both Footer and committed row heights.
+  const [heldLiveRows, showLiveHandoff, noteHandoffItemsRendered] = useLiveTurnHandoff({
+    liveActive: liveSplit.liveActive,
+    liveRows: liveSplit.liveRows,
+    layoutSurfaceKey,
+    isAtBottom,
+    rows,
+  });
+  const showLiveRegion = liveSplit.liveActive;
 
   const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
     noteTranscriptRowCounts(rendered.length, virtualRows.length);
     selectionRetention.reconcileLogicalFocus();
     handleRecoveryItemsRendered(rendered.length);
     scheduleActiveQuestionSync();
-    if (holdingLiveRegion) {
-      const held = heldLiveRowsRef.current;
-      const lastKey = held.length > 0 ? String(held[held.length - 1].key) : null;
-      if (lastKey === null || rendered.some((item) => String(item.data?.key ?? "") === lastKey)) {
-        heldLiveRowsRef.current = [];
-        setHoldingLiveRegion(false);
-      }
-    }
+    noteHandoffItemsRendered(rendered);
     markSurfaceItemsRendered(rendered.length);
-  }, [handleRecoveryItemsRendered, holdingLiveRegion, markSurfaceItemsRendered, scheduleActiveQuestionSync, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
-
-  const prependLayoutTransientRef = useRef(false);
-  useEffect(() => {
-    if (historyMutation?.kind !== "prepend") return;
-    prependLayoutTransientRef.current = true;
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        prependLayoutTransientRef.current = false;
-      });
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      prependLayoutTransientRef.current = false;
-    };
-  }, [historyMutation?.kind, historyMutation?.seq]);
+  }, [handleRecoveryItemsRendered, markSurfaceItemsRendered, noteHandoffItemsRendered, scheduleActiveQuestionSync, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
 
   const handleTotalListHeightChanged = useCallback((height: number) => {
-    if (SHOW_SCROLL_DIAGNOSTICS) recordTranscriptScrollDiagnostic("list-height", { listHeight: height });
-    if (hydrating || prependLayoutTransientRef.current) return;
-    followGrowingTail();
-  }, [followGrowingTail, hydrating]);
+    observeListHeight(height);
+  }, [observeListHeight]);
 
+  const handleLiveRegionGeometryChange = useCallback(() => {
+    if (!hydrating) noteGeometryChange("live-footer");
+  }, [hydrating, noteGeometryChange]);
+
+  const readerWindow = scrollElement?.ownerDocument.defaultView as (Window & { chrome?: { webview?: unknown } }) | null | undefined;
+  const readerViewportBuffer = transcriptReaderViewportBuffer(
+    readerWindow?.navigator.userAgent,
+    Boolean(readerWindow?.chrome?.webview),
+  );
   const virtuosoContext = useMemo<TranscriptVirtuosoContext>(() => ({
     tabId,
     scrollElement,
-    nativeScrollbarDragging,
     overlayRevision,
     geometryEnvironment,
     rowGeometry: {
@@ -895,13 +873,15 @@ export function Transcript({
     },
     liveRegion: showLiveRegion
       ? {
-          rows: liveSplit.liveActive ? liveSplit.liveRows : heldLiveRows,
+          rows: liveSplit.liveRows,
           renderRow,
           showStatus: liveSplit.liveActive,
           turnStartAt,
           onPointerDownCapture: selectionRetention.onPointerDownCapture,
+          onGeometryChange: handleLiveRegionGeometryChange,
         }
       : null,
+    onFooterGeometryChange: handleLiveRegionGeometryChange,
     olderHistory: hasOlderHistory && (loadingOlderHistory || Boolean(olderHistoryError))
       ? {
           loading: loadingOlderHistory,
@@ -914,12 +894,11 @@ export function Transcript({
     heightEstimates,
     estimateSources,
     geometryEnvironment,
-    heldLiveRows,
     liveSplit.liveActive,
     liveSplit.liveRows,
     loadingOlderHistory,
     contentRevision,
-    nativeScrollbarDragging,
+    handleLiveRegionGeometryChange,
     olderHistoryError,
     overlayRevision,
     renderRow,
@@ -939,7 +918,7 @@ export function Transcript({
     <MarkdownImageTabContext.Provider value={tabId ?? ""}>
     <TranscriptLayoutIntentProvider value={beginUserResize}>
     <TranscriptScrollWriteProvider value={writeOffset}>
-    <div className="transcript-shell">
+    <div className="transcript-shell" aria-busy={Boolean(questionJumpSurface) || undefined}>
       {empty ? (
         <div
           className={`transcript transcript--empty${creationMode ? " transcript--creation-scrollbar" : ""}`}
@@ -970,6 +949,7 @@ export function Transcript({
             ref={virtuosoRef}
             className={`transcript${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
             data-transcript-row-count={virtualRows.length}
+            data-transcript-first-item-index={firstItemIndex}
             data-transcript-estimated-total={estimatedTotalHeight}
             data-transcript-reset-key={virtuosoResetKey}
             data-transcript-typography={geometryEnvironment.typographySignature}
@@ -993,12 +973,8 @@ export function Transcript({
             atBottomStateChange={atBottomStateChange}
             heightEstimates={heightEstimates}
             itemSize={itemSize}
-            minOverscanItemCount={layoutSafeMode
-              ? { top: 32, bottom: 32 }
-              : { top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
-            increaseViewportBy={layoutSafeMode
-              ? { top: (scrollElement?.clientHeight ?? 0) * 2, bottom: (scrollElement?.clientHeight ?? 0) * 2 }
-              : { top: 480, bottom: 480 }}
+            minOverscanItemCount={layoutSafeMode ? { top: 32, bottom: 32 } : readerBuffering ? { top: TRANSCRIPT_READER_OVERSCAN_ROWS, bottom: TRANSCRIPT_READER_OVERSCAN_ROWS } : { top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
+            increaseViewportBy={layoutSafeMode ? { top: (scrollElement?.clientHeight ?? 0) * 2, bottom: (scrollElement?.clientHeight ?? 0) * 2 } : readerBuffering ? { top: (scrollElement?.clientHeight ?? 0) * readerViewportBuffer, bottom: (scrollElement?.clientHeight ?? 0) * readerViewportBuffer } : { top: 480, bottom: 480 }}
             scrollerRef={handleScrollerRef}
             itemsRendered={handleItemsRendered}
             startReached={handleViewportEarlierHistoryReached}
@@ -1014,6 +990,17 @@ export function Transcript({
             onPointerDownCapture={scrollInteractions.onPointerDownCapture}
           />
         </LiveStreamContext.Provider>
+      )}
+
+      {showLiveHandoff && (
+        <LiveTurnRegion
+          rows={heldLiveRows}
+          renderRow={renderRow}
+          showStatus={false}
+          tabId={tabId}
+          scrollElement={scrollElement}
+          handoff
+        />
       )}
 
       {creationMode && creationScrollbar.visible && (
@@ -1051,6 +1038,18 @@ export function Transcript({
         >
           <ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" />
         </button>
+      )}
+      {questionJumpSurface && (
+        <div
+          className="transcript-navigation-overlay transcript-question-jump-overlay"
+          data-question-jump-mask="true"
+          data-question-jump-phase={questionJumpSurface.phase}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="transcript-navigation-overlay__spinner" aria-hidden="true" />
+          <span>{t("common.loading")}</span>
+        </div>
       )}
       {FrontendDiagnosticsPanel && <Suspense fallback={null}><FrontendDiagnosticsPanel scrollElement={scrollElement} totalRows={virtualRows.length} /></Suspense>}
     </div>
