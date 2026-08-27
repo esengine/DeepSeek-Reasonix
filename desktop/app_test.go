@@ -237,11 +237,11 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	t.Setenv("REASONIX_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("AppData", appData)
-	// Process-local catalog projections pin SQLite files under cache. Close them
-	// before TempDir cleanup so Windows does not fail unlinkat on open handles.
+	// Close process-local SQLite handles before TempDir cleanup for Windows.
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
+		desktopTopicState.close()
 		_ = history.CloseSharedCatalog(ctx)
 		_ = stats.CloseUsageCatalogs(ctx)
 		_ = taskcatalog.ShutdownShared(ctx)
@@ -4598,7 +4598,7 @@ func TestListSessionsUsesPinnedSessionOwnerBeforeStaleRuntimeDir(t *testing.T) {
 	app.activeTabID = tab.ID
 	installSessionCatalogForTest(t, app, sessionDirA, "project", projectA)
 	t.Cleanup(oldCtrl.Close)
-	sessions := app.ListSessions()
+	sessions := listSessionsAfterPinnedOwnerReconcile(t, app, sessionDirA, projectA)
 	if len(sessions) == 0 {
 		t.Fatal("ListSessions() returned no sessions")
 	}

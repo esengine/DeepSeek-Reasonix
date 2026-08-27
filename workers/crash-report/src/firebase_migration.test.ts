@@ -1,15 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessMigrationCapacity,
   buildFirebaseGroups,
   canonicalJSONString,
   classifyMigrationGroup,
   contentDigest,
   firebaseOAuthGrantType,
+  runWrangler,
+  wranglerD1MaxBufferBytes,
 } from "../scripts/migrate-firebase-data.mjs";
 
 describe("Firebase retained-sample migration", () => {
   it("uses the OAuth JWT bearer grant expected by Google's token endpoint", () => {
     expect(firebaseOAuthGrantType).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
+  });
+
+  it("explains active reservations without treating stale open groups as automatically eligible", () => {
+    const now = new Date("2026-08-25T00:00:00Z");
+    const assessment = assessMigrationCapacity([
+      { status: "open", last_seen: "2026-08-20T00:00:00Z", fingerprint: "private", message: "private" },
+      { status: "open", last_seen: "2026-07-10T00:00:00Z" },
+      { status: "open", last_seen: "2026-06-01T00:00:00Z" },
+      { status: "resolved", last_seen: "2026-08-20T00:00:00Z" },
+      { status: "resolved", last_seen: "2026-07-10T00:00:00Z" },
+      { status: "ignored", last_seen: "2026-06-01T00:00:00Z" },
+      { status: "resolved", last_seen: "invalid" },
+      { status: "future-status", last_seen: "2026-06-01T00:00:00Z" },
+    ], now);
+
+    expect(assessment.statusTotals).toEqual({ open: 3, resolved: 3, ignored: 1, other: 1 });
+    expect(assessment.activeReasons).toEqual({
+      open: 3,
+      otherStatus: 1,
+      recentResolvedOrIgnored: 1,
+      invalidResolvedOrIgnored: 1,
+    });
+    expect(assessment.automaticRetention).toEqual({ compacted: 1, archived: 1 });
+    expect(assessment.manualReview).toEqual({ open30to59d: 1, open60dPlus: 1, otherStatus30dPlus: 1 });
+    expect(JSON.stringify(assessment)).not.toContain("private");
+  });
+
+  it("captures a full retained-report page without using Node's default child-process buffer", () => {
+    let configuredMaxBuffer = 0;
+    const rows = runWrangler("/tmp/crash-worker", "reasonix-crash", "SELECT 1", (
+      _command: string,
+      _args: string[],
+      options: { maxBuffer?: number },
+    ) => {
+      configuredMaxBuffer = options.maxBuffer ?? 0;
+      return { status: 0, stdout: '[{"results":[{"value":1}]}]' };
+    });
+
+    expect(rows).toEqual([{ value: 1 }]);
+    expect(configuredMaxBuffer).toBe(wranglerD1MaxBufferBytes);
+    expect(configuredMaxBuffer).toBeGreaterThan(200 * 6 * 96 * 1024);
   });
 
   it("keeps the first sample and maps the newest five into absolute ring slots", () => {

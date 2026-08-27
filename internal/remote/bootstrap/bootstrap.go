@@ -107,8 +107,8 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-
-	// 1. Reuse a live process if the recorded pid is still running.
+	// 1. Reuse a live process if the recorded pid is still running and exposes
+	// every Serve contract required by this desktop.
 	if st, tok, ok := tryReuse(ctx, conn, fs, paths, workspace, requireLaunchArgs...); ok {
 		opts.progress("reuse", st.Addr)
 		return Result{State: st, Token: tok, Reused: true, CredentialConfigChanged: credentialChanged}, nil
@@ -145,16 +145,23 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{State: st, Token: tok, Reused: true, CredentialConfigChanged: credentialChanged}, nil
 	}
 
-	// 5. Generate token, write it 0600, and launch detached serve.
-	token, err := generateToken()
+	// 5. Stage the replacement token, retire incompatible Serve, then publish.
+	freshToken, err := generateToken()
 	if err != nil {
 		return Result{}, err
 	}
-	if err := fs.MkdirAll(ctx, paths.Dir); err != nil {
+	stagedTokenFile, err := stageServeToken(ctx, fs, paths, freshToken)
+	if err != nil {
 		return Result{}, err
 	}
-	if err := fs.WriteFileAtomic(ctx, paths.TokenFile, []byte(token+"\n"), 0o600); err != nil {
-		return Result{}, fmt.Errorf("bootstrap: write token: %w", err)
+	defer cleanupStagedServeToken(fs, stagedTokenFile)
+	// Retire an incompatible Serve only after its replacement is ready to launch
+	// inside the lock, so preparation failures do not interrupt existing work.
+	if err := retireIncompatibleServe(ctx, conn, fs, paths, workspace, requireLaunchArgs); err != nil {
+		return Result{}, err
+	}
+	if err := fs.Rename(ctx, stagedTokenFile, paths.TokenFile); err != nil {
+		return Result{}, fmt.Errorf("bootstrap: publish token: %w", err)
 	}
 	opts.progress("launch", "")
 	launchRes, err := conn.Exec(ctx, LaunchCommand(bin, workspace, paths, opts.CredentialProxy))
@@ -185,6 +192,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		Addr:      addr,
 		Workspace: workspace,
 		Version:   version,
+		ServeCaps: ServeCapsToken,
 		TokenFile: paths.TokenFile,
 		LogFile:   paths.LogFile,
 		StartedAt: nowUnix(opts.clock()),
@@ -199,7 +207,25 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("bootstrap: write state: %w", err)
 	}
 	opts.progress("ready", addr)
-	return Result{State: st, Token: token}, nil
+	return Result{State: st, Token: freshToken}, nil
+}
+
+func stageServeToken(ctx context.Context, fs *sftpfs.FS, paths StatePaths, token string) (string, error) {
+	if err := fs.MkdirAll(ctx, paths.Dir); err != nil {
+		return "", err
+	}
+	staged := paths.TokenFile + ".next"
+	if err := fs.WriteFileAtomic(ctx, staged, []byte(token+"\n"), 0o600); err != nil {
+		cleanupStagedServeToken(fs, staged)
+		return "", fmt.Errorf("bootstrap: stage token: %w", err)
+	}
+	return staged, nil
+}
+
+func cleanupStagedServeToken(fs *sftpfs.FS, staged string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = fs.Remove(ctx, staged, false)
 }
 
 func prepareCredentialProxy(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Options, home, workspace string, paths StatePaths) ([]string, bool, error) {
@@ -212,9 +238,6 @@ func prepareCredentialProxy(ctx context.Context, conn Conn, fs *sftpfs.FS, opts 
 		return nil, false, err
 	}
 	required := []string{"--model " + opts.CredentialProxy.Provider}
-	if err := stopMismatchedServe(ctx, conn, fs, paths, workspace, required); err != nil {
-		return nil, false, err
-	}
 	return required, changed, nil
 }
 
@@ -308,6 +331,9 @@ func tryReuse(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, w
 	if !validServeAddr(st.Addr) || !pidIsServe(ctx, conn, st.PID, paths, requireArgs...) {
 		return ServeState{}, "", false
 	}
+	if st.ServeCaps != ServeCapsToken && !supportsRequiredServeCapabilities(ctx, conn, st.PID) {
+		return ServeState{}, "", false
+	}
 	// The state record is informational; the workspace-derived path is the
 	// authority, so a tampered record cannot make us read an arbitrary file.
 	tok, err := readToken(ctx, fs, paths.TokenFile)
@@ -334,6 +360,38 @@ func stopMismatchedServe(ctx context.Context, conn Conn, fs *sftpfs.FS, paths St
 		}
 	}
 	return nil
+}
+
+func retireIncompatibleServe(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, workspace string, requireArgs []string) error {
+	if err := stopMismatchedServe(ctx, conn, fs, paths, workspace, requireArgs); err != nil {
+		return err
+	}
+	return stopOutdatedServe(ctx, conn, fs, paths, workspace)
+}
+
+// stopOutdatedServe retires a live process whose binary lacks the wire and
+// healing contracts required by the desktop. Leaving it alive would retain the
+// workspace lease and race the replacement process.
+func stopOutdatedServe(ctx context.Context, conn Conn, fs *sftpfs.FS, paths StatePaths, workspace string) error {
+	st, err := readState(ctx, fs, paths.StateJSON)
+	if err != nil || st.PID <= 0 || !validServeAddr(st.Addr) || st.Workspace != workspace {
+		return nil
+	}
+	if !pidIsServe(ctx, conn, st.PID, paths) {
+		return nil
+	}
+	if st.ServeCaps == ServeCapsToken || supportsRequiredServeCapabilities(ctx, conn, st.PID) {
+		return nil
+	}
+	if _, stopErr := conn.Exec(ctx, StopCommand(st.PID, paths)); stopErr != nil {
+		return fmt.Errorf("bootstrap: stop outdated serve: %w", stopErr)
+	}
+	return nil
+}
+
+func supportsRequiredServeCapabilities(ctx context.Context, conn Conn, pid int) bool {
+	res, err := conn.Exec(ctx, SupportsRequiredServeCapabilitiesCommand(pid))
+	return err == nil && strings.TrimSpace(string(res.Stdout)) == "yes"
 }
 
 // pidIsServe reports whether pid is running AND is a reasonix serve process,

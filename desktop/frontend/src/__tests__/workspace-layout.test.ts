@@ -219,19 +219,19 @@ eq(
 );
 eq(
   /const terminalRenderHeight = clampTerminalHeight\(terminalHeight, viewportHeight\)/.test(appSource)
-    && /"--terminal-height": `\$\{liveTerminalHeight \?\? \(terminalPanelOpen \? terminalRenderHeight : 0\)\}px`/.test(appSource),
+    && /"--terminal-height": `\$\{terminalSurfaceOpen \? liveTerminalHeight \?\? terminalRenderHeight : 0\}px`/.test(appSource),
   true,
   "terminal render height re-clamps whenever the viewport changes",
 );
 eq(
-  /aria-hidden=\{!terminalPanelOpen\}/.test(appSource)
-    && /tabIndex=\{terminalPanelOpen \? 0 : -1\}/.test(appSource)
+  /aria-hidden=\{!terminalSurfaceOpen\}/.test(appSource)
+    && /tabIndex=\{terminalSurfaceOpen \? 0 : -1\}/.test(appSource)
     && /onKeyDown=\{resizeTerminalWithKeyboard\}/.test(appSource),
   true,
   "closed terminal resizer leaves the tab order and open resizer supports keyboard adjustment",
 );
 eq(
-  /terminalPanelOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource)
+  /terminalSurfaceOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource)
     && !/\.layout\.layout--terminal-drawer-open \.footer/.test(stylesSource),
   true,
   "footer compaction applies only while the terminal is expanded outside Creation mode",
@@ -329,8 +329,8 @@ eq(
   "terminal and xterm remain in a lazy chunk",
 );
 eq(
-  /onPointerEnter=\{prefetchTerminal\}/.test(moreMenuSource)
-    && /onFocus=\{prefetchTerminal\}/.test(moreMenuSource)
+  /onPointerEnter=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(moreMenuSource)
+    && /onFocus=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(moreMenuSource)
     && /void import\("\.\.\/components\/TerminalPanel"\)/.test(terminalLifecycleSource),
   true,
   "pointer and keyboard intent prefetch the terminal chunk before opening (More menu)",
@@ -363,12 +363,12 @@ eq(
   "terminal selection-to-chat exposes the shared configurable shortcut",
 );
 eq(
-  /className="terminal-drawer"[\s\S]*?aria-hidden=\{!terminalPanelOpen\}[\s\S]*?inert=\{!terminalPanelOpen \? true : undefined\}/.test(appSource),
+  /className="terminal-drawer"[\s\S]*?aria-hidden=\{!terminalSurfaceOpen\}[\s\S]*?inert=\{!terminalSurfaceOpen \? true : undefined\}/.test(appSource),
   true,
   "the warm collapsed terminal is hidden from accessibility and focus navigation",
 );
 eq(
-  /open=\{terminalPanelOpen\}/.test(appSource)
+  /open=\{terminalSurfaceOpen\}/.test(appSource)
     && /open && selectionAction &&/.test(terminalPanelSource)
     && /if \(!open\) setSelectionAction\(null\)/.test(terminalPanelSource),
   true,

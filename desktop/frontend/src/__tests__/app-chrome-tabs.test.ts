@@ -447,7 +447,7 @@ ok(
   /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
     /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
-    /submitDisabled=\{!controllerReady\}/.test(appSource),
+    /submitDisabled=\{remoteSurfaceActive \? !remoteComposerReady \|\| !remoteComposerProfileReady : !controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
 );
 
@@ -500,10 +500,10 @@ ok(
   "rewind previews warn on incomplete coverage and only authorize file overwrite after a conflict confirmation",
 );
 
-ok(
-  /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
-    /hydrating=\{runtimeTransitioning \|\| transcriptHydrating\}/.test(appSource),
-  "Welcome is suppressed only until transcript history has loaded",
+ok(/const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
+    /hydrating=\{transcriptHydrating \|\| \(runtimeTransitioning && !navigationTargetDataReady\)\}/.test(appSource) &&
+    /surfaceCommitToken=\{surfaceCommitToken\}/.test(appSource) && /onSurfacePaintReady=\{handleSurfacePaintReady\}/.test(appSource),
+  "Welcome stays suppressed through target data commit and navigation settles only after paint readiness",
 );
 
 ok(

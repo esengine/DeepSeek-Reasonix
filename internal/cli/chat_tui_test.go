@@ -2815,12 +2815,12 @@ func TestQueuedFoldedPasteExpandsBeforeInterjectSend(t *testing.T) {
 		SessionDir: dir,
 		Label:      "test",
 	})
+	defer ctrl.Close()
 	ctrl.EnsureSessionPath()
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.eventCh = make(chan event.Event, 8)
 	m.state = tuiRunning
-
 	pasted := strings.Repeat("queued pasted content\n", 10)
 	model, _ := m.Update(tea.PasteMsg{Content: pasted})
 	m = model.(chatTUI)

@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,7 @@ func TestEnsureServeRejectsStalePortFile(t *testing.T) {
 		case strings.Contains(cmd, "uname"):
 			return ok("Linux x86_64\n")
 		case strings.Contains(cmd, "command -v reasonix"):
-			return ok("/usr/bin/reasonix\nreasonix v9.9.0\nportfile:yes\n")
+			return ok("/usr/bin/reasonix\nreasonix v9.9.0\nportfile:yes\nsessionevents:yes\ndetachedheal:yes\ncaps:yes\n")
 		case strings.Contains(cmd, "nohup"):
 			if strings.Contains(cmd, "rm -f "+shellQuote(paths.PortFile)) {
 				_ = os.Remove(paths.PortFile) // model the generated launch command
@@ -53,11 +54,13 @@ func TestEnsureServeSerializesConcurrentClients(t *testing.T) {
 		case strings.Contains(cmd, "uname"):
 			return ok("Linux x86_64\n")
 		case strings.Contains(cmd, "command -v reasonix"):
-			return ok("/usr/bin/reasonix\nreasonix v9.9.0\nportfile:yes\n")
+			return ok("/usr/bin/reasonix\nreasonix v9.9.0\nportfile:yes\nsessionevents:yes\ndetachedheal:yes\ncaps:yes\n")
 		case strings.Contains(cmd, "nohup"):
 			launches.Add(1)
 			_ = os.WriteFile(paths.PortFile, []byte("127.0.0.1:45123\n"), 0o600)
 			return ok("321\n")
+		case strings.Contains(cmd, "readlink /proc/321/exe"):
+			return ok("yes\n")
 		case strings.Contains(cmd, "ps -p 321"):
 			return ok("1\n")
 		default:
@@ -124,10 +127,9 @@ func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testi
 		switch {
 		case strings.Contains(cmd, "npm i -g reasonix"):
 			return remote.ExecResult{Stdout: []byte("npm: command not found"), ExitCode: 127}, nil
+		case strings.Contains(cmd, "BIN=; if [ -x "+shellQuote(uploaded)):
+			return ok(uploaded + "\nreasonix v1.2.3\nportfile:yes\nsessionevents:yes\ndetachedheal:yes\ncaps:yes\n")
 		case strings.Contains(cmd, "command -v reasonix"):
-			if _, err := os.Stat(uploaded); err == nil {
-				return ok(uploaded + "\nreasonix v1.2.3\nportfile:yes\n")
-			}
 			return ok("\n")
 		default:
 			return ok("")
@@ -150,5 +152,66 @@ func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testi
 	}
 	if !fetched || bin != uploaded {
 		t.Fatalf("bin=%q fetched=%v", bin, fetched)
+	}
+}
+
+func TestUploadInstallProbesFreshBinaryBeforeStalePathCandidate(t *testing.T) {
+	skipOnWindows(t)
+	root := t.TempDir()
+	uploaded := uploadedBinPath(root)
+	local := filepath.Join(root, "local-reasonix")
+	if err := os.WriteFile(local, []byte("fresh-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	probedUpload := false
+	conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+		switch {
+		case strings.Contains(cmd, "command -v reasonix"):
+			return ok("/usr/bin/reasonix\nreasonix v1.0.0\nportfile:yes\nsessionevents:no\ndetachedheal:no\ncaps:no\n")
+		case strings.Contains(cmd, "BIN=; if [ -x "+shellQuote(uploaded)):
+			probedUpload = true
+			if _, err := os.Stat(uploaded); err != nil {
+				t.Fatalf("uploaded probe ran before binary write: %v", err)
+			}
+			return ok(uploaded + "\nreasonix v9.9.0\nportfile:yes\nsessionevents:yes\ndetachedheal:yes\ncaps:yes\n")
+		default:
+			return ok("")
+		}
+	})
+	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
+		Install: InstallUpload, LocalBinary: local, LocalGOOS: "linux", LocalGOARCH: "amd64",
+	}, root, "linux", "amd64", pathsFor(root, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !probedUpload || bin != uploaded {
+		t.Fatalf("fresh upload result = bin:%q probed:%v, want %q/true", bin, probedUpload, uploaded)
+	}
+}
+
+func TestNPMInstallProbesFreshGlobalBinaryBeforeStalePathCandidate(t *testing.T) {
+	skipOnWindows(t)
+	root := t.TempDir()
+	const installed = "/opt/npm/bin/reasonix"
+	probedGlobal := false
+	conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+		switch {
+		case strings.Contains(cmd, "command -v reasonix"):
+			return ok("/usr/bin/reasonix\nreasonix v1.0.0\nportfile:yes\nsessionevents:no\ndetachedheal:no\ncaps:no\n")
+		case strings.Contains(cmd, "npm i -g reasonix"):
+			return ok("installed\n")
+		case strings.Contains(cmd, `BIN=; P="$(npm prefix -g 2>/dev/null)"`):
+			probedGlobal = true
+			return ok(installed + "\nreasonix v9.9.0\nportfile:yes\nsessionevents:yes\ndetachedheal:yes\ncaps:yes\n")
+		default:
+			return ok("")
+		}
+	})
+	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{Install: InstallNPM}, root, "linux", "amd64", pathsFor(root, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !probedGlobal || bin != installed {
+		t.Fatalf("fresh npm result = bin:%q probed:%v, want %q/true", bin, probedGlobal, installed)
 	}
 }

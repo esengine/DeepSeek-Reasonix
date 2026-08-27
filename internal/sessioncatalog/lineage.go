@@ -1,9 +1,6 @@
 package sessioncatalog
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -455,77 +452,6 @@ func recoveryCandidateCovers(candidate, root int, idxs []int, content map[int]ag
 		}
 	}
 	return true
-}
-
-func (c *Catalog) refreshDirectoryRecoveryLineage(ctx context.Context, target DirectoryTarget, records []SessionRecord) error {
-	for i := range records {
-		records[i] = classifyRecoveryLineageFromContent(normalizeSessionRecord(records[i]))
-	}
-	records = promoteCanonicalLeaves(records)
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	tx, err := c.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	affected := map[TopicKey]struct{}{}
-	changed := false
-	for _, record := range records {
-		// Capture the previously projected topic so re-anchored recovery rows
-		// can delete empty legacy topic shells.
-		var previous TopicKey
-		if err := tx.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id FROM catalog_sessions WHERE path=?`, record.Path).
-			Scan(&previous.Scope, &previous.WorkspaceRoot, &previous.TopicID); err == nil && previous.TopicID != "" {
-			affected[previous] = struct{}{}
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			_ = tx.Rollback()
-			return err
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET recovered=?,recovery_copy=?,recovery_group_id=?,recovery_role=?,recovery_canonical=?,topic_id=?,topic_title=?,logical_topic_id=?,ordinary_visible=?,parent_id=? WHERE path=?`,
-			boolToInt(record.Recovered), boolToInt(record.RecoveryCopy), record.RecoveryGroupID, record.RecoveryRole,
-			boolToInt(record.RecoveryCanonical), record.TopicID, record.TopicTitle, record.LogicalTopicID,
-			boolToInt(record.OrdinaryVisible), record.ParentID, record.Path)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if rows, _ := result.RowsAffected(); rows > 0 {
-			changed = true
-		}
-		if record.TopicID != "" {
-			affected[TopicKey{Scope: record.Scope, WorkspaceRoot: record.WorkspaceRoot, TopicID: record.TopicID}] = struct{}{}
-		}
-		if record.Recovered && previous.TopicID != "" && previous.TopicID != record.TopicID {
-			// The lineage re-anchor moved this recovery row off its old topic;
-			// tombstone it so SyncMetadata cannot resurrect the folded shell.
-			if err := rememberFoldedTopic(ctx, tx, previous, c.opts.Now().UnixMilli()); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-	}
-	if !changed {
-		return tx.Rollback()
-	}
-	for key := range affected {
-		if err := recomputeTopic(ctx, tx, key); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	revision, err := bumpRevision(ctx, tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	// Recovery lineage is the final projection step inside ReconcileDirectory.
-	// Keep its revision internal; finishDirectoryScan publishes the one complete
-	// directory snapshot after missing-row cleanup and readiness are committed.
-	c.rememberRevision(revision)
-	return nil
 }
 
 func recoveryParentPath(record SessionRecord) string {

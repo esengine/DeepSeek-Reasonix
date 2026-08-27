@@ -375,7 +375,7 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 	messages = append(messages, provider.Message{Role: provider.RoleUser, Content: compactionInstructionWithFocus(instructions)})
 	var schemas []provider.ToolSchema
 	if a.svc.tools != nil {
-		schemas = a.svc.tools.Schemas()
+		schemas = a.providerToolSchemas()
 	}
 	return provider.Request{
 		Messages:    messages,

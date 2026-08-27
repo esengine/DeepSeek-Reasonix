@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +17,20 @@ import (
 	"reasonix/internal/jobs"
 )
 
+type blockingRequestBody struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingRequestBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return 0, io.EOF
+}
+
+func (*blockingRequestBody) Close() error { return nil }
+
 // lockProbeController wraps a real controller but intercepts the two blocking
 // steps of a model switch — Snapshot (may touch disk) and Close (jobs grace wait
 // up to 15s + SessionEnd hook) — so a test can assert switchModel runs them while
@@ -23,6 +39,18 @@ type lockProbeController struct {
 	*control.Controller
 	onSnapshot func()
 	onClose    func()
+}
+
+type blockingNewSessionController struct {
+	*control.Controller
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingNewSessionController) NewSession() error {
+	close(c.entered)
+	<-c.release
+	return c.Controller.NewSession()
 }
 
 func (c *lockProbeController) Snapshot() error {
@@ -164,6 +192,94 @@ func TestSwitchModelRejectsWhileRunning(t *testing.T) {
 	waitNotRunning(t, ctrl)
 }
 
+func TestForegroundMutationRejectsStaleSessionPath(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.jsonl")
+	stalePath := filepath.Join(dir, "stale.jsonl")
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Runner: blockingRunner{}, Sink: bc, SessionPath: currentPath})
+	s := New(ctrl, bc, config.ServeConfig{})
+
+	ctrl.SubmitHTTP("hi")
+	waitRunning(t, ctrl)
+	req := httptest.NewRequest(http.MethodPost, "/cancel", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(expectedSessionPathHeader, stalePath)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("stale cancel status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !ctrl.Running() {
+		t.Fatal("stale cancel reached the newly current controller")
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/cancel", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(expectedSessionPathHeader, currentPath)
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("current cancel status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	waitNotRunning(t, ctrl)
+}
+
+func TestForegroundMutationReadsBodyBeforeBindingLock(t *testing.T) {
+	s := New(control.New(control.Options{}), NewBroadcaster(), config.ServeConfig{})
+	blockedBody := &blockingRequestBody{started: make(chan struct{}), release: make(chan struct{})}
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		req := httptest.NewRequest(http.MethodPost, "/slow", blockedBody)
+		s.foregroundMutation(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		})(httptest.NewRecorder(), req)
+	}()
+	select {
+	case <-blockedBody.started:
+	case <-time.After(time.Second):
+		t.Fatal("slow request body was never read")
+	}
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		req := httptest.NewRequest(http.MethodPost, "/fast", http.NoBody)
+		s.foregroundMutation(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})(httptest.NewRecorder(), req)
+	}()
+	select {
+	case <-secondDone:
+	case <-time.After(500 * time.Millisecond):
+		close(blockedBody.release)
+		<-firstDone
+		t.Fatal("slow body held the session binding lock")
+	}
+	close(blockedBody.release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("slow request did not finish after its body was released")
+	}
+}
+
+func TestForegroundMutationRejectsOversizedBodyBeforeHandler(t *testing.T) {
+	s := New(control.New(control.Options{}), NewBroadcaster(), config.ServeConfig{})
+	called := false
+	req := httptest.NewRequest(http.MethodPost, "/oversized", strings.NewReader(strings.Repeat("x", foregroundMutationMaxBody+1)))
+	rec := httptest.NewRecorder()
+	s.foregroundMutation(func(http.ResponseWriter, *http.Request) { called = true })(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if called {
+		t.Fatal("oversized body reached the foreground handler")
+	}
+}
+
 func TestSwitchModelRejectsWhileBackgroundJobRunning(t *testing.T) {
 	bc := NewBroadcaster()
 	manager := jobs.NewManager(bc)
@@ -291,6 +407,98 @@ func TestSubmitWaitsForExtensionReloadAndTargetsReplacement(t *testing.T) {
 	}
 	replacement.Cancel()
 	waitNotRunning(t, replacement)
+}
+
+func TestSubmitNewHoldsBindingLockUntilRotationCompletes(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := &blockingNewSessionController{
+		Controller: control.New(control.Options{Sink: bc, SessionDir: t.TempDir()}),
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	t.Cleanup(func() {
+		select {
+		case <-ctrl.release:
+		default:
+			close(ctrl.release)
+		}
+	})
+	s := New(ctrl, bc, config.ServeConfig{})
+	submitDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/submit", strings.NewReader(`{"input":"/new"}`))
+		rec := httptest.NewRecorder()
+		s.submit(rec, req)
+		submitDone <- rec
+	}()
+	select {
+	case <-ctrl.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("/submit /new did not enter synchronous rotation")
+	}
+	lockAcquired := make(chan struct{})
+	go func() {
+		s.bindMu.Lock()
+		close(lockAcquired)
+		s.bindMu.Unlock()
+	}()
+	select {
+	case <-lockAcquired:
+		t.Fatal("bindMu was released before /new finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(ctrl.release)
+	var rec *httptest.ResponseRecorder
+	select {
+	case rec = <-submitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("/submit /new did not return after rotation finished")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("/submit /new status = %d, want 204", rec.Code)
+	}
+	select {
+	case <-lockAcquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bindMu stayed locked after /new completed")
+	}
+}
+
+func TestSessionSnapshotEndpointsWaitForBindingEpoch(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: t.TempDir()})
+	s := New(ctrl, bc, config.ServeConfig{})
+
+	for _, endpoint := range []struct {
+		name    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "history", handler: s.history},
+		{name: "status", handler: s.status},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			s.bindMu.Lock()
+			done := make(chan struct{})
+			go func() {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/"+endpoint.name+"?runtime=1", nil)
+				endpoint.handler(rec, req)
+				close(done)
+			}()
+			select {
+			case <-done:
+				s.bindMu.Unlock()
+				t.Fatalf("/%s observed a controller snapshot during an active binding epoch", endpoint.name)
+			case <-time.After(100 * time.Millisecond):
+			}
+			s.bindMu.Unlock()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("/%s stayed blocked after the binding epoch completed", endpoint.name)
+			}
+		})
+	}
 }
 
 // blockingRunner keeps a turn "running" until its context is cancelled, so tests

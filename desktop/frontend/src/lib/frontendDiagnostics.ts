@@ -124,11 +124,20 @@ export type FrontendDiagnosticEvent = {
   catalogRebuilding?: boolean;
   directoryState?: string;
   changeReason?: string;
+  outcome?: string;
+  trigger?: string;
   scope?: string;
   variant?: string;
   timeFilter?: string;
   button?: number;
   modifiers?: number;
+  intent?: number;
+};
+
+export type FrontendDiagnosticAnomaly = {
+  code: "settle-before-paint-ready" | "viewport-older-without-user-input" | "navigation-session-count-changed" | "unknown-scroll-writer" | "target-empty-sequence";
+  intent?: number;
+  count?: number;
 };
 
 export type FrontendDiagnosticEnvironment = {
@@ -151,6 +160,7 @@ export type FrontendDiagnosticPayload = {
     eventCount: number;
     droppedEventCount: number;
     markerCount: number;
+    anomalies: FrontendDiagnosticAnomaly[];
   };
   events: FrontendDiagnosticEvent[];
 };
@@ -172,7 +182,7 @@ type EventTargetListener = { target: EventTarget; type: string; listener: EventL
 const NUMBER_FIELDS = [
   "width", "height", "x", "y", "deltaX", "deltaY", "targetTop", "listHeight", "durationMs", "scrollTop", "scrollHeight",
   "clientHeight", "bottomDistance", "mountedRows", "totalRows", "firstVisibleIndex", "firstVisibleTop",
-  "rowIndex", "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "relativeError", "disclosureCount", "contentRevision", "tabCount", "patchCount", "button", "modifiers",
+  "rowIndex", "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "relativeError", "disclosureCount", "contentRevision", "tabCount", "patchCount", "button", "modifiers", "intent",
   "workspaceSessions", "visibleSessions", "hiddenSessions", "hiddenByFilter", "hiddenByCollapsed", "hiddenByTruncation", "runtimeSessions", "runtimeOnlySessions", "recoveryOnlySessions", "recoveryCopySessions", "recoveryCopies", "runningSessions", "unreadSessions", "pinnedSessions", "activeSessions", "activeVisibleSessions", "folderCount", "expandedFolders", "showAllFolders", "catalogRevision", "catalogIndexed", "catalogTotal", "repairPending", "treeRevision", "organizationRevision", "unloadedSessions", "deltaWorkspaceSessions", "deltaVisibleSessions", "deltaHiddenSessions", "deltaRecoveryCopies", "deltaRuntimeOnlySessions",
 ] as const;
 const BOOLEAN_FIELDS = [
@@ -182,8 +192,61 @@ const BOOLEAN_FIELDS = [
 const STRING_FIELDS = [
   "source", "eventSource", "action", "target", "targetRole", "targetTag", "keyClass", "pointerType", "inputType", "visibility", "phase",
   "reason", "status", "mode", "previousMode", "owner", "writeKind", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode",
-  "directoryState", "changeReason", "scope", "variant", "timeFilter",
+  "directoryState", "changeReason", "outcome", "trigger", "scope", "variant", "timeFilter",
 ] as const;
+
+export function analyzeFrontendDiagnosticAnomalies(events: readonly FrontendDiagnosticEvent[]): FrontendDiagnosticAnomaly[] {
+  const anomalies: FrontendDiagnosticAnomaly[] = [];
+  const painted = new Set<number>();
+  const navigation = new Map<number, { sessionCount?: number; counts: Set<number>; rows: number[] }>();
+  const knownScrollWriters = new Set([
+    "tail-follow", "recovery", "reader-stability", "jump", "rewind", "jump-bottom", "custom-scrollbar",
+    "selection-edge-scroll", "anchor-compensation", "block-window-prepend",
+  ]);
+  let viewportPermit = 0;
+  let unknownWriters = 0;
+  let unpermittedOlder = 0;
+  for (const event of events) {
+    if (event.type === "history.viewport-permit") viewportPermit = 1;
+    if (event.type === "navigation.begin" && event.intent !== undefined) {
+      navigation.set(event.intent, { counts: new Set(), rows: [] });
+    }
+    if (event.type === "navigation.paint-ready" && event.intent !== undefined) painted.add(event.intent);
+    if (event.type === "navigation.settle" && event.intent !== undefined && event.outcome !== "failed" &&
+      event.outcome !== "cancelled" && event.outcome !== "superseded" && !painted.has(event.intent)) {
+      anomalies.push({ code: "settle-before-paint-ready", intent: event.intent });
+    }
+    if (event.type === "history.older-request" && event.trigger === "viewport-user") {
+      if (viewportPermit > 0) viewportPermit -= 1;
+      else unpermittedOlder += 1;
+    }
+    if (event.type === "transcript.scroll-write" && event.owner && !knownScrollWriters.has(event.owner)) unknownWriters += 1;
+    for (const [intent, state] of navigation) {
+      if (painted.has(intent)) continue;
+      if (event.workspaceSessions !== undefined) state.counts.add(event.workspaceSessions);
+      if (event.type === "transcript.surface" && event.totalRows !== undefined) state.rows.push(event.totalRows);
+    }
+  }
+  for (const [intent, state] of navigation) {
+    if (state.counts.size > 1) anomalies.push({ code: "navigation-session-count-changed", intent, count: state.counts.size });
+    const sequence = state.rows;
+    let sawEmpty = false;
+    let sawNonEmptyAfterEmpty = false;
+    let exposed = false;
+    for (const rows of sequence) {
+      if (rows === 0) {
+        if (sawNonEmptyAfterEmpty) exposed = true;
+        sawEmpty = true;
+      } else if (sawEmpty) {
+        sawNonEmptyAfterEmpty = true;
+      }
+    }
+    if (exposed) anomalies.push({ code: "target-empty-sequence", intent });
+  }
+  if (unpermittedOlder > 0) anomalies.push({ code: "viewport-older-without-user-input", count: unpermittedOlder });
+  if (unknownWriters > 0) anomalies.push({ code: "unknown-scroll-writer", count: unknownWriters });
+  return anomalies;
+}
 
 function finiteNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -440,7 +503,13 @@ export function createFrontendDiagnostics(options: {
     return {
       schemaVersion: FRONTEND_DIAGNOSTIC_SCHEMA_VERSION,
       manifest: { ...manifest, reportId, createdAt },
-      summary: { durationMs: Math.max(0, Math.round(stoppedAt - startedAt)), eventCount: events.length, droppedEventCount, markerCount },
+      summary: {
+        durationMs: Math.max(0, Math.round(stoppedAt - startedAt)),
+        eventCount: events.length,
+        droppedEventCount,
+        markerCount,
+        anomalies: analyzeFrontendDiagnosticAnomalies(events),
+      },
       events: events.map((event) => ({ ...event })),
     };
   };

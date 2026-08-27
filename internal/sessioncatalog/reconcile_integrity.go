@@ -53,6 +53,10 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 	for _, info := range ordered {
 		expectedRecords = append(expectedRecords, normalizeSessionRecord(recordFromOrder(target, info)))
 	}
+	expectedRecords, err = c.preserveKnownSourceStates(ctx, path, expectedRecords)
+	if err != nil {
+		return false, err
+	}
 	for i := range expectedRecords {
 		expectedRecords[i] = classifyRecoveryLineageFromContent(expectedRecords[i])
 	}

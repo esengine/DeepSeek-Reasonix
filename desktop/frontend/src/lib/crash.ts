@@ -5,7 +5,7 @@ import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } 
 import { writeClipboardText } from "./clipboard";
 import { t } from "./i18n";
 import { sessionPipelineDiagnostics, type SessionPipelineDiagnostics } from "./sessionDiagnostics";
-
+import { isWailsRuntimeOnlyCrashEvent } from "./wailsRuntimeCrash";
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
 
@@ -797,7 +797,6 @@ type GlobalCrashEventLike = Pick<Event, "defaultPrevented"> & {
 const RESIZE_OBSERVER_LOOP_MESSAGE_RE =
   /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
 const OPAQUE_SCRIPT_ERROR_MESSAGE = "Script error.";
-
 function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
   const messages: string[] = [];
   const pushMessage = (message: string) => {
@@ -818,6 +817,7 @@ export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
   if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
   if (globalCrashEventMessages(e).some((message) => /Minified React error #520\b/.test(message))) return false;
+  if (isWailsRuntimeOnlyCrashEvent(e)) return false;
   return true;
 }
 

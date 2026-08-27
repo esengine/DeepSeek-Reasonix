@@ -146,6 +146,9 @@ const requestIdByTab = new Map<string, string>();
 // When true, the mock emits starting+ready synchronously BEFORE returning the
 // ticket (exercises the terminal-event stash path).
 let eagerActivationEvents = false;
+let failedHistoryTabId = "";
+let failSetActiveTabId = "";
+let restoredTabSeq = 0;
 
 function emitActivation(event: TopicActivationEvent): void {
   for (const handler of topicActivationHandlers) handler(event);
@@ -153,6 +156,7 @@ function emitActivation(event: TopicActivationEvent): void {
 
 function historyFor(tabID: string): HistoryMessage[] {
   if (tabID === "tab-r") return [{ role: "user", content: "帮我查询，现在我链接的 deep" }];
+  if (tabID.startsWith("tab-c-restored-")) return [{ role: "user", content: "history tab-c" }];
   return [{ role: "user", content: `history ${tabID}` }];
 }
 
@@ -181,7 +185,10 @@ window.go = {
       JobsForTab: async () => jobs,
       CheckpointsForTab: async () => checkpoints,
       HistoryForTab: async (tabID: string) => historyFor(tabID),
-      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => historySliceFromMessages(tabID, historyFor(tabID), req),
+      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+        if (tabID === failedHistoryTabId) throw new Error(`/private/${tabID}/history.jsonl could not be read`);
+        return historySliceFromMessages(tabID, historyFor(tabID), req);
+      },
       HistoryCheckpointTurnsForTab: async () => [],
       StartTopicActivation: async (req: TopicActivationRequest) => {
         const target = Array.from(tabsById.values()).find((tab) => tab.workspaceRoot === req.workspaceRoot && tab.topicId === req.topicId) ?? tabA;
@@ -195,7 +202,19 @@ window.go = {
         return { requestId, tabId: target.id, meta: { ...target, active: true } };
       },
       SetActiveTab: async (tabID: string) => {
+        if (tabID === failSetActiveTabId) throw new Error("source tab was already pruned");
         backendActiveId = tabID;
+      },
+      OpenTopicSession: async (_scope: string, _workspaceRoot: string, _topicID: string, sessionPath: string) => {
+        const source = Array.from(tabsById.values()).find((tab) => tab.sessionPath === sessionPath) ?? tabA;
+        const restored = tabMeta(`${source.id}-restored-${++restoredTabSeq}`, {
+          ...source,
+          id: `${source.id}-restored-${restoredTabSeq}`,
+          active: true,
+        });
+        tabsById.set(restored.id, restored);
+        backendActiveId = restored.id;
+        return restored;
       },
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,
@@ -257,7 +276,7 @@ await act(async () => {
 await waitFor("C hydrates on its ready", () => hasHistory("tab-c") && controller?.state.hydrating === false);
 ok(!hasHistory("tab-b"), "only the last click's history is visible");
 
-// ── terminal failed surfaces the hydrate-error UI ───────────────────────────
+// ── terminal failure restores the committed source surface ─────────────────
 await act(async () => {
   await controller?.activateTopic("project", tabA.workspaceRoot, tabA.topicId ?? "");
   await flushPromises();
@@ -267,8 +286,27 @@ await act(async () => {
   emitActivation({ requestId: requestIdByTab.get("tab-a") ?? "", tabId: "tab-a", phase: "failed", error: "session failed to start" });
   await flushPromises();
 });
-eq(controller?.state.hydrating, false, "failed activation stops the hydrating surface");
-eq(controller?.state.hydrateError, "session failed to start", "failed activation surfaces the sanitized error");
+eq(controller?.activeTabId, "tab-c", "failed activation restores the previously committed source tab");
+eq(controller?.state.hydrating, false, "restored source is immediately usable");
+ok(hasHistory("tab-c"), "failed activation retains the source transcript");
+const failureNotice = controller?.state.items.findLast((item) => item.kind === "notice");
+ok(Boolean(failureNotice && failureNotice.kind === "notice" && !failureNotice.text.includes("session failed to start")), "failure notice is sanitized before it reaches the restored source");
+
+// ── activation succeeds but target history fails: source still wins ─────────
+failedHistoryTabId = "tab-a";
+failSetActiveTabId = "tab-c";
+await act(async () => {
+  await controller?.activateTopic("project", tabA.workspaceRoot, tabA.topicId ?? "");
+  await flushPromises();
+  emitActivation({ requestId: requestIdByTab.get("tab-a") ?? "", tabId: "tab-a", phase: "ready" });
+  await flushPromises();
+});
+await waitFor("history failure rebinds the pruned committed source", () => controller?.activeTabId?.startsWith("tab-c-restored-") ?? false);
+ok(hasHistory("tab-c"), "target history failure retains the source controller transcript");
+const historyFailureNotice = controller?.state.items.findLast((item) => item.kind === "notice");
+ok(!(historyFailureNotice?.kind === "notice" && historyFailureNotice.text.includes("/private/")), "target history failure does not expose a local path");
+failedHistoryTabId = "";
+failSetActiveTabId = "";
 
 // ── a terminal event that beats the ticket is stashed and replayed ──────────
 eagerActivationEvents = true;

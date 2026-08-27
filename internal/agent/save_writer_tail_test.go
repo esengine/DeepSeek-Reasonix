@@ -71,6 +71,35 @@ func TestWriterTailDecisionAppendAfterSave(t *testing.T) {
 	}
 }
 
+func TestWriterTailRetryAfterPreWALReservation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	bindSessionWriter(t, s, path)
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("initial SaveSnapshot: %v", err)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "second"})
+	_, restore := crashAt(t, "wal-append", store.SessionEventLog(path))
+	crash := saveCrashing(func() { _ = s.SaveSnapshot(path) })
+	restore()
+	if crash == nil {
+		t.Fatal("save must crash after reserving the revision and before WAL append")
+	}
+
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("same-writer retry after reserved revision: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after retry: %v", err)
+	}
+	if got := len(loaded.Snapshot()); got != 3 {
+		t.Fatalf("messages after retry = %d, want 3", got)
+	}
+}
+
 func TestWriterTailDecisionDisarmedWithoutWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	s := NewSession("sys")

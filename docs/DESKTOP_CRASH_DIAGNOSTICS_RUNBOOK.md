@@ -33,13 +33,20 @@ itself resolve a crash issue.
 6. Verify `report_daily`, `report_installations`,
    `report_event_dimensions`, `diagnostics_meta`, their fingerprint/date
    indexes, and the ping window index. Confirm `installation_linked_since`.
-7. Run `npm run migrate:firebase-data` as a dry run. It uses 200-fingerprint
-   keyset pages and must report at most 700 MiB reserved. Then run
-   `npm run migrate:firebase-data -- --apply`; after convergence run
-   `npm run migrate:firebase-data -- --verify-only`. The default checkpoint is
-   `.firebase-crash-migration-state.json` (mode `0600`, gitignored); use
-   `--checkpoint=<path>` to relocate it and `--reset-checkpoint` only to restart
-   deliberately. Logs contain only counts, fingerprint prefixes, and digests.
+7. In **Actions > Deploy crash worker > Run workflow**, select `main-v2` and
+   choose `dry-run` for **Firebase crash history operation**. This uses the
+   existing repository secrets, runs behind the `canary` environment approval,
+   does not deploy the Worker, and must report at most 700 MiB reserved. After
+   reviewing the result, choose `apply` and enter the exact confirmation
+   `APPLY_FIREBASE_CRASH_DATA`; the job runs `--apply` followed immediately by
+   `--verify-only` on the same runner. Choose `verify-only` for later
+   independent audits. Authenticated operators may still run
+   `npm run migrate:firebase-data`, `npm run migrate:firebase-data -- --apply`,
+   and `npm run migrate:firebase-data -- --verify-only` locally. The default
+   checkpoint is `.firebase-crash-migration-state.json` (mode `0600`,
+   gitignored); use `--checkpoint=<path>` to relocate it and
+   `--reset-checkpoint` only to restart deliberately. Logs contain only counts,
+   fingerprint prefixes, and digests.
 8. Deploy the Worker in `dual` mode first. Smoke-test old Report/Ping/Metrics payloads, a
    legacy `webview2` payload, and Windows/Linux `webRuntime` payloads using
    `channel=test`.

@@ -202,6 +202,53 @@ console.log("\nmarkdown history rendering");
   await act(async () => root4.unmount());
 }
 
+// ── a worker result cannot replace the reader's mid-document fallback ────────
+{
+  rootEl.className = "transcript";
+  rootEl.scrollTop = 400;
+  Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_000 });
+  Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
+  (globalThis as { Worker?: unknown }).Worker = class {};
+  let resolveParse: ((result: ReturnType<typeof parseMarkdown>) => void) | null = null;
+  const deferred = new MarkdownWorkerClient({
+    createWorker: () => Promise.resolve({
+      onmessage: null,
+      onerror: null,
+      postMessage(request) {
+        resolveParse = (result) => {
+          const message = { data: { id: request.id, result } };
+          (this.onmessage as ((event: unknown) => void) | null)?.(message);
+        };
+      },
+      terminate() {},
+    }),
+  });
+  setMarkdownWorkerClientForTest(deferred);
+  const root5 = createRoot(rootEl);
+  const text = Array.from({ length: 60 }, (_, index) => `# Anchor ${index + 1}\n\nBody ${index + 1}.`).join("\n\n");
+  await act(async () => {
+    root5.render(<MarkdownHistory text={text} entryId="md-history-mid-read" fallback={<div className="md">{text}</div>} />);
+  });
+  await act(async () => {
+    resolveParse?.(parseMarkdown(text));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  ok(!rootEl.querySelector(".md[data-markdown-blocks]"), "worker completion keeps the full fallback while the reader is away from bottom");
+  ok(rootEl.textContent?.includes("Anchor 1"), "the reader's prefix remains mounted during the deferred handoff");
+
+  rootEl.scrollTop = 700;
+  await act(async () => {
+    rootEl.dispatchEvent(new dom.window.Event("scroll"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  ok(rootEl.querySelector('.md[data-markdown-blocks="120"]'), "returning to bottom commits the cached parsed blocks");
+  ok(rootEl.textContent?.includes("Anchor 60"), "the parsed tail is visible after the safe handoff");
+  await act(async () => root5.unmount());
+  rootEl.className = "";
+  delete (globalThis as { Worker?: unknown }).Worker;
+  setMarkdownWorkerClientForTest(newSpyClient());
+}
+
 // ── progressive mounting for huge documents ──────────────────────────────────
 {
   rootEl.className = "transcript";
@@ -219,13 +266,13 @@ console.log("\nmarkdown history rendering");
     return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) };
   };
   const text = Array.from({ length: 420 }, (_, i) => `Paragraph ${i} with some *content*.`).join("\n\n");
-  const root5 = createRoot(rootEl);
+  const root6 = createRoot(rootEl);
   const writeTranscriptOffset = (_owner: "block-window-prepend", top: number) => {
     rootEl.scrollTop = top;
     return true;
   };
   await act(async () => {
-    root5.render(
+    root6.render(
       <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
         <MarkdownHistory text={text} entryId="md-history-huge" fallback={null} />
       </TranscriptScrollWriteProvider>,
@@ -276,7 +323,7 @@ console.log("\nmarkdown history rendering");
 
   const replacement = Array.from({ length: 420 }, (_, i) => `Replacement ${i} with some *content*.`).join("\n\n");
   await act(async () => {
-    root5.render(
+    root6.render(
       <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
         <MarkdownHistory text={replacement} entryId="md-history-huge-replacement" fallback={null} />
       </TranscriptScrollWriteProvider>,
@@ -288,7 +335,7 @@ console.log("\nmarkdown history rendering");
   ok(rootEl.textContent?.includes("Replacement 419"), "the replacement's newest block mounts immediately");
   await intersectSentinel("[data-markdown-older-sentinel]", true);
   eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "120", "a replacement document re-arms viewport paging");
-  await act(async () => root5.unmount());
+  await act(async () => root6.unmount());
   dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
   rootEl.className = "";
 }

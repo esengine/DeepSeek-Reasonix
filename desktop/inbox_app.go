@@ -181,6 +181,26 @@ func (a *App) EnqueueInboxSteer(tabID, display, submit, idempotency string) (Inb
 	return a.enqueueInbox(tabID, sessioninbox.IntentSteer, display, submit, nil, idempotency, true)
 }
 
+// EnqueueInboxSteerForTurn durably records guidance while ensuring its
+// mid-turn injection is fenced to the exact turn observed by the frontend.
+// A raced completion keeps the item as a follow-up instead of steering the
+// replacement turn.
+func (a *App) EnqueueInboxSteerForTurn(tabID, turnID, display, submit, idempotency string) (InboxReceiptView, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return InboxReceiptView{}, fmt.Errorf("turnId is required")
+	}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return InboxReceiptView{}, err
+	}
+	status := ctrl.RuntimeStatus()
+	if status.TurnID != turnID || !status.Running {
+		return InboxReceiptView{}, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	}
+	return a.enqueueInboxWithController(tabID, ctrl, sessioninbox.IntentSteer, display, submit, nil, idempotency, true, turnID)
+}
+
 // SteerInboxItem attempts to apply an existing durable queue item to the
 // current turn. It never creates a second entry for the same instruction.
 func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
@@ -200,6 +220,39 @@ func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
 		Position:    rec.Position,
 		Paused:      rec.Paused,
 		Idempotent:  rec.Idempotent,
+	}, nil
+}
+
+// SteerInboxItemForTurn is the exact-turn counterpart for an existing durable
+// guidance item.
+func (a *App) SteerInboxItemForTurn(tabID, turnID, itemID string) (InboxReceiptView, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return InboxReceiptView{}, fmt.Errorf("turnId is required")
+	}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return InboxReceiptView{}, err
+	}
+	status := ctrl.RuntimeStatus()
+	if status.TurnID != turnID || !status.Running {
+		return InboxReceiptView{}, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	}
+	exact, ok := ctrl.(interface {
+		TrySteerInboxItemForTurn(string, string) (sessioninbox.InboxReceipt, error)
+	})
+	if !ok {
+		return InboxReceiptView{}, fmt.Errorf("exact-turn steer is unavailable")
+	}
+	rec, err := exact.TrySteerInboxItemForTurn(turnID, strings.TrimSpace(itemID))
+	if err != nil {
+		err = inboxWailsError(err)
+		return InboxReceiptView{Error: err.Error()}, err
+	}
+	a.emitInboxChanged(tabID)
+	return InboxReceiptView{
+		ItemID: rec.ItemID, Disposition: string(rec.Disposition), Position: rec.Position,
+		Paused: rec.Paused, Idempotent: rec.Idempotent,
 	}, nil
 }
 
@@ -240,6 +293,10 @@ func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, displa
 	if err != nil {
 		return InboxReceiptView{}, err
 	}
+	return a.enqueueInboxWithController(tabID, ctrl, intent, display, submit, invocations, idempotency, trySteer, "")
+}
+
+func (a *App) enqueueInboxWithController(tabID string, ctrl control.SessionAPI, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool, turnID string) (InboxReceiptView, error) {
 	if ensurer, ok := ctrl.(interface{ EnsureSessionPath() }); ok {
 		ensurer.EnsureSessionPath()
 	}
@@ -260,9 +317,22 @@ func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, displa
 		Idempotency: strings.TrimSpace(idempotency),
 		Invocations: controlInvocationRequests(invocations),
 	}
-	var rec sessioninbox.InboxReceipt
+	var (
+		rec sessioninbox.InboxReceipt
+		err error
+	)
 	if trySteer {
-		rec, err = ctrl.TryEnqueueAndSteer(req)
+		if turnID != "" {
+			exact, ok := ctrl.(interface {
+				TryEnqueueAndSteerForTurn(string, control.InboxRequest) (sessioninbox.InboxReceipt, error)
+			})
+			if !ok {
+				return InboxReceiptView{}, fmt.Errorf("exact-turn steer is unavailable")
+			}
+			rec, err = exact.TryEnqueueAndSteerForTurn(turnID, req)
+		} else {
+			rec, err = ctrl.TryEnqueueAndSteer(req)
+		}
 	} else {
 		rec, err = ctrl.TryEnqueueFollowup(req)
 	}

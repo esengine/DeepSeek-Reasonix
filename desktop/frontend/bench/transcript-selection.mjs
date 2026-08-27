@@ -136,6 +136,131 @@ async function waitForServer() {
   throw new Error("transcript browser preview did not become ready");
 }
 
+async function runSelectionTableRepaintGeometry(page) {
+  await page.click('.project-tree__topic-main:has-text("bench:selection-table")');
+  await page.waitForFunction(() => (
+    document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:selection-table")
+      && [...document.querySelectorAll("strong")].some((element) => element.textContent?.includes("SELECTION REPAINT TARGET"))
+  ), undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 30_000 });
+
+  const target = page.locator("strong", { hasText: "SELECTION REPAINT TARGET" });
+  await target.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const targetBox = await target.boundingBox();
+  assert(targetBox != null, "selection-table exposes the strong-text multi-click target");
+
+  const initial = await page.evaluate(() => {
+    const targetElement = [...document.querySelectorAll("strong")].find((element) => element.textContent?.includes("SELECTION REPAINT TARGET"));
+    const transcript = document.querySelector(".transcript");
+    const table = targetElement?.closest("table");
+    const row = targetElement?.closest("tr");
+    const host = document.querySelector('.transcript-selection-action[data-surface="transcript"]');
+    if (!targetElement || !transcript || !table || !row || !host) return null;
+    const abort = new AbortController();
+    const rect = (element) => {
+      const value = element.getBoundingClientRect();
+      return { top: value.top, left: value.left, right: value.right, bottom: value.bottom };
+    };
+    const capture = (event) => {
+      const currentHost = document.querySelector('.transcript-selection-action[data-surface="transcript"]');
+      const selection = document.getSelection();
+      window.__selectionTableProbe.samples.push({
+        event,
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+        table: rect(table),
+        row: rect(row),
+        target: rect(targetElement),
+        hostCount: document.querySelectorAll('.transcript-selection-action[data-surface="transcript"]').length,
+        hostStable: currentHost === host,
+        hostState: currentHost?.getAttribute("data-state") ?? null,
+        selectionRects: selection?.rangeCount
+          ? [...selection.getRangeAt(selection.rangeCount - 1).getClientRects()].map((value) => ({
+              top: value.top,
+              left: value.left,
+              right: value.right,
+              bottom: value.bottom,
+            }))
+          : [],
+      });
+    };
+    window.__selectionTableProbe = { host, samples: [], capture, abort };
+    document.addEventListener("pointerdown", () => capture("pointerdown"), { capture: true, signal: abort.signal });
+    document.addEventListener("pointerup", () => capture("pointerup"), { capture: true, signal: abort.signal });
+    document.addEventListener("selectionchange", () => capture("selectionchange"), { signal: abort.signal });
+    capture("initial");
+    return window.__selectionTableProbe.samples[0];
+  });
+  assert(initial != null, "selection-table geometry probe attaches to the settled transcript");
+  assert(initial.scrollTop > 0, `selection-table target exercises a non-top transcript viewport (${initial.scrollTop})`);
+  assert(initial.hostCount === 1 && initial.hostStable, "selection-table starts with one stable transcript action host");
+
+  const clickIntervals = [400, 320, 180, 0];
+  const clickPoint = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
+  await page.mouse.move(clickPoint.x, clickPoint.y);
+  for (let index = 0; index < clickIntervals.length; index += 1) {
+    await page.mouse.down({ button: "left", clickCount: index + 1 });
+    await page.waitForTimeout(30);
+    await page.mouse.up({ button: "left", clickCount: index + 1 });
+    await page.evaluate(async (click) => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      window.__selectionTableProbe.capture(`click-${click}-raf-1`);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      window.__selectionTableProbe.capture(`click-${click}-raf-2`);
+    }, index + 1);
+    if (clickIntervals[index] > 0) await page.waitForTimeout(clickIntervals[index]);
+  }
+
+  await page.keyboard.press("Escape");
+  await page.evaluate(async () => {
+    document.getSelection()?.removeAllRanges();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    window.__selectionTableProbe.capture("settled");
+  });
+  const result = await page.evaluate(() => {
+    const probe = window.__selectionTableProbe;
+    probe.abort.abort();
+    const samples = probe.samples;
+    const baseline = samples[0];
+    const maxDelta = (field) => Math.max(...samples.map((sample) => Math.max(
+      Math.abs(sample[field].top - baseline[field].top),
+      Math.abs(sample[field].left - baseline[field].left),
+    )));
+    const settled = samples.at(-1);
+    delete window.__selectionTableProbe;
+    return {
+      samples: samples.length,
+      maxTableDelta: maxDelta("table"),
+      maxRowDelta: maxDelta("row"),
+      maxTargetDelta: maxDelta("target"),
+      scrollStable: samples.every((sample) => (
+        sample.scrollTop === baseline.scrollTop
+          && sample.scrollHeight === baseline.scrollHeight
+          && sample.clientHeight === baseline.clientHeight
+      )),
+      hostStable: samples.every((sample) => sample.hostCount === 1 && sample.hostStable),
+      observedOpen: samples.some((sample) => sample.hostState === "open"),
+      settledState: settled.hostState,
+      settledButtonDisabled: document.querySelector('.transcript-selection-action[data-surface="transcript"] button')?.disabled,
+      settledButtonTabIndex: document.querySelector('.transcript-selection-action[data-surface="transcript"] button')?.tabIndex,
+    };
+  });
+  assert(result.samples >= 13, `selection-table records pointer, selection, and frame geometry (${result.samples} samples)`);
+  assert(result.hostStable, "four native multi-clicks retain one transcript action host identity");
+  assert(result.observedOpen, "native multi-click selection opens the transcript action host");
+  assert(result.scrollStable, "native multi-click selection preserves scrollTop/scrollHeight/clientHeight");
+  assert(result.maxTableDelta <= 0.5, `table top/left stay within 0.5px (${result.maxTableDelta})`);
+  assert(result.maxRowDelta <= 0.5, `table row top/left stay within 0.5px (${result.maxRowDelta})`);
+  assert(result.maxTargetDelta <= 0.5, `strong target top/left stay within 0.5px (${result.maxTargetDelta})`);
+  assert(
+    result.settledState === "closed" && result.settledButtonDisabled && result.settledButtonTabIndex === -1,
+    "settled action host is closed, disabled, and outside the tab order",
+  );
+}
+
 const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const preview = spawn(packageManager, ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
   cwd: frontendDir,
@@ -162,20 +287,33 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelectorAll(".transcript__row").length > 4, undefined, { timeout: 30_000 });
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
+  await runSelectionTableRepaintGeometry(page);
   await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
   await page.waitForFunction(() => (
     document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t")
       && document.querySelector(".transcript")?.textContent?.includes("pkg-41/mod.go")
   ), undefined, { timeout: 30_000 });
+  await page.waitForFunction(
+    () => !document.querySelector(".transcript-navigation-overlay"),
+    undefined,
+    { timeout: 30_000 },
+  );
   await page.waitForTimeout(300);
-  for (let pageIndex = 0; pageIndex < 8; pageIndex += 1) {
-    await page.evaluate(() => {
+  // Preload the selection fixture with real upward wheel intent. Directly
+  // assigning scrollTop used to make Virtuoso's startReached callback page in
+  // the background, but viewport paging now requires one permit per page.
+  for (let pageIndex = 0; pageIndex < 32; pageIndex += 1) {
+    const before = Number(await page.locator(".transcript").getAttribute("data-transcript-row-count") ?? 0);
+    const box = await page.locator(".transcript").boundingBox();
+    if (!box) break;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -100_000);
+    const loaded = await page.waitForFunction((previous) => {
       const transcript = document.querySelector(".transcript");
-      if (transcript) transcript.scrollTop = 0;
-    });
-    await page.waitForTimeout(100);
-    if (!(await clickIfPresent(page, ".transcript__older"))) break;
-    await page.waitForTimeout(350);
+      const current = Number(transcript?.getAttribute("data-transcript-row-count") ?? 0);
+      return current > previous;
+    }, before, { timeout: 2_000 }).then(() => true, () => false);
+    if (!loaded) break;
   }
   await clickIfPresent(page, ".transcript__jump-bottom");
   try {

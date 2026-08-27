@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
+import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, isLocalRuntimeCommand, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
 import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
@@ -115,6 +115,9 @@ eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", r
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "failed", epoch: "e1" } }), false, "failed runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: true, eventChannel: "", cwd: "", runtime: { phase: "ready", epoch: "e1" } }), true, "ready runtime can submit");
 eq(normalizeTurnSubmit(" visible prompt ", " provider prompt ").submit, "provider prompt", "submit normalization trims provider input");
+eq(isLocalRuntimeCommand(" /reload "), true, "/reload remains a host-only command without a turn receipt");
+eq(isLocalRuntimeCommand("/effort max"), true, "/effort remains a host-only command without a turn receipt");
+eq(isLocalRuntimeCommand("/reload now"), false, "non-command /reload text still starts an agent turn");
 let rejectedVisibleOnlySubmit = false;
 try {
   normalizeTurnSubmit("visible prompt", "   ");

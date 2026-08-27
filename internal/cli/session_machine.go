@@ -276,7 +276,7 @@ func machineSessions(dir string, identityKey []byte) ([]machineSession, error) {
 	out := make([]machineSession, 0, len(ordered))
 	for _, info := range ordered {
 		turns := info.Turns
-		if info.SchemaVersion < agent.BranchMetaCountsVersion {
+		if !info.ListingProjectionFresh() {
 			_, turns = agent.SessionPreview(info.Path)
 		}
 		if turns == 0 {

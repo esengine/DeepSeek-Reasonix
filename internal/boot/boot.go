@@ -256,7 +256,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// CostQuote must run before every host consumer (stats recorder, CLI
 	// metrics via opts.Sink, ACP/eventwire bridges, Desktop) so all see the
 	// same occurrence-time quote. Order from the agent:
-	//   Coalesce → GoalUsageTee → Sync → CostQuote → [Recorder] → frontend
+	//   GoalUsageTee → Sync → CostQuote → [Recorder] → frontend
+	// The controller coalesces before its ledger so every consumer shares boundaries.
 	quoteCtx := &event.QuoteContext{
 		DisplayRequest: billing.DisplayRequest{
 			Currency: cfg.ExplicitDisplayCurrency(),
@@ -291,10 +292,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// from a wire-handler goroutine, and any later reassignment races it.
 	// Goal token-budget accounting: the controller detects this tee and
 	// attributes billable usage to the active goal turn's recorder. Both the
-	// tee and the delta coalescer must ride the shared sink agents emit into
-	// directly — wrapping only the controller's reference would leave the
-	// executor's per-chunk Text/Reasoning stream uncoalesced.
-	sink = control.NewGoalUsageTee(event.Coalesce(sink, event.DefaultStreamDeltaWindow))
+	// tee must ride the shared sink agents emit into directly.
+	sink = control.NewGoalUsageTee(sink)
 
 	// Extension preflight (stages 5b/7): start the installed, enabled v2 runtime
 	// packages ONCE, here, before model resolution, so plugin-namespaced refs
@@ -1189,7 +1188,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// reaches them through the Asker on the call context, which interactive
 	// frontends wire to the controller (EnableInteractiveApproval); a headless run
 	// has none, so ask resolves to "decide for yourself".
-	reg.Add(agent.NewAskTool())
+	registerInteractiveAgentTools(reg)
 
 	// Skill tools: read_only_skill is a narrow explicitly read-only entry point; the
 	// full skills source adds run_skill / install_skill plus the dedicated

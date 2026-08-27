@@ -174,7 +174,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		if c.skillProfile != nil {
 			toolEvent.Profile = c.skillProfile(sk)
 		}
-		c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: toolEvent})
+		if err := event.EmitChecked(c.sink, event.Event{Kind: event.ToolDispatch, Tool: toolEvent}); err != nil {
+			return fmt.Errorf("persist skill dispatch: %w", err)
+		}
 		runCtx := agent.WithToolCallContext(ctx, callID, c.sink, c, planMode)
 		runCtx = agent.WithSubagentDepth(runCtx, 0)
 		answer, err := runner(runCtx, sk, input, skill.SubagentRunOptions{HostInitiated: true})

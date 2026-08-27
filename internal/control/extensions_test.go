@@ -553,8 +553,14 @@ func sinkHasFrontendWrapper(s event.Sink) bool {
 	case *frontendEventSink:
 		return true
 	case *inboxEventSink:
-		_, ok := t.inner.(*frontendEventSink)
-		return ok
+		if _, ok := t.inner.(*frontendEventSink); ok {
+			return true
+		}
+		if lifecycle, ok := t.inner.(*turnEventSink); ok {
+			_, wrapped := lifecycle.inner.(*frontendEventSink)
+			return wrapped
+		}
+		return false
 	default:
 		return false
 	}

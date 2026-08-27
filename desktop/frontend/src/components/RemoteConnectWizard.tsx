@@ -51,15 +51,17 @@ function parentOf(path: string): string {
  *      port, user, auth = password | key file, CLI download method)
  *   2. connecting (ConnectRemoteHost + waitForRemoteConnection; TOFU and
  *      secret prompts surface through the global dialogs)
- *   3. remote workspace picker (SFTP browse + free-text path); finish opens
- *      the selected workspace through the existing remote-window surface.
+ *   3. remote workspace picker (SFTP browse + free-text path); finish pins
+ *      the canonical workspace and opens its in-app remote session tab.
  */
 export function RemoteConnectWizard({
   onClose,
   onRefresh,
+  onMerged,
 }: {
   onClose: () => void;
   onRefresh: () => Promise<void>;
+  onMerged?: (message: string) => void;
 }) {
   const t = useT();
   const hosts = useRemoteStore((s) => s.hosts);
@@ -284,14 +286,29 @@ export function RemoteConnectWizard({
     setBusy(true);
     setError("");
     try {
+      let project: Awaited<ReturnType<typeof app.AddRemoteProject>> | null = null;
       try {
-        await app.AddRemoteProject(hostId, target);
-        await onRefresh();
-        await app.OpenRemoteWorkspace(hostId, target);
+        project = await app.AddRemoteProject(hostId, target);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         return;
       }
+      const canonical = project.merged ? project.workspace : target;
+      if (project.merged) onMerged?.(t("remoteWizard.mergedProject", { path: canonical }));
+      try {
+        await app.OpenRemoteProjectTab(hostId, canonical, { newSession: true });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        if (!project.merged) {
+          try {
+            await app.RemoveRemoteProject(hostId, target);
+          } catch {
+            await onRefresh().catch(() => {});
+          }
+        }
+        return;
+      }
+      await onRefresh();
       onClose();
     } finally {
       setBusy(false);

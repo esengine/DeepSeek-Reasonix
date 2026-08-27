@@ -139,12 +139,13 @@ type RemoteForwardView struct {
 }
 
 type RemoteServerView struct {
-	HostID    string `json:"hostId"`
-	Workspace string `json:"workspace"`
-	State     string `json:"state"`
-	Message   string `json:"message,omitempty"`
-	LocalURL  string `json:"localUrl,omitempty"`
-	Error     string `json:"error,omitempty"`
+	HostID     string `json:"hostId"`
+	Workspace  string `json:"workspace"`
+	State      string `json:"state"`
+	Message    string `json:"message,omitempty"`
+	LocalURL   string `json:"localUrl,omitempty"`
+	InstanceID string `json:"instanceId,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // ── Kernel seam ──
@@ -176,6 +177,7 @@ type remoteKernel interface {
 	RemoveForward(hostID, forwardID string) error
 
 	EnsureServer(ctx context.Context, hostID, workspace string) (RemoteServerView, string, error)
+	SwitchCredentialProxyModel(ctx context.Context, hostID, workspace, currentRef, nextRef, expectedPath string) error
 	StopServer(hostID, workspace string) error
 	ServerStatus(hostID, workspace string) RemoteServerView
 	// ServeSnapshot is the read-only lookup for already-running serves; it
@@ -221,6 +223,9 @@ func (a *App) stopRemoteRuntime() {
 // emitRemoteEvent bridges a kernel callback to the frontend through the async
 // emitter so a slow webview never blocks the kernel.
 func (a *App) emitRemoteEvent(name string, payload any) {
+	if a.remoteEventHook != nil {
+		a.remoteEventHook(name, payload)
+	}
 	ctx := a.bootContext()
 	if ctx == nil {
 		return
@@ -231,6 +236,7 @@ func (a *App) emitRemoteEvent(name string, payload any) {
 // remoteEventSink implementation on *App.
 func (a *App) onStatus(s RemoteConnectionStatusView) {
 	a.emitRemoteEvent("remote:status", s)
+	a.remoteTabsHostStatus(s.HostID, s.State, s.Error)
 	// Close web windows after terminal SSH failures; transient reconnects keep
 	// them open while the status event explains the failure.
 	if s.State == "stopped" && s.Error != "" {
@@ -332,6 +338,9 @@ func (a *App) RemoveRemoteHost(id string) error {
 		}
 		if err := rt.RemoveHost(id); err != nil {
 			return err
+		}
+		if err := a.removeRemoteTabsForHost(id); err != nil {
+			return fmt.Errorf("replace tabs for removed remote host: %w", err)
 		}
 		a.closeRemoteWindowForHost(id)
 		return nil
@@ -559,26 +568,6 @@ func serveURLWithToken(localURL, token string) string {
 	return localURL
 }
 
-func (a *App) StopRemoteServer(hostID, workspace string) error {
-	op := a.beginRemoteWindowHostOperation(hostID)
-	return op.run(func(func() bool) error {
-		rt, err := a.remoteRT()
-		if err != nil {
-			return err
-		}
-		if err := rt.StopServer(hostID, workspace); err != nil {
-			return err
-		}
-		// Stopping the service also tears down that workspace's loopback
-		// tunnel, so close the host's web window only when it is showing this
-		// workspace.
-		if a.remoteWindowWorkspace(hostID) == workspace {
-			a.closeRemoteWindowForHost(hostID)
-		}
-		return nil
-	})
-}
-
 func (a *App) RemoteServerStatus(hostID, workspace string) (RemoteServerView, error) {
 	rt, err := a.remoteRT()
 	if err != nil {
@@ -593,25 +582,6 @@ func (a *App) RemoteServerLogs(hostID, workspace string, tailLines int) (string,
 		return "", err
 	}
 	return rt.ServerLogs(a.bootContext(), hostID, workspace, tailLines)
-}
-
-// editUserConfig runs mutate against the user-global config under the edit lock
-// and saves it there. Remote hosts are user-global (pinned in LoadForRoot).
-func editUserConfig(mutate func(*config.Config) error) error {
-	unlock := config.LockUserConfigEdits()
-	defer unlock()
-	path := config.UserConfigPath()
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("cannot resolve user config path")
-	}
-	cfg := config.LoadForEdit(path)
-	if cfg == nil {
-		cfg = config.Default()
-	}
-	if err := mutate(cfg); err != nil {
-		return err
-	}
-	return cfg.SaveTo(path)
 }
 
 // ── desktopRemoteManager: concrete remoteKernel ──
@@ -632,6 +602,7 @@ type managedHost struct {
 	credPort atomic.Int64
 	// credFallbackAt throttles legacy-serve replacement per workspace.
 	credFallbackAt map[string]int64
+	credWatch      credentialWatchdog
 }
 
 // serveEntry is one workspace's serve registration: the published view (with
@@ -740,6 +711,14 @@ func (m *desktopRemoteManager) UpdateHost(id string, in RemoteHostInput) (Remote
 		return append(changes, config.UnusedGeneratedRemoteCredentialChanges(c, removals)...), nil
 	}); err != nil {
 		return RemoteHostView{}, err
+	}
+	if !merged.CredentialProxyEnabled() {
+		m.mu.Lock()
+		mh := m.hosts[id]
+		m.mu.Unlock()
+		if mh != nil {
+			mh.credWatch.stop()
+		}
 	}
 	return hostEntryToView(merged), nil
 }
@@ -946,6 +925,7 @@ func closeManagedHost(mh *managedHost) {
 	if mh == nil {
 		return
 	}
+	mh.credWatch.stop()
 	if mh.cancel != nil {
 		mh.cancel()
 	}

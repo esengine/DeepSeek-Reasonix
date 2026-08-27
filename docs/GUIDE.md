@@ -271,10 +271,12 @@ The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
 model and reasoning-effort controls, Goal, a live todo panel fed by the
 `todo_write` tool, extension status/card/form/notification surfaces, and
 provider balance when configured. Extension-hosted providers appear in the
-model picker. Run `/reload` while idle to fail-atomically reload extension
-sidecars and the runtime generation without restarting Serve. Use `--model`,
-`--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
-user-global `default_model`.
+model picker. Serve can keep several sessions active at once: creating or
+resuming another session detaches a busy turn instead of cancelling it, and the
+session list continues to report that background activity. Run `/reload` while
+idle to fail-atomically reload extension sidecars and the runtime generation
+without restarting Serve. Use `--model`, `--max-steps`, or `--resume` for
+one-off launches; otherwise `serve` uses the user-global `default_model`.
 
 If the selected Provider has no saved API key, a loopback-bound Serve still
 starts and shows a Provider setup page instead of failing before the browser can
@@ -362,23 +364,24 @@ In the desktop app, manage hosts under **Settings -> Remote SSH**. To add a
 remote project from the project tree, open the add-project menu and choose
 **Remote connection**. The three-step wizard saves or reuses an SSH host,
 connects and verifies that the remote OS is supported, then lets you browse and
-choose a workspace before opening it in the existing remote window. The key-file
+choose a workspace before opening an in-app remote session tab. The key-file
 button uses the native file picker so the saved identity is always an absolute
 desktop path. You can also use the status-bar chip or the host row's **Remote
 explorer** button to browse and edit files over SFTP, manage port forwards, and
 start/open the remote workspace.
-Opening a workspace creates a separate native Reasonix window, similar to a
-VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
-window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions. The remote web page uses the provider configuration and
-API keys on the **remote** host — the desktop never exposes its own providers
-to a remote host. If that host is missing the selected Provider's API key, the
-window shows the authenticated setup page first, saves the key only in the
-remote Reasonix credential file, and activates the Provider without restarting
-the remote Serve process. A transient SSH outage keeps the remote window open;
-the desktop reconnects in the background, re-attaches its loopback forward, and
-reloads the window against the recovered Serve. An authentication or host-key
-failure is terminal and closes the unusable remote window instead.
+
+The project tree lists the workspace's remote sessions. Selecting a row resumes
+that exact session in the shared transcript and composer surface; starting or
+resuming another session leaves a busy turn running remotely and shows its
+running state in the tree. The desktop owns the SSH tunnel and never mixes local
+conversation sessions into the remote tab. In `remote` credential mode, the
+remote Serve uses provider configuration and API keys on the **remote** host.
+In `local-proxy` mode, the desktop keeps the key locally and model calls return
+through an authenticated reverse forward; the credential watchdog repairs that
+channel after transient forwarding failures. A transient SSH outage keeps the
+tab available while the desktop reconnects and re-attaches its forwards. An
+authentication or host-key failure is terminal and marks the remote workspace
+unavailable instead.
 
 ## Custom OpenAI-compatible providers
 
@@ -572,6 +575,12 @@ traditional terminal cursor or `underline` for a lower-profile cursor. This
 setting does not change desktop or web text fields.
 
 ### Desktop GUI
+
+The Desktop Todo shelf derives its label from both `todo_write` and the owning
+tab's runtime: active work is **In progress**, an approval or question is
+**Waiting for input**, and an idle/restored current item is **Ready to continue**.
+The latter exposes a **Continue** action that rechecks the captured tab before
+sending, so a rapid tab switch cannot route stale work into another session.
 
 Desktop shortcuts are managed from **Settings → Shortcuts**. Pick a configurable
 row, press a new key combination, and Reasonix saves it for the desktop app.
@@ -1418,14 +1427,20 @@ Reasonix uses **fact-driven execution**. Ordinary requests always enter the
 executor. There is no automatic task mode. The one session role is the quality floor: standard (default) or delivery; facts can still raise it. Planner,
 Goal, permission, sandbox, and the task contract are independent states.
 
-Standard and Delivery stop after the visible model turn. Readiness gaps are
-reported as a recoverable result and never trigger a hidden follow-up request.
-Delivery exposes the existing `Continue checks` action; the user must activate
-it before another recovery turn starts. Standard keeps verification, review and
-sign-off gaps as completion attention, while Goal and approved Plan retain their
-own state-machine continuation. Historical canonical todos remain visible, and
-provider-level stream/truncation recovery remains independent of final-readiness
-recovery.
+Standard and Delivery do not perform general hidden final-readiness retries.
+Delivery returns readiness gaps as recoverable results and exposes the existing
+`Continue checks` action; the user must activate it before another recovery turn
+starts. Standard keeps verification, review and sign-off gaps as completion
+attention. Separately, a Standard execution turn that successfully writes one
+current `in_progress` todo may continue inside the same foreground `Agent.Run`
+when the trusted host knows the user asked for execution. This repair is excluded
+from Plan, Goal, Delivery, read-only, recovery, cancellation, and queued-user-work
+boundaries. It sends one fixed continuation prompt, permits a second only after a
+new host receipt, and never exceeds two prompts. Goal and approved Plan retain
+their own state-machine continuation. Historical canonical todos remain visible
+but idle ones render as Ready to continue rather than In progress; their Continue
+action targets the exact visible session. Provider-level stream/truncation
+recovery remains independent of final-readiness recovery.
 
 Every task shares the same provider-visible core tool surface: direct
 read/bash/edit/write, background-shell lifecycle tools, `ask`/`compress` when

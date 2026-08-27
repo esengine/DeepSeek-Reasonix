@@ -33,11 +33,19 @@ Legacy 迁移、OS home 约定目录扫描以及其他 fallback 路径都会跳�
 | 会话 | `<state root>/sessions/` |
 | 归档 | `<state root>/archive/` |
 | 记忆 | `<state root>/memory/` 与 `<state root>/projects/` |
+| 全局 Desktop Topic 元数据 | `<state root>/desktop/topic-state-v1.sqlite` |
+| 项目 Desktop Topic 元数据 | `<state root>/projects/<workspace slug>/desktop/topic-state-v1.sqlite` |
 | 可丢弃的会话 Catalog | `<cache root>/session-catalog/v5.sqlite` |
 | 可丢弃的 Task Catalog | `<cache root>/task-catalog/v1.sqlite` |
 
 `<state root>` 默认等于 `<Reasonix home>`；只有设置 `REASONIX_STATE_HOME`
 时才会不同。
+
+Desktop Topic 的标题、标题来源、创建时间和自动标题状态以这些 SQLite 文件为权威存储。
+首次访问时，Desktop 会导入项目 `.reasonix/` 目录（或全局 Reasonix 目录）中的旧
+`desktop-topic-*.json`。检测到旧文件的 scope 会继续镜像旧格式以支持降级；全新 scope
+不会创建这些 JSON。旧文件不会被删除，项目本地 settings、skills、commands、attachments
+以及 `reasonix.toml` 均不受影响。
 
 会话 Catalog 是可重建的查询投影，不是用户数据；JSONL、event log、
 metadata sidecar 和 `desktop-projects.json` 仍是权威数据。详见

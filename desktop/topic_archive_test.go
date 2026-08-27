@@ -296,9 +296,10 @@ func TestTrashTopicCommittedCleanupFailureReconcilesWithoutFailureResponse(t *te
 	}
 }
 
-func TestTrashTopicMetadataFailureReconcilesFromDurableIntent(t *testing.T) {
+func TestTrashTopicLegacyMirrorFailureStaysCommittedAndRepairs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	projectRoot := t.TempDir()
+	seedLegacyTopicBridge(t, projectRoot)
 	topicID := "topic_metadata_retry"
 	if err := addProject(projectRoot, ""); err != nil {
 		t.Fatalf("add project: %v", err)
@@ -311,27 +312,35 @@ func TestTrashTopicMetadataFailureReconcilesFromDurableIntent(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	writeTopicSessionWithPrompt(t, dir, "metadata-retry.jsonl", topicID, "Metadata retry", projectRoot, "preserve me", time.Now())
-	blockedTempPath := topicTitleSourcesPath(projectRoot) + ".tmp"
-	if err := os.MkdirAll(blockedTempPath, 0o755); err != nil {
-		t.Fatalf("block metadata temp write: %v", err)
+	topicLegacyWriteHookForTest = func(path string) error {
+		if path == topicTitleSourcesPath(projectRoot) {
+			return errors.New("injected legacy mirror failure")
+		}
+		return nil
 	}
+	t.Cleanup(func() { topicLegacyWriteHookForTest = nil })
 
 	app := NewApp()
 	if err := app.TrashTopic(topicID); err != nil {
 		t.Fatalf("committed TrashTopic returned a failure: %v", err)
 	}
-	if got := loadTopicTitle(projectRoot, topicID); got != "Metadata retry" {
-		t.Fatalf("failed metadata cleanup title = %q, want retained retry locator", got)
+	if got := loadTopicTitle(projectRoot, topicID); got != "" {
+		t.Fatalf("authoritative deleted title = %q, want empty", got)
 	}
-	if _, err := os.Stat(topicArchiveMetadataPendingPath(topicID)); err != nil {
-		t.Fatalf("metadata cleanup intent was not retained: %v", err)
+	if _, err := os.Stat(topicArchiveMetadataPendingPath(topicID)); !os.IsNotExist(err) {
+		t.Fatalf("SQLite-committed delete should not create archive retry intent: %v", err)
 	}
 
-	if err := os.RemoveAll(blockedTempPath); err != nil {
-		t.Fatalf("unblock metadata temp write: %v", err)
+	topicLegacyWriteHookForTest = nil
+	if err := setTopicCreatedAt(projectRoot, "topic-live", 1234); err != nil {
+		t.Fatalf("trigger pending mirror repair: %v", err)
 	}
-	if err := reconcileTopicArchiveMetadataPending(app.deleteTopic); err != nil {
-		t.Fatalf("reconcile topic metadata: %v", err)
+	legacyTitles, err := loadLegacyStringMap(topicTitlesPath(projectRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := legacyTitles[topicID]; ok {
+		t.Fatalf("repaired legacy mirror resurrected deleted topic: %#v", legacyTitles)
 	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("reconciled archive retained topic title %q", got)

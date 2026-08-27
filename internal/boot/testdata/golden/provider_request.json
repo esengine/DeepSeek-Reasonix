@@ -284,6 +284,28 @@
       }
     },
     {
+      "name": "finish",
+      "description": "Finalize this turn after giving the user a visible final answer. Call finish exactly once, in a separate tool-call batch after all work is done. Use completed when the request is fully handled, partial when useful work was completed but some requested work remains, or blocked when progress requires external state or user input. To ask the user a question, call ask instead of finish.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "description": "Machine-readable result of this turn.",
+            "enum": [
+              "completed",
+              "partial",
+              "blocked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "kill_shell",
       "description": "Terminate a running background job (bash or task) started with run_in_background. A no-op if the job has already finished or the id is unknown.",
       "parameters": {

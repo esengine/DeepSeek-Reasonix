@@ -19,11 +19,20 @@ import (
 // about to touch path. The returned restore must be deferred; the returned
 // channel receives the op-path pair when the crash fires.
 func crashAt(t *testing.T, op, path string) (fired <-chan struct{}, restore func()) {
+	return crashAtOccurrence(t, op, path, 1)
+}
+
+func crashAtOccurrence(t *testing.T, op, path string, occurrence int) (fired <-chan struct{}, restore func()) {
 	t.Helper()
 	firedCh := make(chan struct{}, 1)
 	prev := fileutil.CrashPoint
+	seen := 0
 	fileutil.CrashPoint = func(firedOp, firedPath string) {
 		if firedOp != op || firedPath != path {
+			return
+		}
+		seen++
+		if seen != occurrence {
 			return
 		}
 		select {
@@ -168,7 +177,9 @@ func TestCrashAtRevisionLedgerHealsOnNextSave(t *testing.T) {
 	recordsBefore := countEventLogRecords(t, path)
 
 	s.Add(userMessage("second"))
-	_, restore := crashAt(t, "branch-meta", BranchMetaPath(path))
+	// The first branch-meta write invalidates the listing projection; the
+	// second is the revision-ledger commit we want to interrupt.
+	_, restore := crashAtOccurrence(t, "branch-meta", BranchMetaPath(path), 2)
 	crash := saveCrashing(func() { _ = s.SaveSnapshot(path) })
 	restore()
 	if crash == nil {
@@ -183,6 +194,9 @@ func TestCrashAtRevisionLedgerHealsOnNextSave(t *testing.T) {
 	}
 	if got := messageCount(t, reloaded); got != 3 {
 		t.Fatalf("reload = %d messages, want 3", got)
+	}
+	if preview, turns, ok := SessionPreviewCached(path); ok {
+		t.Fatalf("stale projection survived interrupted ledger commit: preview=%q turns=%d", preview, turns)
 	}
 
 	// A same-content save must heal the ledger without new WAL records.
@@ -205,6 +219,9 @@ func TestCrashAtRevisionLedgerHealsOnNextSave(t *testing.T) {
 	}
 	if meta.ContentDigest == "" {
 		t.Fatal("healed ledger must stamp the current content digest")
+	}
+	if preview, turns, ok := SessionPreviewCached(path); !ok || preview != "first" || turns != 2 {
+		t.Fatalf("healed listing projection = (%q,%d,%v), want (%q,2,true)", preview, turns, ok, "first")
 	}
 }
 

@@ -233,7 +233,7 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
   const answer: Item = { kind: "assistant", id: "answer-1", text: "done", reasoning: "", streaming: false };
   const models = buildTurnModels([user, firstTool, secondTool, answer]);
   const folds: FoldMap = new Map([[
-    "tool-1",
+    models[0].segments[0].key,
     { open: true, userOverridden: true, running: false },
   ]]);
   const options = {

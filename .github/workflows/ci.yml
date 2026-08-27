@@ -394,7 +394,7 @@ jobs:
           pnpm --dir frontend test:motion-browser
           pnpm --dir frontend test:composer
           pnpm --dir frontend test:transcript
-          pnpm --dir frontend test:transcript-browser
+          xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -555,6 +555,20 @@ jobs:
       - name: Test WebView2 native smoke state machine
         shell: pwsh
         run: ../scripts/test-webview2-native-smoke.ps1 -SelfTest
+
+      - name: Test WebView2 transcript selection compositor
+        shell: pwsh
+        timeout-minutes: 5
+        run: ../scripts/test-transcript-selection-webview2.ps1 -Iterations 3
+
+      - name: Upload WebView2 transcript selection evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webview2-transcript-selection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reasonix-transcript-selection-smoke
+          if-no-files-found: warn
+          retention-days: 14
 
       # Build the real Wails executable on every desktop PR and exercise the
       # exact production startup path in Microsoft's installed WebView2 runtime.

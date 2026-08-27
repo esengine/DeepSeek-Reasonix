@@ -56,10 +56,18 @@ func TestSessionPreviewFromMessagesMatchesDecode(t *testing.T) {
 func TestListSessionsUsesSidecarWithoutDecoding(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
-	writeSessionFile(t, path, []provider.Message{
+	msgs := []provider.Message{
 		{Role: provider.RoleUser, Content: "real content in the file"},
 		{Role: provider.RoleAssistant, Content: "a"},
-	})
+	}
+	writeSessionFile(t, path, msgs)
+	digest, err := digestSessionMessages(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(path, BranchMeta{ID: BranchID(path), Revision: 1, ContentDigest: digestString(digest)}); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
 	// Sidecar deliberately disagrees with the file (3 turns, custom preview).
 	if err := UpdateSessionMeta(path, "", "cached preview line", 3, true); err != nil {
 		t.Fatalf("UpdateSessionMeta: %v", err)
@@ -154,11 +162,24 @@ func TestListSessionsLeavesLegacySessionForBackgroundRepair(t *testing.T) {
 func TestListSessionsTrustsRecordedEmptyWithoutDecoding(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
-	writeSessionFile(t, path, []provider.Message{
+	msgs := []provider.Message{
 		{Role: provider.RoleUser, Content: "real content the meta will lie about"},
 		{Role: provider.RoleAssistant, Content: "a"},
-	})
-	if err := SaveBranchMeta(path, BranchMeta{ID: BranchID(path), Turns: 0, SchemaVersion: BranchMetaCountsVersion}); err != nil {
+	}
+	writeSessionFile(t, path, msgs)
+	digest, err := digestSessionMessages(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := BranchMeta{
+		ID:            BranchID(path),
+		Turns:         0,
+		SchemaVersion: BranchMetaCountsVersion,
+		Revision:      1,
+		ContentDigest: digestString(digest),
+	}
+	stampSessionListingProjection(&meta)
+	if err := SaveBranchMeta(path, meta); err != nil {
 		t.Fatalf("SaveBranchMeta: %v", err)
 	}
 

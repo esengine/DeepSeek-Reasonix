@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/runtimepolicy"
 )
 
 func TestTaskWarrantsPlanner(t *testing.T) {
@@ -143,5 +144,19 @@ func TestPlannerPolicyUsesPristineMetadataInsteadOfInjectedContext(t *testing.T)
 	got := DecidePlannerRoute(ctx, input)
 	if got.Route != agent.PlannerRouteExecutorOnly {
 		t.Fatalf("decision used injected context instead of pristine user text: %+v", got)
+	}
+}
+
+func TestStandardTodoExecutionIntentRejectsNegativeShortReplies(t *testing.T) {
+	constraints := runtimepolicy.Constraints{}
+	for _, text := range []string{"no", "n"} {
+		if standardTodoExecutionExpected(text, false, 2, false, constraints) {
+			t.Fatalf("negative reply %q must not arm Standard Todo continuation", text)
+		}
+	}
+	for _, text := range []string{"continue", "开始", "2", "按这个改"} {
+		if !standardTodoExecutionExpected(text, false, 2, false, constraints) {
+			t.Fatalf("execution reply %q should arm Standard Todo continuation with context", text)
+		}
 	}
 }

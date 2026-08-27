@@ -480,7 +480,7 @@ func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []se
 	return summary
 }
 
-func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
+func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
 	catalog := a.sessionCatalog.Load()
 	if catalog == nil {
 		return a.metadataTopicPage(req), nil

@@ -2,13 +2,16 @@ package main
 
 // TabMeta is the frontend-facing shape of one tab.
 type TabMeta struct {
-	ID                string             `json:"id"`
-	Scope             string             `json:"scope"`
-	WorkspaceRoot     string             `json:"workspaceRoot"`
-	WorkspaceName     string             `json:"workspaceName"`
-	WorkspacePath     string             `json:"workspacePath,omitempty"`
-	GitBranch         string             `json:"gitBranch,omitempty"`
-	IsolatedWorktree  bool               `json:"isolatedWorktree,omitempty"`
+	ID               string        `json:"id"`
+	Scope            string        `json:"scope"`
+	WorkspaceRoot    string        `json:"workspaceRoot"`
+	WorkspaceName    string        `json:"workspaceName"`
+	WorkspacePath    string        `json:"workspacePath,omitempty"`
+	GitBranch        string        `json:"gitBranch,omitempty"`
+	IsolatedWorktree bool          `json:"isolatedWorktree,omitempty"`
+	Remote           *RemoteTabRef `json:"remote,omitempty"`
+	// RemoteState seeds restored remote shells before their first state event.
+	RemoteState       string             `json:"remoteState,omitempty"`
 	TopicID           string             `json:"topicId"`
 	TopicTitle        string             `json:"topicTitle"`
 	SessionPath       string             `json:"sessionPath,omitempty"`
@@ -27,6 +30,10 @@ type TabMeta struct {
 	BackgroundJobs    int                `json:"backgroundJobs,omitempty"`
 	CancelRequested   bool               `json:"cancelRequested,omitempty"`
 	Cancellable       bool               `json:"cancellable"`
+	TurnID            string             `json:"turnId,omitempty"`
+	TurnStatus        string             `json:"turnStatus,omitempty"`
+	TurnEventSeq      uint64             `json:"turnEventSeq,omitempty"`
+	TurnReplayAfter   uint64             `json:"turnReplayAfterSeq,omitempty"`
 	Mode              string             `json:"mode"`
 	CollaborationMode string             `json:"collaborationMode"`
 	ToolApprovalMode  string             `json:"toolApprovalMode"`

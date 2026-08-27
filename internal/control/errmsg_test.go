@@ -2,12 +2,14 @@ package control
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/turnevent"
 )
 
 func TestExplainError(t *testing.T) {
@@ -177,6 +179,17 @@ func TestExplainError(t *testing.T) {
 	//nolint:errorlint // identity check: explainError must return the same error, unwrapped.
 	if explainError(plain) != plain {
 		t.Error("unknown errors should pass through unchanged")
+	}
+}
+
+func TestExplainErrorPreservesTurnLedgerFailure(t *testing.T) {
+	storageErr := fmt.Errorf("persist turn admission: %w", turnevent.ErrTurnLedgerUnavailable)
+	got := explainError(storageErr)
+	if !errors.Is(got, turnevent.ErrTurnLedgerUnavailable) {
+		t.Fatalf("explainError(%v) = %v, want storage sentinel preserved", storageErr, got)
+	}
+	if strings.Contains(got.Error(), "model stream") {
+		t.Fatalf("storage failure was misclassified as provider failure: %v", got)
 	}
 }
 

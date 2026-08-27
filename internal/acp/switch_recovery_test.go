@@ -37,7 +37,7 @@ func divergedACPSession(t *testing.T, path string) *agent.Session {
 }
 
 // primaryRecoveryFiles filters a recovery-branch glob down to primary session
-// transcripts, dropping the .events.jsonl / .guardian.jsonl sidecars that the
+// transcripts, dropping lifecycle/diagnostic sidecars that the broad
 // *-recovery-*.jsonl pattern also matches.
 func primaryRecoveryFiles(t *testing.T, dir string) []string {
 	t.Helper()
@@ -48,7 +48,9 @@ func primaryRecoveryFiles(t *testing.T, dir string) []string {
 	primary := matches[:0]
 	for _, path := range matches {
 		base := filepath.Base(path)
-		if strings.HasSuffix(base, ".events.jsonl") || strings.HasSuffix(base, ".guardian.jsonl") {
+		if strings.HasSuffix(base, ".events.jsonl") ||
+			strings.HasSuffix(base, ".guardian.jsonl") ||
+			strings.HasSuffix(base, ".turns.jsonl") {
 			continue
 		}
 		primary = append(primary, path)

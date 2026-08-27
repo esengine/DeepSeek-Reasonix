@@ -143,6 +143,16 @@ type workspaceSignalSink struct {
 	mutations chan event.WorkspaceMutation
 }
 
+type failingToolDispatchSink struct{ err error }
+
+func (s failingToolDispatchSink) Emit(event.Event) {}
+func (s failingToolDispatchSink) EmitChecked(e event.Event) error {
+	if e.Kind == event.ToolDispatch {
+		return s.err
+	}
+	return nil
+}
+
 func newWorkspaceSignalSink() *workspaceSignalSink {
 	return &workspaceSignalSink{mutations: make(chan event.WorkspaceMutation, 8)}
 }
@@ -333,6 +343,25 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	// Allow generous slack for CI; even 2x serial would prove we got parallelism.
 	if elapsed >= 2*delay {
 		t.Errorf("read-only batch took %v (>= %v) — not parallel", elapsed, 2*delay)
+	}
+}
+
+func TestExecuteBatchDoesNotRunAnyToolWhenDispatchPersistenceFails(t *testing.T) {
+	wantErr := errors.New("ledger unavailable")
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true, calls: &calls})
+	reg.Add(fakeTool{name: "write_file", calls: &calls})
+	a := New(nil, reg, NewSession(""), Options{}, failingToolDispatchSink{err: wantErr})
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
+		{ID: "read", Name: "read_file"},
+		{ID: "write", Name: "write_file"},
+	})
+	if !errors.Is(batch.err, wantErr) {
+		t.Fatalf("batch error = %v, want %v", batch.err, wantErr)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("executed %d tools after dispatch persistence failed", got)
 	}
 }
 

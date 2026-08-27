@@ -26,9 +26,13 @@
 6. 验证 `report_daily`、`report_installations`、
    `report_event_dimensions`、`diagnostics_meta`、fingerprint/date 索引、ping
    窗口索引，以及 `installation_linked_since`。
-7. 先运行 `npm run migrate:firebase-data` dry-run。脚本按每页 200 个 fingerprint 的
-   keyset 分页，预计预留必须不超过 700 MiB。随后执行
-   `npm run migrate:firebase-data -- --apply`，收敛后立即执行
+7. 在 **Actions > Deploy crash worker > Run workflow** 中选择 `main-v2`，并将
+   **Firebase crash history operation** 设为 `dry-run`。该任务使用现有仓库 Secret，经过
+   `canary` environment 审批，不会部署 Worker；脚本按每页 200 个 fingerprint 的 keyset
+   分页，预计预留必须不超过 700 MiB。确认结果后选择 `apply`，并输入精确确认短语
+   `APPLY_FIREBASE_CRASH_DATA`；任务会在同一 runner 内依次执行 `--apply` 和
+   `--verify-only`。后续独立核验可选择 `verify-only`。已认证的运维人员仍可在本机运行
+   `npm run migrate:firebase-data`、`npm run migrate:firebase-data -- --apply` 和
    `npm run migrate:firebase-data -- --verify-only`。默认 checkpoint 为权限 `0600` 且已
    gitignore 的 `.firebase-crash-migration-state.json`；可用 `--checkpoint=<path>` 改路径，
    只有明确重跑时才用 `--reset-checkpoint`。日志只输出计数、fingerprint 前缀和摘要。

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Item } from "./useController";
+import type { HistoryLoadTrigger, Item } from "./useController";
 import {
   activeQuestionTurn,
   compactQuestionText,
@@ -10,8 +10,6 @@ import {
   type QuestionAnchorPosition,
 } from "./transcriptGrouping";
 import { userRowKey } from "./transcriptRows";
-
-const HISTORY_AUTO_COMPLETE_TURNS = 60;
 
 export function useTranscriptQuestions(
   items: Item[],
@@ -109,7 +107,6 @@ export function useTranscriptQuestionJump({
   loadingOlderHistory,
   olderHistoryError,
   running,
-  suppressAutoComplete = false,
   onLoadOlderHistory,
   clearTranscriptSelection,
   invalidateAnchors,
@@ -125,9 +122,7 @@ export function useTranscriptQuestionJump({
   loadingOlderHistory: boolean;
   olderHistoryError?: string;
   running: boolean;
-  /** Avoid background history paging while a navigation surface is hidden. */
-  suppressAutoComplete?: boolean;
-  onLoadOlderHistory?: (targetTurn?: number) => boolean | Promise<boolean>;
+  onLoadOlderHistory?: (targetTurn?: number, trigger?: HistoryLoadTrigger) => boolean | Promise<boolean>;
   clearTranscriptSelection: (reason?: string) => void;
   invalidateAnchors: () => void;
   scrollToDataIndex: (index: number, behavior?: "auto" | "smooth") => void;
@@ -136,12 +131,12 @@ export function useTranscriptQuestionJump({
 }) {
   const [pendingQuestion, setPendingQuestion] = useState<{ surfaceKey: string; turn: number } | null>(null);
   const olderRequestInFlightRef = useRef<string | null>(null);
-  const requestOlderHistory = useCallback(async (targetTurn?: number, retry = false): Promise<boolean> => {
+  const requestOlderHistory = useCallback(async (targetTurn?: number, retry = false, trigger: HistoryLoadTrigger = "retry"): Promise<boolean> => {
     if (!hasOlderHistory || loadingOlderHistory || running || !onLoadOlderHistory || (!retry && olderHistoryError)) return false;
     if (olderRequestInFlightRef.current === layoutSurfaceKey) return false;
     olderRequestInFlightRef.current = layoutSurfaceKey;
     try {
-      return onLoadOlderHistory(targetTurn);
+      return onLoadOlderHistory(targetTurn, trigger);
     } finally {
       if (olderRequestInFlightRef.current === layoutSurfaceKey) olderRequestInFlightRef.current = null;
     }
@@ -165,7 +160,7 @@ export function useTranscriptQuestionJump({
     document.getSelection()?.removeAllRanges();
     clearTranscriptSelection("question-navigation");
     setPendingQuestion({ surfaceKey: layoutSurfaceKey, turn: question.turn });
-    void requestOlderHistory(question.turn + 1, true);
+    void requestOlderHistory(question.turn + 1, true, "question-jump");
   }, [clearTranscriptSelection, jumpToLoadedQuestion, layoutSurfaceKey, requestOlderHistory, setActiveQuestion]);
 
   useEffect(() => {
@@ -175,7 +170,7 @@ export function useTranscriptQuestionJump({
       setPendingQuestion(null);
       jumpToLoadedQuestion(question);
     } else if (!loadingOlderHistory && !olderHistoryError) {
-      void requestOlderHistory(pendingQuestion.turn + 1);
+      void requestOlderHistory(pendingQuestion.turn + 1, false, "question-jump");
     }
   }, [jumpToLoadedQuestion, layoutSurfaceKey, loadedByTurn, loadingOlderHistory, olderHistoryError, pendingQuestion, requestOlderHistory]);
 
@@ -184,15 +179,10 @@ export function useTranscriptQuestionJump({
     if (olderRequestInFlightRef.current !== layoutSurfaceKey) olderRequestInFlightRef.current = null;
   }, [layoutSurfaceKey]);
 
-  const earlierTurnsRemaining = questions[0]?.turn ?? 0;
-  useEffect(() => {
-    if (suppressAutoComplete) return;
-    if (earlierTurnsRemaining > 0 && earlierTurnsRemaining < HISTORY_AUTO_COMPLETE_TURNS) void requestOlderHistory();
-  }, [earlierTurnsRemaining, requestOlderHistory, suppressAutoComplete]);
-  const handleEarlierHistoryReached = useCallback(() => void requestOlderHistory(), [requestOlderHistory]);
+  const handleEarlierHistoryReached = useCallback(() => void requestOlderHistory(undefined, false, "viewport-user"), [requestOlderHistory]);
   const retryOlderHistory = useCallback(() => {
     const targetTurn = pendingQuestion?.surfaceKey === layoutSurfaceKey ? pendingQuestion.turn + 1 : undefined;
-    void requestOlderHistory(targetTurn, true);
+    void requestOlderHistory(targetTurn, true, "retry");
   }, [layoutSurfaceKey, pendingQuestion, requestOlderHistory]);
 
   useEffect(() => {

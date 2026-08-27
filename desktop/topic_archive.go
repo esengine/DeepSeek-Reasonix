@@ -467,14 +467,5 @@ func cleanupTransientBlankTopicRegistration(meta agent.BranchMeta) {
 		return changed, nil
 	})
 	titleRoot := topicTitleRoot(scope, root)
-	if titles, err := loadTopicTitlesForUpdate(titleRoot); err == nil {
-		delete(titles, topicID)
-		_ = saveTopicTitles(titleRoot, titles)
-	}
-	if sources, err := loadTopicTitleSourcesForUpdate(titleRoot); err == nil {
-		delete(sources, topicID)
-		_ = saveTopicTitleSources(titleRoot, sources)
-	}
-	_ = deleteTopicCreatedAt(titleRoot, topicID)
-	_ = deleteTopicAutoTitleMeta(titleRoot, topicID)
+	_ = deleteTopicState(titleRoot, topicID)
 }

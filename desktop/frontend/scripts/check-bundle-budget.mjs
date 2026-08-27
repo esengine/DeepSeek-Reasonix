@@ -95,9 +95,45 @@ console.log("\nbundle budgets");
 // is 431.509 KiB gzip; keep 0.1 KiB of explicit headroom for hash/toolchain
 // drift instead of relying on a rounded equality.
 // Remote onboarding [0.5/3] adds project-group and credential-chain wiring on
-// top of the lazy wizard. Production and test-channel builds both measure
-// 432.28 KiB gzip; keep 0.22 KiB for build-SHA/toolchain drift.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 432.5 : 432.5;
+// top of the lazy wizard. Exact-turn routing, the extracted event-gap
+// projector, checkpoint resets, and the navigation surface transaction bring
+// the current main-v2 path to 437.36 KiB gzip.
+// The full remote-session surface adds the lazy transcript bridge and tab
+// lifecycle on top of [0.5/3]. Keep the measured stack's narrow ratchet.
+// Remote approval hardening adds authoritative composer-profile hydration,
+// scoped rewind dispatch, and attachment/inbox fences to the always-mounted
+// remote hook. The measured production path is 438.38 KiB gzip after keeping
+// the integration modules below repolint's ownership ceilings; retain 0.12 KiB
+// toolchain headroom with a bounded 1.4 KiB ratchet.
+// Remote status isolation keeps the always-mounted status bar on the active
+// remote transcript and routes job cancellation to that host. Parsers and
+// retry policy remain lazy; the measured selector adds under 0.1 KiB gzip.
+// Remote runtime parity adds scoped approvals, status-only reconciliation,
+// session quality-floor routing, dropped-frame reconciliation, and remote
+// runtime-command dispatch. The measured initial path is 439.60 KiB;
+// retain 0.10 KiB of bounded toolchain headroom.
+// Closing the remaining review gaps adds generation-fenced hydration plus
+// remote-only tool payload, Todo, and terminal isolation. The measured path is
+// 439.74 KiB; retain 0.06 KiB of headroom with a 0.1 KiB ratchet.
+// The final remote-runtime parity pass adds remote run-strip telemetry,
+// explicit session verbs, and specialized plan decisions. The measured path
+// is 440.02 KiB. The current main-v2 turn-event, finish-protocol, and session
+// repair runtime then moves the combined path to 445.097 KiB; retain 0.103 KiB
+// of bounded build/toolchain headroom.
+// Atomic remote profile changes, exact approval draining, and generation-safe
+// history handoff bring the measured path to 445.228 KiB. Retain 0.072 KiB of
+// headroom with the smallest existing decimal ratchet.
+// Direct pending-prompt recovery and authoritative remote Goal state bring the
+// measured path to 445.473 KiB. Retain 0.027 KiB of bounded headroom.
+// Restored remote shells now activate their backend session immediately and
+// keep disconnected state out of the mounted surface. The merged production
+// path measures 445.614 KiB; retain 0.086 KiB of bounded build/toolchain
+// headroom with the smallest existing decimal ratchet.
+// Runtime-aware Todo presentation plus exact-tab continuation adds 0.3 KiB gzip
+// to the always-mounted footer path. Keep the state/routing guard with a narrow
+// ratchet rather than showing idle restored work as actively running. The
+// combined path measures 445.9 KiB; retain 0.1 KiB of toolchain headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 446.0 : 446.0;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -114,9 +150,9 @@ if (initialCSS.length > 0) {
 // Navigation overlay styles add a bounded 0.1 KiB to the deferred shell.
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
-// The remote-project badge and static session rows move the shell stylesheet
-// to 114.48 KiB gzip. Keep a narrow 0.22 KiB ratchet.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 114.7 * 1024);
+// The navigation mask's stable composer footprint and remote tab/surface
+// states bring the merged shell to roughly 115.7 KiB gzip.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -143,9 +179,8 @@ for (const path of localeChunks) {
   // connection, fallback, and legacy-state copy while removing protocol
   // choices from the primary UI; keep that complete guidance with a bounded
   // 0.4–0.5 KiB locale-only ratchet.
-  // Remote-project actions keep the complete localized labels at measured
-  // sizes of 57.17 KiB (zh) and 57.89 KiB (zh-TW), each with ~0.2 KiB margin.
-  const budget = name.startsWith("zh-TW-") ? 58.1 * 1024 : 57.4 * 1024;
+  // Remote-session actions and disconnected-shell guidance add bounded copy.
+  const budget = name.startsWith("zh-TW-") ? 58.5 * 1024 : 57.8 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -159,10 +194,21 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // (0.021%). The workspace panel rework (change-row hover/revert, status badges,
 // More menu, completion summary) makes the latest-base merge 2353.1 KiB in
 // production and test channels both measure 2357.92 KiB after project-group
-// wiring. Retain it with 0.28 KiB of build-SHA/toolchain headroom.
-// The complete theme-token contract and one shared operational-overlay recipe
-// add 1.09 KiB raw CSS while remaining inside the existing gzip CSS ceiling.
-// Keep only 0.21 KiB of raw headroom so this remains a narrow, measured ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_359.5 : 2_359.5;
+// wiring. Exact-turn routing, checkpoint resets, and failure-atomic navigation
+// bring the current main-v2 path to 2379.22 KiB. The remote approval
+// fences, extracted ownership modules, and remote status-bar isolation bring
+// the measured initial payload to 2380.9 KiB; retain 0.1 KiB of bounded
+// raw/toolchain headroom. Scoped remote approvals, status reconciliation, and
+// runtime command dispatch bring the measured payload to 2382.9 KiB. The
+// remaining review fences measure 2383.2 KiB; retain 0.1 KiB of headroom.
+// Final remote-runtime parity measures 2384.4 KiB raw. The current main-v2
+// runtime additions bring the combined path to 2404.364 KiB. The final merged
+// restored-shell activation and disconnected-state revival path measures
+// 2404.898 KiB; retain 0.102 KiB of bounded headroom alongside the gzip
+// ratchet above.
+// Runtime-aware Todo status and exact-tab continuation then add to the same
+// initial path. The combined payload measures 2406.2 KiB; retain 0.1 KiB of
+// raw/toolchain headroom for both owners.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_406.3 : 2_406.3;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

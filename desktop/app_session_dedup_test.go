@@ -525,6 +525,7 @@ func TestEnsureBlankTabKeepsActiveTabWhenTitleResetFails(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	seedLegacyTopicBridge(t, projectRoot)
 	app := NewApp()
 	topic, err := app.CreateTopic("project", projectRoot, "")
 	if err != nil {

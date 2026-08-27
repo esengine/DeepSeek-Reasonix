@@ -11,6 +11,8 @@ const appSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/App.tsx")
 const bridgeSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/lib/bridge.ts"), "utf8");
 const desktopMainSource = readFileSync(resolve(repoRoot, "desktop/main.go"), "utf8");
 const transcriptScrollBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-scroll-stability.mjs"), "utf8");
+const transcriptSelectionBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-selection.mjs"), "utf8");
+const transcriptSelectionComponentSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/components/TranscriptSelectionMenu.tsx"), "utf8");
 
 function jobBody(name, nextName) {
   const match = workflow.match(new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)\\n  ${nextName}:`));
@@ -35,9 +37,32 @@ for (const required of [
   "../scripts/test-webview2-native-smoke.ps1 -SelfTest",
   "Smoke-test Wails/WebView2 native startup",
   "../scripts/test-webview2-native-smoke.ps1",
+  "Test WebView2 transcript selection compositor",
+  "../scripts/test-transcript-selection-webview2.ps1 -Iterations 3",
+  "Upload WebView2 transcript selection evidence",
 ]) {
   if (!windowsJob.includes(required)) {
     throw new Error(`motion-ci-contract: desktop-windows must include ${required}`);
+  }
+}
+
+for (const required of [
+  "bench:selection-table",
+  "SELECTION REPAINT TARGET",
+  "clickIntervals = [400, 320, 180, 0]",
+  "maxTargetDelta <= 0.5",
+]) {
+  if (!transcriptSelectionBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript selection browser gate must retain ${required}`);
+  }
+}
+for (const required of [
+  'data-surface="transcript"',
+  "data-state={actionOverlay.phase}",
+  "actionOverlayStateRef.current.action",
+]) {
+  if (!transcriptSelectionComponentSource.includes(required)) {
+    throw new Error(`motion-ci-contract: stable transcript selection host must retain ${required}`);
   }
 }
 
@@ -50,10 +75,21 @@ for (const [path, source] of [
     "REASONIX_WEBVIEW2_APPROVAL_SMOKE",
     "__REASONIX_WEBVIEW2_APPROVAL_SMOKE__",
     "WebView2ApprovalSmokeBridge",
+    "__reasonixSelectionSmoke",
+    "reasonix_transcript_smoke",
   ]) {
     if (source.includes(forbidden)) {
       throw new Error(`motion-ci-contract: ${path} must not embed test-only WebView2 instrumentation (${forbidden})`);
     }
+  }
+}
+for (const requiredPath of [
+  "desktop/cmd/transcript-selection-smoke/main.go",
+  "desktop/transcript_selection_smoke_contract.js",
+  "scripts/test-transcript-selection-webview2.ps1",
+]) {
+  if (!existsSync(resolve(repoRoot, requiredPath))) {
+    throw new Error(`motion-ci-contract: missing independent WebView2 selection smoke file ${requiredPath}`);
   }
 }
 for (const retiredPath of [
@@ -105,6 +141,7 @@ for (const required of [
   "markdown-pipeline.test.tsx",
   "message-selection-copy.test.ts",
   "transcript-selection-menu.test.tsx",
+  "transcript-selection-rendering.test.ts",
   "transcript-store.test.ts",
   "transcript-virtualization.test.tsx",
 ]) {

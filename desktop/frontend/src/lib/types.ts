@@ -4,7 +4,7 @@ import type { HistoryServerSearch } from "./searchSources";
 import type { Todo } from "./tools";
 import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 import type { WireApproval } from "./approvalTypes";
-import type { RemoteTabRefView } from "./remoteTypes";
+import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
 export * from "./remoteTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
@@ -16,6 +16,8 @@ export type EventKind =
   | "tool_dispatch"
   | "tool_result"
   | "tool_result_preview"
+  | "turn_status"
+  | "prompt_answered" | "session_changed"
   | "tool_progress"
   | "usage"
   | "notice"
@@ -35,8 +37,31 @@ export type EventKind =
   | "context_maintenance"
   | "workspace_changed"
   | "turn_phase"
-  | "completion_summary";
+  | "completion_summary"
+  | "provider_unreachable";
 export type StreamAttemptAction = "begin" | "discard" | "commit";
+export type TurnStatus = "queued" | "in_progress" | "waiting_user" | "cancelling" | "completed" | "interrupted" | "failed" | "protocol_failed";
+export interface TurnEventEnvelope {
+  turnId: string;
+  seq: number;
+  status: TurnStatus | string;
+  runtimeEpoch?: string;
+  submissionId?: string;
+  transcriptRevision?: number;
+  transcriptDigest?: string;
+  event: WireEvent;
+}
+export interface TurnEventReplayView {
+  events: TurnEventEnvelope[];
+  floorSeq: number;
+  latestSeq: number;
+  nextAfterSeq: number;
+  hasMore: boolean;
+  resetRequired: boolean;
+  transcriptRevision?: number;
+  transcriptDigest?: string;
+  runtimeEpoch?: string;
+}
 export interface WireStreamAttempt {
   id: string;
   action: StreamAttemptAction;
@@ -321,6 +346,9 @@ export interface MemoryCitation {
 
 export interface WireEvent {
   kind: EventKind;
+  turnId?: string;
+  seq?: number;
+  status?: TurnStatus;
   text?: string;
   detail?: string;
   // Stable notice id for localization; empty/absent = localize by text match.
@@ -340,15 +368,16 @@ export interface WireEvent {
   err?: string;
   checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
-  outcome?: "final_readiness" | "recovery_paused";
+  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
-  retryScope?: "headers" | "stream";
+  retryScope?: "headers" | "stream" | "protocol";
   streamAttempt?: WireStreamAttempt;
   /** Durable session-inbox item id for steer / TurnDone correlation. */
   itemId?: string;
+  sessionPath?: string; // Serve multi-session routing tag; absent locally.
   workspace?: WireWorkspaceChanged;
   /** turn_phase: working | checking | verifying | reviewing */
   phase?: string;
@@ -430,7 +459,7 @@ export interface WireFinalReadiness {
 }
 
 // Tab management types (desktop/tabs.go).
-export interface TabMeta {
+export interface TabMeta extends RemoteTabMetaFields {
   id: string;
   tabType?: "session" | "file";
   scope: string;
@@ -458,6 +487,10 @@ export interface TabMeta {
   backgroundJobs?: number;
   cancelRequested?: boolean;
   cancellable?: boolean;
+  turnId?: string;
+  turnStatus?: TurnStatus;
+  turnEventSeq?: number;
+  turnReplayAfterSeq?: number;
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
@@ -499,7 +532,7 @@ export interface TerminalWorkspaceView {
   shells: TerminalShellView[];
 }
 
-export interface ProjectNode {
+export interface ProjectNode extends RemoteProjectNodeFields {
   key: string;
   kind: "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session";
   label: string;
@@ -529,8 +562,6 @@ export interface ProjectNode {
   recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
   isolatedWorktree?: boolean;
   runtimeOnly?: boolean;
-  /** Present ⇒ remote project group; drives the cloud badge on the folder row. */
-  remote?: RemoteTabRefView;
   children?: ProjectNode[];
 }
 
@@ -915,7 +946,7 @@ export interface ContextInfo {
   contextBudget?: ContextBudgetInfo;
 }
 
-export interface Meta {
+export interface Meta extends RemoteSessionMetaFields {
   label: string;
   ready: boolean;
   runtime?: SessionRuntimeView;

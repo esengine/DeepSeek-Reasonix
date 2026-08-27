@@ -280,6 +280,22 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesStripTransientReasoningLanguageBlock(t *testing.T) {
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("history length = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Role != "user" || got[0].Content != "Explain this module" {
+		t.Fatalf("user history = %+v, want plain user text without reasoning-language", got[0])
+	}
+	if strings.Contains(got[0].Content, "<reasoning-language>") {
+		t.Fatalf("reasoning-language leaked into /history user content: %q", got[0].Content)
+	}
+}
+
 func TestSessionsListPreviewStripsTransientReasoningLanguageBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -359,22 +375,6 @@ func TestServeApproveMissingID(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("approve bad json = %d, want 400", resp2.StatusCode)
-	}
-}
-
-func TestServeNewSessionEndpoint(t *testing.T) {
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/new", "application/json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("new session = %d, want 204", resp.StatusCode)
 	}
 }
 
@@ -824,7 +824,7 @@ func TestSessionsSkipsCleanupPending(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "active" || filepath.Clean(got[0].Path) != filepath.Clean(active) {
+	if len(got) != 1 || got[0].Name != "active" || got[0].Path != agent.CanonicalSessionPath(active) {
 		t.Fatalf("/sessions = %+v, want only active session", got)
 	}
 }

@@ -5,7 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useController } from "../lib/useController";
 import type { AppBindings } from "../lib/bridge";
-import type { ContextInfo, EffortInfo, HistorySlice, HistorySliceRequest, Meta, TabMeta, WireEvent } from "../lib/types";
+import type { ContextInfo, EffortInfo, HistorySliceRequest, Meta, TabMeta, WireEvent } from "../lib/types";
 import { historySliceFromMessages } from "./mockHistorySlice";
 
 let passed = 0;
@@ -110,9 +110,7 @@ let effortCalls = 0;
 let checkpointHistoryCalls = 0;
 let historyLoads = 0;
 let checkpointLoads = 0;
-let historyShouldFail = false;
-let deferredHistory = false;
-let resolveDeferredHistory: ((page: HistorySlice) => void) | undefined;
+let turnReplayCalls = 0;
 const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 
@@ -143,12 +141,6 @@ window.go = {
       HistoryForTab: async () => [],
       HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
         historyLoads += 1;
-        if (historyShouldFail) throw new Error("history unavailable");
-        if (deferredHistory) {
-          return await new Promise<HistorySlice>((resolve) => {
-            resolveDeferredHistory = resolve;
-          });
-        }
         return historySliceFromMessages(
           tabID,
           [{ role: "user", content: "hello", createdAt: Date.now(), checkpointTurn: 0 }],
@@ -160,6 +152,31 @@ window.go = {
         return [];
       },
       ReplayPendingPrompts: async () => {},
+      TurnEventsForTab: async (_tabID: string, afterSeq: number) => {
+        turnReplayCalls += 1;
+        const events = afterSeq !== 1 ? [] : [
+          {
+            turnId: "turn-gap",
+            seq: 2,
+            status: "in_progress",
+            event: { kind: "turn_started", turnId: "turn-gap", seq: 2, status: "in_progress" },
+          },
+          {
+            turnId: "turn-gap",
+            seq: 3,
+            status: "waiting_user",
+            event: { kind: "turn_status", turnId: "turn-gap", seq: 3, status: "waiting_user" },
+          },
+        ];
+        return {
+          events,
+          floorSeq: 1,
+          latestSeq: 3,
+          nextAfterSeq: events.length > 0 ? 3 : afterSeq,
+          hasMore: false,
+          resetRequired: false,
+        };
+      },
       SubmitToTab: async () => {},
       SubmitToTabWithID: async () => {},
       CancelTab: async () => {
@@ -204,6 +221,33 @@ await act(async () => {
 historyLoads = 0;
 checkpointLoads = 0;
 
+// A future event must pause projection until the missing durable prefix has
+// been replayed. This interleaving is driven only by resolved promises (no
+// timing sleeps), then a duplicate seq=3 is ignored idempotently.
+await act(async () => {
+  for (const handler of eventHandlers) {
+    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 1, status: "queued" });
+    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "waiting_user" });
+  }
+  for (let step = 0; step < 20; step += 1) await Promise.resolve();
+});
+eq(turnReplayCalls, 1, "sequence gap replays the durable missing prefix once");
+eq(controller?.state.items.find((item) => item.kind === "assistant")?.id, "a:turn-gap", "gap replay keeps the stable turn item id");
+eq(controller?.state.pendingPrompt, true, "future event projects only after the missing prefix");
+await act(async () => {
+  for (const handler of eventHandlers) {
+    handler({ kind: "turn_status", tabId: "tab-a", turnId: "turn-gap", seq: 3, status: "in_progress" });
+  }
+  await Promise.resolve();
+});
+eq(controller?.state.pendingPrompt, true, "duplicate sequence is ignored idempotently");
+await act(async () => {
+  for (const handler of eventHandlers) {
+    handler({ kind: "turn_done", tabId: "tab-a", turnId: "turn-gap", seq: 4, status: "completed" });
+  }
+  await Promise.resolve();
+});
+
 backendRunning = true;
 await act(async () => {
   for (const handler of eventHandlers) handler({ kind: "turn_started", tabId: "tab-a" });
@@ -226,14 +270,9 @@ for (let attempt = 0; attempt < 20 && controller?.state.running; attempt += 1) {
 eq(controller?.state.running, false, "cancel reconciliation clears the running state");
 eq(cancelCalls, 1, "CancelTab is called once");
 eq(controller?.state.cancelRequested, false, "cancel reconciliation clears cancelRequested");
-await waitFor(
-  "cancelled transcript reload",
-  () => historyLoads > 0 && checkpointLoads > 0 && Boolean(
-    controller?.state.items.some((item) => item.kind === "user" && item.text === "hello") &&
-    controller.state.checkpoints.some((checkpoint) => checkpoint.turn === 0 && checkpoint.canConversation),
-  ),
-);
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "hello"), "cancelled prompt is restored from the authoritative transcript");
+await waitFor("cancelled checkpoint refresh", () => checkpointLoads > 0);
+eq(historyLoads, 0, "cancellation never reloads or replaces the transcript");
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "hello"), "cancelled prompt stays in the projected transcript");
 ok(controller?.state.checkpoints.some((checkpoint) => checkpoint.turn === 0 && checkpoint.canConversation), "cancelled prompt keeps its conversation checkpoint");
 
 // The screenshot repro stops before turn_started, while the backend has
@@ -253,54 +292,20 @@ await act(async () => {
   controller?.cancel();
   await flushPromises();
 });
-await waitFor(
-  "immediate cancelled transcript reload",
-  () => !controller?.state.running && historyLoads > 0 && checkpointLoads > 0 && Boolean(
-    controller?.state.items.some((item) => item.kind === "user" && item.text === "hello") &&
-    controller.state.checkpoints.some((checkpoint) => checkpoint.turn === 0 && checkpoint.canConversation),
-  ),
-);
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "hello"), "immediate cancellation restores the persisted prompt bubble");
-ok(controller?.state.checkpoints.some((checkpoint) => checkpoint.turn === 0 && checkpoint.canConversation), "immediate cancellation restores the rewind checkpoint");
+await waitFor("immediate cancellation", () => !controller?.state.running && checkpointLoads > 0);
+eq(historyLoads, 0, "immediate cancellation does not schedule a transcript hydrate");
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "hello"), "immediate cancellation keeps the optimistic prompt bubble");
+ok(controller?.state.checkpoints.some((checkpoint) => checkpoint.turn === 0 && checkpoint.canConversation), "immediate cancellation keeps the rewind checkpoint");
 
-// A new submission must invalidate a cancellation hydrate that is still
-// waiting on authoritative history; otherwise its replace dispatch can erase
-// the new optimistic turn.
+// A new submission after the interrupted terminal boundary must remain in the
+// reducer because cancellation has no whole-history replacement path anymore.
 historyLoads = 0;
-deferredHistory = true;
-backendRunning = true;
-await act(async () => {
-  await controller?.send("accidental");
-  controller?.cancel();
-  await flushPromises();
-});
-await waitFor("deferred cancellation history", () => historyLoads > 0 && resolveDeferredHistory !== undefined);
 await act(async () => {
   await controller?.send("corrected");
-  resolveDeferredHistory?.(historySliceFromMessages(
-    "tab-a",
-    [{ role: "user", content: "stale cancellation history", createdAt: Date.now(), checkpointTurn: 0 }],
-    { cursor: "" },
-  ));
-  resolveDeferredHistory = undefined;
-  deferredHistory = false;
   await flushPromises();
 });
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "corrected"), "resubmission survives a stale cancellation hydrate");
-ok(!controller?.state.items.some((item) => item.kind === "user" && item.text === "stale cancellation history"), "stale cancellation history cannot replace a resubmitted turn");
-
-// A failed cancellation history read must preserve the transcript that was
-// already visible instead of resetting it to an empty state.
-historyLoads = 0;
-historyShouldFail = true;
-backendRunning = true;
-await act(async () => {
-  controller?.cancel();
-  await flushPromises();
-});
-await waitFor("failed cancellation history", () => !controller?.state.running && historyLoads > 0);
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "corrected"), "history failure preserves the visible transcript");
-historyShouldFail = false;
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "corrected"), "resubmission survives the completed cancellation cleanup");
+eq(historyLoads, 0, "resubmission cannot race a stale cancellation history response");
 
 await act(async () => {
   for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a", checkpointTurn: 0 });

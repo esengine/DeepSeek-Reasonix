@@ -301,6 +301,11 @@ export function topicIsActive(node: ProjectNode, activeScope?: string, activeWor
   }
   if (!isTopicNode(node)) return false;
   if (activeSessionPath && asArray(node.children).some(isRuntimeSessionNode)) return false;
+  // Remote filesystem paths are not globally unique: two hosts can expose the
+  // same absolute session path. Their synthesized rows already carry a
+  // host-qualified topicId, so never let the generic path fallback mark a row
+  // from another host active.
+  if (node.remoteSession) return topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId);
   if (topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId)) return true;
   return Boolean(node.sessionPath && activeSessionPath && activeSessionPath === node.sessionPath);
 }

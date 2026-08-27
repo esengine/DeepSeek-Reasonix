@@ -12,7 +12,7 @@ import {
 
 const diagnosticsAvailable = isTranscriptScrollDiagnosticsBuild(
   typeof __BUILD_CHANNEL__ === "string" ? __BUILD_CHANNEL__ : "stable",
-  import.meta.env.DEV,
+  import.meta.env?.DEV,
 );
 
 type DiagnosticCopy = {

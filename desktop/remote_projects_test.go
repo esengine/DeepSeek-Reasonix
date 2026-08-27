@@ -40,8 +40,8 @@ func TestSnapshotIncludesRemoteProjectGroups(t *testing.T) {
 		if !strings.HasPrefix(node.Key, "project_remote_") {
 			t.Fatalf("remote group key = %q", node.Key)
 		}
-		if node.Root != "/home/dev/app" {
-			t.Fatalf("remote group root = %q, want workspace for runtime projection", node.Root)
+		if node.Root != "remote-project:gpu-box:/home/dev/app" {
+			t.Fatalf("remote group root = %q, want host-qualified tree identity", node.Root)
 		}
 		if node.Label != "app" {
 			t.Fatalf("remote group label = %q, want workspace base name", node.Label)
@@ -75,5 +75,40 @@ func TestRemoteProjectNodeKeysDoNotCollide(t *testing.T) {
 	}
 	if len(nodes) != 2 || nodes[0].Key == nodes[1].Key {
 		t.Fatalf("remote project keys collided: %+v", nodes)
+	}
+}
+
+func TestRemoteProjectTreeIdentityIncludesHost(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	if err := editUserConfig(func(c *config.Config) error {
+		for _, host := range []string{"host-a", "host-b"} {
+			if err := c.UpsertRemoteHost(config.RemoteHostEntry{Name: host, Host: "127.0.0.1"}); err != nil {
+				return err
+			}
+			if err := c.UpsertRemoteProject(config.RemoteProjectEntry{HostID: host, Workspace: "/srv/app"}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := (&App{}).remoteProjectNodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 || nodes[0].Root == nodes[1].Root {
+		t.Fatalf("same-path remote roots collided: %+v", nodes)
+	}
+}
+
+func TestRemoteRootWorkspaceContainsAbsoluteDescendants(t *testing.T) {
+	if !isRemoteSubpath("/", "/home/dev/app") {
+		t.Fatal("POSIX root must contain every other absolute workspace")
+	}
+	if isRemoteSubpath("/", "/") || isRemoteSubpath("/", "relative/path") {
+		t.Fatal("root containment must stay strict and absolute")
 	}
 }

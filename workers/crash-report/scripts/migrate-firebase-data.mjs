@@ -6,6 +6,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parseWranglerRows } from "./apply-diagnostics-v2.mjs";
+import {
+  assessMigrationCapacity,
+  accumulateMigrationCapacityAssessment,
+  createMigrationCapacityAssessment,
+  finalizeMigrationCapacityAssessment,
+} from "./firebase-migration-assessment.mjs";
+
+export { assessMigrationCapacity };
 
 const tokenURL = "https://oauth2.googleapis.com/token";
 const scope = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/firebase.database";
@@ -13,6 +21,10 @@ const PAGE_SIZE = 200;
 const MAX_PASSES = 3;
 const STORAGE_BUDGET = 700 * 1024 * 1024;
 const RESERVATIONS = { active: 640 * 1024, compacted: 128 * 1024, archived: 0 };
+// One page can contain six retained 96 KiB reports for each of 200 groups.
+// Keep the capture bounded while leaving room for Wrangler's JSON envelope
+// and escaping; Node's default child-process buffer is too small for this path.
+export const wranglerD1MaxBufferBytes = 192 * 1024 * 1024;
 export const firebaseOAuthGrantType = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 
 function base64url(value) {
@@ -148,13 +160,14 @@ export function buildFirebaseGroups(groupRows, reportRows, now = new Date()) {
   return output;
 }
 
-function runWrangler(projectDir, database, query) {
+export function runWrangler(projectDir, database, query, spawn = spawnSync) {
   const executable = process.platform === "win32" ? "wrangler.cmd" : "wrangler";
   const wrangler = path.join(projectDir, "node_modules", ".bin", executable);
-  const result = spawnSync(wrangler, ["d1", "execute", database, "--remote", "--json", "--command", query], {
+  const result = spawn(wrangler, ["d1", "execute", database, "--remote", "--json", "--command", query], {
     cwd: projectDir,
     encoding: "utf8",
     env: process.env,
+    maxBuffer: wranglerD1MaxBufferBytes,
     stdio: ["ignore", "pipe", "inherit"],
   });
   if (result.error) throw result.error;
@@ -327,11 +340,13 @@ function parseArgs(argv, projectDir) {
 async function dryRun(projectDir, database, now) {
   let cursor = "";
   const counts = { active: 0, compacted: 0, archived: 0 };
+  const assessmentCounts = createMigrationCapacityAssessment();
   let estimatedBytes = 0;
   let contentBytes = 0;
   while (true) {
     const page = readPage(projectDir, database, cursor);
     if (!page.groups.length) break;
+    accumulateMigrationCapacityAssessment(assessmentCounts, page.groups, now);
     const entries = buildFirebaseGroups(page.groups, page.reports, now);
     for (const entry of entries.values()) {
       counts[entry.state]++;
@@ -340,9 +355,36 @@ async function dryRun(projectDir, database, now) {
     }
     cursor = text(page.groups.at(-1).fingerprint);
   }
+  const assessment = finalizeMigrationCapacityAssessment(assessmentCounts);
+  const explainedActive = Object.values(assessment.activeReasons).reduce((sum, value) => sum + value, 0);
+  if (explainedActive !== counts.active || assessment.automaticRetention.compacted !== counts.compacted ||
+      assessment.automaticRetention.archived !== counts.archived) {
+    throw new Error("Firebase capacity assessment disagrees with lifecycle classification");
+  }
+  const ageLine = (status) => {
+    const value = assessment.ageByStatus[status];
+    return `${status}=${value.under30d}/${value.days30to59d}/${value.days60plus}/${value.invalid}`;
+  };
+  const manualSavings = assessment.manualReview.open30to59d * (RESERVATIONS.active - RESERVATIONS.compacted) +
+    assessment.manualReview.open60dPlus * RESERVATIONS.active;
+  const statusTotals = `open=${assessment.statusTotals.open}, resolved=${assessment.statusTotals.resolved}, ` +
+    `ignored=${assessment.statusTotals.ignored}, other=${assessment.statusTotals.other}`;
+  const activeReasons = `open=${assessment.activeReasons.open}, other_status=${assessment.activeReasons.otherStatus}, ` +
+    `recent_resolved_or_ignored=${assessment.activeReasons.recentResolvedOrIgnored}, ` +
+    `invalid_resolved_or_ignored=${assessment.activeReasons.invalidResolvedOrIgnored}`;
+  const manualReview = `open_30_to_59d=${assessment.manualReview.open30to59d}, ` +
+    `open_60d_plus=${assessment.manualReview.open60dPlus}, ` +
+    `other_status_30d_plus=${assessment.manualReview.otherStatus30dPlus}, ` +
+    `potential_reduction=${(manualSavings / 1048576).toFixed(1)} MiB`;
   console.log(`Groups: active=${counts.active}, compacted=${counts.compacted}, archived=${counts.archived}.`);
+  console.log(`Status totals: ${statusTotals}.`);
+  console.log(`Last-seen buckets (<30d/30-59d/>=60d/invalid): ${ageLine("open")}; ${ageLine("resolved")}; ${ageLine("ignored")}; ${ageLine("other")}.`);
+  console.log(`Active reasons: ${activeReasons}.`);
+  console.log(`Manual review only: ${manualReview}.`);
   console.log(`Canonical Firebase content estimate: ${(contentBytes / 1048576).toFixed(1)} MiB.`);
-  console.log(`Conservative reservation: ${(estimatedBytes / 1048576).toFixed(1)} MiB / 700 MiB.`);
+  const reservationPercent = estimatedBytes / STORAGE_BUDGET * 100;
+  console.log(`Conservative reservation: ${(estimatedBytes / 1048576).toFixed(1)} MiB / 700 MiB (${reservationPercent.toFixed(1)}%).`);
+  if (reservationPercent >= 80) console.log("Capacity warning: reservation is at or above the 80% review threshold; do not apply without operator review.");
   if (estimatedBytes > STORAGE_BUDGET) throw new Error("Estimated Firebase reservation exceeds the 700 MiB safety budget");
 }
 

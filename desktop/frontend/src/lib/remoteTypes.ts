@@ -27,18 +27,67 @@ export interface RemoteTabRefView {
   workspace: string;
 }
 
+export interface RemoteTabMetaFields {
+  remote?: RemoteTabRefView;
+  remoteState?: RemoteTabStateValue;
+}
+
+export interface RemoteProjectNodeFields {
+  remote?: RemoteTabRefView;
+  remoteSession?: { hostId: string; workspace: string; name: string; path?: string; title?: string };
+}
+
+export interface RemoteSessionMetaFields {
+  remote?: RemoteTabRefView;
+}
+
 export interface RemoteProjectView {
   hostId: string;
   workspace: string;
   title?: string;
+  color?: string;
+  merged?: boolean;
 }
 
 export interface RemoteSessionView {
   name: string;
+  path?: string;
   title: string;
   turns: number;
   current?: boolean;
+  running?: boolean;
   lastActivityAt?: number;
+  pinned?: boolean;
+}
+
+export type RemoteTabStateValue = "connecting" | "ready" | "reconnecting" | "serve_down" | "error" | "disconnected";
+
+export interface RemoteTabState {
+  state: RemoteTabStateValue;
+  error?: string;
+}
+
+export interface RemoteTabOpenOptions {
+  newSession?: boolean;
+  sessionName?: string;
+  sessionPath?: string;
+  sessionTitle?: string;
+}
+
+export interface RemoteTabSnapshot {
+  history: unknown[];
+  context?: unknown;
+  todos?: unknown[];
+  checkpoints?: unknown[];
+  models?: string[];
+  commands?: unknown[];
+  status?: unknown;
+  pendingEvents?: unknown[];
+}
+
+export interface RemoteAskAnswer {
+  QuestionID: string;
+  Selected: string[];
 }
 
 export interface RemoteHostView {

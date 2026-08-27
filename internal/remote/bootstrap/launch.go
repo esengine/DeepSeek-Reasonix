@@ -107,20 +107,76 @@ func LogsCommand(logFile string, n int) string {
 // the flag name registered in runServe.
 const servePortFileMarker = "port-file"
 
-// LocateCommand probes for a usable reasonix binary. It prints three lines:
-// the resolved path (or empty), the `--version` output, and "portfile:yes" when
-// `serve --help` advertises the --port-file flag. The bootstrap gates on the
-// flag, not the version number, because --port-file/--token-file ship in this
-// change: a version gate cannot know its own future release number, and any
-// already-released binary would pass a numeric gate yet still lack the flags.
+// serveSessionEventsMarker gates on the multi-session capability: serves
+// advertising --session-events tag SSE frames with sessionPath and keep
+// background sessions running across switches.
+const serveSessionEventsMarker = "session-events"
+
+// serveDetachedHealMarker gates on the credential-heal fix: provider reloads
+// retire background controllers instead of leaving them on a stale tunnel.
+const serveDetachedHealMarker = "detached-heal"
+
+// ServeCapsToken is the rolling capability revision advertised in serve help.
+// Bump this when the desktop requires a newer wire/runtime contract. The CLI
+// imports this value so the advertised token cannot drift from the probe.
+const ServeCapsToken = "reasonix-serve-caps-20260826a"
+
+// LocateCommand probes for a usable reasonix binary and the exact Serve
+// capabilities required by the desktop. Capability probes are authoritative:
+// an old binary can have an otherwise acceptable product version.
 func LocateCommand(uploadedBin string) string {
+	return locateCommand(uploadedBin, false)
+}
+
+// LocateUploadedCommand probes exactly the freshly written managed binary.
+// A stale PATH candidate must not shadow an upload performed to repair missing
+// Serve capabilities.
+func LocateUploadedCommand(uploadedBin string) string {
+	return locateCommand(uploadedBin, true)
+}
+
+// LocateNPMGlobalCommand probes exactly the binary installed under npm's
+// current global prefix. A stale login-PATH binary must not shadow a package
+// that was just installed to repair missing Serve capabilities.
+func LocateNPMGlobalCommand() string {
+	resolve := "BIN=; P=\"$(npm prefix -g 2>/dev/null)\"; if [ -n \"$P\" ] && [ -x \"$P/bin/reasonix\" ]; then BIN=\"$P/bin/reasonix\"; fi; "
+	return locateResolvedCommand(resolve)
+}
+
+func locateCommand(uploadedBin string, preferUploaded bool) string {
+	resolve := fmt.Sprintf(
+		"BIN=\"$(command -v reasonix 2>/dev/null)\"; if [ -z \"$BIN\" ] && [ -x %s ]; then BIN=%s; fi; ",
+		shellQuote(uploadedBin), shellQuote(uploadedBin),
+	)
+	fallback := "if [ -z \"$BIN\" ]; then P=\"$(npm prefix -g 2>/dev/null)\"; if [ -n \"$P\" ] && [ -x \"$P/bin/reasonix\" ]; then BIN=\"$P/bin/reasonix\"; fi; fi; "
+	if preferUploaded {
+		resolve = fmt.Sprintf("BIN=; if [ -x %s ]; then BIN=%s; fi; ", shellQuote(uploadedBin), shellQuote(uploadedBin))
+		fallback = ""
+	}
+	return locateResolvedCommand(resolve + fallback)
+}
+
+func locateResolvedCommand(resolve string) string {
 	return fmt.Sprintf(
-		"BIN=\"$(command -v reasonix 2>/dev/null)\"; "+
-			"if [ -z \"$BIN\" ] && [ -x %s ]; then BIN=%s; fi; "+
-			"if [ -z \"$BIN\" ]; then P=\"$(npm prefix -g 2>/dev/null)\"; if [ -n \"$P\" ] && [ -x \"$P/bin/reasonix\" ]; then BIN=\"$P/bin/reasonix\"; fi; fi; "+
+		resolve+
 			"echo \"$BIN\"; "+
 			"if [ -n \"$BIN\" ]; then \"$BIN\" --version 2>/dev/null; "+
-			"if \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo portfile:yes; else echo portfile:no; fi; fi",
-		shellQuote(uploadedBin), shellQuote(uploadedBin), shellQuote(servePortFileMarker),
+			"if \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo portfile:yes; else echo portfile:no; fi; "+
+			"if \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo sessionevents:yes; else echo sessionevents:no; fi; "+
+			"if \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo detachedheal:yes; else echo detachedheal:no; fi; "+
+			"if \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo caps:yes; else echo caps:no; fi; fi",
+		shellQuote(servePortFileMarker), shellQuote(serveSessionEventsMarker), shellQuote(serveDetachedHealMarker), shellQuote(ServeCapsToken),
+	)
+}
+
+// SupportsRequiredServeCapabilitiesCommand probes the executable backing a
+// running Serve on Linux, where /proc exposes the still-mapped executable even
+// after its pathname is replaced. Platforms without that live-image handle
+// fail closed and rely on the capability token recorded at managed launch.
+func SupportsRequiredServeCapabilitiesCommand(pid int) string {
+	return fmt.Sprintf(
+		"BIN=$(readlink /proc/%d/exe 2>/dev/null); "+
+			"if [ -n \"$BIN\" ] && [ -x \"$BIN\" ] && \"$BIN\" serve --help 2>&1 | grep -q -- %s && \"$BIN\" serve --help 2>&1 | grep -q -- %s && \"$BIN\" serve --help 2>&1 | grep -q -- %s; then echo yes; else echo no; fi",
+		pid, shellQuote(serveSessionEventsMarker), shellQuote(serveDetachedHealMarker), shellQuote(ServeCapsToken),
 	)
 }

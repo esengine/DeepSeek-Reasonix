@@ -14,6 +14,7 @@
 | `delete_range` | false | 用精确 start/end 文本锚点删除文件中的连续范围。 |
 | `delete_symbol` | false | 用 Go AST 删除 Go 源文件中的命名符号。 |
 | `edit_file` | false | 将文件中的唯一精确字符串替换为另一个字符串。 |
+| `finish` | true | 在输出用户可见的最终答案后结束本轮；必须且只能以 `completed`、`partial` 或 `blocked` 调用一次，需要用户输入时应改用 `ask`。 |
 | `glob` | true | 查找匹配 glob pattern 的文件。 |
 | `grep` | true | 在文件或目录下按正则搜索文本。 |
 | `kill_shell` | false | 终止后台 `bash` 或 `task` job。 |
@@ -109,8 +110,8 @@ registry 中供调度，但不会展开到 top-level provider schema；模型通
 每个任务共享同一套精简的 provider 可见核心：直接编码工具、后台 shell 生命周期工具，
 以及稳定的能力代理：
 
-`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
-`write_file`, `compress`（若注册），以及 `use_capability`。
+`bash`, `bash_output`, `edit_file`, `finish`, `kill_shell`, `read_file`,
+`wait`, `write_file`, `compress`（若注册），以及 `use_capability`。
 
 可选工具（`glob`、`grep`、`ls`、`web_fetch`、MCP、skills、subagents、docs、会话历史、
 记忆写入、workflow 等）仍在 host registry 中可调度；模型通过 `use_capability` 列举、

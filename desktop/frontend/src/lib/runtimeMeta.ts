@@ -1,10 +1,15 @@
 export type RuntimeMetaSnapshot = {
+  runtime?: { epoch?: string };
   running: boolean;
   turnStartedAt?: number;
   pendingPrompt?: boolean;
   backgroundJobs?: number;
   cancelRequested?: boolean;
   cancellable?: boolean;
+  turnId?: string;
+  turnStatus?: string;
+  turnEventSeq?: number;
+  turnReplayAfterSeq?: number;
 };
 
 export function foregroundRunningFromRuntimeMeta(meta: RuntimeMetaSnapshot): boolean {

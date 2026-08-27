@@ -2146,7 +2146,7 @@ func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
 	return out
 }
 
-func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) {
+func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) error {
 	t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
@@ -2163,7 +2163,7 @@ func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, r
 			ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
 		}
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
+	return event.EmitChecked(a.svc.sink, event.Event{Kind: event.ToolDispatch, Tool: ev})
 }
 
 // emitResolvedToolDispatch upserts the real target classification of a stable

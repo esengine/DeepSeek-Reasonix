@@ -255,7 +255,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			// (unapplied path marks uncertain + pause via the notice sink).
 			a.RecordUnappliedSteer("(body load failed)", itemID)
 		}
-		schemas := a.svc.tools.Schemas()
+		schemas := a.providerToolSchemas()
 		prefixShape := a.capturePrefixShape(schemas)
 		prevPrefixShape := a.sess.lastPrefixShape
 		if !a.sess.haveLastPrefixShape {
@@ -563,6 +563,9 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		}
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
+	if cont, err, handled := a.finishRequiredAtResponseEnd(ctx, state, text, usage); handled {
+		return cont, err
+	}
 	if !hasVisibleFinalAnswer(text) {
 		// DeepSeek thinking mode can stream a long reasoning_content and
 		// then finish with finish_reason="stop" but an empty content
@@ -590,6 +593,10 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
+	if a.continueStandardTodo(ctx, state) {
+		a.contextManager().ObserveUsage(usage)
+		return true, nil
+	}
 	if readiness.applies || a.turn.readinessRecovered {
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
@@ -611,6 +618,9 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
 	state.emptyFinalBlocks = 0
 	state.usedAnyTool = true
+	if cont, err, handled := a.rejectMixedFinishBatch(state, text, calls, usage); handled {
+		return cont, err
+	}
 	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
 	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
 		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
@@ -636,6 +646,11 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		receiptMark = a.task.ledger.Len()
 	}
 	batch := a.executeBatch(ctx, state, calls)
+	if batch.err != nil {
+		// No call from the batch has executed: executeBatch commits every full
+		// dispatch before entering its execution scheduler.
+		return false, batch.err
+	}
 	results, images := batch.results, batch.images
 	for i, call := range calls {
 		msg := provider.Message{
@@ -662,11 +677,19 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		return false, ctx.Err()
 	}
 	if a.successfulTurnFinalizer(ctx, calls, batch) {
+		if a.finalizerName(calls) == "finish" {
+			if cont, err := a.acceptFinishCall(state, text, calls); cont || err != nil {
+				return cont, err
+			}
+		}
 		// submit_plan is the planner's data-bearing final answer. Its paired tool
 		// result is stored, so another acknowledgement adds no host value and can
 		// turn a valid bounded plan into a max-steps pause.
 		a.contextManager().ObserveUsage(usage)
 		return false, nil
+	}
+	if cont, err, handled := a.repairRejectedFinish(state, text, calls, usage); handled {
+		return cont, err
 	}
 	if boundaryFinalizer {
 		// The one allowed boundary finalizer ran but was rejected or blocked.

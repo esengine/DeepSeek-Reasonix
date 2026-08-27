@@ -50,6 +50,12 @@ type Catalog struct {
 	workers          sync.WaitGroup
 	closeDone        chan struct{}
 	closeErr         error
+	// testReconcileBatchHook deterministically pauses an uncommitted directory
+	// projection. Production catalogs leave it nil.
+	testReconcileBatchHook func(int)
+	// testRepairLockHook reports before and after repair acquires the directory
+	// lock. Production catalogs leave it nil.
+	testRepairLockHook func(acquired bool)
 }
 
 type sessionPathRequest struct {
@@ -325,140 +331,6 @@ func (c *Catalog) writerLoop() {
 			}
 		}
 	}
-}
-
-func (c *Catalog) UpsertSession(ctx context.Context, record SessionRecord) error {
-	return c.upsertSessions(ctx, []SessionRecord{normalizeSessionRecord(record)}, nil, "write")
-}
-
-func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
-	return c.upsertSessionsWithNotification(ctx, records, generations, reason, true)
-}
-
-func (c *Catalog) upsertSessionsWithoutNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
-	return c.upsertSessionsWithNotification(ctx, records, generations, reason, false)
-}
-
-func (c *Catalog) upsertSessionsWithNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string, notify bool) error {
-	if len(records) == 0 {
-		return nil
-	}
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	filtered := records[:0]
-	for _, record := range records {
-		if _, removed := c.removedPaths.Load(filepath.Clean(record.Path)); !removed {
-			filtered = append(filtered, record)
-		}
-	}
-	records = filtered
-	if len(records) == 0 {
-		return nil
-	}
-	if len(records) == 1 && generations == nil {
-		record, skip := c.prepareExactPathProjection(ctx, records[0])
-		if skip {
-			return nil
-		}
-		records[0] = record
-	}
-	tx, err := c.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	affected := map[TopicKey]struct{}{}
-	roots := map[string]struct{}{}
-	directoryGenerations := map[string]int64{}
-	for _, raw := range records {
-		record := normalizeSessionRecord(raw)
-		var previous TopicKey
-		if err := tx.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id FROM catalog_sessions WHERE path=?`, record.Path).
-			Scan(&previous.Scope, &previous.WorkspaceRoot, &previous.TopicID); err == nil && previous.TopicID != "" {
-			affected[previous] = struct{}{}
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			_ = tx.Rollback()
-			return err
-		}
-		generation := int64(0)
-		if generations != nil {
-			generation = generations[record.Path]
-		} else if cached, ok := directoryGenerations[record.Directory]; ok {
-			generation = cached
-		} else {
-			_ = tx.QueryRowContext(ctx, `SELECT scan_generation FROM catalog_directories WHERE path=?`, record.Directory).Scan(&generation)
-			directoryGenerations[record.Directory] = generation
-		}
-		record = classifyRecoveryLineage(record)
-		if record.LogicalTopicID == "" {
-			record.LogicalTopicID = record.TopicID
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_sessions(
-            path,directory,scope,workspace_root,topic_id,topic_title,custom_title,
-            created_at,last_activity_at,preview,turns,turns_state,recovered,
-            recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
-            recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
-            meta_fingerprint,health,missing_since,seen_generation
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(path) DO UPDATE SET
-            directory=excluded.directory, scope=excluded.scope,
-            workspace_root=excluded.workspace_root, topic_id=excluded.topic_id,
-            topic_title=excluded.topic_title, custom_title=excluded.custom_title,
-            created_at=excluded.created_at, last_activity_at=excluded.last_activity_at,
-            preview=excluded.preview, turns=excluded.turns,
-            turns_state=excluded.turns_state, recovered=excluded.recovered,
-            recovery_reason=excluded.recovery_reason,
-            recovery_digest=excluded.recovery_digest, parent_id=excluded.parent_id,
-            recovery_copy=excluded.recovery_copy,
-            recovery_group_id=excluded.recovery_group_id,
-            recovery_role=excluded.recovery_role,
-            recovery_canonical=excluded.recovery_canonical,
-            logical_topic_id=excluded.logical_topic_id,
-            ordinary_visible=excluded.ordinary_visible,
-            content_fingerprint=excluded.content_fingerprint,
-            meta_fingerprint=excluded.meta_fingerprint, health=excluded.health,
-            missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation)`,
-			record.Path, record.Directory, record.Scope, record.WorkspaceRoot,
-			record.TopicID, record.TopicTitle, record.CustomTitle, record.CreatedAt,
-			record.LastActivityAt, record.Preview, record.Turns, record.TurnsState,
-			record.Recovered, record.RecoveryReason, record.RecoveryDigest,
-			record.ParentID, boolToInt(record.RecoveryCopy), record.RecoveryGroupID,
-			record.RecoveryRole, boolToInt(record.RecoveryCanonical),
-			record.LogicalTopicID, boolToInt(record.OrdinaryVisible),
-			record.ContentFingerprint, record.MetaFingerprint,
-			record.Health, 0, generation); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if record.TopicID != "" {
-			affected[TopicKey{Scope: record.Scope, WorkspaceRoot: record.WorkspaceRoot, TopicID: record.TopicID}] = struct{}{}
-		}
-		if err := updateFoldedTopicTombstones(ctx, tx, previous, record, c.opts.Now().UnixMilli()); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		roots[record.WorkspaceRoot] = struct{}{}
-	}
-	for key := range affected {
-		if err := recomputeTopic(ctx, tx, key); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	revision, err := bumpRevision(ctx, tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	if notify {
-		c.publishRevision(revision, mapKeys(roots), reason)
-	} else {
-		c.rememberRevision(revision)
-	}
-	c.refreshCounts(ctx)
-	return nil
 }
 
 func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {

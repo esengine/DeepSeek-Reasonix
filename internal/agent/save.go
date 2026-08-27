@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -112,10 +113,11 @@ const (
 )
 
 type snapshotWriteDecision struct {
-	revision   int64
-	upToDate   bool
-	appendFrom int
-	appendOnly bool
+	revision         int64
+	reservedRevision int64
+	upToDate         bool
+	appendFrom       int
+	appendOnly       bool
 	// repairLog is set when the on-disk event log was damaged (torn tail with
 	// a lost suffix, or nothing decodable): the safe write shape is a full
 	// rewrite that also compacts the log back to a healthy single event.
@@ -325,7 +327,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	}
 	repairLog := false
 	ownedRewrite := mode == sessionSaveRewrite || mode == sessionSaveRewriteCompact
-	decision, err := s.classifySnapshotWrite(path, msgs, digest, version, ownedRewrite)
+	decision, err := s.classifySnapshotWriteForCommit(path, msgs, digest, version, ownedRewrite, mode)
 	if err != nil {
 		return err
 	}
@@ -342,7 +344,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 			// that failure deferred to, and skipping here would strand the
 			// ledger on the old digest forever. Record now, reproducing
 			// the state the interrupted save would have left.
-			revision, err := recordSessionContentRevision(path, digest, decision.revision)
+			revision, err := recordSessionContentRevision(path, digest, decision.revision, decision.reservedRevision)
 			if err != nil {
 				return err
 			}
@@ -399,7 +401,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 		if err != nil {
 			slog.Warn("session: keeping save after display read-model append failure", "path", path, "err", err)
 		}
-		revision, err := recordSessionContentRevision(path, digest, decision.revision)
+		revision, err := recordSessionContentRevision(path, digest, decision.revision, decision.reservedRevision)
 		if err != nil {
 			return err
 		}
@@ -462,7 +464,7 @@ func (s *Session) saveLocked(path string, mode sessionSaveMode) error {
 	if err := writeSessionMessages(path, msgs); err != nil {
 		return err
 	}
-	revision, err := recordSessionContentRevision(path, digest, baseRevision)
+	revision, err := recordSessionContentRevision(path, digest, baseRevision, decision.reservedRevision)
 	if err != nil {
 		return err
 	}
@@ -798,6 +800,7 @@ func (s *Session) saveRecoveryBranchMeta(path string, opts RecoveryBranchOptions
 	if strings.TrimSpace(meta.ContentDigest) == "" {
 		meta.ContentDigest = digest
 	}
+	stampSessionListingProjection(&meta)
 	if strings.TrimSpace(meta.WriterID) == "" {
 		meta.WriterID = SessionWriterID()
 	}
@@ -1023,7 +1026,7 @@ func sessionContentRevision(path string) (int64, string, error) {
 	return meta.Revision, strings.TrimSpace(meta.ContentDigest), nil
 }
 
-func recordSessionContentRevision(path string, digest [sha256.Size]byte, baseRevision int64) (int64, error) {
+func recordSessionContentRevision(path string, digest [sha256.Size]byte, baseRevision, reservedRevision int64) (int64, error) {
 	// Revision allocation is a read-modify-write transaction. Holding only the
 	// final SaveBranchMeta lock would still let another writer replace the
 	// sidecar between our read and write, so keep the ledger lock across the
@@ -1046,10 +1049,19 @@ func recordSessionContentRevision(path string, digest [sha256.Size]byte, baseRev
 	if !ok {
 		meta = BranchMeta{ID: BranchID(path)}
 	}
-	if meta.Revision < baseRevision {
-		meta.Revision = baseRevision
+	if reservedRevision > 0 {
+		if reservedRevision != baseRevision+1 || meta.Revision != reservedRevision || meta.SchemaVersion != 0 {
+			return 0, fmt.Errorf("session revision reservation changed: base=%d reserved=%d current=%d schema=%d", baseRevision, reservedRevision, meta.Revision, meta.SchemaVersion)
+		}
+	} else {
+		if meta.Revision < baseRevision {
+			meta.Revision = baseRevision
+		}
+		if meta.Revision == math.MaxInt64 {
+			return 0, fmt.Errorf("session revision exhausted")
+		}
+		meta.Revision++
 	}
-	meta.Revision++
 	meta.ContentDigest = digestString(digest)
 	meta.WriterID = SessionWriterID()
 	if err := saveBranchMeta(path, meta, false); err != nil {
@@ -1530,37 +1542,6 @@ type SessionInfo struct {
 	ParentID       string
 }
 
-// SessionOrderInfo is the lightweight sidecar/mtime ordering record shared by
-// session pickers and prompt-history navigation. It intentionally avoids reading
-// JSONL content; callers that need previews can layer that on afterwards.
-type SessionOrderInfo struct {
-	Path              string
-	CreatedAt         time.Time
-	LastActivityAt    time.Time
-	ModTime           time.Time // compatibility alias for LastActivityAt
-	Scope             string
-	WorkspaceRoot     string
-	TopicID           string
-	TopicTitle        string
-	CustomTitle       string
-	Recovered         bool
-	RecoveryReason    string
-	RecoveryDigest    string
-	ParentID          string
-	RecoveryPreferred bool
-	// Turns and Preview are the cached listing fields from the sidecar; SchemaVersion
-	// >= agent.BranchMetaCountsVersion means they were recorded from content and can
-	// be trusted (even Turns == 0). ListSessions uses them to skip the whole-file decode.
-	Turns         int
-	Preview       string
-	SchemaVersion int
-	// Revision and ContentDigest bind a listing backfill to the transcript
-	// generation it decoded. They are sidecar-only compare-and-apply guards and
-	// are not exposed through SessionInfo.
-	Revision      int64
-	ContentDigest string
-}
-
 // CleanupPendingMeta records that a session was logically removed but still has
 // artifacts waiting for a background job to unwind before physical cleanup.
 type CleanupPendingMeta struct {
@@ -1991,6 +1972,8 @@ func migrateSessionSidecars(oldPath, newPath, newID string) error {
 		{store.SessionGoalState(oldPath), store.SessionGoalState(newPath)},
 		{store.SessionEventLog(oldPath), store.SessionEventLog(newPath)},
 		{store.SessionEventLogDamaged(oldPath), store.SessionEventLogDamaged(newPath)},
+		{store.SessionTurnEventLog(oldPath), store.SessionTurnEventLog(newPath)},
+		{store.SessionTurnEventLogDamaged(oldPath), store.SessionTurnEventLogDamaged(newPath)},
 		{store.SessionEventIndex(oldPath), store.SessionEventIndex(newPath)},
 		{store.SessionConflictLog(oldPath), store.SessionConflictLog(newPath)},
 		{store.SessionRecoveryState(oldPath), store.SessionRecoveryState(newPath)},
@@ -2088,6 +2071,8 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		schemaVersion := 0
 		revision := int64(0)
 		contentDigest := ""
+		listingRevision := int64(0)
+		listingContentDigest := ""
 		if meta, ok, err := LoadBranchMeta(full); err == nil && ok {
 			if !meta.CreatedAt.IsZero() {
 				createdAt = meta.CreatedAt
@@ -2110,6 +2095,8 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			schemaVersion = meta.SchemaVersion
 			revision = meta.Revision
 			contentDigest = meta.ContentDigest
+			listingRevision = meta.ListingRevision
+			listingContentDigest = meta.ListingContentDigest
 		}
 		// Old recovery files may lack Recovered meta; filename still proves
 		// automatic recovery lineage for catalog folding.
@@ -2122,25 +2109,27 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			}
 		}
 		out = append(out, SessionOrderInfo{
-			Path:              full,
-			CreatedAt:         createdAt,
-			LastActivityAt:    lastActivityAt,
-			ModTime:           lastActivityAt,
-			Scope:             scope,
-			WorkspaceRoot:     workspaceRoot,
-			TopicID:           topicID,
-			TopicTitle:        topicTitle,
-			CustomTitle:       customTitle,
-			Recovered:         recovered,
-			RecoveryReason:    recoveryReason,
-			RecoveryDigest:    recoveryDigest,
-			ParentID:          parentID,
-			RecoveryPreferred: recoveryPreferred,
-			Turns:             turns,
-			Preview:           preview,
-			SchemaVersion:     schemaVersion,
-			Revision:          revision,
-			ContentDigest:     contentDigest,
+			Path:                 full,
+			CreatedAt:            createdAt,
+			LastActivityAt:       lastActivityAt,
+			ModTime:              lastActivityAt,
+			Scope:                scope,
+			WorkspaceRoot:        workspaceRoot,
+			TopicID:              topicID,
+			TopicTitle:           topicTitle,
+			CustomTitle:          customTitle,
+			Recovered:            recovered,
+			RecoveryReason:       recoveryReason,
+			RecoveryDigest:       recoveryDigest,
+			ParentID:             parentID,
+			RecoveryPreferred:    recoveryPreferred,
+			Turns:                turns,
+			Preview:              preview,
+			SchemaVersion:        schemaVersion,
+			Revision:             revision,
+			ContentDigest:        contentDigest,
+			ListingRevision:      listingRevision,
+			ListingContentDigest: listingContentDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -2165,7 +2154,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	var out []SessionInfo
 	for _, session := range ordered {
 		preview, turns := session.Preview, session.Turns
-		if sessionListingCountsNeedRefresh(session.SchemaVersion, turns) {
+		if !sessionListingProjectionFresh(session.SchemaVersion, turns, session.Revision, session.ListingRevision, session.ContentDigest, session.ListingContentDigest) {
 			if !sessionArtifactsHaveContent(session.Path) {
 				continue
 			}
@@ -2189,6 +2178,13 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 // ListSessions for one session file.
 func SessionPreview(path string) (string, int) {
 	return previewSession(path)
+}
+
+// SessionPreviewWithError returns the same preview and user-turn count as
+// SessionPreview, but preserves read and decode failures for callers that must
+// not persist a fallback derived from an unreadable transcript.
+func SessionPreviewWithError(path string) (string, int, error) {
+	return previewSessionWithError(path)
 }
 
 // SessionPreviewFromMessages computes the same preview line and user-turn count

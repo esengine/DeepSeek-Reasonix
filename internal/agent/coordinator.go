@@ -704,7 +704,7 @@ func executorToolHandoffContext(a *Agent) string {
 	if a == nil || a.svc.tools == nil {
 		return ""
 	}
-	schemas := a.svc.tools.Schemas()
+	schemas := a.providerToolSchemas()
 	if len(schemas) == 0 {
 		return ""
 	}

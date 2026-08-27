@@ -30,9 +30,14 @@ func (p *compactionEffectProvider) Stream(_ context.Context, req provider.Reques
 	if len(req.Messages) > 0 && strings.HasPrefix(req.Messages[len(req.Messages)-1].Content, "Compact the preceding conversation prefix") {
 		text = "## Standing facts\n- none recorded"
 	}
-	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: text}
-	ch <- provider.Chunk{Type: provider.ChunkDone}
+	chunks := finishCompliantBootChunks(req, len(p.requests()), []provider.Chunk{
+		{Type: provider.ChunkText, Text: text},
+		{Type: provider.ChunkDone},
+	})
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
 	close(ch)
 	return ch, nil
 }

@@ -40,6 +40,8 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Sessions | `<state root>/sessions/` |
 | Archives | `<state root>/archive/` |
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
+| Global Desktop topic metadata | `<state root>/desktop/topic-state-v1.sqlite` |
+| Project Desktop topic metadata | `<state root>/projects/<workspace slug>/desktop/topic-state-v1.sqlite` |
 | Disposable session catalog | `<cache root>/session-catalog/v5.sqlite` |
 | Disposable history search catalog | `<cache root>/history-search/v1.sqlite` |
 | Disposable usage catalog | `<cache root>/usage-catalog/v1.sqlite` |
@@ -47,6 +49,14 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 
 `<state root>` defaults to `<Reasonix home>`. It only differs when
 `REASONIX_STATE_HOME` is set.
+
+Desktop topic titles, title sources, creation times, and automatic-title state
+are authoritative in these SQLite files. On first access, Desktop imports the
+legacy `desktop-topic-*.json` files from a project's `.reasonix/` directory (or
+the global Reasonix directory). A scope with legacy files continues mirroring
+them for downgrade compatibility; a fresh scope does not create them. Legacy
+files are retained, and project-local settings, skills, commands, attachments,
+and `reasonix.toml` are unaffected.
 
 The session catalog is a rebuildable query projection, not user data. Session
 JSONL, event logs, metadata sidecars, and `desktop-projects.json` remain

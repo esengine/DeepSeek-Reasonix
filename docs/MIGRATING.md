@@ -85,6 +85,18 @@ v0.x sessions are in a custom Windows install/data directory, use
 See
 [Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
+### Desktop topic metadata
+
+Desktop automatically migrates its four legacy `desktop-topic-*.json` indexes
+to an authoritative per-scope SQLite database under the Reasonix state root.
+Existing scopes keep the JSON files synchronized so a normal downgrade to the
+previous Desktop can still read titles and timestamps. Fresh scopes write only
+SQLite. An older Desktop cannot read that SQLite-only state directly: existing
+session metadata may recover titles, but creation times and automatic-title
+stages are not guaranteed. The migration never deletes the legacy files or
+changes project-owned `.reasonix` assets. Running old and new Desktop versions
+concurrently against the same workspace is not supported.
+
 ## Context Engine v2 upgrade
 
 Instruction and memory upgrades are automatic and do not require a setup mode,

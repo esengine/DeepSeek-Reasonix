@@ -1050,6 +1050,7 @@ func (p *bootSubagentTestProvider) Stream(_ context.Context, req provider.Reques
 		default:
 			chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}}
 		}
+		chunks = finishCompliantBootChunks(req, call, chunks)
 		ch := make(chan provider.Chunk, len(chunks))
 		for _, chunk := range chunks {
 			ch <- chunk
@@ -1079,6 +1080,7 @@ func (p *bootSubagentTestProvider) Stream(_ context.Context, req provider.Reques
 	default:
 		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}}
 	}
+	chunks = finishCompliantBootChunks(req, call, chunks)
 	ch := make(chan provider.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		ch <- chunk
@@ -1188,7 +1190,7 @@ type headlessTaskTestProvider struct {
 
 func (p *headlessTaskTestProvider) Name() string { return "boot-headless-test" }
 
-func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+func (p *headlessTaskTestProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	call := p.calls
 	p.calls++
@@ -1203,6 +1205,7 @@ func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-
 	default:
 		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
 	}
+	chunks = finishCompliantBootChunks(req, call, chunks)
 	ch := make(chan provider.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		ch <- chunk
@@ -1431,7 +1434,7 @@ type headlessTaskWriteTestProvider struct {
 
 func (p *headlessTaskWriteTestProvider) Name() string { return "boot-headless-write-test" }
 
-func (p *headlessTaskWriteTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+func (p *headlessTaskWriteTestProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	p.mu.Lock()
 	call := p.calls
 	p.calls++
@@ -1448,6 +1451,7 @@ func (p *headlessTaskWriteTestProvider) Stream(context.Context, provider.Request
 	default:
 		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
 	}
+	chunks = finishCompliantBootChunks(req, call, chunks)
 	ch := make(chan provider.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		ch <- chunk
@@ -2286,6 +2290,7 @@ func unifiedBootToolNames() []string {
 		"complete_step",
 		"compress",
 		"edit_file",
+		"finish",
 		"kill_shell",
 		"read_file",
 		"todo_write",

@@ -4,6 +4,10 @@ import React from "react";
 import { JSDOM } from "jsdom";
 import { act } from "react";
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { AppBindings } from "../lib/bridge";
 import type { RemoteDirEntry, RemoteHostView } from "../lib/types";
 
@@ -152,6 +156,9 @@ window.go = { main: { App: {
   },
   async OpenRemoteWorkspace(hostId: string, workspace: string) {
     tape.push(`OpenRemoteWorkspace:${hostId}:${workspace}`);
+  },
+  async OpenRemoteProjectTab(hostId: string, workspace: string, opts?: { newSession?: boolean }) {
+    tape.push(`OpenRemoteProjectTab:${hostId}:${workspace}:${opts?.newSession === true}`);
   },
   async AddRemoteProject(hostId: string, workspace: string) {
     tape.push(`AddRemoteProject:${hostId}:${workspace}`);
@@ -375,14 +382,15 @@ ok(!document.querySelector(".remote-wizard__mkdir"), "workspace step has no crea
   });
 }
 
-// ── Finish: pin, refresh, then open through the existing surface ──
+// ── Finish: pin, open an in-app session tab, then refresh the tree ──
 await act(async () => {
   buttonByText("Connect and open")?.click();
   await flush();
 });
-ok(tape.includes("OpenRemoteWorkspace:gpu-box:/home/dev/projects"), "finish opens the selected workspace through the available remote surface");
+ok(tape.includes("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true"), "finish opens the selected workspace in a new remote session tab");
 ok(tape.includes("AddRemoteProject:gpu-box:/home/dev/projects"), "finish pins the selected remote workspace");
-ok(tape.indexOf("refresh") < tape.indexOf("OpenRemoteWorkspace:gpu-box:/home/dev/projects"), "the project tree refreshes before the remote window opens");
+ok(tape.indexOf("AddRemoteProject:gpu-box:/home/dev/projects") < tape.indexOf("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true"), "the workspace is pinned before its session tab opens");
+ok(tape.indexOf("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true") < tape.indexOf("refresh"), "the project tree refreshes after the session tab opens");
 ok(tape.includes("close"), "wizard closes after a successful finish");
 
 await act(async () => root.unmount());
@@ -427,6 +435,24 @@ ok(tape.some((entry) => entry.startsWith("AddRemoteHost:10.9.8.7:10.9.8.7")), "a
 ok(lastAddInput?.credentialMode === "local-proxy", `AddRemoteHost carries the chosen credential mode (got ${lastAddInput?.credentialMode})`);
 
 await act(async () => secondRoot.unmount());
+
+// ── Merged finish: source contract for overlapping workspaces ──
+const here = dirname(fileURLToPath(import.meta.url));
+const wizardSource = readFileSync(resolve(here, "../components/RemoteConnectWizard.tsx"), "utf8");
+ok(
+  /const canonical = project\.merged \? project\.workspace : target;/.test(wizardSource) &&
+    /OpenRemoteProjectTab\(hostId, canonical, \{ newSession: true \}\)/.test(wizardSource),
+  "a merged finish opens the tab on the canonical workspace",
+);
+ok(
+  /if \(!project\.merged\) \{[\s\S]*?RemoveRemoteProject\(hostId, target\)/.test(wizardSource),
+  "rollback only removes a pin the wizard actually added (a merge owns none)",
+);
+ok(
+  /onMerged\?\.\(t\("remoteWizard\.mergedProject"/.test(wizardSource),
+  "a merged finish notifies through onMerged",
+);
+
 dom.window.close();
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
