@@ -1874,8 +1874,37 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
-  effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
-  gitBashAvailable?: boolean;
+  effectiveShell?: string; // bound shell: "bash" | "git-bash" | "powershell" | "pwsh"
+  resolvedShell?: string; // shell a reload would pick now
+  shellReloadRequired?: boolean;
+  shellCapabilities: ShellCapabilityView[];
+  shellInstallAction?: ShellInstallActionView | null;
+}
+
+// One discovered interpreter: usable on this host, where, and why not.
+export interface ShellCapabilityView {
+  id: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  variant?: string;
+  available: boolean;
+  path?: string;
+  source?: string;
+  reason?: string;
+}
+
+// Optional helper install the sandbox section may offer (Windows only).
+export interface ShellInstallActionView {
+  id: string; // "git-for-windows"
+  mode: string; // "winget-user" | "manual"
+  available: boolean;
+  manualUrl?: string;
+}
+
+// Structured outcome of InstallShellSupport.
+export interface ShellInstallResult {
+  status: string; // "installed" | "already_available" | "cancelled" | "manual_required" | "busy" | "failed" | "unsupported_platform"
+  path?: string;
+  reason?: string;
+  manualUrl?: string;
 }
 
 export interface NetworkProxyView {

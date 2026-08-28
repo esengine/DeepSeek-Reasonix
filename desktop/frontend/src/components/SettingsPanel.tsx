@@ -1,6 +1,7 @@
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ArrowRight, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { ShellInterpreterFields } from "./SettingsShellSupport";
 import { CHANNEL_ICONS } from "./channelIcons";
 import { botAccessEntryCount, botAccessReady, botConnectionCredentialSummary, botConnectionLabel, botConnectionScopeLabel, botConnectionSecretEnv, botConnectionSecretPatch, botInstallTargetForConnection, botInstallTargetMatchesConnection, botTargetHint, botTargetLabel, diagnosticMessage, diagnosticReportDetail, firstConnectionRemote, formatInstallTimeLeft, formatInstallUserCode, qqBotAdded, type BotInstallTarget, type BotOfficialInstallTarget } from "./botConnectionSettings";
 import { useDeferredClose } from "../lib/useMountTransition";
@@ -359,7 +360,7 @@ export function SettingsPanel({
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} refreshSettings={reload} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
@@ -7697,48 +7698,14 @@ function normalizeHookConfig(h: HookConfigView): HookConfigView {
   };
 }
 
-function effectiveShellLabel(value: string, t: ReturnType<typeof useT>): string {
-  switch (value) {
-    case "git-bash": return t("settings.effectiveShellGitBash");
-    case "pwsh": return t("settings.effectiveShellPwsh");
-    case "powershell": return t("settings.effectiveShellPowershell");
-    case "bash": return t("settings.effectiveShellBash");
-    case "auto": return t("common.auto");
-    default: return value.trim() || t("common.none");
-  }
-}
-
-function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: boolean }) {
+function SandboxSection({ s, busy, apply, refreshSettings, windows }: SectionProps & { refreshSettings: () => Promise<SettingsView | null>; windows: boolean }) {
   const t = useT();
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState("");
-  const [installSuccess, setInstallSuccess] = useState("");
   const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
-  const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
-  const reload = () => apply(() => app.ReloadSettings());
-
-  const handleInstallGitBash = async () => {
-    setInstalling(true);
-    setInstallError("");
-    setInstallSuccess("");
-    try {
-      const res = await app.InstallGitBash();
-      if (res.success) {
-        setInstallSuccess(res.message || t("settings.gitBashInstallSuccess"));
-        reload();
-      } else {
-        setInstallError(res.error || t("settings.gitBashInstallFailed"));
-      }
-    } catch (err: any) {
-      setInstallError(err?.message || String(err));
-    } finally {
-      setInstalling(false);
-    }
-  };
+  const reloadSession = () => apply(() => app.ReloadSettings());
 
   return (
     <SettingsSection
@@ -7746,58 +7713,14 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
       description={t("settings.sandboxBoundaryHint")}
       actions={
         <Tooltip label={t("settings.reloadSessionConfigHint")}>
-          <button className="btn btn--small" disabled={busy} title={t("settings.reloadSessionConfigHint")} onClick={() => void reload()}>
+          <button className="btn btn--small" disabled={busy} title={t("settings.reloadSessionConfigHint")} onClick={() => void reloadSession()}>
             <RefreshCw size={14} aria-hidden="true" />
             <span>{t("settings.reloadSessionConfig")}</span>
           </button>
         </Tooltip>
       }
     >
-      <SettingsField label={t("settings.shellInterpreter")}>
-        <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
-          <option value="auto">{windows ? t("settings.shellAutoWindows") : t("settings.shellAuto")}</option>
-          <option value="bash">{t("settings.shellBash")}</option>
-          <option value="powershell">{t("settings.shellPowershell")}</option>
-          <option value="pwsh">{t("settings.shellPwsh")}</option>
-        </select>
-      </SettingsField>
-      <SettingsField label={t("settings.effectiveShell")}>
-        <div className="settings-readonly-field">{effectiveShell}</div>
-      </SettingsField>
-      {!sb.gitBashAvailable && (!sb.shell || sb.shell === "auto" || sb.shell === "bash") && (
-        <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--color-bg-subtle, rgba(0,0,0,0.03))", borderRadius: 6, border: "1px solid var(--color-border, #e0e0e0)" }}>
-          <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted, #666)", lineHeight: 1.4 }}>
-            {t("settings.gitBashNotInstalledNotice")}
-          </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn btn--small btn--primary"
-              disabled={busy || installing}
-              onClick={() => void handleInstallGitBash()}
-            >
-              {installing ? (
-                <>
-                  <Loader2 size={14} className="spin" aria-hidden="true" />
-                  <span>{t("settings.installingGitBash")}</span>
-                </>
-              ) : (
-                <span>{t("settings.installGitBash")}</span>
-              )}
-            </button>
-          </div>
-          {installError && (
-            <div style={{ marginTop: 6, fontSize: "0.82rem", color: "var(--color-danger, #e55)" }}>
-              {installError}
-            </div>
-          )}
-          {installSuccess && (
-            <div style={{ marginTop: 6, fontSize: "0.82rem", color: "var(--color-success, #4caf50)" }}>
-              {installSuccess}
-            </div>
-          )}
-        </div>
-      )}
+      <ShellInterpreterFields sb={sb} windows={windows} busy={busy} setShell={(prefer) => void apply(() => app.SetShellPreference(prefer))} refresh={refreshSettings} reloadSession={() => void reloadSession()} />
       <SettingsField label={t("settings.bashSandbox")} hint={windows ? t("settings.bashUnavailableWindows") : undefined}>
         {/* Windows has no OS-level Bash backend and config.BashModeForGOOS fixes
             the effective value to off. Keep the control visibly immutable and

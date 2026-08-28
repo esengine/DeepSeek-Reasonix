@@ -2654,17 +2654,3 @@ func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
 		t.Fatalf("outbound media roots = %v, want preserved %q", got.Bot.Feishu.OutboundMediaRoots, root)
 	}
 }
-
-func TestAppInstallGitBash(t *testing.T) {
-	app := NewApp()
-	res, err := app.InstallGitBash()
-	if err != nil {
-		t.Fatalf("InstallGitBash() error = %v", err)
-	}
-	if !res.Success {
-		t.Fatalf("expected success (bash should be pre-installed on CI), got %+v", res)
-	}
-	if res.Path == "" {
-		t.Error("expected non-empty path when success is true")
-	}
-}

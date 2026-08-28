@@ -22,6 +22,9 @@ func completeDesktopShutdown(tracker *desktopLifecycleTracker, body func()) {
 }
 
 func (a *App) shutdownBody() {
+	// Terminate any in-flight helper install child (winget) before teardown so
+	// app exit cannot orphan a running installer.
+	a.shellInstall.cancelAll()
 	if a.topicState != nil {
 		defer a.topicState.close()
 	}

@@ -109,6 +109,8 @@ import type {
   SessionRecoveryFailedEvent,
   SessionRecoveryEvent,
   SettingsView,
+  ShellCapabilityView,
+  ShellInstallResult,
   SkillsSettingsView,
   SkillRootView,
   SkillSuggestion,
@@ -540,7 +542,9 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   ReloadSettings(): Promise<void>;
-  InstallGitBash(): Promise<{ success: boolean; path?: string; message?: string; error?: string }>;
+  SetShellPreference(prefer: string): Promise<void>;
+  InstallShellSupport(id: string): Promise<ShellInstallResult>;
+  CancelShellInstall(): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
@@ -1194,6 +1198,22 @@ function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "p
   return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
 }
 
+// Browser-preview stand-in for the backend's shell inventory: the platform
+// override drives detection and whether the Windows-only install action is
+// offered, mirroring desktop behavior (macOS/Linux detect and guide only).
+function browserPreviewShellCapabilities(): ShellCapabilityView[] {
+  if (browserPlatformOverride() !== "windows") return [{ id: "bash", variant: "system", available: true, path: "/bin/bash", source: "path" }];
+  return [
+    { id: "git-bash", variant: "git-for-windows", available: true, path: "C:\\Program Files\\Git\\bin\\bash.exe", source: "standard-path" },
+    { id: "powershell", available: true, path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", source: "standard-path" },
+    { id: "pwsh", available: false, reason: "not-installed" },
+  ];
+}
+
+function browserPreviewShellInstallAction() {
+  return browserPlatformOverride() === "windows" ? { id: "git-for-windows", mode: "winget-user", available: true } : null;
+}
+
 function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "recovery" | "sandbox_escape" | "notice" | "deepseek_upgrade" | "bench" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -1689,7 +1709,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), resolvedShell: browserPreviewEffectiveShell("auto"), shellReloadRequired: false, shellCapabilities: browserPreviewShellCapabilities(), shellInstallAction: browserPreviewShellInstallAction() },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -4674,17 +4694,36 @@ function makeMockApp(): AppBindings {
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
         async ReloadSettings() {},
-        async InstallGitBash() {
-          if (settings.sandbox) {
-            settings.sandbox.shell = "bash";
-            settings.sandbox.effectiveShell = browserPlatformOverride() === "windows" ? "git-bash" : "bash";
-            settings.sandbox.gitBashAvailable = true;
-          }
-          return { success: true, path: "/usr/bin/bash", message: "Bash installed successfully." };
+        async SetShellPreference(prefer: string) {
+          const sb = settings.sandbox;
+          if (!sb) return;
+          sb.shell = prefer;
+          sb.resolvedShell = browserPreviewEffectiveShell(prefer);
+          sb.shellReloadRequired = sb.resolvedShell !== sb.effectiveShell;
         },
+        async InstallShellSupport(id: string): Promise<ShellInstallResult> {
+          if (id !== "git-for-windows") throw new Error(`unknown shell support action ${id}`);
+          if (browserPlatformOverride() !== "windows") return { status: "unsupported_platform", reason: "shell helper install is only available on Windows" };
+          const sb = settings.sandbox;
+          if (sb) {
+            // Mirror the real installer: only discovery changes; the preference
+            // and the bound session shell stay exactly as they were.
+            sb.shellCapabilities = sb.shellCapabilities.map((cap) => cap.id === "git-bash"
+              ? { ...cap, available: true, path: "C:\\Program Files\\Git\\bin\\bash.exe", source: "standard-path", reason: undefined }
+              : cap);
+            sb.resolvedShell = browserPreviewEffectiveShell(sb.shell);
+            sb.shellReloadRequired = sb.resolvedShell !== sb.effectiveShell;
+          }
+          return { status: "installed", path: "C:\\Program Files\\Git\\bin\\bash.exe" };
+        },
+        async CancelShellInstall() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
+          const prev = settings.sandbox;
+          const effectiveShell = browserPreviewEffectiveShell(shell);
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell,
+            resolvedShell: effectiveShell, shellReloadRequired: false,
+            shellCapabilities: prev?.shellCapabilities ?? browserPreviewShellCapabilities(), shellInstallAction: prev?.shellInstallAction ?? browserPreviewShellInstallAction() };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

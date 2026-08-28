@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -55,8 +54,11 @@ type Shell struct {
 // "powershell"/"pwsh" forces that interpreter (path overrides the PATH lookup),
 // warning to warn and falling back to auto-detection if the forced one is
 // missing — so a typo or an uninstalled shell can never leave the tool broken.
+// Discovery (candidate ordering, probing) is served by the process-wide shell
+// inventory snapshot, so repeated calls share one probe pass for 30 seconds.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash)
+	snap := defaultShellInventory.snapshot(runtime.GOOS, path)
+	return resolveShell(prefer, path, warn, snap.goos, snap.lookPath, snap.exists, snap.bashCands, snap.psCands, snap.probe, snap.isWSL)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
@@ -223,53 +225,6 @@ func sanitizeWindowsBashPath(path string, exists func(string) bool) string {
 		}
 	}
 	return path
-}
-
-// windowsBashCandidates lists the bash.exe paths a Git-for-Windows install
-// ships, across standard roots, user installs, package managers, and registry.
-func windowsBashCandidates() []string {
-	// standardRoots are directories that contain a "Git" subdirectory
-	// (e.g. C:\Program Files → C:\Program Files\Git\bin\bash.exe).
-	var standardRoots []string
-	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
-		if v := os.Getenv(env); v != "" {
-			standardRoots = append(standardRoots, v)
-		}
-	}
-	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		standardRoots = append(standardRoots, filepath.Join(v, "Programs"))
-	}
-
-	// directRoots are directories that are already at or inside a Git
-	// install tree (Scoop, Chocolatey, registry InstallPath), so we
-	// probe bin/bash.exe directly without an extra "Git" prefix.
-	var directRoots []string
-	if v := os.Getenv("ProgramData"); v != "" {
-		directRoots = append(directRoots,
-			filepath.Join(v, "chocolatey", "lib", "git", "tools"),
-		)
-	}
-	if v := os.Getenv("USERPROFILE"); v != "" {
-		directRoots = append(directRoots,
-			filepath.Join(v, "scoop", "apps", "git", "current"),
-		)
-	}
-	directRoots = append(directRoots, windowsRegistryGitRoots()...)
-
-	var out []string
-	for _, r := range standardRoots {
-		out = append(out,
-			filepath.Join(r, "Git", "bin", "bash.exe"),
-			filepath.Join(r, "Git", "usr", "bin", "bash.exe"),
-		)
-	}
-	for _, r := range directRoots {
-		out = append(out,
-			filepath.Join(r, "bin", "bash.exe"),
-			filepath.Join(r, "usr", "bin", "bash.exe"),
-		)
-	}
-	return out
 }
 
 // windowsPowerShellCandidates lists common PowerShell executables that are not

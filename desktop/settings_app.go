@@ -28,7 +28,6 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
-	"reasonix/internal/sandbox"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -138,18 +137,6 @@ type PermissionsView struct {
 	Allow []string `json:"allow"`
 	Ask   []string `json:"ask"`
 	Deny  []string `json:"deny"`
-}
-
-type SandboxView struct {
-	Bash                   string   `json:"bash"`
-	Network                bool     `json:"network"`
-	WorkspaceRoot          string   `json:"workspaceRoot"`
-	AllowWrite             []string `json:"allowWrite"`
-	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
-	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string   `json:"effectiveShell,omitempty"`
-	GitBashAvailable       bool     `json:"gitBashAvailable"`
 }
 
 type NetworkProxyView struct {
@@ -997,19 +984,13 @@ func (a *App) Settings() SettingsView {
 	if err != nil {
 		return a.defaultSettingsView()
 	}
-	ctrl := a.activeCtrl()
-	bash := cfg.BashMode()
-	shell := cfg.Tools.Shell.Prefer
-	if shell == "" {
-		shell = "auto"
-	}
 	root := a.activeWorkspaceRoot()
 	writeRoots := cfg.WriteRootsForRoot(root)
 	effectiveWorkspaceRoot := ""
 	if len(writeRoots) > 0 {
 		effectiveWorkspaceRoot = writeRoots[0]
 	}
-	effectiveShell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, nil)
+	ctrl := a.activeCtrl()
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -1026,13 +1007,7 @@ func (a *App) Settings() SettingsView {
 			Ask:   nonNil(cfg.Permissions.Ask),
 			Deny:  nonNil(cfg.Permissions.Deny),
 		},
-		Sandbox: SandboxView{
-			Bash: bash, Network: cfg.Sandbox.Network,
-			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
-			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
-			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
-			GitBashAvailable: sandbox.ResolveShell("bash", "", nil).Kind == sandbox.ShellBash,
-		},
+		Sandbox: a.sandboxViewFor(cfg, ctrl, writeRoots, effectiveWorkspaceRoot),
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
 			ProxyURL:  cfg.Network.ProxyURL,
@@ -1101,20 +1076,6 @@ func (a *App) Settings() SettingsView {
 		v.Providers = append(v.Providers, providerView)
 	}
 	return v
-}
-
-func sandboxEffectiveShellView(sh sandbox.Shell) string {
-	if sh.Kind == sandbox.ShellPowerShell {
-		if sh.SupportsChaining() {
-			return "pwsh"
-		}
-		return "powershell"
-	}
-	path := strings.ToLower(strings.ReplaceAll(sh.Path, "\\", "/"))
-	if strings.Contains(path, "/git/") && strings.HasSuffix(path, "bash.exe") {
-		return "git-bash"
-	}
-	return "bash"
 }
 
 func botSettingsView(b config.BotConfig) BotSettingsView {

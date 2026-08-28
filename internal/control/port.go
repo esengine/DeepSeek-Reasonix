@@ -220,6 +220,10 @@ type Status interface {
 	Balance(ctx context.Context) (*billing.Balance, error)
 	Jobs() []jobs.View
 	Todos() []evidence.TodoItem
+	// BoundShell reports the interpreter this controller generation bound at
+	// build time, so hosts can distinguish the live session's shell from what
+	// a reload would resolve now.
+	BoundShell() sandbox.Shell
 }
 
 // SessionPersistence covers snapshotting a session and tearing down its on-disk
