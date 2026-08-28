@@ -1801,15 +1801,6 @@ func (a *App) activeWorkspaceRoot() string {
 	return "."
 }
 
-func (a *App) saveProviderCredential(apiKeyEnv, value string) (string, error) {
-	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
-	value = strings.TrimSpace(value)
-	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
-		return "", err
-	}
-	return providerCredentialSourceNotice(apiKeyEnv, value), nil
-}
-
 func providerCredentialSourceNotice(apiKeyEnv, value string) string {
 	return ""
 }
@@ -3158,7 +3149,8 @@ func (a *App) ensureProviderAccessForKey(apiKeyEnv string) error {
 // ClearProviderKey removes a provider secret from Reasonix's global .env
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
-	if strings.TrimSpace(apiKeyEnv) == "" {
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
 	if err := a.ensureActiveTabRebuildAllowed("provider key"); err != nil {
@@ -3167,6 +3159,7 @@ func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
 	}
+	a.revokeCredentialProxyRoutesByCredential(apiKeyEnv)
 	if err := a.rebuildSetting("provider key"); err != nil {
 		if _, ok := a.deferredRebuildWarning("provider key", err); ok {
 			return nil
