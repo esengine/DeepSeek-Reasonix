@@ -72,6 +72,30 @@ func TestLifecycleDiagnosticsUsePreWailsOwnershipGate(t *testing.T) {
 	}
 }
 
+func TestSessionIndexingStartsAfterFirstWindowPaint(t *testing.T) {
+	appSource, err := os.ReadFile(`app.go`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(appSource)
+	startupStart := strings.Index(source, `func (a *App) startup(ctx context.Context) {`)
+	domReadyStart := strings.Index(source, `func (a *App) domReady(_ context.Context) {`)
+	if startupStart < 0 || domReadyStart < 0 || startupStart >= domReadyStart {
+		t.Fatal(`app.go startup/domReady boundaries changed`)
+	}
+	startupBody := source[startupStart:domReadyStart]
+	if strings.Contains(startupBody, `a.startSessionCatalog(false)`) || strings.Contains(startupBody, `a.startHistoryIndexMigration()`) {
+		t.Fatal(`session indexing must not run before DOM ready`)
+	}
+	domReadyBody := source[domReadyStart:]
+	healthy := strings.Index(domReadyBody, `a.markDesktopHealthy()`)
+	catalog := strings.Index(domReadyBody, `a.startSessionCatalog(false)`)
+	migration := strings.Index(domReadyBody, `a.startHistoryIndexMigration()`)
+	if healthy < 0 || catalog < healthy || migration < healthy {
+		t.Fatal(`session indexing must start after the first window is marked healthy`)
+	}
+}
+
 // TestMain isolates user config/state/cache dirs for the whole package. Without
 // this, tests that persist desktop state, sessions, cache, or CLI-style config
 // can leak into the developer's real Reasonix directories.

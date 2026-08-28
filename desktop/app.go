@@ -494,7 +494,6 @@ func (a *App) startup(ctx context.Context) {
 	}
 	installSystemQuitHook()
 	a.enableDeferredRebuildRetry()
-	a.startHistoryIndexMigration()
 	a.goSafe("repairDesktopIconIntegration", func() {
 		if err := repairDesktopIconIntegration(); err != nil {
 			slog.Debug("desktop: repair native icon integration", "err", err)
@@ -520,7 +519,6 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Unlock()
 	go a.restoreOrBuildTabs()
 	a.registerHistoryIndexEvents()
-	a.startSessionCatalog(false)
 	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
 	a.goSafe("sendStartupPing", a.sendStartupPing)
 	a.goSafe("flushMetrics", a.flushMetrics)
@@ -955,6 +953,11 @@ func (a *App) domReady(_ context.Context) {
 
 func (a *App) completeFrontendStartup() {
 	a.markDesktopHealthy()
+	// The v2 session catalog can rebuild recovery metadata by reading full
+	// parent/child transcripts. Defer that work until after the first window
+	// paint so a catalog rebuild cannot make Windows startup appear hung.
+	a.startSessionCatalog(false)
+	a.startHistoryIndexMigration()
 	ctx := a.ctx
 	a.goSafe("recordHealthyConfig", func() {
 		timer := time.NewTimer(2 * time.Second)
