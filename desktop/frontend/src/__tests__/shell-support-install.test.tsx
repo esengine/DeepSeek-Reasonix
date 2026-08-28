@@ -50,6 +50,11 @@ installCanvasMock(dom.window as unknown as Window);
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+const copiedCommands: string[] = [];
+Object.defineProperty(dom.window.navigator, "clipboard", {
+  configurable: true,
+  value: { writeText: async (value: string) => { copiedCommands.push(value); } },
+});
 globalThis.Node = dom.window.Node;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
@@ -302,8 +307,9 @@ function windowsSettings(overrides: {
   });
 }
 
-// Scenario 5: macOS and Linux never render an install entry; missing Bash is
-// answered with manual repair guidance only.
+// Scenario 5: Linux never renders an install entry. It reports bash/zsh/sh,
+// offers an allowlisted distro command for copying, and only re-detects after
+// the user explicitly requests a session reload.
 {
   const rootEl = document.createElement("div");
   document.body.appendChild(rootEl);
@@ -311,9 +317,15 @@ function windowsSettings(overrides: {
   const linuxSettings = baseSettings("standard");
   linuxSettings.sandbox = {
     ...linuxSettings.sandbox,
-    shellCapabilities: [{ id: "bash", variant: "system", available: false, reason: "not-found" }],
+    shellCapabilities: [
+      { id: "bash", variant: "system", available: false, reason: "not-found" },
+      { id: "zsh", variant: "system", available: false, reason: "not-found" },
+      { id: "sh", variant: "system", available: true, path: "/bin/sh", source: "standard-path" },
+    ],
     shellInstallAction: null,
+    shellRepairGuidance: { manager: "apt", command: "apt-get install bash" },
   };
+  let reloadCalls = 0;
   window.go = {
     main: {
       App: {
@@ -321,7 +333,7 @@ function windowsSettings(overrides: {
         SetShellPreference: async () => {},
         InstallShellSupport: async () => ({ status: "unsupported_platform" }),
         CancelShellInstall: async () => {},
-        ReloadSettings: async () => {},
+        ReloadSettings: async () => { reloadCalls += 1; },
       } as Partial<AppBindings> as AppBindings,
     },
   };
@@ -336,7 +348,72 @@ function windowsSettings(overrides: {
   await waitFor("linux detection", () => document.body.textContent?.includes("Bash") === true);
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
     "Linux never renders the Windows install entry");
-  ok(document.body.textContent?.includes("package manager") === true, "Linux missing Bash shows manual repair guidance");
+  ok(rootEl.textContent?.includes("zsh") === true && rootEl.textContent?.includes("POSIX sh") === true,
+    "Linux detection reports zsh and POSIX sh alongside Bash");
+  ok(rootEl.textContent?.includes("apt-get install bash") === true, "Linux missing Bash shows the distro repair command");
+  ok(!rootEl.textContent?.includes("sudo apt-get") && !rootEl.textContent?.includes("sudo"),
+    "Linux repair guidance never prescribes sudo");
+  const copyButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Copy command"));
+  ok(Boolean(copyButton), "Linux repair command is copyable");
+  await act(async () => {
+    copyButton!.click();
+    await flushPromises();
+  });
+  eq(copiedCommands.at(-1), "apt-get install bash", "copy action writes the exact allowlisted command");
+  const repairReloadButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Re-detect and reload session"));
+  ok(Boolean(repairReloadButton), "manual repair offers an explicit re-detect and reload action");
+  await act(async () => {
+    repairReloadButton!.click();
+    await flushPromises();
+  });
+  eq(reloadCalls, 1, "manual repair reload remains an explicit user action");
+  await act(async () => {
+    root.unmount();
+  });
+}
+
+// Scenario 6: macOS reports Bash, zsh, and sh but does not show package-manager
+// guidance while Bash is already available.
+{
+  const rootEl = document.createElement("div");
+  document.body.appendChild(rootEl);
+  const root = createRoot(rootEl);
+  const macSettings = baseSettings("standard");
+  macSettings.sandbox = {
+    ...macSettings.sandbox,
+    shellCapabilities: [
+      { id: "bash", variant: "system", available: true, path: "/bin/bash", source: "standard-path" },
+      { id: "zsh", variant: "system", available: true, path: "/bin/zsh", source: "standard-path" },
+      { id: "sh", variant: "system", available: true, path: "/bin/sh", source: "standard-path" },
+    ],
+    shellInstallAction: null,
+    shellRepairGuidance: { manager: "homebrew", command: "brew install bash" },
+  };
+  window.go = {
+    main: {
+      App: {
+        Settings: async () => macSettings,
+        SetShellPreference: async () => {},
+        InstallShellSupport: async () => ({ status: "unsupported_platform" }),
+        CancelShellInstall: async () => {},
+        ReloadSettings: async () => {},
+      } as Partial<AppBindings> as AppBindings,
+    },
+  };
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <SettingsPanel initialTab="sandbox" desktopPlatform="darwin" onClose={() => {}} onChanged={() => {}} />
+      </LocaleProvider>,
+    );
+    await flushPromises();
+  });
+  await waitFor("macOS shell inventory", () => rootEl.textContent?.includes("POSIX sh") === true);
+  ok(rootEl.textContent?.includes("Bash") === true && rootEl.textContent?.includes("zsh") === true,
+    "macOS detection reports Bash and zsh");
+  ok(!rootEl.textContent?.includes("brew install bash"), "macOS hides repair guidance while Bash is available");
+  ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
+    "macOS never renders the Windows install entry");
   await act(async () => {
     root.unmount();
   });

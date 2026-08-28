@@ -144,7 +144,9 @@ console.log("\nbundle budgets");
 // Shell support detection/install UI moves to its own owner component
 // (SettingsShellSupport) with current-session vs after-reload shell rows; the
 // sandbox settings path now measures 448.5 KiB. Retain 0.1 KiB headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 448.6 : 448.6;
+// Cross-platform capability previews and repair guidance add 0.22 KiB gzip to
+// that path. The measured build is 448.72 KiB; retain 0.18 KiB of headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 448.9 : 448.9;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -229,6 +231,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The shell support owner component (detection, per-session vs after-reload
 // rows, Windows-only install card) replaces the inline Git-Bash block and
 // measures 2417.4 KiB raw; retain 0.1 KiB of headroom.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_417.5 : 2_417.5;
+// The same cross-platform preview contract brings the raw path to 2418.60 KiB;
+// retain 0.10 KiB of headroom without widening unrelated chunk ceilings.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_418.7 : 2_418.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

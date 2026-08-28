@@ -1879,11 +1879,11 @@ export interface SandboxView {
   shellReloadRequired?: boolean;
   shellCapabilities: ShellCapabilityView[];
   shellInstallAction?: ShellInstallActionView | null;
+  shellRepairGuidance?: { manager: string; command?: string } | null;
 }
-
 // One discovered interpreter: usable on this host, where, and why not.
 export interface ShellCapabilityView {
-  id: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  id: string; // "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
   variant?: string;
   available: boolean;
   path?: string;

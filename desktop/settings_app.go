@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -3199,6 +3200,10 @@ func (a *App) ReloadSettings() error {
 	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
 		return err
 	}
+	// A manual Git Bash/Bash repair changes the host filesystem without a
+	// config write. The explicit reload action is the user's request to re-check
+	// that environment now rather than wait for the discovery TTL.
+	sandbox.InvalidateShellInventory()
 	if err := a.rebuild(); err != nil {
 		// The on-disk config already diverged from the runtime; retry the
 		// refresh once the other window releases the session lease.

@@ -109,7 +109,6 @@ import type {
   SessionRecoveryFailedEvent,
   SessionRecoveryEvent,
   SettingsView,
-  ShellCapabilityView,
   ShellInstallResult,
   SkillsSettingsView,
   SkillRootView,
@@ -136,6 +135,7 @@ import type {
   WorkspaceView,
   SessionClearResult,
 } from "./types";
+import { browserPreviewShellSupport } from "./shellSupportPreview";
 export * from "./remoteTabEvents";
 export const COMPACT_RATIO_MIN_PERCENT = 30, COMPACT_RATIO_MAX_PERCENT = 85;
 
@@ -1198,22 +1198,6 @@ function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "p
   return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
 }
 
-// Browser-preview stand-in for the backend's shell inventory: the platform
-// override drives detection and whether the Windows-only install action is
-// offered, mirroring desktop behavior (macOS/Linux detect and guide only).
-function browserPreviewShellCapabilities(): ShellCapabilityView[] {
-  if (browserPlatformOverride() !== "windows") return [{ id: "bash", variant: "system", available: true, path: "/bin/bash", source: "path" }];
-  return [
-    { id: "git-bash", variant: "git-for-windows", available: true, path: "C:\\Program Files\\Git\\bin\\bash.exe", source: "standard-path" },
-    { id: "powershell", available: true, path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", source: "standard-path" },
-    { id: "pwsh", available: false, reason: "not-installed" },
-  ];
-}
-
-function browserPreviewShellInstallAction() {
-  return browserPlatformOverride() === "windows" ? { id: "git-for-windows", mode: "winget-user", available: true } : null;
-}
-
 function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "recovery" | "sandbox_escape" | "notice" | "deepseek_upgrade" | "bench" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -1709,7 +1693,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), resolvedShell: browserPreviewEffectiveShell("auto"), shellReloadRequired: false, shellCapabilities: browserPreviewShellCapabilities(), shellInstallAction: browserPreviewShellInstallAction() },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), resolvedShell: browserPreviewEffectiveShell("auto"), shellReloadRequired: false, ...browserPreviewShellSupport(browserPlatformOverride()) },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -4721,9 +4705,11 @@ function makeMockApp(): AppBindings {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
           const prev = settings.sandbox;
           const effectiveShell = browserPreviewEffectiveShell(shell);
+          const shellSupport = browserPreviewShellSupport(browserPlatformOverride());
           settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell,
             resolvedShell: effectiveShell, shellReloadRequired: false,
-            shellCapabilities: prev?.shellCapabilities ?? browserPreviewShellCapabilities(), shellInstallAction: prev?.shellInstallAction ?? browserPreviewShellInstallAction() };
+            shellCapabilities: prev?.shellCapabilities ?? shellSupport.shellCapabilities, shellInstallAction: prev?.shellInstallAction ?? shellSupport.shellInstallAction,
+            shellRepairGuidance: prev?.shellRepairGuidance ?? shellSupport.shellRepairGuidance };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

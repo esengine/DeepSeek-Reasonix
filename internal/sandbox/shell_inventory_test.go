@@ -221,9 +221,35 @@ func TestSnapshotProbeCachesResults(t *testing.T) {
 	}
 }
 
+func TestUnixShellCapabilitiesReportsBashZshAndSh(t *testing.T) {
+	snap := &shellSnapshot{
+		lookPath: fakeLookPath(map[string]string{"zsh": "/opt/homebrew/bin/zsh"}),
+		exists: func(path string) bool {
+			return path == "/bin/sh"
+		},
+	}
+	caps := unixShellCapabilities(snap)
+	if len(caps) != 3 {
+		t.Fatalf("capabilities = %+v, want bash, zsh, and sh", caps)
+	}
+	byID := map[string]ShellCapability{}
+	for _, capability := range caps {
+		byID[capability.ID] = capability
+	}
+	if bash := byID[ShellCapabilityBash]; bash.Available || bash.Reason != "not-found" {
+		t.Fatalf("bash = %+v, want unavailable with a reason", bash)
+	}
+	if zsh := byID[ShellCapabilityZsh]; !zsh.Available || zsh.Path != "/opt/homebrew/bin/zsh" || zsh.Source != ShellSourcePath {
+		t.Fatalf("zsh = %+v, want PATH capability", zsh)
+	}
+	if sh := byID[ShellCapabilitySh]; !sh.Available || sh.Path != "/bin/sh" || sh.Source != ShellSourceStandard {
+		t.Fatalf("sh = %+v, want standard-path capability", sh)
+	}
+}
+
 // TestShellCapabilitiesShape ensures the exported capability report matches
-// the platform: git-bash plus both PowerShells on Windows, system bash
-// elsewhere — and that unavailable entries carry a reason, never an error.
+// the platform: git-bash plus both PowerShells on Windows, and bash/zsh/sh on
+// Unix — with unavailable entries carrying a reason, never an error.
 func TestShellCapabilitiesShape(t *testing.T) {
 	caps := ShellCapabilities()
 	if len(caps) == 0 {
@@ -248,9 +274,16 @@ func TestShellCapabilitiesShape(t *testing.T) {
 		if ids[ShellCapabilityBash] {
 			t.Errorf("Windows report must not advertise a generic bash id: %v", caps)
 		}
+		for _, id := range []string{ShellCapabilityZsh, ShellCapabilitySh} {
+			if ids[id] {
+				t.Errorf("Windows report must not advertise %q: %v", id, caps)
+			}
+		}
 	} else {
-		if !ids[ShellCapabilityBash] {
-			t.Errorf("non-Windows report missing bash: %v", caps)
+		for _, id := range []string{ShellCapabilityBash, ShellCapabilityZsh, ShellCapabilitySh} {
+			if !ids[id] {
+				t.Errorf("non-Windows report missing %q: %v", id, caps)
+			}
 		}
 		for _, id := range []string{ShellCapabilityGitBash, ShellCapabilityPowerShell, ShellCapabilityPwsh} {
 			if ids[id] {

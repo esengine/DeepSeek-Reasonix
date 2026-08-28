@@ -16,6 +16,8 @@ const (
 	ShellCapabilityGitBash    = "git-bash"
 	ShellCapabilityPowerShell = "powershell"
 	ShellCapabilityPwsh       = "pwsh"
+	ShellCapabilityZsh        = "zsh"
+	ShellCapabilitySh         = "sh"
 )
 
 // How a discovered shell was found. Discovery walks these in the fixed
@@ -368,24 +370,4 @@ func windowsPowerShellCapability(snap *shellSnapshot, id string, names []string,
 	}
 	cap.Reason = "not-installed"
 	return cap
-}
-
-// unixShellCapabilities reports the system bash. PATH wins over /bin/bash so
-// a Homebrew bash on macOS is reported when the user has put it first.
-func unixShellCapabilities(snap *shellSnapshot) []ShellCapability {
-	cap := ShellCapability{ID: ShellCapabilityBash, Variant: "system"}
-	if p, err := snap.lookPath("bash"); err == nil {
-		cap.Available = true
-		cap.Path = p
-		cap.Source = ShellSourcePath
-		return []ShellCapability{cap}
-	}
-	if snap.exists("/bin/bash") {
-		cap.Available = true
-		cap.Path = "/bin/bash"
-		cap.Source = ShellSourceStandard
-		return []ShellCapability{cap}
-	}
-	cap.Reason = "not-found"
-	return []ShellCapability{cap}
 }

@@ -480,4 +480,16 @@ func TestSettingsSandboxViewShellContract(t *testing.T) {
 	if runtime.GOOS != "windows" && sb.ShellInstallAction != nil {
 		t.Fatalf("install action on %s = %+v, want nil", runtime.GOOS, sb.ShellInstallAction)
 	}
+	if runtime.GOOS == "windows" {
+		if sb.ShellRepairGuidance != nil {
+			t.Fatalf("repair guidance on Windows = %+v, want install action only", sb.ShellRepairGuidance)
+		}
+	} else {
+		if sb.ShellRepairGuidance == nil {
+			t.Fatalf("repair guidance on %s is nil", runtime.GOOS)
+		}
+		if strings.Contains(strings.ToLower(sb.ShellRepairGuidance.Command), "sudo") {
+			t.Fatalf("repair guidance must never prescribe sudo: %+v", sb.ShellRepairGuidance)
+		}
+	}
 }

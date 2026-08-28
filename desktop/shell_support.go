@@ -77,18 +77,19 @@ type ShellInstallActionView struct {
 // controller bound (EffectiveShell), and what a reload would pick now
 // (ResolvedShell) — ShellReloadRequired marks the divergence.
 type SandboxView struct {
-	Bash                   string                  `json:"bash"`
-	Network                bool                    `json:"network"`
-	WorkspaceRoot          string                  `json:"workspaceRoot"`
-	AllowWrite             []string                `json:"allowWrite"`
-	EffectiveWorkspaceRoot string                  `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string                `json:"effectiveWriteRoots"`
-	Shell                  string                  `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string                  `json:"effectiveShell,omitempty"`
-	ResolvedShell          string                  `json:"resolvedShell,omitempty"`
-	ShellReloadRequired    bool                    `json:"shellReloadRequired"`
-	ShellCapabilities      []ShellCapabilityView   `json:"shellCapabilities"`
-	ShellInstallAction     *ShellInstallActionView `json:"shellInstallAction,omitempty"`
+	Bash                   string                   `json:"bash"`
+	Network                bool                     `json:"network"`
+	WorkspaceRoot          string                   `json:"workspaceRoot"`
+	AllowWrite             []string                 `json:"allowWrite"`
+	EffectiveWorkspaceRoot string                   `json:"effectiveWorkspaceRoot"`
+	EffectiveWriteRoots    []string                 `json:"effectiveWriteRoots"`
+	Shell                  string                   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	EffectiveShell         string                   `json:"effectiveShell,omitempty"`
+	ResolvedShell          string                   `json:"resolvedShell,omitempty"`
+	ShellReloadRequired    bool                     `json:"shellReloadRequired"`
+	ShellCapabilities      []ShellCapabilityView    `json:"shellCapabilities"`
+	ShellInstallAction     *ShellInstallActionView  `json:"shellInstallAction,omitempty"`
+	ShellRepairGuidance    *ShellRepairGuidanceView `json:"shellRepairGuidance,omitempty"`
 }
 
 // shellInstallManager serializes helper installs: at most one installer child
@@ -407,6 +408,7 @@ func (a *App) sandboxViewFor(cfg *config.Config, ctrl control.SessionAPI, writeR
 		ShellReloadRequired: bound != resolved,
 		ShellCapabilities:   sandboxCapabilityViews(cfg.Tools.Shell.Path),
 		ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS, wingetAvailable()),
+		ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
 	}
 }
 

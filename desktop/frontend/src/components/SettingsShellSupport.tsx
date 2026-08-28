@@ -4,6 +4,7 @@ import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { asArray } from "../lib/array";
 import type { SandboxView, ShellCapabilityView } from "../lib/types";
+import { CopyButton } from "./CopyButton";
 
 // The Sandbox settings section's shell surface: interpreter preference, the
 // current session's bound shell vs what a reload would pick, detection, and
@@ -32,6 +33,8 @@ function capabilityLabel(id: string, t: ReturnType<typeof useT>): string {
     case "git-bash": return t("settings.effectiveShellGitBash");
     case "powershell": return t("settings.effectiveShellPowershell");
     case "pwsh": return t("settings.effectiveShellPwsh");
+    case "zsh": return t("settings.shellCapabilityZsh");
+    case "sh": return t("settings.shellCapabilitySh");
     default: return t("settings.effectiveShellBash");
   }
 }
@@ -104,6 +107,7 @@ export function ShellInterpreterFields({
   const gitBash = capabilities.find((cap) => cap.id === "git-bash");
   const bashMissing = windows ? !gitBash?.available : !capabilities.some((cap) => cap.id === "bash" && cap.available);
   const action = windows ? sb.shellInstallAction ?? null : null;
+  const guidance = windows ? null : sb.shellRepairGuidance ?? null;
   // The install entry exists only on Windows; macOS and Linux detect and guide.
   const showInstallCard = windows && action != null && !gitBash?.available;
 
@@ -182,6 +186,10 @@ export function ShellInterpreterFields({
                       <ExternalLink size={14} aria-hidden="true" />
                       <span>{t("settings.shellInstallManualLink")}</span>
                     </button>
+                    <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
+                      <RefreshCw size={13} aria-hidden="true" />
+                      <span>{t("settings.shellRepairReload")}</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -190,6 +198,19 @@ export function ShellInterpreterFields({
           {!windows && bashMissing && (
             <div className="shell-support__card">
               <div className="shell-support__hint">{t("settings.shellBashManualRepair")}</div>
+              {guidance?.command && (
+                <div className="shell-support__repair-command">
+                  <code>{guidance.command}</code>
+                  <CopyButton text={guidance.command} className="btn btn--small" label={t("settings.shellCopyCommand")} />
+                </div>
+              )}
+              <div className="shell-support__repair-safety">{t("settings.shellRepairCommandHint")}</div>
+              <div className="shell-support__actions">
+                <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
+                  <RefreshCw size={13} aria-hidden="true" />
+                  <span>{t("settings.shellRepairReload")}</span>
+                </button>
+              </div>
             </div>
           )}
           {note && (

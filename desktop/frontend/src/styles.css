@@ -18281,6 +18281,32 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
   line-height: 1.4;
 }
+.shell-support__repair-command {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.shell-support__repair-command code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-control-small);
+}
+.shell-support__repair-safety {
+  margin-top: 6px;
+  color: var(--fg-faint);
+  font-size: var(--font-control-small);
+  line-height: 1.4;
+}
 .shell-support__actions {
   margin-top: 8px;
   display: flex;
