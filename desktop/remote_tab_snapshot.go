@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -12,6 +13,12 @@ import (
 
 	"reasonix/internal/agent"
 )
+
+// errRemoteTabStatusSuperseded marks the benign lost race where a /status
+// response lands after SSE-derived runtime state already advanced the tab
+// revision. Adoption was correctly skipped; callers (watchdog, close policy)
+// merely skip the snapshot instead of surfacing a crash.
+var errRemoteTabStatusSuperseded = errors.New("status was superseded by newer runtime state")
 
 type RemoteTabSnapshot struct {
 	History       json.RawMessage   `json:"history"`
@@ -144,7 +151,7 @@ func (a *App) RemoteTabStatus(tabID string) (json.RawMessage, error) {
 	status, err := serveGet(ctx, client, serveURL(base, "/status?runtime=1"))
 	if err == nil {
 		if !a.recordRemoteTabSessionStatus(tabID, client, gen, statusSeq, status) {
-			return nil, fmt.Errorf("remote tab %q status was superseded by newer runtime state", tabID)
+			return nil, fmt.Errorf("remote tab %q %w", tabID, errRemoteTabStatusSuperseded)
 		}
 	}
 	return status, err

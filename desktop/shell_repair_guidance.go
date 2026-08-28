@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -76,7 +77,7 @@ func linuxPackageRepairGuidance(osRelease []byte, packageName string) *RepairGui
 
 func linuxOSReleaseIdentities(contents []byte) []string {
 	values := map[string]string{}
-	for _, line := range strings.Split(string(contents), "\n") {
+	for line := range strings.SplitSeq(string(contents), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -102,10 +103,8 @@ func linuxOSReleaseIdentities(contents []byte) []string {
 
 func intersectsIdentity(available, candidates []string) bool {
 	for _, actual := range available {
-		for _, candidate := range candidates {
-			if actual == candidate {
-				return true
-			}
+		if slices.Contains(candidates, actual) {
+			return true
 		}
 	}
 	return false

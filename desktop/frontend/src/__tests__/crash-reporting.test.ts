@@ -91,6 +91,17 @@ eq(
   false,
   "suppresses React's recoverable concurrent-render diagnostic",
 );
+const supersededRemoteStatusError = new Error('remote tab "remote-1" status was superseded by newer runtime state');
+eq(
+  shouldReportGlobalCrashEvent({ defaultPrevented: false, reason: supersededRemoteStatusError }),
+  false,
+  "suppresses superseded remote status errors delivered through PromiseRejectionEvent.reason",
+);
+eq(
+  shouldReportGlobalCrashEvent({ defaultPrevented: false, reason: new Error("remote status transport failed") }),
+  true,
+  "reports unrelated PromiseRejectionEvent reasons",
+);
 eq(
   shouldReportGlobalCrashEvent({
     defaultPrevented: false,

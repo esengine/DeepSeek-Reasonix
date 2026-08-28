@@ -94,5 +94,18 @@ assert.equal(resolveToolCardDefaultOpen({
     startedAt: 1,
   },
 }, 0, "auto"), true, "auto mode follows live subagent reasoning");
+assert.equal(resolveToolCardDefaultOpen({
+  ...runningTask,
+  status: "running",
+  subagentProgress: {
+    phase: "responding",
+    reasoning: "working",
+    text: "first response token",
+    notice: "",
+    lastActivityAt: 2,
+    truncated: false,
+    startedAt: 1,
+  },
+}, 0, "auto"), true, "auto mode keeps a subagent card open for its full running lifecycle");
 
 console.log("transcript row geometry tests passed");

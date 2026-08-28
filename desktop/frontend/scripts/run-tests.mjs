@@ -41,6 +41,7 @@ const OWNED_ELSEWHERE = new Map(Object.entries({
   "stream-delta-batch.test.ts": "test:stream",
   "use-controller-stream-progress.test.ts": "test:stream",
   "transcript-virtuoso-index.test.ts": "test:transcript",
+  "transcript-live-turn-stability.test.tsx": "test:transcript",
   "transcript-scroll-release.test.ts": "test:transcript",
   "transcript-virtualization.test.tsx": "test:transcript",
   "nested-scroll-handoff.test.ts": "test:transcript",

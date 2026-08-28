@@ -73,7 +73,7 @@ func waitForTopicDirMarker(t *testing.T, dir, marker string) {
 
 func waitForCatalogTopic(t *testing.T, app *App, scope, workspaceRoot, topicID string) []ProjectNode {
 	t.Helper()
-	app.startSessionCatalog(false)
+	app.startSessionCatalog()
 	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -764,7 +764,7 @@ func TestAmbiguousLegacyRecoverySessionsMigrateIntoTopics(t *testing.T) {
 	app := NewApp()
 	// Filename recovery folds into the root ordinary row; History keeps the
 	// physical recovery file reachable as another saved version.
-	app.startSessionCatalog(false)
+	app.startSessionCatalog()
 	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
 	nodes := waitForCatalogTreeCondition(t, app, "filename recovery folded into one ordinary row", func(nodes []ProjectNode) bool {
 		for _, folder := range nodes {

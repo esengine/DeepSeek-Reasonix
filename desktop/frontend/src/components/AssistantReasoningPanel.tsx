@@ -30,7 +30,7 @@ export function AssistantReasoningPanel({
   const running = item.streaming && !item.reasoningComplete;
   const followsWhileStreaming = displayMode === "auto" || displayMode === "expanded" || expandWhileStreaming;
   const keepExpanded = displayMode === "expanded";
-  const [open, setOpen] = useState(defaultExpanded || keepExpanded || (followsWhileStreaming && running));
+  const [open, setOpen] = useState(defaultExpanded || keepExpanded || (followsWhileStreaming && item.streaming));
   const bodyRef = useRef<HTMLDivElement>(null);
   const userOverridden = useRef(false);
   const previousStreaming = useRef(item.streaming);
@@ -47,11 +47,11 @@ export function AssistantReasoningPanel({
     previousMode.current = displayMode;
     if (modeChanged) {
       userOverridden.current = false;
-      setOpen(defaultExpanded || keepExpanded || (followsWhileStreaming && !complete));
+      setOpen(defaultExpanded || keepExpanded || (followsWhileStreaming && item.streaming));
     } else if (item.streaming) {
       if (!wasStreaming) userOverridden.current = false;
       if (defaultExpanded || keepExpanded) setOpen(true);
-      else if (!userOverridden.current) setOpen(followsWhileStreaming && !complete);
+      else if (!userOverridden.current && followsWhileStreaming) setOpen(true);
     } else if ((complete && !wasComplete) || wasStreaming) {
       if (!defaultExpanded && !keepExpanded && !userOverridden.current) setOpen(false);
     }

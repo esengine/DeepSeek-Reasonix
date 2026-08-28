@@ -15,7 +15,7 @@ import (
 	"reasonix/internal/taskcatalog"
 )
 
-func (a *App) runSessionCatalog(ctx context.Context, rebuild bool) {
+func (a *App) runSessionCatalog(ctx context.Context) {
 	path := sessioncatalog.DefaultPath()
 	freshGeneration := false
 	if strings.TrimSpace(path) != "" {
@@ -28,11 +28,6 @@ func (a *App) runSessionCatalog(ctx context.Context, rebuild bool) {
 	taskcatalog.RegisterSharedProject(globalWorkspaceRoot(), projects.GlobalTitle)
 	for _, project := range projects.Projects {
 		taskcatalog.RegisterSharedProject(project.Root, projectDisplayName(project))
-	}
-	if rebuild {
-		if _, err := sessioncatalog.Rebuild(ctx, path, targets); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("desktop: rebuild session catalog", "err", err)
-		}
 	}
 	catalog, err := sessioncatalog.Open(ctx, sessioncatalog.Options{
 		Path: path,
@@ -72,10 +67,8 @@ func (a *App) runSessionCatalog(ctx context.Context, rebuild bool) {
 			return
 		}
 		reconcileGroup.Go(func() error {
-			if !rebuild {
-				if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
-					_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
-				}
+			if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
+				_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
 			}
 			if err := catalog.ReconcileDirectory(ctx, target); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Debug("desktop: reconcile session catalog directory", "dir", target.Path, "err", err)
@@ -84,16 +77,14 @@ func (a *App) runSessionCatalog(ctx context.Context, rebuild bool) {
 		})
 	}
 	_ = reconcileGroup.Wait()
-	if rebuild {
-		catalog.MarkRepairReason("manual_rebuild")
-	} else if freshGeneration {
+	if freshGeneration {
 		catalog.MarkRepairReason("generation_upgrade")
 	}
 	a.retargetOpenTabsToContinuations()
-	a.runSessionCatalogRefreshLoop(ctx, catalog, rebuild)
+	a.runSessionCatalogRefreshLoop(ctx, catalog)
 }
 
-func (a *App) runSessionCatalogRefreshLoop(ctx context.Context, catalog *sessioncatalog.Catalog, rebuild bool) {
+func (a *App) runSessionCatalogRefreshLoop(ctx context.Context, catalog *sessioncatalog.Catalog) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -103,10 +94,8 @@ func (a *App) runSessionCatalogRefreshLoop(ctx context.Context, catalog *session
 				slog.Debug("desktop: refresh session catalog metadata", "err", err)
 			}
 			for _, target := range a.sessionCatalogTargets() {
-				if !rebuild {
-					if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
-						_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
-					}
+				if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
+					_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
 				}
 				catalog.RequestReconcile(target)
 				// Count sweep rides the periodic reconcile tick; it only moves

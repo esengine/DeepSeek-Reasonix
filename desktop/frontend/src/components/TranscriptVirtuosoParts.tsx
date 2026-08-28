@@ -34,6 +34,7 @@ export type TranscriptVirtuosoContext = {
     renderRow: (row: TranscriptRow) => ReactNode;
     showStatus: boolean;
     turnStartAt?: number;
+    minHeight?: number;
     onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
   };
   olderHistory: null | {
@@ -148,7 +149,7 @@ function TranscriptVirtuosoHeader({ context }: { context: TranscriptVirtuosoCont
 function TranscriptVirtuosoFooter({ context }: { context: TranscriptVirtuosoContext }) {
   const live = context.liveRegion;
   if (!live || (live.rows.length === 0 && !live.showStatus)) return null;
-  return <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} />;
+  return <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} minHeight={live.minHeight} />;
 }
 
 export const TRANSCRIPT_VIRTUOSO_COMPONENTS: Components<TranscriptRow, TranscriptVirtuosoContext> = {

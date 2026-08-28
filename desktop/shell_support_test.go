@@ -161,21 +161,22 @@ func TestSettingsSandboxViewShellContract(t *testing.T) {
 	if runtime.GOOS != "windows" && sb.ShellInstallAction != nil {
 		t.Fatalf("install action on %s = %+v, want nil", runtime.GOOS, sb.ShellInstallAction)
 	}
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		if sb.ShellRepairGuidance != nil {
 			t.Fatalf("repair guidance on Windows = %+v, want install action only", sb.ShellRepairGuidance)
 		}
 		if sb.GitRepairGuidance != nil {
 			t.Fatalf("Git repair guidance on Windows = %+v, want Git for Windows action only", sb.GitRepairGuidance)
 		}
-	} else if runtime.GOOS == "darwin" {
+	case "darwin":
 		if sb.ShellRepairGuidance != nil {
 			t.Fatalf("macOS shell guidance = %+v, want native zsh/sh fallback", sb.ShellRepairGuidance)
 		}
 		if sb.GitRepairGuidance == nil || sb.GitRepairGuidance.Command != "brew install git" {
 			t.Fatalf("macOS Git guidance = %+v, want Homebrew Git command", sb.GitRepairGuidance)
 		}
-	} else {
+	default:
 		if sb.ShellRepairGuidance == nil {
 			t.Fatalf("repair guidance on %s is nil", runtime.GOOS)
 		}

@@ -120,6 +120,7 @@ export function useTranscriptScrollArbiter({
   onItemMeasuredRef.current = onItemMeasured;
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const [userResizeRevision, setUserResizeRevision] = useState(0);
   const writerRef = useRef<ReturnType<typeof createTranscriptScrollWriter> | null>(null);
   writerRef.current ??= createTranscriptScrollWriter({ virtuosoRef, scrollRef, modeRef, generationRef });
   const writer = writerRef.current;
@@ -311,6 +312,8 @@ export function useTranscriptScrollArbiter({
     if (isTranscriptSelectionMode(modeRef.current)) return;
     dispatch({ type: "JUMP_TO_BOTTOM", behavior });
   }, [dispatch]);
+
+  const pinLiveTailBeforePaint = useCallback(() => tailSettle.pinLiveTailBeforePaint(), [tailSettle]);
 
   // Reaches a terminal state for a recovery the arbiter itself ends (done /
   // expired / scroller gone). Preemption cancels go through
@@ -647,6 +650,7 @@ export function useTranscriptScrollArbiter({
   }, [anchorCompensation, dispatch, readerExtent, tailSettle]);
 
   const beginUserResize = useCallback(() => {
+    setUserResizeRevision((revision) => revision + 1);
     dispatch({ type: "USER_RESIZE_BEGIN" });
     if (resizeSettleFrameRef.current !== null) cancelAnimationFrame(resizeSettleFrameRef.current);
     const generation = generationRef.current;
@@ -776,10 +780,10 @@ export function useTranscriptScrollArbiter({
     virtuosoRef, scrollRef, scrollElement, layoutTransientRef,
     itemSize, nativeScrollbarDragging, pinnedRef, isAtBottom, modeRef,
     scrollerRef, setMode, reset, writeOffset,
-    scrollToBottom, followGrowingTail, scrollToDataIndex,
+    scrollToBottom, pinLiveTailBeforePaint, followGrowingTail, scrollToDataIndex,
     beginQuestionJump: questionJumpOwnership.begin,
     finishQuestionJump: questionJumpOwnership.finish,
-    finishProgrammaticScroll, releaseTailFollow, beginUserResize,
+    finishProgrammaticScroll, releaseTailFollow, beginUserResize, userResizeRevision,
     atBottomStateChange, deliverScroll, onWheelIntent,
     onTouchStartIntent, onTouchMoveIntent, onTouchEndIntent,
     onKeyScrollIntent, onPointerDownIntent, onNestedScrollIntent,

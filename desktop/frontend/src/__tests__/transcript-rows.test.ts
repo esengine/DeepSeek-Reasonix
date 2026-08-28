@@ -305,6 +305,42 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
 }
 
 {
+  // The first answer token completes the reasoning phase but not the active
+  // turn. Its row must keep the expanded geometry until turn_done, otherwise
+  // the live footer loses the full reasoning height in one commit.
+  const activeModels = buildTurnModels([
+    { kind: "user", id: "u-auto-geometry", text: "inspect" },
+    {
+      kind: "assistant",
+      id: "a-auto-geometry",
+      text: "first answer token",
+      reasoning: "long reasoning",
+      streaming: false,
+      reasoningComplete: true,
+    },
+    { kind: "tool", id: "t-auto-geometry", name: "read_file", args: "{}", status: "running", readOnly: true },
+  ], undefined, true);
+  const activeRows = buildTranscriptRows(activeModels, rowOptions(EMPTY_FOLDS, "expanded"));
+  const activeReasoning = activeRows.find((row) => row.kind === "reasoning");
+  eq(activeReasoning?.layoutVariant, "reasoning-expanded", "active turn keeps completed reasoning geometry expanded");
+
+  const settledModels = buildTurnModels([
+    { kind: "user", id: "u-auto-geometry", text: "inspect" },
+    {
+      kind: "assistant",
+      id: "a-auto-geometry",
+      text: "first answer token",
+      reasoning: "long reasoning",
+      streaming: false,
+      reasoningComplete: true,
+    },
+  ], undefined, false);
+  const settledRows = buildTranscriptRows(settledModels, rowOptions(EMPTY_FOLDS, "expanded"));
+  const settledReasoning = settledRows.find((row) => row.kind === "reasoning");
+  eq(settledReasoning?.layoutVariant, "reasoning-summary", "settled turn returns auto reasoning geometry to its summary");
+}
+
+{
   // Expanded reasoning pins only reasoning-bearing folds across completion.
   const running = buildTurnModels(fixture.slice(0, 7), { id: "a2", hasAnswerText: true, hasReasoning: false, reasoningComplete: true }, true);
   const runningStates = foldSegmentStates(running, true);

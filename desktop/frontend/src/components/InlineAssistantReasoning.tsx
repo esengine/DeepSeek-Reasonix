@@ -11,32 +11,44 @@ import { StreamingReasoningText } from "./StreamingReasoningText";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 import { resolveReasoningLayoutVariant } from "../lib/transcriptRowGeometry";
 
-export function InlineAssistantReasoning({ item, onManualOpen }: { item: AssistantItem; onManualOpen?: () => void }) {
+export function InlineAssistantReasoning({
+  item,
+  autoFollowActive,
+  onManualOpen,
+}: {
+  item: AssistantItem;
+  autoFollowActive?: boolean;
+  onManualOpen?: () => void;
+}) {
   const t = useT();
   const beginUserResize = useTranscriptUserResizeIntent();
   const live = useContext(LiveStreamContext);
   const displayMode = useReasoningDisplayMode();
   const shown = live?.id === item.id ? { reasoning: live.reasoning, streaming: true, reasoningComplete: live.reasoningComplete } : item;
   const running = shown.streaming && !shown.reasoningComplete;
-  const [open, setOpen] = useState(displayMode === "expanded" || (displayMode === "auto" && running));
+  const followActive = autoFollowActive ?? shown.streaming;
+  const [open, setOpen] = useState(displayMode === "expanded" || (displayMode === "auto" && followActive));
   const userOverridden = useRef(false);
   const previousRunning = useRef(running);
+  const previousFollowActive = useRef(followActive);
   const previousMode = useRef(displayMode);
   useEffect(() => {
     const modeChanged = previousMode.current !== displayMode;
     const wasRunning = previousRunning.current;
+    const wasFollowActive = previousFollowActive.current;
     previousMode.current = displayMode;
     previousRunning.current = running;
+    previousFollowActive.current = followActive;
     if (modeChanged) {
       userOverridden.current = false;
-      setOpen(displayMode === "expanded" || (displayMode === "auto" && running));
+      setOpen(displayMode === "expanded" || (displayMode === "auto" && followActive));
     } else if (running && !wasRunning && (displayMode === "auto" || displayMode === "expanded")) {
       userOverridden.current = false;
       setOpen(true);
-    } else if (displayMode === "auto" && !running && wasRunning && !userOverridden.current) {
+    } else if (displayMode === "auto" && !followActive && wasFollowActive && !userOverridden.current) {
       setOpen(false);
     }
-  }, [displayMode, running]);
+  }, [displayMode, followActive, running]);
   const toggle = useCallback(() => {
     beginUserResize();
     userOverridden.current = true;
@@ -47,7 +59,7 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
   if (!reasoning) return null;
   const layoutVariant = open
     ? "reasoning-expanded"
-    : resolveReasoningLayoutVariant(displayMode, running) ?? "reasoning-heading-only";
+    : resolveReasoningLayoutVariant(displayMode, followActive) ?? "reasoning-heading-only";
   return (
     <div
       className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}

@@ -165,10 +165,9 @@ func TestStopSessionCatalogWaitsForExplicitReconcile(t *testing.T) {
 	}
 	app.requestSessionCatalogReconcile(dir)
 	<-started
-	stopped := make(chan struct{})
+	stopped := make(chan bool, 1)
 	go func() {
-		app.stopSessionCatalog(time.Second)
-		close(stopped)
+		stopped <- app.stopSessionCatalog(time.Second)
 	}()
 	select {
 	case <-stopped:
@@ -177,7 +176,10 @@ func TestStopSessionCatalogWaitsForExplicitReconcile(t *testing.T) {
 	}
 	close(release)
 	select {
-	case <-stopped:
+	case clean := <-stopped:
+		if !clean {
+			t.Fatal("catalog stop reported an incomplete drain after reconcile released")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("catalog stop did not drain its explicit reconcile")
 	}

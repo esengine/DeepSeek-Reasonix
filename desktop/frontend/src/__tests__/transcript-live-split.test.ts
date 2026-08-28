@@ -5,11 +5,11 @@ import {
   buildTranscriptRows,
   buildTurnModels,
   EMPTY_FOLDS,
-  splitTranscriptLiveRows,
   userRowKey,
   type BuildRowsOptions,
   type TranscriptLiveFlags,
 } from "../lib/transcriptRows";
+import { resolveLiveTurnGrowthFloor, splitTranscriptLiveRows } from "../lib/transcriptLiveTurn";
 
 let passed = 0;
 let failed = 0;
@@ -50,6 +50,10 @@ function rowsFor(items: Item[], live?: TranscriptLiveFlags, running = false) {
   return { models, rows };
 }
 const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key).join(",");
+
+check(resolveLiveTurnGrowthFloor(3, 5, 420, null) === 420, "adding live rows carries the previous painted height into the next commit");
+check(resolveLiveTurnGrowthFloor(5, 5, 420, null) === null, "steady live rows do not invent a geometry floor");
+check(resolveLiveTurnGrowthFloor(5, 4, 420, 420) === 420, "an active floor survives an unrelated intermediate commit");
 
 // ── Settled transcript: everything is history ────────────────────────────────
 {

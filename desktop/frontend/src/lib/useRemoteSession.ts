@@ -433,7 +433,9 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
           });
           await replayMissingPrompt(status, replay.some((event) => event.kind === "approval_request" || event.kind === "ask_request"), expectedConnectionGeneration);
           if (replay.some((event) => event.kind === "turn_done")) {
-            void refreshStatus();
+            // A status poll losing the revision race is benign; the SSE feed
+            // and the running-state watchdog converge the surface anyway.
+            void refreshStatus().catch(() => undefined);
             void reconcileHistory().catch(() => undefined);
           }
           return;
@@ -500,7 +502,7 @@ export function useRemoteSession(tabId: string | undefined, initial?: RemoteTabS
       }
       setTranscript((s) => reducer(s, { type: "event", e: event, remote: true }));
       if (event.kind === "turn_done") {
-        void refreshStatus();
+        void refreshStatus().catch(() => undefined);
         void reconcileHistory().catch(() => undefined);
       }
     });

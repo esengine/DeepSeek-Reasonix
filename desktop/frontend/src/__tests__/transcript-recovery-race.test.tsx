@@ -1,6 +1,5 @@
 // Run: tsx src/__tests__/transcript-recovery-race.test.tsx
 
-import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { StateSnapshot, VirtuosoHandle } from "react-virtuoso";
@@ -11,6 +10,7 @@ import type { TranscriptScrollWriteRecord } from "../lib/transcriptScrollProbe";
 import { buildTranscriptRows, buildTurnModels, EMPTY_FOLDS, transcriptRowMeasurementVersion, type TranscriptRow } from "../lib/transcriptRows";
 import type { Item } from "../lib/useController";
 import { installTranscriptRaceClock } from "./helpers/transcriptRaceClock";
+import { installTranscriptRecoveryRaceDom } from "./helpers/transcriptRecoveryRaceDom";
 
 let passed = 0;
 let failed = 0;
@@ -27,38 +27,9 @@ function check(condition: unknown, label: string) {
 
 console.log("\ntranscript recovery races");
 
-const dom = new JSDOM('<!doctype html><html><body><div id="root"></div><div id="scroll"><div class="transcript__row" data-row-key="row-a"></div></div></body></html>', {
-  pretendToBeVisual: true,
-  url: "http://localhost/",
-});
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-globalThis.window = dom.window as unknown as Window & typeof globalThis;
-globalThis.document = dom.window.document;
-globalThis.HTMLElement = dom.window.HTMLElement;
-globalThis.Element = dom.window.Element;
-globalThis.Node = dom.window.Node;
-
-let nextFrame = 1;
-const frames = new Map<number, FrameRequestCallback>();
-const requestFrame = (callback: FrameRequestCallback) => {
-  const id = nextFrame;
-  nextFrame += 1;
-  frames.set(id, callback);
-  return id;
-};
-const cancelFrame = (id: number) => void frames.delete(id);
-globalThis.requestAnimationFrame = requestFrame;
-globalThis.cancelAnimationFrame = cancelFrame;
-dom.window.requestAnimationFrame = requestFrame;
-dom.window.cancelAnimationFrame = cancelFrame;
+const { dom, flushFrames } = installTranscriptRecoveryRaceDom();
 
 const { advanceClock, restore: restoreClock } = installTranscriptRaceClock(dom.window as unknown as Window);
-
-async function flushFrames() {
-  const pending = [...frames.entries()];
-  frames.clear();
-  await act(async () => pending.forEach(([, callback]) => callback(performance.now())));
-}
 
 // Runtime capture of every imperative scroll write (Phase 0 probe).
 const scrollWrites: TranscriptScrollWriteRecord[] = [];
@@ -195,6 +166,28 @@ rowElement.getBoundingClientRect = () => rectAt(200);
 scrollElement.scrollTop = 400;
 await act(async () => arbiter?.atBottomStateChange(false));
 check(arbiter?.isAtBottom === true, "physical bottom overrides a stale Virtuoso atBottom=false report");
+
+// A live-footer structural commit (answer -> tool) can expose the new native
+// extent before Virtuoso reports its footer height. Tail ownership repairs the
+// offset synchronously so WebView2 never paints the clamped intermediate frame.
+scrollExtent = 700;
+scrollElement.scrollTop = 477;
+scrollToCalls = 0;
+await act(async () => arbiter?.pinLiveTailBeforePaint());
+check(
+  scrollElement.scrollTop === 600 && scrollToCalls === 1,
+  "a claimed live tail pins the new native extent before paint",
+);
+await act(async () => arbiter?.releaseTailFollow());
+scrollExtent = 800;
+scrollElement.scrollTop = 500;
+scrollToCalls = 0;
+await act(async () => arbiter?.pinLiveTailBeforePaint());
+check(
+  scrollElement.scrollTop === 500 && scrollToCalls === 0,
+  "a manual reader is never moved by live-tail commit stabilization",
+);
+await act(async () => arbiter?.reset());
 
 // A nested code/tool scrollport owns the wheel until it reaches its edge.
 // Capturing the event on Transcript must not release tail-follow early.

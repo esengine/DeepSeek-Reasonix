@@ -4,7 +4,7 @@
     "commented-code": 0,
     "complexity": 1992,
     "essay": 1961,
-    "file-size": 107963,
+    "file-size": 107967,
     "function-size": 8580,
     "layering": 1,
     "marker": 0,
@@ -25,7 +25,7 @@
     "desktop/app.go": {
       "complexity": 57,
       "essay": 64,
-      "file-size": 11096,
+      "file-size": 11101,
       "function-size": 343,
       "struct-state": 15
     },
@@ -117,7 +117,7 @@
       "file-size": 43
     },
     "desktop/frontend/src/components/ProjectTree.tsx": {
-      "file-size": 1467
+      "file-size": 1468
     },
     "desktop/frontend/src/components/RichComposerInput.tsx": {
       "file-size": 141

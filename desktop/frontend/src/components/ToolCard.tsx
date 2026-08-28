@@ -215,8 +215,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
 
   // All tools default to collapsed. Sub-agent tools open while running so the
   // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
-  // also opens while streaming and closes on finish.
+  // stays open for the same owner lifecycle instead of collapsing between the
+  // reasoning and response/tool phases.
   const subagentReasoningRunning = sp?.phase === "reasoning";
+  const subagentActive = Boolean(sp) && item.status === "running";
   const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
   const defaultOpen = resolveToolCardDefaultOpen(item, nested.length, reasoningDisplayMode);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -228,31 +230,34 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // The sub-agent reasoning preview opens as a one-line summary; the full
   // Markdown only mounts after the user expands the reasoning section.
   const [subagentReasoningOpen, setSubagentReasoningOpen] = useState(
-    () => reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentReasoningRunning),
+    () => reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentActive),
   );
   const subagentReasoningUserOverridden = useRef(false);
   const previousSubagentReasoningRunning = useRef(subagentReasoningRunning);
+  const previousSubagentActive = useRef(subagentActive);
   const previousReasoningDisplayMode = useRef(reasoningDisplayMode);
   useEffect(() => {
     const modeChanged = previousReasoningDisplayMode.current !== reasoningDisplayMode;
     const wasRunning = previousSubagentReasoningRunning.current;
+    const wasActive = previousSubagentActive.current;
     previousReasoningDisplayMode.current = reasoningDisplayMode;
     previousSubagentReasoningRunning.current = subagentReasoningRunning;
+    previousSubagentActive.current = subagentActive;
     if (modeChanged) {
       subagentReasoningUserOverridden.current = false;
-      setSubagentReasoningOpen(reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentReasoningRunning));
+      setSubagentReasoningOpen(reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentActive));
       return;
     }
-    if (subagentReasoningRunning && !wasRunning) {
+    if ((subagentActive && !wasActive) || (subagentReasoningRunning && !wasRunning)) {
       subagentReasoningUserOverridden.current = false;
       if (liveFollow) setSubagentReasoningOpen(true);
       return;
     }
     if (reasoningDisplayMode !== "auto") return;
-    if (!subagentReasoningRunning && wasRunning && !subagentReasoningUserOverridden.current) {
+    if (!subagentActive && wasActive && !subagentReasoningUserOverridden.current) {
       setSubagentReasoningOpen(false);
     }
-  }, [reasoningDisplayMode, subagentReasoningRunning]);
+  }, [liveFollow, reasoningDisplayMode, subagentActive, subagentReasoningRunning]);
   // Lazy-load full tool data from the backend when the card is expanded and
   // the in-memory copy was archived for memory efficiency.
   const [fullData, setFullData] = useState<{ args: string; output?: string; execution?: ToolItem["execution"] } | null>(null);

@@ -789,13 +789,13 @@ export function reportCrash(label: string, err: unknown, extra?: string) {
 type GlobalCrashEventLike = Pick<Event, "defaultPrevented"> & {
   message?: unknown;
   error?: unknown;
+  reason?: unknown;
   filename?: unknown;
   lineno?: unknown;
   colno?: unknown;
 };
 
-const RESIZE_OBSERVER_LOOP_MESSAGE_RE =
-  /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
+const RESIZE_OBSERVER_LOOP_MESSAGE_RE = /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
 const OPAQUE_SCRIPT_ERROR_MESSAGE = "Script error.";
 function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
   const messages: string[] = [];
@@ -804,7 +804,7 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
     if (trimmed) messages.push(trimmed);
   };
   if (typeof e.message === "string") pushMessage(e.message);
-  const error = e.error;
+  const error = e.error ?? e.reason;
   if (typeof error === "string") pushMessage(error);
   if (error && typeof error === "object" && "message" in error) {
     const msg = (error as { message?: unknown }).message;
@@ -815,8 +815,8 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
 
 export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
-  if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
-  if (globalCrashEventMessages(e).some((message) => /Minified React error #520\b/.test(message))) return false;
+  if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message) ||
+    /Minified React error #520\b/.test(message) || message.includes("status was superseded by"))) return false;
   if (isWailsRuntimeOnlyCrashEvent(e)) return false;
   return true;
 }

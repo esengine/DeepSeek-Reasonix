@@ -141,10 +141,16 @@ console.log("\nbundle budgets");
 // Notification volume plus per-source loudness normalization moves current
 // main-v2 from 447.639 to 447.882 KiB gzip (+0.243 KiB). Retain 0.118 KiB of
 // bounded build/toolchain headroom.
-// Cross-platform shell inventory, current-session vs after-reload rows, and
-// manual repair guidance move latest main-v2 from 447.883 to 448.924 KiB gzip
-// (+1.041 KiB). Retain 0.176 KiB of bounded build/toolchain headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 449.1 : 449.1;
+// Pre-paint live-tail stabilization and its monotonic live-footer guard then
+// add 0.695 KiB after extracting ownership modules below repolint's source
+// ceilings. Surface- and resize-scoped floor fencing adds another 0.113 KiB;
+// the combined path measures 448.692 KiB. Retain 0.108 KiB of bounded
+// build/toolchain headroom.
+// Cross-platform shell inventory, current-session vs after-reload rows,
+// manual repair guidance, and exact download-host allowlisting move the merged
+// path from 448.692 to 449.758 KiB (+1.066 KiB). Retain 0.142 KiB of bounded
+// build/toolchain headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 449.9 : 449.9;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -226,9 +232,14 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // loudness trims, and its accessible Settings surface. Current main-v2 moves
 // from 2413.183 to 2414.879 KiB raw (+1.696 KiB); retain 0.121 KiB of bounded
 // headroom.
-// The same shell-support surface moves latest main-v2 from 2414.879 to
-// 2419.707 KiB raw (+4.828 KiB). Retain 0.093 KiB of bounded headroom without
+// Owner-lifecycle reasoning disclosure, pre-paint tail pinning, and the live
+// footer growth floor then add 2.390 KiB after extracting ownership modules
+// below repolint's source ceilings. Lifecycle fencing adds 0.258 KiB; the
+// combined path measures 2417.526 KiB. Retain 0.074 KiB while preventing
+// phase-boundary reverse flashes and cross-surface floor leaks.
+// The same shell-support surface moves the merged path from 2417.526 to
+// 2422.371 KiB raw (+4.845 KiB). Retain 0.129 KiB of bounded headroom without
 // widening unrelated chunk ceilings.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_419.8 : 2_419.8;
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_422.5 : 2_422.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

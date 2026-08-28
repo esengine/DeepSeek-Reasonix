@@ -6,7 +6,7 @@
 // (#8657/#8688). Virtuoso tracks the footer height itself and includes it in
 // totalListHeightChanged, which drives the scroll coordinator's tail-follow.
 
-import { memo, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { memo, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { TranscriptRow } from "../lib/transcriptRows";
 import { useT } from "../lib/i18n";
 import { useTick, workStatusLabel } from "../lib/workStatus";
@@ -33,6 +33,7 @@ export const LiveTurnRegion = memo(function LiveTurnRegion({
   tabId,
   scrollElement,
   onPointerDownCapture,
+  minHeight,
 }: {
   rows: readonly TranscriptRow[];
   renderRow: (row: TranscriptRow) => ReactNode;
@@ -42,12 +43,17 @@ export const LiveTurnRegion = memo(function LiveTurnRegion({
   tabId?: string;
   scrollElement: HTMLElement | null;
   onPointerDownCapture?: (event: ReactPointerEvent<HTMLElement>) => void;
+  minHeight?: number;
 }) {
   const overlayRevision = rows.map((row) => String(row.key)).join("|");
+  const regionStyle = minHeight !== undefined
+    ? { minHeight: `${minHeight}px` } satisfies CSSProperties
+    : undefined;
   return (
     <div
       className="transcript__live-region"
       data-live-region="true"
+      style={regionStyle}
       onPointerDownCapture={onPointerDownCapture}
     >
       <div className="transcript__live-content">

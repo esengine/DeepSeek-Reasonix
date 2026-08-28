@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, FileText, Folder, Plus } from "lucide-react";
+import { Check, ChevronDown, FileText, Folder, Plus } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
@@ -9,6 +9,8 @@ import type { RemoteDirEntry, RemoteHostInput, RemoteHostView } from "../lib/typ
 
 type WizardStep = "config" | "connecting" | "workspace";
 const STEP_ORDER: WizardStep[] = ["config", "connecting", "workspace"];
+const HOST_INPUT_ID = "remote-wizard-host-input";
+const HOST_MENU_ID = "remote-wizard-host-menu";
 
 const blankInput: RemoteHostInput = {
   label: "",
@@ -71,7 +73,7 @@ export function RemoteConnectWizard({
   const [form, setForm] = useState<RemoteHostInput>(blankInput);
   const [authMode, setAuthMode] = useState<"password" | "key">("password");
   const [pickedHostId, setPickedHostId] = useState<string | null>(null);
-  const [hostFocus, setHostFocus] = useState(false);
+  const [hostListOpen, setHostListOpen] = useState(false);
   const [hostId, setHostId] = useState("");
   const [connectErr, setConnectErr] = useState("");
   const [startPath, setStartPath] = useState("~");
@@ -86,6 +88,10 @@ export function RemoteConnectWizard({
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const hostInputRef = useRef<HTMLInputElement>(null);
+  const hostToggleRef = useRef<HTMLButtonElement>(null);
+  const portInputRef = useRef<HTMLInputElement>(null);
+  const suggestRef = useRef<HTMLDivElement>(null);
+  const pendingHostMenuFocusRef = useRef<"first" | "last" | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const listRequestRef = useRef(0);
   const host = hosts.find((h) => h.id === hostId) ?? null;
@@ -116,12 +122,40 @@ export function RemoteConnectWizard({
     listRequestRef.current += 1;
   }, []);
 
+  useLayoutEffect(() => {
+    const edge = pendingHostMenuFocusRef.current;
+    if (!hostListOpen || !edge) return;
+    pendingHostMenuFocusRef.current = null;
+    const items = Array.from(
+      suggestRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    );
+    (edge === "first" ? items[0] : items[items.length - 1])?.focus();
+  }, [hostListOpen, hosts.length]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy) {
         event.preventDefault();
         event.stopPropagation();
+        // With the saved-host list open, the first Escape closes the list;
+        // only the next one exits the wizard.
+        if (hostListOpen) {
+          setHostListOpen(false);
+          hostToggleRef.current?.focus();
+          return;
+        }
         onClose();
+        return;
+      }
+      if (
+        event.key === "Tab" &&
+        hostListOpen &&
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.getAttribute("role") === "menuitem"
+      ) {
+        event.preventDefault();
+        setHostListOpen(false);
+        (event.shiftKey ? hostToggleRef.current : portInputRef.current)?.focus();
         return;
       }
       if (event.key !== "Tab") return;
@@ -144,17 +178,24 @@ export function RemoteConnectWizard({
     };
     document.addEventListener("keydown", onKey, { capture: true });
     return () => document.removeEventListener("keydown", onKey, { capture: true });
-  }, [busy, onClose]);
+  }, [busy, hostListOpen, onClose]);
+
+  // The saved-host dropdown only closes on explicit dismissal: a pick, the
+  // arrow, Escape, or a pointer press outside the host field wrapper.
+  useEffect(() => {
+    if (!hostListOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const wrapper = suggestRef.current;
+      if (wrapper && event.target && !wrapper.contains(event.target as Node)) {
+        setHostListOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [hostListOpen]);
 
   const set = <K extends keyof RemoteHostInput>(key: K, value: RemoteHostInput[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
-
-  const suggestions =
-    form.host.trim() === ""
-      ? hosts
-      : hosts.filter(
-          (h) => h.host.includes(form.host.trim()) || h.label.includes(form.host.trim()),
-        );
 
   const pickSaved = (saved: RemoteHostView) => {
     setForm({
@@ -171,7 +212,8 @@ export function RemoteConnectWizard({
     });
     setAuthMode(saved.identityFile ? "key" : "password");
     setPickedHostId(saved.id);
-    setHostFocus(false);
+    setHostListOpen(false);
+    hostInputRef.current?.focus();
   };
 
   const openDir = async (id: string, path: string) => {
@@ -351,38 +393,101 @@ export function RemoteConnectWizard({
               <>
                 <div className="remote-wizard__form">
                 <div className="remote-wizard__field-row">
-                  <div className="remote-wizard__suggest">
-                    <label className="remote-wizard__field">
-                      <span>{t("remote.host.host")}</span>
-                      <input
-                        ref={hostInputRef}
-                        value={form.host}
-                        disabled={busy}
-                        autoComplete="off"
-                        placeholder={t("remoteWizard.hostPlaceholder")}
-                        onFocus={() => setHostFocus(true)}
-                        onBlur={() => setHostFocus(false)}
-                        onChange={(event) => {
-                          set("host", event.target.value);
-                          setPickedHostId(null);
+                  <div className="remote-wizard__suggest" ref={suggestRef}>
+                    <div className="remote-wizard__field">
+                      <label htmlFor={HOST_INPUT_ID}>{t("remote.host.host")}</label>
+                      <div className="remote-wizard__host-box">
+                        <input
+                          id={HOST_INPUT_ID}
+                          ref={hostInputRef}
+                          value={form.host}
+                          disabled={busy}
+                          autoComplete="off"
+                          placeholder={t("remoteWizard.hostPlaceholder")}
+                          onChange={(event) => {
+                            set("host", event.target.value);
+                            setPickedHostId(null);
+                          }}
+                        />
+                        {hosts.length > 0 ? (
+                          <button
+                            ref={hostToggleRef}
+                            type="button"
+                            className={`remote-wizard__suggest-toggle${hostListOpen ? " remote-wizard__suggest-toggle--open" : ""}`}
+                            disabled={busy}
+                            aria-haspopup="menu"
+                            aria-expanded={hostListOpen}
+                            aria-controls={HOST_MENU_ID}
+                            title={t("remoteWizard.suggestions")}
+                            onClick={() => {
+                              if (hostListOpen) {
+                                pendingHostMenuFocusRef.current = null;
+                                setHostListOpen(false);
+                                return;
+                              }
+                              pendingHostMenuFocusRef.current = "first";
+                              setHostListOpen(true);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                              event.preventDefault();
+                              pendingHostMenuFocusRef.current = event.key === "ArrowDown" ? "first" : "last";
+                              if (hostListOpen) {
+                                const items = Array.from(
+                                  suggestRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+                                );
+                                pendingHostMenuFocusRef.current = null;
+                                (event.key === "ArrowDown" ? items[0] : items[items.length - 1])?.focus();
+                              } else {
+                                setHostListOpen(true);
+                              }
+                            }}
+                          >
+                            <ChevronDown size={14} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {hostListOpen && hosts.length > 0 ? (
+                      <div
+                        className="remote-wizard__suggest-list"
+                        role="menu"
+                        id={HOST_MENU_ID}
+                        aria-label={t("remoteWizard.suggestions")}
+                        onKeyDown={(event) => {
+                          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const items = Array.from(
+                            event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+                          );
+                          if (items.length === 0) return;
+                          const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                          const next =
+                            event.key === "Home"
+                              ? 0
+                              : event.key === "End"
+                                ? items.length - 1
+                                : event.key === "ArrowDown"
+                                  ? (current + 1) % items.length
+                                  : (current - 1 + items.length) % items.length;
+                          items[next]?.focus();
                         }}
-                      />
-                    </label>
-                    {hostFocus && suggestions.length > 0 ? (
-                      <div className="remote-wizard__suggest-list" role="listbox" aria-label={t("remoteWizard.suggestions")}>
-                        {suggestions.map((saved) => (
+                      >
+                        <div className="remote-wizard__suggest-head" aria-hidden="true">{t("remoteWizard.suggestions")}</div>
+                        {hosts.map((saved) => (
                           <button
                             key={saved.id}
                             type="button"
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                              pickSaved(saved);
-                            }}
+                            role="menuitem"
+                            tabIndex={-1}
+                            onClick={() => pickSaved(saved)}
                           >
                             <span className="remote-wizard__suggest-label">{saved.label}</span>
                             <span className="remote-wizard__suggest-detail">
                               {saved.user ? `${saved.user}@` : ""}
                               {saved.host}
+                              {saved.port && saved.port !== 22 ? `:${saved.port}` : ""}
                             </span>
                           </button>
                         ))}
@@ -392,6 +497,7 @@ export function RemoteConnectWizard({
                   <label className="remote-wizard__field">
                     <span>{t("remote.host.port")}</span>
                     <input
+                      ref={portInputRef}
                       type="text"
                       inputMode="numeric"
                       placeholder="22"

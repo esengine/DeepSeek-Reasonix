@@ -9,6 +9,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { gitForWindowsDownloadURL } from "../components/SettingsShellSupport";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { SettingsView } from "../lib/types";
@@ -39,6 +40,16 @@ function eq(actual: unknown, expected: unknown, label: string) {
 
 console.log("\nshell support guidance");
 
+const officialGitForWindowsURL = "https://git-scm.com/download/win";
+eq(gitForWindowsDownloadURL(officialGitForWindowsURL), officialGitForWindowsURL,
+  "accepts the exact official Git for Windows download URL");
+eq(gitForWindowsDownloadURL("https://evil.example/?next=https://git-scm.com/download/win"), officialGitForWindowsURL,
+  "rejects an official-looking URL embedded in an attacker-controlled query");
+eq(gitForWindowsDownloadURL("https://git-scm.com.evil.example/download/win"), officialGitForWindowsURL,
+  "rejects an attacker-controlled hostname with the official hostname as a prefix");
+eq(gitForWindowsDownloadURL("http://git-scm.com/download/win"), officialGitForWindowsURL,
+  "rejects a non-HTTPS download URL");
+
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
   url: "http://localhost/",
@@ -51,6 +62,7 @@ globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 const copiedCommands: string[] = [];
+const openedURLs: string[] = [];
 Object.defineProperty(dom.window.navigator, "clipboard", {
   configurable: true,
   value: { writeText: async (value: string) => { copiedCommands.push(value); } },
@@ -66,12 +78,17 @@ globalThis.sessionStorage = dom.window.sessionStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
+window.open = ((url?: string | URL) => {
+  openedURLs.push(String(url));
+  return null;
+}) as typeof window.open;
 localStorage.clear();
 
 function windowsSettings(overrides: {
   shell?: string;
   gitBashAvailable?: boolean;
   reloadRequired?: boolean;
+  manualUrl?: string;
 }): SettingsView {
   const settings = baseSettings("standard");
   const gitBashAvailable = overrides.gitBashAvailable ?? false;
@@ -86,7 +103,7 @@ function windowsSettings(overrides: {
       { id: "powershell", available: true, path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", source: "standard-path" },
       { id: "pwsh", available: false, reason: "not-installed" },
     ],
-    shellInstallAction: { id: "git-for-windows", mode: "manual", available: false, manualUrl: "https://git-scm.com/download/win" },
+    shellInstallAction: { id: "git-for-windows", mode: "manual", available: false, manualUrl: overrides.manualUrl ?? "https://git-scm.com/download/win" },
   };
   return settings;
 }
@@ -106,7 +123,7 @@ function windowsSettings(overrides: {
       App: {
         Settings: async () => {
           settingsCalls += 1;
-          return windowsSettings({});
+          return windowsSettings({ manualUrl: "https://evil.example/?next=https://git-scm.com/download/win" });
         },
         SetShellPreference: async () => {},
         InstallShellSupport: async () => {
@@ -129,8 +146,14 @@ function windowsSettings(overrides: {
   await waitFor("Windows manual card", () => rootEl.textContent?.includes("does not run the Git for Windows installer automatically") === true);
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
     "Windows renders no automatic install button");
-  ok(Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("git-scm.com")),
-    "Windows offers the official Git for Windows download link");
+  const manualLinkButton = rootEl.querySelector<HTMLButtonElement>(".shell-support__card .shell-support__actions button");
+  ok(Boolean(manualLinkButton), "Windows offers the official Git for Windows download link");
+  await act(async () => {
+    manualLinkButton!.click();
+    await flushPromises();
+  });
+  eq(openedURLs.at(-1), officialGitForWindowsURL,
+    "Windows manual repair opens only the allowlisted official download URL");
   eq(installCalls, 0, "rendering Windows repair never calls InstallShellSupport");
   eq(cancelCalls, 0, "manual-only Windows repair never calls CancelShellInstall");
 

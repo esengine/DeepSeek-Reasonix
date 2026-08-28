@@ -634,6 +634,14 @@ func (c *Catalog) finishDirectoryScan(ctx context.Context, target DirectoryTarge
 // sidecars are never changed or removed by this operation. The live database
 // stays in place until a fully-populated replacement is validated and swapped.
 func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Status, error) {
+	return RebuildWithRevisionFloor(ctx, path, targets, 0)
+}
+
+// RebuildWithRevisionFloor preserves the caller's revision epoch while
+// atomically replacing the disposable projection. Desktop clients retain
+// revision fences across the rebuild, so a replacement must never publish a
+// lower revision than the catalog they already rendered.
+func RebuildWithRevisionFloor(ctx context.Context, path string, targets []DirectoryTarget, revisionFloor uint64) (Status, error) {
 	if strings.TrimSpace(path) == "" {
 		path = DefaultPath()
 	}
@@ -642,6 +650,13 @@ func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Statu
 		if err != nil {
 			return Status{}, err
 		}
+		if err := setCatalogRevisionFloor(ctx, catalog.db, revisionFloor); err != nil {
+			closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_ = catalog.Close(closeCtx)
+			cancel()
+			return Status{}, err
+		}
+		catalog.rememberRevision(revisionFloor)
 		for _, target := range targets {
 			if err := catalog.ReconcileDirectory(ctx, target); err != nil {
 				closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -662,6 +677,9 @@ func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Statu
 		Migrations:   sessionMigrations(),
 		RetainBackup: true,
 	}, func(ctx context.Context, db *sql.DB) error {
+		if err := setCatalogRevisionFloor(ctx, db, revisionFloor); err != nil {
+			return err
+		}
 		// Populate through a catalog that owns this temporary database handle
 		// without starting background repair workers.
 		temp := &Catalog{
@@ -670,8 +688,9 @@ func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Statu
 			writeQueued:    map[string]SessionRecord{},
 			directoryLocks: map[string]*sync.Mutex{},
 			stop:           make(chan struct{}),
-			status:         Status{State: StateReady, Mode: ModeDisk, Path: path},
+			status:         Status{State: StateReady, Mode: ModeDisk, Path: path, Revision: revisionFloor},
 		}
+		temp.revision.Store(revisionFloor)
 		temp.workerCtx, temp.workerCancel = context.WithCancel(ctx)
 		defer temp.workerCancel()
 		for _, target := range targets {
@@ -687,13 +706,21 @@ func Rebuild(ctx context.Context, path string, targets []DirectoryTarget) (Statu
 	// Open the published replacement briefly for a status snapshot, then close.
 	catalog, err := Open(ctx, Options{Path: path, DisableRepair: true})
 	if err != nil {
-		return Status{State: StateReady, Mode: ModeDisk, Path: path}, nil
+		return Status{State: StateReady, Mode: ModeDisk, Path: path, Revision: revisionFloor}, nil
 	}
 	status := catalog.Status()
 	closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	_ = catalog.Close(closeCtx)
 	cancel()
 	return status, nil
+}
+
+func setCatalogRevisionFloor(ctx context.Context, db *sql.DB, revisionFloor uint64) error {
+	if db == nil || revisionFloor == 0 {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `UPDATE catalog_state SET revision=? WHERE id=1 AND revision<?`, revisionFloor, revisionFloor)
+	return err
 }
 
 // Inspect is read-only. It never migrates, repairs, quarantines, or rewrites a

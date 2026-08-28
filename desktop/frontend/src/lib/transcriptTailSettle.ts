@@ -40,6 +40,8 @@ export type TranscriptTailSettle = {
   cancel: () => void;
   /** Mark a layout-transient window and arm its bounded idle expiry. */
   noteLayoutTransient: () => void;
+  /** Repair an already-owned live tail before a structural Footer commit paints. */
+  pinLiveTailBeforePaint: () => boolean;
 };
 
 /**
@@ -125,6 +127,17 @@ export function createTranscriptTailSettle({
   const noteLayoutTransient = () => {
     layoutTransientRef.current = true;
     armLayoutTransientIdle();
+  };
+
+  const pinLiveTailBeforePaint = () => {
+    if (!scrollRef.current || modeRef.current !== "tail-follow") return false;
+    geometryRevisionRef.current += 1;
+    noteLayoutTransient();
+    scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS
+      ? { source: "tail-content-changed", phase: "initial" }
+      : undefined);
+    schedule(false, "tail-content-changed");
+    return true;
   };
 
   const schedule = (jump: boolean, source?: TranscriptScrollDiagnosticSource) => {
@@ -220,5 +233,5 @@ export function createTranscriptTailSettle({
     tailSettleFrame = requestAnimationFrame(tick);
   };
 
-  return { scrollToTail, schedule, cancel, noteLayoutTransient };
+  return { scrollToTail, schedule, cancel, noteLayoutTransient, pinLiveTailBeforePaint };
 }

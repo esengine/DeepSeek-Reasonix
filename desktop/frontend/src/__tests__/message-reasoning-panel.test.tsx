@@ -223,6 +223,17 @@ await render({
   id: "a-auto",
   text: "answer",
   reasoning: "live thought",
+  streaming: true,
+  reasoningComplete: true,
+});
+ok(Boolean(document.querySelector(".reasoning__body")), "auto mode keeps reasoning open after its first answer token while the turn streams");
+ok(!document.querySelector(".reasoning-summary"), "active turn does not replace full reasoning with a summary");
+
+await render({
+  kind: "assistant",
+  id: "a-auto",
+  text: "answer",
+  reasoning: "live thought",
   streaming: false,
   reasoningComplete: true,
 });

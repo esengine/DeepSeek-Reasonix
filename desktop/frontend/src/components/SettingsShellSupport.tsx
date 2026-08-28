@@ -5,6 +5,29 @@ import { asArray } from "../lib/array";
 import type { SandboxView, ShellCapabilityView } from "../lib/types";
 import { CopyButton } from "./CopyButton";
 
+const GIT_FOR_WINDOWS_DOWNLOAD_URL = "https://git-scm.com/download/win";
+
+export function gitForWindowsDownloadURL(candidate?: string): string {
+  try {
+    const parsed = new URL(candidate ?? "");
+    if (
+      parsed.protocol === "https:"
+      && parsed.hostname.toLowerCase() === "git-scm.com"
+      && parsed.port === ""
+      && parsed.username === ""
+      && parsed.password === ""
+      && parsed.pathname === "/download/win"
+      && parsed.search === ""
+      && parsed.hash === ""
+    ) {
+      return parsed.href;
+    }
+  } catch {
+    // Fall through to the trusted built-in target.
+  }
+  return GIT_FOR_WINDOWS_DOWNLOAD_URL;
+}
+
 // The Sandbox settings section's shell surface: interpreter preference, the
 // current session's bound shell vs what a reload would pick, detection, and
 // the Windows-only Git for Windows manual repair link. Package managers are
@@ -147,7 +170,7 @@ export function ShellInterpreterFields({
             <div className="shell-support__card">
               <div className="shell-support__hint">{t("settings.shellInstallManualNotice")}</div>
               <div className="shell-support__actions">
-                <button type="button" className="btn btn--small" onClick={() => void openExternal(action.manualUrl || "https://git-scm.com/download/win")}>
+                <button type="button" className="btn btn--small" onClick={() => void openExternal(gitForWindowsDownloadURL(action.manualUrl))}>
                   <ExternalLink size={14} aria-hidden="true" />
                   <span>{t("settings.shellInstallManualLink")}</span>
                 </button>

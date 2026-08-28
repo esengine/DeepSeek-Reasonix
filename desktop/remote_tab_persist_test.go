@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -560,6 +562,40 @@ func TestRemoteStatusRefreshRejectsOutOfOrderSnapshot(t *testing.T) {
 	a.remoteTabMu.Unlock()
 	if runtime.running || runtime.pendingPrompt {
 		t.Fatalf("older status overwrote newer settled state: %+v", runtime)
+	}
+}
+
+// TestRemoteTabStatusSupersededRaceReturnsSentinel: when an SSE-derived frame
+// advances the tab revision while a /status poll is in flight, RemoteTabStatus
+// must fail with the superseded sentinel — a benign stale snapshot, distinct
+// from transport failures — instead of an opaque error that surfaces as a
+// crash report.
+func TestRemoteTabStatusSupersededRaceReturnsSentinel(t *testing.T) {
+	client := &http.Client{}
+	a := &App{remoteTabs: map[string]*remoteTab{
+		"remote-1": {id: "remote-1", client: client, gen: 4, state: "ready"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// The serve streams a turn_started between reservation and recording:
+		// the frame handler advances the revision mid-poll.
+		a.reserveRemoteTabStatusSequence("remote-1", client, 4)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"running":false,"pendingPrompt":false}`))
+	}))
+	t.Cleanup(server.Close)
+	a.remoteTabMu.Lock()
+	a.remoteTabs["remote-1"].base = server.URL
+	a.remoteTabMu.Unlock()
+
+	_, err := a.RemoteTabStatus("remote-1")
+	if err == nil {
+		t.Fatal("superseded status poll returned nil error")
+	}
+	if !errors.Is(err, errRemoteTabStatusSuperseded) {
+		t.Fatalf("superseded race error = %v, want errRemoteTabStatusSuperseded", err)
+	}
+	if want := `remote tab "remote-1" status was superseded by newer runtime state`; err.Error() != want {
+		t.Fatalf("superseded race message = %q, want %q", err.Error(), want)
 	}
 }
 

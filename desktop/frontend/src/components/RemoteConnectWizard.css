@@ -103,6 +103,53 @@
 .remote-wizard__suggest {
   position: relative;
 }
+.remote-wizard__host-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* Outranks the .remote-wizard__form input padding shorthand; the input
+   reserves room for the absolute toggle arrow on its right edge. */
+.remote-wizard__suggest .remote-wizard__host-box input {
+  flex: 1;
+  min-width: 0;
+  padding-right: 32px;
+}
+.remote-wizard__suggest-toggle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 4px;
+  margin-block: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-faint);
+  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+.remote-wizard__suggest-toggle:hover:not(:disabled) {
+  color: var(--fg-dim);
+}
+.remote-wizard__suggest-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.remote-wizard__suggest-toggle--open {
+  transform: rotate(180deg);
+}
+.remote-wizard__suggest-head {
+  padding: 6px 10px 4px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
 .remote-wizard__suggest-list {
   position: absolute;
   top: 100%;

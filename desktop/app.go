@@ -140,6 +140,8 @@ type App struct {
 	catalogLifecycleMu sync.Mutex
 	catalogCancel      context.CancelFunc
 	catalogDone        chan struct{}
+	catalogRebuildMu   sync.Mutex
+	catalogRebuild     *sessionCatalogRebuildFlight
 	catalogRebuilding  atomic.Bool
 	shuttingDown       atomic.Bool
 	// catalogReconcileJobs coalesces both the legacy pre-scan and catalog scan.
@@ -149,6 +151,9 @@ type App struct {
 	catalogReconcileJobs map[string]*desktopCatalogReconcileJob
 	// Test-only deterministic boundary, set before concurrent requests.
 	catalogReconcileHook func(sessioncatalog.DirectoryTarget)
+	// catalogRebuildJoinHook is test-only: it proves concurrent Wails callers
+	// joined the published rebuild flight before its completion was released.
+	catalogRebuildJoinHook func()
 	// projectTreeCatalogRefreshHook is test-only: it proves runtime-only
 	// navigation never falls back to the broad catalog refresh path.
 	projectTreeCatalogRefreshHook func()
@@ -520,7 +525,7 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Unlock()
 	go a.restoreOrBuildTabs()
 	a.registerHistoryIndexEvents()
-	a.startSessionCatalog(false)
+	a.startSessionCatalog()
 	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
 	a.goSafe("sendStartupPing", a.sendStartupPing)
 	a.goSafe("flushMetrics", a.flushMetrics)
