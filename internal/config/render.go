@@ -1598,6 +1598,9 @@ func renderModelOverride(ov ProviderModelOverride) string {
 	if ov.Vision != nil {
 		parts = append(parts, fmt.Sprintf("vision = %t", *ov.Vision))
 	}
+	if ov.SupportsTools != nil {
+		parts = append(parts, fmt.Sprintf("supports_tools = %t", *ov.SupportsTools))
+	}
 	if ov.ContextWindow > 0 {
 		parts = append(parts, fmt.Sprintf("context_window = %d", ov.ContextWindow))
 	}
@@ -1608,7 +1611,7 @@ func renderModelOverride(ov ProviderModelOverride) string {
 }
 
 func modelOverrideEmpty(ov ProviderModelOverride) bool {
-	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow <= 0 && ov.MaxOutputTokens == 0
+	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.SupportsTools == nil && ov.ContextWindow <= 0 && ov.MaxOutputTokens == 0
 }
 
 func hasPositiveIntMap(m map[string]int) bool {

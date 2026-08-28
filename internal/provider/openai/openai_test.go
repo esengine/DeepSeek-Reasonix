@@ -154,6 +154,40 @@ func TestBuildRequestScopesLegacyTupleMigrationToMiMo(t *testing.T) {
 	}
 }
 
+func TestBuildRequestOmitsToolsForModelsWithoutToolSupport(t *testing.T) {
+	tools := []provider.ToolSchema{{
+		Name:        "read_file",
+		Description: "Read a file",
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+	}}
+	req := provider.Request{Tools: tools}
+
+	withTools := (&client{}).buildRequest(req)
+	if len(withTools.Tools) != 1 {
+		t.Fatalf("default tool support produced %d tools, want 1", len(withTools.Tools))
+	}
+	withoutTools := (&client{disableTools: true}).buildRequest(req)
+	if len(withoutTools.Tools) != 0 {
+		t.Fatalf("disabled tool support produced %d tools, want 0", len(withoutTools.Tools))
+	}
+}
+
+func TestNewReadsModelToolCapabilityOverride(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "ollama",
+		BaseURL: "https://ollama.example/v1",
+		Model:   "qwen2.5vl:7b",
+		Extra:   map[string]any{"supports_tools": false},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.disableTools {
+		t.Fatal("supports_tools=false was not applied to the client")
+	}
+}
+
 func TestBuildRequestOrdinaryDeepSeekBytesStayPrefixFree(t *testing.T) {
 	c := &client{model: "deepseek-v4-flash", deepseek: true, effort: "high"}
 	body, err := json.Marshal(c.buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}}))
