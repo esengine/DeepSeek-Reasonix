@@ -59,7 +59,6 @@ import type {
   EffortInfo,
   ExtensionActionView,
   FilePreview,
-  FileRefInspection,
   ExternalOpenersView,
   HistoryMessage,
   HistoryPage,
@@ -445,7 +444,6 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   ListDirForTab(tabID: string, rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
-  InspectFileRefForTab(tabID: string, path: string): Promise<FileRefInspection>;
   ReadFile(rel: string): Promise<FilePreview>;
   ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
   ResolveMarkdownImageForTab(tabID: string, source: string): Promise<MarkdownImageView>;
@@ -4095,12 +4093,6 @@ function makeMockApp(): AppBindings {
     },
     async SearchFileRefsForTab(_tabID: string, query: string) {
       return this.SearchFileRefs(query);
-    },
-    async InspectFileRefForTab(_tabID: string, path: string) {
-      const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
-      const known = ["desktop/frontend/src/lib/bridge.ts", "internal/control/refs.go", "README.md", "go.mod"];
-      const found = known.includes(normalized);
-      return { status: found ? "found" : "missing", path: normalized, isDir: false } as FileRefInspection;
     },
     async ReadFile(rel: string) {
       return mockWorkspaceFile(rel);

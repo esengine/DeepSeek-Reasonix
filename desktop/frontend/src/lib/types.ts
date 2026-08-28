@@ -1101,12 +1101,6 @@ export interface DirEntry {
   displayPath?: string;
 }
 
-export interface FileRefInspection {
-  status: "found" | "directory" | "hidden" | "missing" | "outside" | "invalid" | string;
-  path: string;
-  isDir?: boolean;
-}
-
 export interface DroppedItem {
   kind: "workspace" | "attachment";
   path: string;

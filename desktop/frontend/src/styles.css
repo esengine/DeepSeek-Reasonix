@@ -7060,13 +7060,6 @@ body > .mermaid-diagram--fullscreen {
   color: var(--accent);
 }
 
-.filemenu__inspection {
-  padding: 7px 10px;
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 1.35;
-  border-top: 1px solid var(--border);
-}
 .slashmenu__hint {
   font-family: var(--mono);
   font-size: 11.5px;

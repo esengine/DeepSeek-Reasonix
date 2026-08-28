@@ -181,8 +181,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Its failure-atomic completion paths plus the fixed navigation footer
 // footprint share that initial path. The combined build measures 2379.22 KiB,
 // 10.12 KiB (0.43%) above the navigation base; retain 0.58 KiB of deterministic
-// build/toolchain headroom. Reference-filter UI adds 3.1 KiB raw; keep this
-// increase explicit with narrow headroom.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_383.6 : 2_383.6;
+// build/toolchain headroom. Reference-filter UI adds 2.0 KiB raw; keep a
+// narrow 0.4 KiB margin.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_382.2 : 2_382.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

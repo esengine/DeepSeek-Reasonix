@@ -1013,7 +1013,6 @@ export function ApprovalModal({
                   <FileReferenceMenu
                     items={fileMenu.items}
                     activeIndex={fileMenu.active}
-                    inspection={fileMenu.inspection}
                     onPick={pickRevisionFile}
                     onHover={fileMenu.setActive}
                   />

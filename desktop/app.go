@@ -10158,14 +10158,6 @@ type DirEntry struct {
 	DisplayPath string `json:"displayPath,omitempty"`
 }
 
-// FileRefInspection reports a manually typed @ path without changing resolution.
-// "hidden" affects picker candidates only.
-type FileRefInspection struct {
-	Status string `json:"status"`
-	Path   string `json:"path"`
-	IsDir  bool   `json:"isDir,omitempty"`
-}
-
 // FilePreview is a bounded, read-only file payload for the workspace side panel.
 type FilePreview struct {
 	Path      string `json:"path"`
@@ -10381,43 +10373,6 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name) })
 	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name) })
 	return append(dirs, files...)
-}
-
-// InspectFileRefForTab reports a manually typed path for completion feedback.
-// It does not change ResolveRefs behavior, including for hidden paths.
-func (a *App) InspectFileRefForTab(tabID, rel string) FileRefInspection {
-	root, ctrl, ok := a.workspaceTargetForTab(tabID)
-	if !ok || externalFolderRefBrowserFromController(ctrl) != nil {
-		return FileRefInspection{Status: "invalid", Path: rel}
-	}
-	base, err := workspaceBaseFromRoot(root)
-	if err != nil || strings.TrimSpace(rel) == "" {
-		return FileRefInspection{Status: "invalid", Path: rel}
-	}
-	path, inside, err := workspacePathForBase(base, filepath.FromSlash(rel))
-	if err != nil || !inside {
-		return FileRefInspection{Status: "outside", Path: rel}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return FileRefInspection{Status: "missing", Path: filepath.ToSlash(rel)}
-		}
-		return FileRefInspection{Status: "invalid", Path: filepath.ToSlash(rel)}
-	}
-	relPath, err := filepath.Rel(base, path)
-	if err != nil {
-		return FileRefInspection{Status: "invalid", Path: filepath.ToSlash(rel)}
-	}
-	relPath = filepath.ToSlash(relPath)
-	filter := fileRefFilterForRoot(base)
-	if filter.Skip(relPath, info.Name(), info.IsDir()) {
-		return FileRefInspection{Status: "hidden", Path: relPath, IsDir: info.IsDir()}
-	}
-	if info.IsDir() {
-		return FileRefInspection{Status: "directory", Path: relPath, IsDir: true}
-	}
-	return FileRefInspection{Status: "found", Path: relPath}
 }
 
 // SearchFileRefs finds workspace files by basename for bare "@token" completion.
