@@ -48,9 +48,9 @@ type ExecutableCapability struct {
 type ShellCapability = ExecutableCapability
 
 // shellInventoryTTL bounds how long a discovery snapshot stays trusted. A
-// fresh install changes the filesystem without changing config, so besides
-// this expiry the desktop installer calls InvalidateShellInventory the moment
-// winget returns.
+// manual repair changes the filesystem without changing config, so the
+// desktop's explicit re-detect action invalidates the inventory immediately
+// instead of waiting for this expiry.
 const shellInventoryTTL = 30 * time.Second
 
 // shellSnapshot is one discovery pass: the environment inputs ResolveShell

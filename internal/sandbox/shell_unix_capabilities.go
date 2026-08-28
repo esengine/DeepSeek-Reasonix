@@ -1,9 +1,9 @@
 package sandbox
 
 // unixShellCapabilities reports the common POSIX-family interpreters present
-// on macOS and Linux. Bash remains the only interpreter ResolveShell selects;
-// zsh and sh are informational capabilities so Settings can explain the host
-// accurately without pretending either is a drop-in execution replacement.
+// on macOS and Linux. Linux remains Bash-only for execution; macOS may fall
+// back to zsh and then sh when Bash is unavailable, while Settings reports the
+// complete inventory on both platforms.
 func unixShellCapabilities(snap *shellSnapshot) []ShellCapability {
 	return []ShellCapability{
 		unixShellCapability(snap, ShellCapabilityBash, []string{"bash"}, []string{"/bin/bash", "/usr/bin/bash"}),

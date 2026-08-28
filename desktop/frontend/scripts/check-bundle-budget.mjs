@@ -141,12 +141,10 @@ console.log("\nbundle budgets");
 // Notification volume plus per-source loudness normalization moves current
 // main-v2 from 447.639 to 447.882 KiB gzip (+0.243 KiB). Retain 0.118 KiB of
 // bounded build/toolchain headroom.
-// Shell support detection/install UI moves to its own owner component
-// (SettingsShellSupport) with current-session vs after-reload shell rows; the
-// sandbox settings path now measures 448.5 KiB. Retain 0.1 KiB headroom.
-// Cross-platform capability previews and repair guidance add 0.22 KiB gzip to
-// that path. The measured build is 448.72 KiB; retain 0.18 KiB of headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 448.9 : 448.9;
+// Cross-platform shell inventory, current-session vs after-reload rows, and
+// manual repair guidance move latest main-v2 from 447.883 to 448.924 KiB gzip
+// (+1.041 KiB). Retain 0.176 KiB of bounded build/toolchain headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 449.1 : 449.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -228,13 +226,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // loudness trims, and its accessible Settings surface. Current main-v2 moves
 // from 2413.183 to 2414.879 KiB raw (+1.696 KiB); retain 0.121 KiB of bounded
 // headroom.
-// The shell support owner component (detection, per-session vs after-reload
-// rows, Windows-only install card) replaces the inline Git-Bash block and
-// measures 2417.4 KiB raw; retain 0.1 KiB of headroom.
-// The same cross-platform preview contract brings the raw path to 2418.60 KiB.
-// Independent Git capability guidance and native macOS shell fallback bring
-// the measured path to 2419.1 KiB; retain 0.1 KiB of bounded headroom without
+// The same shell-support surface moves latest main-v2 from 2414.879 to
+// 2419.707 KiB raw (+4.828 KiB). Retain 0.093 KiB of bounded headroom without
 // widening unrelated chunk ceilings.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_419.2 : 2_419.2;
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_419.8 : 2_419.8;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
