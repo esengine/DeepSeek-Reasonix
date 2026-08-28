@@ -2,6 +2,734 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.32.0",
+      "date": "2026-08-28",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.32.0",
+        "zh": "Reasonix 1.32.0"
+      },
+      "summary": {
+        "en": "Remote SSH workspaces, durable turns, smoother transcript scrolling, and a more reliable desktop experience.",
+        "zh": "远程 SSH 工作区、持久化回合、更流畅的对话滚动，以及更可靠的桌面体验。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli",
+        "service"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Remote SSH Workspace Guide",
+            "zh": "远程 SSH 工作区指南"
+          },
+          "body": {
+            "en": "Learn how to connect to remote SSH workspaces, manage sessions, and use background turns.",
+            "zh": "了解如何连接远程 SSH 工作区、管理会话并使用后台回合。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "CLI Reference",
+            "zh": "CLI 参考"
+          },
+          "body": {
+            "en": "Command-line interface documentation and configuration options.",
+            "zh": "命令行界面文档和配置选项。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/CLI.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Where Reasonix stores configuration and state files.",
+            "zh": "Reasonix 存储配置和状态文件的位置。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/CONFIG_PATHS.md"
+        },
+        {
+          "title": {
+            "en": "Migration Guide",
+            "zh": "迁移指南"
+          },
+          "body": {
+            "en": "How to migrate existing workspaces and data to the latest version.",
+            "zh": "如何将现有工作区和数据迁移到最新版本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/MIGRATING.md"
+        },
+        {
+          "title": {
+            "en": "Tool Contract",
+            "zh": "工具契约"
+          },
+          "body": {
+            "en": "Details on tool schemas and provider interactions.",
+            "zh": "工具模式和提供程序交互的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/TOOL_CONTRACT.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Remote SSH workspaces",
+            "zh": "远程 SSH 工作区"
+          },
+          "body": {
+            "en": "Connect to remote SSH workspaces, manage sessions, and run background turns with full desktop parity.",
+            "zh": "连接远程 SSH 工作区、管理会话并以完整的桌面功能运行后台回合。"
+          },
+          "refs": [
+            9369,
+            9317,
+            9319,
+            9368,
+            9367
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Durable, ordered turns",
+            "zh": "持久化、有序的回合"
+          },
+          "body": {
+            "en": "Turns are now durable, ordered, and interrupt-safe, preventing rollbacks and stuck states.",
+            "zh": "回合现在持久化、有序且可安全中断，防止回滚和卡住状态。"
+          },
+          "refs": [
+            9409
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Smoother transcript scrolling",
+            "zh": "更流畅的对话滚动"
+          },
+          "body": {
+            "en": "Fixed scroll bounce, flicker, and jump issues in long conversations.",
+            "zh": "修复了长对话中的滚动弹跳、闪烁和跳动问题。"
+          },
+          "refs": [
+            9248,
+            9341,
+            9493,
+            9422
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Windows taskbar icon and selection rendering",
+            "zh": "Windows 任务栏图标和选区渲染"
+          },
+          "body": {
+            "en": "Restored the taskbar icon and stabilized transcript selection rendering on Windows.",
+            "zh": "恢复了任务栏图标并稳定了 Windows 上的对话选区渲染。"
+          },
+          "refs": [
+            9364,
+            9473,
+            7925
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "MCP session reliability",
+            "zh": "MCP 会话可靠性"
+          },
+          "body": {
+            "en": "Fixed MCP session handling with the official Go SDK, including JetBrains Streamable HTTP support.",
+            "zh": "使用官方 Go SDK 修复了 MCP 会话处理，包括 JetBrains Streamable HTTP 支持。"
+          },
+          "refs": [
+            9410,
+            9381
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Session catalog stability",
+            "zh": "会话目录稳定性"
+          },
+          "body": {
+            "en": "Prevented repeated repair loops and sidebar reordering during indexing.",
+            "zh": "防止了索引期间的重复修复循环和侧栏重新排序。"
+          },
+          "refs": [
+            9312,
+            9314,
+            9421
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Provider deletion and theme overlays",
+            "zh": "提供程序删除和主题覆盖层"
+          },
+          "body": {
+            "en": "Allowed deleting default providers and made operational overlays opaque.",
+            "zh": "允许删除默认提供程序，并使操作覆盖层不透明。"
+          },
+          "refs": [
+            9344,
+            9404
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "macOS self-update on exFAT",
+            "zh": "macOS 在 exFAT 上的自动更新"
+          },
+          "body": {
+            "en": "Fixed self-update on exFAT filesystems.",
+            "zh": "修复了 exFAT 文件系统上的自动更新。"
+          },
+          "refs": [
+            9153
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Corrupt branch meta recovery",
+            "zh": "损坏的分支元数据恢复"
+          },
+          "body": {
+            "en": "Automatically rebuild zero-filled corrupt branch meta files instead of failing saves.",
+            "zh": "自动重建全零损坏的分支元数据文件，而不是保存失败。"
+          },
+          "refs": [
+            9155
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Compact ratio range",
+            "zh": "压缩比例范围"
+          },
+          "body": {
+            "en": "Lowered the minimum compact_ratio to 0.30 for earlier compaction.",
+            "zh": "将最小 compact_ratio 降低到 0.30，以便更早进行压缩。"
+          },
+          "refs": [
+            9158
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Standard todo stalls",
+            "zh": "Standard 待办停滞"
+          },
+          "body": {
+            "en": "Fixed stalled Standard todos by adding a bounded continuation prompt.",
+            "zh": "通过添加有界的继续提示修复了 Standard 待办停滞。"
+          },
+          "refs": [
+            9483
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Topic metadata migration",
+            "zh": "主题元数据迁移"
+          },
+          "body": {
+            "en": "Moved topic metadata to SQLite for reliability and recovery.",
+            "zh": "将主题元数据迁移到 SQLite 以提高可靠性和恢复能力。"
+          },
+          "refs": [
+            9466
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Individual session archiving",
+            "zh": "单个会话归档"
+          },
+          "body": {
+            "en": "Added safe archiving for individual sessions in the project tree.",
+            "zh": "在项目树中为单个会话添加了安全归档。"
+          },
+          "refs": [
+            9374
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Memory capability documentation",
+            "zh": "记忆能力文档"
+          },
+          "body": {
+            "en": "Documented memory capabilities in use_capability description.",
+            "zh": "在 use_capability 描述中记录了记忆能力。"
+          },
+          "refs": [
+            9376
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Release notes split",
+            "zh": "更新日志拆分"
+          },
+          "body": {
+            "en": "Split release notes by Desktop and CLI for clearer upgrade decisions.",
+            "zh": "按桌面端和 CLI 拆分更新日志，以便更清晰地做出升级决策。"
+          },
+          "refs": [
+            9397
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "service"
+          ],
+          "title": {
+            "en": "Crash worker performance and migration",
+            "zh": "崩溃工作器性能和迁移"
+          },
+          "body": {
+            "en": "Retired expensive metric rollup and added Firebase migration gates.",
+            "zh": "退役了昂贵的指标汇总并添加了 Firebase 迁移门禁。"
+          },
+          "refs": [
+            9379,
+            9418,
+            9424,
+            9425,
+            9415,
+            9413,
+            9407
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "WebSocket dependency update",
+            "zh": "WebSocket 依赖更新"
+          },
+          "body": {
+            "en": "Updated gorilla/websocket to 1.5.3.",
+            "zh": "将 gorilla/websocket 更新到 1.5.3。"
+          },
+          "refs": [
+            9382
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Remote SSH workspaces",
+              "zh": "远程 SSH 工作区"
+            },
+            "body": {
+              "en": "Connect to remote SSH workspaces, manage sessions, and run background turns with full desktop parity.",
+              "zh": "连接远程 SSH 工作区、管理会话并以完整的桌面功能运行后台回合。"
+            },
+            "refs": [
+              9369,
+              9317,
+              9319,
+              9368,
+              9367
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Durable, ordered turns",
+              "zh": "持久化、有序的回合"
+            },
+            "body": {
+              "en": "Turns are now durable, ordered, and interrupt-safe, preventing rollbacks and stuck states.",
+              "zh": "回合现在持久化、有序且可安全中断，防止回滚和卡住状态。"
+            },
+            "refs": [
+              9409
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Smoother transcript scrolling",
+              "zh": "更流畅的对话滚动"
+            },
+            "body": {
+              "en": "Fixed scroll bounce, flicker, and jump issues in long conversations.",
+              "zh": "修复了长对话中的滚动弹跳、闪烁和跳动问题。"
+            },
+            "refs": [
+              9248,
+              9341,
+              9493,
+              9422
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Compact ratio range",
+              "zh": "压缩比例范围"
+            },
+            "body": {
+              "en": "Lowered the minimum compact_ratio to 0.30 for earlier compaction.",
+              "zh": "将最小 compact_ratio 降低到 0.30，以便更早进行压缩。"
+            },
+            "refs": [
+              9158
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Windows taskbar icon and selection rendering",
+              "zh": "Windows 任务栏图标和选区渲染"
+            },
+            "body": {
+              "en": "Restored the taskbar icon and stabilized transcript selection rendering on Windows.",
+              "zh": "恢复了任务栏图标并稳定了 Windows 上的对话选区渲染。"
+            },
+            "refs": [
+              9364,
+              9473,
+              7925
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "MCP session reliability",
+              "zh": "MCP 会话可靠性"
+            },
+            "body": {
+              "en": "Fixed MCP session handling with the official Go SDK, including JetBrains Streamable HTTP support.",
+              "zh": "使用官方 Go SDK 修复了 MCP 会话处理，包括 JetBrains Streamable HTTP 支持。"
+            },
+            "refs": [
+              9410,
+              9381
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Session catalog stability",
+              "zh": "会话目录稳定性"
+            },
+            "body": {
+              "en": "Prevented repeated repair loops and sidebar reordering during indexing.",
+              "zh": "防止了索引期间的重复修复循环和侧栏重新排序。"
+            },
+            "refs": [
+              9312,
+              9314,
+              9421
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Provider deletion and theme overlays",
+              "zh": "提供程序删除和主题覆盖层"
+            },
+            "body": {
+              "en": "Allowed deleting default providers and made operational overlays opaque.",
+              "zh": "允许删除默认提供程序，并使操作覆盖层不透明。"
+            },
+            "refs": [
+              9344,
+              9404
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "macOS self-update on exFAT",
+              "zh": "macOS 在 exFAT 上的自动更新"
+            },
+            "body": {
+              "en": "Fixed self-update on exFAT filesystems.",
+              "zh": "修复了 exFAT 文件系统上的自动更新。"
+            },
+            "refs": [
+              9153
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Corrupt branch meta recovery",
+              "zh": "损坏的分支元数据恢复"
+            },
+            "body": {
+              "en": "Automatically rebuild zero-filled corrupt branch meta files instead of failing saves.",
+              "zh": "自动重建全零损坏的分支元数据文件，而不是保存失败。"
+            },
+            "refs": [
+              9155
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Standard todo stalls",
+              "zh": "Standard 待办停滞"
+            },
+            "body": {
+              "en": "Fixed stalled Standard todos by adding a bounded continuation prompt.",
+              "zh": "通过添加有界的继续提示修复了 Standard 待办停滞。"
+            },
+            "refs": [
+              9483
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Topic metadata migration",
+              "zh": "主题元数据迁移"
+            },
+            "body": {
+              "en": "Moved topic metadata to SQLite for reliability and recovery.",
+              "zh": "将主题元数据迁移到 SQLite 以提高可靠性和恢复能力。"
+            },
+            "refs": [
+              9466
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Individual session archiving",
+              "zh": "单个会话归档"
+            },
+            "body": {
+              "en": "Added safe archiving for individual sessions in the project tree.",
+              "zh": "在项目树中为单个会话添加了安全归档。"
+            },
+            "refs": [
+              9374
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Memory capability documentation",
+              "zh": "记忆能力文档"
+            },
+            "body": {
+              "en": "Documented memory capabilities in use_capability description.",
+              "zh": "在 use_capability 描述中记录了记忆能力。"
+            },
+            "refs": [
+              9376
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Release notes split",
+              "zh": "更新日志拆分"
+            },
+            "body": {
+              "en": "Split release notes by Desktop and CLI for clearer upgrade decisions.",
+              "zh": "按桌面端和 CLI 拆分更新日志，以便更清晰地做出升级决策。"
+            },
+            "refs": [
+              9397
+            ]
+          },
+          {
+            "targets": [
+              "service"
+            ],
+            "title": {
+              "en": "Crash worker performance and migration",
+              "zh": "崩溃工作器性能和迁移"
+            },
+            "body": {
+              "en": "Retired expensive metric rollup and added Firebase migration gates.",
+              "zh": "退役了昂贵的指标汇总并添加了 Firebase 迁移门禁。"
+            },
+            "refs": [
+              9379,
+              9418,
+              9424,
+              9425,
+              9415,
+              9413,
+              9407
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "WebSocket dependency update",
+              "zh": "WebSocket 依赖更新"
+            },
+            "body": {
+              "en": "Updated gorilla/websocket to 1.5.3.",
+              "zh": "将 gorilla/websocket 更新到 1.5.3。"
+            },
+            "refs": [
+              9382
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "XTLine",
+        "wuhanwoaini521",
+        "esengine",
+        "Linearl",
+        "dependabot[bot]",
+        "hdkshingala",
+        "zhongerdeajie",
+        "zcxads666"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.32.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.31.4...desktop-v1.32.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.32.0",
+      "baseVersion": "1.32.0",
+      "status": "reviewed",
+      "previousRelease": "1.31.4",
+      "builds": {
+        "cli": "v1.32.0",
+        "desktop": "v1.32.0",
+        "npm": "1.32.0"
+      }
+    },
+    {
       "version": "1.31.4",
       "targetingVersion": 1,
       "date": "2026-08-25",
