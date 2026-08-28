@@ -495,6 +495,13 @@ For Anthropic-compatible services, such as some coding-plan endpoints, choose
 | Balance URL | Optional endpoint for wallet/balance lookup. | Set it when the provider exposes a balance endpoint and you want the desktop status bar to show it. |
 | Context window | The provider-wide token budget Reasonix uses for automatic context cleanup. `0` disables automatic compaction. | Set it to the provider's model context limit; use a per-model override below when selected models differ. |
 
+Click a balance or cost readout in the desktop status bar to mask the balance,
+turn cost, and session cost with `•••`; click again to reveal them. This preference
+is saved as `[desktop].hide_amounts` and survives restarts. Balance fetching
+continues while masked. The context sidebar and context popover follow the same
+setting, including their cost breakdowns; click an amount there to toggle all
+of these displays too. The separate Usage Stats view is unchanged.
+
 Each selected model also has an optional **Context window** input. Leave it blank
 to inherit the provider-wide value, or enter a positive token count to override
 that value for this model. This avoids premature compaction for long-context

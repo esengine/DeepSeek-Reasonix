@@ -26,6 +26,8 @@ import {
   type MarkdownBlock,
 } from "../lib/markdownPipeline";
 import { projectTranscriptSelectableDom } from "../lib/transcriptSelectionDom";
+import { hashGeometryParts } from "../lib/contentRevision";
+import { stableStringHash } from "../lib/stableStringHash";
 
 let passed = 0;
 let failed = 0;
@@ -183,6 +185,9 @@ for (const unsafe of [
 {
   eq(markdownContentRevision("alpha") === markdownContentRevision("alpha"), true, "content revision is deterministic");
   eq(markdownContentRevision("alpha") !== markdownContentRevision("beta"), true, "content revision distinguishes texts");
+  eq(stableStringHash("alpha"), "pye36z", "shared fingerprint preserves existing UI keys");
+  eq(stableStringHash("😀\u0000β"), "p4zvn2", "UI keys continue hashing UTF-16 code units");
+  eq(hashGeometryParts(["alpha", "😀\u0000β"]), "1346534092:5,4", "shared fingerprint preserves geometry delimiters and lengths");
   const blocks = parseMarkdownToBlocks("hello **world**");
   const bytes = estimateHastBytes(blocks);
   ok(bytes > 0 && bytes < 100_000, "hast byte estimate is positive and bounded");

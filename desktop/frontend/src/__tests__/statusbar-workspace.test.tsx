@@ -6,7 +6,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatusBar } from "../components/StatusBar";
+import { ContextPanel } from "../components/ContextPanel";
 import { LocaleProvider } from "../lib/i18n";
+import type { AppBindings } from "../lib/bridge";
+import { useStatusBarPreferences } from "../lib/useStatusBarPreferences";
+import { ToastProvider } from "../lib/toast";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "../lib/statusBarItems";
 
 let passed = 0;
@@ -185,7 +189,7 @@ console.log("\nstatus bar workspace");
     cost: 0.3,
     currency: "USD",
   });
-  ok((estimated.match(/≈/g) ?? []).length === 4, "estimated token and cost metrics use an approximation marker");
+  ok((estimated.match(/>≈/g) ?? []).length === 4, "estimated token and cost metrics use an approximation marker");
 
   const empty = renderStatusBar({
     items: ["session_tokens", "turn_tokens", "turn_cost", "cost"],
@@ -357,6 +361,91 @@ console.log("\nstatus bar workspace");
     await act(async () => { mixedJobsButton?.click(); });
   }
   ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible");
+  let savedHidden = true;
+  let writes = 0;
+  let rejectSave = false;
+  let finishSave: (() => void) | undefined;
+  let holdSave = false;
+  window.go = { main: { App: {
+    SetHideAmounts: async (hidden: boolean) => {
+      writes += 1;
+      if (holdSave) await new Promise<void>((resolve) => { finishSave = resolve; });
+      if (rejectSave) throw new Error("disk full");
+      savedHidden = hidden;
+    },
+  } as AppBindings } };
+  let privacy!: ReturnType<typeof useStatusBarPreferences>;
+  let balance = { available: true, display: "¥88.00", detail: "paid ¥80.00; bonus ¥8.00" };
+  function PrivacyHarness() {
+    privacy = useStatusBarPreferences();
+    return <><ContextPanel balance={balance} sessionCost={0.3} turnCost={0.2} sessionCurrency="USD" amountsHidden={privacy.hidden} amountsPending={privacy.pending} onToggleAmounts={privacy.toggle} />
+      <StatusBar context={{ used: 0, window: 0, sessionTokens: 0 }} running={false}
+      balance={balance} cost={0.3} turnCost={0.2} currency="USD"
+      items={privacy.items} labelStyle={privacy.style}
+      amountsHidden={privacy.hidden} amountsPending={privacy.pending} onToggleAmounts={privacy.toggle} /></>;
+  }
+  const renderPrivacy = (key = 0) => root.render(
+    <LocaleProvider><ToastProvider><PrivacyHarness key={key} /></ToastProvider></LocaleProvider>,
+  );
+  const hydratePrivacy = () => privacy.hydrate({ hideAmounts: savedHidden, statusBarStyle: "text", statusBarItems: ["balance", "cost", "turn_cost"] });
+  const amountButtons = () => Array.from(rootEl.querySelectorAll<HTMLButtonElement>(".statusbar__amount-toggle"));
+  const amountValues = () => amountButtons().map((button) => button.querySelector("b")?.textContent);
+  await act(async () => { renderPrivacy(); });
+  ok(amountButtons().every((button) => button.disabled) && amountValues().every((value) => value === "•••"), "startup never flashes amounts before preferences load");
+  await act(async () => { hydratePrivacy(); });
+  ok(amountButtons().length === 3 && amountValues().every((value) => value === "•••"), "saved privacy masks wallet, session cost, and turn cost together");
+  const sidebar = () => rootEl.querySelector(".context-panel")!;
+  const sidebarButtons = () => Array.from(sidebar().querySelectorAll<HTMLButtonElement>(".amount-toggle"));
+  ok(!sidebar().innerHTML.includes("$") && sidebar().textContent?.includes("•••") === true, "sidebar balance and costs follow the saved hidden preference");
+  ok(sidebarButtons().length === 3, "sidebar balance, turn cost, and session cost are native buttons");
+  for (let i = 0; i < 3; i++) {
+    await act(async () => { sidebarButtons()[i].focus(); sidebarButtons()[i].click(); });
+    ok(!savedHidden && amountValues()[0] === "¥88.00", "clicking a sidebar amount reveals and persists all displays");
+    await act(async () => { sidebarButtons()[i].click(); });
+    ok(savedHidden && amountValues().every(value => value === "•••"), "clicking the sidebar amount again hides all displays");
+    ok(sidebarButtons()[i].title === "Show balance and costs" && !sidebarButtons()[i].getAttribute("aria-label")?.includes("88.00"), "sidebar hidden tooltip and accessible label describe the action without amounts");
+  }
+  await act(async () => { amountButtons()[0].focus(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+  ok(document.querySelector('[role="tooltip"]')?.textContent?.includes("Show balance and costs") === true, "keyboard focus exposes the reveal action");
+  ok(!document.body.innerHTML.includes("88.00") && !document.body.innerHTML.includes("80.00"), "hidden amounts and wallet details are absent from text, tooltips, and accessible labels");
+  balance = { available: true, display: "¥77.00", detail: "paid ¥70.00; bonus ¥7.00" };
+  await act(async () => { renderPrivacy(); });
+  ok(amountValues().every((value) => value === "•••"), "incoming balance updates remain masked");
+  await act(async () => { amountButtons()[0].click(); });
+  ok(!savedHidden && amountValues().join(",") === "¥77.00,$0.3000,$0.2000", "click reveals the latest balance and costs without refetching");
+  ok(sidebar().textContent?.includes("¥77.00") === true && sidebar().textContent?.includes("$0.30") === true && sidebar().textContent?.includes("$0.20") === true, "status bar toggle reveals the latest sidebar balance and both costs");
+  ok(amountButtons()[0].getAttribute("aria-label")?.includes("¥77.00") === true, "visible amount remains accessible to screen readers");
+  await act(async () => {
+    amountButtons()[0].blur(); amountButtons()[0].focus();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  ok(document.querySelector('[role="tooltip"]')?.textContent?.includes("paid ¥70.00") === true, "revealed balance preserves the detailed tooltip");
+  await act(async () => { amountButtons()[1].click(); });
+  ok(savedHidden && amountValues().every((value) => value === "•••"), "clicking session cost hides all three amounts");
+  ok(!sidebar().innerHTML.includes("¥77.00") && !sidebar().innerHTML.includes("$"), "hiding from the status bar removes sidebar financial amounts again");
+  ok(!document.body.innerHTML.includes("70.00"), "hiding removes details even from an already open tooltip");
+  await act(async () => { renderPrivacy(1); });
+  await act(async () => { hydratePrivacy(); });
+  ok(amountValues().every((value) => value === "•••"), "remount restores the saved hidden preference");
+  holdSave = true;
+  rejectSave = true;
+  const writesBefore = writes;
+  await act(async () => { sidebarButtons()[2].click(); amountButtons()[0].click(); });
+  ok(writes === writesBefore + 1 && amountButtons().every((button) => button.disabled), "pending persistence prevents overlapping toggle writes");
+  ok(sidebarButtons().every(button => button.disabled), "pending persistence disables sidebar controls too");
+  ok(amountValues().every((value) => value === "•••"), "reveal waits for persistence to succeed");
+  await act(async () => { finishSave?.(); });
+  ok(savedHidden && amountValues().every((value) => value === "•••"), "a failed save keeps amounts hidden");
+  ok(document.querySelector(".toast--error")?.textContent?.includes("disk full") === true, "save failure is reported through the existing toast UI");
+  await act(async () => { document.querySelector<HTMLElement>(".toast--error")?.click(); });
+  holdSave = false;
+  rejectSave = false;
+  await act(async () => { amountButtons()[2].click(); });
+  ok(!savedHidden && amountValues()[0] === "¥77.00", "failed save can be retried using the turn cost control");
+  rejectSave = true;
+  await act(async () => { amountButtons()[0].click(); });
+  ok(amountValues().every((value) => value === "•••"), "failed hide persistence still masks the current window");
+  await act(async () => { document.querySelector<HTMLElement>(".toast--error")?.click(); });
   await act(async () => { root.unmount(); });
   dom.window.close();
 }

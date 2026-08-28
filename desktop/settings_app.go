@@ -337,6 +337,7 @@ type SettingsView struct {
 	ReasoningDisplayModeExplicit bool                 `json:"reasoningDisplayModeExplicit"`
 	StatusBarStyle               string               `json:"statusBarStyle"`
 	StatusBarItems               []string             `json:"statusBarItems"`
+	HideAmounts                  bool                 `json:"hideAmounts"`
 	DefaultToolApprovalMode      string               `json:"defaultToolApprovalMode"`
 
 	CheckUpdates      bool   `json:"checkUpdates"`
@@ -377,6 +378,7 @@ type DesktopStartupSettingsView struct {
 	ReasoningDisplayModeExplicit bool            `json:"reasoningDisplayModeExplicit"`
 	StatusBarStyle               string          `json:"statusBarStyle"`
 	StatusBarItems               []string        `json:"statusBarItems"`
+	HideAmounts                  bool            `json:"hideAmounts"`
 	CheckUpdates                 bool            `json:"checkUpdates"`
 	UpdateChannel                string          `json:"updateChannel"`
 	ConversationWidth            string          `json:"conversationWidth,omitempty"`
@@ -1068,6 +1070,7 @@ func (a *App) Settings() SettingsView {
 		ReasoningDisplayModeExplicit: cfg.DesktopReasoningDisplayModeExplicit(),
 		StatusBarStyle:               cfg.DesktopStatusBarStyle(),
 		StatusBarItems:               cfg.DesktopStatusBarItems(),
+		HideAmounts:                  cfg.Desktop.HideAmounts,
 		DefaultToolApprovalMode:      cfg.DesktopDefaultToolApprovalMode(),
 		CheckUpdates:                 cfg.DesktopCheckUpdates(),
 		UpdateChannel:                cfg.DesktopUpdateChannel(),
@@ -3445,18 +3448,6 @@ func (a *App) SetCloseBehavior(mode string) error {
 // SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.
 func (a *App) SetDisplayMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopDisplayMode(mode) })
-}
-
-// SetStatusBarStyle updates the desktop status bar metric label style. UI-only,
-// no rebuild needed.
-func (a *App) SetStatusBarStyle(style string) error {
-	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarStyle(style) })
-}
-
-// SetStatusBarItems updates the ordered visible desktop status bar items.
-// UI-only, no rebuild needed.
-func (a *App) SetStatusBarItems(items []string) error {
-	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarItems(items) })
 }
 
 // SetDesktopLanguage updates the desktop UI language and the user-level response

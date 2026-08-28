@@ -201,6 +201,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // of bounded headroom alongside the gzip ratchet above. Runtime-aware Todo
 // status and exact-tab continuation bring the measured payload to 2405.5 KiB;
 // retain 0.2 KiB of raw/toolchain headroom for the same footer owner.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_405.7 : 2_405.7;
+// Persistent amount toggles across status/context displays measure 2408.6 KiB
+// raw; retain 0.2 KiB of headroom. Gzip budgets are unchanged.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_408.8 : 2_408.8;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

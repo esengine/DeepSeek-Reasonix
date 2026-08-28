@@ -420,7 +420,7 @@ export function Transcript({
   }, [openAction]);
 
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
-  const hasCheckpointForTurn = useCallback((turn: number) => checkpointsByTurn.has(turn), [checkpointsByTurn]);
+  const hasCheckpointForTurn = useMemo(() => checkpointsByTurn.has.bind(checkpointsByTurn), [checkpointsByTurn]); // Bind only the map; render closures retain old transcript trees.
   const rows = useMemo(
     () => buildTranscriptRows(turnModels, {
       folds,

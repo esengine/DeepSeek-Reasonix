@@ -954,6 +954,9 @@ export const zh: Record<DictKey, string> = {
   "status.switchFolder": "{cwd}\n点击切换项目目录",
   "status.tokens": "tokens",
   "status.retrying": "正在重试 ({attempt}/{max})…",
+  "status.showAmounts": "显示余额与费用",
+  "status.hideAmounts": "隐藏余额与费用",
+  "status.amountsSaveFailed": "无法保存金额显示设置",
   "status.balanceTitle": "钱包余额",
   "status.spendTitle": "当前会话估算计费费用，包含主模型、子代理和辅助调用",
 

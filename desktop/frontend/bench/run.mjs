@@ -182,6 +182,7 @@ async function startPreview() {
 const COLLECTOR_INIT = () => {
   const metrics = { longTasks: [], events: [], paints: [] };
   window.__benchMetrics = metrics;
+  document.addEventListener("click", (event) => { metrics.lastClickAt = event.timeStamp; }, { capture: true });
   try {
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) metrics.longTasks.push({ start: entry.startTime, duration: entry.duration });
@@ -257,11 +258,16 @@ async function waitForSessionVisible(page, tab, timeoutMs = 15_000) {
 }
 
 async function switchTo(page, tab) {
-  const startedAt = await page.evaluate(() => performance.now());
+  // Start at browser input dispatch, excluding Playwright's pre-click waits
+  // for visibility, scrolling and element stability.
+  await page.evaluate(() => { window.__benchMetrics.lastClickAt = undefined; });
   await page.click(`.project-tree__topic-main:has-text("${tab.label}")`);
   await waitForSessionVisible(page, tab);
-  const settledAt = await page.evaluate(() => performance.now());
-  return settledAt - startedAt;
+  return page.evaluate(() => {
+    const startedAt = window.__benchMetrics.lastClickAt;
+    if (startedAt === undefined) throw new Error("session switch did not dispatch a click");
+    return performance.now() - startedAt;
+  });
 }
 
 // Let in-flight worker parses finish so the parsed-markdown cache is populated

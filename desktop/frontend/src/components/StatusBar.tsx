@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, CircleDollarSign, CircleGauge, Database, FileOutput, Folder, Gauge, GitBranch, HardDrive, Layers, Percent, Puzzle, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
+import { StatusBarAmount } from "./StatusBarAmount";
 import { Tooltip } from "./Tooltip";
 import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Translator } from "../lib/i18n";
@@ -177,6 +178,9 @@ export function StatusBar({
   cost,
   currency,
   modelLabel,
+  amountsHidden = false,
+  amountsPending = false,
+  onToggleAmounts,
   labelStyle = "text",
   items,
   workspacePath,
@@ -199,6 +203,9 @@ export function StatusBar({
   context: ContextInfo;
   usage?: WireUsage;
   balance?: BalanceInfo;
+  amountsHidden?: boolean;
+  amountsPending?: boolean;
+  onToggleAmounts?: () => void;
   running: boolean;
   sessionTurns?: number;
   sessionTokens?: number;
@@ -269,10 +276,8 @@ export function StatusBar({
   const turnCostTooltip = rateBandLabel(turnRateBand, t) ? `${t("status.turnCostTitle")} ${rateBandTooltip}` : t("status.turnCostTitle");
   const sessionCostTooltip = rateBandLabel(statusQuote?.rateBand, t) ? `${t("status.spendTitle")} ${rateBandTooltip}` : t("status.spendTitle");
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
-  const balanceTitle = balance?.available
-    ? (balance.detail
-      ? `${t("status.balanceTitle")}: ${balance.detail}`
-      : t("status.balanceTitle"))
+  const balanceTitle = balance?.available && balance.detail
+    ? `${t("status.balanceTitle")}: ${balance.detail}`
     : t("status.balanceTitle");
   const tpsLabel = lastRequestTps === undefined
     ? formatTps(lastTurnOutputTokens && lastTurnModelMs ? lastTurnOutputTokens / (lastTurnModelMs / 1_000) : null, lastTurnOutputEstimated)
@@ -346,12 +351,10 @@ export function StatusBar({
       </Tooltip>
     ),
     turn_cost: (
-      <Tooltip label={turnCostTooltip} className="statusbar__metric statusbar__metric--turn-cost">
-        <span className="stat statusbar__turn-cost">
-          <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.turnCostLabel")} />
-          <b>{turnCostLabel}</b>
-        </span>
-      </Tooltip>
+      <StatusBarAmount label={t("status.turnCostLabel")} title={turnCostTooltip} value={turnCostLabel} className="statusbar__turn-cost"
+        hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts}>
+        <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.turnCostLabel")} />
+      </StatusBarAmount>
     ),
     session_turns: (
       <Tooltip label={t("status.sessionTurnsTitle")} className="statusbar__metric statusbar__metric--turns">
@@ -417,20 +420,16 @@ export function StatusBar({
       </Tooltip>
     ),
     cost: (
-      <Tooltip label={sessionCostTooltip} className="statusbar__metric statusbar__metric--cost">
-        <span className="stat statusbar__cost">
-          <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
-          <b>{statusCostLabel}</b>
-        </span>
-      </Tooltip>
+      <StatusBarAmount label={t("status.costLabel")} title={sessionCostTooltip} value={statusCostLabel} className="statusbar__cost"
+        hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts}>
+        <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
+      </StatusBarAmount>
     ),
     balance: (
-      <Tooltip label={balanceTitle} className="statusbar__metric statusbar__metric--balance">
-        <span className="stat stat--balance statusbar__balance">
-          <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
-          <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
-        </span>
-      </Tooltip>
+      <StatusBarAmount label={t("status.balanceLabel")} title={balanceTitle} value={balanceLabel} className="stat--balance statusbar__balance"
+        hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts}>
+        <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
+      </StatusBarAmount>
     ),
   };
   const renderedItems = visibleItems

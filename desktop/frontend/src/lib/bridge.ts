@@ -555,6 +555,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   TestDingtalkBot(): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
+  SetHideAmounts(hidden: boolean): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>; SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto" | "expanded"): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
@@ -1056,7 +1057,7 @@ function bridgeBreadcrumb(method: string): string {
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetDefaultModel|SetPlannerModel|SetVisionModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetHideAmounts|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|SetProviderWebSearch|SaveProviderModelCatalogs|AddOfficialProviderAccess|UpgradeDeepSeekProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|RemoveProviderAccesses|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|FetchProviderModels|FetchAllProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
@@ -1856,7 +1857,7 @@ function makeMockApp(): AppBindings {
     conversationWidth: "standard",
     closeBehavior: "background",
     displayMode: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false,
-    statusBarStyle: "text",
+    hideAmounts: false, statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     defaultToolApprovalMode: "auto",
     checkUpdates: true,
@@ -4438,7 +4439,7 @@ function makeMockApp(): AppBindings {
       return this.SaveDoc(path, body);
     },
     async DesktopStartupSettings() {
-      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, desktopTerminalTheme, displayMode, reasoningDisplayMode, reasoningDisplayModeExplicit, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, desktopTerminalTheme, displayMode, reasoningDisplayMode, reasoningDisplayModeExplicit, hideAmounts, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
       return JSON.parse(JSON.stringify({
         bot,
         desktopLanguage,
@@ -4447,7 +4448,7 @@ function makeMockApp(): AppBindings {
         desktopThemeStyle,
         desktopTerminalTheme,
         displayMode, reasoningDisplayMode, reasoningDisplayModeExplicit,
-        statusBarStyle,
+        hideAmounts, statusBarStyle,
         statusBarItems,
         checkUpdates,
         conversationWidth,
@@ -4802,12 +4803,9 @@ function makeMockApp(): AppBindings {
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;
         },
-        async SetStatusBarStyle(style: string) {
-          settings.statusBarStyle = style === "text" ? "text" : "icon";
-        },
-        async SetStatusBarItems(items: string[]) {
-          settings.statusBarItems = normalizeStatusBarItems(items);
-        },
+        async SetHideAmounts(hidden: boolean) { settings.hideAmounts = hidden; },
+        async SetStatusBarStyle(style: string) { settings.statusBarStyle = style === "text" ? "text" : "icon"; },
+        async SetStatusBarItems(items: string[]) { settings.statusBarItems = normalizeStatusBarItems(items); },
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
         },

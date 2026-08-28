@@ -75,8 +75,10 @@ function emptyPanelInfo(): ContextPanelInfo {
 console.log("\ncontext panel capacity");
 
 const dom = installDom();
+const panelInfo = emptyPanelInfo();
+panelInfo.sources = { executor: { promptTokens: 100, completionTokens: 0, totalTokens: 100, reasoningTokens: 0, cacheHitTokens: 0, cacheMissTokens: 100, requestCount: 1, sessionCost: 4.56, sessionCurrency: "USD" } };
 (window as unknown as { go: { main: { App: { ContextPanel: () => Promise<ContextPanelInfo> } } } }).go = {
-  main: { App: { ContextPanel: async () => emptyPanelInfo() } },
+  main: { App: { ContextPanel: async () => panelInfo } },
 };
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
@@ -106,6 +108,15 @@ eq(fill?.style.width, "100%", "capacity fill is capped at the physical track wid
 eq(meter?.querySelectorAll(".context-panel__progress-segment").length, 0, "capacity meter does not mix token composition into its fill");
 eq(compactMarker?.style.left, "80%", "compression threshold marker stays at the configured ratio");
 ok(meter?.getAttribute("aria-label")?.includes("101% used") === true, "accessible summary reports the over-limit ratio");
+
+ok(document.querySelector(".context-panel__source-summary")?.textContent?.includes("$4.56") === true, "source cost is visible before masking");
+let toggles = 0;
+await act(async () => { root.render(<LocaleProvider><ContextPanel tabId="tab-capacity" amountsHidden onToggleAmounts={() => { toggles++; }} /></LocaleProvider>); });
+ok(!rootEl.innerHTML.includes("$4.56") && document.querySelector(".context-panel__source-summary")?.textContent?.includes("•••") === true, "sidebar masks source costs as well as its main readouts");
+await act(async () => { document.querySelector<HTMLButtonElement>(".context-panel__source-summary .amount-toggle")!.click(); });
+eq(toggles, 1, "clicking a source cost invokes the shared toggle");
+await act(async () => { root.render(<LocaleProvider><ContextPanel tabId="tab-capacity" amountsHidden={false} /></LocaleProvider>); });
+ok(document.querySelector(".context-panel__source-summary")?.textContent?.includes("$4.56") === true, "revealing restores the source cost");
 
 await act(async () => {
   root.unmount();

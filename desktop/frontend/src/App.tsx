@@ -172,7 +172,7 @@ import {
 import { useOverlayStore } from "./store/overlays";
 import { hydrateDisplayMode } from "./lib/displayMode";
 import { recordFrontendDiagnostic } from "./lib/frontendDiagnosticBridge";
-import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "./lib/statusBarItems";
+import { useStatusBarPreferences } from "./lib/useStatusBarPreferences";
 import { paletteSessionDisplayTitle, paletteSessionHint, paletteSessionKeywords, sessionActivityTime } from "./lib/session";
 import { enqueueNavigationRequest, type PendingNavigationRequest } from "./lib/openTopicCoalescing";
 import {
@@ -1295,8 +1295,7 @@ export default function App() {
   const windowsFramelessChrome = desktopPlatform === "windows";
   const [mainWindowMaximised, syncMainWindowMaximised] = useWindowsMaximised(windowsFramelessChrome);
   useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
-  const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
-  const [statusBarItems, setStatusBarItems] = useState<StatusBarItemId[]>(() => [...DEFAULT_STATUS_BAR_ITEMS]);
+  const { style: statusBarStyle, items: statusBarItems, hidden: amountsHidden, pending: amountsPending, hydrate: hydrateStatusBar, toggle: toggleAmounts } = useStatusBarPreferences();
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const topicExportOpen = useOverlayStore((s) => s.topicExportOpen);
@@ -1474,7 +1473,7 @@ export default function App() {
   }, []);
 
   const applyDesktopPreferences = useCallback(
-    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopTerminalTheme" | "desktopLayoutStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems" | "conversationWidth"> & { reasoningDisplayMode?: string; reasoningDisplayModeExplicit?: boolean }) => {
+    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopTerminalTheme" | "desktopLayoutStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems" | "hideAmounts" | "conversationWidth"> & { reasoningDisplayMode?: string; reasoningDisplayModeExplicit?: boolean }) => {
       const nextTheme = normalizeThemePreference(settings.desktopTheme);
       const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
       applyConfiguredBaseAppearance(nextTheme, nextStyle);
@@ -1485,11 +1484,10 @@ export default function App() {
       applyLayoutStyleDefaults(nextLayoutStyle);
       setLocalePref(normalizeLangPref(settings.desktopLanguage));
       setStartupUpdateChecksEnabled(settings.checkUpdates !== false);
-      setStatusBarStyle(settings.statusBarStyle === "text" ? "text" : "icon");
-      setStatusBarItems(normalizeStatusBarItems(settings.statusBarItems));
+      hydrateStatusBar(settings);
       hydrateReasoningDisplayMode(settings.reasoningDisplayMode, settings.reasoningDisplayModeExplicit === true);
     },
-    [setLocalePref],
+    [setLocalePref, hydrateStatusBar],
   );
 
   useEffect(() => {
@@ -5210,7 +5208,7 @@ export default function App() {
               currency={visibleRuntimeState.sessionCurrency}
               cacheHitTokens={visibleRuntimeState.usage?.cacheHitTokens}
               cacheMissTokens={visibleRuntimeState.usage?.cacheMissTokens}
-              balance={visibleRuntimeState.balance}
+              balance={visibleRuntimeState.balance} amountsHidden={amountsHidden} amountsPending={amountsPending} onToggleAmounts={toggleAmounts}
             />
             </div>
           </footer>
@@ -5310,7 +5308,7 @@ export default function App() {
                     turnTokens={visibleRuntimeState.turnTotalTokens}
                     turnCost={visibleRuntimeState.turnCost}
                     turnRateBand={visibleRuntimeState.turnRateBand}
-                    balance={visibleRuntimeState.balance}
+                    balance={visibleRuntimeState.balance} amountsHidden={amountsHidden} amountsPending={amountsPending} onToggleAmounts={toggleAmounts}
                     sessionGen={visibleRuntimeState.sessionGen}
                     refreshKey={dockRefreshKey + visibleRuntimeState.contextPanelSeq}
                     usageSeq={visibleRuntimeState.usageSeq}
@@ -5420,6 +5418,7 @@ export default function App() {
             cost={visibleRuntimeState.sessionCost}
             currency={visibleRuntimeState.sessionCurrency}
             modelLabel={remoteSurfaceActive ? remoteSession.modelLabel || activeTab?.label : state.meta?.label}
+            amountsHidden={amountsHidden} amountsPending={amountsPending} onToggleAmounts={toggleAmounts}
             labelStyle={statusBarStyle}
             items={statusBarItems}
             extensionStatuses={extensionStatusList}

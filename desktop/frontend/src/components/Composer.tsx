@@ -609,7 +609,7 @@ export function Composer({
   currency,
   cacheHitTokens,
   cacheMissTokens,
-  balance,
+  balance, amountsHidden = false, amountsPending = false, onToggleAmounts,
   onInvocationMetadataChange,
 }: {
   running: boolean;
@@ -714,7 +714,7 @@ export function Composer({
   currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
-  balance?: BalanceInfo;
+  balance?: BalanceInfo; amountsHidden?: boolean; amountsPending?: boolean; onToggleAmounts?: () => void;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -4759,7 +4759,7 @@ export function Composer({
                   currency={currency}
                   cacheHitTokens={cacheHitTokens}
                   cacheMissTokens={cacheMissTokens}
-                  balance={balance}
+                  balance={balance} amountsHidden={amountsHidden} amountsPending={amountsPending} onToggleAmounts={onToggleAmounts}
                 />
               )}
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />

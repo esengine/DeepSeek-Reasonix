@@ -251,5 +251,37 @@ console.log("\ncontext window ring");
   dom.window.close();
 }
 
+{
+  const dom = installDom();
+  let calls = 0;
+  installContextPanelMock(async () => {
+    calls++;
+    return { ...contextPanelInfo(1), sessionCost: 3.21, sessionCurrency: "USD" };
+  });
+  let toggles = 0;
+  const { root, rerender } = await renderRing({ amountsHidden: true, onToggleAmounts: () => { toggles++; }, turnCost: 1.23, currency: "USD", balance: { available: true, display: "¥88.00" } });
+  await act(async () => { document.querySelector(".context-ring")!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); await wait(220); });
+  const popover = () => document.querySelector(".context-ring-popover")!;
+  ok(!popover().innerHTML.includes("88.00") && !popover().innerHTML.includes("$") && popover().textContent?.includes("•••") === true, "context popover masks balance and costs");
+  const buttons = () => Array.from(popover().querySelectorAll<HTMLButtonElement>(".amount-toggle"));
+  await act(async () => { buttons().forEach(button => button.click()); });
+  eq(toggles, 3, "all three popover amounts invoke the shared toggle");
+  await rerender({ amountsPending: true });
+  ok(buttons().every(button => button.disabled), "popover amount buttons are disabled while saving");
+  await act(async () => { buttons().forEach(button => button.click()); });
+  eq(toggles, 3, "pending popover clicks cannot start another save");
+  await rerender({ amountsPending: false });
+  await rerender({ balance: { available: true, display: "¥77.00" } });
+  ok(!popover().innerHTML.includes("77.00"), "incoming balance remains masked in the open popover");
+  const beforeReveal = calls;
+  await rerender({ amountsHidden: false });
+  ok(popover().textContent?.includes("¥77.00") === true && popover().textContent?.includes("$1.23") === true && popover().textContent?.includes("$3.21") === true, "popover reveals the latest balance and costs");
+  eq(calls, beforeReveal, "revealing amounts does not refetch context data");
+  await rerender({ amountsHidden: true });
+  ok(!popover().innerHTML.includes("77.00") && !popover().innerHTML.includes("$"), "open popover hides amounts again");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

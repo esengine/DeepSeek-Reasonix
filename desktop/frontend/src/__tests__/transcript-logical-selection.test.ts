@@ -256,6 +256,21 @@ console.log("\nuser transcript selection projection");
 console.log("\nstreaming transcript selection projection");
 
 {
+  const item = { kind: "assistant" as const, id: "he:cached", text: "answer", reasoning: "reasoning", streaming: false };
+  const rows: TranscriptRow[] = [{ kind: "answer", key: "a:cached", item }, { kind: "reasoning", key: "r:cached", item, segmentKey: "segment" }];
+  const first = transcriptSelectableRows(rows);
+  const repeat = transcriptSelectableRows(rows.map((row) => ({ ...row })));
+  ok(first[0] === repeat[0] && first[1] === repeat[1], "rebuilt rows reuse unchanged answer and reasoning projections");
+  item.text = "edited";
+  const edited = transcriptSelectableRows(rows);
+  ok(edited[0].contentRevision !== first[0].contentRevision && edited[1] === first[1], "answer edits invalidate only the answer projection");
+  eq(await edited[0].resolveText(), "edited", "cached selection resolves the latest source text");
+  item.reasoning = "updated reasoning";
+  const reasoned = transcriptSelectableRows(rows);
+  ok(reasoned[0] === edited[0] && reasoned[1].contentRevision !== edited[1].contentRevision, "reasoning edits invalidate only the reasoning projection");
+}
+
+{
   const rows: TranscriptRow[] = [
     {
       kind: "answer",

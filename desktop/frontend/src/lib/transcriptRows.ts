@@ -12,6 +12,7 @@
 
 import { isHostRecoveryGuidance } from "./hostRecoverySteer";
 import { stableStringHash } from "./stableStringHash";
+import { hashGeometryParts } from "./contentRevision";
 import { isBatchedReadOnlyTool, isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
 import { appendTurnActionCopyText } from "./turnActionCopy";
 import { isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "../components/ToolGroup";
@@ -465,19 +466,7 @@ export type TranscriptRowWithLayout = TranscriptRowContent & { layoutVariant: Tr
 // retain the source semantic version for that projection without caching
 // mutable bridge objects themselves.
 const itemMeasurementVersionOverrides = new WeakMap<object, string>();
-
-function hashGeometryParts(parts: readonly string[]): string {
-  let hash = 2166136261;
-  for (const part of parts) {
-    for (let index = 0; index < part.length; index += 1) {
-      hash ^= part.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    hash ^= 31;
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${hash >>> 0}:${parts.map((part) => part.length).join(",")}`;
-}
+const itemMeasurementVersions = new WeakMap<object, { parts: string[]; version: string }>();
 
 /** Semantic content version: equal projections keep the same geometry even
  * when the controller creates fresh objects for an unrelated UI update. */
@@ -515,7 +504,11 @@ function itemMeasurementVersion(item: Item): string {
       parts.push(String(item.surfaceKey ?? ""), String(item.pluginId ?? ""), String(item.surfaceId ?? ""), String(item.generation ?? ""), JSON.stringify(item.card ?? null));
       break;
   }
-  return hashGeometryParts(parts);
+  const cached = itemMeasurementVersions.get(item);
+  if (cached?.parts.length === parts.length && cached.parts.every((part, index) => part === parts[index])) return cached.version;
+  const version = hashGeometryParts(parts);
+  itemMeasurementVersions.set(item, { parts, version });
+  return version;
 }
 
 function measurementVersionForItems(items: readonly Item[]): string {

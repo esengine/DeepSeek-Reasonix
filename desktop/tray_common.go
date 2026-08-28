@@ -1,21 +1,5 @@
 package main
 
-func (a *App) trayLocale() string {
-	cfg, _, err := a.loadDesktopUserConfigForView()
-	if err != nil {
-		return ""
-	}
-	return cfg.DesktopLanguage()
-}
-
-func (a *App) showFromTray() {
-	a.showMainWindowFrom("tray")
-}
-
-func (a *App) quitFromTray() {
-	a.quitApp()
-}
-
 type trayLabels struct {
 	openTitle   string
 	openTooltip string

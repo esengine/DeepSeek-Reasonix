@@ -723,6 +723,9 @@ export const zhTW: Record<DictKey, string> = {
   "status.switchFolder": "{cwd}\n點擊切換專案目錄",
   "status.tokens": "tokens",
   "status.retrying": "正在重試 ({attempt}/{max})…",
+  "status.showAmounts": "顯示餘額與費用",
+  "status.hideAmounts": "隱藏餘額與費用",
+  "status.amountsSaveFailed": "無法儲存金額顯示設定",
   "status.balanceTitle": "錢包餘額",
   "status.spendTitle": "本會話估算計費費用，包含主模型、子代理和輔助呼叫",
 

@@ -6,6 +6,7 @@ import { formatMoneyLocalized } from "../lib/money";
 import { appendRateBand, rateBandLabel } from "../lib/costRateBand";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { AmountToggle } from "./AmountToggle";
 import {
   contextWindowStatus,
   formatCacheHitRate,
@@ -20,7 +21,7 @@ interface ContextWindowRingProps {
   currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
-  balance?: BalanceInfo;
+  balance?: BalanceInfo; amountsHidden?: boolean; amountsPending?: boolean; onToggleAmounts?: () => void;
 }
 
 const RING = 20;
@@ -43,7 +44,7 @@ function fmtDuration(ms: number, t: ReturnType<typeof useI18n>['t']): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
-export function ContextWindowRing({ enabled = true, context, tabId, turnCost, turnRateBand, currency, cacheHitTokens, cacheMissTokens, balance }: ContextWindowRingProps) {
+export function ContextWindowRing({ enabled = true, context, tabId, turnCost, turnRateBand, currency, cacheHitTokens, cacheMissTokens, balance, amountsHidden = false, amountsPending = false, onToggleAmounts }: ContextWindowRingProps) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -212,7 +213,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, tu
             {turnCost != null && turnCost > 0 && (
               <div className="context-ring-popover__row">
                 <span className="context-ring-popover__label">{t("status.turnCostLabel")}</span>
-                <span className="context-ring-popover__value" title={turnRateBandTitle}>{turnCostLabel}</span>
+                <span className="context-ring-popover__value" title={turnRateBandTitle}><AmountToggle label={t("status.turnCostLabel")} value={turnCostLabel} hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts} /></span>
               </div>
             )}
             {sessionCostLabel && (
@@ -224,7 +225,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, tu
                       ? t("context.sessionCostFallback")
                     : t("context.sessionCostEstimated")}
                 </span>
-                <span className="context-ring-popover__value" title={sessionRateBandTitle}>{sessionCostLabel}</span>
+                <span className="context-ring-popover__value" title={sessionRateBandTitle}><AmountToggle label={t("context.sessionCost")} value={sessionCostLabel} hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts} /></span>
               </div>
             )}
             {!sessionCost && sessionCostBucketed && (
@@ -242,7 +243,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, tu
             {balance?.available && balance.display && (
               <div className="context-ring-popover__row">
                 <span className="context-ring-popover__label">{t("status.balanceLabel")}</span>
-                <span className="context-ring-popover__value context-ring-popover__value--accent">{balance.display}</span>
+                <span className="context-ring-popover__value context-ring-popover__value--accent"><AmountToggle label={t("status.balanceLabel")} value={balance.display} hidden={amountsHidden} pending={amountsPending} onToggle={onToggleAmounts} /></span>
               </div>
             )}
           </div>

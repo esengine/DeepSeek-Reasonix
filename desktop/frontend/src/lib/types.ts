@@ -2157,6 +2157,7 @@ export interface SettingsView {
   desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   closeBehavior: string; // "background" | "quit"
   displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
+  hideAmounts?: boolean;
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
@@ -2172,19 +2173,11 @@ export interface SettingsView {
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }
 
-export interface DesktopStartupSettingsView {
-  bot: BotSettingsView;
-  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
-  desktopLayoutStyle: string; // "classic" | "workbench"
-  desktopTheme: string; // "auto" | "dark" | "light"
-  desktopThemeStyle: string;
-  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
-  displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
-  statusBarStyle: string; // "icon" | "text"
-  statusBarItems: string[]; // ordered visible status bar item ids
-  checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // compatibility field; always "stable"
-  conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
+export interface DesktopStartupSettingsView extends Pick<SettingsView,
+  "bot" | "desktopLanguage" | "desktopLayoutStyle" | "desktopTheme" | "desktopThemeStyle" |
+  "desktopTerminalTheme" | "displayMode" | "reasoningDisplayMode" | "reasoningDisplayModeExplicit" |
+  "hideAmounts" | "statusBarStyle" | "statusBarItems" | "checkUpdates" | "updateChannel" | "conversationWidth"
+> {
   configWarnings?: string[]; configWarningsRevision?: number; // load recovery notices and async delivery barrier
   configPath?: string;
 }

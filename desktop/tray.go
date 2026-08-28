@@ -10,6 +10,22 @@ import (
 	"fyne.io/systray"
 )
 
+func (a *App) trayLocale() string {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		return ""
+	}
+	return cfg.DesktopLanguage()
+}
+
+func (a *App) showFromTray() {
+	a.showMainWindowFrom("tray")
+}
+
+func (a *App) quitFromTray() {
+	a.quitApp()
+}
+
 type desktopTray struct {
 	end           func()
 	openItem      *systray.MenuItem

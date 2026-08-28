@@ -8688,6 +8688,21 @@ body > .mermaid-diagram--fullscreen {
 .statusbar__cost {
   justify-content: flex-start;
 }
+.statusbar__amount-toggle, .amount-toggle {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar__amount-toggle:focus-visible, .amount-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.statusbar__amount-toggle:disabled, .amount-toggle:disabled {
+  cursor: default;
+}
 .statusbar__balance {
   justify-content: flex-start;
 }

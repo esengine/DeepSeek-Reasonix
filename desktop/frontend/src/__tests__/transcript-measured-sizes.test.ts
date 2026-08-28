@@ -268,6 +268,10 @@ function recordRow(store: ReturnType<typeof createTranscriptMeasuredSizes>, row:
   const beforeRow = beforeRows.find((row) => row.kind === "answer")!;
   const store = createTranscriptMeasuredSizes();
   const beforeVersion = transcriptRowMeasurementVersion(beforeRow);
+  preview.text = "changed";
+  ok(transcriptRowMeasurementVersion(beforeRow) !== beforeVersion, "an in-place text patch invalidates the cached geometry fingerprint");
+  preview.text = "preview";
+  eq(transcriptRowMeasurementVersion(beforeRow), beforeVersion, "restored content recovers its semantic geometry fingerprint");
   recordRow(store, beforeRow, 88, 960);
   const after = reducer(before, {
     type: "history_items_patch",

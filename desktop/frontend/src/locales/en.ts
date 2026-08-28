@@ -953,6 +953,9 @@ export const en = {
   "status.switchFolder": "{cwd}\nClick to switch project folder",
   "status.tokens": "tokens",
   "status.retrying": "retrying ({attempt}/{max})…",
+  "status.showAmounts": "Show balance and costs",
+  "status.hideAmounts": "Hide balance and costs",
+  "status.amountsSaveFailed": "Could not save amount visibility",
   "status.balanceTitle": "Wallet balance",
   "status.spendTitle": "Estimated billable spend in this session, including model, subagent, and helper calls",
 

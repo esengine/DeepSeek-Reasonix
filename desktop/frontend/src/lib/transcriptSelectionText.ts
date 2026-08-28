@@ -61,6 +61,10 @@ function markdownRow(rowKey: string, sourceText: string, entryId?: string): Tran
   };
 }
 
+type CachedMarkdownRow = TranscriptSelectableRow & { entryId?: string };
+const answerRows = new WeakMap<object, CachedMarkdownRow>();
+const reasoningRows = new WeakMap<object, CachedMarkdownRow>();
+
 /** Stable readable projections for the structural transcript row model. */
 export function transcriptSelectableRows(
   rows: readonly TranscriptRow[],
@@ -78,15 +82,18 @@ export function transcriptSelectableRows(
       });
       continue;
     }
-    if (row.kind === "answer") {
-      selectable.push(markdownRow(rowKey, row.item.text, historyEntryIdForItemId(row.item.id)));
-      continue;
-    }
-    if (row.kind === "reasoning") {
-      selectable.push({
-        ...markdownRow(rowKey, row.item.reasoning, historyEntryIdForItemId(row.item.id)),
-        kind: "reasoning",
-      });
+    if (row.kind === "answer" || row.kind === "reasoning") {
+      const sourceText = row.kind === "answer" ? row.item.text : row.item.reasoning;
+      const entryId = historyEntryIdForItemId(row.item.id);
+      const cache = row.kind === "answer" ? answerRows : reasoningRows;
+      let cached = cache.get(row.item);
+      if (!cached || cached.entryId !== entryId || cached.rowKey !== rowKey || cached.sourceText !== sourceText) {
+        cached = markdownRow(rowKey, sourceText, entryId);
+        cached.entryId = entryId;
+        if (row.kind === "reasoning") cached.kind = "reasoning";
+        cache.set(row.item, cached);
+      }
+      selectable.push(cached);
     }
   }
   return selectable;
