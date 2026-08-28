@@ -12,6 +12,7 @@ import (
 
 // Shell capability identifiers as surfaced to hosts (doctor, desktop settings).
 const (
+	HostCapabilityGit         = "git"
 	ShellCapabilityBash       = "bash"
 	ShellCapabilityGitBash    = "git-bash"
 	ShellCapabilityPowerShell = "powershell"
@@ -31,11 +32,9 @@ const (
 	ShellSourceStandard   = "standard-path" // Program Files and friends
 )
 
-// ShellCapability is one discovered interpreter: whether it is usable on this
-// host, where it lives, how discovery found it, and — when unavailable — a
-// short stable reason for settings and diagnostics surfaces. Path and reason
-// are informational only; resolution always goes through ResolveShell.
-type ShellCapability struct {
+// ExecutableCapability is one discovered host executable: whether it is
+// usable, where it lives, how discovery found it, and why not when unavailable.
+type ExecutableCapability struct {
 	ID        string `json:"id"`
 	Variant   string `json:"variant,omitempty"`
 	Available bool   `json:"available"`
@@ -43,6 +42,10 @@ type ShellCapability struct {
 	Source    string `json:"source,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 }
+
+// ShellCapability keeps the interpreter inventory API source-compatible while
+// Git is modeled separately through GitCapabilityForPath.
+type ShellCapability = ExecutableCapability
 
 // shellInventoryTTL bounds how long a discovery snapshot stays trusted. A
 // fresh install changes the filesystem without changing config, so besides
@@ -65,6 +68,9 @@ type shellSnapshot struct {
 	psCands    []string
 	sources    map[string]string
 	caps       []ShellCapability
+	gitOnce    sync.Once
+	git        ExecutableCapability
+	gitProbe   func(string) bool
 	probeMu    sync.Mutex
 	probeCache map[string]bool
 }
@@ -168,6 +174,7 @@ func buildShellSnapshot(goos, configPath string) *shellSnapshot {
 		lookPath:   exec.LookPath,
 		exists:     fileExists,
 		isWSL:      isWindowsWSLBash,
+		gitProbe:   probeGit,
 		sources:    map[string]string{},
 		probeCache: map[string]bool{},
 	}
@@ -196,6 +203,15 @@ func ShellCapabilitiesForPath(configPath string) []ShellCapability {
 // doctor that do not own a loaded desktop configuration.
 func ShellCapabilities() []ShellCapability {
 	return ShellCapabilitiesForPath("")
+}
+
+// GitCapabilityForPath reports Git independently from the shell inventory.
+// configPath only helps portable Git for Windows discovery; Git never changes
+// the configured or resolved shell.
+func GitCapabilityForPath(configPath string) ExecutableCapability {
+	snap := defaultShellInventory.snapshot(runtime.GOOS, configPath)
+	snap.gitOnce.Do(func() { snap.git = discoverGitCapability(snap) })
+	return snap.git
 }
 
 // shellCandidate pairs an ordered discovery path with the source bucket it

@@ -13,7 +13,7 @@ import (
 // optional payload from other future execution kinds without guessing.
 type ShellExecution struct {
 	Kind         string `json:"kind"`
-	Shell        string `json:"shell,omitempty"`        // bash | git-bash | powershell | pwsh
+	Shell        string `json:"shell,omitempty"`        // bash | zsh | sh | git-bash | powershell | pwsh
 	ShellVersion string `json:"shellVersion,omitempty"` // 5.1 | 7+ (PowerShell only)
 	Platform     string `json:"platform,omitempty"`     // windows | darwin | linux
 	// SupportsAndAnd is explicit even when false so UIs can show PowerShell 5.1
@@ -76,6 +76,8 @@ const (
 // Shell name values for ShellExecution.Shell.
 const (
 	ShellNameBash       = "bash"
+	ShellNameZsh        = "zsh"
+	ShellNameSh         = "sh"
 	ShellNameGitBash    = "git-bash"
 	ShellNamePowerShell = "powershell"
 	ShellNamePwsh       = "pwsh"

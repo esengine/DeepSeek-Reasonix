@@ -247,6 +247,51 @@ func TestUnixShellCapabilitiesReportsBashZshAndSh(t *testing.T) {
 	}
 }
 
+func TestDiscoverGitCapabilityIsIndependentFromShells(t *testing.T) {
+	snap := &shellSnapshot{
+		goos:     "darwin",
+		lookPath: fakeLookPath(map[string]string{}),
+		exists: func(path string) bool {
+			return path == "/opt/homebrew/bin/git"
+		},
+	}
+	got := discoverGitCapability(snap)
+	if !got.Available || got.ID != HostCapabilityGit || got.Path != "/opt/homebrew/bin/git" || got.Source != ShellSourceStandard {
+		t.Fatalf("Git capability = %+v, want independent Homebrew standard path", got)
+	}
+}
+
+func TestDiscoverGitCapabilityRejectsUnusableShim(t *testing.T) {
+	snap := &shellSnapshot{
+		goos:     "darwin",
+		lookPath: fakeLookPath(map[string]string{"git": "/usr/bin/git"}),
+		exists:   func(path string) bool { return path == "/usr/bin/git" },
+		gitProbe: func(string) bool { return false },
+	}
+	got := discoverGitCapability(snap)
+	if got.Available || got.Reason != "not-usable" {
+		t.Fatalf("Git capability = %+v, want unusable shim rejected", got)
+	}
+}
+
+func TestGitCandidatesFromWindowsBashFindInstallRoot(t *testing.T) {
+	got := gitCandidatesFromWindowsBash(`C:\Program Files\Git\bin\bash.exe`)
+	norm := func(path string) string {
+		return strings.ToLower(strings.ReplaceAll(filepath.Clean(path), `\`, "/"))
+	}
+	want := norm(`C:\Program Files\Git\cmd\git.exe`)
+	found := false
+	for _, candidate := range got {
+		if norm(candidate) == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("candidates = %v, missing %q", got, want)
+	}
+}
+
 // TestShellCapabilitiesShape ensures the exported capability report matches
 // the platform: git-bash plus both PowerShells on Windows, and bash/zsh/sh on
 // Unix — with unavailable entries carrying a reason, never an error.

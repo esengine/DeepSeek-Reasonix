@@ -42,8 +42,10 @@ func (a *App) defaultSettingsView() SettingsView {
 			EffectiveShell:      sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
 			ResolvedShell:       sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
 			ShellCapabilities:   sandboxCapabilityViews(""),
+			GitCapability:       gitCapabilityView(""),
 			ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS, wingetAvailable()),
-			ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS)},
+			ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
+			GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS)},
 		Agent: AgentView{
 			PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth,
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,

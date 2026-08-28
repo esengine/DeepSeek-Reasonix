@@ -1874,12 +1874,14 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
-  effectiveShell?: string; // bound shell: "bash" | "git-bash" | "powershell" | "pwsh"
+  effectiveShell?: string; // bound shell: "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
   resolvedShell?: string; // shell a reload would pick now
   shellReloadRequired?: boolean;
   shellCapabilities: ShellCapabilityView[];
+  gitCapability?: ShellCapabilityView | null;
   shellInstallAction?: ShellInstallActionView | null;
   shellRepairGuidance?: { manager: string; command?: string } | null;
+  gitRepairGuidance?: { manager: string; command?: string } | null;
 }
 // One discovered interpreter: usable on this host, where, and why not.
 export interface ShellCapabilityView {
@@ -1890,7 +1892,6 @@ export interface ShellCapabilityView {
   source?: string;
   reason?: string;
 }
-
 // Optional helper install the sandbox section may offer (Windows only).
 export interface ShellInstallActionView {
   id: string; // "git-for-windows"
@@ -1898,7 +1899,6 @@ export interface ShellInstallActionView {
   available: boolean;
   manualUrl?: string;
 }
-
 // Structured outcome of InstallShellSupport.
 export interface ShellInstallResult {
   status: string; // "installed" | "already_available" | "cancelled" | "manual_required" | "busy" | "failed" | "unsupported_platform"

@@ -5,7 +5,7 @@ type PreviewPlatform = "darwin" | "windows" | "linux" | "";
 // Browser-preview stand-ins for the backend shell inventory and repair policy.
 // Keeping this mock owner outside bridge.ts preserves that generated-style
 // boundary's file-size ratchet as the Settings contract grows.
-export function browserPreviewShellSupport(platform: PreviewPlatform): Pick<SandboxView, "shellCapabilities" | "shellInstallAction" | "shellRepairGuidance"> {
+export function browserPreviewShellSupport(platform: PreviewPlatform): Pick<SandboxView, "shellCapabilities" | "gitCapability" | "shellInstallAction" | "shellRepairGuidance" | "gitRepairGuidance"> {
   const shellCapabilities: ShellCapabilityView[] = platform !== "windows" ? [
     { id: "bash", variant: "system", available: true, path: "/bin/bash", source: "path" },
     { id: "zsh", variant: "system", available: platform === "darwin", ...(platform === "darwin" ? { path: "/bin/zsh", source: "standard-path" } : { reason: "not-found" }) },
@@ -17,9 +17,11 @@ export function browserPreviewShellSupport(platform: PreviewPlatform): Pick<Sand
   ];
   return {
     shellCapabilities,
+    gitCapability: { id: "git", available: true, path: platform === "windows" ? "C:\\Program Files\\Git\\cmd\\git.exe" : "/usr/bin/git", source: "path" },
     shellInstallAction: platform === "windows" ? { id: "git-for-windows", mode: "winget-user", available: true } : null,
-    shellRepairGuidance: platform === "darwin"
-      ? { manager: "homebrew", command: "brew install bash" }
-      : platform === "linux" ? { manager: "apt", command: "apt-get install bash" } : null,
+    shellRepairGuidance: platform === "linux" ? { manager: "apt", command: "apt-get install bash" } : null,
+    gitRepairGuidance: platform === "darwin"
+      ? { manager: "homebrew", command: "brew install git" }
+      : platform === "linux" ? { manager: "apt", command: "apt-get install git" } : null,
   };
 }

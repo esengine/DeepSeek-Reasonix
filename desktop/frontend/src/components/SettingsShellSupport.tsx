@@ -23,6 +23,8 @@ function effectiveShellLabel(value: string, t: ReturnType<typeof useT>): string 
     case "pwsh": return t("settings.effectiveShellPwsh");
     case "powershell": return t("settings.effectiveShellPowershell");
     case "bash": return t("settings.effectiveShellBash");
+    case "zsh": return t("settings.effectiveShellZsh");
+    case "sh": return t("settings.effectiveShellSh");
     case "auto": return t("common.auto");
     default: return value.trim() || t("common.none");
   }
@@ -35,8 +37,38 @@ function capabilityLabel(id: string, t: ReturnType<typeof useT>): string {
     case "pwsh": return t("settings.effectiveShellPwsh");
     case "zsh": return t("settings.shellCapabilityZsh");
     case "sh": return t("settings.shellCapabilitySh");
+    case "git": return t("settings.gitCapability");
     default: return t("settings.effectiveShellBash");
   }
+}
+
+function RepairCard({ message, guidance, busy, reloadSession }: {
+  message: string;
+  guidance?: { manager: string; command?: string } | null;
+  busy: boolean;
+  reloadSession: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="shell-support__card">
+      <div className="shell-support__hint">{message}</div>
+      {guidance?.command && (
+        <>
+          <div className="shell-support__repair-command">
+            <code>{guidance.command}</code>
+            <CopyButton text={guidance.command} className="btn btn--small" label={t("settings.shellCopyCommand")} />
+          </div>
+          <div className="shell-support__repair-safety">{t("settings.shellRepairCommandHint")}</div>
+        </>
+      )}
+      <div className="shell-support__actions">
+        <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
+          <RefreshCw size={13} aria-hidden="true" />
+          <span>{t("settings.shellRepairReload")}</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function installNote(status: string, reason: string | undefined, manualUrl: string | undefined, t: ReturnType<typeof useT>): InstallNote {
@@ -105,9 +137,12 @@ export function ShellInterpreterFields({
 
   const capabilities = asArray(sb.shellCapabilities);
   const gitBash = capabilities.find((cap) => cap.id === "git-bash");
+  const git = sb.gitCapability ?? null;
   const bashMissing = windows ? !gitBash?.available : !capabilities.some((cap) => cap.id === "bash" && cap.available);
   const action = windows ? sb.shellInstallAction ?? null : null;
   const guidance = windows ? null : sb.shellRepairGuidance ?? null;
+  const gitGuidance = windows ? null : sb.gitRepairGuidance ?? null;
+  const nativeFallback = sb.resolvedShell === "zsh" || sb.resolvedShell === "sh";
   // The install entry exists only on Windows; macOS and Linux detect and guide.
   const showInstallCard = windows && action != null && !gitBash?.available;
 
@@ -159,6 +194,7 @@ export function ShellInterpreterFields({
         <div className="shell-support">
           <div className="settings-readonly-field shell-support__detection" aria-label={t("settings.shellDetection")}>
             {capabilities.map((cap) => <DetectionRow key={cap.id} cap={cap} t={t} />)}
+            {git && <DetectionRow cap={git} t={t} />}
           </div>
           {showInstallCard && (
             <div className="shell-support__card">
@@ -195,23 +231,11 @@ export function ShellInterpreterFields({
               )}
             </div>
           )}
-          {!windows && bashMissing && (
-            <div className="shell-support__card">
-              <div className="shell-support__hint">{t("settings.shellBashManualRepair")}</div>
-              {guidance?.command && (
-                <div className="shell-support__repair-command">
-                  <code>{guidance.command}</code>
-                  <CopyButton text={guidance.command} className="btn btn--small" label={t("settings.shellCopyCommand")} />
-                </div>
-              )}
-              <div className="shell-support__repair-safety">{t("settings.shellRepairCommandHint")}</div>
-              <div className="shell-support__actions">
-                <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
-                  <RefreshCw size={13} aria-hidden="true" />
-                  <span>{t("settings.shellRepairReload")}</span>
-                </button>
-              </div>
-            </div>
+          {!windows && bashMissing && !nativeFallback && (
+            <RepairCard message={t("settings.shellBashManualRepair")} guidance={guidance} busy={busy} reloadSession={reloadSession} />
+          )}
+          {!windows && git && !git.available && (
+            <RepairCard message={t("settings.gitManualRepair")} guidance={gitGuidance} busy={busy} reloadSession={reloadSession} />
           )}
           {note && (
             <div className={`shell-support__note shell-support__note--${note.tone}`} role="status">

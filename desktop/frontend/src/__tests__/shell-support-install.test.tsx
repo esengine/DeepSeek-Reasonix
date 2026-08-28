@@ -322,6 +322,7 @@ function windowsSettings(overrides: {
       { id: "zsh", variant: "system", available: false, reason: "not-found" },
       { id: "sh", variant: "system", available: true, path: "/bin/sh", source: "standard-path" },
     ],
+    gitCapability: { id: "git", available: true, path: "/usr/bin/git", source: "standard-path" },
     shellInstallAction: null,
     shellRepairGuidance: { manager: "apt", command: "apt-get install bash" },
   };
@@ -372,8 +373,8 @@ function windowsSettings(overrides: {
   });
 }
 
-// Scenario 6: macOS reports Bash, zsh, and sh but does not show package-manager
-// guidance while Bash is already available.
+// Scenario 6: macOS falls back to zsh when Bash is missing, while Git remains
+// a separate capability with its own copy-only Homebrew repair command.
 {
   const rootEl = document.createElement("div");
   document.body.appendChild(rootEl);
@@ -381,13 +382,17 @@ function windowsSettings(overrides: {
   const macSettings = baseSettings("standard");
   macSettings.sandbox = {
     ...macSettings.sandbox,
+    effectiveShell: "zsh",
+    resolvedShell: "zsh",
     shellCapabilities: [
-      { id: "bash", variant: "system", available: true, path: "/bin/bash", source: "standard-path" },
+      { id: "bash", variant: "system", available: false, reason: "not-found" },
       { id: "zsh", variant: "system", available: true, path: "/bin/zsh", source: "standard-path" },
       { id: "sh", variant: "system", available: true, path: "/bin/sh", source: "standard-path" },
     ],
+    gitCapability: { id: "git", available: false, reason: "not-found" },
     shellInstallAction: null,
-    shellRepairGuidance: { manager: "homebrew", command: "brew install bash" },
+    shellRepairGuidance: null,
+    gitRepairGuidance: { manager: "homebrew", command: "brew install git" },
   };
   window.go = {
     main: {
@@ -411,7 +416,16 @@ function windowsSettings(overrides: {
   await waitFor("macOS shell inventory", () => rootEl.textContent?.includes("POSIX sh") === true);
   ok(rootEl.textContent?.includes("Bash") === true && rootEl.textContent?.includes("zsh") === true,
     "macOS detection reports Bash and zsh");
-  ok(!rootEl.textContent?.includes("brew install bash"), "macOS hides repair guidance while Bash is available");
+  ok(!rootEl.textContent?.includes("brew install bash") && !rootEl.textContent?.includes("Bash is not detected"),
+    "macOS native zsh fallback does not request a Bash install");
+  ok(rootEl.textContent?.includes("Git") === true && rootEl.textContent?.includes("brew install git") === true,
+    "macOS missing Git shows an independent Homebrew Git repair command");
+  const gitCopyButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Copy command"));
+  await act(async () => {
+    gitCopyButton!.click();
+    await flushPromises();
+  });
+  eq(copiedCommands.at(-1), "brew install git", "macOS Git repair copies brew install git only");
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
     "macOS never renders the Windows install entry");
   await act(async () => {

@@ -77,19 +77,21 @@ type ShellInstallActionView struct {
 // controller bound (EffectiveShell), and what a reload would pick now
 // (ResolvedShell) — ShellReloadRequired marks the divergence.
 type SandboxView struct {
-	Bash                   string                   `json:"bash"`
-	Network                bool                     `json:"network"`
-	WorkspaceRoot          string                   `json:"workspaceRoot"`
-	AllowWrite             []string                 `json:"allowWrite"`
-	EffectiveWorkspaceRoot string                   `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string                 `json:"effectiveWriteRoots"`
-	Shell                  string                   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string                   `json:"effectiveShell,omitempty"`
-	ResolvedShell          string                   `json:"resolvedShell,omitempty"`
-	ShellReloadRequired    bool                     `json:"shellReloadRequired"`
-	ShellCapabilities      []ShellCapabilityView    `json:"shellCapabilities"`
-	ShellInstallAction     *ShellInstallActionView  `json:"shellInstallAction,omitempty"`
-	ShellRepairGuidance    *ShellRepairGuidanceView `json:"shellRepairGuidance,omitempty"`
+	Bash                   string                  `json:"bash"`
+	Network                bool                    `json:"network"`
+	WorkspaceRoot          string                  `json:"workspaceRoot"`
+	AllowWrite             []string                `json:"allowWrite"`
+	EffectiveWorkspaceRoot string                  `json:"effectiveWorkspaceRoot"`
+	EffectiveWriteRoots    []string                `json:"effectiveWriteRoots"`
+	Shell                  string                  `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	EffectiveShell         string                  `json:"effectiveShell,omitempty"`
+	ResolvedShell          string                  `json:"resolvedShell,omitempty"`
+	ShellReloadRequired    bool                    `json:"shellReloadRequired"`
+	ShellCapabilities      []ShellCapabilityView   `json:"shellCapabilities"`
+	GitCapability          *ShellCapabilityView    `json:"gitCapability,omitempty"`
+	ShellInstallAction     *ShellInstallActionView `json:"shellInstallAction,omitempty"`
+	ShellRepairGuidance    *RepairGuidanceView     `json:"shellRepairGuidance,omitempty"`
+	GitRepairGuidance      *RepairGuidanceView     `json:"gitRepairGuidance,omitempty"`
 }
 
 // shellInstallManager serializes helper installs: at most one installer child
@@ -407,12 +409,20 @@ func (a *App) sandboxViewFor(cfg *config.Config, ctrl control.SessionAPI, writeR
 		ResolvedShell:       sandboxEffectiveShellView(resolved),
 		ShellReloadRequired: bound != resolved,
 		ShellCapabilities:   sandboxCapabilityViews(cfg.Tools.Shell.Path),
+		GitCapability:       gitCapabilityView(cfg.Tools.Shell.Path),
 		ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS, wingetAvailable()),
 		ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
+		GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS),
 	}
 }
 
 func sandboxEffectiveShellView(sh sandbox.Shell) string {
+	if sh.Kind == sandbox.ShellZsh {
+		return "zsh"
+	}
+	if sh.Kind == sandbox.ShellSh {
+		return "sh"
+	}
 	if sh.Kind == sandbox.ShellPowerShell {
 		if sh.SupportsChaining() {
 			return "pwsh"
@@ -424,6 +434,14 @@ func sandboxEffectiveShellView(sh sandbox.Shell) string {
 		return "git-bash"
 	}
 	return "bash"
+}
+
+func gitCapabilityView(configPath string) *ShellCapabilityView {
+	capability := sandbox.GitCapabilityForPath(configPath)
+	return &ShellCapabilityView{
+		ID: capability.ID, Available: capability.Available, Path: capability.Path,
+		Source: capability.Source, Reason: capability.Reason,
+	}
 }
 
 // sandboxCapabilityViews projects the discovered shell inventory for the

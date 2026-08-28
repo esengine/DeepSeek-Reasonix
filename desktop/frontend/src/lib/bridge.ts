@@ -4709,7 +4709,8 @@ function makeMockApp(): AppBindings {
           settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell,
             resolvedShell: effectiveShell, shellReloadRequired: false,
             shellCapabilities: prev?.shellCapabilities ?? shellSupport.shellCapabilities, shellInstallAction: prev?.shellInstallAction ?? shellSupport.shellInstallAction,
-            shellRepairGuidance: prev?.shellRepairGuidance ?? shellSupport.shellRepairGuidance };
+            shellRepairGuidance: prev?.shellRepairGuidance ?? shellSupport.shellRepairGuidance,
+            gitCapability: prev?.gitCapability ?? shellSupport.gitCapability, gitRepairGuidance: prev?.gitRepairGuidance ?? shellSupport.gitRepairGuidance };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;

@@ -58,6 +58,10 @@ func classifyShell(sh sandbox.Shell) (name, version string) {
 			return tool.ShellNamePwsh, tool.ShellVersionPS7
 		}
 		return tool.ShellNamePowerShell, tool.ShellVersionPS51
+	case sandbox.ShellZsh:
+		return tool.ShellNameZsh, ""
+	case sandbox.ShellSh:
+		return tool.ShellNameSh, ""
 	default:
 		if isGitBashPath(sh.Path) {
 			return tool.ShellNameGitBash, ""

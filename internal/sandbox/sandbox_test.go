@@ -147,6 +147,8 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, never, ShellPowerShell, ""},
 		{"windows, nothing found", "windows", onPath(), nil, never, never, never, ShellBash, ""},
 		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, never, ShellBash, ""},
+		{"macOS, no bash → zsh", "darwin", onPath("zsh", "sh"), nil, never, always, never, ShellZsh, `C:\fake\zsh.exe`},
+		{"macOS, no bash or zsh → sh", "darwin", onPath("sh"), nil, never, always, never, ShellSh, `C:\fake\sh.exe`},
 		{"wsl bash on PATH skipped for git-bash", "windows", onPath("bash", "powershell"), gitBash, always, always, wslIsPathBash, ShellBash, `C:\fake\Git\bin\bash.exe`},
 		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
 	}

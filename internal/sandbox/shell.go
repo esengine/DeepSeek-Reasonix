@@ -32,14 +32,21 @@ type ShellKind int
 const (
 	ShellBash ShellKind = iota
 	ShellPowerShell
+	ShellZsh
+	ShellSh
 )
 
 func (k ShellKind) String() string {
-	if k == ShellPowerShell {
-		return "powershell"
+	names := [...]string{"bash", "powershell", "zsh", "sh"}
+	if int(k) >= 0 && int(k) < len(names) {
+		return names[k]
 	}
 	return "bash"
 }
+
+// IsPOSIX reports whether this interpreter accepts the POSIX-family command
+// path used by the bash tool. zsh and sh are macOS fallbacks, not PowerShell.
+func (k ShellKind) IsPOSIX() bool { return k != ShellPowerShell }
 
 // Shell is the resolved interpreter the bash tool executes commands with: a kind
 // (so callers can adapt prompts) and the executable to invoke.
@@ -66,9 +73,22 @@ func ResolveShell(prefer, path string, warn io.Writer) Shell {
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
 func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
+	findPOSIX := func(name string, kind ShellKind) (Shell, bool) {
+		if p, err := lookPath(name); err == nil && !isWSL(p) && probe(p) {
+			return Shell{Kind: kind, Path: p}, true
+		}
+		if goos != "windows" {
+			for _, p := range []string{"/bin/" + name, "/usr/bin/" + name} {
+				if exists(p) && probe(p) {
+					return Shell{Kind: kind, Path: p}, true
+				}
+			}
+		}
+		return Shell{}, false
+	}
 	findBash := func() (Shell, bool) {
-		if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
-			return Shell{Kind: ShellBash, Path: p}, true
+		if sh, ok := findPOSIX("bash", ShellBash); ok {
+			return sh, true
 		}
 		for _, p := range winBashCandidates {
 			if exists(p) && probe(p) {
@@ -94,17 +114,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		}
 		return Shell{}, false
 	}
-	auto := func() Shell {
-		if sh, ok := findBash(); ok {
-			return sh
-		}
-		if goos == "windows" {
-			if sh, ok := findPowerShell([]string{"pwsh", "powershell"}); ok {
-				return sh
-			}
-		}
-		return Shell{Kind: ShellBash, Path: "bash"}
-	}
+	auto := func() Shell { return autoDetectedShell(goos, findBash, findPOSIX, findPowerShell) }
 
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto":
@@ -138,6 +148,28 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		}
 		return auto()
 	}
+}
+
+func autoDetectedShell(goos string, findBash func() (Shell, bool), findPOSIX func(string, ShellKind) (Shell, bool), findPowerShell func([]string) (Shell, bool)) Shell {
+	if sh, ok := findBash(); ok {
+		return sh
+	}
+	if goos == "darwin" {
+		for _, fallback := range []struct {
+			name string
+			kind ShellKind
+		}{{"zsh", ShellZsh}, {"sh", ShellSh}} {
+			if sh, ok := findPOSIX(fallback.name, fallback.kind); ok {
+				return sh
+			}
+		}
+	}
+	if goos == "windows" {
+		if sh, ok := findPowerShell([]string{"pwsh", "powershell"}); ok {
+			return sh
+		}
+	}
+	return Shell{Kind: ShellBash, Path: "bash"}
 }
 
 func warnMissingShell(warn io.Writer, prefer string) {

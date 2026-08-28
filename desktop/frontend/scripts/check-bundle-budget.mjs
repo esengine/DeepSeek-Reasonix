@@ -231,8 +231,10 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The shell support owner component (detection, per-session vs after-reload
 // rows, Windows-only install card) replaces the inline Git-Bash block and
 // measures 2417.4 KiB raw; retain 0.1 KiB of headroom.
-// The same cross-platform preview contract brings the raw path to 2418.60 KiB;
-// retain 0.10 KiB of headroom without widening unrelated chunk ceilings.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_418.7 : 2_418.7;
+// The same cross-platform preview contract brings the raw path to 2418.60 KiB.
+// Independent Git capability guidance and native macOS shell fallback bring
+// the measured path to 2419.1 KiB; retain 0.1 KiB of bounded headroom without
+// widening unrelated chunk ceilings.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_419.2 : 2_419.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -37,6 +37,18 @@ func TestDescriptorFromShell(t *testing.T) {
 			wantAndAnd: true,
 		},
 		{
+			name:       "macOS zsh fallback",
+			sh:         sandbox.Shell{Kind: sandbox.ShellZsh, Path: "/bin/zsh"},
+			wantShell:  tool.ShellNameZsh,
+			wantAndAnd: true,
+		},
+		{
+			name:       "POSIX sh fallback",
+			sh:         sandbox.Shell{Kind: sandbox.ShellSh, Path: "/bin/sh"},
+			wantShell:  tool.ShellNameSh,
+			wantAndAnd: true,
+		},
+		{
 			name:        "windows powershell 5.1",
 			sh:          sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`},
 			wantShell:   tool.ShellNamePowerShell,

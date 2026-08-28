@@ -469,6 +469,9 @@ func TestSettingsSandboxViewShellContract(t *testing.T) {
 	if len(sb.ShellCapabilities) == 0 {
 		t.Fatal("shellCapabilities should report at least one interpreter")
 	}
+	if sb.GitCapability == nil || sb.GitCapability.ID != sandbox.HostCapabilityGit {
+		t.Fatalf("Git capability = %+v, want independent Git report", sb.GitCapability)
+	}
 	for _, cap := range sb.ShellCapabilities {
 		if cap.ID == "" {
 			t.Fatalf("capability without id: %+v", cap)
@@ -484,12 +487,25 @@ func TestSettingsSandboxViewShellContract(t *testing.T) {
 		if sb.ShellRepairGuidance != nil {
 			t.Fatalf("repair guidance on Windows = %+v, want install action only", sb.ShellRepairGuidance)
 		}
+		if sb.GitRepairGuidance != nil {
+			t.Fatalf("Git repair guidance on Windows = %+v, want Git for Windows action only", sb.GitRepairGuidance)
+		}
+	} else if runtime.GOOS == "darwin" {
+		if sb.ShellRepairGuidance != nil {
+			t.Fatalf("macOS shell guidance = %+v, want native zsh/sh fallback", sb.ShellRepairGuidance)
+		}
+		if sb.GitRepairGuidance == nil || sb.GitRepairGuidance.Command != "brew install git" {
+			t.Fatalf("macOS Git guidance = %+v, want Homebrew Git command", sb.GitRepairGuidance)
+		}
 	} else {
 		if sb.ShellRepairGuidance == nil {
 			t.Fatalf("repair guidance on %s is nil", runtime.GOOS)
 		}
 		if strings.Contains(strings.ToLower(sb.ShellRepairGuidance.Command), "sudo") {
 			t.Fatalf("repair guidance must never prescribe sudo: %+v", sb.ShellRepairGuidance)
+		}
+		if sb.GitRepairGuidance == nil || strings.Contains(strings.ToLower(sb.GitRepairGuidance.Command), "sudo") {
+			t.Fatalf("Git repair guidance must exist without sudo: %+v", sb.GitRepairGuidance)
 		}
 	}
 }
