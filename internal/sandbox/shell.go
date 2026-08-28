@@ -64,7 +64,7 @@ type Shell struct {
 // Discovery (candidate ordering, probing) is served by the process-wide shell
 // inventory snapshot, so repeated calls share one probe pass for 30 seconds.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	snap := defaultShellInventory.snapshot(runtime.GOOS, path)
+	snap := defaultShellInventory.snapshot(runtime.GOOS, prefer, path)
 	return resolveShell(prefer, path, warn, snap.goos, snap.lookPath, snap.exists, snap.bashCands, snap.psCands, snap.probe, snap.isWSL)
 }
 

@@ -23,6 +23,10 @@ func discoverGitCapability(snap *shellSnapshot) ExecutableCapability {
 		if result, ok := probes[key]; ok {
 			return result
 		}
+		if snap.gitPreflight != nil && !snap.gitPreflight(path) {
+			probes[key] = false
+			return false
+		}
 		result := snap.gitProbe == nil || snap.gitProbe(path)
 		probes[key] = result
 		return result

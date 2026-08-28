@@ -162,8 +162,8 @@ func (a *App) sandboxViewFor(cfg *config.Config, ctrl control.SessionAPI, writeR
 		Shell: shell, EffectiveShell: sandboxEffectiveShellView(bound),
 		ResolvedShell:       sandboxEffectiveShellView(resolved),
 		ShellReloadRequired: bound != resolved,
-		ShellCapabilities:   sandboxCapabilityViews(cfg.Tools.Shell.Path),
-		GitCapability:       gitCapabilityView(cfg.Tools.Shell.Path),
+		ShellCapabilities:   sandboxCapabilityViews(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path),
+		GitCapability:       gitCapabilityView(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path),
 		ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS),
 		ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
 		GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS),
@@ -190,8 +190,8 @@ func sandboxEffectiveShellView(sh sandbox.Shell) string {
 	return "bash"
 }
 
-func gitCapabilityView(configPath string) *ShellCapabilityView {
-	capability := sandbox.GitCapabilityForPath(configPath)
+func gitCapabilityView(prefer, configPath string) *ShellCapabilityView {
+	capability := sandbox.GitCapabilityForConfig(prefer, configPath)
 	return &ShellCapabilityView{
 		ID: capability.ID, Available: capability.Available, Path: capability.Path,
 		Source: capability.Source, Reason: capability.Reason,
@@ -201,8 +201,8 @@ func gitCapabilityView(configPath string) *ShellCapabilityView {
 // sandboxCapabilityViews projects the discovered shell inventory for the
 // settings surface. The slice is never nil so the Wails binding always
 // encodes a JSON array, not null.
-func sandboxCapabilityViews(configPath string) []ShellCapabilityView {
-	caps := sandbox.ShellCapabilitiesForPath(configPath)
+func sandboxCapabilityViews(prefer, configPath string) []ShellCapabilityView {
+	caps := sandbox.ShellCapabilitiesForConfig(prefer, configPath)
 	out := make([]ShellCapabilityView, 0, len(caps))
 	for _, cap := range caps {
 		out = append(out, ShellCapabilityView{

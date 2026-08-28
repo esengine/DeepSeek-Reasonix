@@ -59,7 +59,7 @@ func TestWindowsBashCandidateOrder(t *testing.T) {
 	// "exists", so the config candidate survives sanitization.
 	exists := func(p string) bool { return strings.EqualFold(p, `E:\Portable\Git\bin\bash.exe`) }
 
-	got, sources := windowsBashCandidateSources(`E:\Portable\Git\git-bash.exe`, lookPath, exists)
+	got, sources := windowsBashCandidateSources("auto", `E:\Portable\Git\git-bash.exe`, lookPath, exists)
 	if len(got) == 0 {
 		t.Fatal("expected candidates")
 	}
@@ -87,6 +87,31 @@ func TestWindowsBashCandidateOrder(t *testing.T) {
 	}
 }
 
+func TestConfiguredWindowsBashPathMatchesPreference(t *testing.T) {
+	exists := func(path string) bool {
+		return strings.EqualFold(path, `E:\Portable\Git\bin\bash.exe`)
+	}
+	tests := []struct {
+		name   string
+		prefer string
+		path   string
+		want   string
+	}{
+		{"auto accepts bash", "auto", `E:\Portable\Git\bin\bash.exe`, `E:\Portable\Git\bin\bash.exe`},
+		{"auto rewrites git bash", "auto", `E:\Portable\Git\git-bash.exe`, `E:\Portable\Git\bin\bash.exe`},
+		{"auto rejects stale pwsh", "auto", `C:\Program Files\PowerShell\7\pwsh.exe`, ""},
+		{"powershell rejects stale bash", "powershell", `E:\Portable\Git\bin\bash.exe`, ""},
+		{"forced bash accepts custom wrapper", "bash", `E:\Custom\shell-wrapper.exe`, `E:\Custom\shell-wrapper.exe`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := configuredWindowsBashPath(test.prefer, test.path, exists); got != test.want {
+				t.Fatalf("configuredWindowsBashPath(%q, %q) = %q, want %q", test.prefer, test.path, got, test.want)
+			}
+		})
+	}
+}
+
 // TestWindowsBashCandidatesDedupeAndWSLExclusion exercises dedupe (the same
 // path reachable through two buckets) and the %SystemRoot% WSL launcher
 // exclusion, both of which need a Windows host to observe.
@@ -98,7 +123,7 @@ func TestWindowsBashCandidatesDedupeAndWSLExclusion(t *testing.T) {
 	lookPath := fakeLookPath(map[string]string{
 		"git.exe": `C:\Program Files\Git\cmd\git.exe`,
 	})
-	got, _ := windowsBashCandidateSources("", lookPath, fileExists)
+	got, _ := windowsBashCandidateSources("auto", "", lookPath, fileExists)
 	seen := map[string]bool{}
 	for _, p := range got {
 		key := strings.ToLower(p)
@@ -121,14 +146,14 @@ func TestShellInventoryCache(t *testing.T) {
 	var builds sync.Mutex
 	buildCount := 0
 	release := make(chan struct{})
-	inv.build = func(goos, configPath string) *shellSnapshot {
+	inv.build = func(goos, prefer, configPath string) *shellSnapshot {
 		builds.Lock()
 		buildCount++
 		builds.Unlock()
 		if configPath == "slow" {
 			<-release
 		}
-		return &shellSnapshot{key: shellInventoryKey(goos, configPath), builtAt: time.Now(), probeCache: map[string]bool{}}
+		return &shellSnapshot{key: shellInventoryKey(goos, prefer, configPath), builtAt: time.Now(), probeCache: map[string]bool{}}
 	}
 
 	// Singleflight: concurrent snapshot() calls for one key build once.
@@ -137,7 +162,7 @@ func TestShellInventoryCache(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = inv.snapshot("windows", "")
+			_ = inv.snapshot("windows", "auto", "")
 		}()
 	}
 	// The first build ("") does not block, so wait for the burst to finish.
@@ -150,7 +175,7 @@ func TestShellInventoryCache(t *testing.T) {
 	builds.Unlock()
 
 	// Within the TTL the cached entry is served without a rebuild.
-	_ = inv.snapshot("windows", "")
+	_ = inv.snapshot("windows", "auto", "")
 	builds.Lock()
 	count := buildCount
 	builds.Unlock()
@@ -158,13 +183,23 @@ func TestShellInventoryCache(t *testing.T) {
 		t.Fatalf("TTL hit rebuilt: %d", count)
 	}
 
-	// A different config path is a different cache key.
-	_ = inv.snapshot("windows", "other")
+	// A different preference is a different cache key even when the configured
+	// path stays the same, because only Bash preferences may consume that path.
+	_ = inv.snapshot("windows", "bash", "")
 	builds.Lock()
 	count = buildCount
 	builds.Unlock()
 	if count != 2 {
-		t.Fatalf("different key should rebuild: %d", count)
+		t.Fatalf("different preference should rebuild: %d", count)
+	}
+
+	// A different config path is also a different cache key.
+	_ = inv.snapshot("windows", "auto", "other")
+	builds.Lock()
+	count = buildCount
+	builds.Unlock()
+	if count != 3 {
+		t.Fatalf("different path should rebuild: %d", count)
 	}
 
 	// Invalidation forces a rebuild and drops a stale in-flight result.
@@ -172,7 +207,7 @@ func TestShellInventoryCache(t *testing.T) {
 	inflight.Add(1)
 	go func() {
 		defer inflight.Done()
-		_ = inv.snapshot("windows", "slow")
+		_ = inv.snapshot("windows", "auto", "slow")
 	}()
 	// Wait until the slow build has started, then invalidate under it.
 	deadline := time.Now().Add(2 * time.Second)
@@ -197,11 +232,11 @@ func TestShellInventoryCache(t *testing.T) {
 	}
 
 	// And the next lookup builds fresh.
-	_ = inv.snapshot("windows", "")
+	_ = inv.snapshot("windows", "auto", "")
 	builds.Lock()
 	count = buildCount
 	builds.Unlock()
-	if count != 4 {
+	if count != 5 {
 		t.Fatalf("post-invalidation lookup should rebuild: %d builds", count)
 	}
 }
@@ -271,6 +306,34 @@ func TestDiscoverGitCapabilityRejectsUnusableShim(t *testing.T) {
 	got := discoverGitCapability(snap)
 	if got.Available || got.Reason != "not-usable" {
 		t.Fatalf("Git capability = %+v, want unusable shim rejected", got)
+	}
+}
+
+func TestDiscoverGitCapabilityPreflightRejectsAppleShimWithoutRunningIt(t *testing.T) {
+	preflightCalls := 0
+	probeCalls := 0
+	snap := &shellSnapshot{
+		goos:     "darwin",
+		lookPath: fakeLookPath(map[string]string{"git": "/usr/bin/git"}),
+		exists:   func(path string) bool { return path == "/usr/bin/git" },
+		gitPreflight: func(path string) bool {
+			preflightCalls++
+			return false
+		},
+		gitProbe: func(string) bool {
+			probeCalls++
+			return true
+		},
+	}
+	got := discoverGitCapability(snap)
+	if got.Available || got.Reason != "not-usable" {
+		t.Fatalf("Git capability = %+v, want inactive Apple shim rejected", got)
+	}
+	if preflightCalls != 1 {
+		t.Fatalf("Apple shim preflight calls = %d, want one cached decision", preflightCalls)
+	}
+	if probeCalls != 0 {
+		t.Fatalf("git --version probe ran %d times after preflight rejection", probeCalls)
 	}
 }
 

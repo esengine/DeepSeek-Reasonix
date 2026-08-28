@@ -44,7 +44,7 @@ type ExecutableCapability struct {
 }
 
 // ShellCapability keeps the interpreter inventory API source-compatible while
-// Git is modeled separately through GitCapabilityForPath.
+// Git is modeled separately through GitCapabilityForConfig.
 type ShellCapability = ExecutableCapability
 
 // shellInventoryTTL bounds how long a discovery snapshot stays trusted. A
@@ -58,21 +58,22 @@ const shellInventoryTTL = 30 * time.Second
 // immutable once built, so concurrent resolutions share the same probe cache
 // instead of each spawning `bash -c true` health checks.
 type shellSnapshot struct {
-	key        string
-	builtAt    time.Time
-	goos       string
-	lookPath   func(string) (string, error)
-	exists     func(string) bool
-	isWSL      func(string) bool
-	bashCands  []string
-	psCands    []string
-	sources    map[string]string
-	caps       []ShellCapability
-	gitOnce    sync.Once
-	git        ExecutableCapability
-	gitProbe   func(string) bool
-	probeMu    sync.Mutex
-	probeCache map[string]bool
+	key          string
+	builtAt      time.Time
+	goos         string
+	lookPath     func(string) (string, error)
+	exists       func(string) bool
+	isWSL        func(string) bool
+	bashCands    []string
+	psCands      []string
+	sources      map[string]string
+	caps         []ShellCapability
+	gitOnce      sync.Once
+	git          ExecutableCapability
+	gitPreflight func(string) bool
+	gitProbe     func(string) bool
+	probeMu      sync.Mutex
+	probeCache   map[string]bool
 }
 
 func (s *shellSnapshot) probe(path string) bool {
@@ -87,15 +88,16 @@ func (s *shellSnapshot) probe(path string) bool {
 }
 
 // shellInventory is the process-wide single-entry, singleflight discovery
-// cache. The entry is keyed by (GOOS, configured shell path): a different
-// config path misses and rebuilds rather than serving wrong candidates. build
-// is the discovery pass (injectable so the cache contract itself is testable).
+// cache. The entry is keyed by (GOOS, preference, configured shell path): a
+// different preference or path misses and rebuilds rather than serving
+// candidates attributed to the wrong shell kind. build is the discovery pass
+// (injectable so the cache contract itself is testable).
 type shellInventory struct {
 	mu         sync.Mutex
 	current    *shellSnapshot
 	refreshing chan struct{}
 	generation uint64
-	build      func(goos, configPath string) *shellSnapshot
+	build      func(goos, prefer, configPath string) *shellSnapshot
 }
 
 func newShellInventory() *shellInventory {
@@ -120,12 +122,12 @@ func (inv *shellInventory) invalidate() {
 	inv.generation++
 }
 
-// snapshot returns a discovery result for (goos, configPath), building one
-// when the cached entry is missing, keyed differently, or older than the TTL.
+// snapshot returns a discovery result for (goos, prefer, configPath), building
+// one when the cached entry is missing, keyed differently, or older than the TTL.
 // Concurrent callers coalesce onto the in-flight build (singleflight): the
 // first caller builds, the rest wait and then re-check the cache.
-func (inv *shellInventory) snapshot(goos, configPath string) *shellSnapshot {
-	key := shellInventoryKey(goos, configPath)
+func (inv *shellInventory) snapshot(goos, prefer, configPath string) *shellSnapshot {
+	key := shellInventoryKey(goos, prefer, configPath)
 	for {
 		inv.mu.Lock()
 		if inv.current != nil && inv.current.key == key && time.Since(inv.current.builtAt) < shellInventoryTTL {
@@ -143,7 +145,7 @@ func (inv *shellInventory) snapshot(goos, configPath string) *shellSnapshot {
 		generation := inv.generation
 		inv.mu.Unlock()
 
-		snap := inv.build(goos, configPath)
+		snap := inv.build(goos, prefer, configPath)
 
 		inv.mu.Lock()
 		done := inv.refreshing
@@ -157,29 +159,30 @@ func (inv *shellInventory) snapshot(goos, configPath string) *shellSnapshot {
 	}
 }
 
-func shellInventoryKey(goos, configPath string) string {
-	return goos + "\x00" + strings.ToLower(filepath.Clean(strings.TrimSpace(configPath)))
+func shellInventoryKey(goos, prefer, configPath string) string {
+	return goos + "\x00" + strings.ToLower(strings.TrimSpace(prefer)) + "\x00" + strings.ToLower(filepath.Clean(strings.TrimSpace(configPath)))
 }
 
 // buildShellSnapshot performs one discovery pass. Windows candidate priority:
-// the configured absolute path first, then bash.exe on PATH (checked by
+// a compatible configured Bash path first, then bash.exe on PATH (checked by
 // resolveShell before any candidate), then bash.exe derived from the installed
 // git.exe / git-bash.exe, then the Git for Windows registry InstallPath, then
 // the standard install roots; pwsh and powershell remain the auto fallback.
-func buildShellSnapshot(goos, configPath string) *shellSnapshot {
+func buildShellSnapshot(goos, prefer, configPath string) *shellSnapshot {
 	snap := &shellSnapshot{
-		key:        shellInventoryKey(goos, configPath),
-		builtAt:    time.Now(),
-		goos:       goos,
-		lookPath:   exec.LookPath,
-		exists:     fileExists,
-		isWSL:      isWindowsWSLBash,
-		gitProbe:   probeGit,
-		sources:    map[string]string{},
-		probeCache: map[string]bool{},
+		key:          shellInventoryKey(goos, prefer, configPath),
+		builtAt:      time.Now(),
+		goos:         goos,
+		lookPath:     exec.LookPath,
+		exists:       fileExists,
+		isWSL:        isWindowsWSLBash,
+		gitPreflight: gitCandidatePreflight,
+		gitProbe:     probeGit,
+		sources:      map[string]string{},
+		probeCache:   map[string]bool{},
 	}
 	if goos == "windows" {
-		snap.bashCands, snap.sources = windowsBashCandidateSources(configPath, exec.LookPath, fileExists)
+		snap.bashCands, snap.sources = windowsBashCandidateSources(prefer, configPath, exec.LookPath, fileExists)
 		snap.psCands = windowsPowerShellCandidates()
 		snap.caps = windowsShellCapabilities(snap)
 	} else {
@@ -188,30 +191,44 @@ func buildShellSnapshot(goos, configPath string) *shellSnapshot {
 	return snap
 }
 
-// ShellCapabilitiesForPath reports the discovered interpreter inventory for
-// this host while honoring an explicit [tools.shell] path. On Windows this is
-// important for portable Git installations that are intentionally outside
-// PATH, the registry, and standard install roots.
-func ShellCapabilitiesForPath(configPath string) []ShellCapability {
-	snap := defaultShellInventory.snapshot(runtime.GOOS, configPath)
+// ShellCapabilitiesForConfig reports the discovered interpreter inventory for
+// a complete [tools.shell] selection. The preference is part of the cache key
+// because a retained PowerShell path must never become an auto-detected Bash.
+func ShellCapabilitiesForConfig(prefer, configPath string) []ShellCapability {
+	snap := defaultShellInventory.snapshot(runtime.GOOS, prefer, configPath)
 	out := make([]ShellCapability, len(snap.caps))
 	copy(out, snap.caps)
 	return out
 }
 
+// ShellCapabilitiesForPath reports the discovered interpreter inventory for
+// this host while honoring an explicit [tools.shell] path. On Windows this is
+// important for portable Git installations that are intentionally outside
+// PATH, the registry, and standard install roots.
+func ShellCapabilitiesForPath(configPath string) []ShellCapability {
+	return ShellCapabilitiesForConfig("bash", configPath)
+}
+
 // ShellCapabilities is the config-free inventory used by callers such as
 // doctor that do not own a loaded desktop configuration.
 func ShellCapabilities() []ShellCapability {
-	return ShellCapabilitiesForPath("")
+	return ShellCapabilitiesForConfig("", "")
+}
+
+// GitCapabilityForConfig reports Git independently from the shell inventory.
+// The full shell selection prevents a retained PowerShell path from being used
+// as the root for Git-for-Windows discovery.
+func GitCapabilityForConfig(prefer, configPath string) ExecutableCapability {
+	snap := defaultShellInventory.snapshot(runtime.GOOS, prefer, configPath)
+	snap.gitOnce.Do(func() { snap.git = discoverGitCapability(snap) })
+	return snap.git
 }
 
 // GitCapabilityForPath reports Git independently from the shell inventory.
 // configPath only helps portable Git for Windows discovery; Git never changes
 // the configured or resolved shell.
 func GitCapabilityForPath(configPath string) ExecutableCapability {
-	snap := defaultShellInventory.snapshot(runtime.GOOS, configPath)
-	snap.gitOnce.Do(func() { snap.git = discoverGitCapability(snap) })
-	return snap.git
+	return GitCapabilityForConfig("bash", configPath)
 }
 
 // shellCandidate pairs an ordered discovery path with the source bucket it
@@ -227,7 +244,7 @@ type shellCandidate struct {
 // the WSL bootstrapper, and a native Windows workspace must never be routed
 // into the Linux VM's /mnt/* view of itself. lookPath and exists are injected
 // so the ordering is testable on any host.
-func windowsBashCandidateSources(configPath string, lookPath func(string) (string, error), exists func(string) bool) ([]string, map[string]string) {
+func windowsBashCandidateSources(prefer, configPath string, lookPath func(string) (string, error), exists func(string) bool) ([]string, map[string]string) {
 	var ordered []shellCandidate
 	seen := map[string]bool{}
 	push := func(path, source string) {
@@ -248,8 +265,8 @@ func windowsBashCandidateSources(configPath string, lookPath func(string) (strin
 
 	// 1. The user-configured absolute path, with git-bash.exe rewritten to the
 	// real console binary bin\bash.exe (never MinTTY).
-	if configPath != "" {
-		push(sanitizeWindowsBashPath(configPath, exists), ShellSourceConfig)
+	if path := configuredWindowsBashPath(prefer, configPath, exists); path != "" {
+		push(path, ShellSourceConfig)
 	}
 	// 2. bash.exe on PATH is resolved by resolveShell ahead of every candidate,
 	// so it needs no entry here — only the capability attribution below.
@@ -280,6 +297,26 @@ func windowsBashCandidateSources(configPath string, lookPath func(string) (strin
 		sources[strings.ToLower(c.path)] = c.source
 	}
 	return paths, sources
+}
+
+// configuredWindowsBashPath admits an arbitrary explicit path only when the
+// user forced Bash. Auto-detection accepts well-known Bash executable names but
+// rejects a retained PowerShell path from an earlier preference.
+func configuredWindowsBashPath(prefer, path string, exists func(string) bool) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(prefer)) {
+	case "bash":
+		return sanitizeWindowsBashPath(path, exists)
+	case "powershell", "pwsh":
+		return ""
+	}
+	base := strings.ToLower(strings.TrimSuffix(pathBase(path), ".exe"))
+	if base != "bash" && base != "git-bash" {
+		return ""
+	}
+	return sanitizeWindowsBashPath(path, exists)
 }
 
 // bashCandidatesFromGitBinary maps a git.exe or git-bash.exe location to the
