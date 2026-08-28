@@ -65,6 +65,7 @@ type ProviderView struct {
 	KeySourcePath               string                      `json:"keySourcePath,omitempty"`
 	BalanceURL                  string                      `json:"balanceUrl"`
 	ContextWindow               int                         `json:"contextWindow"`
+	ContextWindowSource         string                      `json:"contextWindowSource,omitempty"`
 	ReasoningProtocol           string                      `json:"reasoningProtocol"`
 	Thinking                    string                      `json:"thinking"`
 	WebSearch                   bool                        `json:"webSearch"`
@@ -684,6 +685,7 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		KeySourcePath:               key.Source.Path,
 		BalanceURL:                  p.BalanceURL,
 		ContextWindow:               p.ContextWindow,
+		ContextWindowSource:         config.EffectiveContextWindowSource(&p),
 		ReasoningProtocol:           p.ReasoningProtocol,
 		Thinking:                    providerThinkingForSettings(p.Thinking),
 		WebSearch:                   config.EffectiveWebSearch(&p),
@@ -2536,6 +2538,13 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	e.AuthHeader = p.AuthHeader
 	e.BalanceURL = strings.TrimSpace(p.BalanceURL)
 	e.ContextWindow = p.ContextWindow
+	if p.ContextWindowSource == config.ContextWindowSourceExplicit || p.ContextWindowSource == config.ContextWindowSourceDefault {
+		e.ContextWindowSource = p.ContextWindowSource
+	} else if e.ContextWindow > 0 {
+		e.ContextWindowSource = config.ContextWindowSourceExplicit
+	} else {
+		e.ContextWindowSource = config.ContextWindowSourceDefault
+	}
 	e.ReasoningProtocol = p.ReasoningProtocol
 	e.Thinking = providerThinkingForSettings(p.Thinking)
 	// Settings exposes this switch only for verified endpoints. Preserve an

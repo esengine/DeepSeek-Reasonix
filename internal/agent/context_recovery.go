@@ -28,7 +28,12 @@ func (a *Agent) recoverContextLimit(ctx context.Context, frozen samplingRequest,
 	adm.ObservedCompletion = limit.CompletionTokens
 	a.storeAdmission(adm)
 
-	window := a.effectiveContextWindow()
+	// Use the provider-observed limit for the retry regardless of window source:
+	// this is one-shot error recovery, not a persistent threshold change.
+	window := limit.WindowTokens
+	if window <= 0 {
+		window = a.effectiveContextWindow()
+	}
 	prompt := limit.PromptTokens
 	if prompt <= 0 {
 		prompt = a.estimatedRequestTokens(frozen.req)

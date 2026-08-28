@@ -1057,32 +1057,38 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	bashSandboxEnforced := bashSpec.Enforce
 	taskToolAdded := false
 	readOnlyTaskToolAdded := false
+	learnedStore, _ := config.LoadLearnedWindowStore()
+	executorWindow, executorCompletion, executorPersist := learnedWindowOptions(learnedStore, entry)
 	var taskTool *agent.TaskTool
 	// capRuntime is assigned after MCP specs load; closures capture the variable
 	// so task tools created later still receive the session-shared substrate.
 	var capRuntime *agent.MCPCapabilityRuntime
 	newTaskTool := func() *agent.TaskTool {
 		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
-			Provider:            execProv,
-			Pricing:             entry.Price,
-			QuoteContext:        quoteCtx,
-			ParentRegistry:      reg,
-			MaxSteps:            maxSteps,
-			ContextWindow:       entry.ContextWindow,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			ContextEditing:      cfg.Agent.ContextEditing,
-			Temperature:         cfg.Agent.Temperature,
-			ArchiveDir:          config.ArchiveDir(),
-			SysPrompt:           "",
-			Gate:                headlessGate,
-			KeepPolicy:          keepPolicy,
-			SubagentModel:       taskModel,
-			SubagentEffort:      taskEffort,
-			ResolveProvider:     resolveSubagentProvider,
+			Provider:                execProv,
+			Pricing:                 entry.Price,
+			QuoteContext:            quoteCtx,
+			ParentRegistry:          reg,
+			MaxSteps:                maxSteps,
+			ContextWindow:           entry.ContextWindow,
+			ContextWindowSource:     config.EffectiveContextWindowSource(entry),
+			LearnedWindow:           executorWindow,
+			LearnedCompletionBudget: executorCompletion,
+			PersistLearnedWindow:    executorPersist,
+			RecentKeep:              cfg.Agent.RecentKeep,
+			SoftCompactRatio:        cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:     cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:            cfg.Agent.CompactRatio,
+			CompactForceRatio:       cfg.Agent.CompactForceRatio,
+			ContextEditing:          cfg.Agent.ContextEditing,
+			Temperature:             cfg.Agent.Temperature,
+			ArchiveDir:              config.ArchiveDir(),
+			SysPrompt:               "",
+			Gate:                    headlessGate,
+			KeepPolicy:              keepPolicy,
+			SubagentModel:           taskModel,
+			SubagentEffort:          taskEffort,
+			ResolveProvider:         resolveSubagentProvider,
 		}).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
@@ -1645,6 +1651,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		CapabilityLedger:             capLedger,
 		CapabilityAudit:              capAudit,
 		ContextWindow:                entry.ContextWindow,
+		ContextWindowSource:          config.EffectiveContextWindowSource(entry),
+		LearnedWindow:                executorWindow,
+		LearnedCompletionBudget:      executorCompletion,
+		PersistLearnedWindow:         executorPersist,
 		MaxOutputTokens:              entry.MaxOutputTokens,
 		SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
 		ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
@@ -1699,12 +1709,17 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				}
 				plannerTools.Add(capRuntime.NewFrontend(plannerLedger, plannerAudit))
 			}
+			plannerWindow, plannerCompletion, plannerPersist := learnedWindowOptions(learnedStore, pe)
 			plannerOpts := agent.Options{
 				MaxSteps:                     0,
 				Gate:                         headlessGate,
 				ModelRef:                     modelRefFromEntry(pe),
 				QuoteContext:                 quoteCtx,
 				ContextWindow:                pe.ContextWindow,
+				ContextWindowSource:          config.EffectiveContextWindowSource(pe),
+				LearnedWindow:                plannerWindow,
+				LearnedCompletionBudget:      plannerCompletion,
+				PersistLearnedWindow:         plannerPersist,
 				SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
 				ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
 				CompactRatio:                 cfg.Agent.CompactRatio,

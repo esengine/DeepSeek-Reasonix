@@ -1388,6 +1388,10 @@ type ProviderEntry struct {
 	resolvedSource    CredentialSource
 	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow     int    `toml:"context_window"`
+	// ContextWindowSource distinguishes an explicit user choice from a
+	// conservative default placeholder. Explicit windows are never
+	// overridden by provider-learned observations; default/zero windows may be.
+	ContextWindowSource string `toml:"context_window_source"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
 	// Zero means official DeepSeek omits the field (server 384K ceiling) and
 	// other vendors keep their own defaults. Effort selects thinking depth only.

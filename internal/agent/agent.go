@@ -916,7 +916,18 @@ type Options struct {
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow int
-	CompactRatio  float64
+	// ContextWindowSource is config.ContextWindowSourceExplicit or
+	// ContextWindowSourceDefault. Explicit windows never take provider-learned
+	// values; default/zero windows do.
+	ContextWindowSource string
+	// LearnedWindow and LearnedCompletionBudget seed the agent with a persisted
+	// provider observation for this base URL + model. Ignored for explicit windows.
+	LearnedWindow           int
+	LearnedCompletionBudget int
+	// PersistLearnedWindow records a downward provider observation back to the
+	// shared store. nil disables persistence.
+	PersistLearnedWindow func(window, completion int)
+	CompactRatio         float64
 	// Deprecated compatibility inputs. New agents ignore these fields; automatic
 	// maintenance is controlled only by CompactRatio.
 	SoftCompactRatio       float64
@@ -1098,22 +1109,24 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		svc: newAgentServices(prov, tools, sink, gate, planModeReadOnlyTrust,
 			sandboxEscapeApprover, configWriteApprover, hooks, opts),
 		agentConfig: agentConfig{
-			maxSteps:               opts.MaxSteps,
-			maxStepsKey:            maxStepsKey,
-			reasoningByteLimit:     reasoningByteLimit,
-			maxOutputTokens:        opts.MaxOutputTokens,
-			temperature:            opts.Temperature,
-			usageSource:            usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-			modelRef:               strings.TrimSpace(opts.ModelRef),
-			workspaceID:            strings.TrimSpace(opts.WorkspaceID),
-			classifierTaskText:     opts.ClassifierTaskText,
-			writeWorkspaceRoot:     strings.TrimSpace(opts.WriteWorkspaceRoot),
-			subagentDepth:          subagentDepth,
-			maxSubagentDepth:       maxSubagentDepth,
-			contextWindow:          opts.ContextWindow,
-			compactRatio:           opts.CompactRatio,
-			recentKeep:             opts.RecentKeep,
-			archiveDir:             opts.ArchiveDir,
+			maxSteps:             opts.MaxSteps,
+			maxStepsKey:          maxStepsKey,
+			reasoningByteLimit:   reasoningByteLimit,
+			maxOutputTokens:      opts.MaxOutputTokens,
+			temperature:          opts.Temperature,
+			usageSource:          usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+			modelRef:             strings.TrimSpace(opts.ModelRef),
+			workspaceID:          strings.TrimSpace(opts.WorkspaceID),
+			classifierTaskText:   opts.ClassifierTaskText,
+			writeWorkspaceRoot:   strings.TrimSpace(opts.WriteWorkspaceRoot),
+			subagentDepth:        subagentDepth,
+			maxSubagentDepth:     maxSubagentDepth,
+			contextWindow:        opts.ContextWindow,
+			contextWindowSource:  opts.ContextWindowSource,
+			persistLearnedWindow: opts.PersistLearnedWindow,
+			compactRatio:         opts.CompactRatio,
+			recentKeep:           opts.RecentKeep,
+			archiveDir:           opts.ArchiveDir,
 			legacyAnchorSafetyGate: opts.LegacyAnchorSafetyGate,
 		},
 		sess: sessionRuntime{
@@ -1141,6 +1154,12 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		strictAlternatingRoles: opts.StrictAlternatingRoles,
 	}
 	a.sess.output.outputBudget = outputBudgetOf(prov)
+	if opts.LearnedWindow > 0 && strings.TrimSpace(opts.ContextWindowSource) != contextWindowSourceExplicit {
+		a.sess.output.learned.Store(&learnedContextBudget{
+			windowTokens:     opts.LearnedWindow,
+			completionBudget: opts.LearnedCompletionBudget,
+		})
+	}
 	if a.sess.path != "" {
 		a.LoadProjectionSidecar(a.sess.path)
 	}

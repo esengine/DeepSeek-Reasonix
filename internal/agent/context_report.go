@@ -9,6 +9,7 @@ import "reasonix/internal/provider"
 // inspectable rather than inferred.
 type ContextReport struct {
 	Window       int
+	WindowSource string
 	HardCeiling  int
 	OutputBudget int
 
@@ -38,6 +39,7 @@ func (a *Agent) ContextReport() ContextReport {
 	}
 	rep := ContextReport{
 		Window:       a.contextWindow,
+		WindowSource: a.contextWindowSourceLabel(),
 		HardCeiling:  a.hardInputCeiling(),
 		OutputBudget: a.maxOutputTokens,
 		CacheState:   a.CacheState(),

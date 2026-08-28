@@ -252,6 +252,10 @@ type TaskTool struct {
 	parentReg                     *tool.Registry
 	maxSteps                      int
 	contextWindow                 int
+	contextWindowSource           string
+	learnedWindow                 int
+	learnedCompletionBudget       int
+	persistLearnedWindow          func(int, int)
 	compactRatio                  float64
 	recentKeep                    int
 	temperature                   float64
@@ -304,6 +308,10 @@ type TaskToolOptions struct {
 	ParentRegistry                        *tool.Registry
 	MaxSteps                              int
 	ContextWindow                         int
+	ContextWindowSource                   string
+	LearnedWindow                         int
+	LearnedCompletionBudget               int
+	PersistLearnedWindow                  func(int, int)
 	RecentKeep                            int
 	SoftCompactRatio                      float64
 	ToolResultSnipRatio                   float64
@@ -328,23 +336,27 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:             opts.Provider,
-		pricing:          opts.Pricing,
-		quoteContext:     opts.QuoteContext,
-		parentReg:        opts.ParentRegistry,
-		maxSteps:         opts.MaxSteps,
-		contextWindow:    opts.ContextWindow,
-		recentKeep:       opts.RecentKeep,
-		compactRatio:     opts.CompactRatio,
-		temperature:      opts.Temperature,
-		archiveDir:       opts.ArchiveDir,
-		keepPolicy:       opts.KeepPolicy,
-		sysPrompt:        sysPrompt,
-		gate:             opts.Gate,
-		subagentModel:    opts.SubagentModel,
-		subagentEffort:   opts.SubagentEffort,
-		resolveProvider:  opts.ResolveProvider,
-		maxSubagentDepth: DefaultMaxSubagentDepth,
+		prov:                    opts.Provider,
+		pricing:                 opts.Pricing,
+		quoteContext:            opts.QuoteContext,
+		parentReg:               opts.ParentRegistry,
+		maxSteps:                opts.MaxSteps,
+		contextWindow:           opts.ContextWindow,
+		contextWindowSource:     opts.ContextWindowSource,
+		learnedWindow:           opts.LearnedWindow,
+		learnedCompletionBudget: opts.LearnedCompletionBudget,
+		persistLearnedWindow:    opts.PersistLearnedWindow,
+		recentKeep:              opts.RecentKeep,
+		compactRatio:            opts.CompactRatio,
+		temperature:             opts.Temperature,
+		archiveDir:              opts.ArchiveDir,
+		keepPolicy:              opts.KeepPolicy,
+		sysPrompt:               sysPrompt,
+		gate:                    opts.Gate,
+		subagentModel:           opts.SubagentModel,
+		subagentEffort:          opts.SubagentEffort,
+		resolveProvider:         opts.ResolveProvider,
+		maxSubagentDepth:        DefaultMaxSubagentDepth,
 	}
 }
 
@@ -1556,6 +1568,10 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		UsageSource:              event.UsageSourceSubagent,
 		Gate:                     t.gate,
 		ContextWindow:            ctxWin,
+		ContextWindowSource:      t.contextWindowSource,
+		LearnedWindow:            t.learnedWindow,
+		LearnedCompletionBudget:  t.learnedCompletionBudget,
+		PersistLearnedWindow:     t.persistLearnedWindow,
 		RecentKeep:               t.recentKeep,
 		CompactRatio:             t.compactRatio,
 		ArchiveDir:               t.archiveDir,

@@ -15,6 +15,12 @@ import (
 
 const outputBudgetReserve = 8 * 1024
 
+// contextWindowSourceExplicit matches config.ContextWindowSourceExplicit.
+const contextWindowSourceExplicit = "explicit"
+
+// contextWindowSourceDefault matches config.ContextWindowSourceDefault.
+const contextWindowSourceDefault = "default"
+
 const learnedOutputBudgetTTL = 24 * time.Hour
 
 type learnedOutputBudgetCacheEntry struct {
@@ -366,14 +372,42 @@ func (a *Agent) effectiveContextWindow() int {
 	if snap := a.sess.output.learned.Load(); snap != nil {
 		learned = snap.windowTokens
 	}
-	switch {
-	case cfg > 0 && learned > 0:
-		return min(cfg, learned)
-	case learned > 0:
-		return learned
-	default:
+	if learned <= 0 {
 		return cfg
 	}
+	// An explicit user window is authoritative: provider observations may guide
+	// per-request recovery but never silently replace the configured threshold.
+	if a.contextWindowSource == contextWindowSourceExplicit {
+		return cfg
+	}
+	if cfg > 0 {
+		return min(cfg, learned)
+	}
+	return learned
+}
+
+// contextWindowSourceLabel describes the effective window origin for UI.
+func (a *Agent) contextWindowSourceLabel() string {
+	if a == nil {
+		return "unknown"
+	}
+	if a.effectiveContextWindow() <= 0 {
+		return "unknown"
+	}
+	if snap := a.sess.output.learned.Load(); snap != nil && snap.windowTokens > 0 && a.contextWindowSource != contextWindowSourceExplicit {
+		return "learned"
+	}
+	if a.contextWindowSource == contextWindowSourceExplicit {
+		return "configured"
+	}
+	return "default"
+}
+
+// learnedWindowPersistAllowed reports whether a provider observation may be
+// persisted. Explicit windows stay user-owned; default placeholders and
+// unset windows may learn.
+func (a *Agent) learnedWindowPersistAllowed() bool {
+	return a != nil && a.contextWindowSource != contextWindowSourceExplicit
 }
 
 func (a *Agent) learnedCompletionBudget() int {
@@ -406,6 +440,9 @@ func (a *Agent) learnContextBudget(window, completion int, omittedOutput bool) {
 	if window > 0 {
 		if cur.windowTokens <= 0 || window < cur.windowTokens {
 			cur.windowTokens = window
+			if a.learnedWindowPersistAllowed() && a.persistLearnedWindow != nil {
+				a.persistLearnedWindow(cur.windowTokens, cur.completionBudget)
+			}
 		}
 	}
 	if omittedOutput && completion > 0 {

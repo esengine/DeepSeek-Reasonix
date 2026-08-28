@@ -1922,9 +1922,10 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 	if apiKey == "" {
 		apiKey = ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
 	}
+	window, windowSource := askContextWindow(in, os.Stdout)
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: window, ContextWindowSource: windowSource,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -1972,9 +1973,10 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	for _, i := range idxs {
 		selected = append(selected, models[i])
 	}
+	window, windowSource := askContextWindow(in, os.Stdout)
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: window, ContextWindowSource: windowSource,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2024,9 +2026,10 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 	if apiKey == "" {
 		apiKey = ask(in, os.Stdout, i18n.M.AnthropicPromptAPIKey, "")
 	}
+	window, windowSource := askContextWindow(in, os.Stdout)
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: window, ContextWindowSource: windowSource,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2074,9 +2077,10 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 	for _, i := range idxs {
 		selected = append(selected, models[i])
 	}
+	window, windowSource := askContextWindow(in, os.Stdout)
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: window, ContextWindowSource: windowSource,
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil

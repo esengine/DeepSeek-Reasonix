@@ -351,6 +351,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
 			}
+			if p.ContextWindowSource != "" {
+				fmt.Fprintf(&b, "context_window_source = %q   # explicit = user-owned, never auto-updated; default = learned windows may override\n", p.ContextWindowSource)
+			}
 			if p.MaxOutputTokens != 0 {
 				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = provider auto (official DeepSeek 384K, omit when safe); positive = cost cap; negative = force-omit; never affects compact_ratio\n", p.MaxOutputTokens)
 			} else {
@@ -1033,6 +1036,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			}
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d\n", p.ContextWindow)
+			}
+			if p.ContextWindowSource != "" {
+				fmt.Fprintf(&b, "context_window_source = %q\n", p.ContextWindowSource)
 			}
 			if p.MaxOutputTokens != 0 {
 				fmt.Fprintf(&b, "max_output_tokens = %d\n", p.MaxOutputTokens)
