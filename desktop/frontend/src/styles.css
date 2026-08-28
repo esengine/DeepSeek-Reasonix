@@ -18313,15 +18313,6 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   align-items: center;
 }
-.shell-support__note {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: var(--font-control-small);
-}
-.shell-support__note--ok { color: var(--fg-faint); }
-.shell-support__note--warn { color: var(--fg-faint); }
-.shell-support__note--error { color: var(--danger, #e55); }
 .provider-models-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

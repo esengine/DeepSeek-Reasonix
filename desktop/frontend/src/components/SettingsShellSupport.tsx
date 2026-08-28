@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { CircleAlert, CircleCheck, ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import { app, openExternal } from "../lib/bridge";
+import { CircleAlert, CircleCheck, ExternalLink, RefreshCw } from "lucide-react";
+import { openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { asArray } from "../lib/array";
 import type { SandboxView, ShellCapabilityView } from "../lib/types";
@@ -8,14 +7,9 @@ import { CopyButton } from "./CopyButton";
 
 // The Sandbox settings section's shell surface: interpreter preference, the
 // current session's bound shell vs what a reload would pick, detection, and
-// the Windows-only Git for Windows helper install. An install never touches
-// the preference or the live session — after success the reload button is the
-// user's explicit switch, and a user who picks PowerShell mid-install keeps
-// that choice because late results only update the note below.
-
-type InstallTone = "ok" | "warn" | "error";
-
-type InstallNote = { tone: InstallTone; text: string; manualUrl?: string };
+// the Windows-only Git for Windows manual repair link. Package managers are
+// never launched from this surface; after repairing manually, the user chooses
+// when to re-detect and reload the current session.
 
 function effectiveShellLabel(value: string, t: ReturnType<typeof useT>): string {
   switch (value) {
@@ -71,18 +65,6 @@ function RepairCard({ message, guidance, busy, reloadSession }: {
   );
 }
 
-function installNote(status: string, reason: string | undefined, manualUrl: string | undefined, t: ReturnType<typeof useT>): InstallNote {
-  switch (status) {
-    case "installed": return { tone: "ok", text: t("settings.shellInstallInstalled") };
-    case "already_available": return { tone: "ok", text: t("settings.shellInstallAlreadyAvailable") };
-    case "cancelled": return { tone: "warn", text: t("settings.shellInstallCancelled") };
-    case "busy": return { tone: "warn", text: t("settings.shellInstallBusy") };
-    case "manual_required": return { tone: "warn", text: t("settings.shellInstallManualRequired"), manualUrl: manualUrl || "https://git-scm.com/download/win" };
-    case "failed": return { tone: "error", text: reason ? t("settings.shellInstallFailedReason", { reason }) : t("settings.shellInstallFailedGeneric"), manualUrl };
-    default: return { tone: "warn", text: reason || status };
-  }
-}
-
 function field(label: string, control: React.ReactNode, stacked = false) {
   return (
     <div className={`settings-field${stacked ? " settings-field--stacked" : ""}`}>
@@ -113,28 +95,15 @@ export function ShellInterpreterFields({
   windows,
   busy,
   setShell,
-  refresh,
   reloadSession,
 }: {
   sb: SandboxView;
   windows: boolean;
   busy: boolean;
   setShell: (prefer: string) => void;
-  refresh: () => Promise<unknown>;
   reloadSession: () => void;
 }) {
   const t = useT();
-  const [installing, setInstalling] = useState(false);
-  const [note, setNote] = useState<InstallNote | null>(null);
-  // requestId + mounted guard: only the newest install's result may land, and
-  // none may land after the settings page unmounts.
-  const requestId = useRef(0);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
-
   const capabilities = asArray(sb.shellCapabilities);
   const gitBash = capabilities.find((cap) => cap.id === "git-bash");
   const git = sb.gitCapability ?? null;
@@ -143,31 +112,9 @@ export function ShellInterpreterFields({
   const guidance = windows ? null : sb.shellRepairGuidance ?? null;
   const gitGuidance = windows ? null : sb.gitRepairGuidance ?? null;
   const nativeFallback = sb.resolvedShell === "zsh" || sb.resolvedShell === "sh";
-  // The install entry exists only on Windows; macOS and Linux detect and guide.
+  // The manual download entry exists only on Windows; macOS and Linux use
+  // platform-native detect-and-guide cards.
   const showInstallCard = windows && action != null && !gitBash?.available;
-
-  const beginInstall = async () => {
-    if (installing || !action) return;
-    const id = ++requestId.current;
-    setInstalling(true);
-    setNote(null);
-    try {
-      const res = await app.InstallShellSupport(action.id);
-      if (!mounted.current || id !== requestId.current) return;
-      // Refresh detection only. The preference and the live session's shell
-      // stay untouched; the reload button above is the user's explicit switch.
-      if (res.status === "installed" || res.status === "already_available") {
-        await refresh();
-        if (!mounted.current || id !== requestId.current) return;
-      }
-      setNote(installNote(res.status, res.reason, res.manualUrl, t));
-    } catch (err: any) {
-      if (!mounted.current || id !== requestId.current) return;
-      setNote({ tone: "error", text: err?.message || String(err) });
-    } finally {
-      if (mounted.current && id === requestId.current) setInstalling(false);
-    }
-  };
 
   return (
     <>
@@ -198,37 +145,17 @@ export function ShellInterpreterFields({
           </div>
           {showInstallCard && (
             <div className="shell-support__card">
-              {action.mode === "winget-user" ? (
-                <>
-                  <div className="shell-support__hint">{t("settings.shellInstallNotice")}</div>
-                  <div className="shell-support__actions">
-                    <button type="button" className="btn btn--small btn--primary" disabled={installing} onClick={() => void beginInstall()}>
-                      {installing
-                        ? (<><Loader2 size={14} className="spin" aria-hidden="true" /><span>{t("settings.shellInstalling")}</span></>)
-                        : <span>{t("settings.shellInstallAction")}</span>}
-                    </button>
-                    {installing && (
-                      <button type="button" className="btn btn--small" onClick={() => void app.CancelShellInstall()}>
-                        <span>{t("settings.shellInstallCancel")}</span>
-                      </button>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="shell-support__hint">{t("settings.shellInstallManualNotice")}</div>
-                  <div className="shell-support__actions">
-                    <button type="button" className="btn btn--small" onClick={() => void openExternal(action.manualUrl || "https://git-scm.com/download/win")}>
-                      <ExternalLink size={14} aria-hidden="true" />
-                      <span>{t("settings.shellInstallManualLink")}</span>
-                    </button>
-                    <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
-                      <RefreshCw size={13} aria-hidden="true" />
-                      <span>{t("settings.shellRepairReload")}</span>
-                    </button>
-                  </div>
-                </>
-              )}
+              <div className="shell-support__hint">{t("settings.shellInstallManualNotice")}</div>
+              <div className="shell-support__actions">
+                <button type="button" className="btn btn--small" onClick={() => void openExternal(action.manualUrl || "https://git-scm.com/download/win")}>
+                  <ExternalLink size={14} aria-hidden="true" />
+                  <span>{t("settings.shellInstallManualLink")}</span>
+                </button>
+                <button type="button" className="btn btn--small" disabled={busy} onClick={reloadSession}>
+                  <RefreshCw size={13} aria-hidden="true" />
+                  <span>{t("settings.shellRepairReload")}</span>
+                </button>
+              </div>
             </div>
           )}
           {!windows && bashMissing && !nativeFallback && (
@@ -236,17 +163,6 @@ export function ShellInterpreterFields({
           )}
           {!windows && git && !git.available && (
             <RepairCard message={t("settings.gitManualRepair")} guidance={gitGuidance} busy={busy} reloadSession={reloadSession} />
-          )}
-          {note && (
-            <div className={`shell-support__note shell-support__note--${note.tone}`} role="status">
-              <span>{note.text}</span>
-              {note.manualUrl && (
-                <button type="button" className="btn btn--small" onClick={() => void openExternal(note.manualUrl as string)}>
-                  <ExternalLink size={13} aria-hidden="true" />
-                  <span>{t("settings.shellInstallManualLink")}</span>
-                </button>
-              )}
-            </div>
           )}
         </div>, true)}
     </>

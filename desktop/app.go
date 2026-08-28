@@ -194,11 +194,6 @@ type App struct {
 	// extras refresh so tests can prove MetaForTab itself never loads config.
 	configLoadForRootHook func(root string)
 
-	// shellInstall serializes the settings surface's helper installs (Git for
-	// Windows via winget): at most one installer child at a time, cancellable
-	// from the UI and from shutdown. Zero value is ready to use.
-	shellInstall shellInstallManager
-
 	// runtimeByID/runtimeBySessionKey form the process-local ownership registry.
 	// App.mu guards both maps and every desktopSessionRuntime field.
 	runtimeByID         map[string]*desktopSessionRuntime

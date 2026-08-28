@@ -1892,16 +1892,16 @@ export interface ShellCapabilityView {
   source?: string;
   reason?: string;
 }
-// Optional helper install the sandbox section may offer (Windows only).
+// Optional manual repair action the sandbox section may offer (Windows only).
 export interface ShellInstallActionView {
   id: string; // "git-for-windows"
-  mode: string; // "winget-user" | "manual"
+  mode: string; // "manual"
   available: boolean;
   manualUrl?: string;
 }
 // Structured outcome of InstallShellSupport.
 export interface ShellInstallResult {
-  status: string; // "installed" | "already_available" | "cancelled" | "manual_required" | "busy" | "failed" | "unsupported_platform"
+  status: string; // "manual_required" | "unsupported_platform"
   path?: string;
   reason?: string;
   manualUrl?: string;

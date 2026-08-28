@@ -1,8 +1,8 @@
 // Run: tsx src/__tests__/shell-support-install.test.tsx
 //
-// Sandbox settings shell support contract: the Windows-only Git for Windows
-// install entry, its race with a concurrent shell preference change, and the
-// macOS/Linux detect-and-guide behavior (no install surface).
+// Sandbox settings shell support contract: Windows is detect-and-guide with an
+// official manual download link, while macOS/Linux expose copy-only native
+// package-manager guidance. No platform launches an installer from Settings.
 
 import { JSDOM } from "jsdom";
 import React from "react";
@@ -37,7 +37,7 @@ function eq(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-console.log("\nshell support install");
+console.log("\nshell support guidance");
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -71,7 +71,6 @@ localStorage.clear();
 function windowsSettings(overrides: {
   shell?: string;
   gitBashAvailable?: boolean;
-  installMode?: "winget-user" | "manual";
   reloadRequired?: boolean;
 }): SettingsView {
   const settings = baseSettings("standard");
@@ -87,163 +86,34 @@ function windowsSettings(overrides: {
       { id: "powershell", available: true, path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", source: "standard-path" },
       { id: "pwsh", available: false, reason: "not-installed" },
     ],
-    shellInstallAction: overrides.installMode === "manual"
-      ? { id: "git-for-windows", mode: "manual", available: false, manualUrl: "https://git-scm.com/download/win" }
-      : { id: "git-for-windows", mode: "winget-user", available: true },
+    shellInstallAction: { id: "git-for-windows", mode: "manual", available: false, manualUrl: "https://git-scm.com/download/win" },
   };
   return settings;
 }
 
-// Scenario 1: Windows with winget offers the install entry; a completed
-// install refreshes detection only and never overwrites a shell preference
-// the user picked while the install was running.
+// Scenario 1: Windows always exposes only the official manual link, even when
+// the binding exists. Re-detection remains an explicit user action.
 {
   const rootEl = document.createElement("div");
   document.body.appendChild(rootEl);
   const root = createRoot(rootEl);
-
-  let settingsState = windowsSettings({ shell: "auto" });
-  const shellPreferenceCalls: string[] = [];
-  const installCalls: string[] = [];
-  const cancelCalls: number[] = [];
+  let installCalls = 0;
+  let cancelCalls = 0;
   let reloadCalls = 0;
   let settingsCalls = 0;
-  let resolveInstall: ((value: { status: string; path?: string }) => void) | null = null;
-  // The panel only re-fetches Settings through apply()/reload, so the mock
-  // applies this state on the next ReloadSettings call.
-  let stateAfterReload = windowsSettings({ shell: "powershell", gitBashAvailable: true });
-
   window.go = {
     main: {
       App: {
         Settings: async () => {
           settingsCalls += 1;
-          return settingsState;
-        },
-        SetShellPreference: async (prefer: string) => {
-          shellPreferenceCalls.push(prefer);
-          settingsState = windowsSettings({ shell: prefer, gitBashAvailable: false });
-        },
-        InstallShellSupport: (id: string) => {
-          installCalls.push(id);
-          return new Promise((resolve) => { resolveInstall = resolve; });
-        },
-        CancelShellInstall: async () => {
-          cancelCalls.push(cancelCalls.length);
-        },
-        ReloadSettings: async () => {
-          reloadCalls += 1;
-          // Post-install refresh: detection now sees Git Bash. The preference
-          // (powershell) and the session shell are untouched by the installer.
-          settingsState = stateAfterReload;
-        },
-      } as Partial<AppBindings> as AppBindings,
-    },
-  };
-
-  await act(async () => {
-    root.render(
-      <LocaleProvider>
-        <SettingsPanel initialTab="sandbox" desktopPlatform="windows" onClose={() => {}} onChanged={() => {}} />
-      </LocaleProvider>,
-    );
-    await flushPromises();
-  });
-  await waitFor("install card", () => document.body.textContent?.includes("Install Git for Windows") === true);
-
-  const installButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Install Git for Windows"));
-  ok(Boolean(installButton), "Windows without Git Bash renders the install entry");
-
-  await act(async () => {
-    installButton!.click();
-    await flushPromises();
-  });
-  await waitFor("install running", () => document.body.textContent?.includes("Installing…") === true);
-  eq(installCalls, ["git-for-windows"], "install entry invokes InstallShellSupport with the action id");
-
-  // While the install is in flight the user switches to PowerShell; the
-  // select must stay enabled and record the explicit choice.
-  const shellSelect = Array.from(rootEl.querySelectorAll("select")).find((select) =>
-    Array.from(select.options).some((option) => option.value === "pwsh"),
-  ) as HTMLSelectElement;
-  ok(shellSelect != null && !shellSelect.disabled, "shell preference select stays enabled during an install");
-  await act(async () => {
-    shellSelect.value = "powershell";
-    shellSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    await flushPromises();
-  });
-  eq(shellPreferenceCalls, ["powershell"], "explicit shell switch goes through SetShellPreference");
-  eq((rootEl.querySelector("select") as HTMLSelectElement) !== null, true, "shell select still rendered after switch");
-
-  // Install completes late: detection refreshes, but the preference the user
-  // just chose must survive the late result.
-  const settingsCallsBeforeInstallCompletion = settingsCalls;
-  settingsState = windowsSettings({ shell: "powershell", gitBashAvailable: true });
-  await act(async () => {
-    resolveInstall!({ status: "installed", path: "C:\\Program Files\\Git\\bin\\bash.exe" });
-    await flushPromises();
-  });
-  await waitFor("install note", () => document.body.textContent?.includes("Shell detection has been refreshed.") === true);
-  eq(settingsCalls, settingsCallsBeforeInstallCompletion + 1, "a successful install re-reads detection once");
-  eq(reloadCalls, 0, "a successful install does not rebuild the current session");
-  eq(shellPreferenceCalls, ["powershell"], "late install completion does not touch the shell preference");
-  const shellSelectAfter = Array.from(rootEl.querySelectorAll("select")).find((select) =>
-    Array.from(select.options).some((option) => option.value === "pwsh"),
-  ) as HTMLSelectElement;
-  eq(shellSelectAfter?.value, "powershell", "shell select still shows the user's explicit PowerShell choice");
-
-  // Scenario 2: cancel during a run reaches the backend and stays idempotent.
-  // Reset detection to "Git Bash missing" via the section's reload control so
-  // the install card renders again.
-  stateAfterReload = windowsSettings({ shell: "powershell", gitBashAvailable: false });
-  await act(async () => {
-    const reloadButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Apply manual config changes"));
-    reloadButton!.click();
-    await flushPromises();
-  });
-  await waitFor("install card again", () => document.body.textContent?.includes("Install Git for Windows") === true);
-  const installButton2 = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Install Git for Windows"));
-  await act(async () => {
-    installButton2!.click();
-    await flushPromises();
-  });
-  await waitFor("second install running", () => document.body.textContent?.includes("Installing…") === true);
-  const cancelButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Cancel"));
-  ok(Boolean(cancelButton), "a running install offers cancellation");
-  await act(async () => {
-    cancelButton!.click();
-    resolveInstall!({ status: "cancelled" });
-    await flushPromises();
-  });
-  await waitFor("cancelled note", () => document.body.textContent?.includes("Installation cancelled.") === true);
-  eq(cancelCalls.length, 1, "cancel button calls CancelShellInstall once");
-
-  await act(async () => {
-    root.unmount();
-  });
-
-  window.go = undefined as unknown as typeof window.go;
-}
-
-// Scenario 3: a genuinely late result after unmount is ignored before it can
-// refresh settings or rebuild the current session.
-{
-  const rootEl = document.createElement("div");
-  document.body.appendChild(rootEl);
-  const root = createRoot(rootEl);
-  let settingsCalls = 0;
-  let reloadCalls = 0;
-  let resolveInstall: ((value: { status: string; path?: string }) => void) | null = null;
-  window.go = {
-    main: {
-      App: {
-        Settings: async () => {
-          settingsCalls += 1;
-          return windowsSettings({ shell: "auto" });
+          return windowsSettings({});
         },
         SetShellPreference: async () => {},
-        InstallShellSupport: () => new Promise((resolve) => { resolveInstall = resolve; }),
-        CancelShellInstall: async () => {},
+        InstallShellSupport: async () => {
+          installCalls += 1;
+          return { status: "manual_required", manualUrl: "https://git-scm.com/download/win" };
+        },
+        CancelShellInstall: async () => { cancelCalls += 1; },
         ReloadSettings: async () => { reloadCalls += 1; },
       } as Partial<AppBindings> as AppBindings,
     },
@@ -256,60 +126,28 @@ function windowsSettings(overrides: {
     );
     await flushPromises();
   });
-  await waitFor("late-result install card", () => rootEl.textContent?.includes("Install Git for Windows") === true);
-  const installButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Install Git for Windows"));
-  await act(async () => {
-    installButton!.click();
-    await flushPromises();
-  });
-  await waitFor("late-result install running", () => rootEl.textContent?.includes("Installing…") === true);
-  const settingsCallsBeforeUnmount = settingsCalls;
-  await act(async () => { root.unmount(); });
-  await act(async () => {
-    resolveInstall!({ status: "installed", path: "C:\\Program Files\\Git\\bin\\bash.exe" });
-    await flushPromises();
-  });
-  eq(settingsCalls, settingsCallsBeforeUnmount, "unmounted panel drops late install result before refreshing settings");
-  eq(reloadCalls, 0, "unmounted panel never rebuilds the current session");
-}
-
-// Scenario 4: Windows without winget offers only the manual download link.
-{
-  const rootEl = document.createElement("div");
-  document.body.appendChild(rootEl);
-  const root = createRoot(rootEl);
-  window.go = {
-    main: {
-      App: {
-        Settings: async () => windowsSettings({ installMode: "manual" }),
-        SetShellPreference: async () => {},
-        InstallShellSupport: async () => ({ status: "failed", reason: "unexpected" }),
-        CancelShellInstall: async () => {},
-        ReloadSettings: async () => {},
-      } as Partial<AppBindings> as AppBindings,
-    },
-  };
-  await act(async () => {
-    root.render(
-      <LocaleProvider>
-        <SettingsPanel initialTab="sandbox" desktopPlatform="windows" onClose={() => {}} onChanged={() => {}} />
-      </LocaleProvider>,
-    );
-    await flushPromises();
-  });
-  await waitFor("manual card", () => document.body.textContent?.includes("winget (App Installer) is unavailable") === true);
+  await waitFor("Windows manual card", () => rootEl.textContent?.includes("does not run the Git for Windows installer automatically") === true);
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
-    "manual mode renders no install button");
+    "Windows renders no automatic install button");
   ok(Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("git-scm.com")),
-    "manual mode offers the official download link");
+    "Windows offers the official Git for Windows download link");
+  eq(installCalls, 0, "rendering Windows repair never calls InstallShellSupport");
+  eq(cancelCalls, 0, "manual-only Windows repair never calls CancelShellInstall");
+
+  const repairReloadButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Re-detect and reload session"));
+  ok(Boolean(repairReloadButton), "Windows manual repair offers explicit re-detection");
   await act(async () => {
-    root.unmount();
+    repairReloadButton!.click();
+    await flushPromises();
   });
+  eq(reloadCalls, 1, "Windows re-detection reloads only after the user requests it");
+  eq(settingsCalls, 2, "Windows re-detection refreshes the Settings snapshot once");
+  eq(installCalls, 0, "re-detection still never calls the install binding");
+  await act(async () => { root.unmount(); });
 }
 
-// Scenario 5: Linux never renders an install entry. It reports bash/zsh/sh,
-// offers an allowlisted distro command for copying, and only re-detects after
-// the user explicitly requests a session reload.
+// Scenario 2: Linux reports bash/zsh/sh, offers an allowlisted distro command
+// for copying, and only re-detects after the user explicitly requests it.
 {
   const rootEl = document.createElement("div");
   document.body.appendChild(rootEl);
@@ -322,7 +160,7 @@ function windowsSettings(overrides: {
       { id: "zsh", variant: "system", available: false, reason: "not-found" },
       { id: "sh", variant: "system", available: true, path: "/bin/sh", source: "standard-path" },
     ],
-    gitCapability: { id: "git", available: true, path: "/usr/bin/git", source: "standard-path" },
+    gitCapability: { id: "git", available: true, path: "/usr/bin/git", source: "path" },
     shellInstallAction: null,
     shellRepairGuidance: { manager: "apt", command: "apt-get install bash" },
   };
@@ -346,9 +184,9 @@ function windowsSettings(overrides: {
     );
     await flushPromises();
   });
-  await waitFor("linux detection", () => document.body.textContent?.includes("Bash") === true);
+  await waitFor("Linux detection", () => rootEl.textContent?.includes("Bash") === true);
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
-    "Linux never renders the Windows install entry");
+    "Linux never renders a Windows install entry");
   ok(rootEl.textContent?.includes("zsh") === true && rootEl.textContent?.includes("POSIX sh") === true,
     "Linux detection reports zsh and POSIX sh alongside Bash");
   ok(rootEl.textContent?.includes("apt-get install bash") === true, "Linux missing Bash shows the distro repair command");
@@ -362,18 +200,16 @@ function windowsSettings(overrides: {
   });
   eq(copiedCommands.at(-1), "apt-get install bash", "copy action writes the exact allowlisted command");
   const repairReloadButton = Array.from(rootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Re-detect and reload session"));
-  ok(Boolean(repairReloadButton), "manual repair offers an explicit re-detect and reload action");
+  ok(Boolean(repairReloadButton), "Linux manual repair offers explicit re-detection");
   await act(async () => {
     repairReloadButton!.click();
     await flushPromises();
   });
-  eq(reloadCalls, 1, "manual repair reload remains an explicit user action");
-  await act(async () => {
-    root.unmount();
-  });
+  eq(reloadCalls, 1, "Linux repair reload remains an explicit user action");
+  await act(async () => { root.unmount(); });
 }
 
-// Scenario 6: macOS falls back to zsh when Bash is missing, while Git remains
+// Scenario 3: macOS falls back to zsh when Bash is missing, while Git remains
 // a separate capability with its own copy-only Homebrew repair command.
 {
   const rootEl = document.createElement("div");
@@ -428,9 +264,7 @@ function windowsSettings(overrides: {
   eq(copiedCommands.at(-1), "brew install git", "macOS Git repair copies brew install git only");
   ok(!Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.includes("Install Git for Windows")),
     "macOS never renders the Windows install entry");
-  await act(async () => {
-    root.unmount();
-  });
+  await act(async () => { root.unmount(); });
 }
 
 if (failed > 0) {

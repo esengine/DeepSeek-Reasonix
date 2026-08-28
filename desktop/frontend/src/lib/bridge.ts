@@ -4688,17 +4688,11 @@ function makeMockApp(): AppBindings {
         async InstallShellSupport(id: string): Promise<ShellInstallResult> {
           if (id !== "git-for-windows") throw new Error(`unknown shell support action ${id}`);
           if (browserPlatformOverride() !== "windows") return { status: "unsupported_platform", reason: "shell helper install is only available on Windows" };
-          const sb = settings.sandbox;
-          if (sb) {
-            // Mirror the real installer: only discovery changes; the preference
-            // and the bound session shell stay exactly as they were.
-            sb.shellCapabilities = sb.shellCapabilities.map((cap) => cap.id === "git-bash"
-              ? { ...cap, available: true, path: "C:\\Program Files\\Git\\bin\\bash.exe", source: "standard-path", reason: undefined }
-              : cap);
-            sb.resolvedShell = browserPreviewEffectiveShell(sb.shell);
-            sb.shellReloadRequired = sb.resolvedShell !== sb.effectiveShell;
-          }
-          return { status: "installed", path: "C:\\Program Files\\Git\\bin\\bash.exe" };
+          return {
+            status: "manual_required",
+            reason: "automatic installation is disabled because Git for Windows cannot reliably honor user scope",
+            manualUrl: "https://git-scm.com/download/win",
+          };
         },
         async CancelShellInstall() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {

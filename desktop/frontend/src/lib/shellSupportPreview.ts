@@ -18,7 +18,7 @@ export function browserPreviewShellSupport(platform: PreviewPlatform): Pick<Sand
   return {
     shellCapabilities,
     gitCapability: { id: "git", available: true, path: platform === "windows" ? "C:\\Program Files\\Git\\cmd\\git.exe" : "/usr/bin/git", source: "path" },
-    shellInstallAction: platform === "windows" ? { id: "git-for-windows", mode: "winget-user", available: true } : null,
+    shellInstallAction: platform === "windows" ? { id: "git-for-windows", mode: "manual", available: false, manualUrl: "https://git-scm.com/download/win" } : null,
     shellRepairGuidance: platform === "linux" ? { manager: "apt", command: "apt-get install bash" } : null,
     gitRepairGuidance: platform === "darwin"
       ? { manager: "homebrew", command: "brew install git" }
