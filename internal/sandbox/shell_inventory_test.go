@@ -87,6 +87,26 @@ func TestWindowsBashCandidateOrder(t *testing.T) {
 	}
 }
 
+func TestWindowsShellCapabilitiesPreferConfiguredBashOverPath(t *testing.T) {
+	const (
+		configured = `E:\Portable\Git\bin\bash.exe`
+		onPath     = `C:\Program Files\Git\bin\bash.exe`
+	)
+	snap := &shellSnapshot{
+		lookPath:   fakeLookPath(map[string]string{"bash": onPath}),
+		exists:     func(path string) bool { return path == configured || path == onPath },
+		isWSL:      func(string) bool { return false },
+		bashCands:  []string{configured},
+		sources:    map[string]string{strings.ToLower(configured): ShellSourceConfig},
+		probeFunc:  func(string) bool { return true },
+		probeCache: map[string]bool{},
+	}
+	caps := windowsShellCapabilities(snap)
+	if len(caps) == 0 || !caps[0].Available || caps[0].Path != configured || caps[0].Source != ShellSourceConfig {
+		t.Fatalf("Git Bash capability = %+v, want configured path before PATH", caps)
+	}
+}
+
 func TestConfiguredWindowsBashPathMatchesPreference(t *testing.T) {
 	exists := func(path string) bool {
 		return strings.EqualFold(path, `E:\Portable\Git\bin\bash.exe`)
@@ -244,7 +264,7 @@ func TestShellInventoryCache(t *testing.T) {
 // TestSnapshotProbeCachesResults proves repeated resolutions inside one
 // snapshot do not re-probe the same path.
 func TestSnapshotProbeCachesResults(t *testing.T) {
-	snap := &shellSnapshot{probeCache: map[string]bool{}}
+	snap := &shellSnapshot{probeFunc: func(string) bool { return true }, probeCache: map[string]bool{}}
 	if !snap.probe(`C:\Git\bin\bash.exe`) {
 		t.Fatal("probe on a non-Windows host always succeeds")
 	}

@@ -81,6 +81,29 @@ func TestResolveShellRejectsExplicitWSLLauncher(t *testing.T) {
 	}
 }
 
+func TestResolveShellAutoPrefersConfiguredWindowsBashOverPath(t *testing.T) {
+	const (
+		configured = `E:\Portable\Git\bin\bash.exe`
+		onPath     = `C:\Program Files\Git\bin\bash.exe`
+	)
+	got := resolveShell(
+		"auto", configured, nil, "windows",
+		func(name string) (string, error) {
+			if name == "bash" {
+				return onPath, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(path string) bool { return path == configured || path == onPath },
+		nil, nil,
+		func(string) bool { return true },
+		func(string) bool { return false },
+	)
+	if got.Kind != ShellBash || got.Path != configured {
+		t.Fatalf("resolved shell = {%s %q}, want configured Bash %q before PATH", got.Kind, got.Path, configured)
+	}
+}
+
 func TestConfiguredShellPathKeepsUnknownWrappers(t *testing.T) {
 	exists := func(string) bool { return true }
 	noWSL := func(string) bool { return false }

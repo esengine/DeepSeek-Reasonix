@@ -72,6 +72,7 @@ type shellSnapshot struct {
 	git          ExecutableCapability
 	gitPreflight func(string) bool
 	gitProbe     func(string) bool
+	probeFunc    func(string) bool
 	probeMu      sync.Mutex
 	probeCache   map[string]bool
 }
@@ -82,7 +83,11 @@ func (s *shellSnapshot) probe(path string) bool {
 	if v, ok := s.probeCache[path]; ok {
 		return v
 	}
-	v := probeBash(path)
+	probe := s.probeFunc
+	if probe == nil {
+		probe = probeBash
+	}
+	v := probe(path)
 	s.probeCache[path] = v
 	return v
 }
@@ -178,6 +183,7 @@ func buildShellSnapshot(goos, prefer, configPath string) *shellSnapshot {
 		isWSL:        isWindowsWSLBash,
 		gitPreflight: gitCandidatePreflight,
 		gitProbe:     probeGit,
+		probeFunc:    probeBash,
 		sources:      map[string]string{},
 		probeCache:   map[string]bool{},
 	}
@@ -374,16 +380,31 @@ func windowsShellCapabilities(snap *shellSnapshot) []ShellCapability {
 	caps := make([]ShellCapability, 0, 3)
 
 	gitBash := ShellCapability{ID: ShellCapabilityGitBash, Variant: "git-for-windows"}
-	if p, err := snap.lookPath("bash"); err == nil && !snap.isWSL(p) && snap.exists(p) && snap.probe(p) {
+	acceptCandidate := func(path, source string) bool {
+		if path == "" || !snap.exists(path) || snap.isWSL(path) || !snap.probe(path) {
+			return false
+		}
 		gitBash.Available = true
-		gitBash.Path = p
-		gitBash.Source = ShellSourcePath
-	} else {
-		for _, p := range snap.bashCands {
-			if snap.exists(p) && snap.probe(p) {
-				gitBash.Available = true
-				gitBash.Path = p
-				gitBash.Source = snap.sources[strings.ToLower(p)]
+		gitBash.Path = path
+		gitBash.Source = source
+		return true
+	}
+	// Match ResolveShell's Windows priority: explicit compatible config, PATH,
+	// then Git-derived, registry, and standard locations.
+	for _, path := range snap.bashCands {
+		if snap.sources[strings.ToLower(path)] == ShellSourceConfig && acceptCandidate(path, ShellSourceConfig) {
+			break
+		}
+	}
+	if !gitBash.Available {
+		if path, err := snap.lookPath("bash"); err == nil {
+			acceptCandidate(path, ShellSourcePath)
+		}
+	}
+	if !gitBash.Available {
+		for _, path := range snap.bashCands {
+			source := snap.sources[strings.ToLower(path)]
+			if source != ShellSourceConfig && acceptCandidate(path, source) {
 				break
 			}
 		}

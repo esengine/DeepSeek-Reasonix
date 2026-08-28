@@ -118,7 +118,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto":
-		return auto()
+		return autoShellWithConfiguredPath(goos, path, exists, probe, isWSL, auto)
 	case "bash":
 		path = configuredShellPath(goos, ShellBash, path, exists, isWSL)
 		if path != "" && exists(path) && probe(path) {
@@ -149,6 +149,23 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		}
 		return auto()
 	}
+}
+
+// autoShellWithConfiguredPath gives a compatible explicit Windows Bash path
+// priority over PATH while keeping resolveShell's decision table compact. Auto
+// accepts only well-known Bash names; arbitrary wrappers remain an explicit
+// opt-in through prefer="bash".
+func autoShellWithConfiguredPath(goos, path string, exists, probe, isWSL func(string) bool, fallback func() Shell) Shell {
+	if goos == "windows" {
+		base := strings.TrimSuffix(strings.ToLower(pathBase(strings.TrimSpace(path))), ".exe")
+		if base == "bash" || base == "git-bash" {
+			configured := configuredShellPath(goos, ShellBash, path, exists, isWSL)
+			if configured != "" && exists(configured) && probe(configured) {
+				return Shell{Kind: ShellBash, Path: configured}
+			}
+		}
+	}
+	return fallback()
 }
 
 func autoDetectedShell(goos string, findBash func() (Shell, bool), findPOSIX func(string, ShellKind) (Shell, bool), findPowerShell func([]string) (Shell, bool)) Shell {
