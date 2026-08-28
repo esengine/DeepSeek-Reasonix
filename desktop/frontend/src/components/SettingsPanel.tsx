@@ -7712,11 +7712,33 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
   const t = useT();
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState("");
+  const [installSuccess, setInstallSuccess] = useState("");
   const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
   const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
   const reload = () => apply(() => app.ReloadSettings());
+
+  const handleInstallGitBash = async () => {
+    setInstalling(true);
+    setInstallError("");
+    setInstallSuccess("");
+    try {
+      const res = await app.InstallGitBash();
+      if (res.success) {
+        setInstallSuccess(res.message || t("settings.gitBashInstallSuccess"));
+        reload();
+      } else {
+        setInstallError(res.error || t("settings.gitBashInstallFailed"));
+      }
+    } catch (err: any) {
+      setInstallError(err?.message || String(err));
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   return (
     <SettingsSection
@@ -7742,6 +7764,40 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
       <SettingsField label={t("settings.effectiveShell")}>
         <div className="settings-readonly-field">{effectiveShell}</div>
       </SettingsField>
+      {!sb.gitBashAvailable && (!sb.shell || sb.shell === "auto" || sb.shell === "bash") && (
+        <div style={{ marginTop: 8, padding: "10px 12px", background: "var(--color-bg-subtle, rgba(0,0,0,0.03))", borderRadius: 6, border: "1px solid var(--color-border, #e0e0e0)" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted, #666)", lineHeight: 1.4 }}>
+            {t("settings.gitBashNotInstalledNotice")}
+          </div>
+          <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn--small btn--primary"
+              disabled={busy || installing}
+              onClick={() => void handleInstallGitBash()}
+            >
+              {installing ? (
+                <>
+                  <Loader2 size={14} className="spin" aria-hidden="true" />
+                  <span>{t("settings.installingGitBash")}</span>
+                </>
+              ) : (
+                <span>{t("settings.installGitBash")}</span>
+              )}
+            </button>
+          </div>
+          {installError && (
+            <div style={{ marginTop: 6, fontSize: "0.82rem", color: "var(--color-danger, #e55)" }}>
+              {installError}
+            </div>
+          )}
+          {installSuccess && (
+            <div style={{ marginTop: 6, fontSize: "0.82rem", color: "var(--color-success, #4caf50)" }}>
+              {installSuccess}
+            </div>
+          )}
+        </div>
+      )}
       <SettingsField label={t("settings.bashSandbox")} hint={windows ? t("settings.bashUnavailableWindows") : undefined}>
         {/* Windows has no OS-level Bash backend and config.BashModeForGOOS fixes
             the effective value to off. Keep the control visibly immutable and

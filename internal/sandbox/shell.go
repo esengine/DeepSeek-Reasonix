@@ -108,6 +108,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 	case "", "auto":
 		return auto()
 	case "bash":
+		path = sanitizeWindowsBashPath(path, exists)
 		if path != "" && exists(path) && probe(path) {
 			return Shell{Kind: ShellBash, Path: path}
 		}
@@ -191,23 +192,81 @@ func pathBase(p string) string {
 	return p
 }
 
+func pathDir(p string) string {
+	if i := strings.LastIndexAny(p, `/\`); i >= 0 {
+		return p[:i]
+	}
+	return "."
+}
+
+func sanitizeWindowsBashPath(path string, exists func(string) bool) string {
+	if path == "" {
+		return path
+	}
+	base := strings.ToLower(pathBase(path))
+	if base == "git-bash.exe" || base == "git-bash" {
+		dir := pathDir(path)
+		sep := "/"
+		if strings.Contains(path, `\`) {
+			sep = `\`
+		}
+		parent := pathDir(dir)
+		for _, sub := range []string{
+			dir + sep + "bin" + sep + "bash.exe",
+			dir + sep + "usr" + sep + "bin" + sep + "bash.exe",
+			parent + sep + "bin" + sep + "bash.exe",
+			parent + sep + "usr" + sep + "bin" + sep + "bash.exe",
+		} {
+			if exists(sub) {
+				return sub
+			}
+		}
+	}
+	return path
+}
+
 // windowsBashCandidates lists the bash.exe paths a Git-for-Windows install
-// ships, across the usual program-files roots and a per-user install.
+// ships, across standard roots, user installs, package managers, and registry.
 func windowsBashCandidates() []string {
-	var roots []string
+	// standardRoots are directories that contain a "Git" subdirectory
+	// (e.g. C:\Program Files → C:\Program Files\Git\bin\bash.exe).
+	var standardRoots []string
 	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
 		if v := os.Getenv(env); v != "" {
-			roots = append(roots, v)
+			standardRoots = append(standardRoots, v)
 		}
 	}
 	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		roots = append(roots, filepath.Join(v, "Programs"))
+		standardRoots = append(standardRoots, filepath.Join(v, "Programs"))
 	}
+
+	// directRoots are directories that are already at or inside a Git
+	// install tree (Scoop, Chocolatey, registry InstallPath), so we
+	// probe bin/bash.exe directly without an extra "Git" prefix.
+	var directRoots []string
+	if v := os.Getenv("ProgramData"); v != "" {
+		directRoots = append(directRoots,
+			filepath.Join(v, "chocolatey", "lib", "git", "tools"),
+		)
+	}
+	if v := os.Getenv("USERPROFILE"); v != "" {
+		directRoots = append(directRoots,
+			filepath.Join(v, "scoop", "apps", "git", "current"),
+		)
+	}
+	directRoots = append(directRoots, windowsRegistryGitRoots()...)
+
 	var out []string
-	for _, r := range roots {
+	for _, r := range standardRoots {
 		out = append(out,
 			filepath.Join(r, "Git", "bin", "bash.exe"),
 			filepath.Join(r, "Git", "usr", "bin", "bash.exe"),
+		)
+	}
+	for _, r := range directRoots {
+		out = append(out,
+			filepath.Join(r, "bin", "bash.exe"),
+			filepath.Join(r, "usr", "bin", "bash.exe"),
 		)
 	}
 	return out

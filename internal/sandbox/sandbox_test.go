@@ -221,6 +221,27 @@ func TestResolveShellPrefer(t *testing.T) {
 	if got.Kind != ShellBash {
 		t.Errorf("unknown prefer should auto-detect, got %s", got.Kind)
 	}
+
+	// git-bash.exe is automatically rewritten to bin/bash.exe when present.
+	existsWithBash := func(p string) bool {
+		return strings.EqualFold(p, `C:\Git\bin\bash.exe`)
+	}
+	got = resolveShell("bash", `C:\Git\git-bash.exe`, nil, "windows", onPath(), existsWithBash, nil, nil, always, noWSL)
+	if got.Kind != ShellBash || got.Path != `C:\Git\bin\bash.exe` {
+		t.Errorf("git-bash.exe should redirect to bin/bash.exe, got %+v", got)
+	}
+}
+
+func TestSanitizeWindowsBashPath(t *testing.T) {
+	exists := func(p string) bool {
+		return strings.EqualFold(p, filepath.Join("C:", "Git", "bin", "bash.exe"))
+	}
+	raw := filepath.Join("C:", "Git", "git-bash.exe")
+	got := sanitizeWindowsBashPath(raw, exists)
+	want := filepath.Join("C:", "Git", "bin", "bash.exe")
+	if got != want {
+		t.Fatalf("sanitizeWindowsBashPath(%q) = %q, want %q", raw, got, want)
+	}
 }
 
 func TestIsWindowsWSLBash(t *testing.T) {

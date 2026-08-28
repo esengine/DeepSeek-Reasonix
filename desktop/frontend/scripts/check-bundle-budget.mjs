@@ -187,8 +187,8 @@ for (const path of localeChunks) {
   // connection, fallback, and legacy-state copy while removing protocol
   // choices from the primary UI; keep that complete guidance with a bounded
   // 0.4–0.5 KiB locale-only ratchet.
-  // Remote-session actions and disconnected-shell guidance add bounded copy.
-  const budget = name.startsWith("zh-TW-") ? 58.5 * 1024 : 57.8 * 1024;
+  // Git-Bash installation guidance adds localized copy across dialects.
+  const budget = name.startsWith("zh-TW-") ? 59.0 * 1024 : 58.5 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -223,6 +223,7 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // loudness trims, and its accessible Settings surface. Current main-v2 moves
 // from 2413.183 to 2414.879 KiB raw (+1.696 KiB); retain 0.121 KiB of bounded
 // headroom.
+// Git-Bash installation controls bring measured payload to 2413.7 KiB.
 const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_415.0 : 2_415.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

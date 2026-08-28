@@ -540,6 +540,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   ReloadSettings(): Promise<void>;
+  InstallGitBash(): Promise<{ success: boolean; path?: string; message?: string; error?: string }>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
@@ -4673,6 +4674,14 @@ function makeMockApp(): AppBindings {
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
         async ReloadSettings() {},
+        async InstallGitBash() {
+          if (settings.sandbox) {
+            settings.sandbox.shell = "bash";
+            settings.sandbox.effectiveShell = browserPlatformOverride() === "windows" ? "git-bash" : "bash";
+            settings.sandbox.gitBashAvailable = true;
+          }
+          return { success: true, path: "/usr/bin/bash", message: "Bash installed successfully." };
+        },
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
           settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };

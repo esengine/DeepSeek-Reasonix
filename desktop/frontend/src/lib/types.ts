@@ -1875,6 +1875,7 @@ export interface SandboxView {
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
   effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  gitBashAvailable?: boolean;
 }
 
 export interface NetworkProxyView {

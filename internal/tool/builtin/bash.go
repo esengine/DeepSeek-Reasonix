@@ -675,6 +675,9 @@ func commandPreview(cmd string) string {
 func bashCommandEnv(ctx context.Context) []string {
 	env := secrets.ProcessEnv()
 	if runtime.GOOS == "windows" {
+		if _, ok := envValue(env, "MSYS_NO_PATHCONV"); !ok {
+			env = setEnvValue(env, "MSYS_NO_PATHCONV", "1")
+		}
 		return env
 	}
 	currentPath, _ := envValue(env, "PATH")

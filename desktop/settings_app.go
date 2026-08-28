@@ -149,6 +149,7 @@ type SandboxView struct {
 	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
 	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 	EffectiveShell         string   `json:"effectiveShell,omitempty"`
+	GitBashAvailable       bool     `json:"gitBashAvailable"`
 }
 
 type NetworkProxyView struct {
@@ -1030,6 +1031,7 @@ func (a *App) Settings() SettingsView {
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
 			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
+			GitBashAvailable: sandbox.ResolveShell("bash", "", nil).Kind == sandbox.ShellBash,
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
