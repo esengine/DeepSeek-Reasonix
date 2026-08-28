@@ -439,6 +439,22 @@
               "desktop"
             ],
             "title": {
+              "en": "Reliable session archiving",
+              "zh": "可靠的会话归档"
+            },
+            "body": {
+              "en": "Session archiving now tolerates brief local lock handoffs without reporting that the session is still in use.",
+              "zh": "会话归档现在可容忍短暂的本地锁交接，不会误报会话仍在使用中。"
+            },
+            "refs": [
+              9502
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
               "en": "Topic metadata migration",
               "zh": "主题元数据迁移"
             },
