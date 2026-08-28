@@ -2,6 +2,140 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.32.1",
+      "date": "2026-08-28",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.32.1",
+        "zh": "Reasonix 1.32.1"
+      },
+      "summary": {
+        "en": "This release improves agent conversation flow by ending ordinary turns naturally, removing the need for a synthetic finish tool call.",
+        "zh": "此版本改进了代理对话流程，普通回合自然结束，无需调用合成的 finish 工具。"
+      },
+      "surfaces": [
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Contract",
+            "zh": "工具契约"
+          },
+          "body": {
+            "en": "Updated tool contract documentation reflecting the removal of the finish tool schema.",
+            "zh": "更新了工具契约文档，反映 finish 工具模式的移除。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a5d349b703711948b8742c2e9bc46e86c5b4344a/docs/TOOL_CONTRACT.md"
+        },
+        {
+          "title": {
+            "en": "Tool Contract (Chinese)",
+            "zh": "工具契约（中文）"
+          },
+          "body": {
+            "en": "Updated Chinese tool contract documentation reflecting the removal of the finish tool schema.",
+            "zh": "更新了中文工具契约文档，反映 finish 工具模式的移除。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a5d349b703711948b8742c2e9bc46e86c5b4344a/docs/TOOL_CONTRACT.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "improved",
+          "targets": [
+            "cli"
+          ],
+          "title": {
+            "en": "Natural turn completion",
+            "zh": "自然回合完成"
+          },
+          "body": {
+            "en": "Ordinary interactive turns now end when the provider completes a visible assistant response, eliminating the need for a synthetic finish tool call and preventing internal protocol repair errors.",
+            "zh": "普通交互回合现在在提供者完成可见助手响应时结束，无需调用合成的 finish 工具，并防止内部协议修复错误。"
+          },
+          "refs": [
+            9508
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Removed mandatory finish tool",
+              "zh": "移除强制 finish 工具"
+            },
+            "body": {
+              "en": "The provider-visible finish schema, mandatory finish enforcement, protocol repair prompt, and user-facing repair failure path have been removed while preserving ask and data-bearing finalizers such as submit_plan.",
+              "zh": "移除了提供者可见的 finish 模式、强制 finish 执行、协议修复提示和面向用户的修复失败路径，同时保留了 ask 和携带数据的终结器（如 submit_plan）。"
+            },
+            "refs": [
+              9508
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Reduced tool schema size",
+              "zh": "减小工具模式大小"
+            },
+            "body": {
+              "en": "The stable tool schema has been reduced from 4,298 to 4,138 estimated tokens.",
+              "zh": "稳定工具模式从约 4,298 个 token 减少到 4,138 个 token。"
+            },
+            "refs": [
+              9508
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Prevented protocol repair error",
+              "zh": "防止协议修复错误"
+            },
+            "body": {
+              "en": "Fixed an issue where a normal visible answer without a finish call triggered another provider round and surfaced an internal protocol repair error to users.",
+              "zh": "修复了正常可见回答未调用 finish 时触发额外提供者回合并向用户显示内部协议修复错误的问题。"
+            },
+            "refs": [
+              9508
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.32.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.32.0...desktop-v1.32.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.32.1",
+      "baseVersion": "1.32.1",
+      "status": "reviewed",
+      "previousRelease": "1.32.0",
+      "builds": {
+        "cli": "v1.32.1",
+        "desktop": "v1.32.1",
+        "npm": "1.32.1"
+      }
+    },
+    {
       "version": "1.32.0",
       "date": "2026-08-28",
       "channel": "stable",
