@@ -4,13 +4,13 @@
     "commented-code": 0,
     "complexity": 1997,
     "essay": 1965,
-    "file-size": 108531,
+    "file-size": 108602,
     "function-size": 8620,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
     "struct-state": 116,
-    "test-file-size": 69481
+    "test-file-size": 69490
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -123,7 +123,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 7284
+      "file-size": 7325
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 43
@@ -147,7 +147,7 @@
       "file-size": 180
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4872
+      "file-size": 4881
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -156,7 +156,7 @@
       "file-size": 265
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1497
+      "file-size": 1498
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 4268
@@ -247,10 +247,10 @@
     "desktop/settings_app.go": {
       "complexity": 29,
       "essay": 6,
-      "file-size": 2941
+      "file-size": 2943
     },
     "desktop/settings_app_test.go": {
-      "test-file-size": 1856
+      "test-file-size": 1870
     },
     "desktop/shared_host.go": {
       "essay": 1
@@ -1420,7 +1420,7 @@
     },
     "internal/tool/builtin/bash.go": {
       "essay": 7,
-      "file-size": 18
+      "file-size": 21
     },
     "internal/tool/builtin/bash_env_test.go": {
       "essay": 4

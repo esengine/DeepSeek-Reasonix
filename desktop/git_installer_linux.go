@@ -31,7 +31,7 @@ func (a *App) InstallGitBash() (GitBashInstallResult, error) {
 	}
 
 	type pkgCmd struct {
-		mgr  string
+		mgr string
 		// steps is a sequence of commands to run. Each inner slice is one
 		// exec invocation (program + args). This avoids passing shell
 		// operators like "&&" as literal arguments to exec.Command.
