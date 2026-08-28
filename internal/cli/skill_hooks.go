@@ -66,7 +66,8 @@ func (m *chatTUI) skillList() {
 		m.notice("no skills found. Add SKILL.md / <name>.md under .reasonix/skills (project) or ~/.reasonix/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
 		return
 	}
-	m.commitLine(renderSkillList(m.width, sortedSkills(skills), m.disabledSkillNames()))
+	skills, disabled := sortedSkills(skills), m.disabledSkillNames()
+	m.commitRenderedLine(func(w int) string { return renderSkillList(w, skills, disabled) })
 }
 
 func (m *chatTUI) skillShow(name string) {
@@ -80,7 +81,7 @@ func (m *chatTUI) skillShow(name string) {
 			if m.ctrl != nil {
 				disabled = !m.ctrl.SkillEnabled(s.Name)
 			}
-			m.commitLine(renderSkillShow(m.width, s, disabled))
+			m.commitRenderedLine(func(w int) string { return renderSkillShow(w, s, disabled) })
 			return
 		}
 	}
@@ -268,8 +269,8 @@ func (m *chatTUI) skillNew(name string, global bool) {
 }
 
 func (m *chatTUI) skillPaths() {
-	st := m.skillStore()
-	m.commitLine(renderSkillPaths(m.width, st.Roots()))
+	roots := m.skillStore().Roots()
+	m.commitRenderedLine(func(w int) string { return renderSkillPaths(w, roots) })
 }
 
 func (m *chatTUI) skillStore() *skill.Store {
@@ -309,7 +310,7 @@ func (m *chatTUI) runHooksSubcommand(input string) {
 
 func (m *chatTUI) hooksList(cwd string) {
 	active := m.ctrl.HookRunner().Hooks()
-	m.commitLine(renderHooks(m.width, active))
+	m.commitRenderedLine(func(w int) string { return renderHooks(w, active) })
 }
 
 func containsArg(args []string, flag string) bool {

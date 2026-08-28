@@ -234,16 +234,6 @@ func setCLIThemeMode(mode string) cliPalette {
 	return activeCLITheme
 }
 
-func setCLIThemeStyle(name string) (cliPalette, bool) {
-	st, ok := cliThemeStyleByName(name)
-	if !ok {
-		return cliPalette{}, false
-	}
-	activeCLITheme = resolveCLIThemeWithStyle(st.mode, st.name)
-	refreshCLIStyles()
-	return activeCLITheme, true
-}
-
 type terminalRGB struct {
 	r int
 	g int
@@ -448,23 +438,26 @@ func applyTextareaTheme(ti *textarea.Model) {
 func (m *chatTUI) runThemeSubcommand(input string) tea.Cmd {
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
-		m.notice(i18n.M.ThemeHeader + "\n" + describeCLIThemes() + "\n" + i18n.M.ThemeHint)
+		m.input.SetValue("/theme ")
+		m.input.CursorEnd()
+		m.updateCompletion()
 		return nil
 	}
 	name := strings.ToLower(args[1])
 	previous := activeCLITheme
-	var theme cliPalette
-	switch name {
-	case "auto", "light", "dark":
-		theme = setCLIThemeMode(name)
-	default:
-		next, ok := setCLIThemeStyle(name)
-		if !ok {
-			m.notice(fmt.Sprintf(i18n.M.ThemeUnknownFmt, name) + "\n" + describeCLIThemes())
-			return nil
-		}
-		theme = next
+	base := previous
+	if m.themePreview != nil {
+		base = *m.themePreview
 	}
+	if _, ok := cliThemeStyleByName(name); !ok && name != "auto" && name != "light" && name != "dark" {
+		m.notice(fmt.Sprintf(i18n.M.ThemeUnknownFmt, name) + "\n" + describeCLIThemes())
+		return nil
+	}
+	theme := resolveCLIThemeWithStyle(name, base.style)
+	m.themePreview = nil
+	m.themeSweep = nil
+	activeCLITheme = theme
+	refreshCLIStyles()
 	m.refreshRuntimeTheme()
 	m.notice(fmt.Sprintf(i18n.M.ThemeChangedFmt, theme.name, theme.style))
 
@@ -499,6 +492,63 @@ func (m *chatTUI) persistTheme(inputName string) {
 func (m *chatTUI) refreshRuntimeTheme() {
 	m.spinner.Style = themeStyle(activeCLITheme.accent)
 	applyTextareaTheme(&m.input)
+	y := m.viewport.YOffset()
+	m.reflowTranscript(m.width)
+	m.syncWrappedLines(transcriptContentWidth(m.width, m.nativeScrollback), true)
+	m.feedViewportContent()
+	m.viewport.SetYOffset(y)
+}
+
+// selectedTheme only recognizes the /theme argument menu, never another
+// completion menu that happens to contain a theme name.
+func (m chatTUI) selectedTheme() string {
+	c := m.completion
+	val := m.input.Value()
+	if !c.active || c.kind != compSlashArg || c.sel < 0 || c.sel >= len(c.items) ||
+		c.replaceFrom < 0 || c.replaceFrom > len(val) || c.replaceTo < c.replaceFrom || c.replaceTo > len(val) ||
+		strings.TrimSpace(val[:c.replaceFrom]) != "/theme" || strings.TrimSpace(val[c.replaceTo:]) != "" ||
+		m.hideComposer() {
+		return ""
+	}
+	return c.items[c.sel].insert
+}
+
+func (m *chatTUI) syncThemePreview() {
+	name := m.selectedTheme()
+	if name == "" {
+		if m.themePreview != nil {
+			activeCLITheme = *m.themePreview
+			m.themePreview = nil
+			m.themeSweep = nil
+			refreshCLIStyles()
+			m.refreshRuntimeTheme()
+		}
+		return
+	}
+	if m.themePreview == nil {
+		previous := activeCLITheme
+		m.themePreview = &previous
+		m.themeSweep = nil
+		// Start an unfiltered picker on the current style instead of previewing
+		// "auto" just because it is the first completion.
+		if strings.TrimSpace(m.input.Value()) == "/theme" {
+			for i, item := range m.completion.items {
+				if item.insert == previous.style {
+					m.completion.sel = i
+					name = item.insert
+					break
+				}
+			}
+		}
+	}
+	// Resolve mode aliases against the original style, not the last hovered
+	// theme, so browsing light -> dark cannot silently change a custom style.
+	preview := resolveCLIThemeWithStyle(name, m.themePreview.style)
+	if preview != activeCLITheme {
+		activeCLITheme = preview
+		refreshCLIStyles()
+		m.refreshRuntimeTheme()
+	}
 }
 
 func describeCLIThemes() string {
@@ -546,7 +596,11 @@ func (m *chatTUI) themeArgItems(val string) ([]compItem, int, bool) {
 			continue
 		}
 		hint := st.mode + " · " + st.description
-		if st.name == activeCLITheme.style {
+		current := activeCLITheme.style
+		if m.themePreview != nil {
+			current = m.themePreview.style
+		}
+		if st.name == current {
 			hint = i18n.M.ArgThemeCurrent
 		}
 		out = append(out, compItem{label: st.name, insert: st.name, hint: hint})

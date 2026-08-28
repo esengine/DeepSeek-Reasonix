@@ -116,13 +116,6 @@ func countUntracked(out string) int {
 	return n
 }
 
-func (m chatTUI) gitTag() string {
-	if strings.TrimSpace(m.gitStatus.Repo) == "" || strings.TrimSpace(m.gitStatus.Branch) == "" {
-		return ""
-	}
-	return m.gitStatus.render(themeFg(m.statusModeColor(), m.gitStatus.Repo), m.gitStatus.Branch)
-}
-
 var (
 	statusAutoColor  = cliColor{"#f59e0b", 214}
 	statusPlanColor  = cliColor{"#2563eb", 27}

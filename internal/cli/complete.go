@@ -13,7 +13,6 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
-	"reasonix/internal/i18n"
 	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
 )
@@ -837,10 +836,6 @@ func (m chatTUI) renderCompletion() string {
 	}
 	// A key-hint footer so users discover Tab — many won't know it accepts a
 	// completion, let alone descends into a folder.
-	hint := i18n.M.CompHintSlash
-	if m.completion.kind == compAt {
-		hint = i18n.M.CompHintFile
-	}
-	b.WriteString(padCompletionLine(dim(hint), m.width))
+	b.WriteString(padCompletionLine(dim(m.completionHint()), m.width))
 	return b.String()
 }

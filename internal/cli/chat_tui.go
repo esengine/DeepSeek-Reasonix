@@ -63,6 +63,8 @@ type chatTUI struct {
 	height int
 	// themeSweep freezes the frame while a /theme switch wipes across it.
 	themeSweep *themeSweep
+	// themePreview is the palette to restore if the /theme picker is dismissed.
+	themePreview *cliPalette
 	// nativeScrollback keeps Termux out of alt-screen mode so taps still focus
 	// the textarea and raise the soft keyboard.
 	nativeScrollback bool
@@ -957,6 +959,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
+	cm.syncThemePreview()
 	if logFirstFrame {
 		cm.firstFrameLogged = true
 		if cm.diagnostics != nil {
@@ -1016,6 +1019,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var mouseCmd tea.Cmd
 	switch v := msg.(type) {
 	case tea.WindowSizeMsg:
+		cm.themeSweep = nil
 		if cm.width != prevWidth || cm.height != prevHeight {
 			mouseCmd = cm.maybeReenableMouse()
 		}
@@ -1406,38 +1410,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingApproval != nil {
 			return m.handleApprovalKey(msg)
 		}
-		// While the autocomplete menu is open it captures navigation/accept keys
-		// (↑/↓ move, Tab/Enter accept, Esc close); everything else falls through
-		// to the textarea and re-filters the menu at the end of Update.
-		if m.completion.active {
-			switch msg.String() {
-			case "up", "ctrl+p":
-				m.moveCompletion(-1)
-				return m, nil
-			case "down", "ctrl+n":
-				m.moveCompletion(1)
-				return m, nil
-			case "tab", "enter":
-				if msg.String() == "enter" && (m.completionExactLabel() || m.completionBareOverlayCommand()) {
-					m.completion = completion{}
-					break // fall through to regular Enter and submit the command
-				}
-				// When Enter is pressed and the selected completion is already fully
-				// present in the input, close the menu and submit instead of accepting
-				// the same item again (/resume 1 still has /resume 10 as a prefix match).
-				if msg.String() == "enter" && m.completionSelectedInsertPresent() {
-					m.completion = completion{}
-					break // fall through to regular Enter
-				}
-				m.acceptCompletion()
-				return m, nil
-			case "esc":
-				m.completion = completion{}
-				if m.state == tuiRunning {
-					break // a turn is running — also cancel it via the main Esc handler
-				}
-				return m, nil
-			}
+		if cmd, handled := m.handleCompletionKey(msg); handled {
+			return m, cmd
 		}
 		switch msg.String() {
 		case "up":
@@ -1630,6 +1604,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (like Esc); on an empty composer a double-press within 1.5s quits.
 			if strings.TrimSpace(m.input.Value()) != "" {
 				m.input.Reset()
+				m.completion = completion{}
 				m.pastedBlocks = nil
 				m.lastCtrlCAt = time.Time{}
 				return m, nil
@@ -1986,7 +1961,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptResolvedMsg:
 		switch {
 		case msg.err != nil:
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), m.width, activeCLITheme.warn))
+			m.commitRenderedLine(func(w int) string {
+				return wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), w, activeCLITheme.warn)
+			})
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
@@ -1996,7 +1973,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case extensionActionMsg:
 		switch {
 		case msg.err != nil:
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), m.width, activeCLITheme.warn))
+			m.commitRenderedLine(func(w int) string {
+				return wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), w, activeCLITheme.warn)
+			})
 		case strings.TrimSpace(msg.message) != "":
 			m.notice(msg.message)
 		}
@@ -2534,11 +2513,16 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	if m.nativeScrollback {
 		return
 	}
-	lines := make([]string, len(vis))
-	for i, ln := range vis {
-		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+	lines := slices.Clone(vis)
+	m.rewriteRenderedLine(m.toolStreamIdx, func(w int) string { return renderToolOutputLines(lines, w) })
+}
+
+func renderToolOutputLines(lines []string, width int) string {
+	rendered := make([]string, len(lines))
+	for i, line := range lines {
+		rendered[i] = dim(clampPlain(line, width-len([]rune(connector))))
 	}
-	m.rewriteTranscriptBlock(m.toolStreamIdx, connectorBlock(lines))
+	return connectorBlock(rendered)
 }
 
 // pushToolLine appends a completed output line to the bounded tail, dropping the
@@ -2657,7 +2641,7 @@ func (m *chatTUI) renderSubagentProgress(id string) {
 	if !ok {
 		idx = len(m.transcript)
 		m.subagentProgressIdx[id] = idx
-		m.commitLine(m.subagentProgressBlock(id, sp))
+		m.commitTranscriptSource(transcriptSource{kind: transcriptSourceSubagentProgress, raw: id})
 		return
 	}
 	m.setTranscriptBlock(idx, m.subagentProgressBlock(id, sp), transcriptSource{kind: transcriptSourceSubagentProgress, raw: id})
@@ -2824,25 +2808,10 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 		}
 		if n > 0 {
 			if full, ok := m.shellOutputs[id]; ok {
-				lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
-				total := len(lines)
-				if total > shellPreviewLines {
-					preview := make([]string, shellPreviewLines+1)
-					for i := range shellPreviewLines {
-						preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
-					}
-					preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-					m.commitLine(connectorBlock(preview))
-				} else {
-					rendered := make([]string, total)
-					for i, ln := range lines {
-						rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
-					}
-					m.commitLine(connectorBlock(rendered))
-				}
+				m.commitRenderedLine(func(w int) string { return renderShellOutput(full, w, false) })
 				m.shellTranscriptIdx[id] = len(m.transcript) - 1
 			} else {
-				m.commitLine(connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
+				m.commitRenderedLine(func(int) string { return connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}) })
 			}
 		}
 		m.toolStreamIdx = -1
@@ -2908,29 +2877,14 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 	if n == 0 {
 		// Tool finished with no output: clear the "working…" placeholder but
 		// keep the slot (shellTranscriptIdx still points here for late progress).
-		m.rewriteTranscriptBlock(idx, "")
+		m.setTranscriptBlock(idx, "", transcriptSource{kind: transcriptSourceFixed})
 		return
 	}
 	if full, ok := m.shellOutputs[id]; ok {
 		// Shell command: show first N lines + hint.
-		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
-		total := len(lines)
-		if total > shellPreviewLines {
-			preview := make([]string, shellPreviewLines+1)
-			for i := range shellPreviewLines {
-				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
-			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.rewriteTranscriptBlock(idx, connectorBlock(preview))
-		} else {
-			rendered := make([]string, total)
-			for i, ln := range lines {
-				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
-			}
-			m.rewriteTranscriptBlock(idx, connectorBlock(rendered))
-		}
+		m.rewriteRenderedLine(idx, func(w int) string { return renderShellOutput(full, w, false) })
 	} else {
-		m.rewriteTranscriptBlock(idx, connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
+		m.rewriteRenderedLine(idx, func(int) string { return connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}) })
 	}
 	m.shellTranscriptIdx[id] = idx
 }
@@ -2955,40 +2909,29 @@ func (m *chatTUI) toggleShellOutput() {
 	if !ok {
 		return
 	}
-	lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
-	total := len(lines)
-	innerW := m.width - len([]rune(connector))
-	if innerW < 10 {
-		innerW = 80
-	}
-
-	if m.shellExpanded[lastID] {
-		// Collapse back to preview.
-		m.shellExpanded[lastID] = false
-		if total > shellPreviewLines {
-			preview := make([]string, shellPreviewLines+1)
-			for i := range shellPreviewLines {
-				preview[i] = dim(clampPlain(lines[i], innerW))
-			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.rewriteTranscriptBlock(lastIdx, connectorBlock(preview))
-		}
-	} else {
-		// Expand: show up to shellExpandMaxLines lines.
-		m.shellExpanded[lastID] = true
-		show := min(total, shellExpandMaxLines)
-		rendered := make([]string, show)
-		for i := range show {
-			rendered[i] = dim(clampPlain(lines[i], innerW))
-		}
-		if total > shellExpandMaxLines {
-			rendered = append(rendered, dim(fmt.Sprintf("… %d more lines", total-shellExpandMaxLines)))
-		}
-		m.rewriteTranscriptBlock(lastIdx, connectorBlock(rendered))
-	}
+	expanded := !m.shellExpanded[lastID]
+	m.shellExpanded[lastID] = expanded
+	m.rewriteRenderedLine(lastIdx, func(w int) string { return renderShellOutput(full, w, expanded) })
 	if m.nativeScrollback {
-		m.commitLine(m.transcript[lastIdx])
+		m.commitRenderedLine(func(w int) string { return renderShellOutput(full, w, expanded) })
 	}
+}
+
+func renderShellOutput(full string, width int, expanded bool) string {
+	lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+	limit, hint := shellPreviewLines, " (Ctrl+B)"
+	if expanded {
+		limit, hint = shellExpandMaxLines, ""
+	}
+	shown := lines[:min(len(lines), limit)]
+	rendered := make([]string, len(shown))
+	for i, line := range shown {
+		rendered[i] = dim(clampPlain(line, width-len([]rune(connector))))
+	}
+	if len(lines) > limit {
+		rendered = append(rendered, dim(fmt.Sprintf("… %d more lines%s", len(lines)-limit, hint)))
+	}
+	return connectorBlock(rendered)
 }
 
 // toolWorkingFrames is the braille spinner cycled once per second on the
@@ -3017,7 +2960,9 @@ func (m *chatTUI) beginToolRunning(id string) {
 		return
 	}
 	m.toolStreamIdx = len(m.transcript)
-	m.commitLine(connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
+	m.commitRenderedLine(func(int) string {
+		return connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))})
+	})
 	// Remember the transcript slot for this id so a late ToolProgress for a
 	// previously dispatched (and possibly already collapsed) tool can reuse
 	// it instead of appending a fresh slot at the end of the transcript. For
@@ -3038,7 +2983,9 @@ func (m *chatTUI) tickToolRunning() {
 	m.toolStreamFrame++
 	frame := toolWorkingFrames[m.toolStreamFrame%len(toolWorkingFrames)]
 	secs := int(time.Since(m.toolStreamStart).Seconds())
-	m.rewriteTranscriptBlock(m.toolStreamIdx, connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))}))
+	m.rewriteRenderedLine(m.toolStreamIdx, func(int) string {
+		return connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
+	})
 }
 
 // commitReasoning closes the live thinking block: the "▎ thinking…" marker is
@@ -3050,9 +2997,9 @@ func (m *chatTUI) commitReasoning() {
 		if strings.TrimSpace(m.reasoning.String()) != "" || !m.thinkStart.IsZero() {
 			secs := int(time.Since(m.thinkStart).Seconds())
 			m.commitSpacer()
-			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
+			m.commitRenderedLine(func(int) string { return dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)) })
 			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
-				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
+				m.commitTranscriptSource(transcriptSource{kind: transcriptSourceReasoning, raw: m.reasoning.String()})
 			}
 		}
 		m.reasoning.Reset()
@@ -3065,7 +3012,7 @@ func (m *chatTUI) commitReasoning() {
 		return
 	}
 	secs := int(time.Since(m.thinkStart).Seconds())
-	m.setTranscriptBlock(m.reasoningLineIdx, dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)), transcriptSource{kind: transcriptSourceFixed})
+	m.rewriteRenderedLine(m.reasoningLineIdx, func(int) string { return dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)) })
 	if m.reasoningTextIdx >= 0 {
 		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 			raw := m.reasoning.String()
@@ -3555,17 +3502,15 @@ func compactionCardLines(c event.Compaction) []string {
 	return lines
 }
 
-// contextTag renders the prompt-vs-context-window gauge for the status line,
+// renderContextTag renders the prompt-vs-context-window gauge for the status line,
 // framed around the auto-compaction threshold: it shows how much headroom is
 // left until the next compaction, and colours by proximity to that point rather
 // than the raw window. Falls back to a plain percentage when compaction is disabled.
-func (m chatTUI) contextTag() string {
-	used, window := m.ctrl.ContextSnapshot()
+func renderContextTag(used, window int, ratio float64) string {
 	if used == 0 || window == 0 {
 		return ""
 	}
 	pct := used * 100 / window
-	ratio := m.ctrl.CompactRatio()
 	if ratio <= 0 || ratio >= 1 {
 		// Compaction disabled: just the raw gauge, coloured on window fill.
 		body := fmt.Sprintf("%s / %s ctx (%d%%)", shortTokens(used), shortTokens(window), pct)
@@ -4343,7 +4288,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.toolTail = nil
 			m.toolStreamIdx = -1
 			m.toolLineCount = 0
-			m.commitLine(dim("  ↻ stream interrupted — reconnecting…"))
+			m.commitRenderedLine(func(int) string { return dim("  ↻ stream interrupted — reconnecting…") })
 		}
 		return
 	}
@@ -4384,7 +4329,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.commitSpacer()
 			m.thinkStart = time.Now()
 			m.reasoningLineIdx = len(m.transcript)
-			m.commitLine(dim("  ▎ " + i18n.M.ChatThinking))
+			m.commitRenderedLine(func(int) string { return dim("  ▎ " + i18n.M.ChatThinking) })
 			m.reasoningTextIdx = len(m.transcript)
 			m.commitLine("")
 			m.reasoningView = m.reasoningView[:0]
@@ -4424,10 +4369,9 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			// No longer a tool, but guard anyway: the plan is the assistant's reply.
 		default:
 			m.commitSpacer()
-			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
-				for _, ln := range block {
-					m.commitLine(ln)
-				}
+			if e.Tool.Diff != "" {
+				name, args, diff, limit := e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.diffMaxLines
+				m.commitRenderedLine(func(w int) string { return strings.Join(diffBlock(name, args, diff, w, limit), "\n") })
 				break
 			}
 			m.commitTranscriptSource(transcriptSource{
@@ -4468,7 +4412,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			if detail != "" {
 				errText = detail + " · " + errText
 			}
-			m.commitLine("  " + red("●") + " " + bold(label) + " " + red("⊘ "+errText))
+			m.commitRenderedLine(func(int) string { return "  " + red("●") + " " + bold(label) + " " + red("⊘ "+errText) })
 		}
 
 	case event.Usage:
@@ -4480,7 +4424,10 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			if line := renderQuotedTurnReceipt(e.Usage, e.CostQuote, e.CacheDiagnostics); line != "" {
 				m.finalizeStreamed()
 				m.commitSpacer()
-				m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+				native := m.nativeScrollback
+				m.commitRenderedLine(func(w int) string {
+					return renderTurnReceiptBand(renderQuotedTurnReceipt(e.Usage, e.CostQuote, e.CacheDiagnostics), transcriptContentWidth(w, native))
+				})
 			}
 		}
 
@@ -4500,7 +4447,8 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			}
 			if m.showReasoning {
 				m.finalizeStreamed()
-				m.commitLine(dim("  · " + formatCompletionSummaryLine(e.Completion)))
+				text := formatCompletionSummaryLine(e.Completion)
+				m.commitRenderedLine(func(int) string { return dim("  · " + text) })
 			}
 		}
 
@@ -4539,7 +4487,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// severity-aware notice line, like event.Notice.
 		if line := extensionStatusLine(e.Extension); line != "" {
 			m.finalizeStreamed()
-			m.commitLine(line)
+			m.commitRenderedLine(func(int) string { return extensionStatusLine(e.Extension) })
 		}
 
 	case event.ExtensionSurface:
@@ -4549,17 +4497,17 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.finalizeStreamed()
 		if e.Extension != nil && e.Extension.Notification != nil {
 			if line := extensionNotificationLine(e.Extension); line != "" {
-				m.commitLine(line)
+				m.commitRenderedLine(func(int) string { return extensionNotificationLine(e.Extension) })
 			}
 			break
 		}
-		for _, ln := range extensionSurfaceLines(e.Extension, m.width) {
-			m.commitLine(ln)
+		if len(extensionSurfaceLines(e.Extension, m.width)) > 0 {
+			m.commitRenderedLine(func(w int) string { return strings.Join(extensionSurfaceLines(e.Extension, w), "\n") })
 		}
 
 	case event.CompactionStarted:
 		m.finalizeStreamed()
-		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
+		m.commitRenderedLine(func(int) string { return dim("  ⋯ " + i18n.M.CompactionWorking) })
 
 	case event.CompactionDone:
 		// An aborted pass carries no summary; the accompanying Notice (auto) or
@@ -4568,9 +4516,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			break
 		}
 		m.finalizeStreamed()
-		for _, ln := range compactionCardLines(e.Compaction) {
-			m.commitLine(ln)
-		}
+		m.commitRenderedLine(func(int) string { return strings.Join(compactionCardLines(e.Compaction), "\n") })
 
 	case event.Phase:
 		m.finalizeStreamed()
@@ -4620,11 +4566,15 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.queueEditCursor, m.queueEditDraft = -1, ""
 		m.clearSubmittedPastes()
 		if e.Outcome == event.TurnOutcomeRecoveryPaused {
-			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
+			m.commitRenderedLine(func(w int) string { return wrapForViewport("⏸ "+i18n.M.RecoveryPaused, w, activeCLITheme.info) })
 		} else if e.Outcome == event.TurnOutcomeFinalReadiness {
-			m.commitLine(wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, m.width, activeCLITheme.info))
+			m.commitRenderedLine(func(w int) string {
+				return wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, w, activeCLITheme.info)
+			})
 		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
+			m.commitRenderedLine(func(w int) string {
+				return wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), w, activeCLITheme.warn)
+			})
 		}
 		m.commitReceipt(e.Receipt)
 		// Long turns on Windows ConPTY often drop mouse tracking; re-arm on
@@ -4696,8 +4646,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.echoLocalCommand(input)
 		m.finalizeStreamed()
 		m.clearTranscriptDisplay()
-		m.commitLine(strings.TrimRight(
-			renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
+		m.commitTranscriptSource(transcriptSource{kind: transcriptSourceBanner})
 		m.transcriptDirty = true
 		m.forceGotoBottom = true
 		m.notice(i18n.M.SlashClsDone)
@@ -4803,7 +4752,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if len(styles) == 0 {
 			m.notice(i18n.M.OutputStyleNone)
 		} else {
-			m.commitLine(renderOutputStyles(m.width, styles, m.outputStyle))
+			current := m.outputStyle
+			m.commitRenderedLine(func(w int) string { return renderOutputStyles(w, styles, current) })
 		}
 	case "/diff-fold":
 		m.echoLocalCommand(input)
@@ -4815,7 +4765,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice(i18n.M.DiffFoldDisabled)
 		}
 	case "/theme":
-		m.echoLocalCommand(input)
+		if len(tokenizeArgs(input)) > 1 {
+			m.echoLocalCommand(input)
+		}
 		return m.runThemeSubcommand(input)
 	case "/language":
 		m.echoLocalCommand(input)
@@ -4897,51 +4849,56 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 // showStatusDetails keeps diagnostics available without permanently crowding
 // the two-line composer footer.
 func (m *chatTUI) showStatusDetails() {
-	var lines []string
-	lines = append(lines, viewHeader("%s", "Session status"))
 	mode := "Ask"
+	var used, window, jobs int
+	var ratio float64
+	var cache string
 	if m.ctrl != nil {
 		mode = m.modeTagText()
+		used, window = m.ctrl.ContextSnapshot()
+		ratio = m.ctrl.CompactRatio()
+		cache, _, _ = m.cacheStatus()
+		jobs = len(m.ctrl.Jobs())
 	}
-	lines = append(lines, "  mode       "+mode)
 	model := strings.TrimSpace(m.modelRef)
 	if model == "" {
 		model = strings.TrimSpace(m.label)
 	}
-	if model != "" {
-		lines = append(lines, "  model      "+model)
+	effort, balance, mouseOff := m.effortLevel, m.balance, m.mouseCaptureOff
+	git, cfg := m.gitStatus, activeConfigTag()
+	gitRepo := ""
+	if strings.TrimSpace(git.Repo) != "" && strings.TrimSpace(git.Branch) != "" {
+		gitRepo = themeFg(m.statusModeColor(), git.Repo)
 	}
-	if m.ctrl != nil {
-		if tag := m.contextTag(); tag != "" {
+	m.commitRenderedLine(func(int) string {
+		lines := []string{viewHeader("%s", "Session status"), "  mode       " + mode}
+		if model != "" {
+			lines = append(lines, "  model      "+model)
+		}
+		if tag := renderContextTag(used, window, ratio); tag != "" {
 			lines = append(lines, "  context    "+tag)
 		}
-	}
-	if m.effortLevel != "" {
-		// The persistent footer uses an uppercase semantic label. The expanded
-		// diagnostic view keeps its sentence-like wording for readability.
-		lines = append(lines, "  effort     effort "+m.effortLevel)
-	}
-	if m.ctrl != nil {
-		if tag := m.cacheTag(); tag != "" {
-			lines = append(lines, "  cache      "+tag)
+		if effort != "" {
+			lines = append(lines, "  effort     effort "+effort)
 		}
-	}
-	if tag := m.gitTag(); tag != "" {
-		lines = append(lines, "  git        "+tag)
-	}
-	if m.ctrl != nil {
-		if tag := m.jobsTag(); tag != "" {
-			lines = append(lines, "  jobs       "+tag)
+		if cache != "" {
+			lines = append(lines, "  cache      "+dim(cache))
 		}
-	}
-	if m.balance != "" {
-		lines = append(lines, "  balance    "+m.balance)
-	}
-	if tag := m.mouseTag(); tag != "" {
-		lines = append(lines, "  mouse      "+tag)
-	}
-	lines = append(lines, "  config     "+activeConfigTag())
-	m.commitLine(strings.Join(lines, "\n"))
+		if gitRepo != "" {
+			lines = append(lines, "  git        "+git.render(gitRepo, git.Branch))
+		}
+		if jobs > 0 {
+			lines = append(lines, "  jobs       "+dim(fmt.Sprintf("⚙ %d", jobs)))
+		}
+		if balance != "" {
+			lines = append(lines, "  balance    "+balance)
+		}
+		if mouseOff {
+			lines = append(lines, "  mouse      "+dim(i18n.M.MouseCaptureTag))
+		}
+		lines = append(lines, "  config     "+cfg)
+		return strings.Join(lines, "\n")
+	})
 }
 
 // activeConfigTag names the config file actually in effect. A ./reasonix.toml
@@ -5161,7 +5118,7 @@ func (m *chatTUI) echoLocalCommand(input string) {
 	if input == "" {
 		return
 	}
-	m.commitLine(dim("  › " + input))
+	m.commitRenderedLine(func(int) string { return dim("  › " + input) })
 }
 
 // commandNames renders the custom command list for /help, "" when there are none.
@@ -5296,12 +5253,13 @@ func (m *chatTUI) showMCPStatus() {
 		m.notice(i18n.M.SlashMCPNone)
 		return
 	}
-	m.commitLine(renderMCPStatus(m.width, m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures()))
+	servers, prompts, resources, failures := m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures()
+	m.commitRenderedLine(func(w int) string { return renderMCPStatus(w, servers, prompts, resources, failures) })
 }
 
 // notice queues a dim informational line to scrollback.
 func (m *chatTUI) notice(note string) {
-	m.commitLine(dim("  · " + note))
+	m.commitRenderedLine(func(int) string { return dim("  · " + note) })
 }
 
 // showRemoteHosts renders a read-only summary of configured remote hosts. The
@@ -5329,7 +5287,8 @@ func (m *chatTUI) showRemoteHosts() {
 		fmt.Fprintf(&b, "  · %s  %s\n", h.Name, target)
 	}
 	fmt.Fprintf(&b, "  run `reasonix remote connect <name>` in a terminal to open the remote workspace")
-	m.commitLine(dim(b.String()))
+	text := b.String()
+	m.commitRenderedLine(func(int) string { return dim(text) })
 }
 
 // resolveRefs resolves a line's @references off the event loop via the

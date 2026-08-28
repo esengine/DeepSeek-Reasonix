@@ -637,7 +637,11 @@ default. Long drafts grow to the available maximum height; once they overflow,
 wheel events inside the composer scroll the draft without moving the insertion
 cursor, while wheel events in the transcript keep scrolling the conversation.
 Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
-to select one of the named accent palettes shown by bare `/theme`.
+to select a named accent palette. Bare `/theme` opens a picker: ↑/↓ previews,
+Enter confirms and saves the choice to the user config, Esc restores the previous
+theme, and Tab only completes the name. In Termux's native scrollback mode,
+already-printed terminal history cannot be repainted; the live UI still previews
+the theme.
 
 The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
 interaction state on the left. On wider terminals, model and effort
@@ -684,7 +688,7 @@ Mode and display shortcuts:
 | `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
-| `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
+| `/theme [auto|light|dark|style]` | Previews or switches the CLI theme | Bare `/theme` opens a live preview picker. Enter saves the choice to the user config; Esc restores the previous theme. `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override the saved choice for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
 | `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | A Goal is unbounded unless `[agent].goal_token_budget` is set. |

@@ -15,7 +15,8 @@ import (
 func (m *chatTUI) showMemory(input string) {
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/memory"))
 	if args == "" {
-		m.commitLine(renderMemory(m.width, m.ctrl.Memory()))
+		memory := m.ctrl.Memory()
+		m.commitRenderedLine(func(w int) string { return renderMemory(w, memory) })
 		return
 	}
 	m.commitLine(viewProtectLines(control.MemoryCommandText(m.ctrl, args), m.width))
