@@ -15,6 +15,7 @@
         "zh": "此版本改进了代理对话流程，普通回合自然结束，无需调用合成的 finish 工具。"
       },
       "surfaces": [
+        "desktop",
         "cli"
       ],
       "guides": [
@@ -45,6 +46,7 @@
         {
           "kind": "improved",
           "targets": [
+            "desktop",
             "cli"
           ],
           "title": {
@@ -65,6 +67,7 @@
         "improved": [
           {
             "targets": [
+              "desktop",
               "cli"
             ],
             "title": {
@@ -81,6 +84,7 @@
           },
           {
             "targets": [
+              "desktop",
               "cli"
             ],
             "title": {
@@ -99,6 +103,7 @@
         "fixed": [
           {
             "targets": [
+              "desktop",
               "cli"
             ],
             "title": {
