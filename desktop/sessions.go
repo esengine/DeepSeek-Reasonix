@@ -192,7 +192,9 @@ var errSessionBusyElsewhere = errors.New("session is in use by another Reasonix 
 // would let another process acquire the lease in between and then lose its
 // freshly locked lease file, breaking cross-process mutual exclusion.
 func acquireSessionRemovalGuard(sessionPath string) (*agent.SessionRemovalGuard, error) {
-	guard, err := agent.TryAcquireSessionRemovalGuard(sessionPath)
+	guard, err := withSessionLeaseContentionRetry(func() (*agent.SessionRemovalGuard, error) {
+		return agent.TryAcquireSessionRemovalGuard(sessionPath)
+	})
 	if err != nil {
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return nil, errSessionBusyElsewhere

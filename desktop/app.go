@@ -9516,24 +9516,23 @@ func sessionPathAfterSnapshot(ctrl control.SessionAPI, fallback string) string {
 
 var (
 	// sessionLeaseContentionRetryInterval and sessionLeaseContentionRetryAttempts
-	// bound the retry window for startup session-lease binds that hit a
-	// transient in-process holder. CleanupStaleRunning probes a running
-	// sub-agent's parent session lease inside every controller build, holding
-	// it only for the duration of a metadata rewrite (sub-millisecond); a
-	// concurrent tab build that races that probe must not surface a spurious
-	// "already open in another Reasonix window" error for a lease that is
-	// genuinely free once the probe releases it. A lease held by another
-	// window or process stays held for its whole lifetime, so the bounded
-	// retry still fails fast there.
+	// bound the retry window for lease or removal-guard acquisition that hits a
+	// transient in-process holder. CleanupStaleRunning and catalog persistence
+	// can hold the session lease or save lock briefly while a concurrent tab
+	// bind or archive begins; those callers must not surface a spurious
+	// "already open in another Reasonix window" error for ownership that is
+	// genuinely free once the short operation finishes. A lease held by another
+	// window or process stays held for its whole lifetime, so the bounded retry
+	// still fails fast there.
 	sessionLeaseContentionRetryInterval = 50 * time.Millisecond
 	sessionLeaseContentionRetryAttempts = 2
 )
 
 // withSessionLeaseContentionRetry retries acquire while it fails with
 // agent.ErrSessionLeaseHeld, absorbing sub-second contention windows created
-// by transient in-process lease probes. Any other error is returned
-// immediately, and a lease that remains held after the bounded retries is
-// reported as-is.
+// by transient in-process lease or save-lock holders. Any other error is
+// returned immediately, and a lease that remains held after the bounded
+// retries is reported as-is.
 func withSessionLeaseContentionRetry[T any](acquire func() (T, error)) (T, error) {
 	var zero T
 	for attempt := 0; ; attempt++ {
