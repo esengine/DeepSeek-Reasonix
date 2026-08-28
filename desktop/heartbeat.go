@@ -33,22 +33,26 @@ import (
 
 // HeartbeatTask defines a single scheduled prompt.
 type HeartbeatTask struct {
-	ID                     string         `json:"id"`
-	Title                  string         `json:"title"`    // user-visible label
-	Prompt                 string         `json:"prompt"`   // the prompt to submit
-	Interval               string         `json:"interval"` // e.g. "5m", "1h", "30s"
-	Enabled                bool           `json:"enabled"`
-	Scope                  string         `json:"scope,omitempty"`                  // "global" or "project"
-	WorkspaceRoot          string         `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
-	TopicID                string         `json:"topicId,omitempty"`                // created topic, reused on re-run
-	LastRunAt              int64          `json:"lastRunAt,omitempty"`              // unix millis
-	NewConversationEachRun bool           `json:"newConversationEachRun,omitempty"` // true = create new topic every run
-	RunHistory             []HeartbeatRun `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
-	CreatedAt              int64          `json:"createdAt,omitempty"`
-	ApprovalMode           string         `json:"approvalMode"`              // "ask" | "auto" | "yolo"; empty defaults to "yolo"
-	TimeWindowStart        string         `json:"timeWindowStart,omitempty"` // "HH:MM" — interval tasks only run after this time (inclusive)
-	TimeWindowEnd          string         `json:"timeWindowEnd,omitempty"`   // "HH:MM" — interval tasks only run before this time (exclusive)
-	NotifyChannels         *bool          `json:"notifyChannels,omitempty"`  // true = push to bot channels; nil/false = skip
+	ID                     string                 `json:"id"`
+	Title                  string                 `json:"title"`    // user-visible label
+	Prompt                 string                 `json:"prompt"`   // the prompt to submit
+	Interval               string                 `json:"interval"` // e.g. "5m", "1h", "30s"
+	Enabled                bool                   `json:"enabled"`
+	Scope                  string                 `json:"scope,omitempty"`                  // "global" or "project"
+	WorkspaceRoot          string                 `json:"workspaceRoot,omitempty"`          // project root path when scope="project"
+	TopicID                string                 `json:"topicId,omitempty"`                // created topic, reused on re-run
+	LastRunAt              int64                  `json:"lastRunAt,omitempty"`              // unix millis
+	NewConversationEachRun bool                   `json:"newConversationEachRun,omitempty"` // true = create new topic every run
+	RunHistory             []HeartbeatRun         `json:"runHistory,omitempty"`             // recent executions (oldest first, capped)
+	CreatedAt              int64                  `json:"createdAt,omitempty"`
+	ApprovalMode           string                 `json:"approvalMode"`                // "ask" | "auto" | "yolo"; empty defaults to "yolo"
+	TimeWindowStart        string                 `json:"timeWindowStart,omitempty"`   // "HH:MM" — interval tasks only run after this time (inclusive)
+	TimeWindowEnd          string                 `json:"timeWindowEnd,omitempty"`     // "HH:MM" — interval tasks only run before this time (exclusive)
+	NotifyChannels         *bool                  `json:"notifyChannels,omitempty"`    // true = push to bot channels; nil/false = skip
+	Precheck               string                 `json:"precheck,omitempty"`          // optional gate command; run before each execution, skip run on non-zero exit
+	LastSkippedAt          int64                  `json:"lastSkippedAt,omitempty"`     // unix millis when the precheck gate last skipped a run
+	LastSkippedReason      string                 `json:"lastSkippedReason,omitempty"` // why the last run was skipped (stderr/stdout, truncated)
+	PrecheckHistory        []HeartbeatPrecheckRun `json:"precheckHistory,omitempty"`   // recent precheck outcomes (oldest first, capped)
 }
 
 // HeartbeatRun records a single successful execution of a heartbeat task.
@@ -393,6 +397,12 @@ func (e *HeartbeatEngine) resolveHeartbeatTopic(t HeartbeatTask, scope, workspac
 }
 
 func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
+	// Optional precheck gate: run it before creating any topic or tab; a
+	// non-pass outcome skips this run (LastRunAt still advances).
+	var skip bool
+	if t, skip = e.runPrecheckGate(t); skip {
+		return t
+	}
 	title := "Heartbeat: " + t.Title
 	scope := t.Scope
 	workspaceRoot := t.WorkspaceRoot
@@ -446,10 +456,8 @@ func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 		return e.executeTaskOwned(t)
 	}
 
-	// Set the task's approval mode only after confirming the controller is idle.
-	// SetToolApprovalModeForTab may drain pending approvals for auto/yolo modes,
-	// so applying it to a busy reused topic would accidentally approve a previous
-	// turn instead of preparing this heartbeat prompt.
+	// Set approval mode only after confirming the controller is idle, since
+	// SetToolApprovalModeForTab may drain pending approvals (auto/yolo).
 	mode := normalizeHeartbeatApprovalMode(t.ApprovalMode)
 	t.ApprovalMode = mode
 	e.app.SetToolApprovalModeForTab(tabMeta.ID, mode)

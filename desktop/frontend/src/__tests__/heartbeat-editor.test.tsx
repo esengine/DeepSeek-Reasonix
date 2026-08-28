@@ -71,6 +71,11 @@ Object.assign(window, {
         },
         async HeartbeatTriggerNow() {},
         async HeartbeatGenerateID() { nextID += 1; return `draft-${nextID}`; },
+        async HeartbeatTestPrecheck(command: string, _workspaceRoot: string) {
+          if (command.includes("exit 2")) return { status: "skipped", summary: "mock skipped: no tasks" };
+          if (command.includes("exit 1")) return { status: "failed", summary: "mock failed: gate broken" };
+          return { status: "passed", summary: "mock passed: 2 tasks waiting" };
+        },
         async ListWorkspaces() { return [{ name: "Project One", path: "/project-one", current: true }]; },
       },
     },
@@ -210,6 +215,39 @@ await act(async () => {
 });
 ok(document.querySelector<HTMLInputElement>('[aria-label="Title"]')?.value === "Product update digest", "parent save conflict keeps the unsaved recommendation draft open");
 ok(document.querySelector('.heartbeat-editor__save-error')?.textContent?.includes("Your draft is still here") === true, "parent save conflict is reported instead of marking the draft clean");
+
+console.log("\nheartbeat editor precheck gate");
+
+await act(async () => {
+  renderEditor({
+    ...originalTask,
+    id: "precheck-task",
+    precheck: "node ~/.reasonix/hooks/precheck.js",
+    precheckHistory: [
+      { at: 1700000000000, status: "skipped", summary: "任务看板无 todo 任务，跳过本轮认领" },
+      { at: 1700000060000, status: "passed", summary: "任务看板有 2 个 todo 任务待认领" },
+      { at: 1700000120000, status: "failed", summary: "taskctl issue list 失败，禁止执行" },
+    ],
+  }, async () => true, "precheck");
+  await flush();
+});
+const precheckInput = document.querySelector<HTMLInputElement>(".heartbeat-editor__precheck-input");
+ok(precheckInput?.value === "node ~/.reasonix/hooks/precheck.js", "precheck input shows the configured gate command");
+ok(document.querySelector(".heartbeat-editor__precheck-test") != null, "precheck test button renders");
+await act(async () => {
+  document.querySelector<HTMLButtonElement>(".heartbeat-editor__precheck-test")?.click();
+  await flush();
+  await flush();
+});
+const resultEl = document.querySelector<HTMLElement>(".heartbeat-editor__precheck-result");
+ok(resultEl?.textContent?.includes("passed") === true && resultEl?.textContent?.includes("mock passed") === true, "test button shows passed result with the gate note");
+ok(document.querySelector(".heartbeat-precheck-history") != null, "precheck history renders when the task has a precheck");
+const historyItems = Array.from(document.querySelectorAll(".heartbeat-precheck-history__item"));
+ok(historyItems.length === 3, "precheck history lists recent gate outcomes");
+ok(historyItems[0]?.textContent?.includes("failed") === true && historyItems[0]?.textContent?.includes("taskctl") === true, "newest failed outcome shows first in red");
+ok(historyItems[1]?.textContent?.includes("passed") === true && historyItems[1]?.textContent?.includes("2 个 todo 任务") === true, "passed outcome shows with its pass note");
+ok(historyItems[2]?.textContent?.includes("skipped") === true && historyItems[2]?.textContent?.includes("无 todo 任务") === true, "skipped outcome shows with its skip reason");
+ok(historyItems[0]?.classList.contains("heartbeat-precheck-history__item--failed") === true, "failed outcome gets the failed item class");
 
 await act(async () => root.unmount());
 dom.window.close();

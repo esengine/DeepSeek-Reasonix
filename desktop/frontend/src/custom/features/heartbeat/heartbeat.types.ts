@@ -5,6 +5,12 @@ export interface HeartbeatRun {
   topicId: string; // topic used/created by this run
 }
 
+export interface HeartbeatPrecheckRun {
+  at: number;       // unix millis execution time
+  status: "passed" | "skipped" | "failed"; // precheck gate outcome
+  summary: string;  // human-readable outcome (pass note, skip reason, or failure detail)
+}
+
 export interface HeartbeatTask {
   id: string;
   title: string;
@@ -22,4 +28,8 @@ export interface HeartbeatTask {
   timeWindowStart?: string; // "HH:MM" — interval tasks only run after this time
   timeWindowEnd?: string;   // "HH:MM" — interval tasks only run before this time
   notifyChannels?: boolean; // true = push to bot channels; false/nil = skip
+  precheck?: string;        // optional gate command; run before each execution, skip run on non-zero exit
+  lastSkippedAt?: number;   // unix millis when the precheck gate last skipped a run
+  lastSkippedReason?: string; // why the last run was skipped
+  precheckHistory?: HeartbeatPrecheckRun[]; // recent precheck outcomes (oldest first)
 }

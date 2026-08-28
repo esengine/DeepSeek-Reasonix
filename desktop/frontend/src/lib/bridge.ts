@@ -194,6 +194,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   HeartbeatSaveConfig(update: unknown): Promise<unknown>;
   HeartbeatTriggerNow(id: string): Promise<void>;
   HeartbeatGenerateID(): Promise<string>;
+  HeartbeatTestPrecheck(precheckCommand: string, workspaceRoot: string): Promise<{ status: string; summary: string }>;
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitToTabWithID(tabID: string, input: string, submissionID: string): Promise<void>;
@@ -5009,6 +5010,9 @@ function makeMockApp(): AppBindings {
     },
     async HeartbeatTriggerNow(_id: string) {},
     async HeartbeatGenerateID() { return "mock-" + Date.now().toString(36); },
+    async HeartbeatTestPrecheck(command: string, _workspaceRoot: string) {
+      return { status: command.includes("exit 2") ? "skipped" : command.includes("exit 1") ? "failed" : "passed", summary: "mock precheck result" };
+    },
     async ListTasks() { return []; },
     async CurrentTaskSessionID() { return ""; },
     async ListTasksForSession() { return []; },
