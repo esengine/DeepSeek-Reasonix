@@ -6,12 +6,15 @@ import (
 	"reasonix/internal/sandbox"
 )
 
-// resolvedShellLabel keeps the provider-visible environment section aligned
-// with the interpreter actually bound after configured-path validation and
-// fallback. A stale persisted path must never describe a different executable.
-func resolvedShellLabel(shell sandbox.Shell) string {
-	if path := strings.TrimSpace(shell.Path); path != "" {
-		return path
+// resolvedShellLabel preserves the cache-stable kind label when the user did
+// not configure an explicit path. When a path was configured, it reports the
+// interpreter actually bound after validation and fallback, so a stale path
+// can never describe a different executable.
+func resolvedShellLabel(shell sandbox.Shell, configuredPath string) string {
+	if strings.TrimSpace(configuredPath) != "" {
+		if path := strings.TrimSpace(shell.Path); path != "" {
+			return path
+		}
 	}
 	return shell.Kind.String()
 }
