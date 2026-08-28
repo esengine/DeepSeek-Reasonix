@@ -29,7 +29,7 @@
             "en": "Learn how to connect to remote SSH workspaces, manage sessions, and use background turns.",
             "zh": "了解如何连接远程 SSH 工作区、管理会话并使用后台回合。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/GUIDE.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d7d0f2084bf9abbf4824e30a97f2ee019f2ff6f3/docs/GUIDE.md"
         },
         {
           "title": {
@@ -40,7 +40,7 @@
             "en": "Command-line interface documentation and configuration options.",
             "zh": "命令行界面文档和配置选项。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/CLI.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d7d0f2084bf9abbf4824e30a97f2ee019f2ff6f3/docs/CLI.md"
         },
         {
           "title": {
@@ -51,7 +51,7 @@
             "en": "Where Reasonix stores configuration and state files.",
             "zh": "Reasonix 存储配置和状态文件的位置。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/CONFIG_PATHS.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d7d0f2084bf9abbf4824e30a97f2ee019f2ff6f3/docs/CONFIG_PATHS.md"
         },
         {
           "title": {
@@ -62,7 +62,7 @@
             "en": "How to migrate existing workspaces and data to the latest version.",
             "zh": "如何将现有工作区和数据迁移到最新版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/MIGRATING.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d7d0f2084bf9abbf4824e30a97f2ee019f2ff6f3/docs/MIGRATING.md"
         },
         {
           "title": {
@@ -73,7 +73,7 @@
             "en": "Details on tool schemas and provider interactions.",
             "zh": "工具模式和提供程序交互的详细信息。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/28e6303e488e4febd47009f720602744ba1b6175/docs/TOOL_CONTRACT.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d7d0f2084bf9abbf4824e30a97f2ee019f2ff6f3/docs/TOOL_CONTRACT.md"
         }
       ],
       "highlights": [
@@ -263,6 +263,23 @@
             "refs": [
               9493,
               9422
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Compact MCP capability discovery",
+              "zh": "精简 MCP 能力发现"
+            },
+            "body": {
+              "en": "Capability listing now summarizes each MCP server and keeps full tool catalogs available on demand through inspection.",
+              "zh": "能力列表现在只摘要展示各 MCP 服务器，完整工具目录仍可按需检查。"
+            },
+            "refs": [
+              9499
             ]
           },
           {
