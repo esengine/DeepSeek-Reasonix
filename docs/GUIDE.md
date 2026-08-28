@@ -278,6 +278,11 @@ idle to fail-atomically reload extension sidecars and the runtime generation
 without restarting Serve. Use `--model`, `--max-steps`, or `--resume` for
 one-off launches; otherwise `serve` uses the user-global `default_model`.
 
+Click either the bottom-left or bottom-right balance to hide both with `•••`,
+and click again to reveal them. This preference is saved for the browser's
+current origin. Balance refreshes continue while hidden; the Stats panel remains
+unmasked.
+
 If the selected Provider has no saved API key, a loopback-bound Serve still
 starts and shows a Provider setup page instead of failing before the browser can
 connect. After authentication, enter the key there; Reasonix writes it to this

@@ -248,6 +248,9 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板、扩展发布的 stat
 和运行时 generation。临时启动可用 `--model`、`--max-steps` 或 `--resume`；不传
 `--model` 时，`serve` 使用用户全局 `default_model`。
 
+点击左下角或右下角的余额可将两处余额同时隐藏为 `•••`，再次点击即可显示。
+此偏好保存在浏览器当前源下。隐藏时仍会刷新余额，Stats 面板不受影响。
+
 如果当前 Provider 尚未保存 API Key，绑定在回环地址的 Serve 仍会启动，并先显示 Provider
 配置页，而不是在浏览器连接前直接失败。通过 Serve 认证后可在该页输入 Key；Reasonix 会以受限
 权限写入**当前主机**的全局凭据文件，在同一进程内重建 Controller，然后进入正常 Web UI。

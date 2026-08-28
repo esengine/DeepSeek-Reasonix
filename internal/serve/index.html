@@ -427,7 +427,7 @@ input,textarea{font:inherit;color:inherit}
       <div class="status-metrics" id="status-metrics">
         <div class="sm-item"><span class="sm-val" id="sm-cache">—</span><span>__('cache')</span></div>
         <div class="sm-item"><span class="sm-val" id="sm-cost">—</span><span>__('cost')</span></div>
-        <div class="sm-item"><span class="sm-val acc" id="sm-balance">—</span><span>__('balance')</span></div>
+        <button type="button" class="sm-item" id="btn-balance"><span class="sm-val acc" id="sm-balance">—</span><span>__('balance')</span></button>
       </div>
       <div style="padding:4px 10px">
         <div class="status" id="sidebar-status"><span class="status__dot" id="status-dot"></span><span id="status-model">-</span></div>
@@ -500,7 +500,7 @@ input,textarea{font:inherit;color:inherit}
       </div>
       <div class="toolbar__spacer"></div>
       <div class="status" id="turn-info"></div>
-      <div class="status" id="balance-info"></div>
+      <button type="button" class="status" id="balance-info"></button>
     </div>
     <div class="composer">
       <span class="composer__caret">&#8250;</span>
@@ -623,6 +623,9 @@ const __T = {
     'cost': 'Cost',
     'multi_currency': 'Multiple currencies',
     'balance': 'Balance',
+    'show_balance': 'Show balance',
+    'hide_balance': 'Hide balance',
+    'balance_preference_failed': 'Could not save balance visibility. It may reset when you reload.',
     'ready': 'Ready',
     'thinking': 'Thinking...',
     'retrying_status': 'Retrying ({attempt}/{max})...',
@@ -774,6 +777,9 @@ const __T = {
     'cost': '费用',
     'multi_currency': '多币种',
     'balance': '余额',
+    'show_balance': '显示余额',
+    'hide_balance': '隐藏余额',
+    'balance_preference_failed': '无法保存余额显示偏好，重新加载后可能会重置。',
     'ready': '就绪',
     'thinking': '思考中...',
     'retrying_status': '正在重试 ({attempt}/{max})...',
@@ -959,6 +965,28 @@ const statusDotSidebar = $('#status-dot'), statusModel = $('#status-model');
 const welcome = $('#welcome');
 const welcomeModel = $('#welcome-model'), welcomeCwd = $('#welcome-cwd');
 const slashAnchor = $('#slash-menu-anchor');
+
+let balanceDisplay = null, hideBalance = false;
+try { hideBalance = localStorage.getItem('reasonix.hideBalance') === 'true'; }
+catch { hideBalance = true; }
+function renderBalance() {
+  const display = hideBalance ? '•••' : balanceDisplay;
+  $('#sm-balance').textContent = balanceDisplay === null ? '—' : display;
+  balanceInfo.textContent = balanceDisplay === null ? '' : '💰 ' + display;
+  for (const button of [$('#btn-balance'), balanceInfo]) {
+    button.disabled = balanceDisplay === null;
+    button.title = __(hideBalance ? 'show_balance' : 'hide_balance');
+    button.setAttribute('aria-label', hideBalance || balanceDisplay === null ? button.title : button.title + ': ' + balanceDisplay);
+  }
+}
+function toggleBalance() {
+  hideBalance = !hideBalance;
+  renderBalance();
+  try { localStorage.setItem('reasonix.hideBalance', String(hideBalance)); }
+  catch { showNotice(__('balance_preference_failed'), 'warn'); }
+}
+$('#btn-balance').onclick = balanceInfo.onclick = toggleBalance;
+renderBalance();
 
 // Token links use a URL fragment so the secret never appears in the initial
 // HTTP request, browser history, referrers, or access logs. Exchange it for an
@@ -1655,8 +1683,8 @@ function fetchStatus(){
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
     const lastPicked=usageSelectedCost(s.lastUsage);
     $('#sm-cost').textContent=lastPicked?.bucketed?__('multi_currency'):lastPicked?fmtMoney(lastPicked.amount,lastPicked.currency||s.lastUsage?.currency):'—';
-    if(s.balance){$('#sm-balance').textContent=s.balance.display||'--';}
-    if(s.balance)balanceInfo.textContent='💰 '+(s.balance.display||'--');
+    balanceDisplay=s.balance ? s.balance.display||'--' : null;
+    renderBalance();
   }).catch(()=>{});
 }
 setInterval(fetchStatus,30000);
