@@ -179,11 +179,9 @@ func TestShellInventoryCache(t *testing.T) {
 	// Singleflight: concurrent snapshot() calls for one key build once.
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = inv.snapshot("windows", "auto", "")
-		}()
+		})
 	}
 	// The first build ("") does not block, so wait for the burst to finish.
 	wg.Wait()
@@ -224,11 +222,9 @@ func TestShellInventoryCache(t *testing.T) {
 
 	// Invalidation forces a rebuild and drops a stale in-flight result.
 	var inflight sync.WaitGroup
-	inflight.Add(1)
-	go func() {
-		defer inflight.Done()
+	inflight.Go(func() {
 		_ = inv.snapshot("windows", "auto", "slow")
-	}()
+	})
 	// Wait until the slow build has started, then invalidate under it.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
