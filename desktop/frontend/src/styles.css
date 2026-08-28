@@ -5292,6 +5292,16 @@ button.reasoning-summary:focus-visible {
   line-height: 1.72;
   white-space: pre-wrap;
 }
+
+/* A live turn's streaming reasoning grows every token; bounding the region
+   with internal scrolling stops the live footer (and thus the tail-follow
+   target) from moving every frame (#9208/#8688 jitter), while the full text
+   stays reachable inside the region. */
+.turn-collapse__inline-reasoning {
+  max-height: min(40vh, 480px);
+  overflow-y: auto;
+}
+
 .reasoning__body > .md,
 .turn-collapse__inline-reasoning > .md,
 .tool__subagent-preview-text--markdown > .md {

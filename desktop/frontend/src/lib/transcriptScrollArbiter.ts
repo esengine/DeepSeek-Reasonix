@@ -46,7 +46,7 @@ export type TranscriptScrollEvent =
   | { type: "SCROLL_DELIVERED"; atBottom: boolean; scrollable: boolean; substantial?: boolean }
   | { type: "TAIL_CONTENT_CHANGED" }
   | { type: "CONTENT_SHRANK" }
-  | { type: "LAYOUT_HEIGHT_CHANGED" }
+  | { type: "LAYOUT_HEIGHT_CHANGED"; deltaHeight?: number }
   | { type: "VIEWPORT_RESIZED" }
   | { type: "USER_RESIZE_BEGIN" }
   | { type: "USER_RESIZE_END" }
@@ -106,6 +106,14 @@ export function isTranscriptContentShrink(delta: number): boolean {
 // the bottom) no longer re-enters (#8709/#9099); only an explicit
 // JUMP_TO_BOTTOM bypasses the hold.
 export const TRANSCRIPT_BOTTOM_HOLD_DELIVERIES = 2;
+
+// Layout growth below this many pixels does not re-aim the tail writer while
+// tail-follow is active. Per-frame streaming growth (reasoning tokens, small
+// tool-card arrivals) otherwise keeps the viewport chasing a moving target
+// (#9208/#8688 jitter); a real growth step above the threshold still re-aims
+// immediately, and deliberate jumps (JUMP_TO_BOTTOM, tail-claiming scroll)
+// bypass this gate.
+export const TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX = 24;
 
 function transition(state: TranscriptScrollState, commands: readonly TranscriptScrollCommand[] = []): TranscriptScrollTransition {
   return { state, commands };
@@ -198,9 +206,26 @@ export function reduceTranscriptScroll(
       );
     }
     case "TAIL_CONTENT_CHANGED":
-    case "LAYOUT_HEIGHT_CHANGED":
     case "VIEWPORT_RESIZED":
+      // Tail content / viewport changes always re-aim: the user's viewport
+      // size changed, so the previous bottom target is stale by construction.
       return transition(state, state.mode === "tail-follow" ? [{ type: "AUTOSCROLL_TO_BOTTOM" }] : []);
+    case "LAYOUT_HEIGHT_CHANGED": {
+      // Per-frame content growth (streaming reasoning tokens, arriving tool
+      // cards) re-enters the tail writer for every small layout event, so the
+      // viewport chases a target that is itself moving (jitter/flash, #9208,
+      // #8688). Ignore sub-threshold growth; real growth above the threshold
+      // still re-aims immediately. Events without a measured delta keep the
+      // legacy re-aim behaviour.
+      if (
+        state.mode === "tail-follow"
+        && event.deltaHeight !== undefined
+        && event.deltaHeight < TRANSCRIPT_TAIL_REARM_MIN_HEIGHT_PX
+      ) {
+        return transition(state);
+      }
+      return transition(state, state.mode === "tail-follow" ? [{ type: "AUTOSCROLL_TO_BOTTOM" }] : []);
+    }
     case "CONTENT_SHRANK":
       // Auto-fold collapse shortens the transcript. Keep tail ownership but
       // let the browser's native scrollTop clamp settle the new bottom; a

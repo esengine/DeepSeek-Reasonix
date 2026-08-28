@@ -271,5 +271,47 @@ check(
   "manual reading suppresses viewport-shrink pinning",
 );
 
+// Per-frame streaming growth (reasoning tokens, small tool-card arrivals)
+// below the re-arm threshold must not re-aim the tail writer: the viewport
+// otherwise chases a target that moves every frame (#9208/#8688 jitter).
+const subThresholdGrowth = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "LAYOUT_HEIGHT_CHANGED", deltaHeight: 12 },
+  { type: "LAYOUT_HEIGHT_CHANGED", deltaHeight: 12 },
+  { type: "LAYOUT_HEIGHT_CHANGED", deltaHeight: 12 },
+]);
+check(
+  subThresholdGrowth.commands.length === 0,
+  "sub-threshold layout growth does not re-aim the tail writer",
+);
+
+const thresholdGrowth = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "LAYOUT_HEIGHT_CHANGED", deltaHeight: 48 },
+]);
+check(
+  thresholdGrowth.commands.join(",") === "AUTOSCROLL_TO_BOTTOM",
+  "above-threshold layout growth still re-aims the tail writer",
+);
+
+const legacyGrowth = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+]);
+check(
+  legacyGrowth.commands.join(",") === "AUTOSCROLL_TO_BOTTOM",
+  "layout events without a measured delta keep the legacy re-aim behaviour",
+);
+
+const subThresholdManual = run([
+  { type: "SCROLL_DELIVERED", atBottom: true, scrollable: true },
+  { type: "USER_SCROLL_INTENT", canClaimTail: false },
+  { type: "LAYOUT_HEIGHT_CHANGED", deltaHeight: 12 },
+]);
+check(
+  subThresholdManual.commands.length === 0 && subThresholdManual.state.mode === "manual",
+  "sub-threshold growth never disturbs manual reading",
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -599,6 +599,7 @@ export function useTranscriptScrollArbiter({
       followFrameRef.current = null;
       if (generationRef.current !== generation || scrollRef.current !== scrollElement) return;
       const element = scrollRef.current;
+      let deltaHeight = 0;
       if (element) {
         const scrollHeight = element.scrollHeight;
         const previous = followGeometryRef.current.contentExtent;
@@ -608,8 +609,9 @@ export function useTranscriptScrollArbiter({
           anchorCompensation.schedule();
           return;
         }
+        deltaHeight = previous != null ? Math.max(0, scrollHeight - previous) : 0;
       }
-      dispatch({ type: "LAYOUT_HEIGHT_CHANGED" });
+      dispatch({ type: "LAYOUT_HEIGHT_CHANGED", deltaHeight });
       anchorCompensation.schedule();
     });
   }, [anchorCompensation, dispatch, readerExtent, tailSettle]);
