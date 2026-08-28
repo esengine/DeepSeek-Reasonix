@@ -7,12 +7,12 @@
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
-        "en": "Reasonix 1.32.0",
-        "zh": "Reasonix 1.32.0"
+        "en": "Remote workspaces and durable turns",
+        "zh": "远程工作区与持久化回合"
       },
       "summary": {
-        "en": "Remote SSH workspaces, durable turns, smoother transcript scrolling, and a more reliable desktop experience.",
-        "zh": "远程 SSH 工作区、持久化回合、更流畅的对话滚动，以及更可靠的桌面体验。"
+        "en": "Remote SSH workspaces, durable ordered turns, smoother transcript navigation, and stronger Windows and state-recovery reliability.",
+        "zh": "远程 SSH 工作区、持久有序的回合、更流畅的对话导航，以及更可靠的 Windows 与状态恢复体验。"
       },
       "surfaces": [
         "desktop",
@@ -88,8 +88,8 @@
             "zh": "远程 SSH 工作区"
           },
           "body": {
-            "en": "Connect to remote SSH workspaces, manage sessions, and run background turns with full desktop parity.",
-            "zh": "连接远程 SSH 工作区、管理会话并以完整的桌面功能运行后台回合。"
+            "en": "Connect remote SSH workspaces, resume exact sessions, and let busy turns continue in the background while you switch sessions.",
+            "zh": "连接远程 SSH 工作区、精确恢复会话，并在切换会话时让繁忙回合继续在后台运行。"
           },
           "refs": [
             9369,
@@ -110,8 +110,8 @@
             "zh": "持久化、有序的回合"
           },
           "body": {
-            "en": "Turns are now durable, ordered, and interrupt-safe, preventing rollbacks and stuck states.",
-            "zh": "回合现在持久化、有序且可安全中断，防止回滚和卡住状态。"
+            "en": "Ordered turn events now persist across interruptions and restarts, with accepted side effects fenced from replay.",
+            "zh": "有序的回合事件现在可跨中断与重启持久保存，并防止已接受的副作用被重复执行。"
           },
           "refs": [
             9409
@@ -123,16 +123,14 @@
             "desktop"
           ],
           "title": {
-            "en": "Smoother transcript scrolling",
-            "zh": "更流畅的对话滚动"
+            "en": "Smoother transcript scrolling and navigation",
+            "zh": "更流畅的对话滚动与导航"
           },
           "body": {
-            "en": "Fixed scroll bounce, flicker, and jump issues in long conversations.",
-            "zh": "修复了长对话中的滚动弹跳、闪烁和跳动问题。"
+            "en": "Stabilized scroll-surface ownership and commit navigation only after the destination has painted.",
+            "zh": "稳定滚动表面所有权，并在目标完成绘制后再提交会话导航。"
           },
           "refs": [
-            9248,
-            9341,
             9493,
             9422
           ]
@@ -152,8 +150,7 @@
           },
           "refs": [
             9364,
-            9473,
-            7925
+            9473
           ]
         },
         {
@@ -167,119 +164,12 @@
             "zh": "MCP 会话可靠性"
           },
           "body": {
-            "en": "Fixed MCP session handling with the official Go SDK, including JetBrains Streamable HTTP support.",
-            "zh": "使用官方 Go SDK 修复了 MCP 会话处理，包括 JetBrains Streamable HTTP 支持。"
+            "en": "Moved supervised MCP sessions to the official Go SDK and correctly dispatch ACP-supplied host-session servers.",
+            "zh": "将受管 MCP 会话迁移到官方 Go SDK，并正确调度通过 ACP 提供的宿主会话服务器。"
           },
           "refs": [
             9410,
             9381
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "Session catalog stability",
-            "zh": "会话目录稳定性"
-          },
-          "body": {
-            "en": "Prevented repeated repair loops and sidebar reordering during indexing.",
-            "zh": "防止了索引期间的重复修复循环和侧栏重新排序。"
-          },
-          "refs": [
-            9312,
-            9314,
-            9421
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "Provider deletion and theme overlays",
-            "zh": "提供程序删除和主题覆盖层"
-          },
-          "body": {
-            "en": "Allowed deleting default providers and made operational overlays opaque.",
-            "zh": "允许删除默认提供程序，并使操作覆盖层不透明。"
-          },
-          "refs": [
-            9344,
-            9404
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "macOS self-update on exFAT",
-            "zh": "macOS 在 exFAT 上的自动更新"
-          },
-          "body": {
-            "en": "Fixed self-update on exFAT filesystems.",
-            "zh": "修复了 exFAT 文件系统上的自动更新。"
-          },
-          "refs": [
-            9153
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "Corrupt branch meta recovery",
-            "zh": "损坏的分支元数据恢复"
-          },
-          "body": {
-            "en": "Automatically rebuild zero-filled corrupt branch meta files instead of failing saves.",
-            "zh": "自动重建全零损坏的分支元数据文件，而不是保存失败。"
-          },
-          "refs": [
-            9155
-          ]
-        },
-        {
-          "kind": "improved",
-          "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "Compact ratio range",
-            "zh": "压缩比例范围"
-          },
-          "body": {
-            "en": "Lowered the minimum compact_ratio to 0.30 for earlier compaction.",
-            "zh": "将最小 compact_ratio 降低到 0.30，以便更早进行压缩。"
-          },
-          "refs": [
-            9158
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "Standard todo stalls",
-            "zh": "Standard 待办停滞"
-          },
-          "body": {
-            "en": "Fixed stalled Standard todos by adding a bounded continuation prompt.",
-            "zh": "通过添加有界的继续提示修复了 Standard 待办停滞。"
-          },
-          "refs": [
-            9483
           ]
         },
         {
@@ -298,100 +188,6 @@
           "refs": [
             9466
           ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "Individual session archiving",
-            "zh": "单个会话归档"
-          },
-          "body": {
-            "en": "Added safe archiving for individual sessions in the project tree.",
-            "zh": "在项目树中为单个会话添加了安全归档。"
-          },
-          "refs": [
-            9374
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "Memory capability documentation",
-            "zh": "记忆能力文档"
-          },
-          "body": {
-            "en": "Documented memory capabilities in use_capability description.",
-            "zh": "在 use_capability 描述中记录了记忆能力。"
-          },
-          "refs": [
-            9376
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "Release notes split",
-            "zh": "更新日志拆分"
-          },
-          "body": {
-            "en": "Split release notes by Desktop and CLI for clearer upgrade decisions.",
-            "zh": "按桌面端和 CLI 拆分更新日志，以便更清晰地做出升级决策。"
-          },
-          "refs": [
-            9397
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "service"
-          ],
-          "title": {
-            "en": "Crash worker performance and migration",
-            "zh": "崩溃工作器性能和迁移"
-          },
-          "body": {
-            "en": "Retired expensive metric rollup and added Firebase migration gates.",
-            "zh": "退役了昂贵的指标汇总并添加了 Firebase 迁移门禁。"
-          },
-          "refs": [
-            9379,
-            9418,
-            9424,
-            9425,
-            9415,
-            9413,
-            9407
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop",
-            "cli"
-          ],
-          "title": {
-            "en": "WebSocket dependency update",
-            "zh": "WebSocket 依赖更新"
-          },
-          "body": {
-            "en": "Updated gorilla/websocket to 1.5.3.",
-            "zh": "将 gorilla/websocket 更新到 1.5.3。"
-          },
-          "refs": [
-            9382
-          ]
         }
       ],
       "changes": {
@@ -406,8 +202,8 @@
               "zh": "远程 SSH 工作区"
             },
             "body": {
-              "en": "Connect to remote SSH workspaces, manage sessions, and run background turns with full desktop parity.",
-              "zh": "连接远程 SSH 工作区、管理会话并以完整的桌面功能运行后台回合。"
+              "en": "Connect remote SSH workspaces, resume exact sessions, and let busy turns continue in the background while you switch sessions.",
+              "zh": "连接远程 SSH 工作区、精确恢复会话，并在切换会话时让繁忙回合继续在后台运行。"
             },
             "refs": [
               9369,
@@ -427,11 +223,27 @@
               "zh": "持久化、有序的回合"
             },
             "body": {
-              "en": "Turns are now durable, ordered, and interrupt-safe, preventing rollbacks and stuck states.",
-              "zh": "回合现在持久化、有序且可安全中断，防止回滚和卡住状态。"
+              "en": "Ordered turn events now persist across interruptions and restarts, with accepted side effects fenced from replay.",
+              "zh": "有序的回合事件现在可跨中断与重启持久保存，并防止已接受的副作用被重复执行。"
             },
             "refs": [
               9409
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Individual session archiving",
+              "zh": "单个会话归档"
+            },
+            "body": {
+              "en": "Archive individual sessions safely from their project-tree group.",
+              "zh": "现在可以在项目树分组中安全归档单个会话。"
+            },
+            "refs": [
+              9374
             ]
           }
         ],
@@ -441,16 +253,14 @@
               "desktop"
             ],
             "title": {
-              "en": "Smoother transcript scrolling",
-              "zh": "更流畅的对话滚动"
+              "en": "Smoother transcript scrolling and navigation",
+              "zh": "更流畅的对话滚动与导航"
             },
             "body": {
-              "en": "Fixed scroll bounce, flicker, and jump issues in long conversations.",
-              "zh": "修复了长对话中的滚动弹跳、闪烁和跳动问题。"
+              "en": "Stabilized scroll-surface ownership and commit navigation only after the destination has painted.",
+              "zh": "稳定滚动表面所有权，并在目标完成绘制后再提交会话导航。"
             },
             "refs": [
-              9248,
-              9341,
               9493,
               9422
             ]
@@ -471,6 +281,40 @@
             "refs": [
               9158
             ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Clearer memory capability guidance",
+              "zh": "更清晰的记忆能力指引"
+            },
+            "body": {
+              "en": "The capability description now explains when and how to use Reasonix memory tools.",
+              "zh": "能力说明现在会解释何时以及如何使用 Reasonix 记忆工具。"
+            },
+            "refs": [
+              9376
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Client-specific release notes",
+              "zh": "按客户端拆分的更新日志"
+            },
+            "body": {
+              "en": "Release notes now separate Desktop and CLI changes for clearer upgrade decisions.",
+              "zh": "更新日志现在分别展示桌面端与 CLI 变更，便于判断升级影响。"
+            },
+            "refs": [
+              9397
+            ]
           }
         ],
         "fixed": [
@@ -488,8 +332,7 @@
             },
             "refs": [
               9364,
-              9473,
-              7925
+              9473
             ]
           },
           {
@@ -502,8 +345,8 @@
               "zh": "MCP 会话可靠性"
             },
             "body": {
-              "en": "Fixed MCP session handling with the official Go SDK, including JetBrains Streamable HTTP support.",
-              "zh": "使用官方 Go SDK 修复了 MCP 会话处理，包括 JetBrains Streamable HTTP 支持。"
+              "en": "Moved supervised MCP sessions to the official Go SDK and correctly dispatch ACP-supplied host-session servers.",
+              "zh": "将受管 MCP 会话迁移到官方 Go SDK，并正确调度通过 ACP 提供的宿主会话服务器。"
             },
             "refs": [
               9410,
@@ -515,16 +358,14 @@
               "desktop"
             ],
             "title": {
-              "en": "Session catalog stability",
-              "zh": "会话目录稳定性"
+              "en": "Atomic recovered-session publication",
+              "zh": "原子发布恢复会话"
             },
             "body": {
-              "en": "Prevented repeated repair loops and sidebar reordering during indexing.",
-              "zh": "防止了索引期间的重复修复循环和侧栏重新排序。"
+              "en": "Recovered session projections now publish atomically, avoiding partially updated catalog state.",
+              "zh": "恢复后的会话投影现在会原子发布，避免目录出现部分更新状态。"
             },
             "refs": [
-              9312,
-              9314,
               9421
             ]
           },
@@ -533,15 +374,14 @@
               "desktop"
             ],
             "title": {
-              "en": "Provider deletion and theme overlays",
-              "zh": "提供程序删除和主题覆盖层"
+              "en": "Readable operational overlays",
+              "zh": "清晰可读的操作弹层"
             },
             "body": {
-              "en": "Allowed deleting default providers and made operational overlays opaque.",
-              "zh": "允许删除默认提供程序，并使操作覆盖层不透明。"
+              "en": "Operational dialogs and menus now use opaque theme surfaces so their content remains readable.",
+              "zh": "操作对话框和菜单现在使用不透明主题表面，确保内容始终清晰可读。"
             },
             "refs": [
-              9344,
               9404
             ]
           },
@@ -559,23 +399,6 @@
             },
             "refs": [
               9153
-            ]
-          },
-          {
-            "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Corrupt branch meta recovery",
-              "zh": "损坏的分支元数据恢复"
-            },
-            "body": {
-              "en": "Automatically rebuild zero-filled corrupt branch meta files instead of failing saves.",
-              "zh": "自动重建全零损坏的分支元数据文件，而不是保存失败。"
-            },
-            "refs": [
-              9155
             ]
           },
           {
@@ -612,68 +435,17 @@
           },
           {
             "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Individual session archiving",
-              "zh": "单个会话归档"
-            },
-            "body": {
-              "en": "Added safe archiving for individual sessions in the project tree.",
-              "zh": "在项目树中为单个会话添加了安全归档。"
-            },
-            "refs": [
-              9374
-            ]
-          },
-          {
-            "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Memory capability documentation",
-              "zh": "记忆能力文档"
-            },
-            "body": {
-              "en": "Documented memory capabilities in use_capability description.",
-              "zh": "在 use_capability 描述中记录了记忆能力。"
-            },
-            "refs": [
-              9376
-            ]
-          },
-          {
-            "targets": [
-              "desktop",
-              "cli"
-            ],
-            "title": {
-              "en": "Release notes split",
-              "zh": "更新日志拆分"
-            },
-            "body": {
-              "en": "Split release notes by Desktop and CLI for clearer upgrade decisions.",
-              "zh": "按桌面端和 CLI 拆分更新日志，以便更清晰地做出升级决策。"
-            },
-            "refs": [
-              9397
-            ]
-          },
-          {
-            "targets": [
               "service"
             ],
             "title": {
-              "en": "Crash worker performance and migration",
-              "zh": "崩溃工作器性能和迁移"
+              "en": "Crash-report storage migration",
+              "zh": "崩溃报告存储迁移"
             },
             "body": {
-              "en": "Retired expensive metric rollup and added Firebase migration gates.",
-              "zh": "退役了昂贵的指标汇总并添加了 Firebase 迁移门禁。"
+              "en": "Migrated crash-report storage to Firebase with approval, output, and capacity safeguards.",
+              "zh": "将崩溃报告存储迁移到 Firebase，并加入审批、输出与容量保护。"
             },
             "refs": [
-              9379,
               9418,
               9424,
               9425,
@@ -701,15 +473,47 @@
           }
         ]
       },
-      "upgrade": [],
-      "risks": [],
+      "upgrade": [
+        {
+          "level": "info",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Existing topic metadata migrates automatically",
+            "zh": "现有主题元数据会自动迁移"
+          },
+          "body": {
+            "en": "Existing workspaces migrate on first access and retain legacy JSON mirrors for sequential downgrade and re-upgrade; no manual action is required.",
+            "zh": "现有工作区会在首次访问时迁移，并保留旧版 JSON 镜像以支持顺序降级与再次升级；无需手动操作。"
+          },
+          "refs": [
+            9466
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Fresh-workspace downgrade boundary",
+            "zh": "新工作区的降级边界"
+          },
+          "body": {
+            "en": "Workspaces first created in v1.32.0 keep topic metadata only in SQLite. A direct downgrade may recover titles from session metadata but cannot guarantee creation timestamps or auto-title stages. Do not run old and new Reasonix versions against the same workspace concurrently.",
+            "zh": "在 v1.32.0 中首次创建的工作区仅在 SQLite 中保存主题元数据。直接降级时可从会话元数据恢复标题，但无法保证创建时间或自动标题阶段完整恢复。请勿让新旧 Reasonix 版本同时写入同一工作区。"
+          },
+          "refs": [
+            9466
+          ]
+        }
+      ],
       "contributors": [
         "SivanCola",
         "XTLine",
-        "wuhanwoaini521",
-        "esengine",
         "Linearl",
-        "dependabot[bot]",
         "hdkshingala",
         "zhongerdeajie",
         "zcxads666"
