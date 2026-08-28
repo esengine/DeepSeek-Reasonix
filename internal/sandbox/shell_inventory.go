@@ -308,7 +308,7 @@ func configuredWindowsBashPath(prefer, path string, exists func(string) bool) st
 	}
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "bash":
-		return sanitizeWindowsBashPath(path, exists)
+		return configuredShellPath("windows", ShellBash, path, exists, isWindowsWSLBash)
 	case "powershell", "pwsh":
 		return ""
 	}
@@ -316,7 +316,7 @@ func configuredWindowsBashPath(prefer, path string, exists func(string) bool) st
 	if base != "bash" && base != "git-bash" {
 		return ""
 	}
-	return sanitizeWindowsBashPath(path, exists)
+	return configuredShellPath("windows", ShellBash, path, exists, isWindowsWSLBash)
 }
 
 // bashCandidatesFromGitBinary maps a git.exe or git-bash.exe location to the

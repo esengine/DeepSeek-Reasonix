@@ -120,7 +120,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 	case "", "auto":
 		return auto()
 	case "bash":
-		path = sanitizeWindowsBashPath(path, exists)
+		path = configuredShellPath(goos, ShellBash, path, exists, isWSL)
 		if path != "" && exists(path) && probe(path) {
 			return Shell{Kind: ShellBash, Path: path}
 		}
@@ -130,6 +130,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		warnMissingShell(warn, prefer)
 		return auto()
 	case "powershell", "pwsh":
+		path = configuredShellPath(goos, ShellPowerShell, path, exists, isWSL)
 		if path != "" && exists(path) {
 			return Shell{Kind: ShellPowerShell, Path: path}
 		}
@@ -231,6 +232,52 @@ func pathDir(p string) string {
 		return p[:i]
 	}
 	return "."
+}
+
+// ConfiguredShellPathForPreference returns a configured executable only when
+// it is compatible with the forced interpreter. The path remains persisted
+// even when rejected here, so changing preferences never destroys the user's
+// custom setting while runtime consumers avoid launching it with the wrong
+// argv contract.
+func ConfiguredShellPathForPreference(prefer, path string) string {
+	var kind ShellKind
+	switch strings.ToLower(strings.TrimSpace(prefer)) {
+	case "bash":
+		kind = ShellBash
+	case "powershell", "pwsh":
+		kind = ShellPowerShell
+	default:
+		return ""
+	}
+	return configuredShellPath(runtime.GOOS, kind, path, fileExists, isWindowsWSLBash)
+}
+
+// configuredShellPath is the shared safety boundary for every consumer of
+// [tools.shell].path. Known cross-kind executables are ignored instead of being
+// relabeled, while unknown names remain available for intentional wrappers.
+func configuredShellPath(goos string, kind ShellKind, path string, exists func(string) bool, isWSL func(string) bool) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if kind == ShellBash && goos == "windows" {
+		path = sanitizeWindowsBashPath(path, exists)
+		if isWSL != nil && isWSL(path) {
+			return ""
+		}
+	}
+	base := strings.TrimSuffix(strings.ToLower(pathBase(path)), ".exe")
+	switch kind {
+	case ShellBash:
+		if base == "git-bash" || base == "powershell" || base == "pwsh" || base == "zsh" || base == "sh" {
+			return ""
+		}
+	case ShellPowerShell:
+		if base == "bash" || base == "git-bash" || base == "zsh" || base == "sh" {
+			return ""
+		}
+	}
+	return path
 }
 
 func sanitizeWindowsBashPath(path string, exists func(string) bool) string {

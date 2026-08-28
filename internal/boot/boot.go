@@ -602,10 +602,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Execution modes no longer exist. Host obligations are fact-driven and
 	// never rewrite the cache-stable system prefix or tool schemas.
 	if cfg.EnvironmentEnabled() {
-		shellLabel := shell.Kind.String()
-		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
-			shellLabel = shell.Path
-		}
+		shellLabel := resolvedShellLabel(shell)
 		envSection := environment.FormatSection(
 			environment.RunProbesWithOptions(ctx, environment.DefaultProbes(), environment.ProbeOptions{
 				Overrides: cfg.Environment.Tools,
