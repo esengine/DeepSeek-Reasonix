@@ -389,3 +389,60 @@ func TestLegacyLiteralRuleMatchesExactly(t *testing.T) {
 		t.Errorf("literal rule wildcard-matched %q — '*' must stay literal", "rm secrets.log")
 	}
 }
+
+func TestBareNameRulesMatchBash(t *testing.T) {
+	// Simulate rules entered as bare tool names (without Bash() wrapper).
+	// These are common in desktop UI-generated configs and should be
+	// treated as Bash(prefix:*) prefix rules.
+
+	t.Run("deny bare rm", func(t *testing.T) {
+		p := New("ask", nil, nil, []string{"rm"})
+		if got := p.DecideSubject("bash", false, "rm secrets.log"); got != Deny {
+			t.Errorf("bare 'rm' deny should match 'rm secrets.log', got %v", got)
+		}
+		// Different command should not match.
+		if got := p.DecideSubject("bash", false, "ls -la"); got == Deny {
+			t.Errorf("bare 'rm' deny should NOT match 'ls -la', got Deny")
+		}
+	})
+
+	t.Run("allow bare git status prefix", func(t *testing.T) {
+		p := New("ask", []string{"git status"}, nil, nil)
+		if got := p.DecideSubject("bash", false, "git status"); got != Allow {
+			t.Errorf("bare 'git status' allow should match exact command, got %v", got)
+		}
+		if got := p.DecideSubject("bash", false, "git status --porcelain"); got != Allow {
+			t.Errorf("bare 'git status' allow should match prefix 'git status --porcelain', got %v", got)
+		}
+		// Substring that is not a field-prefix should not match.
+		if got := p.DecideSubject("bash", false, "git stash"); got == Allow {
+			t.Errorf("bare 'git status' allow should NOT match 'git stash', got Allow")
+		}
+	})
+
+	t.Run("deny beats bare allow", func(t *testing.T) {
+		p := New("ask", []string{"go test"}, nil, []string{"go test -race"})
+		if got := p.DecideSubject("bash", false, "go test -race"); got != Deny {
+			t.Errorf("deny should beat allow for bare-name rules, got %v", got)
+		}
+	})
+
+	t.Run("bare name does not affect non-bash tools", func(t *testing.T) {
+		// A bare name like "rm" should not match the write_file tool.
+		p := New("ask", nil, nil, []string{"rm"})
+		if got := p.DecideSubject("write_file", false, "test.txt"); got == Deny {
+			t.Errorf("bare 'rm' deny should NOT affect write_file, got Deny")
+		}
+	})
+
+	t.Run("Bash-format rule still works", func(t *testing.T) {
+		// Ensure the normal Bash(prefix:*) format still works alongside bare names.
+		p := New("ask", []string{"Bash(go test:*)"}, nil, []string{"rm"})
+		if got := p.DecideSubject("bash", false, "go test -v"); got != Allow {
+			t.Errorf("Bash(go test:*) allow should match, got %v", got)
+		}
+		if got := p.DecideSubject("bash", false, "rm -rf /"); got != Deny {
+			t.Errorf("bare 'rm' deny should match, got %v", got)
+		}
+	})
+}

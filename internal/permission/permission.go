@@ -228,6 +228,16 @@ func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) De
 			return Ask
 		case matchAnyExact(p.Allow, toolName, subject):
 			return Allow
+		// Fallback: bare-name rules like "git status" or "rm" that were
+		// entered without a Bash() wrapper. They are parsed as
+		// Rule{Tool: "git status"} and don't match "bash" via
+		// ruleToolMatches. Treat them as Bash(git status:*) prefix rules.
+		case matchAnyBareNameAsBash(p.Deny, subject):
+			return Deny
+		case matchAnyBareNameAsBash(p.Ask, subject):
+			return Ask
+		case matchAnyBareNameAsBash(p.Allow, subject):
+			return Allow
 		}
 		if parts != nil {
 			return p.decideBashSegments(readOnly, parts)
@@ -321,6 +331,33 @@ func (p Policy) DecideSubjects(toolName string, readOnly bool, subjects []string
 
 // matchAny reports whether any rule matches the (toolName, subject) pair. A
 // subject-specific rule cannot match a call that exposes no subject.
+// matchAnyBareNameAsBash checks whether any bare-name rule (no subject,
+// unknown tool family) matches the given bash command by treating the rule's
+// tool name as a bash command prefix. For example, a rule string "git status"
+// is parsed as Rule{Tool: "git status"}, which doesn't match "bash" via
+// ruleToolMatches. This function matches it by checking whether the actual
+// bash command starts with "git status".
+func matchAnyBareNameAsBash(rules []Rule, subject string) bool {
+	if subject == "" {
+		return false
+	}
+	for _, r := range rules {
+		if r.Subject != "" {
+			continue
+		}
+		if canonicalRuleTool(r.Tool) != r.Tool {
+			continue
+		}
+		if IsFileMutationTool(r.Tool) {
+			continue
+		}
+		if bashPrefixMatches(r.Tool, subject) {
+			return true
+		}
+	}
+	return false
+}
+
 func matchAny(rules []Rule, toolName, subject string) bool {
 	for _, r := range rules {
 		if !ruleToolMatches(r.Tool, toolName) {
