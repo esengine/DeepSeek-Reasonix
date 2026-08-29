@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/tool"
@@ -259,12 +260,22 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			processResult(r)
 		case <-ctx.Done():
 			err := ctx.Err()
+			// Grace period: sub-agents that are near completion
+			// can finish before being marked as cancelled.
+			// This prevents unnecessary context.Canceled results
+			// for sub-agents that would have completed within a
+			// few hundred milliseconds.
+			drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer drainCancel()
 		drain:
 			for {
 				select {
 				case r := <-doneCh:
 					processResult(r)
-				default:
+					if completed >= n {
+						break drain
+					}
+				case <-drainCtx.Done():
 					break drain
 				}
 			}
