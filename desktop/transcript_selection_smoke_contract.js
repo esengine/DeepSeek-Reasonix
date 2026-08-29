@@ -23,6 +23,8 @@
   };
   const selectionTableTopic = () => [...document.querySelectorAll(".project-tree__topic-main")]
     .find((element) => element.textContent?.includes("bench:selection-table"));
+  const selectionTarget = () => [...document.querySelectorAll("strong")]
+    .find((element) => element.textContent?.includes("SELECTION REPAINT TARGET"));
   const activateSelectionTableTopic = async (timeout = 30000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -48,12 +50,47 @@
     throw new Error("timed out activating selection table topic");
   };
 
+  const settleSelectionTarget = async (initialTarget, timeout = 10000) => {
+    const deadline = Date.now() + timeout;
+    let target = initialTarget;
+    let previous = null;
+    let stableSamples = 0;
+    while (Date.now() < deadline) {
+      if (!target?.isConnected) target = selectionTarget();
+      const transcript = document.querySelector(".transcript");
+      const shell = document.querySelector(".transcript-shell");
+      if (!(target instanceof HTMLElement) || !(transcript instanceof HTMLElement) || !(shell instanceof HTMLElement)) {
+        await wait(50);
+        continue;
+      }
+      target.scrollIntoView({ block: "center", inline: "nearest" });
+      await frame();
+      await frame();
+      await wait(50);
+      const targetRect = target.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      const current = {
+        top: targetRect.top,
+        bottom: targetRect.bottom,
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+      };
+      const insideShell = targetRect.top >= shellRect.top && targetRect.bottom <= shellRect.bottom;
+      const geometryStable = previous && Object.keys(current)
+        .every((key) => Math.abs(current[key] - previous[key]) <= 0.5);
+      const geometryPending = transcript.querySelector("[data-transcript-geometry-pending], .reasoning--loading");
+      stableSamples = insideShell && geometryStable && !geometryPending ? stableSamples + 1 : 0;
+      if (stableSamples >= 4) return target;
+      previous = current;
+    }
+    throw new Error("timed out settling selection repaint target");
+  };
+
   const start = async () => {
     await activateSelectionTableTopic();
-    const target = await waitFor(
+    let target = await waitFor(
       () => {
-        const target = [...document.querySelectorAll("strong")]
-          .find((element) => element.textContent?.includes("SELECTION REPAINT TARGET"));
+        const target = selectionTarget();
         if (target) return target;
         // The marker is in the fixture's final virtual row. WebView2 can
         // publish the active topic before Virtuoso performs its initial tail
@@ -67,11 +104,8 @@
       "selection repaint target",
     );
     await waitFor(() => !document.querySelector(".transcript-navigation-overlay"), "settled transcript navigation");
-    target.scrollIntoView({ block: "center", inline: "nearest" });
     await document.fonts?.ready;
-    await frame();
-    await frame();
-    await wait(200);
+    target = await settleSelectionTarget(target);
 
     const transcript = document.querySelector(".transcript");
     const shell = document.querySelector(".transcript-shell");
@@ -85,6 +119,8 @@
     const geometry = (label) => {
       const currentHosts = transcriptActionHosts();
       const currentHost = currentHosts[0] ?? null;
+      const currentTable = target.closest("table") ?? table;
+      const currentRow = target.closest("tr") ?? row;
       const selection = document.getSelection();
       const selectionRects = selection?.rangeCount
         ? [...selection.getRangeAt(selection.rangeCount - 1).getClientRects()].map(rect)
@@ -100,8 +136,8 @@
         dpr: window.devicePixelRatio,
         viewport: { width: window.innerWidth, height: window.innerHeight },
         shell: rect(shell.getBoundingClientRect()),
-        table: rect(table.getBoundingClientRect()),
-        row: rect(row.getBoundingClientRect()),
+        table: rect(currentTable.getBoundingClientRect()),
+        row: rect(currentRow.getBoundingClientRect()),
         target: rect(target.getBoundingClientRect()),
         toolbar: hostOpen ? currentToolbar : lastToolbar,
         selectionRects,
@@ -139,6 +175,18 @@
         await frame();
         eventSamples.length = 0;
         post({ type: "reset", iteration, geometry: geometry(`reset-${iteration}`) });
+      },
+      async settle() {
+        target = await settleSelectionTarget(target);
+        const targetRect = target.getBoundingClientRect();
+        post({
+          type: "settled",
+          point: {
+            x: Math.round(targetRect.left + targetRect.width / 2),
+            y: Math.round(targetRect.top + targetRect.height / 2),
+          },
+          geometry: geometry("settled"),
+        });
       },
     };
 

@@ -72,10 +72,14 @@ func runSelectionSmoke(url, script, artifacts string, iterations, width, height 
 	result.WindowsVersion = fmt.Sprintf("%d.%d.%d", version.MajorVersion, version.MinorVersion, version.BuildNumber)
 	result.Viewport = ready.Geometry.Viewport
 	result.DPR = ready.Geometry.DPR
-	movePointerToClientPoint(hwnd, ready.Point)
 	if err := host.warmCompositor(); err != nil {
 		return result, err
 	}
+	settled, err := host.settleTarget()
+	if err != nil {
+		return result, err
+	}
+	movePointerToClientPoint(hwnd, settled.Point)
 	result.Passed = true
 	for iteration := 1; iteration <= iterations; iteration++ {
 		iterationResult, iterationErr := host.runIteration(iteration)
@@ -86,6 +90,15 @@ func runSelectionSmoke(url, script, artifacts string, iterations, width, height 
 		result.Passed = result.Passed && iterationResult.Passed
 	}
 	return result, nil
+}
+
+func (host *selectionSmokeHost) settleTarget() (smokeMessage, error) {
+	host.chromium.Eval("window.__reasonixSelectionSmoke.settle()")
+	message, err := waitForMessage(host.messages, host.webViewErrors, "settled", interactionTimeout)
+	if err != nil {
+		return smokeMessage{}, fmt.Errorf("settle selection target after compositor warmup: %w", err)
+	}
+	return message, nil
 }
 
 func startSelectionSmokeHost(
