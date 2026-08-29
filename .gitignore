@@ -47,10 +47,12 @@ node_modules/
 .pnpm-store/
 .npm/
 
-# Project-local Reasonix state; keep the checked-in review command.
+# Project-local Reasonix state; keep the checked-in review command and skills.
 /.reasonix/*
 !/.reasonix/commands/
 !/.reasonix/commands/review.md
+!/.reasonix/skills/
+!/.reasonix/skills/design-ui/
 
 # Stray Reasonix state written under a package dir by a test whose RealPath
 # resolves to CWD (e.g. remote bootstrap EnsureServe). Never commit these.
