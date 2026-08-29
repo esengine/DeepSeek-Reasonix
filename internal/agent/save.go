@@ -1111,14 +1111,6 @@ func digestSessionMessages(msgs []provider.Message) ([sha256.Size]byte, error) {
 	return digest, err
 }
 
-func messageForSessionIdentity(m provider.Message) provider.Message {
-	// CreatedAt is local display metadata. Keep it out of transcript identity
-	// so older builds that ignore the optional field can share the same event-
-	// log revision and append without false conflicts.
-	m.CreatedAt = 0
-	return m
-}
-
 // digestAndSizeSessionMessages also reports the encoded transcript size, which
 // the save path uses to bound the event log relative to the live content.
 func digestAndSizeSessionMessages(msgs []provider.Message) ([sha256.Size]byte, int64, error) {
