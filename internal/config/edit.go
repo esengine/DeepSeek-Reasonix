@@ -620,6 +620,62 @@ func (c *Config) providerRemovalFallback(name string) string {
 	return ""
 }
 
+// RemovePluginModelRefs migrates model references that name models of the
+// plugin id off that plugin, and reports whether anything changed.
+//
+// Plugin-namespaced refs (plugin/<plugin>/<provider>/<model>) resolve through
+// boot's merged resolver rather than the config catalog, so SetDefaultModel
+// accepts them without proof. That trade means removing the plugin strands
+// every ref that named it: the next launch fails with "unknown model" and no
+// session can start until the file is edited by hand. Removal calls this to
+// close that gap the way RemoveProvider does for a deleted provider.
+//
+// References move to the first remaining configured provider. Unlike provider
+// removal this never refuses: the plugin is already gone by the time it runs,
+// so with no fallback the refs are cleared and the keyless-default policy in
+// ResolveNewSessionChatModel picks the boot model instead.
+func (c *Config) RemovePluginModelRefs(pluginID string) bool {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return false
+	}
+	ownedByPlugin := func(ref string) bool {
+		return protocol.PluginRefOwner(strings.TrimSpace(ref)) == pluginID
+	}
+
+	defaultOwned := ownedByPlugin(c.DefaultModel)
+	plannerOwned := ownedByPlugin(c.Agent.PlannerModel)
+	subagentOwned := ownedByPlugin(c.Agent.SubagentModel)
+	subagentModelsOwned := map[string]bool{}
+	for skill, ref := range c.Agent.SubagentModels {
+		if ownedByPlugin(ref) {
+			subagentModelsOwned[skill] = true
+		}
+	}
+	if !defaultOwned && !plannerOwned && !subagentOwned && len(subagentModelsOwned) == 0 {
+		return false
+	}
+
+	fallback := c.providerRemovalFallback("")
+	if defaultOwned {
+		c.DefaultModel = fallback
+	}
+	if plannerOwned {
+		c.Agent.PlannerModel = fallback
+	}
+	if subagentOwned {
+		c.Agent.SubagentModel = fallback
+	}
+	for skill := range subagentModelsOwned {
+		if fallback != "" {
+			c.Agent.SubagentModels[skill] = fallback
+		} else {
+			delete(c.Agent.SubagentModels, skill)
+		}
+	}
+	return true
+}
+
 // validateProvider checks the fields a provider can't function without.
 func validateProvider(e ProviderEntry) error {
 	switch {
