@@ -1262,6 +1262,23 @@ export function ProjectTree({
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 openTopicMenu(event);
+                return;
+              }
+              // Delete acts on the focused sidebar item only and routes through
+              // the same in-menu confirmation as the right-click delete entry:
+              // the first press arms the confirm state (the menu stays open
+              // showing "Confirm move to trash"), the second press trashes the
+              // topic. Session nodes and running topics (which the menu also
+              // excludes) and any non-focused element are left untouched.
+              if (event.key === "Delete" && !isSessionNode && !archiveBlocked) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (confirmAction?.topicId === topicId && confirmAction.action === "trash") {
+                  void trashTopic(topicId);
+                } else {
+                  openTopicMenu(event);
+                  setConfirmAction({ topicId, action: "trash" });
+                }
               }
             }}
             onDoubleClick={(event) => {
