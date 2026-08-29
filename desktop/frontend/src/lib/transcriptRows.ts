@@ -559,6 +559,18 @@ function processBodyRows(
   let roBatch: ToolItem[] = [];
   let toolBatch: ToolItem[] = [];
   let toolBatchKind: ToolGroupKind | null = null;
+  const pushToolRow = (item: ToolItem) => {
+    rows.push({
+      kind: "tool",
+      key: `t:${item.id}`,
+      item,
+      layoutVariant: resolveToolCardDefaultOpen(
+        item,
+        subcallsByParent.get(item.id)?.length ?? 0,
+        reasoningDisplayMode,
+      ) ? "tool-expanded" : "tool-collapsed",
+    });
+  };
   const flushRO = () => {
     if (roBatch.length === 0) return;
     rows.push({ kind: "tool-batch", key: `tb:${roBatch[0].id}`, items: [...roBatch], layoutVariant: "tool-batch-collapsed" });
@@ -566,7 +578,11 @@ function processBodyRows(
   };
   const flushToolBatch = () => {
     if (!toolBatchKind || toolBatch.length === 0) return;
-    rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind, layoutVariant: "tool-group-collapsed" });
+    if (creationMode || toolBatch.length >= 2) {
+      rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind, layoutVariant: "tool-group-collapsed" });
+    } else {
+      pushToolRow(toolBatch[0]);
+    }
     toolBatch = [];
     toolBatchKind = null;
   };
@@ -584,6 +600,19 @@ function processBodyRows(
       flushToolBatch();
       flushRO();
     }
+    if (
+      !creationMode
+      && it.kind === "tool"
+      && it.status === "done"
+      && !it.fileDiff
+      && toolGroupKind(it as ToolItem) === "shell"
+    ) {
+      flushRO();
+      toolBatchKind = "shell";
+      toolBatch.push(it as ToolItem);
+      continue;
+    }
+    if (it.kind === "tool") flushToolBatch();
     if (!creationMode && it.kind === "tool" && it.status !== "running" && isBatchedReadOnlyTool(it.name, it.readOnly)) {
       roBatch.push(it as ToolItem);
       continue;
@@ -594,16 +623,7 @@ function processBodyRows(
     }
     switch (it.kind) {
       case "tool":
-        rows.push({
-          kind: "tool",
-          key: `t:${it.id}`,
-          item: it as ToolItem,
-          layoutVariant: resolveToolCardDefaultOpen(
-            it as ToolItem,
-            subcallsByParent.get(it.id)?.length ?? 0,
-            reasoningDisplayMode,
-          ) ? "tool-expanded" : "tool-collapsed",
-        });
+        pushToolRow(it as ToolItem);
         break;
       case "phase":
         rows.push({ kind: "phase", key: `p:${it.id}`, item: it as PhaseItem, layoutVariant: "static" });

@@ -181,6 +181,59 @@ console.log("\nstreaming code fence tail styling");
   await act(async () => root.unmount());
 }
 
+console.log("\nlive-footer → virtual row remount fallback");
+
+{
+  const requests: Array<{ id: number; text: string }> = [];
+  const fakeWorker = {
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    onerror: null,
+    postMessage(request: { id: number; text: string }) {
+      requests.push(request);
+    },
+    terminate() {},
+  };
+  (globalThis as { Worker?: unknown }).Worker = class {};
+  const client: MarkdownWorkerClientType = new workerModule.MarkdownWorkerClient({
+    createWorker: () => Promise.resolve(fakeWorker),
+  });
+  workerModule.setMarkdownWorkerClientForTest(client);
+
+  const text = "# Final title\n\n**formatted**\n\n| A | B |\n|---|---|\n| 1 | 2 |";
+  const renderRow = () => (
+    <div className="transcript">
+      <Markdown text={text} streaming={false} wasStreamed cacheKey="a:handoff:0:answer" />
+    </div>
+  );
+  const first = createRoot(rootEl);
+  await act(async () => {
+    first.render(renderRow());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  ok(rootEl.querySelector("h1")?.textContent === "Final title", "completed live row keeps its formatted heading while worker parsing is pending");
+  ok(rootEl.querySelector("strong")?.textContent === "formatted", "completed live row keeps formatted emphasis");
+  ok(Boolean(rootEl.querySelector("table")), "completed live row keeps a formatted table");
+
+  await act(async () => first.unmount());
+  const second = createRoot(rootEl);
+  await act(async () => {
+    second.render(renderRow());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const scroller = rootEl.querySelector(".transcript") as HTMLElement;
+  Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 200 });
+  Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1_000 });
+  Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 100 });
+  ok(requests.length >= 2, "virtual remount requests parsing under the same stable cache key");
+  ok(rootEl.querySelector("h1")?.textContent === "Final title", "off-bottom remount never falls back to raw heading source");
+  ok(rootEl.querySelector("strong")?.textContent === "formatted", "off-bottom remount preserves emphasis formatting");
+  ok(Boolean(rootEl.querySelector("table")), "off-bottom remount preserves table formatting");
+
+  await act(async () => second.unmount());
+  workerModule.disposeMarkdownWorkerClient();
+  delete (globalThis as { Worker?: unknown }).Worker;
+}
+
 await server.close();
 dom.window.close();
 

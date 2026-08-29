@@ -196,6 +196,39 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
 
 {
   const models = buildTurnModels([
+    { kind: "user", id: "u-shell", text: "run checks" },
+    { kind: "tool", id: "shell-a", name: "bash", args: "{}", readOnly: false, status: "done" },
+    { kind: "tool", id: "shell-b", name: "bash", args: "{}", readOnly: false, status: "done" },
+    { kind: "tool", id: "shell-error", name: "bash", args: "{}", readOnly: false, status: "error", error: "failed" },
+    { kind: "tool", id: "shell-diff", name: "bash", args: "{}", readOnly: false, status: "done", fileDiff: { diff: "+change", added: 1, removed: 0 } },
+    { kind: "tool", id: "shell-running", name: "bash", args: "{}", readOnly: false, status: "running" },
+    { kind: "tool", id: "shell-stopped", name: "bash", args: "{}", readOnly: false, status: "stopped" },
+    { kind: "assistant", id: "a-shell", text: "done", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS, "expanded"));
+  const shellGroup = rows.find((row) => row.kind === "tool-group" && row.groupKind === "shell");
+  eq(shellGroup?.kind === "tool-group" ? shellGroup.items.map((item) => item.id).join(",") : "", "shell-a,shell-b", "ordinary mode groups consecutive successful shell cards");
+  for (const id of ["shell-error", "shell-diff", "shell-running", "shell-stopped"]) {
+    ok(rows.some((row) => row.kind === "tool" && row.item.id === id), `${id} remains a standalone visible card`);
+  }
+}
+
+{
+  const models = buildTurnModels([
+    { kind: "user", id: "u-single-shell", text: "one command" },
+    { kind: "tool", id: "only-shell", name: "bash", args: "{}", readOnly: false, status: "done" },
+    { kind: "tool", id: "reader-a", name: "read_file", args: "{}", readOnly: true, status: "done" },
+    { kind: "tool", id: "reader-b", name: "grep", args: "{}", readOnly: true, status: "done" },
+    { kind: "assistant", id: "a-single-shell", text: "done", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS, "expanded"));
+  ok(rows.some((row) => row.kind === "tool" && row.item.id === "only-shell"), "a single successful shell card is not grouped");
+  const readBatch = rows.find((row) => row.kind === "tool-batch");
+  eq(readBatch?.kind === "tool-batch" ? readBatch.items.length : 0, 2, "existing read-only tool batching remains unchanged");
+}
+
+{
+  const models = buildTurnModels([
     { kind: "user", id: "u-search", text: "search" },
     { kind: "tool", id: "s1", name: "web_search", args: `{"query":"bitcoin"}`, readOnly: true, status: "done" },
     { kind: "tool", id: "r1", name: "read_file", args: "{}", readOnly: true, status: "done" },

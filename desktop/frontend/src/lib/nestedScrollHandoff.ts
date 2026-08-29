@@ -31,6 +31,11 @@ export type NestedScrollHandoff = {
   detach: () => void;
 };
 
+/** Inner reasoning scrollports are independent of transcript ownership. */
+export function scrollReasoningToBottom(element: HTMLElement): void {
+  element.scrollTop = element.scrollHeight;
+}
+
 /** Normalize WheelEvent line/page deltas before applying them to scrollTop. */
 export function normalizeWheelDelta(event: Pick<WheelEvent, "deltaX" | "deltaY" | "deltaMode">, viewport: HTMLElement) {
   const deltaMode = event.deltaMode ?? DOM_DELTA_PIXEL;

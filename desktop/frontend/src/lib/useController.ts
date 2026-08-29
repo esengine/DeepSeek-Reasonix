@@ -20,6 +20,7 @@ import { createRafBatch } from "./rafBatch";
 import { foregroundRunningFromRuntimeMeta, type RuntimeMetaSnapshot } from "./runtimeMeta";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
+import { assistantHasContent, removeEmptyAssistantItems } from "./assistantItems";
 import { getTranscriptStore } from "./transcriptStore";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { uiPerfTracker } from "./uiPerf";
@@ -263,7 +264,7 @@ const HISTORY_PAGE_TURNS = 60;
 export type TurnPhaseName = "working" | "checking" | "verifying" | "reviewing" | string;
 export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number; historyTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; wasStreamed?: true; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
@@ -403,6 +404,8 @@ export interface State {
   backendActivationPending: boolean;
   messageAction?: MessageActionState;
   currentAssistant?: string;
+  /** Next assistant sampling-segment ordinal within activeTurnId. */
+  assistantSegmentOrdinal: number;
   pendingSearchSources?: SearchSource[];
   live?: LiveStream;
   pendingUser?: string;
@@ -518,6 +521,7 @@ export const initialState: State = {
   cancelRequested: false,
   cancellable: false,
   activeTurnId: undefined,
+  assistantSegmentOrdinal: 0,
   context: { used: 0, window: 0, sessionTokens: 0 },
   jobs: [],
   checkpoints: [],
@@ -1058,27 +1062,69 @@ export function historyToolError(output: string): string | undefined {
   return undefined;
 }
 
-function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
+function ensureAssistant(s: State): State {
   if (s.currentAssistant) {
     const exists = s.items.some((it) => it.id === s.currentAssistant && it.kind === "assistant");
-    if (exists) return { items: s.items, id: s.currentAssistant, seq: s.seq };
+    if (exists) return s;
   }
-  // The backend turn id survives Stop/Ask patches and event replay, so current
-  // turn state never remounts merely because its presentation status changed.
-  const stableTurnID = s.activeTurnId ? `a:${s.activeTurnId}` : undefined;
-  if (stableTurnID && s.items.some((item) => item.id === stableTurnID && item.kind === "assistant")) {
-    return { items: s.items, id: stableTurnID, seq: s.seq };
-  }
-  const id = stableTurnID ?? `a${s.seq}`;
+  // Stop/Ask owns the backend turn id, while the ordinal owns one provider
+  // sampling segment inside that turn. A settled segment is never reused by a
+  // later model round, so the live order matches persisted assistant → tool →
+  // assistant history without changing the wire protocol.
+  const ordinal = s.assistantSegmentOrdinal;
+  const id = s.activeTurnId ? `a:${s.activeTurnId}:${ordinal}` : `a${s.seq}`;
   const item: Item = {
     kind: "assistant",
     id,
     text: "",
     reasoning: "",
     streaming: true,
+    wasStreamed: true,
     searchSources: s.pendingSearchSources?.length ? s.pendingSearchSources : undefined,
   };
-  return { items: [...s.items, item], id, seq: s.seq + 1 };
+  return {
+    ...s,
+    items: [...s.items, item],
+    currentAssistant: id,
+    seq: s.seq + 1,
+    assistantSegmentOrdinal: ordinal + 1,
+  };
+}
+
+function ensureActiveAssistant(s: State): State {
+  const active = ensureAssistant(s);
+  const id = active.currentAssistant!;
+  return active.live?.id === id
+    ? active
+    : { ...active, live: { id, text: "", reasoning: "", reasoningComplete: false } };
+}
+
+/** End the compatibility-path segment before a committed tool dispatch. */
+function settleCurrentAssistant(s: State, now = Date.now()): State {
+  const settled = endTurnModelActivity(s, now, true);
+  if (!s.currentAssistant) return settled;
+  const current = settled.items.find((item) => item.id === s.currentAssistant) as Extract<Item, { kind: "assistant" }> | undefined;
+  const live = s.live?.id === s.currentAssistant ? s.live : undefined;
+  if (!assistantHasContent(current, live)) {
+    return {
+      ...settled,
+      items: current ? settled.items.filter((item) => item.id !== current.id) : settled.items,
+      live: undefined,
+      currentAssistant: undefined,
+    };
+  }
+  const completedLive = live ? completeLiveReasoning(live, now) : undefined;
+  const items = settled.items.map((item) => item.kind === "assistant" && item.id === s.currentAssistant
+    ? {
+        ...item,
+        text: completedLive?.text ?? item.text,
+        reasoning: completedLive?.reasoning ?? item.reasoning,
+        streaming: false,
+        reasoningComplete: Boolean(completedLive?.reasoning || item.reasoning || completedLive?.reasoningComplete || item.reasoningComplete),
+        reasoningDurationMs: liveReasoningDurationMs(completedLive) ?? item.reasoningDurationMs,
+      }
+    : item);
+  return { ...settled, items, live: undefined, currentAssistant: undefined };
 }
 
 function liveReasoningDurationMs(live?: LiveStream): number | undefined {
@@ -1091,11 +1137,12 @@ function liveReasoningDurationMs(live?: LiveStream): number | undefined {
 // applyDeltaSegments folds ordered stream segments into the assistant's live
 // stream in one state transition. Assumes applyEvent's preamble already ran.
 function applyDeltaSegments(s: State, segments: StreamSegment[]): State {
-  const { items, id, seq } = ensureAssistant(s);
-  const base = s.live?.id === id ? s.live : { id, text: "", reasoning: "", reasoningComplete: false };
+  const active = ensureAssistant(s);
+  const id = active.currentAssistant!;
+  const base = active.live?.id === id ? active.live : { id, text: "", reasoning: "", reasoningComplete: false };
   const now = Date.now();
   const deltaChars = segments.reduce((total, segment) => total + segment.delta.length, 0);
-  const next = { ...s, items, live: applyLiveSegments(base, segments, now), currentAssistant: id, seq, turnOutputChars: s.turnOutputChars + deltaChars };
+  const next = { ...active, live: applyLiveSegments(base, segments, now), turnOutputChars: active.turnOutputChars + deltaChars };
   return deltaChars > 0 ? beginTurnModelActivity(next, now) : next;
 }
 
@@ -1291,21 +1338,13 @@ function applyStreamAttempt(s: State, e: WireEvent): State {
   if (!sa?.id || !sa.action) return s;
   switch (sa.action) {
     case "begin": {
+      const active = ensureActiveAssistant(s);
       // Snapshot only what this attempt may replace in the visible stream.
       // Provider activity timing is closed at discard but remains accumulated so
       // retry backoff is not counted in the completed TPS denominator.
-      const baselineLive = s.live
-        ? {
-            id: s.live.id,
-            text: s.live.text,
-            reasoning: s.live.reasoning,
-            reasoningComplete: s.live.reasoningComplete,
-            reasoningStartedAt: s.live.reasoningStartedAt,
-            reasoningCompletedAt: s.live.reasoningCompletedAt,
-          }
-        : undefined;
+      const baselineLive = { ...active.live! };
       return {
-        ...s,
+        ...active,
         running: true,
         turnActive: true,
         cancellable: true,
@@ -1313,7 +1352,7 @@ function applyStreamAttempt(s: State, e: WireEvent): State {
         streamAttemptJournal: {
           id: sa.id,
           baselineLive,
-          baselineTurnArgChars: s.turnArgChars,
+          baselineTurnArgChars: active.turnArgChars,
           createdToolIds: [],
           priorTools: {},
         },
@@ -1353,9 +1392,21 @@ function applyStreamAttempt(s: State, e: WireEvent): State {
       };
     }
     case "commit": {
-      // Commit clears bookkeeping only; subsequent tool_dispatch/result are real.
       if (s.streamAttemptJournal && s.streamAttemptJournal.id !== sa.id) {
         return s;
+      }
+      // Tool-only samples do not emit a message event. Remove their empty
+      // placeholder now so the next sampling round is allocated after the
+      // committed tool cards instead of reusing a bubble above them.
+      const current = s.items.find((item) => item.id === s.currentAssistant) as Extract<Item, { kind: "assistant" }> | undefined;
+      if (s.currentAssistant && !assistantHasContent(current, s.live?.id === s.currentAssistant ? s.live : undefined)) {
+        return {
+          ...s,
+          items: current ? s.items.filter((item) => item.id !== current.id) : s.items,
+          live: undefined,
+          currentAssistant: undefined,
+          streamAttemptJournal: undefined,
+        };
       }
       return { ...s, streamAttemptJournal: undefined };
     }
@@ -1430,6 +1481,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
         cancellable: false,
         turnLifecycleObservedAt: promptEventClock(),
         currentAssistant: undefined,
+        assistantSegmentOrdinal: 0,
         activeTurnId: undefined,
         live: undefined,
       };
@@ -1477,19 +1529,22 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       // immediately so the user sees their message + a blinking cursor the
       // instant the backend acknowledges the turn — no dead gap waiting for
       // the first text/reasoning token.
-      const fresh = { ...s, activeTurnId: e.turnId ?? s.activeTurnId, pendingSearchSources: undefined };
+      const startsNewTurn = s.assistantSegmentOrdinal === 0
+        || !s.turnActive
+        || (Boolean(e.turnId) && e.turnId !== s.activeTurnId);
+      const fresh = {
+        ...s,
+        activeTurnId: e.turnId ?? s.activeTurnId,
+        assistantSegmentOrdinal: startsNewTurn ? 0 : s.assistantSegmentOrdinal,
+        pendingSearchSources: undefined,
+      };
       if (fresh.items.some((it) => it.id === "provider-unreachable")) {
         fresh.items = fresh.items.filter((it) => it.id !== "provider-unreachable");
       }
-      const { items, id, seq } = ensureAssistant(fresh);
+      const active = startsNewTurn || fresh.currentAssistant ? ensureActiveAssistant(fresh) : fresh;
       return {
-        ...fresh,
-        items,
-        currentAssistant: id,
-        seq,
-        live: { id, text: "", reasoning: "", reasoningComplete: false },
+        ...active,
         running: true,
-        activeTurnId: e.turnId ?? fresh.activeTurnId,
         turnActive: true,
         turnPhase: "working",
         completionSummary: undefined,
@@ -1577,13 +1632,14 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       }
       const now = Date.now();
       const settled = endTurnModelActivity(s, now, true);
-      const { items, id, seq } = ensureAssistant(settled);
-      const streamedChars = settled.live?.id === id ? settled.live.text.length + settled.live.reasoning.length : 0;
+      const active = ensureAssistant(settled);
+      const id = active.currentAssistant!;
+      const streamedChars = active.live?.id === id ? active.live.text.length + active.live.reasoning.length : 0;
       const turnOutputChars = Math.max(0, settled.turnOutputChars - streamedChars + text.length + reasoning.length);
-      const completedLive = settled.live?.id === id ? completeLiveReasoning({ ...settled.live, text, reasoning }, now) : undefined;
+      const completedLive = active.live?.id === id ? completeLiveReasoning({ ...active.live, text, reasoning }, now) : undefined;
       const reasoningDurationMs = liveReasoningDurationMs(completedLive);
       const workDurationMs = currentTurnDurationMs(settled, now);
-      const next = items.map((it) =>
+      const next = active.items.map((it) =>
         it.kind === "assistant" && it.id === id
           ? (() => {
               const memoryCitations = asArray<MemoryCitation>(e.memoryCitations ?? it.memoryCitations);
@@ -1596,12 +1652,11 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
                 reasoningDurationMs: reasoningDurationMs ?? it.reasoningDurationMs,
                 workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined,
                 memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
-                searchSources: it.searchSources,
               };
             })()
           : it,
       );
-      return { ...settled, items: next, live: undefined, currentAssistant: undefined, turnOutputChars, turnOutputCharsAtUsage: 0, seq };
+      return { ...active, items: next, live: undefined, currentAssistant: undefined, turnOutputChars, turnOutputCharsAtUsage: 0 };
     }
     case "tool_dispatch": {
       const t = e.tool;
@@ -1612,7 +1667,8 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       // zero visible activity, indistinguishable from a hang. The full
       // dispatch that follows merges by ID and fills in args/summary.
       if (t.partial) {
-        const activeState = t.parentId ? s : beginTurnModelActivity(s);
+        const samplingState = t.parentId || s.currentAssistant ? s : ensureActiveAssistant(s);
+        const activeState = t.parentId ? samplingState : beginTurnModelActivity(samplingState);
         const turnArgChars = t.argChars && t.argChars > 0 ? t.argChars : s.turnArgChars;
         // Some OpenAI-compatible streams surface the call name before its ID.
         // Without a stable ID the card could never be merged with the full
@@ -1641,7 +1697,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
           items: [...activeState.items, { kind: "tool", id, name: t.name, args: "", readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", argChars: t.argChars || undefined, parentId: t.parentId, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined }],
         }, id, false, undefined, { attemptId: t.attemptId, parentId: t.parentId, partial: true });
       }
-      const settled = t.parentId ? s : endTurnModelActivity(s, Date.now(), true);
+      const settled = t.parentId ? s : settleCurrentAssistant(s);
       const id = t.id || `tool${s.seq}`;
       const idx = settled.items.findIndex((it) => it.kind === "tool" && it.id === id);
       if (idx >= 0) {
@@ -1858,35 +1914,24 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       const now = Date.now();
       s = snapshotCompletedTurnTelemetry(s, now);
       const workDurationMs = currentTurnDurationMs(s, now);
-      let lastUserIndex = -1;
       let lastAssistantIndex = -1;
-      for (let i = 0; i < s.items.length; i++) {
-        if (s.items[i].kind === "user") {
-          lastUserIndex = i;
-          lastAssistantIndex = -1;
-        } else if (i > lastUserIndex && s.items[i].kind === "assistant") {
+      for (let i = s.items.length - 1; i >= 0; i -= 1) {
+        if (s.items[i].kind === "user") break;
+        if (s.items[i].kind === "assistant") {
           lastAssistantIndex = i;
+          break;
         }
       }
-      const finalized = s.items.map((it, index) => {
-        if (it.kind === "assistant" && s.live && it.id === s.live.id) {
-          const completedLive = completeLiveReasoning(s.live, now);
-          return {
-            ...it,
-            text: completedLive.text,
-            reasoning: completedLive.reasoning,
-            streaming: false,
-            reasoningComplete: completedLive.reasoning !== "" || completedLive.reasoningComplete,
-            reasoningDurationMs: liveReasoningDurationMs(completedLive) ?? it.reasoningDurationMs,
-            workDurationMs: index === lastAssistantIndex
-              ? Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined
-              : it.workDurationMs,
-          };
-        }
+      const finalized = removeEmptyAssistantItems(s.items.map((it, index) => {
         if (it.kind === "assistant") {
+          const completedLive = s.live?.id === it.id ? completeLiveReasoning(s.live, now) : undefined;
           return {
             ...it,
+            text: completedLive?.text ?? it.text,
+            reasoning: completedLive?.reasoning ?? it.reasoning,
             streaming: false,
+            reasoningComplete: completedLive?.reasoningComplete ?? it.reasoningComplete,
+            reasoningDurationMs: liveReasoningDurationMs(completedLive) ?? it.reasoningDurationMs,
             workDurationMs: index === lastAssistantIndex
               ? Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined
               : it.workDurationMs,
@@ -1894,7 +1939,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
         }
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
-      });
+      }));
       // A todo-only readiness card is retracted once the turn's own items
       // show an all-complete todo list (the panel is already green).
       const todoGapResolved = !e.err && latestTodosAllComplete(finalized);
@@ -1953,6 +1998,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
         cancelRequested: false,
         cancellable: keepPlanApproval,
         currentAssistant: undefined,
+        assistantSegmentOrdinal: 0,
         activeTurnId: undefined,
         approval: keepPlanApproval ? s.approval : undefined,
         ask: undefined,
@@ -1989,6 +2035,11 @@ export function reducer(s: State, a: Action): State {
         promptArrivedId: undefined,
         pendingUser: a.text,
         pendingSubmissionId: a.submissionId,
+        activeTurnId: undefined,
+        currentAssistant: undefined,
+        assistantSegmentOrdinal: 0,
+        live: undefined,
+        streamAttemptJournal: undefined,
         deliveryRecoveryActive: Boolean(a.deliveryRecovery),
         discardTurn: false,
       };
@@ -2034,7 +2085,7 @@ export function reducer(s: State, a: Action): State {
       const idx = s.items.findIndex((it) => it.kind === "user" && it.submissionId === a.submissionId);
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, submissionId: undefined, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, pendingSubmissionId: undefined, deliveryRecoveryActive: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, turnLifecycleObservedAt: promptEventClock(), seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, pendingSubmissionId: undefined, deliveryRecoveryActive: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, activeTurnId: undefined, currentAssistant: undefined, assistantSegmentOrdinal: 0, live: undefined, streamAttemptJournal: undefined, turnLifecycleObservedAt: promptEventClock(), seq: s.seq + 1, items: [...removeEmptyAssistantItems(items), notice] };
     }
     case "turn_interrupted": {
       return withRemoteTurnInterrupted(s);
@@ -2076,12 +2127,12 @@ export function reducer(s: State, a: Action): State {
         };
       }
       const telemetry = snapshotCompletedTurnTelemetry(s);
-      const finalized = telemetry.items.map((it) => {
+      const finalized = removeEmptyAssistantItems(telemetry.items.map((it) => {
         if (it.kind === "assistant" && telemetry.live && it.id === telemetry.live.id) return { ...it, text: telemetry.live.text, reasoning: telemetry.live.reasoning, streaming: false };
         if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
-      });
+      }));
       return endPromptWait({
         ...telemetry,
         items: finalized,
@@ -2094,6 +2145,8 @@ export function reducer(s: State, a: Action): State {
         activeTurnId: undefined,
         live: undefined,
         currentAssistant: undefined,
+        assistantSegmentOrdinal: 0,
+        streamAttemptJournal: undefined,
         approval: undefined,
         ask: undefined,
         retry: undefined,

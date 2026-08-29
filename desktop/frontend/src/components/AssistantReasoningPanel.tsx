@@ -73,10 +73,10 @@ export function AssistantReasoningPanel({
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
       {open ? (
-        <div ref={bodyRef} className="reasoning__body" data-transcript-selectable="reasoning">
+        <div ref={bodyRef} className="reasoning__body" data-transcript-selectable="reasoning" data-nested-scroll>
           {running
             ? <StreamingReasoningText text={item.reasoning} />
-            : <Markdown text={item.reasoning} streaming={false} />}
+            : <Markdown text={item.reasoning} streaming={false} cacheKey={item.id} wasStreamed={item.wasStreamed} />}
         </div>
       ) : (
         <ReasoningSummary text={item.reasoning} streaming={running} onOpen={toggle} />

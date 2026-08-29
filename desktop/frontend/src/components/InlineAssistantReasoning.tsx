@@ -10,6 +10,7 @@ import { ReasoningSummary } from "./ReasoningSummary";
 import { StreamingReasoningText } from "./StreamingReasoningText";
 import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 import { resolveReasoningLayoutVariant } from "../lib/transcriptRowGeometry";
+import { useReasoningScrollFollow } from "../lib/useReasoningScrollFollow";
 
 export function InlineAssistantReasoning({
   item,
@@ -56,6 +57,7 @@ export function InlineAssistantReasoning({
     setOpen(!open);
   }, [beginUserResize, onManualOpen, open]);
   const reasoning = shown.reasoning.trim();
+  const [reasoningScrollRef, onReasoningScroll] = useReasoningScrollFollow(shown.reasoning, open && running);
   if (!reasoning) return null;
   const layoutVariant = open
     ? "reasoning-expanded"
@@ -71,10 +73,16 @@ export function InlineAssistantReasoning({
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
       {open ? (
-        <div className="turn-collapse__inline-reasoning reasoning__body" data-transcript-selectable="reasoning">
+        <div
+          ref={reasoningScrollRef}
+          className="turn-collapse__inline-reasoning reasoning__body"
+          data-transcript-selectable="reasoning"
+          data-nested-scroll
+          onScroll={onReasoningScroll}
+        >
           {running
             ? <StreamingReasoningText text={shown.reasoning} />
-            : <Markdown text={shown.reasoning} streaming={false} />}
+            : <Markdown text={shown.reasoning} streaming={false} cacheKey={item.id} wasStreamed={item.wasStreamed} />}
         </div>
       ) : (
         <ReasoningSummary text={shown.reasoning} streaming={running} onOpen={toggle} />

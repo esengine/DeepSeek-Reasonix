@@ -5323,7 +5323,10 @@ button.reasoning-summary:focus-visible {
 }
 .reasoning__body,
 .turn-collapse__inline-reasoning {
-  overflow: hidden;
+  max-height: min(40vh, 480px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 2px 0 6px 8px;
   border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding-left: 12px;

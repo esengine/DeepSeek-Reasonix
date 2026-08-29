@@ -1,6 +1,6 @@
 // MarkdownHistory — history (non-streaming) Markdown rendering driven by the
 // parse worker (Phase E). Mounted rows: check the transcript markdown cache
-// (entryId + content revision) → on miss request a worker parse → render the
+// (stable row key + content revision) → on miss request a worker parse → render the
 // resulting HAST blocks with the same components map react-markdown uses.
 // Unmounted rows never reach this component, so cold-zone rows never parse.
 //
@@ -49,9 +49,9 @@ type PendingScrollAnchor = {
   scroller: HTMLElement | null;
 };
 
-function cachedBlocks(entryId: string | undefined, revision: number, text: string): MarkdownBlock[] | undefined {
-  if (!entryId) return undefined;
-  const cached = getTranscriptStore().getMarkdown(entryId, revision);
+function cachedBlocks(cacheKey: string | undefined, revision: number, text: string): MarkdownBlock[] | undefined {
+  if (!cacheKey) return undefined;
+  const cached = getTranscriptStore().getMarkdown(cacheKey, revision);
   // The revision is a content hash; the stored source comparison is the
   // fidelity backstop against collisions and stale writes.
   return cached && cached.source === text ? cached.blocks : undefined;
@@ -119,6 +119,7 @@ function useBlockWindowSentinel(
 export const MarkdownHistory = memo(function MarkdownHistory({
   text,
   plainStatusBlocks = false,
+  cacheKey,
   entryId,
   fallback,
   onParsed,
@@ -126,25 +127,28 @@ export const MarkdownHistory = memo(function MarkdownHistory({
 }: {
   text: string;
   plainStatusBlocks?: boolean;
-  /** History entry id (`he:<entryId>` rows) — enables the parsed-block cache. */
+  /** Stable transcript item key — enables cache reuse across live/history hosts. */
+  cacheKey?: string;
+  /** @deprecated Use cacheKey. Retained for focused history callers. */
   entryId?: string;
   /** What to show while the worker parses (plain text or the streaming view). */
   fallback: ReactNode;
   onParsed?: () => void;
   onError?: () => void;
 }) {
+  const stableCacheKey = cacheKey ?? entryId;
   const revision = useMemo(() => markdownContentRevision(text), [text]);
   // Parsed state is keyed by its source text: a text change renders the
   // fallback (never stale blocks) until the new parse lands.
   const [parsed, setParsed] = useState<{ text: string; blocks: MarkdownBlock[] } | undefined>(() => {
-    const cached = cachedBlocks(entryId, revision, text);
+    const cached = cachedBlocks(stableCacheKey, revision, text);
     return cached ? { text, blocks: cached } : undefined;
   });
   const blocks = parsed && parsed.text === text ? parsed.blocks : undefined;
   const fallbackMarkerRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    const cached = cachedBlocks(entryId, revision, text);
+    const cached = cachedBlocks(stableCacheKey, revision, text);
     if (cached) {
       setParsed({ text, blocks: cached });
       onParsed?.();
@@ -156,8 +160,8 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     handle.promise
       .then((result) => {
         if (cancelled || !result) return;
-        if (entryId) {
-          getTranscriptStore().setMarkdown(entryId, revision, {
+        if (stableCacheKey) {
+          getTranscriptStore().setMarkdown(stableCacheKey, revision, {
             source: text,
             blocks: result.blocks,
             selectionText: result.selectionText,
@@ -204,7 +208,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     // onParsed/onError are stable caller callbacks; re-running per identity
     // change would re-request parses the cache already serves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, entryId, revision]);
+  }, [text, stableCacheKey, revision]);
 
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);
   const totalBlocks = blocks?.length ?? 0;
