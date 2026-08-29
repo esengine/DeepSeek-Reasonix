@@ -14,6 +14,13 @@
     "productName": "Reasonix",
     "productVersion": "0.0.0",
     "copyright": "Copyright © 2026 Reasonix Contributors",
-    "comments": "Reasonix desktop — a Wails shell around the Go kernel."
+    "comments": "Reasonix desktop — a Wails shell around the Go kernel.",
+    "protocols": [
+      {
+        "scheme": "reasonix",
+        "description": "Open Reasonix desktop sessions from web links",
+        "role": "Viewer"
+      }
+    ]
   }
 }

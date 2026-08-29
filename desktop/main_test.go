@@ -20,6 +20,23 @@ func TestParseDesktopLaunchArgsStripsLegacySafeMode(t *testing.T) {
 	}
 }
 
+func TestParseDesktopLaunchArgsDeepLink(t *testing.T) {
+	got := parseDesktopLaunchArgs([]string{"reasonix://threads/20260805-064639.072848000-17an-deepseek-v4-flash"})
+	if got.DeepLinkURL != "reasonix://threads/20260805-064639.072848000-17an-deepseek-v4-flash" {
+		t.Fatalf("DeepLinkURL = %q", got.DeepLinkURL)
+	}
+	if got.LegacySafeModeArg {
+		t.Fatal("deep link must not enable legacy safe mode")
+	}
+	if parseDesktopLaunchArgs([]string{"https://example.com"}).DeepLinkURL != "" {
+		t.Fatal("non-reasonix URL must not be treated as a deep link")
+	}
+	// Scheme matching is case-insensitive (the OS may normalize the case).
+	if parseDesktopLaunchArgs([]string{"REASONIX://threads/x"}).DeepLinkURL == "" {
+		t.Fatal("case-variant reasonix:// scheme must be recognized")
+	}
+}
+
 func TestParseDesktopLaunchArgsRemoteWindow(t *testing.T) {
 	got := parseDesktopLaunchArgs([]string{
 		"--other",

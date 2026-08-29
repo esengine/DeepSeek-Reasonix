@@ -1485,6 +1485,7 @@ export default function App() {
       setSettingsTarget("general");
     });
   }, [closeTransientOverlays]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onResize = () => {
@@ -3852,6 +3853,123 @@ export default function App() {
     setSidebarImDetailConnectionId("");
     return enqueueNavigation({ kind: "topic", scope, workspaceRoot, topicId, sessionPath });
   }, [closeTransientOverlays, enqueueNavigation]);
+
+  // Deep links (reasonix://) hand the resolved conversation to the frontend.
+  // Route through handleOpenTopic — the same navigation path as a sidebar
+  // click — so the sidebar highlight and conversation content refresh
+  // together (a bare activateTopic call misses the navigation-intent seq and
+  // hits the stale-navigation guard, leaving the sidebar unhighlighted).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("app:open-topic", (payload?: unknown) => {
+      const target = (payload ?? {}) as {
+        scope?: string;
+        workspaceRoot?: string;
+        topicID?: string;
+        sessionPath?: string;
+      };
+      if (!target.topicID) return;
+      void handleOpenTopic(
+        target.scope || "project",
+        target.workspaceRoot || "",
+        target.topicID,
+        target.sessionPath || "",
+      );
+    });
+  }, [handleOpenTopic]);
+
+  // Deep link reasonix://new?workspace=...&prompt=... — open a fresh session
+  // and submit the goal once the new tab's controller is ready. Routing
+  // through the frontend (instead of backend ActivateTopic +
+  // SubmitInitialGoalToTab) keeps the visible-tab seeding consistent and lets
+  // the existing ready-poll in sendToTab wait out the controller build, so
+  // the prompt is not lost to a workspace-still-starting error.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("app:new-topic", (payload?: unknown) => {
+      const target = (payload ?? {}) as { scope?: string; workspaceRoot?: string; goal?: string };
+      const scope = target.scope || "project";
+      const workspaceRoot = target.workspaceRoot || "";
+      const goal = (target.goal || "").trim();
+      void (async () => {
+        await openBlankSession(scope, workspaceRoot);
+        if (!goal) return;
+        // openBlankSession resolves after the tab is seeded; the controller
+        // may still be building. Poll tab metas until the fresh tab is ready
+        // before committing the goal, mirroring what commitThenSend enforces.
+        const tabId = activeTabIdRef.current;
+        if (!tabId) return;
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const metas = await refreshTabMetas().catch(() => []);
+          const tab = metas.find((candidate) => candidate.id === tabId);
+          if (tab?.ready && (!tab.runtime || tab.runtime.phase === "ready") && !tab.startupErr) {
+            void commitThenSend(tabId, goal, goal, undefined, {
+              goal,
+              collaborationMode: "normal",
+              toolApprovalMode: tab.toolApprovalMode || "ask",
+            }).catch((err) => {
+              console.warn("Failed to submit deep-link goal", err);
+            });
+            return;
+          }
+          if (tab?.startupErr) return;
+        }
+      })();
+    });
+  }, [commitThenSend, openBlankSession, refreshTabMetas]);
+
+  // Tell the backend the frontend is ready for runtime events, then drain any
+  // deep links that arrived during cold start before the listeners above were
+  // registered (they would otherwise be emitted into the void and lost).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    let cancelled = false;
+    void (async () => {
+      await app.MarkFrontendReady().catch(() => undefined);
+      if (cancelled) return;
+      const pending = await app.DrainPendingDeepLinks().catch(() => [] as string[]);
+      if (cancelled || !pending.length) return;
+      for (const url of pending) {
+        if (cancelled) return;
+        const parsed = new URL(url);
+        const query = parsed.searchParams;
+        if (parsed.host === "new") {
+          await openBlankSession(
+            query.get("workspace") ? "project" : "global",
+            query.get("workspace") || "",
+          );
+          const goal = (query.get("prompt") || "").trim();
+          if (goal) {
+            const tabId = activeTabIdRef.current;
+            if (tabId) {
+              void commitThenSend(tabId, goal, goal, undefined, {
+                goal,
+                collaborationMode: "normal",
+                toolApprovalMode: "ask",
+              }).catch((err) => {
+                console.warn("Failed to submit drained deep-link goal", err);
+              });
+            }
+          }
+        } else if (parsed.host === "threads") {
+          const topicID = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+          if (topicID) {
+            await handleOpenTopic(
+              query.get("workspace") ? "project" : "global",
+              query.get("workspace") || "",
+              topicID,
+            );
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [commitThenSend, handleOpenTopic, openBlankSession]);
+
+
 
   const openSidebarImConnectionSession = useCallback((connection: SidebarImConnection): Promise<void> => {
     setSidebarImDetailConnectionId("");

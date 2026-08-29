@@ -117,6 +117,13 @@ func main() {
 	launch := parseDesktopLaunchArgs(os.Args[1:])
 
 	app := NewApp()
+	// On Windows/Linux a deep link arrives as argv (installer-registered
+	// scheme with "%1"); macOS delivers it via Apple Events (OnUrlOpen). Queue
+	// it the same way so the frontend-ready drain picks it up after the React
+	// listeners mount — identical cold-start handling on every platform.
+	if launch.DeepLinkURL != "" && goruntime.GOOS != "darwin" {
+		app.queueDeepLink(launch.DeepLinkURL)
+	}
 	title := "Reasonix"
 	singleInstance := singleInstanceLock(app)
 	appMenu := app.createAppMenu()
@@ -209,6 +216,15 @@ func main() {
 			// Follow the OS appearance so the title bar matches light/dark system
 			// preference instead of being locked to dark.
 			Appearance: mac.DefaultAppearance,
+			// Deep links (reasonix://): the OS delivers the URL via Apple Events.
+			// Tabs may not be restored yet on cold start, so gate on the
+			// tabsRestored signal before dispatching (see handleDeepLink).
+			OnUrlOpen: func(rawURL string) {
+				go func() {
+					<-app.tabsRestoredSignal()
+					app.handleDeepLink(rawURL)
+				}()
+			},
 		},
 		Windows: &windows.Options{
 			// Follow the OS theme so the title bar matches light/dark system
@@ -239,6 +255,12 @@ func main() {
 type desktopLaunchOptions struct {
 	// LegacySafeModeArg is true when --safe-mode was present. v1.20+ ignores it.
 	LegacySafeModeArg bool
+	// DeepLinkURL is a reasonix:// URL passed on the command line. Windows
+	// registers the scheme through the installer (wails_tools.nsh
+	// wails.associateCustomProtocols) which launches the app with
+	// '"%1"' — the URL arrives here as argv[1]. macOS delivers the URL via
+	// Apple Events (OnUrlOpen) instead, so this field stays empty there.
+	DeepLinkURL string
 	// RemoteWindowTicket is the one-shot ticket name for an SSH remote web
 	// window child process. The URL and Serve token never appear in argv.
 	RemoteWindowTicket string
@@ -260,6 +282,8 @@ func parseDesktopLaunchArgs(args []string) desktopLaunchOptions {
 			out.LegacySafeModeArg = true
 		case arg == "launch" || arg == "--detach":
 			// Legacy launch tokens from old shortcuts. They produce no behavior.
+		case strings.HasPrefix(strings.ToLower(arg), "reasonix://"):
+			out.DeepLinkURL = arg
 		case strings.HasPrefix(arg, remoteWindowTicketArgPrefix):
 			out.RemoteWindowTicket = strings.TrimPrefix(arg, remoteWindowTicketArgPrefix)
 		case strings.HasPrefix(arg, remoteWindowHostArgPrefix):

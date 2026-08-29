@@ -212,6 +212,19 @@ type App struct {
 	// closed and could overwrite desktop-tabs.json with an empty snapshot.
 	tabsRestored chan struct{}
 
+	// pendingDeepLinks buffers reasonix:// URLs that arrived before the
+	// frontend mounted its runtime event listeners (cold start). The frontend
+	// drains them via DrainPendingDeepLinks once the app:open-topic /
+	// app:new-topic handlers are registered; without this queue the first
+	// deep link of a cold launch would be emitted with no listener and lost.
+	// App.mu guards the slice.
+	pendingDeepLinks []string
+
+	// frontendReady is set once the frontend has registered its runtime event
+	// listeners and called MarkFrontendReady. Deep links arriving before that
+	// are queued in pendingDeepLinks instead of being emitted into the void.
+	frontendReady atomic.Bool
+
 	// projectTreeChangedHook is test-only: set once before any concurrency
 	// starts, then read lock-free from emitProjectTreeChanged (whose callers
 	// may or may not hold a.mu, so it cannot re-lock). Never write it after
@@ -654,6 +667,288 @@ func (a *App) tabsRestoredSignal() <-chan struct{} {
 
 func (a *App) showMainWindow() {
 	a.showMainWindowFrom("menu")
+}
+
+// handleDeepLink processes a reasonix:// URL opened by the OS. Supported forms:
+//
+//	reasonix://threads/<topicID>?workspace=<absPath>
+//	    → activate an existing tab whose TopicID matches, else open it
+//	reasonix://new?workspace=<absPath>&prompt=<urlencoded>
+//	    → open a project tab (or global if workspace empty) and submit the goal
+//
+// OnUrlOpen may fire before tabs are restored on cold start; the caller gates
+// on tabsRestored before invoking this.
+func (a *App) handleDeepLink(rawURL string) {
+	a.logDeepLink("handleDeepLink entry", "url", rawURL)
+	a.showMainWindowFrom("deeplink")
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		a.logDeepLink("unparsable url", "url", rawURL, "err", err.Error())
+		slog.Warn("deeplink: unparsable url", "url", rawURL, "err", err)
+		return
+	}
+	if !strings.EqualFold(parsed.Scheme, "reasonix") {
+		a.logDeepLink("unexpected scheme", "scheme", parsed.Scheme)
+		slog.Warn("deeplink: unexpected scheme", "scheme", parsed.Scheme)
+		return
+	}
+	if !a.frontendReady.Load() {
+		// Cold start: the React app has not mounted its runtime event
+		// listeners yet, so an immediate emit would be dropped. Queue the URL
+		// and let the frontend drain it (DrainPendingDeepLinks) after its
+		// handlers are registered.
+		a.queueDeepLink(rawURL)
+		return
+	}
+	a.dispatchDeepLink(parsed, rawURL)
+}
+
+// queueDeepLink appends a reasonix:// URL to the pending queue. It is used
+// both for URLs that arrive before the frontend listeners mount (cold start)
+// and for non-macOS argv deep links on first launch. App.mu guards the queue.
+func (a *App) queueDeepLink(rawURL string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.pendingDeepLinks = append(a.pendingDeepLinks, rawURL)
+	a.mu.Unlock()
+	a.logDeepLink("queued until frontend ready", "url", rawURL)
+}
+
+// dispatchDeepLink handles a parsed reasonix:// URL whose target can reach the
+// frontend (either the listeners are mounted or the URL is being drained).
+func (a *App) dispatchDeepLink(parsed *url.URL, rawURL string) {
+	query := parsed.Query()
+	workspace := strings.TrimSpace(query.Get("workspace"))
+	a.logDeepLink("parsed", "host", parsed.Host, "path", parsed.Path, "workspace", workspace)
+	switch {
+	case parsed.Host == "threads" && strings.TrimSpace(parsed.Path) != "":
+		topicID := strings.Trim(strings.TrimPrefix(parsed.Path, "/"), "/")
+		// The taskboard may pass a session file name (e.g.
+		// 20260805-064639.072848000-17an-deepseek-v4-flash) rather than a
+		// topic_id, and it may omit the workspace parameter. Resolve the file
+		// name first: it carries the topic id, scope and workspace root of the
+		// matching conversation, so the deep link still lands on the right tab
+		// even when the caller only supplied a session name.
+		scope := "project"
+		resolved := false
+		resolvedSessionPath := ""
+		if target, ok := a.resolveSessionFile(topicID, workspace); ok {
+			a.logDeepLink("resolveSessionFile hit", "file", topicID, "topicID", target.topicID, "scope", target.scope, "workspace", target.workspaceRoot, "sessionPath", target.sessionPath)
+			topicID = target.topicID
+			scope = target.scope
+			// The resolved session metadata is authoritative: the URL's
+			// workspace parameter may be stale or absent, and a mismatched one
+			// would make the frontend search the wrong project and possibly
+			// create a new empty session for the resolved topic.
+			workspace = target.workspaceRoot
+			resolvedSessionPath = target.sessionPath
+			resolved = true
+		} else {
+			a.logDeepLink("resolveSessionFile miss", "file", topicID, "willTryAsTopicID", topicID)
+		}
+		// Guard against synthetic identifiers that are not real conversations:
+		// the taskboard tags issues with a bare "reasonix-heartbeat" attribution
+		// marker when no session backs them. Only hand real topic ids to the
+		// frontend; anything else would activate a phantom tab and error out.
+		if !resolved && !strings.HasPrefix(topicID, "topic_") {
+			a.logDeepLink("skip phantom topic", "topic", topicID)
+			slog.Info("deeplink: skip phantom topic", "topic", topicID)
+			return
+		}
+		// Hand the resolved target to the frontend so it runs its own
+		// activateTopic path — exactly as if the user clicked the conversation
+		// in the sidebar. That refreshes the tab header AND the conversation
+		// content, and keeps single-surface pruning consistent with a real
+		// click. (Backend-side ActivateTopic alone would leave the content
+		// pane stale.)
+		a.emitRuntimeEvent("app:open-topic", map[string]string{
+			"scope":         scope,
+			"workspaceRoot": workspace,
+			"topicID":       topicID,
+			"sessionPath":   resolvedSessionPath,
+		})
+		a.logDeepLink("emitted app:open-topic", "scope", scope, "workspace", workspace, "topicID", topicID)
+		slog.Info("deeplink: emitted open-topic", "scope", scope, "workspace", workspace, "topicID", topicID)
+	case parsed.Host == "new":
+		goal := query.Get("prompt")
+		scope := "project"
+		workspaceRoot := workspace
+		if workspaceRoot == "" {
+			scope = "global"
+		}
+		// Route through the frontend's own navigation path (openBlankSession +
+		// commitThenSend): the backend-side ActivateTopic/SubmitInitialGoalToTab
+		// sequence here would (a) mutate and prune the backend tab set without
+		// running the frontend's seedActiveTabMeta/refresh path, leaving the
+		// previously visible conversation selected until the metadata poll, and
+		// (b) submit before the freshly-built controller reaches the ready
+		// phase, failing workspaceRuntimeAdmissionErr without a retry. The
+		// frontend already polls tab readiness before committing a goal, so
+		// hand it the intent and let it drive.
+		a.emitRuntimeEvent("app:new-topic", map[string]string{
+			"scope":         scope,
+			"workspaceRoot": workspaceRoot,
+			"goal":          goal,
+		})
+		a.logDeepLink("emitted app:new-topic", "scope", scope, "workspace", workspaceRoot, "hasGoal", fmt.Sprintf("%t", strings.TrimSpace(goal) != ""))
+		slog.Info("deeplink: emitted new-topic", "scope", scope, "workspace", workspaceRoot)
+	default:
+		slog.Warn("deeplink: unsupported target", "host", parsed.Host, "url", rawURL)
+	}
+}
+
+// resolvedSessionTarget carries the topic/scope/workspace resolved from a
+// session file name, so deep links without a workspace parameter can still
+// locate the matching conversation.
+type resolvedSessionTarget struct {
+	topicID       string
+	scope         string
+	workspaceRoot string
+	// sessionPath is the exact session file the name resolved to. Preserving
+	// it through navigation matters when a topic has multiple saved branches
+	// (session files): the frontend would otherwise open whichever session
+	// findTopicSessionForTarget considers latest instead of the one named in
+	// the deep link.
+	sessionPath string
+}
+
+// resolveSessionFile looks up a session file name (with or without the .jsonl
+// suffix) across the known session directories and returns its topic id plus
+// the session's scope and workspace root. Returns ok=false when no session
+// file matches the given name. When workspaceHint is non-empty it is searched
+// in addition to the registered/known directories, so deep links that carry
+// an explicit workspace parameter can resolve sessions the desktop instance
+// has not yet registered (e.g. a CLI-created session in a fresh project).
+func (a *App) resolveSessionFile(name, workspaceHint string) (resolvedSessionTarget, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return resolvedSessionTarget{}, false
+	}
+	// Accept both a session file name (20260807-012459.824834000-session,
+	// with or without the .jsonl suffix) and a topic id
+	// (topic_20260807-012459_77f16abbac25bd24). Both resolve through the
+	// session index to the topic's scope and workspace root.
+	lookupName := strings.TrimSuffix(name, ".jsonl")
+	dirs := a.knownSessionDirs()
+	if strings.TrimSpace(workspaceHint) != "" {
+		dirs = append(dirs, desktopSessionDir(strings.TrimSpace(workspaceHint)))
+	}
+	for _, dir := range dirs {
+		index, err := topicSessionIndexForDir(dir)
+		if err != nil {
+			continue
+		}
+		// Direct topic-id hit first (covers topic_* identifiers).
+		if matches := index.byTopic[name]; len(matches) > 0 {
+			m := matches[0]
+			return resolvedSessionTarget{
+				topicID:       name,
+				scope:         m.scope,
+				workspaceRoot: m.workspaceRoot,
+				sessionPath:   m.path,
+			}, true
+		}
+		for topicID, matches := range index.byTopic {
+			for _, match := range matches {
+				if filepath.Base(match.path) == lookupName ||
+					strings.TrimSuffix(filepath.Base(match.path), ".jsonl") == lookupName {
+					return resolvedSessionTarget{
+						topicID:       topicID,
+						scope:         match.scope,
+						workspaceRoot: match.workspaceRoot,
+						sessionPath:   match.path,
+					}, true
+				}
+			}
+		}
+	}
+	return resolvedSessionTarget{}, false
+}
+
+// logDeepLink appends a line to ~/.reasonix/deeplink.log so deep-link
+// handling can be diagnosed without relying on the system log (which may not
+// capture the desktop process's slog output). Values are treated as
+// potentially sensitive: query values are redacted (the prompt text of a
+// reasonix://new link may contain private material and must not be persisted),
+// and the file is created private (0600) so other local users cannot read it.
+func (a *App) logDeepLink(message string, kv ...string) {
+	line := fmt.Sprintf("%s %s", time.Now().Format("15:04:05.000"), message)
+	for i := 0; i+1 < len(kv); i += 2 {
+		key := kv[i]
+		value := redactDeepLinkValue(kv[i+1])
+		line += fmt.Sprintf(" %s=%s", key, value)
+	}
+	line += "\n"
+	dir := config.ReasonixHomeDir()
+	if dir == "" {
+		return
+	}
+	path := filepath.Join(dir, "deeplink.log")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(line)
+}
+
+// redactDeepLinkValue masks values that look like URLs or query strings: the
+// raw reasonix:// URL contains the workspace path and the prompt text, neither
+// of which belongs in a persistent plaintext log. Non-URL values pass through
+// unchanged so diagnostic keys (topic, scope, sessionPath) stay readable.
+func redactDeepLinkValue(value string) string {
+	if strings.Contains(value, "://") {
+		if parsed, err := url.Parse(value); err == nil {
+			parsed.RawQuery = ""
+			parsed.ForceQuery = false
+			return parsed.String() + "?<redacted>"
+		}
+		return "<redacted-url>"
+	}
+	return value
+}
+
+// MarkFrontendReady is called by the frontend after it has registered its
+// runtime event listeners. It flushes any deep links that arrived during cold
+// start (before the listeners existed) so they are not lost.
+func (a *App) MarkFrontendReady() {
+	if a == nil {
+		return
+	}
+	a.frontendReady.Store(true)
+	a.mu.Lock()
+	pending := append([]string(nil), a.pendingDeepLinks...)
+	a.pendingDeepLinks = nil
+	a.mu.Unlock()
+	for _, rawURL := range pending {
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			a.logDeepLink("drain: unparsable url", "url", rawURL, "err", err.Error())
+			continue
+		}
+		if !strings.EqualFold(parsed.Scheme, "reasonix") {
+			continue
+		}
+		a.logDeepLink("drain queued link", "url", rawURL)
+		a.dispatchDeepLink(parsed, rawURL)
+	}
+}
+
+// DrainPendingDeepLinks returns any reasonix:// URLs that were queued before
+// the frontend mounted its runtime event listeners. The frontend calls this
+// once when the app:open-topic / app:new-topic handlers are registered, then
+// processes each URL the same way it handles live runtime events.
+func (a *App) DrainPendingDeepLinks() []string {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	pending := append([]string(nil), a.pendingDeepLinks...)
+	a.pendingDeepLinks = nil
+	return pending
 }
 
 func (a *App) secondInstanceLaunch() {

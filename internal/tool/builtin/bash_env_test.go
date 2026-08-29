@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/jobs"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
 )
@@ -81,6 +82,32 @@ func TestBashCommandEnvKeepsTokensByDefault(t *testing.T) {
 	env := strings.Join(bashCommandEnv(context.Background()), "\n")
 	if !strings.Contains(env, "GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz") {
 		t.Fatalf("bash env must inherit tokens while filter_subprocess_env is off (default):\n%s", env)
+	}
+}
+
+func TestBashCommandEnvInjectsThreadIDFromContext(t *testing.T) {
+	ctx := jobs.WithSession(context.Background(), "topic_20260808_abc123")
+	env := strings.Join(bashCommandEnv(ctx), "\n")
+	if !strings.Contains(env, "REASONIX_THREAD_ID=topic_20260808_abc123") {
+		t.Fatalf("bash env must expose session id for attribution:\n%s", env)
+	}
+}
+
+func TestBashCommandEnvThreadIDEmptyWithoutSession(t *testing.T) {
+	// The parent harness may carry REASONIX_THREAD_ID in its own env; unset it
+	// to prove the function only injects from session-scoped context.
+	prev, hadPrev := os.LookupEnv("REASONIX_THREAD_ID")
+	if err := os.Unsetenv("REASONIX_THREAD_ID"); err != nil {
+		t.Fatalf("unsetenv: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadPrev {
+			_ = os.Setenv("REASONIX_THREAD_ID", prev)
+		}
+	})
+	env := strings.Join(bashCommandEnv(context.Background()), "\n")
+	if strings.Contains(env, "REASONIX_THREAD_ID=") {
+		t.Fatalf("bash env must not set REASONIX_THREAD_ID without session scope:\n%s", env)
 	}
 }
 
