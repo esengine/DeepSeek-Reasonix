@@ -29,6 +29,13 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: workers/accounts/pnpm-lock.yaml
+      - name: Apply D1 migrations
+        working-directory: workers/accounts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm install --frozen-lockfile
+          npx wrangler d1 migrations apply reasonix-accounts --remote
       - name: Deploy
         working-directory: workers/accounts
         env:
