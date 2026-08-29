@@ -486,8 +486,45 @@ func (m chatTUI) renderTranscript() string {
 		}
 		rows[r] = line
 		bar[r] = scrollbarCell(r, total, h, thumbStart, thumbSize)
+		// At a divider line (horizontal rule ───), use ┤ instead of │ to connect
+		// the horizontal rule to the scrollbar track. Only match full-width
+		// dividers that actually reach the right edge; partial underlines
+		// (heading level-1) that end in ─ but don't span the content width
+		// must not get ┤.
+		if isDividerLine(line, cw) {
+			if bar[r] == scrollTrackStyle.Render("│") {
+				bar[r] = scrollTrackStyle.Render("┤")
+			}
+		}
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(rows, "\n"), strings.Join(bar, "\n"))
+}
+
+// isDividerLine reports whether the wrapped content line (potentially containing
+// ANSI SGR codes) is a full-width horizontal-rule divider line that visually
+// fills the content width (e.g. a markdown thematic break ─── or a table
+// separator). Partial-width underlines (heading level-1) that don't reach the
+// scrollbar column (their rightmost character is space, not ─) return false.
+func isDividerLine(line string, cw int) bool {
+	plain := ansi.Strip(line)
+	runes := []rune(plain)
+	// Must have a visible right-edge ─ (no trailing gap of spaces).
+	if len(runes) == 0 || runes[len(runes)-1] != '─' {
+		return false
+	}
+	// Leading indent spaces followed only by box-drawing characters;
+	// normal text that ends in ─ must not match.
+	started := false
+	for _, r := range runes {
+		if r == ' ' && !started {
+			continue // leading indent
+		}
+		if r != '─' && r != '┼' && r != '│' {
+			return false
+		}
+		started = true
+	}
+	return started
 }
 
 // selSpan returns the [lo, hi) visual-column span of the selection on content
