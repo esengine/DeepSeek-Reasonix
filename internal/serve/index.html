@@ -1481,7 +1481,7 @@ function renderRewindPicker() {
     rewindCheckpoints.forEach((cp,i)=>{
       const item=el('div','rewind-picker__item'+(i===rewindSelected?' rewind-picker__item--active':''));
       item.innerHTML='<span class="rewind-picker__turn">#'+cp.turn+'</span><span class="rewind-picker__prompt">'+escHtml((cp.prompt||'').slice(0,80))+'</span><span class="rewind-picker__files">'+cp.files+' '+__('files')+'</span>';
-      item.onclick=()=>{rewindSelected=i;renderRewindPicker();};
+      item.onclick=()=>{rewindSelected=i;rewindStage=1;rewindScope=0;renderRewindPicker();};
       list.appendChild(item);
     });
     picker.appendChild(list);
