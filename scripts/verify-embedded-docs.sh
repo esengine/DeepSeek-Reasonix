@@ -16,7 +16,7 @@ case "$version" in
 	v*) ;;
 	*) version="v$version" ;;
 esac
-version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?)?$'
+version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
 if [[ ! "$version" =~ $version_pattern ]]; then
 	echo "invalid docs build version: $version" >&2
 	exit 2

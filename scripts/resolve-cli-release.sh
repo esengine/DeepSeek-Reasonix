@@ -4,7 +4,7 @@
 set -euo pipefail
 
 stable_semver_re='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-release_semver_re="^v${stable_semver_re}(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?)?$"
+release_semver_re="^v${stable_semver_re}(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$"
 preview_semver_re="^v${stable_semver_re}-preview\.(0|[1-9][0-9]*)$"
 
 if [ "${IN_ORCHESTRATED:-false}" = "true" ]; then
