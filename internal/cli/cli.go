@@ -1107,6 +1107,11 @@ func chatREPL(args []string, version string) int {
 	// agent goroutine.
 	eventCh := make(chan event.Event, 1024)
 
+	// Route slog.Warn/Error through TUI Notice events while bubbletea owns
+	// the terminal so raw-mode stderr writes don't corrupt the display.
+	restoreSlog := routeSlogToTUI(eventCh)
+	defer restoreSlog()
+
 	var sink event.Sink = &eventSink{ch: eventCh}
 	sink = withNotifications(sink, cfg)
 	sink = reporter.Wrap(sink)
@@ -1283,6 +1288,7 @@ func chatREPL(args []string, version string) int {
 		}
 	}()
 	final, runErr := p.Run()
+	restoreSlog()
 	signal.Stop(hangup)
 	diagnostics.Milestone("terminal_released")
 	// Close the active controller plus any retired ones from /model switches.
