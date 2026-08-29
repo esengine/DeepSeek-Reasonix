@@ -18,6 +18,10 @@ type sessionListEntry struct {
 	Current    bool   `json:"current,omitempty"`
 	Running    bool   `json:"running,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
+	// HeldBy reports lease ownership for clients: "me" (this serve
+	// runtime holds it), "other" (another runtime, e.g. the desktop app,
+	// holds it — write attempts will be rejected), or "" (free).
+	HeldBy string `json:"heldBy,omitempty"`
 }
 
 // sessions lists saved sessions with event-log-aware titles and turn counts.
@@ -54,6 +58,11 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		row := sessionListEntry{Name: strings.TrimSuffix(entry.Name(), ".jsonl"), Path: path, Current: cleanPath == current, Running: running[cleanPath], MtimeMilli: mtime.UnixMilli()}
 		if row.Current {
 			row.Running = controllerHasActiveRuntimeWork(ctrl)
+		}
+		if agent.SessionLeaseHeldByCurrentRuntime(path) {
+			row.HeldBy = "me"
+		} else if agent.SessionLeaseHeldByOtherRuntime(path) {
+			row.HeldBy = "other"
 		}
 		first, turns, cached := agent.SessionPreviewCached(path)
 		if !cached {

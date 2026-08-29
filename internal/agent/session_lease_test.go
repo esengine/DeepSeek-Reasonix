@@ -436,3 +436,102 @@ func TestSessionLeaseReleaseRetiresLockSidecars(t *testing.T) {
 	}
 	first.Release()
 }
+
+func TestSessionLeaseHandoffTransfer(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	origWriter := sessionWriterID
+	defer func() { sessionWriterID = origWriter }()
+
+	// First runtime (this process, releasing side) acquires.
+	lease1, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	// ReleaseForHandoff reserves for the target writer.
+	if err := lease1.ReleaseForHandoff("writer-B"); err != nil {
+		t.Fatalf("release for handoff: %v", err)
+	}
+	// A plain acquire still fails while the reservation window is live.
+	if _, err := TryAcquireSessionLease(userPath); err == nil {
+		t.Fatal("plain acquire succeeded during handoff window; want ErrSessionLeaseHeld")
+	}
+	// A runtime whose own identity is NOT the named target is refused, even
+	// if it supplies the releasing writer id (spoof attempt).
+	sessionWriterID = "writer-C"
+	if _, err := TryAcquireSessionLeaseWithHandoff(userPath, origWriter); err == nil {
+		t.Fatal("non-target runtime acquired via spoofed handoff; want refusal")
+	}
+	// The intended target but a wrong source (releasing runtime) is refused.
+	sessionWriterID = "writer-B"
+	if _, err := TryAcquireSessionLeaseWithHandoff(userPath, "writer-X"); err == nil {
+		t.Fatal("wrong source writer acquired; want refusal")
+	}
+	// The intended target (own id == handoff_to, from == releasing id) succeeds.
+	lease2, err := TryAcquireSessionLeaseWithHandoff(userPath, origWriter)
+	if err != nil {
+		t.Fatalf("handoff acquire: %v", err)
+	}
+	info, err := LoadSessionLeaseInfo(userPath)
+	if err != nil {
+		t.Fatalf("load info: %v", err)
+	}
+	if info.HandoffTo != "" {
+		t.Fatalf("handoff reservation not cleared: %+v", info)
+	}
+	lease2.Release()
+	// After the reservation cleared, plain acquire works again.
+	l3, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("re-acquire after handoff: %v", err)
+	}
+	l3.Release()
+}
+
+func TestSessionLeaseHandoffExpiry(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	origWriter := sessionWriterID
+	defer func() { sessionWriterID = origWriter }()
+
+	lease1, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if err := lease1.ReleaseForHandoff("writer-B"); err != nil {
+		t.Fatalf("release for handoff: %v", err)
+	}
+	// Backdate the reservation past the window.
+	info, err := LoadSessionLeaseInfo(userPath)
+	if err != nil {
+		t.Fatalf("load info: %v", err)
+	}
+	info.HandoffExpiresAt = time.Now().UTC().Add(-time.Second)
+	if err := SaveSessionLeaseInfo(userPath, *info); err != nil {
+		t.Fatalf("save backdated info: %v", err)
+	}
+	// The named target (own id == handoff_to) is still refused once the
+	// reservation expired.
+	sessionWriterID = "writer-B"
+	if _, err := TryAcquireSessionLeaseWithHandoff(userPath, ""); err == nil {
+		t.Fatal("expired handoff still acquired; want refusal")
+	}
+	sessionWriterID = origWriter
+	// Normal acquire is not wedged by the stale reservation.
+	l, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("plain acquire with stale reservation: %v", err)
+	}
+	l.Release()
+}
+
+func TestSessionLeaseHandoffRefusesActiveHolder(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	lease1, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer lease1.Release()
+	// No handoff marker: the active holder is never disturbed.
+	if _, err := TryAcquireSessionLeaseWithHandoff(userPath, ""); err == nil {
+		t.Fatal("handoff acquire without marker succeeded; want refusal")
+	}
+}

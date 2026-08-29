@@ -581,6 +581,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("GET /todos", s.todos)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
+	mux.HandleFunc("POST /release-session", s.releaseSession)
+	mux.HandleFunc("POST /takeover-session", s.takeoverSession)
 	return logMiddleware(gzipMiddleware(s.auth.middleware(csrfGuard(mux))))
 }
 
@@ -1545,6 +1547,138 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// releaseSession releases the lease of a named session with a handoff
+// reservation, so another runtime (e.g. the desktop app) can take it over via
+// /takeover-session. Only the session currently held by this serve runtime can
+// be released; releasing an unheld or foreign-held session is a 409. A
+// running turn rejects the release with 409 so the handoff never tears a
+// mid-write session.
+func (s *Server) releaseSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		To   string `json:"to,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	target := strings.TrimSpace(body.To)
+	if target == "" {
+		// Validate the required handoff target up front: a missing target is a
+		// client error (400), not a deferred conflict (409).
+		http.Error(w, "handoff target (to) is required", http.StatusBadRequest)
+		return
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `\/`) {
+		http.Error(w, "invalid session name", http.StatusBadRequest)
+		return
+	}
+	dir := s.ctl().SessionDir()
+	if dir == "" {
+		http.Error(w, "sessions disabled", http.StatusBadRequest)
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		return
+	}
+	abs := filepath.Join(absDir, name+".jsonl")
+	rel, err := filepath.Rel(absDir, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		http.Error(w, "path outside session dir", http.StatusForbidden)
+		return
+	}
+	currentPath, err := filepath.Abs(s.ctl().SessionPath())
+	if err != nil {
+		http.Error(w, "invalid current session path", http.StatusInternalServerError)
+		return
+	}
+	if filepath.Clean(abs) != filepath.Clean(currentPath) {
+		// Only the currently bound session is this runtime's to release.
+		http.Error(w, "session is not held by this runtime", http.StatusConflict)
+		return
+	}
+	// A handoff mid-turn would race the session writes: the controller is
+	// single-owner and releaseSession must not hand off while a turn is
+	// executing (between saves).
+	if s.ctl().Running() {
+		http.Error(w, "cannot hand off a session while a turn is running", http.StatusConflict)
+		return
+	}
+	// Serialize with the other session-path-changing endpoints (/resume,
+	// /new, /fork, /takeover-session, model switch) that hold bindMu, so the
+	// lease cannot be handed off while a rebind is mid-flight.
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	keeper := s.leases
+	if keeper == nil {
+		http.Error(w, "lease keeper unavailable", http.StatusInternalServerError)
+		return
+	}
+	lease := keeper.Lease()
+	if lease == nil {
+		http.Error(w, "no lease held for current session", http.StatusConflict)
+		return
+	}
+	if err := lease.ReleaseForHandoff(target); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	// Drop the released lease from the local keeper so a later rebind to the
+	// same path is a real acquire, not a no-op against a released lease.
+	if err := keeper.Rebind(""); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// takeoverSession acquires a session whose lease carries a handoff
+// reservation for this runtime (created by /release-session). The session's
+// path is loaded through the controller so subsequent submits target it.
+func (s *Server) takeoverSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		From string `json:"from,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		http.Error(w, "invalid session name", http.StatusBadRequest)
+		return
+	}
+	dir := s.ctl().SessionDir()
+	if dir == "" {
+		http.Error(w, "sessions disabled", http.StatusBadRequest)
+		return
+	}
+	abs := filepath.Join(dir, name+".jsonl")
+	if _, err := os.Stat(abs); err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	lease, err := agent.TryAcquireSessionLeaseWithHandoff(abs, strings.TrimSpace(body.From))
+	if err != nil {
+		http.Error(w, control.SessionInUseMessage(err), http.StatusConflict)
+		return
+	}
+	// Point the controller at the acquired session so /submit and /history
+	// operate on it. Rebind releases any lease this runtime previously held.
+	if err := s.leases.Rebind(abs); err != nil {
+		lease.Release()
+		http.Error(w, control.SessionInUseMessage(err), http.StatusConflict)
+		return
+	}
+	// Rebind re-acquired its own lease; release the probe lease we took.
+	lease.Release()
 	w.WriteHeader(http.StatusNoContent)
 }
 

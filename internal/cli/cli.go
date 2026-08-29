@@ -818,8 +818,17 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	registerServeCapabilityFlags(fs)
 	openBrowser := fs.Bool("open", opts.openBrowser, "open the Web UI in the default browser")
 	noOpen := fs.Bool("no-open", false, "do not open the Web UI in the default browser")
+	pool := fs.Bool("pool", false, "run as a multi-project pool gateway (single entry for remote clients)")
+	poolAddr := fs.String("pool-addr", "0.0.0.0:8848", "pool gateway listen address")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
+	}
+	if *pool {
+		if opts.command != "serve" {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--pool is only valid with `reasonix serve`")
+			return 2
+		}
+		return runServePool(*poolAddr, *tokenFile, *token)
 	}
 	authExplicit := false
 	fs.Visit(func(f *flag.Flag) {
