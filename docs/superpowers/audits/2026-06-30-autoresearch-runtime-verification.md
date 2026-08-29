@@ -20,14 +20,14 @@ criteria, and exposes desktop/frontend status APIs with compact tab metadata.
 The implementation is verified against the design requirements listed below.
 The only residual limitation is that an external browser smoke test cannot call
 the Wails `window.go` bridge directly; bridge behavior is covered by Go and
-TypeScript tests, and the running Wails app was smoke-tested through `./dev`.
+TypeScript tests, and the running Wails app was smoke-tested through `./dev.sh`.
 
 ## Requirement Matrix
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Host creates task id and directory layout | `internal/autoresearch.Store.CreateTask`; `TestCreateTaskCreatesHostOwnedLayoutAndInitialState` | Verified |
-| State files are host-owned JSON/JSONL under `.reasonix/autoresearch/<task-id>/` | `task_spec.json`, `progress.json`, `directions_tried.json`, `findings.jsonl`, `iteration_log.jsonl`, `heartbeat.jsonl`; store tests and `./dev` smoke task directory | Verified |
+| State files are host-owned JSON/JSONL under `.reasonix/autoresearch/<task-id>/` | `task_spec.json`, `progress.json`, `directions_tried.json`, `findings.jsonl`, `iteration_log.jsonl`, `heartbeat.jsonl`; store tests and `./dev.sh` smoke task directory | Verified |
 | Schema validation rejects missing required fields | `ValidateTask`; `TestValidateTaskReportsSchemaErrors` | Verified |
 | JSONL append rejects invalid entries | `AppendFinding`; `TestAppendFindingRejectsInvalidEntry` | Verified |
 | Accepted findings satisfy readiness | `Readiness`; `TestAppendFindingRecordsAcceptedEvidenceForReadiness`, `TestRecordEvidenceLinksFindingToCriterionAndSatisfiesReadiness` | Verified |
@@ -39,7 +39,7 @@ TypeScript tests, and the running Wails app was smoke-tested through `./dev`.
 | Missing explicit task path blocks instead of silently creating a new task | `ensureAutoResearchTask`; `TestResearchGoalMissingExplicitTaskBlocksInsteadOfCreatingNewTask` | Verified |
 | Cold resume restores running AutoResearch task id | `goalMachine.restoreRunningFromState`; `TestResumeRestoresRunningAutoResearchGoalFromSidecar` | Verified |
 | Compose injects host-generated `<autoresearch-runtime>` | `Controller.Compose`; `TestResearchGoalCreatesHostManagedAutoResearchTask`, resume test | Verified |
-| Heartbeats are written around turns | `appendAutoResearchHeartbeat`; `TestResearchGoalTurnAppendsAutoResearchHeartbeats`; `./dev` smoke heartbeat log | Verified |
+| Heartbeats are written around turns | `appendAutoResearchHeartbeat`; `TestResearchGoalTurnAppendsAutoResearchHeartbeats`; `./dev.sh` smoke heartbeat log | Verified |
 | Summary includes last heartbeat | `Summary`; `TestAppendHeartbeatRecordsDurableTurnStatus` | Verified |
 | Completion is intercepted when readiness fails | `autoResearchReadinessFailure`; `TestResearchGoalCompletionIsInterceptedWhenReadinessFails` | Verified |
 | Completion requires host-readable evidence for default criteria | `defaultAutoResearchSuccessCriteria`; `TestResearchGoalCreatesHostManagedAutoResearchTask`, `TestResearchGoalCompletionMarksAutoResearchTaskComplete` | Verified |
@@ -52,8 +52,8 @@ TypeScript tests, and the running Wails app was smoke-tested through `./dev`.
 | Findings load on demand and cap by limit | `AutoResearchFindings`; `TestAutoResearchFindingsAreLoadedOnDemand` | Verified |
 | AutoResearch does not appear as a configurable default status bar item | `statusbar-workspace.test.tsx` | Verified |
 | Frontend bridge tolerates transient Wails IPC timing errors | `bridge-drag-rejection.test.ts` | Verified |
-| Transcript lifecycle cards exist | Controller emits `event.Notice`; frontend renders notices via `NoticeCard`; `./dev` smoke shows `autoresearch task created` notice | Verified |
-| `./dev` starts and AutoResearch creates durable state | Browser smoke against `http://127.0.0.1:34193`; task `20260630-065721-e2e-verify-autoresearch-ui-smoke-test` created | Verified |
+| Transcript lifecycle cards exist | Controller emits `event.Notice`; frontend renders notices via `NoticeCard`; `./dev.sh` smoke shows `autoresearch task created` notice | Verified |
+| `./dev.sh` starts and AutoResearch creates durable state | Browser smoke against `http://127.0.0.1:34193`; task `20260630-065721-e2e-verify-autoresearch-ui-smoke-test` created | Verified |
 
 ## Commands Run
 
@@ -64,7 +64,7 @@ GOCACHE=/private/tmp/reasonix-go-build-cache go test . -count=1
 ./node_modules/.bin/tsc --noEmit -p tsconfig.test.json
 ./node_modules/.bin/tsx src/__tests__/statusbar-workspace.test.tsx
 pnpm test
-./dev
+./dev.sh
 ```
 
 `tsx` tests required running outside the sandbox because `tsx` creates IPC pipes
@@ -72,7 +72,7 @@ under `/var/folders`.
 
 ## End-to-End Smoke Notes
 
-- `./dev` started successfully.
+- `./dev.sh` started successfully.
 - Wails devserver: `http://127.0.0.1:34193`.
 - External browser loaded the page with title `Reasonix`.
 - Browser console had no error/warn entries.
