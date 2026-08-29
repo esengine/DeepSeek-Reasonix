@@ -225,6 +225,48 @@ func TestHandleCardActionDoesNotTrustCardRequesterAsOperator(t *testing.T) {
 	}
 }
 
+func TestHandleCardActionPrefersOpenIDOverUnionID(t *testing.T) {
+	a := &adapter{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	// 真实飞书回调会同时携带 union_id 与 open_id；准入名单通常以 open_id
+	// 记录，因此 operator 必须优先解析 open_id（与普通消息身份解析一致），
+	// 否则按钮回调会被当成未知用户并误触发配对。
+	raw := []byte(`{
+		"event": {
+			"operator": {
+				"operator_id": {
+					"union_id": "on_union-user",
+					"open_id": "ou_open-user"
+				}
+			},
+			"context": {
+				"open_message_id": "msg-1",
+				"open_chat_id": "chat-1"
+			},
+			"action": {
+				"value": {
+					"command": "/approve approval-1",
+					"chat_type": "dm"
+				}
+			}
+		}
+	}`)
+
+	if !a.handleCardAction(raw) {
+		t.Fatal("handleCardAction returned false")
+	}
+
+	msg := <-a.msgCh
+	if msg.OperatorID != "ou_open-user" {
+		t.Fatalf("operator id = %q, want ou_open-user (open_id must win over union_id)", msg.OperatorID)
+	}
+	if msg.UserID != "ou_open-user" {
+		t.Fatalf("user id = %q, want ou_open-user", msg.UserID)
+	}
+}
+
 func TestHandleMessageTreatsTopicGroupAsGroup(t *testing.T) {
 	a := &adapter{
 		cfg:    config.FeishuBotConfig{RequireMention: true},
