@@ -2309,11 +2309,17 @@ export interface TaskSnapshot {
   session_id: string;
   state: TaskState;
   runtime_state?: RuntimeState; // absent in snapshots written before this field existed
+  runtime_lease_until?: string;
   version: number;
   created_at: string; // ISO 8601
   updated_at: string; // ISO 8601
   error_code?: string;
   error_summary?: string;
+  parent_task_id?: string;
+  parent_session_id?: string;
+  kind?: "background" | "subagent" | string;
+  depth?: number;
+  attempt?: number;
 }
 
 export type { TaskActionRequest, TaskCatalogItem, TaskCatalogStatus, TaskEventPage, TaskEventPageRequest, TaskPage, TaskPageRequest } from "./taskCatalogTypes";
@@ -2336,9 +2342,15 @@ export interface TaskEvent {
   timestamp: string; // ISO 8601
   event_type: string;
   task_id: string;
+  job_id?: string;
   session_id: string;
   state: TaskState;
   runtime_state?: RuntimeState;
   error_code?: string;
   error_summary?: string;
+  parent_task_id?: string;
+  parent_session_id?: string;
+  kind?: "background" | "subagent" | string;
+  depth?: number;
+  attempt?: number;
 }

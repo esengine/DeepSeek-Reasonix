@@ -238,6 +238,7 @@ reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [-
 reasonix task monitor list --json [--dir PROJECT_DIR]
 reasonix task monitor status <task-id> --json [--dir PROJECT_DIR]
 reasonix task monitor events <task-id> --json|--jsonl [--dir PROJECT_DIR] [--after N] [--follow]
+reasonix task requeue <task-id> --expected-version N --json [--dir PROJECT_DIR]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
@@ -258,6 +259,11 @@ ID，需要一并保留该私有身份密钥。任务仍在运行时
 `interrupted`；再次打开该 session 时也会自动修复持久化生命周期状态。
 
 Schema version 1 的兼容规则：
+
+`task requeue` 只接受失败、stale 或已退出 runtime 的任务，并将任务置为 queued，
+由宿主自己的 runtime 消费。任务快照和事件中的
+`parent_task_id`、`parent_session_id`、`kind`、`depth`、`attempt` 均为可选字段，
+用于 Desktop 展示父任务与 Subagent 树，不改变旧字段语义。
 
 - 消费端必须忽略未知字段；
 - 同一 schema version 内不会删除字段或改变字段类型；

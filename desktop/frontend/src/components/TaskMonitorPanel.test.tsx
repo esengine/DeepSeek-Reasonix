@@ -4,8 +4,9 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
+import type { TaskSnapshot } from "../lib/types";
 
-type Task = Record<string, unknown>;
+type Task = TaskSnapshot;
 type Event = Record<string, unknown>;
 
 let passed = 0;
@@ -21,7 +22,7 @@ function ok(value: boolean, label: string) {
   }
 }
 
-function snap(overrides: Task = {}): Task {
+function snap(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
   return {
     schema_version: 1,
     task_id: "task-0001",
@@ -124,7 +125,22 @@ const mockApp = {
 };
 (window as unknown as { go: { main: { App: typeof mockApp } } }).go = { main: { App: mockApp } };
 
-const { TaskMonitorPanel } = await import("./TaskMonitorPanel");
+const { TaskMonitorPanel, taskTree } = await import("./TaskMonitorPanel");
+
+const treeParent = snap({ task_id: "parent", state: "running" });
+const treeChild = snap({ task_id: "child", parent_task_id: "parent", depth: 1 });
+const treeGrandchild = snap({ task_id: "grandchild", parent_task_id: "child", depth: 2 });
+const treeRows = taskTree([treeGrandchild, treeChild, treeParent]);
+ok(treeRows.map((row) => row.task.task_id).join(",") === "parent,child,grandchild", "orders parent task tree before descendants");
+ok(treeRows.map((row) => row.depth).join(",") === "0,1,2", "preserves bounded task tree depth");
+
+const orphanRows = taskTree([snap({ task_id: "orphan", parent_task_id: "missing" })]);
+ok(orphanRows.length === 1 && orphanRows[0].task.task_id === "orphan", "keeps orphan tasks visible");
+const cycleRows = taskTree([
+  snap({ task_id: "cycle-a", parent_task_id: "cycle-b" }),
+  snap({ task_id: "cycle-b", parent_task_id: "cycle-a" }),
+]);
+ok(cycleRows.map((row) => row.task.task_id).sort().join(",") === "cycle-a,cycle-b", "keeps cyclic task components visible");
 
 let activeRoot: Root | null = null;
 let activeHost: HTMLElement | null = null;

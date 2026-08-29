@@ -198,6 +198,14 @@ type TaskRecorder interface {
 	RecordDone(id string, st Status, err error)
 }
 
+// TaskRecorderWithParent is an optional extension for hosts that can identify
+// which task or session launched a background job. Older recorders continue
+// to receive the ordinary lifecycle callbacks.
+type TaskRecorderWithParent interface {
+	TaskRecorder
+	RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID string)
+}
+
 // WithStalledWarningAfter enables one stalled warning per job after d without
 // job-owned visible output. A non-positive duration disables stalled warnings.
 func WithStalledWarningAfter(d time.Duration) Option {
@@ -410,6 +418,13 @@ func (m *Manager) startInvalid(parentSession, kind, label string, validationErr 
 // StartForSession launches a job owned by parentSession. Session-scoped readers
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
+	return m.StartForSessionWithParent(parentSession, "", kind, label, run)
+}
+
+// StartForSessionWithParent launches a job and records optional parent
+// metadata for Task Monitor consumers. An empty parentTaskID preserves the
+// existing session-root behavior.
+func (m *Manager) StartForSessionWithParent(parentSession, parentTaskID, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
 	kind = strings.TrimSpace(kind)
 	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
@@ -459,7 +474,15 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
 	if !nilutil.IsNil(m.taskRecorder) {
-		m.taskRecorder.RecordStart(id, kind, label)
+		if recorder, ok := m.taskRecorder.(TaskRecorderWithParent); ok {
+			parentSessionID := ""
+			if parentTaskID != "" {
+				parentSessionID = parentSession
+			}
+			recorder.RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID)
+		} else {
+			m.taskRecorder.RecordStart(id, kind, label)
+		}
 	}
 
 	m.wg.Add(1)

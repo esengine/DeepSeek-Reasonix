@@ -268,6 +268,7 @@ reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [-
 reasonix task monitor list --json [--dir PROJECT_DIR]
 reasonix task monitor status <task-id> --json [--dir PROJECT_DIR]
 reasonix task monitor events <task-id> --json|--jsonl [--dir PROJECT_DIR] [--after N] [--follow]
+reasonix task requeue <task-id> --expected-version N --json [--dir PROJECT_DIR]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
@@ -292,6 +293,11 @@ artifact exists. A `running` record without a live session lease is reported as
 `interrupted`; opening that session also repairs the persisted lifecycle state.
 
 Schema compatibility rules for version 1:
+
+`task requeue` accepts only failed, stale, or runtime-exited tasks and leaves the
+task queued for a host-owned runtime to consume. The optional `parent_task_id`, `parent_session_id`,
+`kind`, `depth`, and `attempt` fields let Desktop render parent/Subagent trees
+without changing the meaning of existing fields.
 
 - consumers must ignore unknown fields;
 - fields are not removed or retyped within the same schema version;
