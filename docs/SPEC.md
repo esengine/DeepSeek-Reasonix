@@ -999,7 +999,7 @@ type Chunk struct {
 
 ## 5. Configuration (TOML)
 
-Resolution order: **flag > project `./reasonix.toml` > the user config file
+Resolution order: **flag > project `./reasonix.toml` > project `.reasonix/reasonix.toml` (fallback) > the user config file
 > built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives
 at `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows. See

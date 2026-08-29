@@ -2461,13 +2461,16 @@ func (c *Config) Save() error {
 // are edited from their own TOML only, never from a runtime user+project merge.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
-	if _, err := os.Stat(projectTOML); err == nil {
+	projectTOML := projectTOMLPath(root)
+	if info, err := os.Stat(projectTOML); err == nil && !info.IsDir() {
 		projectCfg := LoadForEditWithoutCredentials(projectTOML)
 		return projectCfg.SaveTo(projectTOML)
+	}
+	// Neither project file exists yet — create the conventional root path.
+	if root != "." {
+		projectTOML = filepath.Join(root, "reasonix.toml")
+	} else {
+		projectTOML = "reasonix.toml"
 	}
 	if uc := userConfigPath(); uc != "" {
 		if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {
