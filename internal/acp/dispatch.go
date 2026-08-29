@@ -515,14 +515,118 @@ func (s *updateSink) requestAsk(ctx context.Context, a event.Ask) {
 	}
 	answers := make([]event.AskAnswer, 0, len(a.Questions))
 	for _, q := range a.Questions {
-		selected, ok := s.requestAskQuestion(ctx, a.ID, q)
+		selected, ok := s.requestAskQuestionAnswers(ctx, a.ID, q)
 		if !ok {
 			s.answer(a.ID, nil)
 			return
 		}
-		answers = append(answers, event.AskAnswer{QuestionID: q.ID, Selected: []string{selected}})
+		answers = append(answers, event.AskAnswer{QuestionID: q.ID, Selected: selected})
 	}
 	s.answer(a.ID, answers)
+}
+
+// requestAskQuestionAnswers resolves one ask question over the ACP client.
+// session/request_permission is a single-select primitive (one optionId per
+// round-trip), so a multiSelect question round-trips once per pick: each
+// round offers the still-unselected options plus a "Done" row, folding the
+// pick into the accumulated answer until the user submits or cancels.
+// Single-select questions keep the original one-round-trip path (#7649: a
+// prior version answered multiSelect questions with only the first pick).
+func (s *updateSink) requestAskQuestionAnswers(ctx context.Context, askID string, q event.AskQuestion) ([]string, bool) {
+	if !q.Multi {
+		selected, ok := s.requestAskQuestion(ctx, askID, q)
+		if !ok {
+			return nil, false
+		}
+		return []string{selected}, true
+	}
+
+	var picked []string
+	remaining := append([]event.AskOption(nil), q.Options...)
+	for round := 1; len(remaining) > 0; round++ {
+		label, done, ok := s.requestAskQuestionRound(ctx, askID, q, remaining, len(picked) > 0, round)
+		if !ok {
+			return nil, false
+		}
+		if done {
+			break
+		}
+		picked = append(picked, label)
+		for i, opt := range remaining {
+			if opt.Label == label {
+				remaining = append(remaining[:i], remaining[i+1:]...)
+				break
+			}
+		}
+	}
+	return picked, true
+}
+
+// requestAskQuestionRound resolves one round of a multiSelect question: it
+// offers the still-unselected options plus a "Done" row (once at least one
+// option is picked) and a "Cancel" row. round distinguishes each request's
+// ToolCallID since the same question round-trips multiple times.
+func (s *updateSink) requestAskQuestionRound(ctx context.Context, askID string, q event.AskQuestion, remaining []event.AskOption, canFinish bool, round int) (label string, done bool, ok bool) {
+	title := strings.TrimSpace(q.Prompt)
+	if title == "" {
+		title = strings.TrimSpace(q.Header)
+	}
+	if title == "" {
+		title = "Question"
+	}
+	content := []toolContent(nil)
+	if q.Header != "" && q.Header != title {
+		content = append(content, toolContent{Type: "content", Content: textBlock(q.Header)})
+	}
+	options := make([]PermissionOption, 0, len(remaining)+2)
+	labelsByID := make(map[string]string, len(remaining))
+	for i, opt := range remaining {
+		id := fmt.Sprintf("%s:%d", q.ID, i+1)
+		name := strings.TrimSpace(opt.Label)
+		if strings.TrimSpace(opt.Description) != "" {
+			name += " - " + strings.TrimSpace(opt.Description)
+		}
+		options = append(options, PermissionOption{OptionID: id, Name: name, Kind: OptAllowOnce})
+		labelsByID[id] = opt.Label
+	}
+	doneID := q.ID + ":done"
+	if canFinish {
+		options = append(options, PermissionOption{OptionID: doneID, Name: "Done", Kind: OptAllowOnce})
+	}
+	options = append(options, PermissionOption{OptionID: q.ID + ":cancel", Name: "Cancel", Kind: OptRejectOnce})
+
+	rawInput, _ := json.Marshal(map[string]any{
+		"id":       q.ID,
+		"question": title,
+		"options":  remaining,
+		"multi":    q.Multi,
+	})
+	params := PermissionRequestParams{
+		SessionID: s.sessionID,
+		ToolCall: PermissionToolCall{
+			ToolCallID: fmt.Sprintf("ask-%s-%s-r%d", askID, q.ID, round),
+			Title:      title,
+			Kind:       "other",
+			Status:     "pending",
+			Content:    content,
+			RawInput:   rawInput,
+		},
+		Options: options,
+	}
+
+	raw, err := s.conn.Request(ctx, "session/request_permission", params)
+	if err != nil {
+		return "", false, false
+	}
+	var res PermissionRequestResult
+	if json.Unmarshal(raw, &res) != nil || res.Outcome.Outcome != "selected" {
+		return "", false, false
+	}
+	if res.Outcome.OptionID == doneID {
+		return "", true, true
+	}
+	pickedLabel, found := labelsByID[res.Outcome.OptionID]
+	return pickedLabel, false, found
 }
 
 func (s *updateSink) requestAskQuestion(ctx context.Context, askID string, q event.AskQuestion) (string, bool) {

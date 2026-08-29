@@ -1122,7 +1122,7 @@ export default function App() {
   const [tasksOpen, setTasksOpen] = useState<false | "session" | "all">(false);
   const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
-  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 720 : window.innerHeight));
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 720 : window.visualViewport?.height ?? window.innerHeight));
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const setWorkspacePanelOpen = useLayoutStore((s) => s.setWorkspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
@@ -1489,10 +1489,15 @@ export default function App() {
     if (typeof window === "undefined") return;
     const onResize = () => {
       setViewportWidth(window.innerWidth);
-      setViewportHeight(window.innerHeight);
+      // #6798: Use visualViewport.height when available so Windows taskbar doesn't clip the UI
+      setViewportHeight(window.visualViewport?.height ?? window.innerHeight);
     };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+    };
   }, []);
 
   const [pendingPlanRevisionsByTab, setPendingPlanRevisionsByTab] = useState<Record<string, string>>({});
