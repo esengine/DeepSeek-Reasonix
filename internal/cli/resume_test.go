@@ -491,3 +491,27 @@ func TestRunResumeSwitchesSession(t *testing.T) {
 		t.Fatalf("history not loaded from target: %+v", hist)
 	}
 }
+
+// TestResumeStartupPickerItemsPreferRenamedTitle proves bare `reasonix --resume`
+// surfaces CustomTitle / TopicTitle as the primary menu label (matching in-TUI
+// /resume), not the timestamp (#7052).
+func TestResumeStartupPickerItemsPreferRenamedTitle(t *testing.T) {
+	when := time.Date(2026, 3, 15, 14, 30, 0, 0, time.Local)
+	sessions := []agent.SessionInfo{
+		{Path: "a.jsonl", Preview: "old preview", Turns: 4, ModTime: when, CustomTitle: "My renamed chat"},
+		{Path: "b.jsonl", Preview: "preview only", Turns: 2, ModTime: when, TopicTitle: "Desktop topic"},
+	}
+	items := resumeStartupPickerItems(sessions)
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if items[0].name != "4 turns · My renamed chat" {
+		t.Fatalf("custom title primary = %q, want renamed title", items[0].name)
+	}
+	if items[0].desc != "03-15 14:30" {
+		t.Fatalf("timestamp secondary = %q, want 03-15 14:30", items[0].desc)
+	}
+	if items[1].name != "2 turns · Desktop topic" {
+		t.Fatalf("topic title primary = %q, want topic title", items[1].name)
+	}
+}

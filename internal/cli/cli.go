@@ -1533,9 +1533,9 @@ func interactiveSetup(configPath, envPath string) int {
 }
 
 // pickSessionToResume scans the session dir, takes the 10 most recent, and
-// shows a single-choice menu with timestamp + turn count + first user
-// message so the user can pick one. Returns the chosen path and a process
-// exit code (non-zero when there's nothing to pick or the user cancelled).
+// shows a single-choice menu. Renamed titles (and topic titles / previews) are
+// the primary label — matching in-TUI /resume — with the timestamp as the
+// secondary hint (#7052).
 func pickSessionToResume() (string, int) {
 	sessionDir := resolveCLISessionDir()
 	reclaimCLIRecoveryBranches(sessionDir)
@@ -1548,19 +1548,27 @@ func pickSessionToResume() (string, int) {
 		fmt.Fprintln(os.Stderr, i18n.M.ResumeRequiresTTY)
 		return "", 1
 	}
-	items := make([]menuItem, len(sessions))
-	for i, s := range sessions {
-		when := s.ModTime.Local().Format("01-02 15:04")
-		items[i] = menuItem{
-			name: when,
-			desc: sessionSummary(s),
-		}
-	}
+	items := resumeStartupPickerItems(sessions)
 	idx, err := selectOne(i18n.M.PickSessionLabel, items)
 	if err != nil {
 		return "", 1
 	}
 	return sessions[idx].Path, 0
+}
+
+// resumeStartupPickerItems builds the startup --resume menu rows. Primary
+// label prefers CustomTitle / TopicTitle / Preview (via sessionSummary); the
+// timestamp stays secondary so renames are visible at a glance.
+func resumeStartupPickerItems(sessions []agent.SessionInfo) []menuItem {
+	items := make([]menuItem, len(sessions))
+	for i, s := range sessions {
+		when := s.ModTime.Local().Format("01-02 15:04")
+		items[i] = menuItem{
+			name: sessionSummary(s),
+			desc: when,
+		}
+	}
+	return items
 }
 
 // selectLanguage is the wizard's first prompt: it shows the two UI languages
