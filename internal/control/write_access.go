@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -351,4 +352,211 @@ func scopeFromApprove(allow, session, persist bool) sandbox.ApprovalScope {
 		return sandbox.ApprovalScopeSession
 	}
 	return sandbox.ApprovalScopeOnce
+}
+
+// QueryAuthorizedWriteDirs returns the write directories currently authorized
+// for this controller, split by scope:
+//
+//	project — configured [sandbox].allow_write (persisted in the project config)
+//	         as [project] allow_write entries;
+//	global — user-global [sandbox].allow_global common dirs honored for every
+//	         project/session without approval (including subdirectories);
+//	session — session-level roots granted for the rest of this logical session
+//	         (process memory).
+//
+// This backs the "authorized write directories" management surface (see
+// #9167). Per-call one-shot grants are intentionally not listed.
+func (c *Controller) QueryAuthorizedWriteDirs() (project, global, session []string) {
+	if c != nil && c.workspaceRoot != "" {
+		if cfg, err := config.LoadForRootReadOnly(c.workspaceRoot); err == nil && cfg != nil {
+			project = cfg.AllowWriteRoots()
+			global = cfg.GlobalAllowRoots()
+		}
+	}
+	if c != nil && c.writeAccess.roots != nil {
+		session = c.writeAccess.roots.SessionRoots()
+	}
+	return project, global, session
+}
+
+// AddAuthorizedWriteDir adds a writable directory at the given scope.
+//   - ApprovalScopeProject: persists into the project config [sandbox].allow_write
+//     (via SetProjectWriteAccess) and grants it as a verified baseline root.
+//   - ApprovalScopeSession: grants a verified session root for this logical session.
+//
+// Other scopes are rejected. Directory creation is best-effort; a not-yet
+// existing approved path is created like the interactive approval flow does.
+func (c *Controller) AddAuthorizedWriteDir(scope sandbox.ApprovalScope, dir string) error {
+	if c == nil {
+		return fmt.Errorf("no active controller")
+	}
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return fmt.Errorf("directory is required")
+	}
+	stateRoot := config.MemoryUserDir()
+	verified, err := sandbox.EnsureWriteDir(dir, stateRoot)
+	if err != nil {
+		return fmt.Errorf("add authorized write dir: %w", err)
+	}
+	switch scope {
+	case sandbox.ApprovalScopeProject:
+		if c.writeAccess.persist == nil {
+			return fmt.Errorf("project persistence is not available")
+		}
+		// Rewrite the full allow_write list with the new entry appended
+		// (replacement write on current list) so removal can also be served.
+		project, _, _ := c.QueryAuthorizedWriteDirs()
+		if !containsWriteRoot(project, verified) {
+			project = append(project, verified)
+		}
+		if err := c.persistSetWriteAccess(project); err != nil {
+			return err
+		}
+		if c.writeAccess.roots != nil {
+			c.writeAccess.roots.GrantVerifiedBaseline([]string{verified})
+		}
+		return nil
+	case sandbox.ApprovalScopeSession:
+		if c.writeAccess.roots != nil {
+			c.writeAccess.roots.GrantVerifiedSession([]string{verified})
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported scope %v for adding a write directory", scope)
+	}
+}
+
+// RemoveAuthorizedWriteDir removes a writable directory at the given scope.
+//   - ApprovalScopeProject: removes it from the project config [sandbox].allow_write
+//     and from the in-memory baseline.
+//   - ApprovalScopeSession: removes it from the session roots.
+func (c *Controller) RemoveAuthorizedWriteDir(scope sandbox.ApprovalScope, dir string) error {
+	if c == nil {
+		return fmt.Errorf("no active controller")
+	}
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("directory is required")
+	}
+	switch scope {
+	case sandbox.ApprovalScopeProject:
+		project, _, _ := c.QueryAuthorizedWriteDirs()
+		kept := project[:0]
+		for _, p := range project {
+			if pathEqualDir(p, dir) {
+				continue
+			}
+			kept = append(kept, p)
+		}
+		if err := c.persistSetWriteAccess(kept); err != nil {
+			return err
+		}
+		// The persisted [sandbox].allow_write rewrite is authoritative for the
+		// project scope; the in-memory baseline will refresh from config on the
+		// next LoadForRoot. Nothing to mutate in session roots here.
+		return nil
+	case sandbox.ApprovalScopeSession:
+		if c.writeAccess.roots != nil {
+			c.writeAccess.roots.RemoveSessionRoot(dir)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported scope %v for removing a write directory", scope)
+	}
+}
+
+// GlobalWriteDirs returns the user-global common directories (config
+// [sandbox] allow_global) honored for every project/session without approval.
+func (c *Controller) GlobalWriteDirs() []string {
+	if c == nil {
+		return nil
+	}
+	_, global, _ := c.QueryAuthorizedWriteDirs()
+	return global
+}
+
+// AddGlobalWriteDir adds a directory to the user-global common-directory list
+// (config [sandbox] allow_global). It is honored across all projects/sessions
+// without approval, including subdirectories. Directory creation is best-effort
+// like the interactive approval flow.
+func (c *Controller) AddGlobalWriteDir(dir string) error {
+	if c == nil {
+		return fmt.Errorf("no active controller")
+	}
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return fmt.Errorf("directory is required")
+	}
+	stateRoot := config.MemoryUserDir()
+	verified, err := sandbox.EnsureWriteDir(dir, stateRoot)
+	if err != nil {
+		return fmt.Errorf("add global write dir: %w", err)
+	}
+	global := c.GlobalWriteDirs()
+	if !containsWriteRoot(global, verified) {
+		global = append(global, verified)
+	}
+	return config.SetGlobalWriteAccess(global)
+}
+
+// RemoveGlobalWriteDir removes a directory from the user-global common-directory
+// list (config [sandbox] allow_global).
+func (c *Controller) RemoveGlobalWriteDir(dir string) error {
+	if c == nil {
+		return fmt.Errorf("no active controller")
+	}
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("directory is required")
+	}
+	global := c.GlobalWriteDirs()
+	kept := global[:0]
+	for _, g := range global {
+		if pathEqualDir(g, dir) {
+			continue
+		}
+		kept = append(kept, g)
+	}
+	return config.SetGlobalWriteAccess(kept)
+}
+
+func containsWriteRoot(roots []string, target string) bool {
+	for _, r := range roots {
+		if pathEqualDir(r, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathEqualDir(a, b string) bool {
+	absA, errA := filepath.Abs(filepath.Clean(a))
+	absB, errB := filepath.Abs(filepath.Clean(b))
+	if errA == nil && errB == nil {
+		return absA == absB
+	}
+	return strings.TrimSpace(a) == strings.TrimSpace(b)
+}
+
+// projectConfigPathForWriteAccess returns the project config path that holds
+// [sandbox].allow_write for a workspace (workspaceRoot/reasonix.toml), matching
+// boot's rememberPermissionConfigPath semantics. Empty workspaceRoot falls back
+// to the user config path.
+func projectConfigPathForWriteAccess(workspaceRoot string) string {
+	root := strings.TrimSpace(workspaceRoot)
+	if root != "" {
+		return filepath.Join(root, "reasonix.toml")
+	}
+	path := config.SourcePath()
+	if path == "" {
+		path = "reasonix.toml"
+	}
+	return path
+}
+
+// persistSetWriteAccess rewrites the project config [sandbox].allow_write to
+// exactly the given list (replacement write, supports removal). It is the
+// management-surface counterpart to the interactive approval's append-only
+// PersistProjectWriteAccess (see #9167).
+func (c *Controller) persistSetWriteAccess(allowWrite []string) error {
+	return config.SetProjectWriteAccess(projectConfigPathForWriteAccess(c.workspaceRoot), allowWrite, "")
 }

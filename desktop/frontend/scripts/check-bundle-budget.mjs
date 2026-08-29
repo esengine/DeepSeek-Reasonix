@@ -151,7 +151,10 @@ console.log("\nbundle budgets");
 // Generic elicitation validation adds field-specific localized accessibility
 // copy to the English startup dictionary. The interaction code and CSS remain
 // lazy; the measured path is 455.437 KiB. Retain 0.163 KiB of headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 455.6 : 455.6;
+// The #9167 authorized write-directories panel (SessionWriteRootsSection +
+// GlobalWriteRootsSection browse input) adds ~0.3 KiB to the always-mounted
+// path on the 455.4 KiB baseline; the budget ratchets to 456.0 KiB.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 456.0 : 456.0;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -202,7 +205,9 @@ for (const path of localeChunks) {
   // Generic schema validation adds complete field-error, privacy, and safe-
   // fallback copy. Measured chunks are 58.574 KiB zh and 59.368 KiB zh-TW;
   // retain roughly 0.13 KiB of platform headroom for each.
-  const budget = name.startsWith("zh-TW-") ? 59.5 * 1024 : 58.7 * 1024;
+  // The #9167 write-dirs panel adds session/global write-root keys on top of
+  // the upstream baseline; zh- ratchets to 59.0 with the panel included.
+  const budget = name.startsWith("zh-TW-") ? 59.5 * 1024 : 59.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -261,6 +266,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The off-flow composer measurement mirror adds 0.472 KiB raw while removing
 // live-textarea layout mutation. The merged path measures 2444.806 KiB; retain
 // 0.194 KiB of bounded toolchain headroom without widening gzip/chunk gates.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_445.0 : 2_445.0;
+// The #9167 write-dirs panel (SettingsPanel sections + bindings) adds ~1.4 KiB
+// raw to the always-mounted settings surface on the 2444.8 KiB baseline; the
+// budget ratchets to 2446.5 KiB.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_446.5 : 2_446.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

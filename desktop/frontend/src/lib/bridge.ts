@@ -184,6 +184,14 @@ interface DesktopWindowState {
 // AppBindings is the hand-written React-to-Go contract. _CheckGeneratedBindings
 // catches generated methods missing here; update this interface and typecheck.
 export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganizationBindings, HistoryCatalogBindings, TaskCatalogBindings, BlankProjectBindings, QualityFloorBindings, SessionTitleBindings, ScrollDiagnosticBindings, RemoteProjectBindings, MCPAppBindings {
+  // Authorized write-directory management (#9167).
+  QueryAuthorizedWriteDirs(): Promise<{ project: string[]; global: string[]; session: string[] }>;
+  AddAuthorizedWriteDir(scope: 0 | 1, dir: string): Promise<void>;
+  RemoveAuthorizedWriteDir(scope: 0 | 1, dir: string): Promise<void>;
+  // User-global common directories (Settings → Permissions): honored for every
+  // project/session without approval, including subdirectories.
+  AddGlobalWriteDir(dir: string): Promise<void>;
+  RemoveGlobalWriteDir(dir: string): Promise<void>;
   Platform(): Promise<string>;
   MinimiseMainWindow(): Promise<void>;
   ToggleMaximiseMainWindow(): Promise<void>;
@@ -431,6 +439,16 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   PickPluginFolder(): Promise<string>;
+  PickGlobalWriteDir(): Promise<string>;
+  // Authorized write-directory management (#9167): query project/global/session
+  // write roots and add/remove granted directories.
+  QueryAuthorizedWriteDirs(): Promise<{ project: string[]; global: string[]; session: string[] }>;
+  AddAuthorizedWriteDir(scope: 0 | 1, dir: string): Promise<void>;
+  RemoveAuthorizedWriteDir(scope: 0 | 1, dir: string): Promise<void>;
+  // User-global common directories (Settings → Permissions): honored for every
+  // project/session without approval, including subdirectories.
+  AddGlobalWriteDir(dir: string): Promise<void>;
+  RemoveGlobalWriteDir(dir: string): Promise<void>;
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
   SetSkillPathEnabled(path: string, enabled: boolean): Promise<void>;
@@ -761,6 +779,11 @@ const WAILS_IPC_NULL_SEND_RE = /Cannot read properties of null \(reading 'send'\
 function realApp(): AppBindings | undefined {
   return typeof window !== "undefined" ? window.go?.main?.App : undefined;
 }
+
+// browser-preview state for the authorized write-directories panel (#9167).
+let mockWriteDirsProject: string[] = [];
+let mockWriteDirsSession: string[] = [];
+let mockWriteDirsGlobal: string[] = [];
 
 let mockSingleton: AppBindings | null = null;
 function getMock(): AppBindings {
@@ -3925,6 +3948,33 @@ function makeMockApp(): AppBindings {
     },
     async PickPluginFolder() {
       return "~/plugins/superpowers";
+    },
+    async PickGlobalWriteDir() {
+      return "C:/tmp";
+    },
+    async QueryAuthorizedWriteDirs() {
+      return { project: [...mockWriteDirsProject], global: [...mockWriteDirsGlobal], session: [...mockWriteDirsSession] };
+    },
+    async AddAuthorizedWriteDir(scope: 0 | 1, dir: string) {
+      if (!dir?.trim()) throw new Error("directory is required");
+      if (scope === 1) {
+        if (!mockWriteDirsSession.includes(dir)) mockWriteDirsSession.push(dir);
+      } else {
+        if (!mockWriteDirsProject.includes(dir)) mockWriteDirsProject.push(dir);
+      }
+    },
+    async RemoveAuthorizedWriteDir(scope: 0 | 1, dir: string) {
+      if (!dir?.trim()) throw new Error("directory is required");
+      if (scope === 1) mockWriteDirsSession = mockWriteDirsSession.filter((d) => d !== dir);
+      else mockWriteDirsProject = mockWriteDirsProject.filter((d) => d !== dir);
+    },
+    async AddGlobalWriteDir(dir: string) {
+      if (!dir?.trim()) throw new Error("directory is required");
+      if (!mockWriteDirsGlobal.includes(dir)) mockWriteDirsGlobal.push(dir);
+    },
+    async RemoveGlobalWriteDir(dir: string) {
+      if (!dir?.trim()) throw new Error("directory is required");
+      mockWriteDirsGlobal = mockWriteDirsGlobal.filter((d) => d !== dir);
     },
     async AddSkillPath(path: string) {
       const dir = path.trim() || "~/my-skills";

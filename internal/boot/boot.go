@@ -670,9 +670,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 
 	reg := tool.NewRegistry()
 	writeRoots := cfg.WriteRootsForRoot(root)
+	// User-global [sandbox] allow_global common dirs are honored for every
+	// project/session without approval (including subdirectories). Inject them
+	// before conditional overrides so each project boots with them pre-granted.
+	writeRoots = appendUniquePaths(writeRoots, cfg.GlobalAllowRoots()...)
 	writeRoots = appendUniquePaths(writeRoots, additionalDirs...)
 	if opts.WorkspaceOnly {
-		writeRoots = []string{root}
+		writeRoots = appendUniquePaths([]string{root}, cfg.GlobalAllowRoots()...)
 	}
 	networkEnabled := cfg.Sandbox.Network
 	if opts.SandboxNetworkOverride != nil {

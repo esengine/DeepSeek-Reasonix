@@ -270,3 +270,95 @@ func canonicalWriteTestDir(t *testing.T) string {
 	}
 	return dir
 }
+
+func assertSessionRoots(t *testing.T, c *Controller, present, absent []string) {
+	t.Helper()
+	_, _, session := c.QueryAuthorizedWriteDirs()
+	for _, p := range present {
+		if !writeRootsContains(session, p) {
+			t.Fatalf("session roots should contain %s, got %v", p, session)
+		}
+	}
+	for _, a := range absent {
+		if writeRootsContains(session, a) {
+			t.Fatalf("session roots should NOT contain %s, got %v", a, session)
+		}
+	}
+}
+
+func writeRootsContains(roots []string, target string) bool {
+	targetAbs, _ := filepath.Abs(filepath.Clean(target))
+	for _, r := range roots {
+		if ra, _ := filepath.Abs(filepath.Clean(r)); ra == targetAbs {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAuthorizedWriteDirsSessionAddQueryRemove(t *testing.T) {
+	dir := t.TempDir()
+	set := sandbox.NewWritableRootSet([]string{dir})
+	c := New(Options{Policy: permission.New("allow", nil, nil, nil), WriteRoots: set})
+
+	a := canonicalWriteTestDir(t)
+	b := canonicalWriteTestDir(t)
+
+	// Add session-level.
+	if err := c.AddAuthorizedWriteDir(sandbox.ApprovalScopeSession, a); err != nil {
+		t.Fatalf("add session: %v", err)
+	}
+	assertSessionRoots(t, c, []string{a}, nil)
+
+	if err := c.AddAuthorizedWriteDir(sandbox.ApprovalScopeSession, b); err != nil {
+		t.Fatalf("add session b: %v", err)
+	}
+	assertSessionRoots(t, c, []string{a, b}, nil)
+
+	// Query reflects both.
+	project, _, session := c.QueryAuthorizedWriteDirs()
+	if len(project) != 0 {
+		t.Fatalf("project roots should be empty (no workspaceRoot config), got %v", project)
+	}
+	if !writeRootsContains(session, a) || !writeRootsContains(session, b) {
+		t.Fatalf("session roots = %v, want a and b", session)
+	}
+
+	// Remove a session-level.
+	if err := c.RemoveAuthorizedWriteDir(sandbox.ApprovalScopeSession, a); err != nil {
+		t.Fatalf("remove session: %v", err)
+	}
+	assertSessionRoots(t, c, []string{b}, []string{a})
+}
+
+func TestQueryAuthorizedWriteDirsReadsProjectConfig(t *testing.T) {
+	ws := t.TempDir()
+	// A project config with an allow_write entry.
+	extra := canonicalWriteTestDir(t)
+	cfgBody := `[sandbox]
+allow_write = ["` + strings.ReplaceAll(extra, `\`, `\\`) + `"]
+`
+	if err := os.WriteFile(filepath.Join(ws, "reasonix.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{WorkspaceRoot: ws, Policy: permission.New("allow", nil, nil, nil), WriteRoots: sandbox.NewWritableRootSet([]string{ws})})
+
+	project, _, session := c.QueryAuthorizedWriteDirs()
+	if len(session) != 0 {
+		t.Fatalf("session roots should be empty, got %v", session)
+	}
+	if !writeRootsContains(project, extra) {
+		t.Fatalf("project roots should include %s, got %v", extra, project)
+	}
+}
+
+func TestAddAuthorizedWriteDirProjectRequiresPersist(t *testing.T) {
+	ws := t.TempDir()
+	c := New(Options{WorkspaceRoot: ws, Policy: permission.New("allow", nil, nil, nil), WriteRoots: sandbox.NewWritableRootSet([]string{ws})})
+	extra := canonicalWriteTestDir(t)
+	// Without an injected persist (OnPersistWriteAccess nil), project-scope add
+	// must fail closed instead of mutating memory-only.
+	if err := c.AddAuthorizedWriteDir(sandbox.ApprovalScopeProject, extra); err == nil {
+		t.Fatal("project add without persist should error")
+	}
+}

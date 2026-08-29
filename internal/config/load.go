@@ -134,6 +134,10 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalPricingCurrency := cfg.Desktop.Currency
 	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
 	globalTelemetry, globalLegacyAnchorSafetyGate := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate
+	// User-global [sandbox] allow_global common dirs must survive project
+	// reasonix.toml merges so a repository cannot drop the user's pre-approved
+	// common directories (e.g. DeepSeek's C:\tmp repeat-approval pain point).
+	globalSandboxAllowGlobal := append([]string(nil), cfg.Sandbox.AllowGlobal...)
 
 	tomlSources = append(tomlSources, projectTOML)
 	projectMeta, err := mergeTOML(cfg, projectTOML)
@@ -169,6 +173,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// CLI telemetry is an explicit user-global privacy choice. Project config
 	// cannot opt a user in or out, including when the global value is absent.
 	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate = globalTelemetry, globalLegacyAnchorSafetyGate
+	// Restore user-global common dirs after the project reasonix.toml merge so a
+	// repository cannot override or drop the user's approved global directories.
+	cfg.Sandbox.AllowGlobal = globalSandboxAllowGlobal
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.

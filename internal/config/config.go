@@ -1163,7 +1163,13 @@ func (c *Config) IsSkillDisabled(name string) bool {
 type SandboxConfig struct {
 	WorkspaceRoot string   `toml:"workspace_root"`
 	AllowWrite    []string `toml:"allow_write"`
-	ForbidRead    []string `toml:"forbid_read"`
+	// AllowGlobal lists directories every project/session may write without
+	// approval, including anything under them (the DeepSeek `C:\tmp\...`
+	// repeat-approval pain point). Unlike allow_write, these are user-global:
+	// a project reasonix.toml cannot override or drop them. Managed from
+	// Settings → Permissions → global common dirs.
+	AllowGlobal []string `toml:"allow_global"`
+	ForbidRead  []string `toml:"forbid_read"`
 	// Bash is the OS-sandbox mode for the bash tool: "enforce" jails each
 	// command when an OS sandbox is available and refuses bash otherwise; "off"
 	// runs it unconfined. Empty uses the platform default.
@@ -1213,6 +1219,23 @@ func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
 func (c *Config) AllowWriteRoots() []string {
 	var roots []string
 	for _, d := range c.Sandbox.AllowWrite {
+		if d = c.expandVars(d); d != "" {
+			roots = append(roots, d)
+		}
+	}
+	return roots
+}
+
+// GlobalAllowRoots returns the user-global common-directory extras with ${VAR}
+// expanded. These roots are honored for every project/session without approval,
+// including subdirectories. They originate from the user config [sandbox]
+// allow_global and are protected from project override in loadForRoot.
+func (c *Config) GlobalAllowRoots() []string {
+	var roots []string
+	for _, d := range c.Sandbox.AllowGlobal {
+		if strings.TrimSpace(d) == "" {
+			continue
+		}
 		if d = c.expandVars(d); d != "" {
 			roots = append(roots, d)
 		}

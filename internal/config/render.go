@@ -505,6 +505,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# allow_write = [\"/tmp\"]          # extra dirs writers may also modify\n")
 	}
+	if len(c.Sandbox.AllowGlobal) > 0 {
+		fmt.Fprintf(&b, "allow_global = %s\n", renderStringArray(c.Sandbox.AllowGlobal))
+	} else {
+		b.WriteString("# allow_global = []              # user-global common dirs: every project may write\n")
+		b.WriteString("#                                  # these and anything under them WITHOUT approval.\n")
+		b.WriteString("#                                  # e.g. allow_global = [\"C:\\\\tmp\"] stops repeated\n")
+		b.WriteString("#                                  # prompts for new subdirectories under it.\n")
+	}
 	if len(c.Sandbox.ForbidRead) > 0 {
 		fmt.Fprintf(&b, "forbid_read = %s\n", renderStringArray(c.Sandbox.ForbidRead))
 	} else {
