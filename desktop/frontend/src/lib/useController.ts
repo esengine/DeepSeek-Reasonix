@@ -20,7 +20,7 @@ import { createRafBatch } from "./rafBatch";
 import { foregroundRunningFromRuntimeMeta, type RuntimeMetaSnapshot } from "./runtimeMeta";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
-import { assistantHasContent, removeEmptyAssistantItems } from "./assistantItems";
+import { assistantHasContent, ensureActiveAssistant, ensureAssistant, removeEmptyAssistantItems } from "./assistantItems";
 import { getTranscriptStore } from "./transcriptStore";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { uiPerfTracker } from "./uiPerf";
@@ -1062,43 +1062,6 @@ export function historyToolError(output: string): string | undefined {
   return undefined;
 }
 
-function ensureAssistant(s: State): State {
-  if (s.currentAssistant) {
-    const exists = s.items.some((it) => it.id === s.currentAssistant && it.kind === "assistant");
-    if (exists) return s;
-  }
-  // Stop/Ask owns the backend turn id, while the ordinal owns one provider
-  // sampling segment inside that turn. A settled segment is never reused by a
-  // later model round, so the live order matches persisted assistant → tool →
-  // assistant history without changing the wire protocol.
-  const ordinal = s.assistantSegmentOrdinal;
-  const id = s.activeTurnId ? `a:${s.activeTurnId}:${ordinal}` : `a${s.seq}`;
-  const item: Item = {
-    kind: "assistant",
-    id,
-    text: "",
-    reasoning: "",
-    streaming: true,
-    wasStreamed: true,
-    searchSources: s.pendingSearchSources?.length ? s.pendingSearchSources : undefined,
-  };
-  return {
-    ...s,
-    items: [...s.items, item],
-    currentAssistant: id,
-    seq: s.seq + 1,
-    assistantSegmentOrdinal: ordinal + 1,
-  };
-}
-
-function ensureActiveAssistant(s: State): State {
-  const active = ensureAssistant(s);
-  const id = active.currentAssistant!;
-  return active.live?.id === id
-    ? active
-    : { ...active, live: { id, text: "", reasoning: "", reasoningComplete: false } };
-}
-
 /** End the compatibility-path segment before a committed tool dispatch. */
 function settleCurrentAssistant(s: State, now = Date.now()): State {
   const settled = endTurnModelActivity(s, now, true);
@@ -1106,20 +1069,12 @@ function settleCurrentAssistant(s: State, now = Date.now()): State {
   const current = settled.items.find((item) => item.id === s.currentAssistant) as Extract<Item, { kind: "assistant" }> | undefined;
   const live = s.live?.id === s.currentAssistant ? s.live : undefined;
   if (!assistantHasContent(current, live)) {
-    return {
-      ...settled,
-      items: current ? settled.items.filter((item) => item.id !== current.id) : settled.items,
-      live: undefined,
-      currentAssistant: undefined,
-    };
+    return { ...settled, items: current ? settled.items.filter((item) => item.id !== current.id) : settled.items, live: undefined, currentAssistant: undefined };
   }
   const completedLive = live ? completeLiveReasoning(live, now) : undefined;
   const items = settled.items.map((item) => item.kind === "assistant" && item.id === s.currentAssistant
     ? {
-        ...item,
-        text: completedLive?.text ?? item.text,
-        reasoning: completedLive?.reasoning ?? item.reasoning,
-        streaming: false,
+        ...item, text: completedLive?.text ?? item.text, reasoning: completedLive?.reasoning ?? item.reasoning, streaming: false,
         reasoningComplete: Boolean(completedLive?.reasoning || item.reasoning || completedLive?.reasoningComplete || item.reasoningComplete),
         reasoningDurationMs: liveReasoningDurationMs(completedLive) ?? item.reasoningDurationMs,
       }
@@ -1392,21 +1347,13 @@ function applyStreamAttempt(s: State, e: WireEvent): State {
       };
     }
     case "commit": {
-      if (s.streamAttemptJournal && s.streamAttemptJournal.id !== sa.id) {
-        return s;
-      }
+      if (s.streamAttemptJournal && s.streamAttemptJournal.id !== sa.id) return s;
       // Tool-only samples do not emit a message event. Remove their empty
       // placeholder now so the next sampling round is allocated after the
       // committed tool cards instead of reusing a bubble above them.
       const current = s.items.find((item) => item.id === s.currentAssistant) as Extract<Item, { kind: "assistant" }> | undefined;
       if (s.currentAssistant && !assistantHasContent(current, s.live?.id === s.currentAssistant ? s.live : undefined)) {
-        return {
-          ...s,
-          items: current ? s.items.filter((item) => item.id !== current.id) : s.items,
-          live: undefined,
-          currentAssistant: undefined,
-          streamAttemptJournal: undefined,
-        };
+        return { ...s, items: current ? s.items.filter((item) => item.id !== current.id) : s.items, live: undefined, currentAssistant: undefined, streamAttemptJournal: undefined };
       }
       return { ...s, streamAttemptJournal: undefined };
     }

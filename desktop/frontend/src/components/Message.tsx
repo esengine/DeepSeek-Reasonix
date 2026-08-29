@@ -818,11 +818,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
         <Suspense fallback={null}>
-          <AssistantReasoningPanel
-            item={item}
-            defaultExpanded={defaultExpanded}
-            expandWhileStreaming={expandWhileStreaming}
-          />
+          <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
         </Suspense>
       )}
       {(hasText || hasFootnotes) && (
@@ -839,9 +835,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           <Suspense fallback={null}><SearchSourcesPanel sources={item.searchSources} /></Suspense>
         </div>
       )}
-      {Boolean(item.memoryCitations?.length) && (
-        <Suspense fallback={null}><MemoryCitations citations={item.memoryCitations} /></Suspense>
-      )}
+      {Boolean(item.memoryCitations?.length) && <Suspense fallback={null}><MemoryCitations citations={item.memoryCitations} /></Suspense>}
     </div>
   );
 });
