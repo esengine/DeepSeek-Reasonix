@@ -5,6 +5,7 @@ const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
 const { title, description, titleEn, titleZh, wide } = Astro.props;
 ---
 <Base title={title} description={description} titleEn={titleEn} titleZh={titleZh}>
+  <Fragment slot="head"><meta name="robots" content="noindex" /></Fragment>
   <header class="nav auth-nav scrolled">
     <div class="nav-inner">
       <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
