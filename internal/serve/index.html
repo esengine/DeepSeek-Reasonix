@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="__THEME__">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -30,6 +30,23 @@
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   color-scheme:dark;
 }
+:root[data-theme="light"]{
+  --bg:oklch(97.5% .003 280);--bg-2:oklch(94% .004 270);
+  --panel:oklch(92% .004 275);--panel-2:oklch(89% .005 270);
+  --card:oklch(96% .003 280);--card-hover:oklch(91% .004 270);
+  --border:oklch(86% .005 270);--border-strong:oklch(78% .006 270);
+  --fg:oklch(18% .005 280);--fg-2:oklch(38% .006 275);
+  --muted:oklch(55% .006 275);--muted-2:oklch(65% .005 270);
+  --accent:oklch(52% .19 35);--accent-soft:oklch(52% .19 35/.1);--accent-strong:oklch(45% .21 33);
+  --success:oklch(46% .17 145);--success-soft:oklch(46% .17 145/.1);
+  --warning:oklch(58% .17 82);--warning-soft:oklch(58% .17 82/.12);
+  --danger:oklch(48% .21 22);--danger-soft:oklch(48% .21 22/.12);
+  --violet:oklch(50% .17 292);--violet-soft:oklch(50% .17 292/.12);
+  --shadow-sm:0 1px 0 oklch(0% 0 0/.05);
+  --shadow-md:0 8px 24px -8px oklch(0% 0 0/.08);
+  --shadow-lg:0 24px 60px -16px oklch(0% 0 0/.12);
+  color-scheme:light;
+}
 html,body{height:100%;overflow:hidden}
 body{font:14px/1.6 var(--sans);color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -49,6 +66,7 @@ input,textarea{font:inherit;color:inherit}
 .sidebar__logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--violet));display:flex;align-items:center;justify-content:center;font-family:var(--heading);font-weight:700;font-size:13px;color:oklch(99% 0 0)}
 .sidebar__name{font-family:var(--heading);font-size:14px;font-weight:600}
 .brand-wordmark{display:block;object-fit:contain;filter:brightness(0) invert(1);opacity:.94}
+:root[data-theme="light"] .brand-wordmark{filter:none;opacity:.8}
 .brand-wordmark--sidebar{width:136px;height:32px;object-position:left center}
 .brand-wordmark--welcome{width:240px;height:56px}
 .sidebar__nav{flex:1;padding:8px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}
@@ -59,6 +77,13 @@ input,textarea{font:inherit;color:inherit}
 .sidebar__item--accent:hover{background:var(--accent-strong);color:oklch(99% 0 0)}
 .sidebar__item--disabled{opacity:.45;cursor:not-allowed}
 .sidebar__item--disabled:hover{background:transparent;color:var(--fg-2)}
+.sidebar__theme-tgl{display:flex;align-items:center;gap:7px;padding:8px 10px;margin:4px 8px;border-radius:6px;color:var(--muted);font-size:12px;cursor:pointer;transition:background .18s ease,color .18s ease}
+.sidebar__theme-tgl:hover{background:var(--panel);color:var(--fg-2)}
+.sidebar__theme-tgl svg{width:15px;height:15px;flex-shrink:0}
+.theme-tgl__icon--dark{display:block}
+.theme-tgl__icon--light{display:none}
+:root[data-theme="light"] .theme-tgl__icon--dark{display:none}
+:root[data-theme="light"] .theme-tgl__icon--light{display:block}
 .sidebar__item svg{width:15px;height:15px;flex-shrink:0;opacity:.7}
 .sidebar__item--active svg,.sidebar__item--accent svg{opacity:1}
 .sidebar__section{padding:8px;border-top:1px solid var(--border)}
@@ -432,6 +457,11 @@ input,textarea{font:inherit;color:inherit}
       <div style="padding:4px 10px">
         <div class="status" id="sidebar-status"><span class="status__dot" id="status-dot"></span><span id="status-model">-</span></div>
       </div>
+      <div class="sidebar__theme-tgl" id="theme-toggle" title="__('toggle_theme')">
+        <svg class="theme-tgl__icon theme-tgl__icon--dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-tgl__icon theme-tgl__icon--light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <span id="theme-toggle-label">__('toggle_theme')</span>
+      </div>
     </div>
   </aside>
 
@@ -605,6 +635,8 @@ input,textarea{font:inherit;color:inherit}
   </div>
 </div>
 <script>
+// ── theme ──
+(function(){var k='theme-pref',c=function(t){document.documentElement.setAttribute('data-theme',t)};var p=localStorage.getItem(k);if(p){c(p)}else{var t='__THEME__';if(t==='auto'){t=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark'}c(t)};window.matchMedia('(prefers-color-scheme:light)').addEventListener('change',function(e){if(!localStorage.getItem(k)){c(e.matches?'light':'dark')}});document.getElementById('theme-toggle').addEventListener('click',function(){var n=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';c(n);localStorage.setItem(k,n)})})();
 // ── i18n ──
 const __LANG_PREF = '__LANG__';
 const __LANG = (__LANG_PREF === 'zh' || __LANG_PREF === 'en') ? __LANG_PREF : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
@@ -724,6 +756,7 @@ const __T = {
     'delete_failed': 'Could not delete the session. Check your connection and try again.',
     'auth_failed': 'Web authentication failed',
     'search_sessions': 'Search sessions',
+    'toggle_theme': 'Toggle theme',
     'active': 'Active',
     'use_model': 'Use',
     'no_sessions': 'No sessions',
@@ -875,6 +908,7 @@ const __T = {
     'delete_failed': '无法删除会话，请检查连接后重试',
     'auth_failed': 'Web 认证失败',
     'search_sessions': '搜索会话',
+    'toggle_theme': '切换主题',
     'active': '当前',
     'use_model': '使用',
     'no_sessions': '暂无会话',

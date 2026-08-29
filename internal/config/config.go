@@ -344,6 +344,22 @@ func (c *Config) UIThemeStyle() string {
 	return normalizeThemeStyle(c.UI.ThemeStyle)
 }
 
+// ServeTheme normalizes serve.theme. Falls back to ui.theme if serve.theme is empty.
+func (c *Config) ServeTheme() string {
+	t := strings.ToLower(strings.TrimSpace(c.Serve.Theme))
+	if t == "" {
+		return c.UITheme()
+	}
+	switch t {
+	case "dark":
+		return "dark"
+	case "light":
+		return "light"
+	default:
+		return "auto"
+	}
+}
+
 // UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is kept
 // for compatibility; Shift+Tab toggles Plan and Ctrl+Y toggles YOLO in both
 // layouts.
@@ -951,7 +967,7 @@ type BotConnectionSessionMapping struct {
 	UpdatedAt     string `toml:"updated_at"`
 }
 
-// ServeConfig controls the HTTP serve frontend security settings.
+// ServeConfig controls the HTTP serve frontend security and appearance settings.
 type ServeConfig struct {
 	// AuthMode selects the authentication mode for the HTTP serve frontend.
 	// "none" (default): no authentication.
@@ -970,6 +986,11 @@ type ServeConfig struct {
 	// rate-limiting and Secure-cookie decisions. When false (default), they
 	// are ignored — an attacker can otherwise forge them.
 	BehindProxy bool `toml:"behind_proxy"`
+	// Theme selects the color scheme for the web UI served by "reasonix serve".
+	// "auto" (default): respect OS preference (prefers-color-scheme).
+	// "light": force light mode.
+	// "dark": force dark mode.
+	Theme string `toml:"theme"`
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,

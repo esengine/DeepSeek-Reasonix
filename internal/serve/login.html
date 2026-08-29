@@ -1,59 +1,61 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="__THEME__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reasonix — Login</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{--bg:#1a1a2e;--bg-2:#16213e;--border:#0f3460;--fg:#e0e0e0;--fg-2:#aaa;--subtle:#888;--accent:#e94560;--accent-hover:#d63851;--shadow:rgba(0,0,0,0.3)}
+  :root[data-theme="light"]{--bg:#f5f5f7;--bg-2:#ffffff;--border:#d1d1d6;--fg:#1d1d1f;--fg-2:#6e6e73;--subtle:#86868b;--accent:#e94560;--accent-hover:#d63851;--shadow:rgba(0,0,0,0.08)}
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--fg);
     display: flex; align-items: center; justify-content: center;
-    min-height: 100vh;
+    min-height: 100vh;transition:background .2s;
   }
   .login-box {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 40px 36px;
     width: 100%;
     max-width: 380px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    box-shadow: 0 8px 32px var(--shadow);
   }
   .login-box h1 {
     font-size: 22px;
     font-weight: 600;
     text-align: center;
     margin-bottom: 8px;
-    color: #e94560;
+    color: var(--accent);
   }
   .login-box .subtitle {
     text-align: center;
     font-size: 13px;
-    color: #888;
+    color: var(--subtle);
     margin-bottom: 28px;
   }
   .login-box label {
     display: block;
     font-size: 13px;
-    color: #aaa;
+    color: var(--fg-2);
     margin-bottom: 6px;
   }
   .login-box input[type="password"] {
     width: 100%;
     padding: 10px 14px;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--fg);
     font-size: 15px;
     outline: none;
     transition: border-color 0.2s;
   }
   .login-box input[type="password"]:focus {
-    border-color: #e94560;
+    border-color: var(--accent);
   }
   .login-box button {
     width: 100%;
@@ -61,25 +63,26 @@
     padding: 10px 0;
     border: none;
     border-radius: 8px;
-    background: #e94560;
+    background: var(--accent);
     color: #fff;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.2s;
   }
-  .login-box button:hover { background: #d63851; }
+  .login-box button:hover { background: var(--accent-hover); }
   .error {
-    background: rgba(233, 69, 96, 0.15);
-    border: 1px solid #e94560;
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    border: 1px solid var(--accent);
     border-radius: 8px;
     padding: 10px 14px;
     font-size: 13px;
-    color: #e94560;
+    color: var(--accent);
     margin-bottom: 18px;
     text-align: center;
   }
 </style>
+<script>(function(){var k='theme-pref',c=function(t){document.documentElement.setAttribute('data-theme',t)};var p=localStorage.getItem(k);if(p){c(p)}else{var t='__THEME__';if(t==='auto'){t=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark'}c(t)}})();</script>
 </head>
 <body>
 <div class="login-box">

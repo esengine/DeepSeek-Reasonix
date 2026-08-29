@@ -391,10 +391,19 @@ func (ag *authGate) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func loginTheme() string {
+	_, _ = config.MigrateLegacyIfNeeded()
+	if cfg, err := config.Load(); err == nil {
+		return cfg.ServeTheme()
+	}
+	return "auto"
+}
+
 // loginPage serves the embedded login HTML.
 func (ag *authGate) loginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(loginHTML)
+	html := strings.Replace(string(loginHTML), "__THEME__", loginTheme(), 1)
+	_, _ = w.Write([]byte(html))
 }
 
 // loginSubmit verifies the password and issues a session cookie.
@@ -576,7 +585,9 @@ func (ag *authGate) verifySession(token string) bool {
 func (ag *authGate) loginPageWithError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnauthorized)
-	html := strings.Replace(string(loginHTML), "<!--ERROR-->",
+	html := string(loginHTML)
+	html = strings.Replace(html, "__THEME__", loginTheme(), 1)
+	html = strings.Replace(html, "<!--ERROR-->",
 		`<div class="error">`+htmlEscape(msg)+`</div>`, 1)
 	_, _ = w.Write([]byte(html))
 }

@@ -676,13 +676,16 @@ func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = config.MigrateLegacyIfNeeded()
 	lang := "auto"
+	theme := "auto"
 	if cfg, err := config.Load(); err == nil {
 		if dl := cfg.DesktopLanguage(); dl != "" {
 			lang = dl
 		}
+		theme = cfg.ServeTheme()
 	}
 	html := string(indexHTML)
 	html = strings.ReplaceAll(html, "__LANG__", lang)
+	html = strings.ReplaceAll(html, "__THEME__", theme)
 	_, _ = w.Write([]byte(html))
 }
 

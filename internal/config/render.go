@@ -514,6 +514,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
 	b.WriteString("\n")
 
+	if shouldRenderServe(c, defaults, scope) {
+		b.WriteString("[serve]\n")
+		fmt.Fprintf(&b, "theme = %q   # auto|dark|light; web UI color scheme; \"auto\" respects OS preference\n\n", c.ServeTheme())
+	}
+
 	b.WriteString("[statusline]\n")
 	b.WriteString("# A custom status line: a command whose first stdout line replaces the built-in\n")
 	b.WriteString("# data row. It receives {\"model\",\"contextUsed\",\"contextWindow\",\"cwd\"} as JSON on stdin.\n")
@@ -1302,6 +1307,10 @@ func shouldRenderUI(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.UI, defaults.UI)
+}
+
+func shouldRenderServe(c, defaults *Config, scope RenderScope) bool {
+	return scope != RenderScopeProject || c.Serve.Theme != ""
 }
 
 func shouldRenderNetwork(c, defaults *Config, scope RenderScope) bool {
