@@ -12,11 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileref"
 	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/plugin"
@@ -580,6 +583,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /pending-prompts", s.pendingPrompts)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("GET /todos", s.todos)
+	mux.HandleFunc("GET /files", s.files)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
 	return logMiddleware(gzipMiddleware(s.auth.middleware(csrfGuard(mux))))
 }
@@ -1648,4 +1652,255 @@ func (s *Server) todos(w http.ResponseWriter, _ *http.Request) {
 		out[i] = todoItem{Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm, Level: t.Level}
 	}
 	writeJSON(w, out)
+}
+
+// fileRefEntry is one suggestion in the web UI "@" file-reference menu.
+type fileRefEntry struct {
+	Path  string `json:"path"`  // slash-normalized path relative to the workspace root
+	IsDir bool   `json:"isDir"` // directories append "/" on selection so the user can descend
+}
+
+// Bounds for the web "@" autocomplete walk. The desktop @-menu (internal/fileref
+// Search) bounds itself the same way, minus the explicit depth cap.
+const (
+	fileRefLimit    = 50    // max suggestions per response
+	fileRefMaxDepth = 20    // max directory depth walked from the root
+	fileRefMaxWalk  = 10000 // cap on visited entries, like fileref.Search
+	fileRefDirQuota = 5     // directory suggestions never fully crowd out file hits
+)
+
+// files serves the web UI's "@" file-reference autocomplete: GET /files?q=<frag>&dir=<rel>.
+//
+// Matching mirrors the desktop @-menu (desktop/frontend/src/lib/atMatches.ts and
+// internal/fileref.Search): q is matched case-insensitively as a SUBSTRING of an
+// entry's basename (preferred tier), of any slash-separated path segment
+// (fallback tier), or of a directory name (lowest tier) — not a strict prefix,
+// so "planind" surfaces "src/planind/index.tsx" and "ts" surfaces "index.ts".
+// Results are ordered directories first (up to fileRefDirQuota, so folders stay
+// navigable), then basename hits, then path-segment hits, capped at
+// fileRefLimit.
+//
+// The walk is bounded (fileRefMaxDepth, fileRefMaxWalk) and skips generated and
+// vendor entries (.git, node_modules, build/dist/target, ...) via
+// fileref.SkipEntry plus hidden dotfiles, unless q starts with "." — the same
+// visibility rules the desktop picker applies. dir scopes the search to one
+// directory level relative to the workspace root (slash-separated); when dir is
+// empty the whole tree is searched. The workspace root is the controller's
+// WorkspaceRoot (cwd fallback), the same base @-references resolve against on
+// submit. An empty response (no matches, unreadable directory) is a 200 with
+// an empty array so the frontend can close the menu silently; a dir that
+// escapes the root is a 400.
+func (s *Server) files(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	dir := r.URL.Query().Get("dir")
+	root := strings.TrimSpace(s.ctl().WorkspaceRoot())
+	if root == "" {
+		wd, err := os.Getwd()
+		if err != nil || wd == "" {
+			writeJSON(w, []any{})
+			return
+		}
+		root = wd
+	}
+	// Open the root once per request: every read below goes through this
+	// *os.Root, which resolves symlinks with openat semantics, so a link
+	// inside the root that points outside it fails (EPERM) instead of
+	// escaping the workspace boundary. An unreadable root is the same silent
+	// empty response the endpoint uses for unreadable targets.
+	rootOS, err := os.OpenRoot(root)
+	if err != nil {
+		writeJSON(w, []any{})
+		return
+	}
+	defer rootOS.Close()
+	if dir != "" {
+		rel, ok := fileRefDirWithin(root, dir)
+		if !ok {
+			http.Error(w, "dir escapes workspace root", http.StatusBadRequest)
+			return
+		}
+		// Inside a directory the menu lists one level (navigating one level per
+		// pick, like the desktop ListDir) — never a recursive search.
+		writeJSON(w, listFileRefLevel(rootOS, rel, q))
+		return
+	}
+	if q == "" {
+		// Bare "@" with nothing typed yet: show the workspace root listing.
+		writeJSON(w, listFileRefLevel(rootOS, ".", ""))
+		return
+	}
+	writeJSON(w, searchFileRefs(rootOS, q))
+}
+
+// fileRefDirWithin validates dir (slash-separated, relative) against root and
+// rejects anything that escapes it: absolute paths and ".." segments. Mirrors
+// the desktop's workspacePathForBase confinement. On success it returns dir in
+// slash-separated form relative to root ("." for the root itself) — the form
+// the *os.Root opened on root expects.
+func fileRefDirWithin(root, dir string) (string, bool) {
+	if dir == "" || filepath.IsAbs(dir) {
+		return "", false
+	}
+	dir = filepath.FromSlash(strings.TrimRight(dir, "/"))
+	if dir == "" || dir == "." {
+		return ".", true
+	}
+	target := filepath.Join(root, dir)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// listFileRefLevel lists one directory level: directories first, then files,
+// each alphabetical, filtered by q (case-insensitive substring of the name),
+// capped at fileRefLimit. Unreadable or non-directory targets return an empty
+// list, matching the desktop ListDir behavior of silently showing nothing.
+// rel is read through root, which confines it to the workspace root: a
+// symlink escaping the root fails here and yields the same empty list.
+func listFileRefLevel(root *os.Root, rel, q string) []fileRefEntry {
+	f, err := root.Open(rel)
+	if err != nil {
+		return []fileRefEntry{}
+	}
+	defer f.Close()
+	es, err := f.ReadDir(-1)
+	if err != nil {
+		return []fileRefEntry{}
+	}
+	q = strings.ToLower(q)
+	showHidden := strings.HasPrefix(q, ".")
+	var dirs, files []fileRefEntry
+	for _, e := range es {
+		name := e.Name()
+		isDir := e.IsDir()
+		if fileref.SkipEntry(name, name, isDir) || (!showHidden && strings.HasPrefix(name, ".")) {
+			continue
+		}
+		if !isDir {
+			info, err := e.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+		}
+		if q != "" && !strings.Contains(strings.ToLower(name), q) {
+			continue
+		}
+		if isDir {
+			dirs = append(dirs, fileRefEntry{Path: name, IsDir: true})
+		} else {
+			files = append(files, fileRefEntry{Path: name})
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Path) < strings.ToLower(dirs[j].Path) })
+	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Path) < strings.ToLower(files[j].Path) })
+	out := append(dirs, files...)
+	if len(out) > fileRefLimit {
+		out = out[:fileRefLimit]
+	}
+	return out
+}
+
+// searchFileRefs walks the tree under root (bounded by fileRefMaxDepth and
+// fileRefMaxWalk) and returns entries matching q as a substring of their
+// basename, of any path segment, or of a directory name — the same tiers and
+// ordering internal/fileref.Search applies for the desktop @-menu, with the
+// added depth bound. Directories are returned with IsDir set so the frontend
+// can offer to descend into them. The walk runs on the *os.Root's fs.FS
+// adapter, confining it to the workspace root (escaping symlinks fail
+// instead of being followed).
+func searchFileRefs(root *os.Root, q string) []fileRefEntry {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" || strings.ContainsAny(q, `/\`) {
+		return []fileRefEntry{}
+	}
+	showHidden := strings.HasPrefix(q, ".")
+	var dirHits, basenameHits, segmentHits []fileRefEntry
+	visited := 0
+	_ = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if path == "." {
+			return nil
+		}
+		visited++
+		if visited > fileRefMaxWalk {
+			return fs.SkipAll
+		}
+		// fs.WalkDir paths are already slash-separated and relative to the root.
+		relSlash := path
+		if strings.Count(relSlash, "/") > fileRefMaxDepth {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if fileref.SkipEntry(relSlash, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
+				return fs.SkipDir
+			}
+			if strings.Contains(strings.ToLower(name), q) {
+				dirHits = append(dirHits, fileRefEntry{Path: relSlash, IsDir: true})
+			}
+			return nil
+		}
+		if fileref.SkipEntry(relSlash, name, false) || (!showHidden && strings.HasPrefix(name, ".")) {
+			return nil
+		}
+		if info, err := d.Info(); err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		switch {
+		case strings.Contains(strings.ToLower(name), q):
+			basenameHits = append(basenameHits, fileRefEntry{Path: relSlash})
+		case fileRefSegmentContains(relSlash, q):
+			segmentHits = append(segmentHits, fileRefEntry{Path: relSlash})
+		}
+		return nil
+	})
+	sort.Slice(dirHits, func(i, j int) bool { return dirHits[i].Path < dirHits[j].Path })
+	sort.Slice(basenameHits, func(i, j int) bool { return basenameHits[i].Path < basenameHits[j].Path })
+	sort.Slice(segmentHits, func(i, j int) bool { return segmentHits[i].Path < segmentHits[j].Path })
+	// Directories first so the user can navigate into them; then basename hits
+	// (most relevant file matches); then path-segment hits. Reserve up to
+	// fileRefDirQuota slots for directories so they are never fully crowded out.
+	out := make([]fileRefEntry, 0, fileRefLimit)
+	nDirs := len(dirHits)
+	if nDirs > fileRefDirQuota {
+		nDirs = fileRefDirQuota
+	}
+	out = append(out, dirHits[:nDirs]...)
+	remaining := fileRefLimit - len(out)
+	if remaining > 0 {
+		if len(basenameHits) > remaining {
+			basenameHits = basenameHits[:remaining]
+		}
+		out = append(out, basenameHits...)
+		remaining = fileRefLimit - len(out)
+	}
+	if remaining > 0 {
+		if len(segmentHits) > remaining {
+			segmentHits = segmentHits[:remaining]
+		}
+		out = append(out, segmentHits...)
+	}
+	return out
+}
+
+// fileRefSegmentContains reports whether q appears in any slash-separated
+// segment of the slash-normalized relative path (the basename is matched
+// independently by the caller). Mirrors fileref.pathSegmentContains.
+func fileRefSegmentContains(relSlash, q string) bool {
+	for _, seg := range strings.Split(relSlash, "/") {
+		if strings.Contains(strings.ToLower(seg), q) {
+			return true
+		}
+	}
+	return false
 }

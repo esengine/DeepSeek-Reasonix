@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1218,5 +1221,250 @@ func TestServeEventsReplaysPendingApprovalOnAttach(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("executor did not finish after approval")
+	}
+}
+
+// filesFixture builds a fake workspace tree for the /files endpoint tests and
+// a server whose controller reports it as the workspace root.
+func filesFixture(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	root := t.TempDir()
+	mk := func(rel string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkdir := func(rel string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Root level: three visible files, plus entries that must be hidden.
+	mk("README.md")
+	mk("hello.txt")
+	mk("main.go")
+	mk(".hidden.txt")
+	mkdir(".git")
+	mkdir("node_modules")
+	mkdir("tmp")
+	mkdir("build") // skipDirNames
+	// Nested tree for segment/basename matches and dir scoping.
+	mk("src/util.go")
+	mk("src/planind/index.tsx")
+	mkdir("src/deep")
+	mk("src/deep/nested.txt")
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, WorkspaceRoot: root})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	t.Cleanup(srv.Close)
+	return srv, root
+}
+
+func filesGet(t *testing.T, srv *httptest.Server, qs string) (int, []fileRefEntry) {
+	t.Helper()
+	resp, err := http.Get(srv.URL + "/files?" + qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out []fileRefEntry
+	if resp.StatusCode == 200 {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode /files: %v", err)
+		}
+	}
+	return resp.StatusCode, out
+}
+
+func filesPaths(entries []fileRefEntry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.Path
+	}
+	return out
+}
+
+func TestServeFilesEmptyQueryListsRoot(t *testing.T) {
+	srv, _ := filesFixture(t)
+	status, out := filesGet(t, srv, "")
+	if status != 200 {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	// Directories first, then files, alphabetical (case-insensitive, like the
+	// desktop ListDir); generated, vendor and hidden entries are skipped.
+	want := []string{"src", "hello.txt", "main.go", "README.md"}
+	got := filesPaths(out)
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("root listing = %v, want %v", got, want)
+	}
+	if !out[0].IsDir || out[1].IsDir {
+		t.Errorf("expected first entry to be a directory and files after, got %+v", out)
+	}
+}
+
+func TestServeFilesSubstringMatch(t *testing.T) {
+	srv, _ := filesFixture(t)
+	cases := []struct {
+		q    string
+		want []string
+	}{
+		{"hello", []string{"hello.txt"}},                              // basename substring
+		{"txt", []string{"hello.txt", "src/deep/nested.txt"}},         // substring, not prefix
+		{"util", []string{"src/util.go"}},                             // basename hit on a nested file
+		{"planind", []string{"src/planind", "src/planind/index.tsx"}}, // path-segment hit, matching dir first
+		{"index", []string{"src/planind/index.tsx"}},
+		{"zzz", nil},
+	}
+	for _, c := range cases {
+		_, out := filesGet(t, srv, "q="+url.QueryEscape(c.q))
+		if got := filesPaths(out); strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("q=%q = %v, want %v", c.q, got, c.want)
+		}
+	}
+}
+
+func TestServeFilesHiddenRespectsDotPrefix(t *testing.T) {
+	srv, _ := filesFixture(t)
+	// Without a leading dot in q, hidden files are invisible.
+	if _, out := filesGet(t, srv, "q=hidden"); len(out) != 0 {
+		t.Errorf("q=hidden = %v, want no hidden matches", filesPaths(out))
+	}
+	// A q starting with "." opts into hidden entries, like the desktop picker.
+	_, out := filesGet(t, srv, "q="+url.QueryEscape(".h"))
+	if got := filesPaths(out); strings.Join(got, "|") != ".hidden.txt" {
+		t.Errorf("q=.h = %v, want [.hidden.txt]", got)
+	}
+}
+
+func TestServeFilesDirScoping(t *testing.T) {
+	srv, _ := filesFixture(t)
+	// One level inside src: directories first, then files.
+	_, out := filesGet(t, srv, "dir=src")
+	if got := filesPaths(out); strings.Join(got, "|") != "deep|planind|util.go" {
+		t.Errorf("dir=src = %v, want [deep planind util.go]", got)
+	}
+	// Filtered listing inside the directory.
+	_, out = filesGet(t, srv, "dir=src&q=util")
+	if got := filesPaths(out); strings.Join(got, "|") != "util.go" {
+		t.Errorf("dir=src&q=util = %v, want [util.go]", got)
+	}
+	// A directory match is selectable for descending.
+	_, out = filesGet(t, srv, "dir=src&q=plan")
+	if got := filesPaths(out); strings.Join(got, "|") != "planind" || !out[0].IsDir {
+		t.Errorf("dir=src&q=plan = %v (isDir=%v), want [planind] dir", got, out[0].IsDir)
+	}
+}
+
+func TestServeFilesRejectsTraversal(t *testing.T) {
+	srv, root := filesFixture(t)
+	// A marker outside the workspace root that must never leak into results.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(root), "outside.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"..", "../..", "..%2Fetc", "%2Fetc", "src%2F..%2F..%2F..", "src/../.."} {
+		status, _ := filesGet(t, srv, "q=outside&dir="+dir)
+		if status != http.StatusBadRequest {
+			t.Errorf("dir=%q status = %d, want 400", dir, status)
+		}
+	}
+}
+
+func TestServeFilesUnreadableDirIsEmpty(t *testing.T) {
+	srv, root := filesFixture(t)
+	// A dir that is a regular file reads as an empty listing (ENOTDIR).
+	status, out := filesGet(t, srv, "dir=README.md")
+	if status != 200 || len(out) != 0 {
+		t.Errorf("dir=README.md = %d %v, want 200 []", status, filesPaths(out))
+	}
+	// A permission-denied directory is likewise silently empty. Root can read
+	// anything, so skip the chmod probe when running as root.
+	if os.Geteuid() == 0 {
+		return
+	}
+	locked := filepath.Join(root, "src", "deep")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	status, out = filesGet(t, srv, "dir=src%2Fdeep")
+	if status != 200 || len(out) != 0 {
+		t.Errorf("locked dir = %d %v, want 200 []", status, filesPaths(out))
+	}
+}
+
+func TestServeFilesDepthLimit(t *testing.T) {
+	srv, root := filesFixture(t)
+	// A chain one level deeper than fileRefMaxDepth: the file at exactly
+	// maxDepth is found, the one beyond it is not.
+	var chain []string
+	for i := 0; i <= fileRefMaxDepth+1; i++ {
+		chain = append(chain, "d"+fmt.Sprint(i))
+	}
+	okDir := filepath.Join(append(append([]string{}, chain[:fileRefMaxDepth]...), "f_at_depth.txt")...)
+	deepDir := filepath.Join(append(append([]string{}, chain[:fileRefMaxDepth+1]...), "f_too_deep.txt")...)
+	for _, p := range []string{okDir, deepDir} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, p), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, out := filesGet(t, srv, "q=f_at_depth")
+	if got := filesPaths(out); strings.Join(got, "|") != "d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/d12/d13/d14/d15/d16/d17/d18/d19/f_at_depth.txt" {
+		t.Errorf("depth-limit match = %v", got)
+	}
+	if _, out := filesGet(t, srv, "q=f_too_deep"); len(out) != 0 {
+		t.Errorf("file beyond depth %d leaked into results: %v", fileRefMaxDepth, filesPaths(out))
+	}
+}
+
+func TestServeFilesSymlinkEscapeIsEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	srv, root := filesFixture(t)
+	// A symlink inside the root pointing at a directory OUTSIDE it defeats
+	// the lexical fileRefDirWithin check, which cannot see through links.
+	// Reading it must fail inside the *os.Root (openat confinement) and come
+	// back as the same silent empty listing as any unreadable target.
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "leak.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	status, out := filesGet(t, srv, "dir=escape")
+	if status != 200 || len(out) != 0 {
+		t.Errorf("dir=escape = %d %v, want 200 [] (symlink must not escape the root)", status, filesPaths(out))
+	}
+}
+
+func TestServeFilesSymlinkInsideStillWorks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	srv, root := filesFixture(t)
+	// A symlink to a directory INSIDE the root is still resolvable: os.Root
+	// only rejects links that escape the root. Use a RELATIVE target — the
+	// absolute-target form is intentionally rejected on darwin (openat
+	// confinement treats absolute paths as escaping the root).
+	if err := os.Symlink("src", filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	status, out := filesGet(t, srv, "dir=alias")
+	if status != 200 {
+		t.Fatalf("dir=alias status = %d, want 200", status)
+	}
+	if got := filesPaths(out); strings.Join(got, "|") != "deep|planind|util.go" {
+		t.Errorf("dir=alias = %v, want [deep planind util.go]", got)
 	}
 }

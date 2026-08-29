@@ -677,6 +677,9 @@ const __T = {
     'command_palette': 'Command palette',
     'command_empty': 'No commands match',
     'command_nav': '↑↓ navigate · Enter insert · Esc close',
+    'at_files': 'Files',
+    'at_file': 'File',
+    'at_folder': 'Folder',
     'danger': 'Danger',
     'tool_running': 'Running',
     'tool_done': 'Done',
@@ -828,6 +831,9 @@ const __T = {
     'command_palette': '命令面板',
     'command_empty': '没有匹配的命令',
     'command_nav': '↑↓ 选择 · Enter 插入 · Esc 关闭',
+    'at_files': '文件',
+    'at_file': '文件',
+    'at_folder': '文件夹',
     'danger': '危险',
     'tool_running': '运行中',
     'tool_done': '完成',
@@ -1582,6 +1588,87 @@ function renderSlashMenu() {
 function closeSlashMenu(){slashOpen=false;const m=$('#slash-menu');if(m)m.remove();}
 function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if(c){input.value='/'+c.cmd+' ';}closeSlashMenu();input.focus();}
 
+// ── @ file reference menu ──
+// Mirrors the desktop Composer @-token grammar (desktop/frontend/src/lib/refToken.ts):
+// a trailing "@token" after whitespace or at line start; a backslash-escaped
+// space/tab stays inside the token. The part after the last "/" is the search
+// fragment, the part before it the directory to list.
+let atOpen=false, atIndex=0, atItems=[], atQuery='';
+let atTimer=null, atFetchCtrl=null;
+function activeAtToken() {
+  const v=input.value.replace(/[\r\n]+$/,'');
+  const m=/(?:^|\s)@((?:\\[ \t]|[^\s])*)$/.exec(v);
+  if(!m)return null;
+  const raw=m[1];
+  const slash=raw.lastIndexOf('/');
+  // The token is anchored at the end, so '@' sits exactly rawLen+1 chars back
+  // (robust for both the line-start and whitespace-boundary forms).
+  return {atPos:v.length-raw.length-1, raw,
+    dir:slash>=0?raw.slice(0,slash+1):'',
+    frag:slash>=0?raw.slice(slash+1):raw};
+}
+function unescapeAtPath(s){return s.replace(/\\([ \t])/g,'$1');}
+function updateAtMenu() {
+  const tok=activeAtToken();
+  if(!tok){closeAtMenu();return;}
+  clearTimeout(atTimer);
+  if(atFetchCtrl){atFetchCtrl.abort();atFetchCtrl=null;}
+  const frag=tok.frag.toLowerCase();
+  const dir=unescapeAtPath(tok.dir);
+  // Debounce the fetch; aborted/stale responses never render. Failures and
+  // empty workspaces close the menu silently.
+  atTimer=setTimeout(()=>{
+    const ctrl=new AbortController();
+    atFetchCtrl=ctrl;
+    const url='/files?q='+encodeURIComponent(frag)+(dir?'&dir='+encodeURIComponent(dir):'');
+    fetch(url,{signal:ctrl.signal}).then(r=>{if(!r.ok)throw new Error('bad status');return r.json();}).then(items=>{
+      if(atFetchCtrl!==ctrl)return;
+      atItems=Array.isArray(items)?items:[];
+      atQuery='@'+tok.raw;
+      if(atItems.length===0){closeAtMenu();return;}
+      atOpen=true; atIndex=0;
+      renderAtMenu();
+    }).catch(()=>{if(atFetchCtrl===ctrl)closeAtMenu();});
+  },150);
+}
+function renderAtMenu() {
+  let menu=$('#at-menu');
+  if(!menu){menu=el('div','slash-menu');menu.id='at-menu';slashAnchor.appendChild(menu);}
+  menu.innerHTML='<div class="slash-menu__head"><span>'+escHtml(__('at_files'))+'</span><span class="slash-menu__query">'+escHtml(atQuery)+'</span></div><div class="slash-menu__list" id="at-menu-list" role="listbox"></div><div class="slash-menu__foot"><span>'+escHtml(__('command_nav'))+'</span><span>'+atItems.length+'</span></div>';
+  const list=$('#at-menu-list');
+  atItems.forEach((it,i)=>{
+    const name=String(it.path||'').split('/').pop();
+    const item=el('button','slash-menu__item'+(i===atIndex?' slash-menu__item--active':''));
+    item.type='button';
+    item.setAttribute('role','option');
+    item.setAttribute('aria-selected',i===atIndex?'true':'false');
+    item.innerHTML='<span class="slash-menu__name">@'+escHtml(name)+'</span><span class="slash-menu__desc">'+escHtml(it.path||'')+'</span><span class="slash-menu__pill">'+escHtml(it.isDir?__('at_folder'):__('at_file'))+'</span>';
+    item.onmouseenter=()=>{atIndex=i;renderAtMenu();};
+    item.onclick=()=>{atIndex=i;acceptAt();};
+    list.appendChild(item);
+  });
+  const active=menu.querySelector('.slash-menu__item--active');
+  if(active)active.scrollIntoView({block:'nearest'});
+}
+function closeAtMenu(){
+  atOpen=false;
+  clearTimeout(atTimer);atTimer=null;
+  if(atFetchCtrl){atFetchCtrl.abort();atFetchCtrl=null;}
+  const m=$('#at-menu');if(m)m.remove();
+}
+// Replace the typed "@token" with the picked path (whitespace backslash-escaped
+// so the reference survives @-token parsing on submit) plus "/" for folders so
+// the user can keep descending, or a space for files.
+function acceptAt(){
+  if(!atOpen)return;
+  const it=atItems[atIndex]; if(!it)return;
+  const tok=activeAtToken(); if(!tok)return;
+  const path=String(it.path||'').replace(/[ \t]/g,ws=>'\\'+ws);
+  input.value=input.value.slice(0,tok.atPos)+'@'+path+(it.isDir?'/':' ');
+  closeAtMenu();
+  input.focus();
+}
+
 // ── SSE ──
 let es;
 function connectEvents(){
@@ -1837,7 +1924,7 @@ async function syncModeBeforeSubmit(){
 async function send(){
   const v=input.value.trim(); if(!v)return;
   if(v==='/reload'){
-    input.value='';input.style.height='';closeSlashMenu();
+    input.value='';input.style.height='';closeSlashMenu();closeAtMenu();
     showNotice(__('extensions_reloading'));
     const response=await post('/extensions/reload',{});
     if(response.ok){showNotice(__('extensions_reloaded'));fetchStatus();}
@@ -1858,10 +1945,10 @@ async function send(){
   }
   addUserMsg(v);
   post('/submit',{input:submitInput}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}});
-  input.value='';input.style.height='';closeSlashMenu();
+  input.value='';input.style.height='';closeSlashMenu();closeAtMenu();
 }
 
-input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';updateSlashMenu();});
+input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';updateSlashMenu();updateAtMenu();});
 input.addEventListener('keydown',e=>{
   // slash menu nav
   if(slashOpen){
@@ -1870,10 +1957,17 @@ input.addEventListener('keydown',e=>{
     if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();acceptSlash();return;}
     if(e.key==='Escape'){e.preventDefault();closeSlashMenu();return;}
   }
+  // @ file menu nav
+  if(atOpen){
+    if(e.key==='ArrowDown'){e.preventDefault();atIndex=Math.min(atIndex+1,atItems.length-1);renderAtMenu();return;}
+    if(e.key==='ArrowUp'){e.preventDefault();atIndex=Math.max(atIndex-1,0);renderAtMenu();return;}
+    if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();acceptAt();return;}
+    if(e.key==='Escape'){e.preventDefault();closeAtMenu();return;}
+  }
   // main keys
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();return;}
   if(e.key==='Escape'){
-    if(goalMode&&!running){goalMode=false;updateGoalUI();input.value='';closeSlashMenu();return;}
+    if(goalMode&&!running){goalMode=false;updateGoalUI();input.value='';closeSlashMenu();closeAtMenu();return;}
     if(running){post('/cancel');return;}
     // double-Esc for rewind
     if(input.value===''){if(escTimer){clearTimeout(escTimer);escTimer=null;openRewindPicker();}else{escTimer=setInterval(()=>escTimer=null,600);}return;}
