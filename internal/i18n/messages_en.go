@@ -31,6 +31,7 @@ var English = Messages{
 	NoSessionToResume: "no saved session to resume — start a new one with `reasonix`",
 	ResumeRequiresTTY: "--resume needs an interactive terminal; pass --continue for the most recent session",
 	PickSessionLabel:  "Resume which session?",
+	ResumeExitHintFmt: "Tip: resume this conversation later with `reasonix --resume %s`, or `reasonix --continue` for the latest.",
 
 	ResumeBusy:          "finish or cancel the current turn before resuming",
 	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",

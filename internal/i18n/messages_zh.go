@@ -32,6 +32,7 @@ var Chinese = Messages{
 	NoSessionToResume: "没有可恢复的会话 — 用 `reasonix` 开一个新的",
 	ResumeRequiresTTY: "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
 	PickSessionLabel:  "恢复哪个会话？",
+	ResumeExitHintFmt: "提示：以后可用 `reasonix --resume %s` 恢复本次对话，或用 `reasonix --continue` 恢复最近一次。",
 
 	ResumeBusy:          "请先完成或取消当前这一轮再恢复会话",
 	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",

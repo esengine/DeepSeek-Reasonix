@@ -47,6 +47,7 @@ type Messages struct {
 	NoSessionToResume string // shown when --continue / --resume finds nothing
 	ResumeRequiresTTY string // shown when --resume runs piped instead of on a terminal
 	PickSessionLabel  string // header on the --resume picker
+	ResumeExitHintFmt string // shown when the chat exits — %s = session id to resume
 
 	// in-chat /resume command
 	ResumeBusy          string // shown when /resume is used mid-turn

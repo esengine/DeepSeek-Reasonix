@@ -1331,7 +1331,7 @@ func chatREPL(args []string, version string) int {
 		leases.Release()
 		return runWebCommand(webHandoffArgs(launchWebPath, launchWebSessionID, launchWebModelRef))
 	}
-	return 0
+	return exitWithResumeHint(final, ctrl)
 }
 
 // adoptCarriedHistoryPreservingProfileAndGrants resumes c on the carried
