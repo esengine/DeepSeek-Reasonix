@@ -12,16 +12,24 @@ import (
 
 // recordingRecorder captures lifecycle calls for assertions.
 type recordingRecorder struct {
-	mu     sync.Mutex
-	starts []string
-	dones  []string
-	status []Status
+	mu      sync.Mutex
+	starts  []string
+	parents []string
+	dones   []string
+	status  []Status
 }
 
 func (r *recordingRecorder) RecordStart(id, kind, label string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, id+"|"+kind+"|"+label)
+}
+
+func (r *recordingRecorder) RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID string) {
+	r.RecordStart(id, kind, label)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.parents = append(r.parents, id+"|"+parentTaskID+"|"+parentSessionID)
 }
 
 func (r *recordingRecorder) RecordDone(id string, st Status, err error) {
@@ -124,5 +132,24 @@ func TestTaskRecorderHook_NilRecorderIsNoop(t *testing.T) {
 	})
 	if res := m.Wait(context.Background(), []string{j.ID}, 5); len(res) != 1 {
 		t.Fatalf("wait = %+v", res)
+	}
+}
+
+func TestTaskRecorderHook_StartForSessionWithParent(t *testing.T) {
+	rec := &recordingRecorder{}
+	m := NewManager(event.Discard, WithTaskRecorder(rec))
+	defer m.Close()
+
+	j := m.StartForSessionWithParent("parent-session", "parent-task", "subagent", "child", func(ctx context.Context, out io.Writer) (string, error) {
+		return "answer", nil
+	})
+	if res := m.Wait(context.Background(), []string{j.ID}, 5); len(res) != 1 || res[0].Status != Done {
+		t.Fatalf("wait = %+v", res)
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.parents) != 1 || rec.parents[0] != j.ID+"|parent-task|parent-session" {
+		t.Fatalf("parent starts = %v", rec.parents)
 	}
 }

@@ -876,7 +876,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		// Emit queued before the job goroutine can start so the status slot
 		// never regresses to a stale queued after running.
 		trk.queued()
-		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
+		job := jm.StartForSessionWithParent(jobs.SessionFromContext(ctx), parentID, "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
 			if writerRegistered {
 				defer mutationObserver.UnregisterWriter(recoveryTaskID)
 			}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -133,6 +134,11 @@ func (r *TaskRecorder) stopHeartbeat(monitorID string) {
 
 // RecordStart implements jobs.TaskRecorder.
 func (r *TaskRecorder) RecordStart(id, kind, label string) {
+	r.RecordStartWithParent(id, kind, label, "", "")
+}
+
+// RecordStartWithParent records optional parent metadata for nested jobs.
+func (r *TaskRecorder) RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID string) {
 	ctx := context.Background()
 	now := timeNow()
 	sessionID := ""
@@ -144,6 +150,10 @@ func (r *TaskRecorder) RecordStart(id, kind, label string) {
 		monitorID = sessionlessMonitorTaskID(id)
 	}
 	r.rememberMonitorID(id, monitorID)
+	depth := 0
+	if parentTaskID != "" {
+		depth = 1
+	}
 	snap := TaskSnapshot{
 		SchemaVersion:     1,
 		TaskID:            monitorID,
@@ -156,6 +166,11 @@ func (r *TaskRecorder) RecordStart(id, kind, label string) {
 		Version:           1,
 		CreatedAt:         now,
 		UpdatedAt:         now,
+		Kind:              taskKind(kind),
+		ParentTaskID:      parentTaskID,
+		ParentSessionID:   parentSessionID,
+		Depth:             depth,
+		Attempt:           1,
 	}
 	if err := r.store.SaveTask(ctx, r.projectDir, snap); err != nil {
 		return
@@ -164,8 +179,18 @@ func (r *TaskRecorder) RecordStart(id, kind, label string) {
 		Timestamp: now, EventType: "state_change",
 		TaskID: monitorID, SessionID: sessionID, State: TaskStateRunning,
 		RuntimeState: RuntimeStateAlive,
+		Kind:         taskKind(kind), ParentTaskID: parentTaskID, ParentSessionID: parentSessionID,
+		Depth: depth, Attempt: 1,
 	})
 	r.startHeartbeat(monitorID)
+}
+
+func taskKind(kind string) string {
+	lower := strings.ToLower(kind)
+	if strings.Contains(lower, "subagent") || strings.Contains(lower, "skill") {
+		return "subagent"
+	}
+	return "background"
 }
 
 // RecordDone implements jobs.TaskRecorder.
@@ -208,9 +233,11 @@ func (r *TaskRecorder) RecordDone(id string, st jobs.Status, jobErr error) {
 		}
 		_ = r.store.AppendAuditEvent(ctx, r.projectDir, TaskEvent{
 			Timestamp: now, EventType: "state_change",
-			TaskID: monitorID, SessionID: cur.SessionID, State: target,
+			TaskID: monitorID, JobID: cur.JobID, SessionID: cur.SessionID, State: target,
 			RuntimeState: RuntimeStateExited,
-			ErrorCode:    cur.ErrorCode, ErrorSummary: cur.ErrorSummary,
+			ParentTaskID: cur.ParentTaskID, ParentSessionID: cur.ParentSessionID,
+			Kind: cur.Kind, Depth: cur.Depth, Attempt: cur.Attempt,
+			ErrorCode: cur.ErrorCode, ErrorSummary: cur.ErrorSummary,
 		})
 		return
 	}

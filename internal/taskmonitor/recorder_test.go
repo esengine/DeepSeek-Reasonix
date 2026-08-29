@@ -52,6 +52,21 @@ func TestTaskRecorder_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestTaskRecorder_ParentMetadata(t *testing.T) {
+	dir := t.TempDir()
+	r, store := newRecorderForTest(t, dir)
+	ctx := context.Background()
+
+	r.RecordStartWithParent("child-1", "subagent", "demo", "parent-1", "parent-session")
+	snap, err := store.GetTask(ctx, dir, monitorTaskID("sess-1", "child-1"))
+	if err != nil || snap == nil {
+		t.Fatalf("GetTask after start: %+v, %v", snap, err)
+	}
+	if snap.ParentTaskID != "parent-1" || snap.ParentSessionID != "parent-session" || snap.Kind != "subagent" || snap.Depth != 1 || snap.Attempt != 1 {
+		t.Fatalf("snapshot metadata = %+v", snap)
+	}
+}
+
 func TestTaskRecorder_HeartbeatRenewsExpiredOwnedLease(t *testing.T) {
 	dir := t.TempDir()
 	r, store := newRecorderForTest(t, dir)
