@@ -2,6 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -24,14 +27,26 @@ import (
 type mdRenderer struct {
 	md             goldmark.Markdown
 	width          int
+	workspaceRoot  string
 	copyMath       bool
 	copyMathPrefix string
 	nextCopyMathID int
 }
 
 func newMarkdownRenderer(width int) *mdRenderer {
+	return newMarkdownRendererWithWorkspaceRoot(width, "")
+}
+
+func newMarkdownRendererWithWorkspaceRoot(width int, workspaceRoot string) *mdRenderer {
 	if width <= 0 {
 		width = 80
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" {
+		workspaceRoot, _ = os.Getwd()
+	}
+	if absoluteRoot, err := filepath.Abs(workspaceRoot); err == nil {
+		workspaceRoot = absoluteRoot
 	}
 	// Enable the GFM table extension so | header | rows | get parsed into
 	// a Table node rather than falling through as a literal text block.
@@ -42,7 +57,8 @@ func newMarkdownRenderer(width int) *mdRenderer {
 				parser.WithInlineParsers(util.Prioritized(&mathParser{}, 150)),
 			),
 		),
-		width: width,
+		width:         width,
+		workspaceRoot: workspaceRoot,
 	}
 }
 
@@ -363,10 +379,11 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 		case *ast.Link:
 			var inner strings.Builder
 			r.appendInline(&inner, v, src)
-			b.WriteString(inner.String())
+			b.WriteString(r.hyperlink(string(v.Destination), inner.String()))
 			b.WriteString(dim(" (" + string(v.Destination) + ")"))
 		case *ast.AutoLink:
-			b.WriteString(string(v.URL(src)))
+			urlText := string(v.URL(src))
+			b.WriteString(r.hyperlink(urlText, urlText))
 		case *ast.RawHTML:
 			// drop — rare in chat output and would print as literal escapes
 		case *mathNode:
@@ -390,6 +407,100 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 			r.appendInline(b, c, src)
 		}
 	}
+}
+
+const (
+	terminalHyperlinkStart = "\x1b]8;;"
+	terminalHyperlinkClose = "\x1b]8;;\x1b\\"
+)
+
+// hyperlink wraps visible text in an OSC 8 terminal hyperlink. Terminals that
+// support OSC 8 make the text clickable and show the target on hover; terminals
+// that do not support it simply render the same visible text. Copy rendering
+// intentionally omits the control sequence so clipboard output stays plain.
+func (r *mdRenderer) hyperlink(destination, visible string) string {
+	if r.copyMath || visible == "" {
+		return visible
+	}
+	target := r.markdownLinkTarget(destination)
+	if target == "" {
+		return visible
+	}
+	return terminalHyperlinkStart + target + "\x1b\\" + visible + terminalHyperlinkClose
+}
+
+// markdownLinkTarget converts a Markdown destination into a safe OSC 8 target.
+// HTTP(S) and other browser-friendly URI schemes stay untouched. Bare paths
+// are resolved against the current workspace and converted to file:// URLs so
+// relative links such as .omc/research/mockup.html open from the right project.
+func (r *mdRenderer) markdownLinkTarget(destination string) string {
+	destination = strings.TrimSpace(destination)
+	if destination == "" || containsTerminalControl(destination) {
+		return ""
+	}
+	if windowsTarget, ok := windowsPathLinkTarget(destination); ok {
+		return windowsTarget
+	}
+
+	parsed, err := url.Parse(destination)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme != "" {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https", "file", "mailto", "tel":
+			return destination
+		default:
+			return ""
+		}
+	}
+	// A fragment-only link is meaningful inside a browser page but has no
+	// reliable terminal action because the rendered answer is not a web page.
+	if strings.HasPrefix(destination, "#") || parsed.Path == "" {
+		return ""
+	}
+
+	pathName := parsed.Path
+	if !filepath.IsAbs(pathName) {
+		if r.workspaceRoot == "" {
+			return ""
+		}
+		pathName = filepath.Join(r.workspaceRoot, filepath.FromSlash(pathName))
+	}
+	absolutePath, err := filepath.Abs(pathName)
+	if err != nil {
+		return ""
+	}
+	return (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(absolutePath),
+		RawQuery: parsed.RawQuery,
+		Fragment: parsed.Fragment,
+	}).String()
+}
+
+func windowsPathLinkTarget(destination string) (string, bool) {
+	if len(destination) < 3 || !isASCIILetter(rune(destination[0])) || destination[1] != ':' {
+		return "", false
+	}
+	if destination[2] != '/' && destination[2] != '\\' {
+		return "", false
+	}
+	normalized := strings.ReplaceAll(destination, "\\", "/")
+	parsed, err := url.Parse("file:///" + normalized)
+	if err != nil {
+		return "", false
+	}
+	return parsed.String(), true
+}
+
+func containsTerminalControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // renderTable lays out a GFM table as terminal columns separated by dim

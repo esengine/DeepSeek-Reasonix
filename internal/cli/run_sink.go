@@ -26,7 +26,7 @@ type runSinkChain struct {
 // metrics accumulation, then trajectory recording, then notifications and the
 // telemetry reporter outermost. Markdown post-stream redraw (cursor moves) is
 // enabled only on a TTY; piped / captured output keeps the raw stream.
-func buildRunSink(format runOutputFormat, printOnly, showThinking bool, metricsPath, trajectoryPath string, cfg *config.Config, reporter *telemetry.Reporter) (runSinkChain, error) {
+func buildRunSink(format runOutputFormat, printOnly, showThinking bool, metricsPath, trajectoryPath, workspaceRoot string, cfg *config.Config, reporter *telemetry.Reporter) (runSinkChain, error) {
 	var chain runSinkChain
 	if printOnly || format != runOutputText {
 		chain.resultOutput = newRunOutputSink(os.Stdout, format)
@@ -38,7 +38,7 @@ func buildRunSink(format runOutputFormat, printOnly, showThinking bool, metricsP
 			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 				termW = w
 			}
-			renderer = newMarkdownRenderer(termW)
+			renderer = newMarkdownRendererWithWorkspaceRoot(termW, workspaceRoot)
 		}
 		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
 		textSink.SetShowReasoning(showThinking)

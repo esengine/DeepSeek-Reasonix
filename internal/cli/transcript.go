@@ -93,7 +93,7 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	contentWidth := transcriptContentWidth(terminalWidth, m.nativeScrollback)
 	switch source.kind {
 	case transcriptSourceMarkdown:
-		return renderAssistantMarkdown(source.raw, contentWidth)
+		return renderAssistantMarkdownWithWorkspaceRoot(source.raw, contentWidth, m.markdownWorkspaceRoot())
 	case transcriptSourceUser:
 		return renderUserBubble(source.raw, terminalWidth, source.planMode)
 	case transcriptSourceReasoning:
@@ -103,7 +103,9 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceBanner:
 		return strings.TrimRight(renderTUIBanner(m.label, source.raw, contentWidth), "\n")
 	case transcriptSourceReplayBundle:
-		return m.renderReplayBundle(source, contentWidth, renderAssistantMarkdown)
+		return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
+			return renderAssistantMarkdownWithWorkspaceRoot(raw, width, m.markdownWorkspaceRoot())
+		})
 	case transcriptSourceTurnReceipt:
 		return renderTurnReceiptBand(source.raw, contentWidth)
 	case transcriptSourceSubagentProgress:
@@ -142,7 +144,7 @@ func (m chatTUI) renderReplayBundleCopy(
 	return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
 		messagePrefix := prefix + "-" + strconv.Itoa(assistantIndex)
 		assistantIndex++
-		return renderAssistantMarkdownCopy(raw, width, messagePrefix)
+		return renderAssistantMarkdownCopyWithWorkspaceRoot(raw, width, messagePrefix, m.markdownWorkspaceRoot())
 	})
 }
 
@@ -153,13 +155,17 @@ const assistantTranscriptIndent = "  "
 // body keeps a restrained two-cell gutter instead of using a heavy card, and
 // rendering at the reduced width keeps every indented row inside the viewport.
 func renderAssistantMarkdown(raw string, contentWidth int) string {
+	return renderAssistantMarkdownWithWorkspaceRoot(raw, contentWidth, "")
+}
+
+func renderAssistantMarkdownWithWorkspaceRoot(raw string, contentWidth int, workspaceRoot string) string {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
 	if contentWidth <= visibleWidth(indent) {
 		indent = ""
 	}
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
-	renderer := newMarkdownRenderer(bodyWidth)
+	renderer := newMarkdownRendererWithWorkspaceRoot(bodyWidth, workspaceRoot)
 	rendered := renderer.Render(raw)
 	if rendered == "" {
 		rendered = raw
@@ -175,13 +181,17 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 // renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output
 // and adds zero-width math markers for on-demand clipboard reconstruction.
 func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) string {
+	return renderAssistantMarkdownCopyWithWorkspaceRoot(raw, contentWidth, prefix, "")
+}
+
+func renderAssistantMarkdownCopyWithWorkspaceRoot(raw string, contentWidth int, prefix, workspaceRoot string) string {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
 	if contentWidth <= visibleWidth(indent) {
 		indent = ""
 	}
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
-	renderer := newMarkdownRenderer(bodyWidth)
+	renderer := newMarkdownRendererWithWorkspaceRoot(bodyWidth, workspaceRoot)
 	rendered := renderer.RenderCopy(raw, prefix)
 	if rendered == "" {
 		rendered = raw
@@ -192,6 +202,13 @@ func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) st
 		return header
 	}
 	return header + "\n\n" + indentTranscriptBlock(body, indent)
+}
+
+func (m chatTUI) markdownWorkspaceRoot() string {
+	if m.ctrl == nil {
+		return ""
+	}
+	return m.ctrl.WorkspaceRoot()
 }
 
 func indentTranscriptBlock(block, indent string) string {
@@ -269,7 +286,7 @@ func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
 		}
 		switch source.kind {
 		case transcriptSourceMarkdown:
-			rendered := renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
+			rendered := renderAssistantMarkdownCopyWithWorkspaceRoot(source.raw, contentWidth, strconv.Itoa(i), m.markdownWorkspaceRoot())
 			markers += strings.Count(rendered, copyMathStartPrefix)
 			b.WriteString(rendered)
 		case transcriptSourceReplayBundle:

@@ -664,7 +664,7 @@ func runAgent(args []string, version string) int {
 	defer stop()
 	started := time.Now()
 
-	chain, err := buildRunSink(format, *printOnly, *showThinking, *metricsPath, *trajectoryPath, cfg, reporter)
+	chain, err := buildRunSink(format, *printOnly, *showThinking, *metricsPath, *trajectoryPath, workspaceRoot, cfg, reporter)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
