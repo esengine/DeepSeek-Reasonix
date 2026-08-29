@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -80,7 +81,9 @@ input,textarea{font:inherit;color:inherit}
 @keyframes msg-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 .msg--user{display:flex;gap:9px;align-items:baseline}
 .msg__caret{color:var(--accent);font-family:var(--mono);font-weight:600;flex-shrink:0;font-size:15px}
-.msg__text{white-space:pre-wrap;word-break:break-word;font-weight:500;line-height:1.65}
+.msg__text{word-break:break-word;font-weight:500;line-height:1.65}
+.msg__text>:first-child{margin-top:0}
+.msg__text>:last-child{margin-bottom:0}
 .msg--assistant{color:var(--fg);line-height:1.7}
 .msg--assistant .msg__text{font-weight:400}
 .msg--system{font-size:13px;color:var(--fg-2);border-left:2px solid var(--border);padding:4px 12px;margin:8px auto}
@@ -372,6 +375,32 @@ input,textarea{font:inherit;color:inherit}
 .dialog-btn{height:30px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--fg-2);font-size:12px}
 .dialog-btn:hover{border-color:var(--border-strong);color:var(--fg)}
 .dialog-btn--danger{background:var(--danger-soft);border-color:transparent;color:var(--danger)}
+
+/* markdown content */
+.msg__text pre{background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;margin:8px 0}
+.msg__text code{background:var(--panel-2);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:12.5px;color:var(--accent)}
+.msg__text pre code{background:none;padding:0;border-radius:0;color:inherit;font-size:inherit}
+.msg__text table{border-collapse:collapse;width:100%;margin:8px 0;font-size:13px}
+.msg__text th,.msg__text td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+.msg__text th{background:var(--panel-2);font-weight:600;color:var(--fg)}
+.msg__text tr:nth-child(even) td{background:var(--bg-2)}
+.msg__text blockquote{border-left:3px solid var(--accent);padding:4px 12px;margin:8px 0;color:var(--fg-2)}
+.msg__text ul,.msg__text ol{padding-left:20px;margin:6px 0}
+.msg__text li{margin:2px 0}
+.msg__text h1,.msg__text h2,.msg__text h3,.msg__text h4{font-family:var(--heading);font-weight:600;margin:14px 0 6px;letter-spacing:-.01em}
+.msg__text h1{font-size:18px}
+.msg__text h2{font-size:16px}
+.msg__text h3{font-size:15px}
+.msg__text h4{font-size:14px}
+.msg__text a{color:var(--accent);text-decoration:none}
+.msg__text a:hover{text-decoration:underline}
+.msg__text p{margin:6px 0}
+.msg__text hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.msg__text img{max-width:100%;border-radius:6px;margin:8px 0}
+.msg__text strong{font-weight:600}
+.msg__text em{font-style:italic}
+.msg__text del{text-decoration:line-through;opacity:.7}
+.msg__text input[type="checkbox"]{accent-color:var(--accent);margin-right:4px;transform:translateY(1px)}
 </style>
 </head>
 <body>
@@ -605,6 +634,11 @@ input,textarea{font:inherit;color:inherit}
   </div>
 </div>
 <script>
+// ── markdown renderer ──
+const mdRenderer={link({href,text,tokens}){const t=text||'';return '<a href="'+href+'" target="_blank" rel="noopener noreferrer">'+t+'</a>';}};
+marked.use({renderer:mdRenderer});
+function renderMd(t){try{return marked.parse(t,{gfm:true,breaks:true});}catch(e){return escHtml(t);}}
+
 // ── i18n ──
 const __LANG_PREF = '__LANG__';
 const __LANG = (__LANG_PREF === 'zh' || __LANG_PREF === 'en') ? __LANG_PREF : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
@@ -1148,7 +1182,7 @@ function setConnState(state) {
 // ── messages ──
 function addUserMsg(text) { hasVisibleHistory=true; updateActionAvailability(); hideWelcome(); const d=el('div','msg msg--user'); d.appendChild(el('span','msg__caret','›')); d.appendChild(el('div','msg__text',text)); log.appendChild(d); scrollDown(true); currentMsg=null;currentText=null;currentReasoning=null; }
 function ensureMsg() { if(!currentMsg){hasVisibleHistory=true; updateActionAvailability(); hideWelcome();currentMsg=el('div','msg msg--assistant');log.appendChild(currentMsg);} return currentMsg; }
-function appendText(t) { const m=ensureMsg(); if(!currentText){currentText=document.createElement('span');currentText.className='msg__text'; const old=m.querySelector('.cursor');if(old)old.remove(); m.appendChild(currentText); m.appendChild(el('span','cursor'));} currentText.textContent+=t; scrollDown(); }
+function appendText(t) { const m=ensureMsg(); if(!currentText){currentText=document.createElement('div');currentText.className='msg__text'; const old=m.querySelector('.cursor');if(old)old.remove(); m.appendChild(currentText); currentText._md='';} currentText._md+=t; currentText.innerHTML=renderMd(currentText._md); const old=m.querySelector('.cursor');if(old)old.remove(); m.appendChild(el('span','cursor')); scrollDown(); }
 function appendReasoning(t) { const m=ensureMsg(); if(!currentReasoning){const w=el('div','reasoning'); const b=el('button','reasoning__toggle'); b.innerHTML='<span class="reasoning__chevron">▶</span> '+__('thinking'); const body=el('div','reasoning__body'); body.style.display='none'; b.onclick=()=>{body.style.display=body.style.display==='none'?'':'none';b.querySelector('.reasoning__chevron').className='reasoning__chevron'+(body.style.display!=='none'?' reasoning__chevron--open':'');}; w.appendChild(b);w.appendChild(body); if(currentText) m.insertBefore(w,currentText); else m.appendChild(w); currentReasoning=body;} currentReasoning.textContent+=t; scrollDown(); }
 function finalizeMsg() { if(currentMsg){const c=currentMsg.querySelector('.cursor');if(c)c.remove();} currentMsg=null;currentText=null;currentReasoning=null; }
 
