@@ -5338,6 +5338,7 @@ button.reasoning-summary:focus-visible {
   font-style: normal;
   line-height: 1.72;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 .reasoning__body > .md,
 .turn-collapse__inline-reasoning > .md,
@@ -5371,6 +5372,8 @@ button.reasoning-summary:focus-visible {
 .md {
   font-family: var(--font-content-family);
   font-weight: var(--font-weight-regular);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 /* KaTeX \boxed draws its frame as an empty .fbox span that relies on
    width:100% resolving against an inline-table + table-layout:fixed row.
