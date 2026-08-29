@@ -3270,7 +3270,7 @@ func (c *Controller) rewindFail(err error) error {
 
 // Rewind is implemented in rewind.go (transactional conversation+file restore).
 
-// Fork branches the conversation at the start of turn into a NEW session file,
+// Fork branches the conversation through the selected turn into a NEW session file,
 // preserving the current one as the branch point, and switches to the branch. Code
 // is untouched (it's a conversation operation). Like a conversation rewind it needs
 // the live boundary, so it is unavailable for resumed-session turns and refused
@@ -3283,7 +3283,7 @@ func (c *Controller) ForkNamed(turn int, name string) (string, error) {
 	return c.forkNamed(turn, name, true)
 }
 
-// ForkSession copies the conversation at the start of turn into a new session
+// ForkSession copies the conversation through the selected turn into a new session
 // file without switching this controller to it. Desktop uses this to open the
 // branch in a new tab while the source tab keeps its current transcript.
 func (c *Controller) ForkSession(turn int, name string) (string, error) {
@@ -3314,7 +3314,7 @@ func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool) (s
 	}
 
 	// Persist the current conversation first so the branch point survives, then
-	// seed a fresh session with the messages up to the fork and switch to it.
+	// seed a fresh session through the selected turn (inclusive) and switch to it.
 	if err := c.Snapshot(); err != nil {
 		slog.Warn("controller: pre-fork snapshot", "err", err)
 	}
@@ -3324,7 +3324,16 @@ func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool) (s
 	if boundary > len(src) {
 		boundary = len(src)
 	}
-	forked := append([]provider.Message(nil), src[:boundary]...)
+	// Inclusive of the selected turn: keep through this turn, cut before the
+	// next visible user message (steer/synthetic user rows are ignored).
+	end := len(src)
+	if cut := nextVisibleUserAfter(src, boundary); cut >= 0 {
+		end = cut
+	}
+	if end < boundary {
+		end = boundary
+	}
+	forked := append([]provider.Message(nil), src[:end]...)
 	sess := agent.NewSession("")
 	sess.Messages = forked
 
@@ -3340,7 +3349,7 @@ func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool) (s
 		Name:             strings.TrimSpace(name),
 		ParentID:         parentID,
 		ForkTurn:         turn,
-		ForkMessageIndex: boundary,
+		ForkMessageIndex: end,
 		Preview:          forkPreview,
 		Turns:            forkTurns,
 		SchemaVersion:    agent.BranchMetaCountsVersion,
@@ -3373,6 +3382,31 @@ func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool) (s
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("forked conversation at turn %d into a new session", turn)})
 	return newPath, nil
+}
+
+// nextVisibleUserAfter returns the index of the next visible user message after
+// the selected turn's user prompt, or -1 if none. Steer/synthetic rows are skipped.
+func nextVisibleUserAfter(src []provider.Message, turnStart int) int {
+	if turnStart < 0 {
+		turnStart = 0
+	}
+	seenTurnUser := false
+	for i := turnStart; i < len(src); i++ {
+		if src[i].Role != provider.RoleUser {
+			continue
+		}
+		if _, isSteer := agent.SteerText(src[i].Content); isSteer {
+			continue
+		}
+		if IsSyntheticUserMessage(src[i].Content) {
+			continue
+		}
+		if seenTurnUser {
+			return i
+		}
+		seenTurnUser = true
+	}
+	return -1
 }
 
 func (c *Controller) CheckpointHasBoundary(turn int) bool {

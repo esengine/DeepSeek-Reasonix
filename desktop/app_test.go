@@ -7708,8 +7708,8 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 		}
 		if ok && m.TopicID == meta.TopicID {
 			forkPath = candidate
-			if m.ParentID != agent.BranchID(path) || m.ForkTurn != 1 || m.ForkMessageIndex != 3 {
-				t.Fatalf("fork branch meta = %+v, want parent %q turn 1 index 3", m, agent.BranchID(path))
+			if m.ParentID != agent.BranchID(path) || m.ForkTurn != 1 || m.ForkMessageIndex != 5 {
+				t.Fatalf("fork branch meta = %+v, want parent %q turn 1 index 5", m, agent.BranchID(path))
 			}
 			if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic · 分叉" {
 				t.Fatalf("fork topic meta = %+v", m)

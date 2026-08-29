@@ -243,11 +243,48 @@ func TestSubmitBranchHonorsNumericTurnTarget(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load branch meta ok=%v err=%v", ok, err)
 	}
-	if meta.ForkTurn != 1 || meta.ForkMessageIndex != 3 || meta.Name != "experiment" {
-		t.Fatalf("meta = %+v, want turn 1, msg index 3, name experiment", meta)
+	if meta.ForkTurn != 1 || meta.ForkMessageIndex != 4 || meta.Name != "experiment" {
+		t.Fatalf("meta = %+v, want turn 1, msg index 4, name experiment", meta)
 	}
-	if got := len(c.History()); got != 3 {
-		t.Fatalf("forked history length = %d, want 3", got)
+	if got := len(c.History()); got != 4 {
+		t.Fatalf("forked history length = %d, want 4", got)
+	}
+}
+
+func TestForkIncludesSelectedTurn(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "first prompt"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "first answer"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "second prompt"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "second answer"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "third prompt"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "third answer"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.SetSessionPath(agent.NewSessionPath(dir, "test"))
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	c.checkpoints.mu.Lock()
+	c.checkpoints.bound[0] = 1
+	c.checkpoints.bound[1] = 3
+	c.checkpoints.bound[2] = 5
+	c.checkpoints.mu.Unlock()
+
+	newPath, err := c.ForkSession(1, "keep-second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := agent.LoadSession(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(loaded.Messages); got != 5 {
+		t.Fatalf("forked messages = %d, want 5", got)
+	}
+	if loaded.Messages[4].Content != "second answer" {
+		t.Fatalf("fork tip = %q, want second answer", loaded.Messages[4].Content)
 	}
 }
 
