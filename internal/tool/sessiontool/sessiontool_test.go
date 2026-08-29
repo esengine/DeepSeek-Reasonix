@@ -373,3 +373,70 @@ func TestCleanupPendingContract(t *testing.T) {
 		t.Fatal("read_session should reject cleanup-pending session created by agent.MarkCleanupPending")
 	}
 }
+
+// set_session_title tests
+
+func TestSetSessionTitle_SetsMetaTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "20260618-231556.000000000-gpt-4.jsonl")
+	writeSessionJSONL(t, path, []provider.Message{{Role: provider.RoleUser, Content: "help me parse the ledger"}})
+
+	tool := NewSetSessionTitleTool(dir)
+	out := runTool(t, tool, map[string]any{
+		"session": "20260618-231556.000000000-gpt-4.jsonl",
+		"title":   "Parse the ledger",
+	})
+	if !strings.Contains(out, `title set to "Parse the ledger"`) {
+		t.Fatalf("output %q missing confirmation", out)
+	}
+
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("load meta: ok=%v err=%v", ok, err)
+	}
+	if meta.CustomTitle != "Parse the ledger" {
+		t.Fatalf("meta.CustomTitle = %q, want %q", meta.CustomTitle, "Parse the ledger")
+	}
+}
+
+func TestSetSessionTitle_ClearsTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "20260618-231556.000000000-gpt-4.jsonl")
+	writeSessionJSONL(t, path, []provider.Message{{Role: provider.RoleUser, Content: "hi"}})
+	if err := agent.RenameSession(path, "Initial title"); err != nil {
+		t.Fatalf("seed title: %v", err)
+	}
+
+	tool := NewSetSessionTitleTool(dir)
+	runTool(t, tool, map[string]any{
+		"session": "20260618-231556.000000000-gpt-4.jsonl",
+		"title":   "",
+	})
+
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("load meta: ok=%v err=%v", ok, err)
+	}
+	if meta.CustomTitle != "" {
+		t.Fatalf("meta.CustomTitle = %q, want empty after clearing", meta.CustomTitle)
+	}
+}
+
+func TestSetSessionTitle_RejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	tool := NewSetSessionTitleTool(dir)
+	_, err := tool.Execute(context.Background(), json.RawMessage(`{
+		"session":"../../elsewhere.jsonl",
+		"title":"nope"
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "outside the session directory") {
+		t.Fatalf("path traversal should be rejected, got %v", err)
+	}
+}
+
+func TestSetSessionTitle_RequiresSession(t *testing.T) {
+	tool := NewSetSessionTitleTool(t.TempDir())
+	if _, err := tool.Execute(context.Background(), json.RawMessage(`{"title":"x"}`)); err == nil {
+		t.Fatal("missing session argument should be rejected")
+	}
+}

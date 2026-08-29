@@ -1154,12 +1154,14 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		if opts.Ablation.Off(ablation.Retrieval) {
 			reg.Add(sessiontool.NewListSessionsTool(sessionDir))
 			reg.Add(sessiontool.NewReadSessionTool(sessionDir))
-			return "enabled list_sessions, read_session."
+			reg.Add(sessiontool.NewSetSessionTitleTool(sessionDir))
+			return "enabled list_sessions, read_session, set_session_title."
 		}
 		reg.Add(history.NewIndexedTool(history.Options{SessionDir: sessionDir, GlobalSessionDir: config.SessionDir(), ArchiveDir: config.ArchiveDir()}))
 		reg.Add(sessiontool.NewListSessionsTool(sessionDir))
 		reg.Add(sessiontool.NewReadSessionTool(sessionDir))
-		return "enabled history, list_sessions, read_session."
+		reg.Add(sessiontool.NewSetSessionTitleTool(sessionDir))
+		return "enabled history, list_sessions, read_session, set_session_title."
 	}
 	memoryToolsAdded := false
 	addMemoryTools := func() string {
