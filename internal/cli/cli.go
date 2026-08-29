@@ -1852,7 +1852,7 @@ type providerFamily struct {
 func familyOf(name string) providerFamily {
 	switch {
 	case strings.HasPrefix(name, "deepseek"):
-		return providerFamily{key: "deepseek", name: "DeepSeek", desc: "fast & cheap, plus a stronger Pro SKU"}
+		return providerFamily{key: "deepseek", name: "DeepSeek", desc: i18n.M.DeepSeekProviderDesc}
 	default:
 		return providerFamily{key: name, name: name}
 	}

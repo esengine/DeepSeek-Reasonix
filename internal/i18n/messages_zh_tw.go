@@ -413,6 +413,9 @@ var ChineseTraditional = Messages{
 	InvalidAPIKeyEnvFmt:        "%q 不是有效的 API Key 變數名稱。只能使用字母、數字和底線（例如 MY_PROVIDER_API_KEY）；請勿在此填寫模型名稱。",
 	RepairedAPIKeyEnvFmt:       "provider %s：已將無效的 API Key 變數名稱 %q 修復為 %q",
 
+	// DeepSeek provider
+	DeepSeekProviderDesc: "快速且便宜，另有更強的 Pro 型號",
+
 	// custom provider
 	CustomProviderDesc:   "新增第三方 OpenAI 相容模型",
 	CustomAddMethodLabel: "新增第三方 OpenAI 相容模型 - 選擇新增方式",

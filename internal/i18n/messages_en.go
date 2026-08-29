@@ -439,6 +439,9 @@ var English = Messages{
 	InvalidAPIKeyEnvFmt:        "%q is not a valid API Key variable name. Use letters, numbers, and underscores (for example, MY_PROVIDER_API_KEY); do not enter a model name.",
 	RepairedAPIKeyEnvFmt:       "provider %s: replaced invalid API Key variable name %q with %q",
 
+	// DeepSeek provider
+	DeepSeekProviderDesc: "fast & cheap, plus a stronger Pro SKU",
+
 	// custom provider
 	CustomProviderDesc:   "Add third-party OpenAI compatible model",
 	CustomAddMethodLabel: "Add third-party OpenAI compatible model - Select add method",

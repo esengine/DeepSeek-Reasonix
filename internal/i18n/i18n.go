@@ -475,6 +475,9 @@ type Messages struct {
 	InvalidAPIKeyEnvFmt        string // "%q is not a valid API Key variable name..."
 	RepairedAPIKeyEnvFmt       string // "provider %s: replaced invalid api_key_env %q with %q"
 
+	// DeepSeek provider
+	DeepSeekProviderDesc string // "fast & cheap, plus a stronger Pro SKU"
+
 	// custom provider
 	CustomProviderDesc   string // "Add third-party OpenAI compatible model"
 	CustomAddMethodLabel string // "Select add method"
