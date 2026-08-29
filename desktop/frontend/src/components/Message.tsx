@@ -814,10 +814,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
   const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
   if (processOnly && (reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending")) return null;
+  const reasoningFallback = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending" ? null
+    : <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || reasoningDisplayMode === "expanded" || (item.streaming && (reasoningDisplayMode === "auto" || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <Suspense fallback={null}>
+        <Suspense fallback={reasoningFallback}>
           <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
         </Suspense>
       )}

@@ -4838,6 +4838,8 @@ a[href] {
 .reasoning {
   margin: 2px 0 4px;
 }
+.reasoning--loading { height: 58px; }
+.reasoning--loading[data-expanded] { height: min(40vh, 480px); }
 .reasoning__head {
   display: inline-flex;
   align-items: center;

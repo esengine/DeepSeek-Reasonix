@@ -41,6 +41,8 @@ console.log("\nreasoning inner-scroll follow");
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 eq(styles.includes("max-height: min(40vh, 480px);"), true, "expanded reasoning uses the responsive height cap");
 eq(styles.includes("overflow-y: auto;"), true, "expanded reasoning keeps full content internally scrollable");
+eq(styles.includes(".reasoning--loading { height: 58px; }"), true, "lazy reasoning reserves collapsed history geometry");
+eq(styles.includes(".reasoning--loading[data-expanded] { height: min(40vh, 480px); }"), true, "lazy expanded reasoning reserves bounded geometry");
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("missing root");
