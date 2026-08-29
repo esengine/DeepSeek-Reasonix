@@ -272,6 +272,11 @@ type Controller struct {
 	finishing         bool // TurnDone is still being delivered; park a replacement turn
 	finishingBoundary turnFinishingBoundary
 	canceling         bool
+	// interrupting is set when the user submits a new message during tool
+	// execution. Unlike canceling (which kills everything), interrupting
+	// lets tools with InterruptBehaviorContinue (bash) keep running in the
+	// background while ending the turn gracefully.
+	interrupting bool
 	// closed marks the controller as terminally torn down (close() ran). It
 	// seals turn admission: without it, a submit arriving AFTER close cleared
 	// the parked queue — but while a still-running turn's TurnDone delivery
@@ -1036,6 +1041,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	// A closed controller has no live surface and may clear immediately.
 	if c.closed {
 		c.canceling = false
+		c.interrupting = false
 	}
 	c.mu.Unlock()
 
@@ -1060,6 +1066,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		c.cancel = cancel
 		c.running = true
 		c.canceling = false
+		c.interrupting = false
 		c.mu.Unlock()
 		c.spawnGuardedTurn(ctx, cancel, next)
 	}()
@@ -2129,6 +2136,26 @@ func (c *Controller) Cancel() {
 	}
 }
 
+// Interrupt signals the in-flight turn to end gracefully after the current
+// tool round. Unlike Cancel, tools with InterruptBehaviorContinue (bash) keep
+// running in the background. The user's next message is queued as a new turn.
+// This implements Claude Code-style "steer in real-time": submit while tools
+// are running, and long-running tools don't get killed.
+func (c *Controller) Interrupt() {
+	c.mu.Lock()
+	cancel := c.cancel
+	running := c.running
+	if running {
+		c.interrupting = true
+	}
+	c.mu.Unlock()
+	if cancel != nil {
+		// Cancel the turn context — tools with InterruptBehaviorCancel stop
+		// immediately, tools with InterruptBehaviorContinue detour to background.
+		cancel()
+	}
+}
+
 // beginRotation claims the session-rotation gate. It fails if a turn is running
 // or another rotation is already in progress, so the caller holds exclusive
 // rights to swap the executor session from the check here through endRotation.
@@ -2153,6 +2180,15 @@ func (c *Controller) CancelRequested() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.canceling
+}
+
+// InterruptRequested reports whether Interrupt has been requested for the
+// active turn. Unlike CancelRequested, this signals a soft interrupt: tools
+// with InterruptBehaviorContinue should keep running in the background.
+func (c *Controller) InterruptRequested() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.interrupting
 }
 
 // PendingPrompt reports whether the current turn is blocked waiting for a user
