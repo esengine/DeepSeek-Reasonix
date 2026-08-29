@@ -668,6 +668,25 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 	}
 }
 
+// isEventStreamContentType reports whether the response's Content-Type claims
+// to be an SSE stream. Some compatible gateways omit or mislabel the header
+// while still streaming correctly, so this is only used to improve diagnostics
+// when the stream ended without a single SSE event — never to reject a response.
+func isEventStreamContentType(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	return ct == "" || strings.Contains(ct, "event-stream") || strings.Contains(ct, "ndjson")
+}
+
+// clipDiagnosticLine bounds a non-SSE line before it rides in an error
+// message, so a multi-KB HTML page cannot bloat the surface text.
+func clipDiagnosticLine(line string) string {
+	const max = 120
+	if len(line) <= max {
+		return line
+	}
+	return line[:max] + "…"
+}
+
 func (c *client) buildRequest(req provider.Request) chatRequest {
 	// Repair tool-call pairing before sending: an interrupted/resumed history can
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
@@ -914,6 +933,14 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	var lastFinishReason string
 	var sawDone bool
 	var think thinkSplitter
+	// sawDataPrefix records whether any `data:` line was seen at all, and
+	// firstNonData the first non-blank line that was not a `data:` line. A
+	// stream that ends without a single SSE event and whose Content-Type is not
+	// event-stream usually means the URL pointed at a non-streaming endpoint
+	// (a gateway landing page, an HTML error page) rather than a real model
+	// stream — surface that instead of a bare unexpected EOF (#8781).
+	var sawDataPrefix bool
+	var firstNonData string
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -924,9 +951,16 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		default:
 		}
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
+		if line == "" {
 			continue
 		}
+		if !strings.HasPrefix(line, "data:") {
+			if firstNonData == "" {
+				firstNonData = clipDiagnosticLine(line)
+			}
+			continue
+		}
+		sawDataPrefix = true
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			sawDone = true
@@ -1053,6 +1087,16 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	// tool-call arguments, which then 400 on every replay (#3953). OpenAI Chat
 	// accepts either [DONE] or a legal finish_reason as a complete terminal.
 	if !sawDone && lastFinishReason == "" {
+		ct := strings.TrimSpace(resp.Header.Get("Content-Type"))
+		if !sawDataPrefix && !isEventStreamContentType(ct) {
+			// No SSE event at all and the response does not even claim to be
+			// event-stream: the endpoint returned a non-streaming body (a
+			// gateway landing page or HTML/JSON error page) for a URL that
+			// should have streamed. This is a config problem, not a dropped
+			// connection, so say so instead of a bare unexpected EOF (#8781).
+			return emitted, fmt.Errorf("%s: stream ended before any SSE event (Content-Type %q, first line %q) — the endpoint returned a non-streaming response, e.g. a gateway landing page. Check that request_url/base_url points to a full API endpoint such as /v1/chat/completions or /v1/responses, not a gateway root: %w",
+				c.name, ct, firstNonData, io.ErrUnexpectedEOF)
+		}
 		return emitted, fmt.Errorf("%s: stream ended before completion: %w", c.name, io.ErrUnexpectedEOF)
 	}
 
