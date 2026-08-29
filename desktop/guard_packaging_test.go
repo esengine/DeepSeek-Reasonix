@@ -74,11 +74,12 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 		`cp "$cli_out" "$app/Contents/MacOS/$CLINAME"`,
 		`macOS bundle must not include $GUARDNAME`,
 		`[ "$bundle_executable" = "$BINNAME" ]`,
-		`Print :CFBundleIconFile`,
-		`darwin_icon="$ROOT/desktop/build/darwin/icon.icns"`,
-		`cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
-		`cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
-		`Contents/Resources/$bundle_icon`,
+		`modern_icon="$ROOT/desktop/build/darwin/$APPNAME.icon"`,
+		`xcrun actool "$modern_icon"`,
+		`--app-icon "$APPNAME"`,
+		`Set :CFBundleIconName $APPNAME`,
+		`Contents/Resources/Assets.car`,
+		`Contents/Resources/$APPNAME.icns`,
 		`-H windowsgui`,
 		`stamp_windows_executable "$guard_out" "Reasonix Legacy Migrator"`,
 		`stamp_windows_executable "$launcher_out" "Reasonix Launcher"`,
@@ -108,10 +109,10 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	if strings.Contains(build, `"$staging/$CLINAME.exe"`) {
 		t.Fatal("Windows package must not collide reasonix.exe with the Reasonix.exe launcher")
 	}
-	darwinIconCopy := strings.Index(build, `cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`)
+	darwinIconCompile := strings.Index(build, `xcrun actool "$modern_icon"`)
 	developerIDSign := strings.Index(build, `codesign --force --deep --timestamp --options runtime`)
-	if darwinIconCopy < 0 || developerIDSign < 0 || darwinIconCopy > developerIDSign {
-		t.Fatalf("macOS icon must be replaced before signing (icon=%d sign=%d)", darwinIconCopy, developerIDSign)
+	if darwinIconCompile < 0 || developerIDSign < 0 || darwinIconCompile > developerIDSign {
+		t.Fatalf("macOS icon must be compiled before signing (icon=%d sign=%d)", darwinIconCompile, developerIDSign)
 	}
 
 	for _, want := range []string{

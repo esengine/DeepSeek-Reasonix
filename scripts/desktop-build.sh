@@ -203,19 +203,24 @@ darwin)
 		echo "macOS bundle must not include $GUARDNAME" >&2
 		exit 1
 	fi
-	bundle_icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
-	case "$bundle_icon" in
-	*.icns) ;;
-	*) bundle_icon="$bundle_icon.icns" ;;
-	esac
-	darwin_icon="$ROOT/desktop/build/darwin/icon.icns"
-	[ -s "$darwin_icon" ] || { echo "macOS source icon is missing: $darwin_icon" >&2; exit 1; }
-	# Wails v2 always regenerates iconfile.icns from build/appicon.png. Replace it
-	# with the platform-specific asset before signing so the macOS safe area does
-	# not force the shared Windows/Linux artwork to shrink as well.
-	cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"
-	[ -s "$app/Contents/Resources/$bundle_icon" ] || { echo "macOS bundle icon is missing: $bundle_icon" >&2; exit 1; }
-	cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon" || { echo "macOS bundle icon replacement failed: $bundle_icon" >&2; exit 1; }
+	modern_icon="$ROOT/desktop/build/darwin/$APPNAME.icon"
+	[ -s "$modern_icon/icon.json" ] || { echo "macOS Icon Composer source is missing: $modern_icon" >&2; exit 1; }
+	icon_info="$staging/icon-info.plist"
+	echo "==> compile macOS Icon Composer asset"
+	xcrun actool "$modern_icon" \
+		--compile "$app/Contents/Resources" \
+		--platform macosx \
+		--minimum-deployment-target 10.13 \
+		--app-icon "$APPNAME" \
+		--output-partial-info-plist "$icon_info" \
+		--output-format human-readable-text
+	[ -s "$app/Contents/Resources/Assets.car" ] || { echo "macOS asset catalog is missing" >&2; exit 1; }
+	[ -s "$app/Contents/Resources/$APPNAME.icns" ] || { echo "macOS fallback icon is missing" >&2; exit 1; }
+	/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile $APPNAME" "$app/Contents/Info.plist"
+	if ! /usr/libexec/PlistBuddy -c "Set :CFBundleIconName $APPNAME" "$app/Contents/Info.plist" >/dev/null 2>&1; then
+		/usr/libexec/PlistBuddy -c "Add :CFBundleIconName string $APPNAME" "$app/Contents/Info.plist"
+	fi
+	[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist")" = "$APPNAME" ] || { echo "macOS modern icon declaration failed" >&2; exit 1; }
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization

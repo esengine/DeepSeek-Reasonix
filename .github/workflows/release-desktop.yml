@@ -285,7 +285,7 @@ jobs:
         include:
           # Keep preflight on the same complete native matrix as publication so
           # it cannot attest a release whose adjacent platform build is broken.
-          - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
+          - { runner: macos-26, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
           - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
