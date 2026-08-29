@@ -1369,6 +1369,7 @@ export const zh: Record<DictKey, string> = {
   "projectTree.revealInFinder": "在 Finder 中显示",
   "projectTree.revealInExplorer": "在文件资源管理器中显示",
   "projectTree.revealInFileManager": "在文件管理器中显示",
+  "projectTree.openInGithub": "在 GitHub 中打开",
   "projectTree.topicActions": "会话操作",
   "projectTree.projectActions": "项目操作",
   "projectTree.colorDefault": "默认",

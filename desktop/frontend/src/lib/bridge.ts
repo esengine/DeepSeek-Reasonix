@@ -473,6 +473,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
+  ProjectRemoteURL(path: string): Promise<string>;
   OpenLocalPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
@@ -4196,6 +4197,9 @@ function makeMockApp(): AppBindings {
     },
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
+    },
+    async ProjectRemoteURL(_path: string): Promise<string> {
+      return "";
     },
     async SavePastedImage(dataUrl: string) {
       const path = `.reasonix/attachments/mock-${mockAttachmentDataURLs.size + 1}.png`;

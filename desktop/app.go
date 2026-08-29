@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
@@ -10591,6 +10592,122 @@ func defaultRevealPath(path string) error {
 		}
 		return proc.VisibleCommand("xdg-open", dir).Start()
 	}
+}
+
+// remoteURLCacheEntry holds a cached sanitized URL with its expiry.
+type remoteURLCacheEntry struct {
+	url    string
+	expiry time.Time
+}
+
+// remoteURLCacheTTL is how long we cache a ProjectRemoteURL result.
+const remoteURLCacheTTL = 30 * time.Second
+
+// remoteURLCache is a process-wide cache keyed by project path.
+var remoteURLCache sync.Map
+
+// ProjectRemoteURL returns the Git remote origin URL for the project at path,
+// converted to a clean HTTPS URL suitable for opening in a browser.
+// Credentials are stripped. Returns empty string when the path is not a Git
+// repository, has no remote, or the remote URL cannot be sanitized.
+// Results are cached with a 30-second TTL.
+func (a *App) ProjectRemoteURL(path string) string {
+	if a == nil || a.ctx == nil {
+		return ""
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// Check cache
+	if entry, ok := remoteURLCache.Load(path); ok {
+		e := entry.(remoteURLCacheEntry)
+		if time.Now().Before(e.expiry) {
+			return e.url
+		}
+	}
+	// Fetch from git
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "config", "--get", "remote.origin.url")
+	out, err := cmd.Output()
+	if err != nil {
+		remoteURLCache.Store(path, remoteURLCacheEntry{expiry: time.Now().Add(remoteURLCacheTTL)})
+		return ""
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		remoteURLCache.Store(path, remoteURLCacheEntry{expiry: time.Now().Add(remoteURLCacheTTL)})
+		return ""
+	}
+	sanitized := sanitizeRemoteURL(raw)
+	remoteURLCache.Store(path, remoteURLCacheEntry{url: sanitized, expiry: time.Now().Add(remoteURLCacheTTL)})
+	return sanitized
+}
+
+// sanitizeRemoteURL converts a git remote URL to a clean HTTPS URL suitable
+// for opening in a browser. It handles HTTPS, SCP-style SSH
+// (git@host:path), and ssh:// URL formats. Credentials are stripped from
+// HTTPS URLs. Returns empty string when the URL cannot be sanitized.
+func sanitizeRemoteURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	// Handle SCP-style SSH: [user@]host:path (e.g. git@github.com:org/repo.git
+	// or deploy@gitlab.com:group/repo.git). The user is dropped and the result
+	// is built through net/url so host/path are properly encoded.
+	if !strings.Contains(rawURL, "://") {
+		userHost, path, ok := strings.Cut(rawURL, ":")
+		if !ok || path == "" {
+			return ""
+		}
+		if strings.Count(userHost, "@") > 1 {
+			return ""
+		}
+		host := userHost
+		if i := strings.LastIndex(userHost, "@"); i >= 0 {
+			host = userHost[i+1:]
+		}
+		if host == "" || strings.ContainsAny(host, "@/") {
+			return ""
+		}
+		path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+		if path == "" {
+			return ""
+		}
+		return (&url.URL{Scheme: "https", Host: host, Path: "/" + path}).String()
+	}
+	// For http/https and ssh:// URLs, use net/url to parse and sanitize
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") && !strings.HasPrefix(rawURL, "ssh://") {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	// Convert ssh:// to https://
+	if u.Scheme == "ssh" {
+		u.Scheme = "https"
+	}
+	// Only allow http/https
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	// Reject URLs without a host (e.g. https:///org/repo)
+	if u.Host == "" {
+		return ""
+	}
+	// Strip credentials
+	u.User = nil
+	// Query strings and fragments can carry tokens — drop them entirely.
+	u.RawQuery = ""
+	u.Fragment = ""
+	// Strip trailing slash, then a trailing .git suffix (order matters so
+	// https://host/org/repo.git/ also loses the .git).
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	u.Path = strings.TrimSuffix(u.Path, ".git")
+	return u.String()
 }
 
 func (a *App) noticeForTab(tabID, text string) {
