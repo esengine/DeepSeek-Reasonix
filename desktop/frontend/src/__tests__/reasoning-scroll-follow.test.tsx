@@ -31,6 +31,11 @@ function Harness({ content }: { content: string }) {
   return <div ref={elementRef} data-nested-scroll onScroll={onScroll}>{content}</div>;
 }
 
+function RefLessHarness({ content }: { content: string }) {
+  useReasoningScrollFollow(content, true);
+  return null;
+}
+
 console.log("\nreasoning inner-scroll follow");
 
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
@@ -82,6 +87,9 @@ Object.defineProperty(nextPane, "scrollTop", {
 });
 await act(async () => root.render(<Harness key="a:turn:1" content="new segment token" />));
 eq(nextScrollTop, 1_400, "a new assistant segment starts with inner follow armed");
+
+await act(async () => root.render(<RefLessHarness content="unmounted before layout effect" />));
+eq(rootElement.firstElementChild, null, "an active follow tolerates a reasoning body that is not mounted");
 
 await act(async () => root.unmount());
 dom.window.close();

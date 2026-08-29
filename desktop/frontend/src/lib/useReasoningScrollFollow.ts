@@ -16,7 +16,9 @@ export function useReasoningScrollFollow(
 
   useLayoutEffect(() => {
     if (!active || !followRef.current) return;
-    scrollReasoningToBottom(elementRef.current!);
+    const element = elementRef.current;
+    if (!element) return;
+    scrollReasoningToBottom(element);
   }, [active, content]);
 
   return [elementRef, onScroll] as const;
