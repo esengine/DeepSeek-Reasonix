@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +45,106 @@ func newTestClient(t *testing.T, srv *sshtest.Server, opts Options) *Client {
 	return c
 }
 
+// TestExecSendsBareShCommand pins the issue #8130 wire contract: the remote
+// side receives exactly `sh` — never a quoted payload — so the user's login
+// shell (tcsh/csh/zsh) has nothing to misinterpret — and the full script
+// arrives intact via the session stdin.
+func TestExecSendsBareShCommand(t *testing.T) {
+	// gotCmd is written by the sshtest handler goroutine and read by the test
+	// goroutine after Exec returns; the network round trip alone establishes no
+	// happens-before, so the pair must be synchronized for -race.
+	var (
+		mu     sync.Mutex
+		gotCmd string
+	)
+	srv := sshtest.Start(t, sshtest.Options{
+		Password: "hunter2",
+		Exec: func(cmd string) (string, string, int) {
+			mu.Lock()
+			gotCmd = cmd
+			mu.Unlock()
+			return "ok", "", 0
+		},
+	})
+	c := newTestClient(t, srv, Options{Auth: AuthOptions{Password: func() (string, error) { return "hunter2", nil }}})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+	payload := `echo 'x; echo PWNED; echo y'`
+	res, err := c.Exec(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	mu.Lock()
+	cmd := gotCmd
+	mu.Unlock()
+	if cmd != "sh" {
+		t.Fatalf("remote command = %q, want exactly %q", cmd, "sh")
+	}
+	if strings.TrimSpace(string(res.Stdout)) != "ok" {
+		t.Fatalf("stdout = %q, want ok", res.Stdout)
+	}
+	// The script travels via stdin and must arrive byte-identical.
+	deadline := time.Now().Add(2 * time.Second)
+	for srv.LastStdin() != payload && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := srv.LastStdin(); got != payload {
+		t.Fatalf("session stdin = %q, want the full payload %q", got, payload)
+	}
+}
+
+// TestShViaStdinRoundTripsPayload verifies the stdin-fed script executes under
+// /bin/sh with quoting intact — the same stdin path the remote `sh` uses.
+func TestShViaStdinRoundTripsPayload(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	payload := `echo 'x; echo PWNED; echo y'`
+	cmd := exec.Command("sh")
+	cmd.Stdin = strings.NewReader(payload)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("sh via stdin failed: %v", err)
+	}
+	if string(out) != "x; echo PWNED; echo y\n" {
+		t.Fatalf("stdin payload output = %q, want literal %q", out, "x; echo PWNED; echo y\n")
+	}
+}
+
+// TestExecSurvivesTcshLoginShell reproduces the sshd execution model on a host
+// whose login shell is tcsh: the outer command is `sh` (trivially parsed) and
+// the script arrives via stdin. Skipped when tcsh is unavailable (Linux CI).
+func TestExecSurvivesTcshLoginShell(t *testing.T) {
+	tcsh, err := exec.LookPath("tcsh")
+	if err != nil {
+		t.Skip("tcsh not installed")
+	}
+	payload := `SX=; command -v setsid >/dev/null 2>&1 && SX=setsid; echo "probe-ok $SX"`
+	cmd := exec.Command(tcsh, "-fc", "sh")
+	cmd.Stdin = strings.NewReader(payload)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("tcsh -fc sh via stdin failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "probe-ok") {
+		t.Fatalf("output = %q, want prefix probe-ok", out)
+	}
+	// A payload with POSIX '\'' escaping (bootstrap quoted paths) must survive
+	// too — the escaping is resolved inside sh, never by tcsh.
+	quoted := `echo 'a'\''b'`
+	cmd2 := exec.Command(tcsh, "-fc", "sh")
+	cmd2.Stdin = strings.NewReader(quoted)
+	out2, err := cmd2.Output()
+	if err != nil {
+		t.Fatalf("quoted payload via tcsh sh failed: %v", err)
+	}
+	if string(out2) != "a'b\n" {
+		t.Fatalf("quoted output = %q, want a'b", out2)
+	}
+}
+
 func TestClientConnectPasswordAuth(t *testing.T) {
 	srv := sshtest.Start(t, sshtest.Options{Password: "hunter2"})
 	c := newTestClient(t, srv, Options{
@@ -64,8 +166,11 @@ func TestClientConnectPasswordAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
-	if strings.TrimSpace(string(res.Stdout)) != "echo hello" {
-		t.Fatalf("exec stdout = %q", res.Stdout)
+	// The sshtest server echoes the received exec command; since issue #8130
+	// the remote side receives exactly `sh` — the stdin script path is covered
+	// by TestShViaStdinRoundTripsPayload and the tcsh test.
+	if strings.TrimSpace(string(res.Stdout)) != "sh" {
+		t.Fatalf("exec stdout = %q, want the bare `sh` command", res.Stdout)
 	}
 }
 
@@ -300,10 +405,9 @@ func TestClientFallsBackFromStoredPassphraseToPerIdentityPrompt(t *testing.T) {
 		},
 	}
 
-	// This handshake performs three passphrase KDFs (stored + prompted for the
-	// first identity, then stored for the second). Under full -race package
-	// parallelism on a constrained CI runner, ten seconds is too close to the CPU
-	// bound work even though the in-process SSH server remains responsive.
+	// This handshake performs three passphrase KDFs; under full -race package
+	// parallelism on a constrained CI runner ten seconds is too close to the
+	// CPU-bound work even though the in-process server stays responsive.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := c.Start(ctx); err != nil {

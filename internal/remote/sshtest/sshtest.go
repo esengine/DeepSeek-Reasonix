@@ -12,6 +12,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -31,6 +32,12 @@ type Server struct {
 	conns     []net.Conn
 	listeners []net.Listener
 	wg        sync.WaitGroup
+
+	// stdinMu guards lastStdin, the session script the client streams after
+	// the exec request (models sshd's forwarding to the remote process's
+	// stdin). Test code reads it to assert the payload arrived intact.
+	stdinMu   sync.Mutex
+	lastStdin []byte
 }
 
 // Options configures a test server.
@@ -202,8 +209,26 @@ func (s *Server) handleSession(newCh ssh.NewChannel) {
 		switch req.Type {
 		case "exec":
 			cmd := parseStringPayload(req.Payload)
+			// The client streams the script after the exec request; model the
+			// same ordering: wait for the first data frame, then run the
+			// handler. Reading until EOF would deadlock.
+			first := make(chan struct{})
+			go func() {
+				buf := make([]byte, 64*1024)
+				n, _ := ch.Read(buf)
+				if n > 0 {
+					s.stdinMu.Lock()
+					s.lastStdin = append([]byte(nil), buf[:n]...)
+					s.stdinMu.Unlock()
+				}
+				close(first)
+			}()
 			if req.WantReply {
 				_ = req.Reply(true, nil)
+			}
+			select {
+			case <-first:
+			case <-time.After(500 * time.Millisecond):
 			}
 			s.runExec(ch, cmd)
 			return
@@ -229,6 +254,15 @@ func (s *Server) handleSession(newCh ssh.NewChannel) {
 			}
 		}
 	}
+}
+
+// LastStdin returns the script streamed by the most recent exec request,
+// once the session channel has closed (the same completion point a remote
+// process observes). Test code polls it to assert the payload arrived intact.
+func (s *Server) LastStdin() string {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	return string(s.lastStdin)
 }
 
 func (s *Server) runExec(ch ssh.Channel, cmd string) {
