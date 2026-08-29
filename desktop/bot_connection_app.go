@@ -176,7 +176,7 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 			Access:     botInstallAccess(result.UserID),
 			Credential: config.BotConnectionCredential{AccountID: result.AccountID, TokenEnv: "WEIXIN_BOT_TOKEN"},
 		}, func(c *config.Config) {
-			c.Bot.Enabled = true
+			c.Bot.Enabled = c.Bot.Enabled || config.BotInstallMayEnableGateway(c)
 			c.Bot.Weixin.Enabled = true
 			c.Bot.Weixin.AccountID = result.AccountID
 			c.Bot.Weixin.APIBase = result.BaseURL
@@ -588,7 +588,7 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		Access:     botInstallAccess(userID),
 		Credential: config.BotConnectionCredential{AppID: appID, AppSecretEnv: secretEnv},
 	}, func(c *config.Config) {
-		c.Bot.Enabled = true
+		c.Bot.Enabled = c.Bot.Enabled || config.BotInstallMayEnableGateway(c)
 		c.Bot.Feishu.Enabled = true
 		c.Bot.Feishu.Domain = domain
 		c.Bot.Feishu.AppID = appID
