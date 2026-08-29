@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/instruction"
 )
@@ -18,7 +19,7 @@ type Set struct {
 	Docs                   []Source // REASONIX.md / AGENTS.md, ascending precedence
 	PinnedGuidance         []Memory // stable snapshot of pinned fact bodies (incl. legacy global user/feedback)
 	Store                  Store    // auto-memory store (may be a zero/disabled Store)
-	Index                  string   // MEMORY.md contents at load time
+	Index                  string   // bounded index projection folded into the prefix at load time
 	CWD                    string   // project working dir used for discovery
 	UserDir                string   // user config root (may be "")
 	InstructionDiagnostics []instruction.Diagnostic
@@ -57,13 +58,22 @@ func Load(opts Options) *Set {
 		Docs:                   resolved.Documents,
 		PinnedGuidance:         store.pinnedGuidanceForProject(),
 		Store:                  store,
-		Index:                  store.Index(),
+		Index:                  store.IndexBounded(prefixIndexNow(), defaultPrefixIndexMaxChars),
 		CWD:                    cwd,
 		UserDir:                opts.UserDir,
 		InstructionDiagnostics: resolved.Diagnostics,
 		recall:                 BuildRecallIndex(store),
 	}
 }
+
+// prefixIndexNow pins the prefix-index reference clock to process start so a
+// same-session rebuild re-Loads the store with the same now: the prefix stays
+// a pure function of the memory set, keeping DeepSeek's prefix cache warm.
+func prefixIndexNow() time.Time {
+	return sessionStartTime
+}
+
+var sessionStartTime = time.Now()
 
 // DocPath returns the doc-memory file a given scope writes to. To avoid splitting
 // a project's memory across conventions, it prefers a file that already exists
