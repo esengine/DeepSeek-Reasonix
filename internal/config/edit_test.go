@@ -2921,27 +2921,38 @@ func TestUpsertProviderNormalizesCustomEffortFields(t *testing.T) {
 	}
 }
 
-func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
-	// mimo-pro without SupportedEfforts: no built-in heuristic, /effort must reject.
+func TestEffortCapabilityGenericOpenAIExposesStandardScale(t *testing.T) {
+	// A generic OpenAI-compatible provider we don't otherwise recognise (here a
+	// MiMo gateway) now exposes the standard reasoning_effort selector rather than
+	// hiding it, so third-party proxies aren't silently stripped of /effort (#4729).
 	e := &ProviderEntry{
 		Name:    "mimo-pro",
 		Kind:    "openai",
 		BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
 		Model:   "mimo-v2.5-pro",
 	}
-	if cap := EffortCapabilityForEntry(e); cap.Supported {
-		t.Fatalf("mimo-pro without SupportedEfforts should not be configurable, got %+v", cap)
+	cap := EffortCapabilityForEntry(e)
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if !cap.Supported || len(cap.Levels) != len(wantLevels) || cap.Default != "auto" {
+		t.Fatalf("generic openai provider should expose auto/low/medium/high (default auto), got %+v", cap)
 	}
-	if _, err := NormalizeEffort(e, "high"); err == nil {
-		t.Fatal("NormalizeEffort should reject level for unsupported provider")
+	for i, l := range wantLevels {
+		if cap.Levels[i] != l {
+			t.Errorf("levels[%d] = %q, want %q", i, cap.Levels[i], l)
+		}
 	}
-	// `supported_efforts = []` (empty slice) is treated like nil — the v2 design
-	// has no way to opt out of the built-in heuristic; users either configure
-	// levels or leave the field unset.
+	// The standard scale is accepted; "max" clamps to the OpenAI ceiling and
+	// "off" means no override.
+	for in, want := range map[string]string{"high": "high", "medium": "medium", "max": "high", "off": ""} {
+		if got, err := NormalizeEffort(e, in); err != nil || got != want {
+			t.Errorf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
+		}
+	}
+	// An empty supported_efforts slice is treated like nil — same generic scale.
 	e2 := *e
 	e2.SupportedEfforts = []string{}
-	if cap := EffortCapabilityForEntry(&e2); cap.Supported {
-		t.Fatalf("empty supported_efforts should also fall through to the heuristic, got %+v", cap)
+	if cap := EffortCapabilityForEntry(&e2); !cap.Supported {
+		t.Fatalf("empty supported_efforts should fall through to the generic scale, got %+v", cap)
 	}
 }
 

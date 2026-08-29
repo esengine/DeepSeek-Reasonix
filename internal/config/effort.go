@@ -130,6 +130,13 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		return EffortCapability{Supported: true, Levels: []string{"auto", "none", "low", "medium", "high", "max"}, Default: "auto"}
 	case e != nil && e.Kind == "anthropic":
 		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high", "xhigh", "max"}, Default: "auto"}
+	case e != nil && e.Kind == "openai":
+		// Generic OpenAI-compatible provider (third-party proxy, gateway, etc.)
+		// that we don't otherwise recognise: expose the standard reasoning_effort
+		// selector rather than hiding it. Default "auto" sends nothing, so a model
+		// that ignores reasoning_effort is unaffected; a DeepSeek-V4-behind-a-proxy
+		// still gets effort honoured by the backend (#4729).
+		return openAIEffortCapability()
 	default:
 		return EffortCapability{}
 	}
@@ -252,6 +259,20 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return level, nil
 		default:
 			return "", fmt.Errorf("usage: /effort auto|low|medium|high|xhigh|max")
+		}
+	case e != nil && e.Kind == "openai":
+		// Generic OpenAI-compatible provider: accept the standard scale. "max" /
+		// "xhigh" are DeepSeek-isms some backends 400 on, so clamp to the OpenAI
+		// ceiling; "off" means no override (#4729).
+		switch level {
+		case "low", "medium", "high":
+			return level, nil
+		case "max", "xhigh":
+			return "high", nil
+		case "off":
+			return "", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|low|medium|high")
 		}
 	default:
 		return "", effortNotConfigurableError(e)
