@@ -1025,7 +1025,7 @@ export function WorkspacePanel({
       return scopedFilePaths
         .map((path) => ({ path, entry: { name: basename(path), isDir: false } }))
         .filter((row) => !q || row.path.toLowerCase().includes(q))
-        .sort((a, b) => a.path.localeCompare(b.path));
+        .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }));
     }
     const rows: { path: string; entry: DirEntry }[] = [];
     for (const [dir, entries] of Object.entries(entriesByDir)) {
@@ -1036,7 +1036,7 @@ export function WorkspacePanel({
     if (!q) return null;
     return mergeWorkspaceSearchResults(rows, searchResults)
       .filter((row) => row.path.toLowerCase().includes(q))
-      .sort((a, b) => a.path.localeCompare(b.path));
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }));
   }, [entriesByDir, filter, scopedFilePaths, searchResults]);
 
   const treeRows = useMemo<WorkspaceTreeRowData[]>(() => {

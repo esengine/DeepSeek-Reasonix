@@ -58,6 +58,7 @@ import (
 	"reasonix/internal/store"
 	"reasonix/internal/taskcatalog"
 	"reasonix/internal/taskmonitor"
+	"reasonix/internal/textutil"
 	"reasonix/internal/tool"
 )
 
@@ -10357,8 +10358,8 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 		}
 		files = append(files, DirEntry{Name: name, IsDir: false})
 	}
-	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name) })
-	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name) })
+	sort.Slice(dirs, func(i, j int) bool { return textutil.NaturalLess(dirs[i].Name, dirs[j].Name) })
+	sort.Slice(files, func(i, j int) bool { return textutil.NaturalLess(files[i].Name, files[j].Name) })
 	return append(dirs, files...)
 }
 

@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
+	"reasonix/internal/textutil"
 )
 
 // compKind distinguishes the two completion menus.
@@ -565,9 +566,12 @@ func (m *chatTUI) fileItems(token string) []compItem {
 	if err != nil {
 		entries = nil
 	}
-	// Directories first, then files; ReadDir is already name-sorted.
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].IsDir() && !entries[j].IsDir()
+	// Directories first, then files; both groups sorted naturally.
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() != entries[j].IsDir() {
+			return entries[i].IsDir()
+		}
+		return textutil.NaturalLess(entries[i].Name(), entries[j].Name())
 	})
 
 	showHidden := strings.HasPrefix(fsFrag, ".")
