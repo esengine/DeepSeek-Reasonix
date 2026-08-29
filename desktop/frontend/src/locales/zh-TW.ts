@@ -2159,6 +2159,8 @@ export const zhTW: Record<DictKey, string> = {
   "notice.deliveryIncompleteContinue": "繼續檢查",
   "notice.deliveryIncompleteAccept": "接受驗收",
   "notice.deliveryIncompleteContinuePrompt": "繼續完成剩餘的任務收尾檢查。",
+  "notice.deliveryIncompleteAccept": "接受驗收（免模型）",
+  "notice.deliveryAccepted": "已完成驗收，待完成驗證標籤已清除（未觸發模型呼叫）。",
   "notice.completionAttentionTitle": "本輪仍需處理",
   "notice.completionGapsBody": "部分驗證未完成或受限，請查看變更詳情。",
   "notice.completionFailedTitle": "測試未通過",

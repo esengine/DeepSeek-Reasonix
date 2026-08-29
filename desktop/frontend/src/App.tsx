@@ -36,7 +36,7 @@ import { useActiveRemoteSession } from "./lib/useRemoteSession";
 import { useRemoteTabOpened } from "./lib/useRemoteTabOpened";
 import { renameCurrentRemoteSession } from "./lib/remoteSessionActions";
 import { localizedNoticeText, useController, type HistoryLoadTrigger, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onReady, onRemoteForwards, onRemoteServer, onRemoteStatus, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
+import { app, onDeliveryAccepted, onEvent, onProjectTreeChanged, onReady, onRemoteForwards, onRemoteServer, onRemoteStatus, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
 import { useConfigLoadWarnings } from "./lib/useConfigLoadWarnings";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
@@ -3566,6 +3566,25 @@ export default function App() {
       send: (tabId) => recoverDeliveryToTab(tabId, t("notice.deliveryIncompleteContinuePrompt")),
     });
   }, [controllerReady, recoverDeliveryToTab, resumeControllerGoalForTab, state.meta?.goal, t]);
+
+  const handleAcceptDelivery = useCallback(async (tabId: string) => {
+    if (!tabId) return;
+    try {
+      await app.AcceptDeliveryToTab(tabId);
+      refreshTabMetas(undefined, { afterMutation: true });
+    } catch (error) {
+      console.warn("Failed to accept delivery", error);
+    }
+  }, [refreshTabMetas]);
+
+  useEffect(() => {
+    const unsub = onDeliveryAccepted((event) => {
+      if (event.tabId && activeTabIdRef.current === event.tabId) {
+        showToast(t("notice.deliveryAccepted"), "info");
+      }
+    });
+    return unsub;
+  }, [showToast, t]);
   commitThenSendRef.current = commitThenSend;
 
   const handleMessageAction = useCallback((turn: number, scope: string) => {
@@ -4913,7 +4932,7 @@ export default function App() {
                       footerHeight={footerHeight}
                       onPrompt={handleTranscriptPrompt}
                       onDeliveryContinue={() => void handleDeliveryContinue()}
-                      onAcceptDelivery={() => void app.AcceptDeliveryToTab(activeTabIdRef.current ?? "")}
+                      onAcceptDelivery={(tabId) => void handleAcceptDelivery(tabId)}
                       onOpenChanges={() => openRightDockMode("changed")}
                       onOpenVerification={openTurnVerification}
                       onEditPrompt={handleEditPrompt}

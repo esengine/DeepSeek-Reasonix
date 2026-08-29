@@ -206,6 +206,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   SubmitDisplayToTabWithID(tabID: string, display: string, input: string, submissionID: string): Promise<void>;
   SubmitDeliveryRecoveryToTab(tabID: string, display: string, input: string): Promise<void>;
   SubmitDeliveryRecoveryToTabWithID(tabID: string, display: string, input: string, submissionID: string): Promise<void>;
+  AcceptDeliveryToTab(tabID: string): Promise<void>;
   SubmitInvocationsToTab(tabID: string, display: string, input: string, invocations: InvocationRequest[]): Promise<void>;
   SubmitInvocationsToTabWithID(tabID: string, display: string, input: string, invocations: InvocationRequest[], submissionID: string): Promise<void>;
   SubmitInitialGoalToTab(
@@ -966,6 +967,15 @@ export function onReady(cb: (tabId?: string) => void): () => void {
   }
   // In dev mock, fire immediately since there's no real boot sequence.
   cb();
+  return () => {};
+}
+
+export function onDeliveryAccepted(cb: (event: { tabId?: string; acceptedAt?: string }) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("delivery:accepted", (payload?: unknown) => {
+      if (payload && typeof payload === "object") cb(payload as { tabId?: string; acceptedAt?: string });
+    });
+  }
   return () => {};
 }
 
@@ -2941,6 +2951,7 @@ function makeMockApp(): AppBindings {
         async SubmitDisplayToTabWithID(_tabID, _display, input, submissionID) { await this.SubmitToTabWithID(_tabID, input, submissionID); },
         async SubmitDeliveryRecoveryToTab(_tabID, display, input) { await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input)); },
         async SubmitDeliveryRecoveryToTabWithID(_tabID, _display, input, submissionID) { await this.SubmitToTabWithID(_tabID, input, submissionID); },
+        async AcceptDeliveryToTab(_tabID) { /* mock: nothing to persist server-side; status clears via runtime events */ },
         async SubmitInvocationsToTab(_tabID, display, input, _invocations) { await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input)); },
         async SubmitInvocationsToTabWithID(_tabID, _display, input, _invocations, submissionID) { await this.SubmitToTabWithID(_tabID, input, submissionID); },
         async SubmitInitialGoalToTab(

@@ -140,7 +140,7 @@ export function Transcript({
   footerHeight?: number;
   onPrompt: (text: string) => void;
   onDeliveryContinue?: () => void;
-  onAcceptDelivery?: () => void;
+  onAcceptDelivery?: (tabId: string) => void;
   onOpenChanges?: () => void;
   onOpenVerification?: (summary: WireCompletionSummary) => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
@@ -737,7 +737,9 @@ export function Transcript({
                 ? onOpenChanges
                 : undefined}
             onOpenVerification={row.item.variant === "completion" ? onOpenVerification : undefined}
-            onAccept={row.item.action === "continue_delivery" ? onAcceptDelivery : undefined}
+            onAccept={row.item.variant === "delivery" && onAcceptDelivery
+              ? () => onAcceptDelivery(tabId ?? "")
+              : undefined}
           />
         );
       case "extension":

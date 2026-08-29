@@ -97,8 +97,9 @@ export function NoticeCard({ item, onAction, onAccept, onOpenVerification, actio
                 <span>{t("notice.completionViewVerification")}</span>
               </button>
             ) : null}
+            ) : null}
             {onAccept ? (
-              <button className="btn btn--small" type="button" onClick={onAccept}>
+              <button className="btn btn--small" type="button" onClick={onAccept} disabled={actionDisabled}>
                 <CheckCheck size={13} aria-hidden="true" />
                 <span>{t("notice.deliveryIncompleteAccept")}</span>
               </button>
