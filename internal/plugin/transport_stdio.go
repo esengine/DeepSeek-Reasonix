@@ -75,7 +75,11 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	var argv []string
 	if s.ResolvedProcessMode() == MCPProcessConfined {
 		processSandbox.MinimalWrites = true
-		argv, _ = sandbox.CommandArgs(processSandbox, launchArgs)
+		var err error
+		argv, err = wrapConfinedCommand(s.Name, processSandbox, launchArgs, sandbox.CommandArgs)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		argv = launchArgs
 	}
@@ -598,26 +602,4 @@ func (t *stdioTransport) close() {
 		proc.KillTracked(t.cmd, t.job)
 		waitWithBudget(t.wait, closeWaitBudget)
 	})
-}
-
-type tailBuffer struct {
-	mu    sync.Mutex
-	limit int
-	buf   []byte
-}
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buf = append(b.buf, p...)
-	if b.limit > 0 && len(b.buf) > b.limit {
-		b.buf = append([]byte(nil), b.buf[len(b.buf)-b.limit:]...)
-	}
-	return len(p), nil
-}
-
-func (b *tailBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return strings.TrimSpace(string(b.buf))
 }
