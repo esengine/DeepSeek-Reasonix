@@ -20,7 +20,14 @@ export function ensureAssistant(s: State): State {
   const ordinal = s.assistantSegmentOrdinal;
   const id = s.activeTurnId ? `a:${s.activeTurnId}:${ordinal}` : `a${s.seq}`;
   const item: AssistantItem = { kind: "assistant", id, text: "", reasoning: "", streaming: true, wasStreamed: true, searchSources: s.pendingSearchSources?.length ? s.pendingSearchSources : undefined };
-  return { ...s, items: [...s.items, item], currentAssistant: id, seq: s.seq + 1, assistantSegmentOrdinal: ordinal + 1 };
+  return {
+    ...s,
+    items: [...s.items, item],
+    currentAssistant: id,
+    pendingSearchSources: undefined,
+    seq: s.seq + 1,
+    assistantSegmentOrdinal: ordinal + 1,
+  };
 }
 
 export function ensureActiveAssistant(s: State): State {

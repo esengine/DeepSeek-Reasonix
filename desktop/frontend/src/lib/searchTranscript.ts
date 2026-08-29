@@ -58,13 +58,18 @@ export function historySearchAndAnswer(
 
 export function attachSearchSources<T extends SearchState>(s: T, sources: SearchSource[]): T {
   if (sources.length === 0) return s;
-  const pendingSearchSources = mergeSearchSources(s.pendingSearchSources, sources);
-  if (!s.currentAssistant) return { ...s, pendingSearchSources };
+  const currentAssistant = s.currentAssistant && s.items.some(
+    (it) => it.kind === "assistant" && it.id === s.currentAssistant,
+  )
+    ? s.currentAssistant
+    : undefined;
+  if (!currentAssistant) {
+    return { ...s, pendingSearchSources: mergeSearchSources(s.pendingSearchSources, sources) };
+  }
   return {
     ...s,
-    pendingSearchSources,
     items: s.items.map((it) =>
-      it.kind === "assistant" && it.id === s.currentAssistant
+      it.kind === "assistant" && it.id === currentAssistant
         ? { ...it, searchSources: mergeSearchSources(it.searchSources, sources) }
         : it,
     ),

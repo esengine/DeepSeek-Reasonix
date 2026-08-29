@@ -1861,15 +1861,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       const now = Date.now();
       s = snapshotCompletedTurnTelemetry(s, now);
       const workDurationMs = currentTurnDurationMs(s, now);
-      let lastAssistantIndex = -1;
-      for (let i = s.items.length - 1; i >= 0; i -= 1) {
-        if (s.items[i].kind === "user") break;
-        if (s.items[i].kind === "assistant") {
-          lastAssistantIndex = i;
-          break;
-        }
-      }
-      const finalized = removeEmptyAssistantItems(s.items.map((it, index) => {
+      const completedItems = removeEmptyAssistantItems(s.items.map((it) => {
         if (it.kind === "assistant") {
           const completedLive = s.live?.id === it.id ? completeLiveReasoning(s.live, now) : undefined;
           return {
@@ -1879,14 +1871,21 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
             streaming: false,
             reasoningComplete: completedLive?.reasoningComplete ?? it.reasoningComplete,
             reasoningDurationMs: liveReasoningDurationMs(completedLive) ?? it.reasoningDurationMs,
-            workDurationMs: index === lastAssistantIndex
-              ? Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined
-              : it.workDurationMs,
           };
         }
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       }));
+      let lastAssistantIndex = -1;
+      for (let i = completedItems.length - 1; i >= 0; i -= 1) {
+        if (completedItems[i].kind === "user") break;
+        if (completedItems[i].kind === "assistant") { lastAssistantIndex = i; break; }
+      }
+      const finalized = completedItems.map((it, index) =>
+        it.kind === "assistant" && index === lastAssistantIndex
+          ? { ...it, workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined }
+          : it,
+      );
       // A todo-only readiness card is retracted once the turn's own items
       // show an all-complete todo list (the panel is already green).
       const todoGapResolved = !e.err && latestTodosAllComplete(finalized);

@@ -85,6 +85,49 @@ live = ev(live, { kind: "message", text: "answer only" });
 const liveAnswer = live.items.find((item) => item.kind === "assistant");
 eq(liveAnswer?.kind === "assistant" ? liveAnswer.text : "", "answer only", "live answer stays model-only");
 eq(liveAnswer?.kind === "assistant" ? liveAnswer.searchSources?.[0]?.title : "", "新闻本文", "live tool result attaches footnotes to the answer");
+live = ev(live, { kind: "tool_dispatch", tool: { id: "after-live", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+live = ev(live, { kind: "tool_result", tool: { id: "after-live", name: "bash", readOnly: false, output: "ok" } } as WireEvent);
+live = ev(live, { kind: "stream_attempt", streamAttempt: { id: "after-live", action: "begin", attempt: 1, max: 1 } } as WireEvent);
+live = ev(live, { kind: "message", text: "later answer" } as WireEvent);
+const laterLiveAnswer = live.items.filter((item) => item.kind === "assistant")[1];
+eq(laterLiveAnswer?.kind === "assistant" ? laterLiveAnswer.searchSources?.length ?? 0 : -1, 0, "sources attached to an active answer do not enter the pending buffer");
+
+let segmented = ev(initialState, { kind: "turn_started", turnId: "search-ownership" } as WireEvent);
+segmented = ev(segmented, { kind: "message", text: "searching" } as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_dispatch",
+  tool: { id: "search-1", name: "web_search", args: '{"query":"bitcoin"}', readOnly: true },
+} as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_result",
+  tool: { id: "search-1", name: "web_search", readOnly: true, output: "Source A\nhttps://example.com/a" },
+} as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_dispatch",
+  tool: { id: "search-2", name: "web_search", args: '{"query":"ethereum"}', readOnly: true },
+} as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_result",
+  tool: { id: "search-2", name: "web_search", readOnly: true, output: "Source B\nhttps://example.com/b" },
+} as WireEvent);
+segmented = ev(segmented, { kind: "stream_attempt", streamAttempt: { id: "answer-1", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+segmented = ev(segmented, { kind: "message", text: "search answer" } as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_dispatch",
+  tool: { id: "shell-1", name: "bash", args: '{"command":"true"}', readOnly: false },
+} as WireEvent);
+segmented = ev(segmented, {
+  kind: "tool_result",
+  tool: { id: "shell-1", name: "bash", readOnly: false, output: "ok" },
+} as WireEvent);
+segmented = ev(segmented, { kind: "stream_attempt", streamAttempt: { id: "answer-2", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+segmented = ev(segmented, { kind: "message", text: "final answer" } as WireEvent);
+const segmentedAnswers = segmented.items.filter((item) => item.kind === "assistant");
+eq(segmentedAnswers.length, 3, "multi-round search flow keeps three assistant segments");
+eq(segmentedAnswers[1]?.kind === "assistant" ? segmentedAnswers[1].searchSources?.[0]?.title : "", "Source A", "search sources attach to the immediately following answer");
+eq(segmentedAnswers[1]?.kind === "assistant" ? segmentedAnswers[1].searchSources?.[1]?.title : "", "Source B", "multiple pending searches accumulate before the answer starts");
+eq(segmentedAnswers[2]?.kind === "assistant" ? segmentedAnswers[2].searchSources?.length ?? 0 : -1, 0, "consumed search sources do not leak into later assistant segments");
+eq(segmented.pendingSearchSources, undefined, "allocating an answer consumes the pending search-source buffer");
 eq(searchSourcesFromHistory([{ results: [{ title: "A" }] }])[0]?.title, "A", "history helper reads structured hits");
 
 if (failed) {

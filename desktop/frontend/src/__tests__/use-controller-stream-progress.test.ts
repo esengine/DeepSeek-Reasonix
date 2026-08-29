@@ -315,6 +315,29 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(partialLegacy.items.some((item) => item.kind === "assistant"), false, "legacy full dispatch removes the partial path's empty segment");
 }
 
+// --- 1h. terminal duration belongs to the last retained assistant segment ---
+{
+  const originalNow = Date.now;
+  let now = 100_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started", turnId: "terminal-duration" } as WireEvent);
+    now = 101_000;
+    s = ev(s, { kind: "message", text: "first answer" } as WireEvent);
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+    s = ev(s, { kind: "tool_result", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+    now = 110_000;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "empty-final", action: "begin", attempt: 1, max: 1 } } as WireEvent);
+    s = ev(s, { kind: "turn_done", turnId: "terminal-duration", status: "interrupted" } as WireEvent);
+
+    const assistants = s.items.filter((item) => item.kind === "assistant");
+    eq(assistants.length, 1, "turn_done removes the empty terminal placeholder");
+    eq(assistants[0]?.kind === "assistant" ? assistants[0].workDurationMs : 0, 10_000, "turn_done assigns total work duration to the last visible assistant");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 // --- 2. usageSeq bumps for every source ---
 {
   let s = { ...initialState, running: true, turnActive: true };

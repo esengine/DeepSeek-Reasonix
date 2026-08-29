@@ -232,7 +232,7 @@ await act(async () => {
   for (let step = 0; step < 20; step += 1) await Promise.resolve();
 });
 eq(turnReplayCalls, 1, "sequence gap replays the durable missing prefix once");
-eq(controller?.state.items.find((item) => item.kind === "assistant")?.id, "a:turn-gap", "gap replay keeps the stable turn item id");
+eq(controller?.state.items.find((item) => item.kind === "assistant")?.id, "a:turn-gap:0", "gap replay keeps the stable sampling-segment item id");
 eq(controller?.state.pendingPrompt, true, "future event projects only after the missing prefix");
 await act(async () => {
   for (const handler of eventHandlers) {
