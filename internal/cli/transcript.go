@@ -13,6 +13,9 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
@@ -133,17 +136,103 @@ func (m chatTUI) renderReplayBundle(
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// copyBlock is one transcript block's copy rendition: the semantic text (for
+// markdown blocks, free of display wrap newlines) plus the display-row mapping
+// used to translate a screen selection back to that text.
+type copyBlock struct {
+	text string
+	rows []mdCopyRow
+}
+
+// textRows splits display text into its logical rows: every newline-terminated
+// segment counts as a row (including blank rows), while a trailing newline is
+// only a terminator and adds no row of its own.
+func textRows(block string) []string {
+	if block == "" {
+		return []string{""}
+	}
+	return strings.Split(strings.TrimSuffix(block, "\n"), "\n")
+}
+
+// splitCopyRows maps display-rendered text onto 1:1 copy rows. Used for blocks
+// whose only rendition is the wrapped display text (user bubbles, tool cards,
+// reasoning, banners): their copy semantics are the display rows themselves.
+func splitCopyRows(block string) []mdCopyRow {
+	lines := textRows(block)
+	rows := make([]mdCopyRow, len(lines))
+	for i, l := range lines {
+		rows[i] = mdCopyRow{text: l, rows: []string{l}, bases: []int{0}}
+	}
+	return rows
+}
+
 func (m chatTUI) renderReplayBundleCopy(
 	source transcriptSource,
 	contentWidth int,
 	prefix string,
-) string {
+) copyBlock {
+	var b strings.Builder
+	var rows []mdCopyRow
+	banner := renderTUIBanner(m.label, source.raw, contentWidth)
+	b.WriteString(banner)
+	rows = append(rows, splitCopyRows(banner)...)
+
+	// Mirror replaySectionsForWithAssistantRenderer so the copy rendition and
+	// its display mapping stay in lockstep; assistant markdown sections use the
+	// unwrapped copy renderer, everything else its wrapped display text.
 	assistantIndex := 0
-	return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
-		messagePrefix := prefix + "-" + strconv.Itoa(assistantIndex)
+	appendSection := func(text string) {
+		b.WriteString(text)
+		rows = append(rows, splitCopyRows(text)...)
+	}
+	appendAssistant := func(body string) {
+		blk := renderAssistantMarkdownCopy(body, contentWidth, prefix+"-"+strconv.Itoa(assistantIndex))
 		assistantIndex++
-		return renderAssistantMarkdownCopy(raw, width, messagePrefix)
-	})
+		b.WriteString(blk.text + "\n\n")
+		rows = append(rows, blk.rows...)
+		rows = append(rows, blankCopyRow())
+	}
+	for _, msg := range source.history {
+		if msg.LocalOnly {
+			if reasoning := strings.TrimSpace(msg.ReasoningContent); reasoning != "" {
+				appendSection(dim("  ▎ "+i18n.M.ChatThinking) + "\n" + reasoningBlock(reasoning, contentWidth, 0) + "\n\n")
+			}
+			if body := strings.TrimSpace(msg.Content); body != "" {
+				appendAssistant(body)
+			}
+			for _, call := range msg.ToolCalls {
+				appendSection(toolCard(call.Name, "", contentWidth) + "\n\n")
+			}
+			if msg.InterruptedTurn != nil {
+				appendSection("  · " + interruptedTurnDisplayNotice() + "\n\n")
+			}
+			continue
+		}
+		switch msg.Role {
+		case provider.RoleUser:
+			if steerText, isSteer := agent.SteerText(msg.Content); isSteer {
+				appendSection("  ↪ " + steerText + "\n\n")
+				continue
+			}
+			content := control.StripComposePrefixes(msg.Content)
+			appendSection(renderUserBubble(content, contentWidth, false) + "\n\n")
+		case provider.RoleAssistant:
+			if reasoning := strings.TrimSpace(msg.ReasoningContent); reasoning != "" {
+				appendSection(dim("  ▎ "+i18n.M.ChatThinking) + "\n" + reasoningBlock(reasoning, contentWidth, 0) + "\n\n")
+			}
+			if body := strings.TrimSpace(msg.Content); body != "" {
+				appendAssistant(body)
+			}
+			for _, call := range msg.ToolCalls {
+				appendSection(toolCard(call.Name, call.Arguments, contentWidth) + "\n\n")
+			}
+		}
+	}
+	text := strings.TrimRight(b.String(), "\n")
+	if segs := strings.Count(text, "\n") + 1; len(rows) > segs {
+		rows = rows[:segs]
+	}
+	return copyBlock{text: text, rows: rows}
 }
 
 const assistantTranscriptIndent = "  "
@@ -172,9 +261,11 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 	return header + "\n\n" + indentTranscriptBlock(body, indent)
 }
 
-// renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output
-// and adds zero-width math markers for on-demand clipboard reconstruction.
-func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) string {
+// renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output,
+// renders it without display wrap newlines, and adds zero-width math markers for
+// on-demand clipboard reconstruction. The returned rows carry the display-layer
+// expansion of each semantic row so selection coordinates still translate.
+func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) copyBlock {
 	contentWidth = max(contentWidth, 1)
 	indent := assistantTranscriptIndent
 	if contentWidth <= visibleWidth(indent) {
@@ -182,16 +273,40 @@ func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) st
 	}
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
 	renderer := newMarkdownRenderer(bodyWidth)
-	rendered := renderer.RenderCopy(raw, prefix)
+	rendered, rows := renderer.RenderCopy(raw, prefix)
 	if rendered == "" {
 		rendered = raw
+		rows = splitCopyRows(raw)
 	}
 	body := strings.TrimRight(rendered, "\n")
+	if segs := strings.Count(body, "\n") + 1; len(rows) > segs {
+		rows = rows[:segs]
+	}
 	header := indent + accent("◆") + " " + bold("Reasonix")
 	if body == "" {
-		return header
+		return copyBlock{text: header, rows: []mdCopyRow{{text: header, rows: []string{header}, bases: []int{0}}}}
 	}
-	return header + "\n\n" + indentTranscriptBlock(body, indent)
+	// Re-apply the two-cell gutter the display layer adds to non-blank rows;
+	// the semantic-column offsets are unaffected (both sides shift equally).
+	for i := range rows {
+		if rows[i].text == "" {
+			continue
+		}
+		rows[i].text = indent + rows[i].text
+		for j := range rows[i].rows {
+			if rows[i].rows[j] != "" {
+				rows[i].rows[j] = indent + rows[i].rows[j]
+			}
+		}
+	}
+	all := make([]mdCopyRow, 0, len(rows)+2)
+	all = append(all, mdCopyRow{text: header, rows: []string{header}, bases: []int{0}})
+	all = append(all, blankCopyRow())
+	all = append(all, rows...)
+	return copyBlock{
+		text: header + "\n\n" + indentTranscriptBlock(body, indent),
+		rows: all,
+	}
 }
 
 func indentTranscriptBlock(block, indent string) string {
@@ -255,32 +370,34 @@ func copyMathEndMarker(id string) string {
 }
 
 // buildCopyTranscript renders semantic Markdown only when a copy is requested.
-// The visible text stays byte-for-byte equivalent after ANSI stripping, while
-// math markers retain the source needed to map display cells back to LaTeX.
-func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
+// The text is the copy source (no display wrap newlines for markdown blocks);
+// rows track each semantic row's display expansion so a screen selection can be
+// mapped back. math markers retain the source needed to reconstruct LaTeX.
+func (m chatTUI) buildCopyTranscript(contentWidth int) (string, []mdCopyRow, int, bool) {
 	if len(m.transcriptSources) != len(m.transcript) {
-		return "", 0, false
+		return "", nil, 0, false
 	}
 	var b strings.Builder
+	var rows []mdCopyRow
 	markers := 0
 	for i, source := range m.transcriptSources {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
+		var blk copyBlock
 		switch source.kind {
 		case transcriptSourceMarkdown:
-			rendered := renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
-			markers += strings.Count(rendered, copyMathStartPrefix)
-			b.WriteString(rendered)
+			blk = renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
 		case transcriptSourceReplayBundle:
-			rendered := m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
-			markers += strings.Count(rendered, copyMathStartPrefix)
-			b.WriteString(rendered)
+			blk = m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
 		default:
-			b.WriteString(m.transcript[i])
+			blk = copyBlock{text: m.transcript[i], rows: splitCopyRows(m.transcript[i])}
 		}
+		markers += strings.Count(blk.text, copyMathStartPrefix)
+		b.WriteString(blk.text)
+		rows = append(rows, blk.rows...)
 	}
-	return b.String(), markers, true
+	return b.String(), rows, markers, true
 }
 
 // transcriptResizeAnchor identifies the transcript block at the top of the
@@ -520,9 +637,14 @@ type copyMathSpan struct {
 	source string
 }
 
+// copyTranscriptLine is one semantic copy row: unwrapped source text (still
+// carrying copy-math markers and ANSI), its in-row math spans, and the display
+// rows it expands to (display[j] with semantic column offset bases[j]).
 type copyTranscriptLine struct {
-	text string
-	math []copyMathSpan
+	text    string
+	math    []copyMathSpan
+	display []string
+	bases   []int
 }
 
 type activeCopyMath struct {
@@ -622,22 +744,106 @@ func parseCopyTranscript(wrapped string) ([]copyTranscriptLine, int, bool) {
 	return lines, parsedMarkers, true
 }
 
+// copyTranscriptLines builds the semantic copy rendition of the transcript and
+// validates it against the wrapped display lines: row count and, per display
+// row, the ANSI-stripped text must match exactly, so selection coordinates are
+// trustworthy before selectedCopyText consumes them.
 func (m chatTUI) copyTranscriptLines() ([]copyTranscriptLine, bool) {
 	contentWidth := m.viewport.Width()
-	marked, expectedMarkers, ok := m.buildCopyTranscript(contentWidth)
-	if !ok {
+	marked, rows, expectedMarkers, ok := m.buildCopyTranscript(contentWidth)
+	if !ok || len(rows) != strings.Count(marked, "\n")+1 {
 		return nil, false
 	}
-	lines, parsedMarkers, ok := parseCopyTranscript(wrapTranscript(marked, contentWidth))
-	if !ok || parsedMarkers != expectedMarkers || len(lines) != len(m.wrappedLines) {
+	lines := make([]copyTranscriptLine, 0, len(rows))
+	var display []string
+	markers := 0
+	for _, row := range rows {
+		parsed, parsedMarkers, ok := parseCopyTranscript(row.text)
+		if !ok || len(parsed) != 1 {
+			return nil, false
+		}
+		markers += parsedMarkers
+		dl, mdBases := expandCopyRow(row, contentWidth)
+		bases := semanticBases(row.text, dl, mdBases)
+		lines = append(lines, copyTranscriptLine{text: row.text, math: parsed[0].math, display: dl, bases: bases})
+		display = append(display, dl...)
+	}
+	if markers != expectedMarkers || len(display) != len(m.wrappedLines) {
 		return nil, false
 	}
-	for i := range lines {
-		if ansi.Strip(lines[i].text) != ansi.Strip(m.wrappedLines[i]) {
+	for i := range display {
+		if ansi.Strip(display[i]) != ansi.Strip(m.wrappedLines[i]) {
 			return nil, false
 		}
 	}
 	return lines, true
+}
+
+// expandCopyRow soft-wraps each recorded display row (the lipgloss pass the
+// display layer applies after the md renderer), returning the viewport rows and
+// their md-layer semantic column offsets (used when matching is ambiguous).
+func expandCopyRow(row mdCopyRow, width int) ([]string, []int) {
+	var out []string
+	var bases []int
+	for j, r := range row.rows {
+		sub := strings.Split(wrapTranscript(r, width), "\n")
+		acc := 0
+		for _, s := range sub {
+			out = append(out, s)
+			bases = append(bases, row.bases[j]+acc)
+			acc += ansi.StringWidth(s)
+		}
+	}
+	return out, bases
+}
+
+// semanticBases returns, for every display row, the visual column at which the
+// row's first character maps back into the semantic text. Word-wrapping drops
+// the break-point space, so a plain width prefix sum is off by one per break;
+// matching each row fragment against the unwrapped text absorbs that. The
+// per-row indent the display layer repeats on every line is tolerated by
+// trimming it off before matching and subtracting it from the offset. Rows
+// whose fragment cannot be matched (e.g. padded table rails) fall back to the
+// md-layer offset.
+func semanticBases(text string, display []string, mdBases []int) []int {
+	t := []rune(ansi.Strip(text))
+	bases := make([]int, len(display))
+	pos := 0
+	for i, d := range display {
+		frag := strings.TrimRight(ansi.Strip(d), " ")
+		if frag == "" {
+			bases[i] = pos
+			continue
+		}
+		cand := []rune(frag)
+		skip := 0
+		if cand[0] == ' ' {
+			trimmed := []rune(strings.TrimLeft(frag, " "))
+			skip = len(cand) - len(trimmed)
+			cand = trimmed
+		}
+		if idx := indexRunes(t, cand, pos); idx >= 0 {
+			bases[i] = max(idx-skip, 0)
+			pos = idx + len(cand)
+			continue
+		}
+		bases[i] = mdBases[i]
+	}
+	return bases
+}
+
+// indexRunes finds sub in s at or after from, in rune space.
+func indexRunes(s, sub []rune, from int) int {
+	if from < 0 || from > len(s) {
+		return -1
+	}
+	s = s[from:]
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if string(s[i:i+len(sub)]) == string(sub) {
+			return from + i
+		}
+	}
+	return -1
 }
 
 func selectedDisplayText(lines []string, start, end selPos) string {
@@ -655,51 +861,82 @@ func selectedDisplayText(lines []string, start, end selPos) string {
 	return strings.Join(out, "\n")
 }
 
+// selectedCopyText maps the display-cell selection back to semantic rows: each
+// selected viewport row resolves to a semantic row plus a column range, and the
+// output is rebuilt from the unwrapped source text so no display wrap newline
+// leaks into the clipboard.
 func selectedCopyText(lines []copyTranscriptLine, start, end selPos) string {
 	seen := make(map[string]bool)
 	var out []string
-	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
-		line := lines[idx]
-		lo, hi := 0, ansi.StringWidth(line.text)
-		if idx == start.line {
-			lo = start.col
-		}
-		if idx == end.line {
-			hi = end.col
-		}
-
-		var selected strings.Builder
-		cursor := lo
-		touchedMath := false
-		for _, span := range line.math {
-			if span.end <= lo || span.start >= hi {
-				continue
+	visLine := 0 // global display-line index of the first display row of lines[i]
+	for _, line := range lines {
+		firstVis := visLine
+		lastVis := visLine + len(line.display) - 1
+		if lastVis >= start.line && firstVis <= end.line && len(line.display) > 0 {
+			width := ansi.StringWidth(line.text)
+			var a, b int
+			if start.line >= firstVis {
+				a = line.bases[start.line-firstVis] + start.col
 			}
-			touchedMath = true
-			if span.start > cursor {
-				selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, min(span.start, hi))))
+			if end.line <= lastVis {
+				b = line.bases[end.line-firstVis] + end.col
+			} else {
+				b = width
 			}
-			if !seen[span.id] {
-				selected.WriteString(span.source)
-				seen[span.id] = true
+			a = max(a, 0)
+			b = min(b, width)
+			if line.text == "" {
+				out = append(out, "")
+			} else if a < b || mathSpanOverlaps(line.math, a, b) {
+				out = append(out, selectCopyRange(line, a, b, seen))
 			}
-			cursor = max(cursor, min(span.end, hi))
 		}
-		if cursor < hi {
-			selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, hi)))
-		}
-		if selected.Len() == 0 && touchedMath {
-			continue
-		}
-		out = append(out, strings.TrimRight(selected.String(), " "))
+		visLine = lastVis + 1
 	}
 	return strings.Join(out, "\n")
 }
 
+func mathSpanOverlaps(spans []copyMathSpan, a, b int) bool {
+	for _, span := range spans {
+		if span.end > a && span.start < b {
+			return true
+		}
+	}
+	return false
+}
+
+func selectCopyRange(line copyTranscriptLine, a, b int, seen map[string]bool) string {
+	var selected strings.Builder
+	cursor := a
+	touchedMath := false
+	for _, span := range line.math {
+		if span.end <= a || span.start >= b {
+			continue
+		}
+		touchedMath = true
+		if span.start > cursor {
+			selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, min(span.start, b))))
+		}
+		if !seen[span.id] {
+			selected.WriteString(span.source)
+			seen[span.id] = true
+		}
+		cursor = max(cursor, min(span.end, b))
+	}
+	if cursor < b {
+		selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, b)))
+	}
+	if selected.Len() == 0 && touchedMath {
+		return ""
+	}
+	return strings.TrimRight(selected.String(), " ")
+}
+
 // selectedText is the plain text of the active display-cell selection. Math is
 // reconstructed on demand from semantic transcript sources; if the marked copy
-// rendition ever diverges from the visible transcript, the safe fallback keeps
-// the exact displayed text rather than applying mismatched coordinates.
+// rendition ever diverges from the visible transcript, the fallback rebuilds
+// whole markdown blocks from their unwrapped source and only resorts to the
+// exact displayed rows for partial blocks and non-markdown content.
 func (m chatTUI) selectedText() string {
 	if !m.sel.active || m.sel.empty() {
 		return ""
@@ -708,7 +945,42 @@ func (m chatTUI) selectedText() string {
 	if lines, ok := m.copyTranscriptLines(); ok {
 		return selectedCopyText(lines, start, end)
 	}
-	return selectedDisplayText(m.wrappedLines, start, end)
+	return m.selectedFallbackText(start, end)
+}
+
+func (m chatTUI) selectedFallbackText(start, end selPos) string {
+	if len(m.wrapBlockLines) == 0 || len(m.transcriptSources) != len(m.wrapBlockLines) {
+		return selectedDisplayText(m.wrappedLines, start, end)
+	}
+	contentWidth := m.viewport.Width()
+	var out []string
+	vis := 0
+	for i := range m.wrapBlockLines {
+		blockVis := len(m.wrapBlockLines[i])
+		blockStart, blockEnd := vis, vis+blockVis-1
+		if blockEnd >= start.line && blockStart <= end.line {
+			inLo := max(start.line-blockStart, 0)
+			inHi := min(end.line-blockStart, blockVis-1)
+			full := inLo == 0 && inHi == blockVis-1
+			if full && m.transcriptSources[i].kind == transcriptSourceMarkdown {
+				blk := renderAssistantMarkdownCopy(m.transcriptSources[i].raw, contentWidth, strconv.Itoa(i))
+				out = append(out, blk.text)
+			} else {
+				for idx := blockStart + inLo; idx <= blockStart+inHi && idx < len(m.wrappedLines); idx++ {
+					lo, hi := 0, ansi.StringWidth(m.wrappedLines[idx])
+					if idx == start.line {
+						lo = start.col
+					}
+					if idx == end.line {
+						hi = end.col
+					}
+					out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(m.wrappedLines[idx], lo, hi)), " "))
+				}
+			}
+		}
+		vis = blockEnd + 1
+	}
+	return strings.Join(out, "\n")
 }
 
 // scrollbarThumb returns the thumb's [start, start+size) row span for a viewport

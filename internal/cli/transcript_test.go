@@ -334,27 +334,32 @@ func TestSelectedTextRestoresMathWrappedAcrossDisplayLinesOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("copy rendition diverged from the displayed transcript")
 	}
-	firstLine, lastLine := -1, -1
-	firstCol, lastCol := 0, 0
+	// The formula now sits on a single semantic row that spans several display
+	// rows; locate that row and its display-row span.
+	firstVis, idx := -1, -1
+	visLine := 0
 	for i, line := range copyLines {
-		if len(line.math) == 0 {
-			continue
+		if len(line.math) > 0 {
+			firstVis, idx = visLine, i
+			break
 		}
-		if firstLine < 0 {
-			firstLine = i
-			firstCol = line.math[0].start
-		}
-		lastLine = i
-		lastCol = line.math[len(line.math)-1].end
+		visLine += len(line.display)
 	}
-	if firstLine < 0 || lastLine <= firstLine {
-		t.Fatalf("expected formula to wrap across lines:\n%s", ansi.Strip(rendered))
+	if idx < 0 {
+		t.Fatalf("rendered transcript did not contain the formula:\n%s", ansi.Strip(rendered))
 	}
+	line := copyLines[idx]
+	if len(line.display) <= 1 {
+		t.Fatalf("expected formula to wrap across display lines:\n%s", ansi.Strip(rendered))
+	}
+	lastVis := firstVis + len(line.display) - 1
+	firstCol := max(line.math[0].start-line.bases[0], 0)
+	lastCol := min(line.math[len(line.math)-1].end-line.bases[len(line.bases)-1], ansi.StringWidth(line.display[len(line.display)-1]))
 
 	m.sel = selection{
 		active: true,
-		anchor: selPos{line: firstLine, col: firstCol},
-		head:   selPos{line: lastLine, col: lastCol},
+		anchor: selPos{line: firstVis, col: firstCol},
+		head:   selPos{line: lastVis, col: lastCol},
 	}
 	if got, want := m.selectedText(), `$`+latex+`$`; got != want {
 		t.Fatalf("wrapped formula selection = %q, want %q", got, want)
