@@ -2196,7 +2196,7 @@ export interface SettingsView {
   network: NetworkView;
   agent: AgentView;
   bot: BotSettingsView;
-  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopLanguage: string; // "" | "en" | "zh" | "ru"; empty = auto
   desktopCurrency?: string; // "" | "CNY" | "USD"; absent/empty = follow language
   desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
@@ -2221,7 +2221,7 @@ export interface SettingsView {
 
 export interface DesktopStartupSettingsView {
   bot: BotSettingsView;
-  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopLanguage: string; // "" | "en" | "zh" | "ru"; empty = auto
   desktopLayoutStyle: string; // "classic" | "workbench"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;

@@ -13,6 +13,11 @@ func TestTrayMenuLabelsFollowLocale(t *testing.T) {
 		t.Fatalf("en labels = %#v", en)
 	}
 
+	ru := trayMenuLabels("ru")
+	if ru.openTitle != "Открыть" || ru.quitTitle != "Выход" {
+		t.Fatalf("ru labels = %#v", ru)
+	}
+
 	other := trayMenuLabels("fr")
 	if other.openTitle != en.openTitle || other.quitTitle != en.quitTitle {
 		t.Fatalf("unknown locale should fall back to English, got %#v", other)

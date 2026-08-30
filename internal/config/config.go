@@ -410,6 +410,8 @@ func (c *Config) DesktopLanguage() string {
 		return "en"
 	case "zh":
 		return "zh"
+	case "ru":
+		return "ru"
 	default:
 		return ""
 	}

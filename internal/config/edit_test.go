@@ -3223,3 +3223,25 @@ func TestBrokenProjectConfigSymlinkFailsLoadAndSave(t *testing.T) {
 		t.Fatal("failed operations replaced the broken project config symlink")
 	}
 }
+
+func TestLanguageRuAccepted(t *testing.T) {
+	c := Default()
+	if err := c.SetLanguage("ru"); err != nil {
+		t.Fatalf("SetLanguage ru: %v", err)
+	}
+	if c.Language != "ru" {
+		t.Fatalf("language = %q, want ru", c.Language)
+	}
+	if err := c.SetDesktopLanguage("ru"); err != nil {
+		t.Fatalf("SetDesktopLanguage ru: %v", err)
+	}
+	if c.Desktop.Language != "ru" {
+		t.Fatalf("desktop language = %q, want ru", c.Desktop.Language)
+	}
+	if got := c.DesktopLanguage(); got != "ru" {
+		t.Fatalf("DesktopLanguage() = %q, want ru", got)
+	}
+	if err := c.SetLanguage("fr"); err == nil {
+		t.Fatal("fr should be rejected")
+	}
+}

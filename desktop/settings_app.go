@@ -3536,6 +3536,9 @@ func (a *App) SetTrayLocale(locale string) error {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "zh") {
 		trayLocale = "zh"
 	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "ru") {
+		trayLocale = "ru"
+	}
 	a.updateTrayLocale(trayLocale)
 	a.emitProjectTreeChanged()
 	return nil
