@@ -28,30 +28,27 @@ function eq(a: unknown, b: unknown, label: string) {
 console.log("\nworkspace file split");
 
 const TREE_MIN_WIDTH = 140;
-const TREE_RAIL_WIDTH = 44;
 const PREVIEW_MIN_WIDTH = 140;
 
 eq(
   initialWorkspaceSplitTreeWidth({
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     savedTreeWidth: null,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
-  308,
-  "first split divides the file area evenly after reserving the tree rail",
+  330,
+  "first split divides the file area evenly (no tree rail to reserve)",
 );
 
 eq(
   initialWorkspaceSplitTreeWidth({
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     savedTreeWidth: 620,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
-  476,
+  520,
   "tree width is clamped so the preview keeps its minimum width",
 );
 
@@ -60,12 +57,11 @@ eq(
     clientX: 400,
     panelLeft: 100,
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
-  256,
-  "tree resize pointer coordinates start after the tree rail",
+  300,
+  "tree resize pointer coordinates start at the panel's left edge",
 );
 
 eq(
@@ -73,12 +69,37 @@ eq(
     clientX: 700,
     panelLeft: 100,
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
-  476,
-  "tree resize pointer clamps against the preview minimum after reserving the rail",
+  520,
+  "tree resize pointer clamps against the preview minimum",
+);
+
+eq(
+  workspaceSplitTreeWidthFromPointer({
+    clientX: 650,
+    panelLeft: 100,
+    panelWidth: 800,
+    treeMinWidth: TREE_MIN_WIDTH,
+    previewMinWidth: PREVIEW_MIN_WIDTH,
+    treeOnRight: true,
+  }),
+  250,
+  "right-side tree width is measured from the pointer to the panel's right edge",
+);
+
+eq(
+  workspaceSplitTreeWidthFromPointer({
+    clientX: 100,
+    panelLeft: 100,
+    panelWidth: 800,
+    treeMinWidth: TREE_MIN_WIDTH,
+    previewMinWidth: PREVIEW_MIN_WIDTH,
+    treeOnRight: true,
+  }),
+  660,
+  "right-side tree maximum keeps space for the preview",
 );
 
 eq(
@@ -86,11 +107,10 @@ eq(
     mode: "even",
     currentTreeWidth: 140,
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
-  308,
+  330,
   "default split recomputes evenly after the parent preview width applies",
 );
 
@@ -99,7 +119,6 @@ eq(
     mode: "manual",
     currentTreeWidth: 256,
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
@@ -121,19 +140,17 @@ eq(
 
 eq(
   workspaceSplitCanFit({
-    panelWidth: 323,
-    railWidth: TREE_RAIL_WIDTH,
+    panelWidth: 279,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
   false,
-  "file tree collapses before rail tree and preview would overflow a narrow panel",
+  "file tree collapses before tree and preview would overflow a narrow panel",
 );
 
 eq(
   workspaceSplitCanFit({
-    panelWidth: 324,
-    railWidth: TREE_RAIL_WIDTH,
+    panelWidth: 280,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
@@ -144,7 +161,6 @@ eq(
 eq(
   workspaceSplitCanFit({
     panelWidth: undefined,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),
@@ -178,7 +194,6 @@ const effectiveEvenTreeWidth = resolveWorkspaceSplitTreeWidth({
   mode: "even",
   currentTreeWidth: TREE_MIN_WIDTH,
   panelWidth: 660,
-  railWidth: TREE_RAIL_WIDTH,
   treeMinWidth: TREE_MIN_WIDTH,
   previewMinWidth: PREVIEW_MIN_WIDTH,
 });
@@ -188,7 +203,6 @@ eq(
     mode: "manual",
     currentTreeWidth: effectiveEvenTreeWidth,
     panelWidth: 660,
-    railWidth: TREE_RAIL_WIDTH,
     treeMinWidth: TREE_MIN_WIDTH,
     previewMinWidth: PREVIEW_MIN_WIDTH,
   }),

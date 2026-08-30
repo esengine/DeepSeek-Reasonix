@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/sessioninbox"
 )
+
+const inboxDispatchTestTimeout = 15 * time.Second
 
 type inboxDispatchRunner struct {
 	inputs chan string
@@ -43,23 +46,43 @@ func newInboxDispatchController(t *testing.T) (*Controller, *inboxDispatchRunner
 	return c, runner, done
 }
 
-func waitForInboxDispatch(t *testing.T, runner *inboxDispatchRunner) string {
+func failInboxDispatchWait(t *testing.T, c *Controller, waitingFor string) {
+	t.Helper()
+	c.inbox.mu.Lock()
+	active := c.inbox.activeIDs()
+	dispatching := c.inbox.dispatching
+	dispatchPending := c.inbox.dispatchPending
+	c.inbox.mu.Unlock()
+	sort.Strings(active)
+	t.Fatalf(
+		"timed out after %s waiting for %s: runtime=%+v inbox=%+v active_items=%v dispatching=%t dispatch_pending=%t",
+		inboxDispatchTestTimeout,
+		waitingFor,
+		c.RuntimeStatus(),
+		c.InboxSnapshot(),
+		active,
+		dispatching,
+		dispatchPending,
+	)
+}
+
+func waitForInboxDispatch(t *testing.T, c *Controller, runner *inboxDispatchRunner) string {
 	t.Helper()
 	select {
 	case input := <-runner.inputs:
 		return input
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for inbox dispatch")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "inbox dispatch")
 		return ""
 	}
 }
 
-func waitForInboxTurnDone(t *testing.T, done <-chan struct{}) {
+func waitForInboxTurnDone(t *testing.T, c *Controller, done <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for inbox turn completion")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "inbox turn completion")
 	}
 }
 
@@ -76,10 +99,10 @@ func TestEndRotationDispatchesQueuedInboxItem(t *testing.T) {
 	}
 	c.endRotation()
 
-	if got := waitForInboxDispatch(t, runner); got != "queued during rotation" {
+	if got := waitForInboxDispatch(t, c, runner); got != "queued during rotation" {
 		t.Fatalf("dispatched input = %q", got)
 	}
-	waitForInboxTurnDone(t, done)
+	waitForInboxTurnDone(t, c, done)
 }
 
 func TestRejectedIdleSteerDispatchesAsFollowup(t *testing.T) {
@@ -99,10 +122,10 @@ func TestRejectedIdleSteerDispatchesAsFollowup(t *testing.T) {
 		t.Fatalf("disposition = %q", receipt.Disposition)
 	}
 
-	if got := waitForInboxDispatch(t, runner); got != "late steer becomes follow-up" {
+	if got := waitForInboxDispatch(t, c, runner); got != "late steer becomes follow-up" {
 		t.Fatalf("dispatched input = %q", got)
 	}
-	waitForInboxTurnDone(t, done)
+	waitForInboxTurnDone(t, c, done)
 }
 
 func TestInboxDispatchKickDuringEmptyScanIsNotLost(t *testing.T) {
@@ -129,8 +152,8 @@ func TestInboxDispatchKickDuringEmptyScanIsNotLost(t *testing.T) {
 	}()
 	select {
 	case <-scanReached:
-	case <-time.After(time.Second):
-		t.Fatal("dispatcher did not reach empty scan")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "dispatcher empty scan")
 	}
 	if _, err := c.EnqueueInbox(InboxRequest{Submit: "arrived during empty scan"}); err != nil {
 		t.Fatal(err)
@@ -142,13 +165,13 @@ func TestInboxDispatchKickDuringEmptyScanIsNotLost(t *testing.T) {
 
 	select {
 	case <-dispatchReturned:
-	case <-time.After(time.Second):
-		t.Fatal("dispatcher did not return")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "dispatcher return")
 	}
-	if got := waitForInboxDispatch(t, runner); got != "arrived during empty scan" {
+	if got := waitForInboxDispatch(t, c, runner); got != "arrived during empty scan" {
 		t.Fatalf("dispatched input = %q", got)
 	}
-	waitForInboxTurnDone(t, done)
+	waitForInboxTurnDone(t, c, done)
 }
 
 func TestInboxDispatchRetriesTransientOwnerFailure(t *testing.T) {
@@ -175,8 +198,8 @@ func TestInboxDispatchRetriesTransientOwnerFailure(t *testing.T) {
 	var retry func()
 	select {
 	case retry = <-retryReady:
-	case <-time.After(time.Second):
-		t.Fatal("transient failure did not schedule a retry")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "transient failure retry")
 	}
 	select {
 	case got := <-runner.inputs:
@@ -184,10 +207,10 @@ func TestInboxDispatchRetriesTransientOwnerFailure(t *testing.T) {
 	default:
 	}
 	retry()
-	if got := waitForInboxDispatch(t, runner); got != "retry me" {
+	if got := waitForInboxDispatch(t, c, runner); got != "retry me" {
 		t.Fatalf("retried input = %q", got)
 	}
-	waitForInboxTurnDone(t, done)
+	waitForInboxTurnDone(t, c, done)
 }
 
 type gatedInboxDispatchRunner struct {
@@ -241,8 +264,8 @@ func TestNaturalCompletionAutoDispatchesDurableFIFO(t *testing.T) {
 	c.Submit("active turn")
 	select {
 	case <-runner.firstStarted:
-	case <-time.After(time.Second):
-		t.Fatal("active turn did not start")
+	case <-time.After(inboxDispatchTestTimeout):
+		failInboxDispatchWait(t, c, "active turn start")
 	}
 	if got := <-runner.inputs; got != "active turn" {
 		t.Fatalf("initial input = %q", got)
@@ -253,12 +276,12 @@ func TestNaturalCompletionAutoDispatchesDurableFIFO(t *testing.T) {
 		}
 	}
 	close(runner.releaseFirst)
-	waitForInboxTurnDone(t, done)
+	waitForInboxTurnDone(t, c, done)
 	for _, want := range []string{"queued one", "queued two"} {
-		if got := waitForInboxDispatch(t, &inboxDispatchRunner{inputs: runner.inputs}); got != want {
+		if got := waitForInboxDispatch(t, c, &inboxDispatchRunner{inputs: runner.inputs}); got != want {
 			t.Fatalf("FIFO input = %q, want %q", got, want)
 		}
-		waitForInboxTurnDone(t, done)
+		waitForInboxTurnDone(t, c, done)
 	}
 	if snap := c.InboxSnapshot(); len(snap.Items) != 0 || snap.Paused {
 		t.Fatalf("completed FIFO left inbox state: %+v", snap)

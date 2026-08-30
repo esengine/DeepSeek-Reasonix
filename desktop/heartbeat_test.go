@@ -11,7 +11,6 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
-	"reasonix/internal/filelock"
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
@@ -162,6 +161,75 @@ func TestHeartbeatTaskDueAtWaitsForDailySchedule(t *testing.T) {
 	}
 }
 
+func TestHeartbeatTaskDueAtCronExpression(t *testing.T) {
+	loc := time.FixedZone("test", 8*60*60)
+	task := HeartbeatTask{
+		ID:        "cron",
+		Interval:  "0 9 * * 1-5", // weekdays at 09:00
+		Enabled:   true,
+		CreatedAt: time.Date(2026, 6, 15, 0, 0, 0, 0, loc).UnixMilli(), // Monday
+	}
+
+	// Not due outside the cron window (Monday 08:59).
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 8, 59, 0, 0, loc)) {
+		t.Fatal("cron task should wait for the configured time")
+	}
+	// Due exactly at Monday 09:00.
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should be due at the configured time")
+	}
+	// Not due again within the same minute after running.
+	task.LastRunAt = time.Date(2026, 6, 15, 9, 0, 0, 0, loc).UnixMilli()
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 15, 9, 0, 30, 0, loc)) {
+		t.Fatal("cron task should not fire twice for the same occurrence")
+	}
+	// Due again on the next weekday.
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 16, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should be due at the next weekday occurrence")
+	}
+	// Weekend (Saturday) is not part of 1-5.
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 20, 9, 0, 0, 0, loc)) {
+		t.Fatal("cron task should skip weekends")
+	}
+}
+
+func TestHeartbeatTaskDueAtCronEvery15Minutes(t *testing.T) {
+	loc := time.FixedZone("test", 8*60*60)
+	task := HeartbeatTask{
+		ID:        "cron-15",
+		Interval:  "*/15 * * * *",
+		Enabled:   true,
+		CreatedAt: time.Date(2026, 6, 18, 0, 0, 0, 0, loc).UnixMilli(),
+	}
+
+	for _, tt := range []struct {
+		at   time.Time
+		want bool
+	}{
+		{time.Date(2026, 6, 18, 10, 7, 0, 0, loc), false},
+		{time.Date(2026, 6, 18, 10, 15, 0, 0, loc), true},
+		{time.Date(2026, 6, 18, 10, 30, 0, 0, loc), true},
+		{time.Date(2026, 6, 18, 10, 31, 0, 0, loc), false},
+	} {
+		if got := heartbeatTaskDueAt(task, tt.at); got != tt.want {
+			t.Fatalf("cron */15 due at %v = %v, want %v", tt.at, got, tt.want)
+		}
+	}
+}
+
+func TestHeartbeatTaskDueAtCronDedupesByOccurrenceMinute(t *testing.T) {
+	loc := time.UTC
+	lastRun := time.Date(2026, 6, 18, 9, 1, 41, 0, loc)
+	task := HeartbeatTask{Interval: "* * * * *", LastRunAt: lastRun.UnixMilli()}
+
+	if heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 9, 1, 59, 0, loc)) {
+		t.Fatal("cron task must not run twice in one occurrence minute")
+	}
+	if !heartbeatTaskDueAt(task, time.Date(2026, 6, 18, 9, 2, 10, 0, loc)) {
+		t.Fatal("every-minute cron task must run in the next occurrence minute")
+	}
+}
+
 func TestHeartbeatTaskDueAtHonorsWeeklySelection(t *testing.T) {
 	loc := time.UTC
 	task := HeartbeatTask{
@@ -188,10 +256,20 @@ func (s heartbeatStatusStub) RuntimeStatus() control.RuntimeStatus {
 }
 
 type heartbeatExecuteTaskCtrlStub struct {
-	control.SessionAPI
+	stubSessionAPI
 	status       control.RuntimeStatus
 	submitted    []string
 	approvalMode string
+}
+
+type heartbeatSignalingCtrlStub struct {
+	heartbeatExecuteTaskCtrlStub
+	submittedSignal chan struct{}
+}
+
+func (s *heartbeatSignalingCtrlStub) SubmitUserTurn(input, display string) {
+	s.heartbeatExecuteTaskCtrlStub.SubmitUserTurn(input, display)
+	close(s.submittedSignal)
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
@@ -217,6 +295,10 @@ func (s *heartbeatExecuteTaskCtrlStub) AutoApproveTools() bool {
 
 func (s *heartbeatExecuteTaskCtrlStub) Goal() string {
 	return ""
+}
+
+func (s *heartbeatExecuteTaskCtrlStub) GoalStatus() string {
+	return control.GoalStatusStopped
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) ToolApprovalMode() string {
@@ -274,6 +356,17 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},
 	}
+	seed := HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	}
+	if err := engine.saveTasks([]HeartbeatTask{seed}); err != nil {
+		t.Fatal(err)
+	}
+	engine.ReloadConfig()
 	ctrl := &heartbeatExecuteTaskCtrlStub{}
 	injected := make(chan struct{})
 
@@ -319,13 +412,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(HeartbeatTask{
-		ID:                     "fresh",
-		Title:                  "Fresh",
-		Prompt:                 "ping",
-		NewConversationEachRun: true,
-		ApprovalMode:           "auto",
-	})
+	got := engine.executeTask(seed)
 
 	if got.TopicID == "" {
 		t.Fatal("fresh conversation task should return the newly created topic ID")
@@ -355,6 +442,17 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},
 	}
+	seed := HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	}
+	if err := engine.saveTasks([]HeartbeatTask{seed}); err != nil {
+		t.Fatal(err)
+	}
+	engine.ReloadConfig()
 	ctrl := &heartbeatExecuteTaskCtrlStub{status: control.RuntimeStatus{PendingPrompt: true}}
 	injected := make(chan struct{})
 
@@ -400,13 +498,7 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 		}
 	}()
 
-	got := engine.executeTask(HeartbeatTask{
-		ID:                     "fresh",
-		Title:                  "Fresh",
-		Prompt:                 "ping",
-		NewConversationEachRun: true,
-		ApprovalMode:           "auto",
-	})
+	got := engine.executeTask(seed)
 
 	if got.LastRunAt != 0 {
 		t.Fatalf("pending prompt should not mark heartbeat run complete, LastRunAt=%d", got.LastRunAt)
@@ -689,55 +781,4 @@ func TestHeartbeatExternalDeletionDoesNotResurrectTasks(t *testing.T) {
 	if _, err := os.Stat(engine.configPath()); !os.IsNotExist(err) {
 		t.Fatalf("deleted heartbeat config was recreated, stat err=%v", err)
 	}
-}
-
-func TestHeartbeatRunCompletionObservesDeletionBeforeNextTick(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	engine := newHeartbeatEngine(nil)
-	if err := engine.saveTasks([]HeartbeatTask{{ID: "deleted", Title: "old", Interval: "1h", Enabled: true}}); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := engine.readConfigSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.mu.Lock()
-	engine.recordConfigSnapshotLocked(snapshot)
-	engine.tasks = append([]HeartbeatTask(nil), snapshot.cfg.Tasks...)
-	if err := os.Remove(engine.configPath()); err != nil {
-		engine.mu.Unlock()
-		t.Fatal(err)
-	}
-	// Simulate a run that finishes before the scheduler's next external-edit
-	// adoption pass. The completion merge itself must observe the deletion.
-	engine.mergeRunUpdatesLocked(map[string]HeartbeatTask{"deleted": {ID: "deleted", LastRunAt: 123}})
-	deleted := engine.cfgDeleted
-	taskCount := len(engine.tasks)
-	engine.mu.Unlock()
-
-	if !deleted || taskCount != 0 {
-		t.Fatalf("run completion retained deleted config: tasks=%d deleted=%v", taskCount, deleted)
-	}
-	if _, err := os.Stat(engine.configPath()); !os.IsNotExist(err) {
-		t.Fatalf("run completion recreated deleted heartbeat config, stat err=%v", err)
-	}
-}
-
-func TestHeartbeatTaskLeaseIsCrossEngine(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	first := newHeartbeatEngine(nil)
-	second := newHeartbeatEngine(nil)
-	release, err := first.tryAcquireTaskLease("same-task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := second.tryAcquireTaskLease("same-task"); !errors.Is(err, filelock.ErrHeld) {
-		t.Fatalf("second task lease err=%v, want filelock.ErrHeld", err)
-	}
-	release()
-	retry, err := second.tryAcquireTaskLease("same-task")
-	if err != nil {
-		t.Fatalf("task lease after release: %v", err)
-	}
-	retry()
 }

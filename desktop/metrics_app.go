@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/recovery"
+	"reasonix/internal/turnevent"
 )
 
 // metrics_app.go is the aggregate desktop-metrics flush: anonymous (signal,
@@ -481,6 +482,57 @@ func observeControllerRecoveryMetrics(m *metricsAggregator, ctrl any) {
 		DrainRecoveryMetrics() recovery.Metrics
 	}); ok {
 		m.observeRecoveryMetrics(drainer.DrainRecoveryMetrics())
+	}
+}
+
+func (m *metricsAggregator) observeTurnEventMetrics(stats turnevent.MetricsSnapshot) {
+	if m == nil {
+		return
+	}
+	m.add("turn_ledger_stream_raw", "total", int(stats.RawEvents))
+	m.add("turn_ledger_stream_records", "total", int(stats.StreamRecords))
+	m.add("turn_ledger_write_bytes", "total", int(stats.BytesWritten))
+	m.add("turn_ledger_replay_events", "total", int(stats.ReplayEvents))
+	m.add("turn_ledger_replay_bytes", "total", int(stats.ReplayBytes))
+	m.add("turn_ledger_replay_reset", "total", int(stats.ReplayResets))
+	m.add("turn_ledger_compaction", "success", int(stats.Compactions))
+	m.add("turn_ledger_compaction", "failed", int(stats.CompactionFailures))
+	m.add("turn_ledger_compaction_bytes", "before", int(stats.BytesBeforeCompact))
+	m.add("turn_ledger_compaction_bytes", "after", int(stats.BytesAfterCompact))
+	m.add("turn_ledger_failure", "write", int(stats.WriteFailures))
+	m.add("turn_ledger_recovery", "torn_tail", int(stats.TornTails))
+	m.add("turn_ledger_projection_retry", "total", int(stats.ProjectionRetries))
+	latencyBuckets := []string{"lt_1ms", "1_5ms", "5_20ms", "20_100ms", "gte_100ms"}
+	for i, bucket := range latencyBuckets {
+		m.add("turn_ledger_append_latency", bucket, int(stats.AppendLatencyBuckets[i]))
+		m.add("turn_ledger_replay_latency", bucket, int(stats.ReplayLatencyBuckets[i]))
+		m.add("turn_ledger_compact_latency", bucket, int(stats.CompactLatencyBuckets[i]))
+	}
+	switch {
+	case stats.FileSizeBytes < 256<<10:
+		m.inc("turn_ledger_file_size", "lt_256k")
+	case stats.FileSizeBytes < 1<<20:
+		m.inc("turn_ledger_file_size", "256k_1m")
+	case stats.FileSizeBytes < 8<<20:
+		m.inc("turn_ledger_file_size", "1m_8m")
+	case stats.FileSizeBytes < 32<<20:
+		m.inc("turn_ledger_file_size", "8m_32m")
+	default:
+		m.inc("turn_ledger_file_size", "gte_32m")
+	}
+	if stats.UnconfirmedTurns > 0 {
+		m.add("turn_ledger_projection_pending", "total", stats.UnconfirmedTurns)
+	}
+}
+
+func observeControllerTurnEventMetrics(m *metricsAggregator, ctrl any) {
+	if m == nil || ctrl == nil {
+		return
+	}
+	if drainer, ok := ctrl.(interface {
+		DrainTurnEventMetrics() turnevent.MetricsSnapshot
+	}); ok {
+		m.observeTurnEventMetrics(drainer.DrainTurnEventMetrics())
 	}
 }
 

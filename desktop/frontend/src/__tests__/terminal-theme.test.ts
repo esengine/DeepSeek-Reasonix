@@ -90,6 +90,14 @@ for (const key of ansiKeys) {
   );
 }
 
+applyTerminalThemePreference("dark");
+const darkTerminalTheme = terminalThemeForElement(document.createElement("div"));
+assert.equal(darkTerminalTheme.selectionForeground, "#ffffff");
+assert.ok(
+  contrastRatio(darkTerminalTheme.selectionForeground!, darkTerminalTheme.selectionBackground!) >= 4.5,
+  "dark terminal selection text meets WCAG AA contrast",
+);
+
 let releaseFirstSave!: () => void;
 const firstSaveGate = new Promise<void>((resolve) => { releaseFirstSave = resolve; });
 const saveOrder: string[] = [];
@@ -172,6 +180,11 @@ assertCssRule(terminalStyles, ":root", {
 });
 assertCssRule(terminalStyles, ':root[data-terminal-theme="dark"] .terminal-panel', { "color-scheme": "dark" });
 assertCssRule(terminalStyles, ':root[data-terminal-theme="light"] .terminal-panel', { "color-scheme": "light" });
+const explicitDarkTokens = cssRuleDeclarations(stylesSource, ':root[data-terminal-theme="dark"]');
+assert.ok(
+  contrastRatio(explicitDarkTokens["--terminal-selection-fg"], explicitDarkTokens["--terminal-selection"]) >= 4.5,
+  "explicit dark selection CSS tokens meet WCAG AA contrast",
+);
 
 const terminalChromeMatrix: Array<[string, Record<string, string>]> = [
   [".terminal-panel__header", {

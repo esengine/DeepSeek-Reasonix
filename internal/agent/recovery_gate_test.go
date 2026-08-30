@@ -45,6 +45,14 @@ func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testi
 	if !strings.Contains(before, "Implement parser") || !strings.Contains(after, "Replace parser architecture") {
 		t.Fatalf("plan evidence before=%q after=%q", before, after)
 	}
+
+	cleared, _, clearedAfter, _ := a.recoveryPlanTransition("todo_write", json.RawMessage(`{"todos":[]}`))
+	if !cleared {
+		t.Fatal("clearing an active plan must invoke the plan reviewer")
+	}
+	if strings.TrimSpace(clearedAfter) != "" && strings.Contains(clearedAfter, "Implement parser") {
+		t.Fatalf("cleared plan evidence = %q, want an empty replacement", clearedAfter)
+	}
 }
 
 func TestRecoveryPlanTransitionIgnoresCompletedPriorPlan(t *testing.T) {
@@ -118,6 +126,43 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 	})
 	if out.errMsg == "" || !strings.Contains(out.output, "cannot be removed or replaced") {
 		t.Fatalf("plain allow unexpectedly replaced current todo: %+v", out)
+	}
+
+	clearOut := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:        "clear-plan-without-authorization",
+		Name:      "todo_write",
+		Arguments: `{"todos":[]}`,
+	})
+	if clearOut.errMsg == "" || !strings.Contains(clearOut.output, "cannot be cleared") {
+		t.Fatalf("plain allow unexpectedly cleared the current todo: %+v", clearOut)
+	}
+	if got := a.CanonicalTodoState(); len(got) != 1 || got[0].Content != "Implement parser" {
+		t.Fatalf("canonical todo state = %+v, want the original current item", got)
+	}
+}
+
+func TestAuthorizedRecoveryPlanTransitionCanClearCurrentTodo(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	gate := &recordingRecoveryGate{decision: RecoveryDecision{
+		Allow: true, AuthorizePlanReplacement: true,
+	}}
+	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, event.Discard)
+	a.SeedTodoState([]evidence.TodoItem{{Content: "Implement parser", Status: "in_progress"}})
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:        "clear-plan",
+		Name:      "todo_write",
+		Arguments: `{"todos":[]}`,
+	})
+	if out.errMsg != "" {
+		t.Fatalf("authorized plan clear was blocked: %+v", out)
+	}
+	if len(gate.proposals) != 1 || !gate.proposals[0].PlanTransition {
+		t.Fatalf("recovery proposals = %+v, want one plan-clear transition", gate.proposals)
+	}
+	if got := a.CanonicalTodoState(); len(got) != 0 {
+		t.Fatalf("canonical todo state = %+v, want empty after approved clear", got)
 	}
 }
 

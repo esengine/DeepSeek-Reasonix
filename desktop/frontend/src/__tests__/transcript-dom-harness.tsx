@@ -9,6 +9,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createServer, type ViteDevServer } from "vite";
+import type { ReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import type { Item } from "../lib/useController";
 
 export interface TranscriptHarnessOptions {
@@ -18,6 +19,8 @@ export interface TranscriptHarnessOptions {
   rowHeight?: number;
   /** Extra localStorage seed values (display mode, fold preference, …). */
   storage?: Record<string, string>;
+  /** Authoritative reasoning mode to hydrate before Transcript is imported. */
+  reasoningDisplayMode?: ReasoningDisplayMode;
 }
 
 export interface TranscriptHarness {
@@ -53,6 +56,7 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
   globalThis.CustomEvent = dom.window.CustomEvent;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.KeyboardEvent = dom.window.KeyboardEvent;
+  globalThis.WheelEvent = dom.window.WheelEvent;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window) as typeof getComputedStyle;
@@ -185,6 +189,12 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     logLevel: "silent",
     server: { middlewareMode: true },
   });
+  if (options.reasoningDisplayMode) {
+    const preference = await server.ssrLoadModule("/src/lib/reasoningDisplayPreference.ts") as {
+      hydrateReasoningDisplayMode: (mode: unknown, explicit: boolean) => void;
+    };
+    preference.hydrateReasoningDisplayMode(options.reasoningDisplayMode, true);
+  }
   const { TranscriptTestSurface } = await server.ssrLoadModule("/src/__tests__/transcript-test-surface.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");
   const TranscriptComponent = TranscriptTestSurface as React.ComponentType<Record<string, unknown>>;
@@ -248,6 +258,11 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
           ),
         );
       });
+      // Virtuoso and the lazy Markdown/live-region surfaces can schedule a
+      // second commit after the initial act (especially on a loaded CI
+      // runner). Drain one extra frame so render() promises a settled DOM to
+      // callers that intentionally assert immediately after rendering.
+      await flush();
       await flush();
     },
     flush,
@@ -259,6 +274,11 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
       await act(async () => current?.unmount());
     },
     close: async () => {
+      // React.lazy Markdown chunks may resolve just after the last act() in a
+      // block. Let those requests settle before tearing down Vite's SSR
+      // module runner; otherwise the runner reports a transport disconnect
+      // even though every assertion completed.
+      await new Promise((resolve) => setTimeout(resolve, 100));
       await server.close();
     },
     loadModule: <T,>(path: string) => server.ssrLoadModule(path) as Promise<T>,

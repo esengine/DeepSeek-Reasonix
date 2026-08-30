@@ -14,7 +14,8 @@ import {
   type TranscriptSelectionPoint,
 } from "./transcriptSelectionStore";
 import { mergeTranscriptSelectableRows } from "./transcriptSelectionText";
-import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollController";
+import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
+import { nativeTranscriptBottomTop } from "./transcriptScrollGeometry";
 
 const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MIN_PX = 4;
@@ -109,6 +110,14 @@ export function useTranscriptSelectionRetention({
     publish();
   }, [cancelFrames, publish, releasePointerCapture, setScrollMode]);
 
+  // A fresh user gesture (e.g. the jump-to-bottom click) while a gesture is
+  // still marked dragging means the original pointerup was lost (released
+  // outside the window, WebView2 pointer quirks). Ending the stale gesture
+  // lets scroll commands leave selection mode instead of no-oping forever.
+  const endStaleGesture = useCallback(() => {
+    if (selectionRef.current?.dragging) clear("stale-selection-gesture");
+  }, [clear]);
+
   const updateLogicalFocus = useCallback((pointer = lastPointerRef.current) => {
     const tracked = selectionRef.current;
     if (!tracked?.logical || !tracked.dragging || !pointer) return;
@@ -145,10 +154,15 @@ export function useTranscriptSelectionRetention({
       speed = EDGE_SCROLL_MIN_PX + ratio * (EDGE_SCROLL_MAX_PX - EDGE_SCROLL_MIN_PX);
     }
     if (speed === 0) return;
-    const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    const max = nativeTranscriptBottomTop(scroll);
     const next = Math.max(0, Math.min(max, scroll.scrollTop + speed));
     if (next === scroll.scrollTop) {
       scheduleLogicalFocus();
+      // A transient Virtuoso extent can clamp the native scrollTop at a false
+      // boundary before the range commit catches up. Keep one edge observer
+      // alive for the active drag so a later extent/range rebound can resume
+      // scrolling and refresh the logical focus without another pointermove.
+      edgeFrameRef.current = requestAnimationFrame(edgeScrollTick);
       return;
     }
     if (!writeOffset("selection-edge-scroll", next)) return;
@@ -174,7 +188,7 @@ export function useTranscriptSelectionRetention({
     if (snapshotId == null) return false;
     tracked.logical = true;
     document.getSelection()?.removeAllRanges();
-    setScrollMode("logical-selecting", "cross-row-selection");
+    setScrollMode("selection", "cross-row-selection");
     try {
       tracked.captureElement.setPointerCapture(tracked.pointerId);
     } catch {
@@ -238,7 +252,7 @@ export function useTranscriptSelectionRetention({
     };
     lastPointerRef.current = { x: event.clientX, y: event.clientY };
     transcriptSelectionStore.beginNative(tabId ?? "");
-    setScrollMode("native-selecting", "pointerdown");
+    setScrollMode("selection", "pointerdown");
     publish();
   }, [cancelStreamingScroll, clear, publish, setScrollMode, tabId]);
 
@@ -435,6 +449,7 @@ export function useTranscriptSelectionRetention({
 
   return {
     clear,
+    endStaleGesture,
     active: selectionRef.current !== null,
     logical: selectionRef.current?.logical ?? false,
     reconcileLogicalFocus: scheduleLogicalFocus,

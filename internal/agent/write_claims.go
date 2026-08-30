@@ -20,12 +20,24 @@ const DefaultMaxParallelWriters = 3
 // MaxSubagentConcurrencyLimit is the upper bound for both concurrency knobs.
 const MaxSubagentConcurrencyLimit = 32
 
+// pathKind classifies one declared write_paths entry. Directory claims are
+// capability prefixes (sandbox AllowsPath) but do not serialize against each
+// other at schedule time; file claims do.
+type pathKind uint8
+
+const (
+	pathKindFile pathKind = iota
+	pathKindDir
+)
+
 // WritePathSet is a normalized claim over workspace paths a sub-agent may write.
 // WholeWorkspace is true when a writer-capable task omitted write_paths and
 // therefore claims the entire workspace (forcing writer serialization).
 type WritePathSet struct {
 	// Paths are absolute, cleaned, and symlink-resolved when possible.
 	Paths []string
+	// Kinds is parallel to Paths. Empty when WholeWorkspace or Paths is empty.
+	Kinds []pathKind
 	// WholeWorkspace claims the entire workspace root.
 	WholeWorkspace bool
 	// WorkspaceRoot is the absolute workspace root used for WholeWorkspace claims.
@@ -80,7 +92,12 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 		if strings.ContainsAny(entry, "*?[") {
 			return WritePathSet{}, fmt.Errorf("write_paths[%d]: globs are not allowed (%q)", i, entry)
 		}
-		abs, err := resolveWriteClaimPath(root, entry)
+		trailingSep := strings.HasSuffix(entry, "/") || strings.HasSuffix(entry, `\`)
+		trimmed := strings.TrimRight(entry, `/\`)
+		if trimmed == "" {
+			trimmed = entry
+		}
+		abs, err := resolveWriteClaimPath(root, trimmed)
 		if err != nil {
 			return WritePathSet{}, fmt.Errorf("write_paths[%d]: %w", i, err)
 		}
@@ -93,17 +110,34 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 		}
 		seen[key] = true
 		out.Paths = append(out.Paths, abs)
+		out.Kinds = append(out.Kinds, classifyWritePath(abs, trailingSep))
 	}
 	return out, nil
 }
 
 type subagentWriteClaimKey struct{}
+type subagentClaimIDKey struct{}
 
 // WithSubagentWriteClaim carries a child's declared write claim into its run so
 // the host can audit, after the fact, that every mutation it observed fell
 // inside the claim the scheduler parallelized on.
 func WithSubagentWriteClaim(ctx context.Context, claims WritePathSet) context.Context {
 	return context.WithValue(ctx, subagentWriteClaimKey{}, claims)
+}
+
+// WithSubagentClaimID carries the scheduler live-claim id so path-bound tools
+// can Realize and opaque writers can MarkOpaque.
+func WithSubagentClaimID(ctx context.Context, id int64) context.Context {
+	if id == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, subagentClaimIDKey{}, id)
+}
+
+// SubagentClaimID returns the live claim id of the running child, if any.
+func SubagentClaimID(ctx context.Context) int64 {
+	id, _ := ctx.Value(subagentClaimIDKey{}).(int64)
+	return id
 }
 
 // SubagentWriteClaim returns the write claim of the running child, if any.
@@ -120,6 +154,49 @@ func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
 		return WritePathSet{}, err
 	}
 	return WritePathSet{WholeWorkspace: true, WorkspaceRoot: root}, nil
+}
+
+// ScheduleOverlaps reports whether two claims must not start at the same time.
+// Capability Overlaps stays stricter: identical directory claims still overlap
+// for sandbox/AllowsPath. Directory-vs-directory claims (including identity)
+// may run in parallel; a directory still blocks a concrete file inside it.
+func ScheduleOverlaps(a, b WritePathSet) bool {
+	if a.Empty() || b.Empty() {
+		return false
+	}
+	if a.WholeWorkspace || b.WholeWorkspace {
+		return a.Overlaps(b)
+	}
+	for i, pa := range a.Paths {
+		for j, pb := range b.Paths {
+			if !pathWithinFold(pa, pb) && !pathWithinFold(pb, pa) {
+				continue
+			}
+			if a.kindAt(i) == pathKindDir && b.kindAt(j) == pathKindDir {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (s WritePathSet) kindAt(i int) pathKind {
+	if i >= 0 && i < len(s.Kinds) {
+		return s.Kinds[i]
+	}
+	return pathKindFile
+}
+
+func classifyWritePath(abs string, trailingSep bool) pathKind {
+	if trailingSep {
+		return pathKindDir
+	}
+	info, err := os.Stat(abs)
+	if err == nil && info.IsDir() {
+		return pathKindDir
+	}
+	return pathKindFile
 }
 
 // Overlaps reports whether two write claims conflict (identical, parent/child,

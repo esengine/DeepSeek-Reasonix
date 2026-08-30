@@ -185,7 +185,7 @@
 }
 
 .usage-stats__section-note {
-  color: var(--muted);
+  color: var(--fg-faint);
   font-size: var(--font-caption);
 }
 

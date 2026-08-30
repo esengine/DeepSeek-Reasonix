@@ -88,10 +88,19 @@ future_provider_field = "untouched"
 		if !ok {
 			t.Fatalf("migrated provider %q missing", name)
 		}
+		model := strings.TrimSpace(entry.Default)
+		if model == "" {
+			model = strings.TrimSpace(entry.Model)
+		}
+		resolved, ok := cfg.ResolveModel(name + "/" + model)
+		if !ok {
+			t.Fatalf("migrated provider %q model %q did not resolve", name, model)
+		}
+		cap := EffortCapabilityForEntry(resolved)
 		if entry.Kind != "anthropic" || entry.BaseURL != deepSeekAnthropicBaseURL ||
 			entry.Thinking != "enabled" || !EffectiveWebSearch(entry) ||
-			len(entry.SupportedEfforts) == 0 || entry.DefaultEffort != "high" {
-			t.Errorf("migrated provider %q capabilities = %+v", name, entry)
+			cap.Default != "high" || len(cap.Levels) == 0 {
+			t.Errorf("migrated provider %q capabilities = %+v effort=%+v", name, entry, cap)
 		}
 	}
 
@@ -645,8 +654,59 @@ func TestNormalizeOfficialDeepSeekResponsesPresetAddsPro(t *testing.T) {
 		t.Fatalf("Flash effort override = %+v", flash)
 	}
 	pro := p.ModelOverrides["deepseek-v4-pro"]
-	if containsString(pro.SupportedEfforts, "low") || !containsString(pro.SupportedEfforts, "max") {
+	if !containsString(pro.SupportedEfforts, "low") || !containsString(pro.SupportedEfforts, "max") {
 		t.Fatalf("Pro effort override = %+v", pro)
+	}
+}
+
+func TestNormalizeOfficialDeepSeekMultiModelPreservesProviderEfforts(t *testing.T) {
+	for _, tc := range []struct {
+		name, providerName, kind, baseURL string
+	}{
+		{name: "responses", providerName: "deepseek-responses", kind: "responses", baseURL: "https://api.deepseek.com"},
+		{name: "anthropic", providerName: "deepseek", kind: "anthropic", baseURL: deepSeekAnthropicBaseURL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{Providers: []ProviderEntry{{
+				Name: tc.providerName, Kind: tc.kind, BaseURL: tc.baseURL,
+				Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash",
+				SupportedEfforts: []string{"disabled", "high"}, DefaultEffort: "high",
+			}}}
+
+			normalizeOfficialDeepSeekModels(c)
+			for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+				entry, ok := c.ResolveModel(tc.providerName + "/" + model)
+				if !ok {
+					t.Fatalf("%s did not resolve", model)
+				}
+				if !stringSlicesEqual(entry.SupportedEfforts, []string{"disabled", "high"}) {
+					t.Errorf("%s supported_efforts = %v, want provider-level custom vocabulary", model, entry.SupportedEfforts)
+				}
+				if _, err := NormalizeEffort(entry, "low"); err == nil {
+					t.Errorf("%s unexpectedly accepted low outside provider-level vocabulary", model)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeOfficialDeepSeekProviderEffortsKeepsExplicitModelOverride(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash",
+		SupportedEfforts: []string{"disabled", "high"}, DefaultEffort: "high",
+		ModelOverrides: map[string]ProviderModelOverride{
+			"deepseek-v4-pro": {SupportedEfforts: []string{"disabled", "low", "high"}, DefaultEffort: "low"},
+		},
+	}}}
+
+	normalizeOfficialDeepSeekModels(c)
+	pro, ok := c.ResolveModel("deepseek-responses/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("Pro did not resolve")
+	}
+	if !stringSlicesEqual(pro.SupportedEfforts, []string{"disabled", "low", "high"}) || pro.DefaultEffort != "low" {
+		t.Fatalf("Pro override = %v/%q, want explicit per-model values", pro.SupportedEfforts, pro.DefaultEffort)
 	}
 }
 
@@ -664,7 +724,7 @@ func TestNormalizeOfficialDeepSeekResponsesDoesNotRestoreUncheckedPro(t *testing
 		{
 			name: "leftover pro override is still treated as curated",
 			overrides: map[string]ProviderModelOverride{
-				"deepseek-v4-pro": {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+				"deepseek-v4-pro": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
 			},
 		},
 	}

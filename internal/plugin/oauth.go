@@ -86,6 +86,7 @@ type mcpOAuthClient struct {
 	stateDir string
 	state    mcpOAuthState
 	client   *http.Client
+	runtime  mcpOAuthSDKRuntime
 }
 
 // AuthorizeHTTPMCP performs the user-initiated OAuth authorization-code flow
@@ -279,33 +280,6 @@ func newMCPOAuthClient(stateDir string, httpClient *http.Client) (*mcpOAuthClien
 		return nil, nil
 	}
 	return &mcpOAuthClient{stateDir: stateDir, state: state, client: newOAuthHTTPClient(httpClient)}, nil
-}
-
-func (c *mcpOAuthClient) authorizationHeader(ctx context.Context, forceRefresh bool) (string, bool, error) {
-	if c == nil {
-		return "", false, nil
-	}
-	needsRefresh := forceRefresh || (strings.TrimSpace(c.state.RefreshToken) != "" && !c.state.Expiry.IsZero() && time.Now().Add(30*time.Second).After(c.state.Expiry))
-	if needsRefresh {
-		if err := c.refresh(ctx); err != nil {
-			return "", false, err
-		}
-	}
-	if strings.TrimSpace(c.state.AccessToken) == "" {
-		return "", false, nil
-	}
-	tokenType := strings.TrimSpace(c.state.TokenType)
-	if tokenType == "" {
-		tokenType = "Bearer"
-	}
-	if !strings.EqualFold(tokenType, "Bearer") {
-		return "", false, fmt.Errorf("MCP OAuth: unsupported token type %q", tokenType)
-	}
-	return "Bearer " + c.state.AccessToken, true, nil
-}
-
-func (c *mcpOAuthClient) canRefresh() bool {
-	return c != nil && strings.TrimSpace(c.state.RefreshToken) != "" && strings.TrimSpace(c.state.TokenEndpoint) != ""
 }
 
 func discoverProtectedResource(ctx context.Context, client *http.Client, endpoint *url.URL) (protectedResourceMetadata, string, error) {

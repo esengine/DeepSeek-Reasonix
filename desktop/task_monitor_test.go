@@ -251,7 +251,7 @@ func TestListSessionsForTabKeepsSourceDirectoryAfterActiveTabSwitch(t *testing.T
 		},
 		activeTabID: "tab-b",
 	}
-	installSessionCatalogForTest(t, app, dirA, "global", "")
+	installSessionCatalogForTest(t, app, dirA, "project", app.tabs["tab-a"].WorkspaceRoot)
 
 	sessions := app.ListSessionsForTab("tab-a")
 	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].TurnsState != "unknown" {

@@ -76,6 +76,7 @@ func RebindBashWriteRoots(tl tool.Tool, roots []string) (tool.Tool, bool) {
 	// confinement — the claim roots are the only allowed write surface.
 	spec.AppContainerWriteRoots = append([]string(nil), rs...)
 	b.sb = spec
+	// rootSet is preserved so later session grants still apply inside the claim.
 	// sessionTemp is preserved: sub-agent write-root rebinding must not drop
 	// the session-private temporary directory manager.
 	return b, true
@@ -230,16 +231,13 @@ func confineWrite(ctx context.Context, roots []string, guard SessionDataGuard, m
 	return managed.approve(ctx, target)
 }
 
-// confinePreview mirrors confineWrite for ctx-less diff previews: they read the
-// target to render a diff but never write, so a managed config file passes
-// without the per-write approval — Execute still gates the actual write.
-func confinePreview(roots []string, guard SessionDataGuard, managed ManagedConfigPaths, target string) error {
-	confineErr := confine(roots, target)
-	if confineErr == nil {
-		return guard.Check(target)
-	}
-	if !managed.Match(target) {
-		return confineErr
+// confinePreview is stricter than confineWrite because Preview runs before the
+// permission gate and reads old content into the approval card and session.
+// Managed config files outside the roots therefore stay unreadable here; only
+// Execute may use their explicit, per-write approval escape hatch.
+func confinePreview(roots []string, guard SessionDataGuard, _ ManagedConfigPaths, target string) error {
+	if err := confine(roots, target); err != nil {
+		return err
 	}
 	return guard.Check(target)
 }

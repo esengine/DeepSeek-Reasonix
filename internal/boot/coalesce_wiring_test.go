@@ -15,12 +15,16 @@ type coalesceWiringProvider struct{ deltas int }
 
 func (p *coalesceWiringProvider) Name() string { return "boot-coalesce-test" }
 
-func (p *coalesceWiringProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
-	ch := make(chan provider.Chunk, p.deltas+1)
+func (p *coalesceWiringProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	chunks := make([]provider.Chunk, 0, p.deltas+1)
 	for i := range p.deltas {
-		ch <- provider.Chunk{Type: provider.ChunkText, Text: fmt.Sprintf("w%d ", i)}
+		chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: fmt.Sprintf("w%d ", i)})
 	}
-	ch <- provider.Chunk{Type: provider.ChunkDone}
+	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
 	close(ch)
 	return ch, nil
 }

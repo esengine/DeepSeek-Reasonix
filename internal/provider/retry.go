@@ -332,6 +332,12 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			TraceID:  responseTraceID(resp.Header),
 		}
 		if !RetryableStatus(resp.StatusCode) {
+			if limitErr := ParseOutputLimitError(apiErr); limitErr != nil {
+				return nil, limitErr
+			}
+			if limitErr := ParseContextLimitError(apiErr); limitErr != nil {
+				return nil, limitErr
+			}
 			return nil, apiErr
 		}
 		lastErr = apiErr

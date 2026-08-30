@@ -132,6 +132,7 @@ func configureControllerRuntime(ctrl, oldCtrl control.SessionAPI, runtime normal
 	ctrl.EnableInteractiveApproval()
 	applyTabModeToController(ctrl, runtime.tabMode())
 	applyTabToolApprovalModeToController(ctrl, runtime.toolApprovalMode)
+	applyTabQualityFloorToController(ctrl, runtime.qualityFloor)
 	if next, ok := ctrl.(*control.Controller); ok {
 		if prev, ok := oldCtrl.(*control.Controller); ok {
 			next.RestoreSessionAuthorizations(prev.SessionAuthorizations())

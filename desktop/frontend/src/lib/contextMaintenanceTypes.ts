@@ -49,6 +49,29 @@ export interface ContextMaintenanceInfo {
   projectionVersion?: number;
   blocked?: boolean;
   lastReceipt?: ContextMaintenanceReceipt;
+  contextBudget?: ContextBudgetInfo;
+}
+
+export type ContextBudgetSource = "unknown" | "explicit" | "official" | "opencode" | "learned";
+export type ContextBudgetRecovery = "none" | "proactive_clip" | "learned_retry" | "compacted" | "failed";
+
+export interface ContextBudgetInfo {
+  windowMode?: string;
+  limitMode?: string;
+  source?: ContextBudgetSource | string;
+  windowTokens?: number;
+  promptTokens?: number;
+  autoOutputTokens?: number;
+  maxOutputTokens?: number;
+  requestedOutputTokens?: number;
+  effectiveOutputTokens?: number;
+  reserveTokens?: number;
+  physicalRemaining?: number;
+  clipped?: boolean;
+  lastRecovery?: ContextBudgetRecovery | string;
+  observedWindow?: number;
+  observedPrompt?: number;
+  observedCompletion?: number;
 }
 
 export function formatContextMaintenanceNotice(m: WireContextMaintenance, t: Translator): string {

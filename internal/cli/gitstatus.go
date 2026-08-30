@@ -72,10 +72,10 @@ func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
 }
 
 func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := gitcmd.Command(ctx, "", args...)
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
+	// cwd goes through gitcmd's dir parameter, not cmd.Dir, so the gitcmd
+	// baseline can resolve the repository's own config relative to it (the
+	// filter-driver neutralization reads <cwd>/.git/config).
+	cmd := gitcmd.Command(ctx, cwd, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

@@ -34,10 +34,13 @@ type ReviewFinding struct {
 
 // ReviewReport is the structured payload submitted via the review_report tool.
 type ReviewReport struct {
-	Kind          ReviewKind      `json:"kind"`
-	Verdict       ReviewVerdict   `json:"verdict"`
-	ReviewedPaths []string        `json:"reviewed_paths"`
-	Findings      []ReviewFinding `json:"findings"`
+	Kind             ReviewKind      `json:"kind"`
+	Verdict          ReviewVerdict   `json:"verdict"`
+	ReviewedPaths    []string        `json:"reviewed_paths"`
+	Findings         []ReviewFinding `json:"findings"`
+	BlockingFindings []ReviewFinding `json:"blocking_findings,omitempty"`
+	NonBlocking      []ReviewFinding `json:"non_blocking,omitempty"`
+	RequiredChanges  []string        `json:"required_changes,omitempty"`
 }
 
 // ParseReviewReport validates and normalizes a review_report argument object.
@@ -62,6 +65,14 @@ func ParseReviewReport(raw json.RawMessage) (ReviewReport, error) {
 	if len(r.ReviewedPaths) == 0 {
 		return ReviewReport{}, fmt.Errorf("review_report.reviewed_paths must be non-empty")
 	}
+	if len(r.BlockingFindings) > 0 || len(r.NonBlocking) > 0 {
+		for i := range r.BlockingFindings {
+			if strings.TrimSpace(r.BlockingFindings[i].Severity) == "" {
+				r.BlockingFindings[i].Severity = "block"
+			}
+		}
+		r.Findings = append(append([]ReviewFinding{}, r.BlockingFindings...), r.NonBlocking...)
+	}
 	clean := make([]ReviewFinding, 0, len(r.Findings))
 	for _, f := range r.Findings {
 		f.Severity = strings.TrimSpace(f.Severity)
@@ -80,6 +91,8 @@ func ParseReviewReport(raw json.RawMessage) (ReviewReport, error) {
 }
 
 // CoversPaths reports whether every required production path was reviewed.
+// A fuller absolute path may cover the same relative path, but a bare
+// basename never covers a directory-qualified target.
 func (r ReviewReport) CoversPaths(required []string) bool {
 	if len(required) == 0 {
 		return len(r.ReviewedPaths) > 0
@@ -89,19 +102,21 @@ func (r ReviewReport) CoversPaths(required []string) bool {
 		if p == "" {
 			continue
 		}
-		if !have[p] {
-			// Also accept basename coverage for short relative refs.
-			found := false
-			base := filepathBase(p)
-			for h := range have {
-				if h == p || filepathBase(h) == base {
-					found = true
-					break
-				}
+		if have[p] {
+			continue
+		}
+		found := false
+		for h := range have {
+			hSlash := strings.ToLower(filepath.ToSlash(h))
+			pSlash := strings.ToLower(filepath.ToSlash(p))
+			if strings.HasSuffix(hSlash, "/"+pSlash) ||
+				(strings.Contains(hSlash, "/") && strings.HasSuffix(pSlash, "/"+hSlash)) {
+				found = true
+				break
 			}
-			if !found {
-				return false
-			}
+		}
+		if !found {
+			return false
 		}
 	}
 	return true
@@ -138,14 +153,6 @@ func (r ReviewReport) WarningSummaries() []string {
 		}
 	}
 	return out
-}
-
-func filepathBase(p string) string {
-	p = strings.ReplaceAll(p, `\`, `/`)
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }
 
 // ReviewReportReceipt is stored on the ledger when a review_report succeeds.
@@ -217,6 +224,27 @@ func (l *Ledger) HasSuccessfulReviewReportOfKind(kind ReviewKind) bool {
 		}
 	}
 	return false
+}
+
+// CountSuccessfulReviewReportsOfKind counts non-blocking successful reports.
+func (l *Ledger) CountSuccessfulReviewReportsOfKind(kind ReviewKind) int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, r := range l.receipts {
+		if !r.Success || r.ToolName != "review_report" {
+			continue
+		}
+		parsed, err := ParseReviewReport(r.Args)
+		if err != nil || parsed.Kind != kind || parsed.HasBlockingFinding() {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // HasReadEvidenceForPath reports whether the host observed the CONTENT of

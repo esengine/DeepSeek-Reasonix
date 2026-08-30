@@ -35,7 +35,9 @@ import (
 	"reasonix/internal/extension/providerext"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
+	"reasonix/internal/netclient"
 	"reasonix/internal/notify"
+	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -203,7 +205,7 @@ func isDoctorRepairCommand(args []string) bool {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile", "--preset":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -260,17 +262,13 @@ func configureCLIThemeFromConfigForTTYOutput() {
 // The assembly (model resolution, tool registry, permission gate, two-model
 // Coordinator) lives in internal/boot, shared with the desktop frontend.
 // requireKey forces the executor's API key to be present (used by run); chat
-// passes false so the session UI is reachable before a key is set. sink receives
-// the agent's typed event stream — runAgent passes a TextSink that renders to
-// stdout, the TUI passes an event-channel sink so events become tea.Msgs.
-// profile selects economy|balanced|delivery (empty = balanced/full).
-// workspaceRoot pins the project root explicitly (from --dir); empty falls back
-// to git-root detection.
-func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, workspaceRoot string) (*control.Controller, error) {
-	return setupProfileWithOverrides(ctx, modelName, maxStepsOverride, requireKey, sink, profile, cliBuildOverrides{WorkspaceRoot: workspaceRoot})
+// passes false so the session UI is reachable before a key is set.
+func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, workspaceRoot string) (*control.Controller, error) {
+	return setupProfileWithOverrides(ctx, modelName, maxStepsOverride, requireKey, sink, cliBuildOverrides{WorkspaceRoot: workspaceRoot})
 }
 
 type cliBuildOverrides struct {
+	Preset               string
 	Effort               *string
 	PermissionAllow      []string
 	AdditionalDirs       []string
@@ -279,6 +277,9 @@ type cliBuildOverrides struct {
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
 	Ablation             ablation.Set
+	// InteractiveHost marks human-in-the-loop entries (chat TUI); print mode
+	// and bots stay on core-v1.
+	InteractiveHost bool
 	// SessionTemp carries the previous Controller's private temporary directory
 	// manager across model/profile rebuilds so temporary files survive.
 	SessionTemp *sessiontemp.Manager
@@ -295,22 +296,20 @@ func sessionTempFromCLIController(ctrl control.SessionAPI) *sessiontemp.Manager 
 	return prev.SessionTemp()
 }
 
-func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
+func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) (*control.Controller, error) {
 	migrateMCPConfigForCLIWorkspace()
-	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, profile, overrides))
+	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, overrides))
 }
 
-func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) boot.Options {
-	// profile is dual-write TokenMode; also set AgentPreset for the new path.
-	return boot.Options{
+func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) boot.Options {
+	opts := boot.Options{
 		Model:                modelName,
 		MaxSteps:             maxStepsOverride,
 		MaxStepsKey:          "--max-steps",
 		RequireKey:           requireKey,
 		Sink:                 sink,
-		AgentPreset:          boot.NormalizeAgentPreset(profile),
-		TokenMode:            boot.NormalizeTokenMode(profile),
 		SessionDir:           resolveCLISessionDir(),
+		AgentPreset:          overrides.Preset,
 		WorkspaceRoot:        overrides.WorkspaceRoot,
 		EffortOverride:       overrides.Effort,
 		PermissionAllow:      overrides.PermissionAllow,
@@ -322,6 +321,8 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		Ablation:             overrides.Ablation,
 		SessionTemp:          overrides.SessionTemp,
 	}
+	opts.MCPHostProfile = plugin.HostProfileForInteractive(overrides.InteractiveHost)
+	return opts
 }
 
 type cliPermissionMode struct {
@@ -388,25 +389,26 @@ func resolveCLISessionDir() string {
 // setupQuietProfile is like setupProfile but guarantees plugin subprocess
 // stderr stays off the terminal. Interactive callers provide the private TUI
 // diagnostic writer; other callers fall back to io.Discard.
-func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
+func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, overrides cliBuildOverrides) (*control.Controller, error) {
 	if overrides.Stderr == nil {
 		overrides.Stderr = io.Discard
 	}
-	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, profile, overrides))
+	return boot.Build(ctx, cliProfileBuildOptions(modelName, maxStepsOverride, requireKey, sink, overrides))
 }
 
+// parseRuntimeProfile validates a role-flag value and maps it onto the
+// session quality floor: light folds to standard silently, delivery sets the
+// delivery floor.
 func parseRuntimeProfile(value string) (string, error) {
-	// Accept both --preset light|balanced|delivery and legacy --profile
-	// economy|full|delivery. Returns dual-write TokenMode values.
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "balanced", boot.TokenModeFull:
-		return boot.TokenModeFull, nil
-	case boot.TokenModeEconomy, "light", "lite", "eco":
-		return boot.TokenModeEconomy, nil
+	case "", "balanced", "standard", boot.TokenModeFull:
+		return "standard", nil
+	case "economy", "light", "lite", "eco":
+		return "standard", nil
 	case boot.TokenModeDelivery, "deliver", "quality":
-		return boot.TokenModeDelivery, nil
+		return "delivery", nil
 	default:
-		return "", fmt.Errorf("unknown execution setting %q (want light, balanced, or delivery; legacy: economy, full)", value)
+		return "", fmt.Errorf("unknown execution setting %q (accepted: standard, delivery; legacy light folds to standard)", value)
 	}
 }
 
@@ -485,11 +487,14 @@ func registerContinueFlag(fs *pflag.FlagSet) *bool {
 
 func runAgent(args []string, version string) int {
 	defer closeCLIUsageCatalogs()
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := pflag.NewFlagSet("run", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)")
-	presetFlag := fs.String("preset", "balanced", "agent execution setting: light | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
@@ -536,14 +541,7 @@ func runAgent(args []string, version string) int {
 		}
 		format = runOutputEventsJSONL
 	}
-	profileRaw := strings.TrimSpace(*profileFlag)
-	if profileRaw != "" {
-		fmt.Fprintln(os.Stderr, "warning: --profile is deprecated; use --preset light|balanced|delivery")
-	} else {
-		profileRaw = strings.TrimSpace(*presetFlag)
-	}
-	profile, err := parseRuntimeProfile(profileRaw)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -635,7 +633,7 @@ func runAgent(args []string, version string) int {
 	}
 	sessionMode := cliTelemetrySessionMode(*cont, strings.TrimSpace(*resume) != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
-		Version: version, Interactive: false, CLIMode: "run", Profile: profile,
+		Version: version, Interactive: false, CLIMode: "run",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
 	})
 
@@ -690,6 +688,7 @@ func runAgent(args []string, version string) int {
 	// UI can answer; unattended writes require explicit --auto/-y,
 	// --permission-mode auto, or yolo.
 	overrides := cliBuildOverrides{
+		Preset:               deprecatedMode,
 		Effort:               effortOverride,
 		PermissionAllow:      allowedTools,
 		AdditionalDirs:       additionalDirs,
@@ -698,7 +697,7 @@ func runAgent(args []string, version string) int {
 		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
 		Ablation:             ablated,
 	}
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, profile, overrides)
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, overrides)
 	if err != nil {
 		if resultOutput != nil && format != runOutputText {
 			if encodeErr := resultOutput.Finalize("", started, err); encodeErr != nil {
@@ -751,16 +750,7 @@ func runAgent(args []string, version string) int {
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
-				final.MergeCapabilityAuditCounters(
-					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
-					snap.SemanticRoutes, snap.SemanticFallbacks,
-					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
-					snap.SkillInvocations, snap.SkillFailures, snap.SkillUnavailable,
-					snap.MCPInspect, snap.MCPCall, snap.MCPCallFailures,
-					snap.ReviewBlocks, snap.SecurityReviewBlocks,
-					snap.RouterPromptTokens, snap.RouterCompletionTokens,
-					snap.RouterCost, snap.RouterLatencyMs,
-				)
+				final.MergeCapabilityAudit(&snap)
 			}
 		}
 		if err := writeMetrics(*metricsPath, final); err != nil {
@@ -790,10 +780,13 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	if opts.command == "" {
 		opts.command = "serve"
 	}
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := flag.NewFlagSet(opts.command, flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)")
-	presetFlag := fs.String("preset", "balanced", "agent execution setting: light | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
@@ -814,6 +807,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
 	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
 	pidFile := fs.String("pid-file", "", "write the server process id to this file")
+	registerServeCapabilityFlags(fs)
 	openBrowser := fs.Bool("open", opts.openBrowser, "open the Web UI in the default browser")
 	noOpen := fs.Bool("no-open", false, "do not open the Web UI in the default browser")
 	if code, ok := parseCommandFlags(fs, args); !ok {
@@ -835,14 +829,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 			return 2
 		}
 	}
-	profileRaw := strings.TrimSpace(*profileFlag)
-	if profileRaw != "" {
-		fmt.Fprintln(os.Stderr, "warning: --profile is deprecated; use --preset light|balanced|delivery")
-	} else {
-		profileRaw = strings.TrimSpace(*presetFlag)
-	}
-	profile, err := parseRuntimeProfile(profileRaw)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -863,8 +850,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	}
 
 	ctx := context.Background()
-	bc := serve.NewBroadcaster()
-	cfg, _ := config.Load()
+	bc, sessionTag, cfg := newServeBootstrap()
 
 	// Build serve config, merging CLI flags over config file.
 	serveCfg := serveConfigWithCommandDefaults(opts.command, authExplicit, cfg.Serve)
@@ -939,9 +925,7 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// Keep the browser reachable when the selected provider has no saved key.
 	// The loopback-only provider setup surface stores the missing credential and
 	// rebuilds this controller in place before the normal web UI is exposed.
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
-		OnSessionRecovered: cliSessionRecoveredHandler(leases),
-	})
+	ctrl, serveBuildOpts, err := setupCLIMultiSessionProfile(ctx, *model, *maxSteps, deprecatedMode, sessionTag, leases)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -968,8 +952,8 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 		return 1
 	}
 
-	srv := serve.New(ctrl, bc, serveCfg)
-	_ = srv.SetSessionLeases(leases) // same live keeper was bound above
+	srv := newCLIMultiSessionServer(ctrl, bc, sessionTag, serveCfg, leases, serveBuildOpts)
+	defer srv.Close()
 	return runServeFrontend(ctrl, srv, serveCfg, serveFrontendOptions{
 		command: opts.command, address: *addr,
 		portFile: *portFile, tokenFile: *tokenFile, pidFile: *pidFile,
@@ -982,11 +966,14 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 // prompt loop that keeps conversation context across turns. Exit with
 // 'exit'/'quit' or Ctrl-D.
 func chatREPL(args []string, version string) int {
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile", "preset")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)")
-	presetFlag := fs.String("preset", "balanced", "agent execution setting: light | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	cont := registerContinueFlag(fs)
 	resume := fs.StringP("resume", "r", "", "resume by session ID/query, or open the picker when no value is given")
@@ -1010,14 +997,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	profileRaw := strings.TrimSpace(*profileFlag)
-	if profileRaw != "" {
-		fmt.Fprintln(os.Stderr, "warning: --profile is deprecated; use --preset light|balanced|delivery")
-	} else {
-		profileRaw = strings.TrimSpace(*presetFlag)
-	}
-	profile, err := parseRuntimeProfile(profileRaw)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -1097,7 +1077,7 @@ func chatREPL(args []string, version string) int {
 	}
 	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
 	reporter := startCLITelemetry(cfg, telemetry.Options{
-		Version: version, Interactive: isInteractive(), CLIMode: "tui", Profile: profile,
+		Version: version, Interactive: isInteractive(), CLIMode: "tui",
 		PermissionMode: *permissionMode, SessionMode: sessionMode,
 	})
 
@@ -1135,15 +1115,17 @@ func chatREPL(args []string, version string) int {
 		effortOverride = effort
 	}
 	overrides := cliBuildOverrides{
+		Preset:             deprecatedMode,
 		Effort:             effortOverride,
 		PermissionAllow:    allowedTools,
 		AdditionalDirs:     additionalDirs,
 		WorkspaceRoot:      workspaceRoot,
+		InteractiveHost:    true,
 		Stderr:             diagnostics.Writer(),
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	}
 	diagnostics.Milestone("controller_build_begin")
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, overrides)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
 		// With a config present, fall through to the descriptive error — re-running
@@ -1152,7 +1134,7 @@ func chatREPL(args []string, version string) int {
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
-		ctrl, err = setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
+		ctrl, err = setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, overrides)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -1245,7 +1227,7 @@ func chatREPL(args []string, version string) int {
 		// Keep the logical-session private temporary directory across model /
 		// profile switches (Issue #7575).
 		effectiveOverrides.SessionTemp = sessionTempFromCLIController(oldCtrl)
-		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides)
+		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, effectiveOverrides)
 		if err != nil {
 			return nil, err
 		}
@@ -1273,7 +1255,6 @@ func chatREPL(args []string, version string) int {
 	// buildController so the replacement matches this session's launch wiring;
 	// the CLI holds no SharedHost, so each rebuild owns its plugin host.
 	m.bindRuntimeRebuilder(*maxSteps, sink, *yolo, overrides, cliProfileBuildOptions)
-	m.runtimeProfile = profile
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
 	}
@@ -1313,10 +1294,8 @@ func chatREPL(args []string, version string) int {
 	launchWebPath := ""
 	launchWebSessionID := ""
 	launchWebModelRef := ""
-	launchWebProfile := ""
 	if fm, ok := final.(chatTUI); ok {
 		launchWeb = fm.launchWebOnExit
-		launchWebProfile = fm.runtimeProfile
 		for _, oc := range fm.oldControllers {
 			if c, ok := oc.(*control.Controller); ok {
 				reporter.RecordRecovery(c.DrainRecoveryMetrics())
@@ -1350,7 +1329,7 @@ func chatREPL(args []string, version string) int {
 		// session as already in use. The deferred Release remains as a harmless
 		// final guard for every other return path.
 		leases.Release()
-		return runWebCommand(webHandoffArgs(launchWebPath, launchWebSessionID, launchWebModelRef, launchWebProfile))
+		return runWebCommand(webHandoffArgs(launchWebPath, launchWebSessionID, launchWebModelRef))
 	}
 	return 0
 }
@@ -1627,14 +1606,14 @@ func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
 // later wizard step), network/auth error, or a vendor without /models — it
 // silently returns the preset's static model list so the wizard can always
 // present something. The fetch has a 10s timeout and is best-effort.
-func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
+func fetchOrFallback(probe *config.ProviderEntry, famName string, proxy netclient.ProxySpec) []string {
 	static := probe.ModelList()
 	if probe.BaseURL == "" {
 		return static
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := probe.FetchModels(ctx)
+	models, err := probe.FetchModelsWithProxy(ctx, proxy)
 	if err != nil || len(models) == 0 {
 		if len(static) > 0 {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsUsingPresetsFmt, famName)))
@@ -1656,7 +1635,7 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 // wizard's idea of "what models exist" diverged from the chat client's actual
 // endpoint. Returning the empty slice (not an error) on full miss lets the
 // wizard fall through to a manual text input without an error message.
-func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string, proxy netclient.ProxySpec) ([]string, error) {
 	candidates, err := config.BuildModelFetchURLs(baseURL, "")
 	if err != nil {
 		return nil, err
@@ -1664,7 +1643,7 @@ func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string
 	var lastErr error
 	var firstHardErr error
 	for _, u := range candidates {
-		models, err := openai.FetchModels(ctx, u, apiKey, nil)
+		models, err := openai.FetchModelsWithOptions(ctx, u, apiKey, openai.FetchModelsOptions{Proxy: proxy})
 		if err == nil {
 			return models, nil
 		}
@@ -1893,7 +1872,7 @@ func newProviderPromptResult(entries []config.ProviderEntry, key, value string) 
 }
 
 // promptCustomProvider handles the custom provider entry flow.
-func promptCustomProvider() (providerPromptResult, error) {
+func promptCustomProvider(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	methodIdx, err := selectOne(i18n.M.CustomAddMethodLabel, []menuItem{
 		{name: i18n.M.CustomMethodManual},
 		{name: i18n.M.CustomMethodURL},
@@ -1904,7 +1883,7 @@ func promptCustomProvider() (providerPromptResult, error) {
 	if methodIdx == 0 {
 		return promptCustomProviderManual()
 	}
-	return promptCustomProviderFromURL()
+	return promptCustomProviderFromURL(proxy)
 }
 
 // promptCustomProviderManual handles manual model entry.
@@ -1950,7 +1929,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 // endpoint and shows a checkbox of the returned models. If the call fails
 // (network error, auth failure, or a vendor without /models) it falls
 // through to manual entry, reusing the URL and key the user already typed.
-func promptCustomProviderFromURL() (providerPromptResult, error) {
+func promptCustomProviderFromURL(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	in := bufio.NewScanner(os.Stdin)
 	fmt.Println()
 
@@ -1965,7 +1944,7 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey, proxy)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1997,7 +1976,7 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 }
 
 // promptAnthropicProvider handles the Anthropic compatible provider entry flow.
-func promptAnthropicProvider() (providerPromptResult, error) {
+func promptAnthropicProvider(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	methodIdx, err := selectOne(i18n.M.AnthropicAddMethodLabel, []menuItem{
 		{name: i18n.M.AnthropicMethodManual},
 		{name: i18n.M.AnthropicMethodURL},
@@ -2008,7 +1987,7 @@ func promptAnthropicProvider() (providerPromptResult, error) {
 	if methodIdx == 0 {
 		return promptAnthropicProviderManual()
 	}
-	return promptAnthropicProviderFromURL()
+	return promptAnthropicProviderFromURL(proxy)
 }
 
 // promptAnthropicProviderManual handles manual model entry.
@@ -2053,7 +2032,7 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 // — Anthropic's own API has no public model list — so on any failure the
 // flow falls through to manual entry with the URL/key already filled in,
 // rather than aborting the wizard.
-func promptAnthropicProviderFromURL() (providerPromptResult, error) {
+func promptAnthropicProviderFromURL(proxy netclient.ProxySpec) (providerPromptResult, error) {
 	in := bufio.NewScanner(os.Stdin)
 	fmt.Println()
 
@@ -2067,7 +2046,7 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey, proxy)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))
@@ -2583,8 +2562,10 @@ func configCompactRatioCommand(args []string) int {
 		return 0
 	}
 	percent, err := strconv.ParseFloat(strings.TrimSpace(rest[0]), 64)
-	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 65 || percent > 85 {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "compact ratio must be a percentage between 65 and 85")
+	minPercent := config.CompactRatioMin * 100
+	maxPercent := config.CompactRatioMax * 100
+	if err != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < minPercent || percent > maxPercent {
+		fmt.Fprintf(os.Stderr, "%s compact ratio must be a percentage between %.0f and %.0f\n", i18n.M.ErrorPrefix, minPercent, maxPercent)
 		return 2
 	}
 	ratio := percent / 100
@@ -2653,7 +2634,7 @@ func formatCompactRatioPercent(ratio float64) string {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [30..85]
   reasonix config currency [auto|CNY|USD]
   reasonix config telemetry [auto|on|off]
 `)
@@ -2667,7 +2648,7 @@ func configTelemetryUsage() {
 
 func configCompactRatioUsage() {
 	fmt.Print(`Usage:
-  reasonix config compact-ratio [--local] [65..85]
+  reasonix config compact-ratio [--local] [30..85]
 `)
 }
 

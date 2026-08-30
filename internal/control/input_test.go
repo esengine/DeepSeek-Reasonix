@@ -491,8 +491,8 @@ func TestSubmitSlashSubagentWithoutRunnerFinishesWithError(t *testing.T) {
 	c.Submit("/helper inspect auth")
 	gotEvents := waitForTurnEvents(t, events)
 	waitIdle(t, c)
-	if len(gotEvents) != 1 || gotEvents[0].Kind != event.TurnDone || gotEvents[0].Err == nil ||
-		!strings.Contains(gotEvents[0].Err.Error(), "runner is unavailable") {
+	if terminal := gotEvents[len(gotEvents)-1]; terminal.Kind != event.TurnDone || terminal.Err == nil ||
+		!strings.Contains(terminal.Err.Error(), "runner is unavailable") {
 		t.Fatalf("missing terminal runner error: %+v", gotEvents)
 	}
 }

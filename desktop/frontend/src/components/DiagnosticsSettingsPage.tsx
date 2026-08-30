@@ -2,8 +2,24 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ChevronDown, ChevronRight, Clipboard, Loader2, RefreshCw } from "lucide-react";
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
-import { useT } from "../lib/i18n";
+import { useI18n, useT, type Locale } from "../lib/i18n";
 import type { CapabilityDiagnosticsReport, CapabilityIssue, RuntimeDoctorReport, SettingsTab } from "../lib/types";
+import { FrontendDiagnosticsControl } from "./FrontendDiagnosticsControl";
+
+const FRONTEND_COPY: Record<Locale, { title: string; hint: string }> = {
+  en: {
+    title: "Frontend interaction recording",
+    hint: "When scrolling jumps, sessions switch, or the UI flickers, turn this on, reproduce the issue, then turn it off and choose where to export. Only timing, events, and geometry are recorded; conversation content, input values, paths, and secrets are excluded.",
+  },
+  zh: {
+    title: "前端交互记录",
+    hint: "遇到滚动闪回、会话切换或界面抖动时，打开记录开关，复现问题后关闭并选择路径导出。仅记录时间、事件和几何信息，不记录对话内容、输入值、路径或密钥。",
+  },
+  "zh-TW": {
+    title: "前端互動記錄",
+    hint: "遇到捲動閃回、工作階段切換或介面抖動時，開啟記錄開關，重現問題後關閉並選擇路徑匯出。僅記錄時間、事件與幾何資訊，不記錄對話內容、輸入值、路徑或密鑰。",
+  },
+};
 
 export function DiagnosticsSettingsPage({
   onNavigate,
@@ -11,6 +27,8 @@ export function DiagnosticsSettingsPage({
   onNavigate?: (tab: SettingsTab) => void;
 }) {
   const t = useT();
+  const { locale } = useI18n();
+  const frontendCopy = FRONTEND_COPY[locale];
   const [report, setReport] = useState<CapabilityDiagnosticsReport | null>(null);
   const [runtimeDoctor, setRuntimeDoctor] = useState<RuntimeDoctorReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,6 +134,16 @@ export function DiagnosticsSettingsPage({
       </div>
 
       <p className="diag-page__hint">{t("diag.hint")}</p>
+
+      <section className="diag-section diag-section--frontend" data-testid="frontend-diagnostics-settings">
+        <div className="diag-section__body diag-section__body--frontend">
+          <div className="diag-frontend-recording__copy">
+            <strong>{frontendCopy.title}</strong>
+            <span>{frontendCopy.hint}</span>
+          </div>
+          <FrontendDiagnosticsControl embedded />
+        </div>
+      </section>
 
       {loading && !report && <div className="empty">{t("settings.loading")}</div>}
       {error && <div className="settings-error" role="alert">{error}</div>}

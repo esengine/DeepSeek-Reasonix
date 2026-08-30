@@ -1,12 +1,13 @@
-import type { Translator } from "./i18n";
+import type { SessionCatalogStatus } from "./sessionCatalogTypes";
 
-type SessionTurns = {
-  turns?: number;
-  turnsState?: string;
-};
+export type SessionCatalogNotice = "working" | "failed" | "rebuild";
 
-export function sessionTurnsLabel(session: SessionTurns, t: Translator): string {
-  if (session.turnsState === "unknown") return t("history.indexing");
-  if (typeof session.turns === "number") return t("composer.sessionTurns", { n: session.turns });
-  return "";
+export function sessionCatalogNotice(status: SessionCatalogStatus): SessionCatalogNotice | null {
+  const working = status.state === "opening"
+    || status.state === "rebuilding"
+    || status.repairPending > 0
+    || (status.unindexedTargetCount ?? 0) > 0;
+  if (working) return "working";
+  if (status.state === "degraded" || status.lastError) return status.canRebuild === true ? "rebuild" : "failed";
+  return null;
 }

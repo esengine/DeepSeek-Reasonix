@@ -9,10 +9,61 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
 )
+
+// Approve answers a pending ApprovalRequest by ID. It remains the compatibility
+// bridge for clients that do not yet call the scope-aware resolver directly.
+func (c *Controller) Approve(id string, allow, session, persist bool) {
+	_ = c.approveChecked(id, allow, session, persist)
+}
+
+func (c *Controller) approveChecked(id string, allow, session, persist bool) error {
+	if pending := c.approval.peek(id); pending.reply != nil && pending.kind == writeAccessKind {
+		return c.ResolveApproval(id, allow, scopeFromApprove(allow, session, persist))
+	}
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	if gate != nil && gate.HasApproval(id) {
+		action := agent.RecoveryActionRevise
+		if allow {
+			action = agent.RecoveryActionContinue
+		}
+		return c.ResolveRecovery(id, action, "")
+	}
+	pending, ok, err := c.approval.resolveAfter(id, func(p pendingApproval) error {
+		return c.emitTurnEventChecked(event.Event{Kind: event.PromptAnswered, ItemID: id, Status: event.TurnInProgress})
+	})
+	if err != nil {
+		return err
+	}
+	if !ok || pending.reply == nil {
+		return nil
+	}
+	outcome := "deny"
+	if pending.tool == planApprovalTool {
+		outcome = string(PlanDecisionRevisePlan)
+		if allow {
+			outcome = string(PlanDecisionStartExecution)
+		}
+	} else if allow {
+		switch {
+		case persist:
+			outcome = "allow_persistent"
+		case session:
+			outcome = "allow_session"
+		default:
+			outcome = "allow_once"
+		}
+	}
+	c.recordDecisionReceipt(pending, outcome)
+	pending.reply <- approvalReply{allow: allow, session: session, persist: persist}
+	return nil
+}
 
 // approvalManager owns the approval/ask prompt bookkeeping and the runtime
 // approval posture, behind its own locks and off the controller's c.mu. It is a
@@ -33,6 +84,8 @@ type approvalManager struct {
 	mu                       sync.Mutex
 	approvals                map[string]pendingApproval
 	asks                     map[string]pendingAsk
+	approvalResolutions      map[string]*promptResolution
+	askResolutions           map[string]*promptResolution
 	granted                  map[string]bool
 	planModeReadOnlyCommands map[string]bool
 	nextID                   int
@@ -61,6 +114,30 @@ type approvalManager struct {
 	// attach handoff. It is separate from promptMu because promptMu remains
 	// held while waiting for the user's answer.
 	promptEmitMu sync.Mutex
+
+	// mcpInteractions holds pending MCP elicitations, guarded by mu and
+	// grouped so the struct-state ratchet grows by one field.
+	mcpInteractions mcpInteractionState
+}
+
+type promptResolution struct {
+	done     chan struct{}
+	joined   chan struct{}
+	joinOnce sync.Once
+	err      error
+}
+
+func newPromptResolution() *promptResolution {
+	return &promptResolution{done: make(chan struct{}), joined: make(chan struct{})}
+}
+
+func (r *promptResolution) wait() error {
+	if r == nil {
+		return nil
+	}
+	r.joinOnce.Do(func() { close(r.joined) })
+	<-r.done
+	return r.err
 }
 
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {
@@ -68,6 +145,8 @@ func newApprovalManager(policy permission.Policy, mode string, timeout time.Dura
 		policy:                   policy,
 		approvals:                map[string]pendingApproval{},
 		asks:                     map[string]pendingAsk{},
+		approvalResolutions:      map[string]*promptResolution{},
+		askResolutions:           map[string]*promptResolution{},
 		granted:                  map[string]bool{},
 		planModeReadOnlyCommands: map[string]bool{},
 		toolApprovalMode:         mode,
@@ -263,7 +342,7 @@ func (a *approvalManager) registerDecisionKindWithInput(tool, subject, reason st
 	reply := make(chan approvalReply, 1)
 	autoDrain := false
 	if !fresh && !requireHuman {
-		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject)
+		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject, rawInput)
 	}
 	a.approvals[id] = pendingApproval{
 		id:   id,
@@ -271,6 +350,27 @@ func (a *approvalManager) registerDecisionKindWithInput(tool, subject, reason st
 		autoDrain: autoDrain, kind: kind, recovery: rec, reply: reply,
 	}
 	return id, reply
+}
+
+func (a *approvalManager) registerWriteAccess(tool, subject, reason string, rawInput json.RawMessage, payload *event.WriteAccessApproval) (string, chan approvalReply) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextID++
+	id := strconv.Itoa(a.nextID)
+	reply := make(chan approvalReply, 1)
+	a.approvals[id] = pendingApproval{
+		id: id, tool: tool, subject: subject, reason: reason,
+		rawInput: append(json.RawMessage(nil), rawInput...),
+		fresh:    true, requireHuman: true, kind: writeAccessKind,
+		writeAccess: event.NormalizeWriteAccessApproval(payload), reply: reply,
+	}
+	return id, reply
+}
+
+func (a *approvalManager) peek(id string) pendingApproval {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.approvals[id]
 }
 
 // grantSession records a session-scoped grant so future calls in the same scope
@@ -307,6 +407,7 @@ func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
 type SessionAuthorizations struct {
 	Grants                   []string
 	PlanModeReadOnlyCommands []string
+	WriteRoots               []string
 }
 
 func (a *approvalManager) snapshotSessionAuthorizations() SessionAuthorizations {
@@ -340,6 +441,7 @@ func (a *approvalManager) restoreSessionAuthorizations(auth SessionAuthorization
 func (a *approvalManager) cancel(id string) {
 	a.mu.Lock()
 	delete(a.approvals, id)
+	a.cancelApprovalResolutionLocked(id)
 	a.mu.Unlock()
 }
 
@@ -349,21 +451,67 @@ func (a *approvalManager) resolve(id string) pendingApproval {
 	defer a.mu.Unlock()
 	p := a.approvals[id]
 	delete(a.approvals, id)
+	a.cancelApprovalResolutionLocked(id)
 	return p
 }
 
-// resolveTool removes id only when it belongs to the expected specialized
-// decision surface. A mismatched bridge call must not consume another approval
-// type that happens to share the same short numeric id.
-func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
+func (a *approvalManager) resolveAfter(id string, persist func(pendingApproval) error) (pendingApproval, bool, error) {
+	a.mu.Lock()
+	p, ok := a.approvals[id]
+	if !ok {
+		a.mu.Unlock()
+		return pendingApproval{}, false, nil
+	}
+	if inFlight := a.approvalResolutions[id]; inFlight != nil {
+		a.mu.Unlock()
+		return pendingApproval{}, false, inFlight.wait()
+	}
+	attempt := newPromptResolution()
+	a.approvalResolutions[id] = attempt
+	a.mu.Unlock()
+	if persist != nil {
+		if err := persist(p); err != nil {
+			a.mu.Lock()
+			a.finishApprovalResolutionLocked(id, attempt, err)
+			a.mu.Unlock()
+			return pendingApproval{}, false, err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p, ok := a.approvals[id]
-	if !ok || p.tool != tool {
-		return pendingApproval{}, false
+	current, ok := a.approvals[id]
+	if !ok || a.approvalResolutions[id] != attempt || current.reply != p.reply {
+		if a.approvalResolutions[id] == attempt {
+			a.finishApprovalResolutionLocked(id, attempt, context.Canceled)
+		}
+		return pendingApproval{}, false, attempt.err
 	}
 	delete(a.approvals, id)
-	return p, true
+	a.finishApprovalResolutionLocked(id, attempt, nil)
+	return p, true, nil
+}
+
+func (a *approvalManager) finishApprovalResolutionLocked(id string, attempt *promptResolution, err error) {
+	if attempt == nil || a.approvalResolutions[id] != attempt {
+		return
+	}
+	delete(a.approvalResolutions, id)
+	attempt.err = err
+	close(attempt.done)
+}
+
+func (a *approvalManager) cancelApprovalResolutionLocked(id string) {
+	if attempt := a.approvalResolutions[id]; attempt != nil {
+		a.finishApprovalResolutionLocked(id, attempt, context.Canceled)
+	}
+}
+
+func (a *approvalManager) resolveToolAfter(id, tool string, persist func(pendingApproval) error) (pendingApproval, bool, error) {
+	p := a.peek(id)
+	if p.reply == nil || p.tool != tool {
+		return pendingApproval{}, false, nil
+	}
+	return a.resolveAfter(id, persist)
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and
@@ -408,16 +556,59 @@ func (a *approvalManager) queuedAsks() int {
 func (a *approvalManager) cancelAsk(id string) {
 	a.mu.Lock()
 	delete(a.asks, id)
+	a.cancelAskResolutionLocked(id)
 	a.mu.Unlock()
 }
 
-// resolveAsk removes and returns the pending ask for id (AnswerQuestion path).
-func (a *approvalManager) resolveAsk(id string) (pendingAsk, bool) {
+func (a *approvalManager) resolveAskAfter(id string, persist func(pendingAsk) error) (pendingAsk, bool, error) {
+	a.mu.Lock()
+	p, ok := a.asks[id]
+	if !ok {
+		a.mu.Unlock()
+		return pendingAsk{}, false, nil
+	}
+	if inFlight := a.askResolutions[id]; inFlight != nil {
+		a.mu.Unlock()
+		return pendingAsk{}, false, inFlight.wait()
+	}
+	attempt := newPromptResolution()
+	a.askResolutions[id] = attempt
+	a.mu.Unlock()
+	if persist != nil {
+		if err := persist(p); err != nil {
+			a.mu.Lock()
+			a.finishAskResolutionLocked(id, attempt, err)
+			a.mu.Unlock()
+			return pendingAsk{}, false, err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p, ok := a.asks[id]
+	current, ok := a.asks[id]
+	if !ok || a.askResolutions[id] != attempt || current.reply != p.reply {
+		if a.askResolutions[id] == attempt {
+			a.finishAskResolutionLocked(id, attempt, context.Canceled)
+		}
+		return pendingAsk{}, false, attempt.err
+	}
 	delete(a.asks, id)
-	return p, ok
+	a.finishAskResolutionLocked(id, attempt, nil)
+	return p, true, nil
+}
+
+func (a *approvalManager) finishAskResolutionLocked(id string, attempt *promptResolution, err error) {
+	if attempt == nil || a.askResolutions[id] != attempt {
+		return
+	}
+	delete(a.askResolutions, id)
+	attempt.err = err
+	close(attempt.done)
+}
+
+func (a *approvalManager) cancelAskResolutionLocked(id string) {
+	if attempt := a.askResolutions[id]; attempt != nil {
+		a.finishAskResolutionLocked(id, attempt, context.Canceled)
+	}
 }
 
 // clearAll drops every in-flight prompt without signaling — the cancel path,
@@ -427,6 +618,16 @@ func (a *approvalManager) clearAll() {
 	defer a.mu.Unlock()
 	clear(a.approvals)
 	clear(a.asks)
+	clear(a.mcpInteractions.pending)
+	for id := range a.approvalResolutions {
+		a.cancelApprovalResolutionLocked(id)
+	}
+	for id := range a.askResolutions {
+		a.cancelAskResolutionLocked(id)
+	}
+	for id := range a.mcpInteractions.resolutions {
+		a.finishMCPInteractionResolutionLocked(id, a.mcpInteractions.resolutions[id], context.Canceled)
+	}
 }
 
 // clearKind drops pending approvals of one specialized kind. Session recovery
@@ -438,6 +639,7 @@ func (a *approvalManager) clearKind(kind string) {
 	for id, pending := range a.approvals {
 		if pending.kind == kind {
 			delete(a.approvals, id)
+			a.cancelApprovalResolutionLocked(id)
 		}
 	}
 }
@@ -446,7 +648,7 @@ func (a *approvalManager) clearKind(kind string) {
 func (a *approvalManager) hasPending() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.approvals) > 0 || len(a.asks) > 0
+	return len(a.approvals) > 0 || len(a.asks) > 0 || len(a.mcpInteractions.pending) > 0
 }
 
 // mode returns the normalized runtime approval posture.
@@ -496,7 +698,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	for id, p := range a.approvals {
 		approvals = append(approvals, event.Approval{
 			ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason, RawInput: append(json.RawMessage(nil), p.rawInput...), Fresh: p.fresh,
-			Kind: p.kind, Recovery: p.recovery,
+			Kind: p.kind, Recovery: p.recovery, WriteAccess: event.NormalizeWriteAccessApproval(p.writeAccess),
 		})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
@@ -518,6 +720,14 @@ func normalizePlanModeReadOnlyCommandPrefix(prefix string) string {
 // decision helpers (caller holds a.mu)
 
 func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.RawMessage) bool {
+	if isMemoryApprovalTool(tool) {
+		switch a.toolApprovalMode {
+		case ToolApprovalYolo:
+			return true
+		case ToolApprovalAuto:
+			return a.autoApprovalWouldAllowLocked(tool, subject, args)
+		}
+	}
 	if requiresFreshApprovalTool(tool) {
 		return false
 	}
@@ -535,12 +745,15 @@ func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.Raw
 	return policy.DecideSubject(tool, false, subject) == permission.Allow
 }
 
-func (a *approvalManager) autoApprovalWouldAllowLocked(tool, subject string) bool {
-	if requiresFreshApprovalTool(tool) {
+func (a *approvalManager) autoApprovalWouldAllowLocked(tool, subject string, args json.RawMessage) bool {
+	if requiresFreshApprovalTool(tool) && !isMemoryApprovalTool(tool) {
 		return false
 	}
 	policy := a.policy
 	policy.Mode = permission.Allow
+	if len(args) > 0 {
+		return policy.Decide(tool, false, args) == permission.Allow
+	}
 	return policy.DecideSubject(tool, false, subject) == permission.Allow
 }
 
@@ -558,7 +771,7 @@ func (a *approvalManager) sessionGrantAllowsLocked(tool, subject string) bool {
 
 // drainedApproval is a pending approval removed by a posture switch, keeping
 // its prompt id so frontends can dismiss exactly the prompts the new posture
-// resolved (fresh/plan/memory prompts stay pending and must stay visible).
+// resolved (plan/sandbox/config prompts stay pending and must stay visible).
 type drainedApproval struct {
 	id    string
 	reply chan approvalReply
@@ -569,7 +782,12 @@ type drainedApproval struct {
 func (a *approvalManager) drainLocked(includeExplicitAsk bool) []drainedApproval {
 	pending := make([]drainedApproval, 0, len(a.approvals))
 	for id, approval := range a.approvals {
-		if approval.fresh || requiresFreshApprovalTool(approval.tool) {
+		memoryBypass := isMemoryApprovalTool(approval.tool) && (a.toolApprovalMode == ToolApprovalYolo ||
+			a.toolApprovalMode == ToolApprovalAuto && approval.autoDrain)
+		if approval.kind == writeAccessKind {
+			continue
+		}
+		if (approval.fresh || requiresFreshApprovalTool(approval.tool)) && !memoryBypass {
 			continue
 		}
 		if approval.requireHuman && !includeExplicitAsk {
@@ -599,14 +817,23 @@ func normalizeToolApprovalMode(mode string) string {
 	}
 }
 
-// RequiresFreshHumanApprovalTool reports whether a tool's unsafe variants must
-// be answered by a human decision, not by YOLO/auto approval, Guardian, or a
-// non-interactive nil approver. A controller that owns the scoped memory store
-// may still classify a bounded new project memory as create-only and allow that
-// narrow operation in interactive or headless mode.
+// RequiresFreshHumanApprovalTool reports tools that session grants,
+// Guardian/hooks, and headless nil approvers cannot authorize. Interactive Auto
+// treats remember/forget as normal policy fallback, while interactive YOLO may
+// also bypass explicit memory ask rules. A controller that owns the scoped
+// memory store may still auto-allow a bounded create-only project memory.
 func RequiresFreshHumanApprovalTool(tool string) bool {
 	switch tool {
 	case planApprovalTool, memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool:
+		return true
+	default:
+		return false
+	}
+}
+
+func isMemoryApprovalTool(tool string) bool {
+	switch tool {
+	case memoryRememberTool, memoryForgetTool:
 		return true
 	default:
 		return false

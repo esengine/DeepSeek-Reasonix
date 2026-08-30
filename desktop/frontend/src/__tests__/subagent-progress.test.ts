@@ -2,7 +2,7 @@
 //
 // Verifies the reserved ToolProgress channels (reasonix.subagent.*) update
 // only the target card's in-memory subagentProgress: never tool.output, never
-// the parent LiveStream, never history data. Also locks the background keep-
+// the settled parent assistant segment, never history data. Also locks the background keep-
 // running rule, the group-card settle rule, preview caps, and the isolation
 // of concurrent children.
 
@@ -79,7 +79,7 @@ console.log("\nsubagent progress reducer");
   s = text(s, "parent answer part 1");
   s = reasoning(s, "parent thinking");
   s = dispatch(s, { id: "task-1", name: "task", args: "{}", readOnly: true });
-  const liveBefore = JSON.stringify(s.live);
+  const parentBefore = JSON.stringify(s.items.find((item) => item.kind === "assistant"));
 
   s = progress(s, progressTool("task-1", SUBAGENT_PROGRESS_STATUS, "running"));
   s = progress(s, progressTool("task-1", SUBAGENT_PROGRESS_REASONING, "child thinks"));
@@ -95,9 +95,10 @@ console.log("\nsubagent progress reducer");
   eq(card.subagentProgress?.durationMs, 1234, "terminal duration captured");
   eq(card.status, "done", "completed terminal maps to done status");
   eq(card.output, undefined, "preview never writes tool.output");
-  eq(JSON.stringify(s.live), liveBefore, "parent LiveStream bytes unchanged by child previews");
-  eq(s.live?.text, "parent answer part 1", "parent live text unchanged by child previews");
-  eq(s.live?.reasoning, "parent thinking", "parent live reasoning unchanged by child previews");
+  const parent = s.items.find((item) => item.kind === "assistant");
+  eq(JSON.stringify(parent), parentBefore, "settled parent assistant bytes unchanged by child previews");
+  eq(parent?.kind === "assistant" ? parent.text : undefined, "parent answer part 1", "parent text unchanged by child previews");
+  eq(parent?.kind === "assistant" ? parent.reasoning : undefined, "parent thinking", "parent reasoning unchanged by child previews");
 }
 
 // --- 2. Unknown status phases and unknown names are ignored ---------------

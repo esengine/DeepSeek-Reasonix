@@ -37,6 +37,23 @@ func IsDeepSeek(baseURL string) bool {
 	return matchesVendorHost(baseURL, "deepseek.com", "api.deepseek.com")
 }
 
+// OfficialDeepSeekVisionModel is the only official DeepSeek chat SKU that
+// accepts image input. Flash and Pro remain text-only; a future name that
+// merely contains "vision" must not inherit this contract.
+const OfficialDeepSeekVisionModel = "deepseek-v4-flash-vision-exp"
+
+// IsOfficialDeepSeekVisionModel reports whether model is the pinned official
+// DeepSeek vision SKU. Matching is case-insensitive and trims surrounding space.
+func IsOfficialDeepSeekVisionModel(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), OfficialDeepSeekVisionModel)
+}
+
+// OfficialDeepSeekAllowsVision reports whether this official DeepSeek endpoint
+// may serialize image parts for the selected model. Custom gateways never match.
+func OfficialDeepSeekAllowsVision(baseURL, model string) bool {
+	return IsDeepSeek(baseURL) && IsOfficialDeepSeekVisionModel(model)
+}
+
 // IsOpenAI reports whether baseURL points at OpenAI's official API host. Keep
 // this exact-host so a compatible gateway under another openai.com subdomain
 // cannot accidentally receive the official max_completion_tokens wire shape.

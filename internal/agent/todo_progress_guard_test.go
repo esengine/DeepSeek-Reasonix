@@ -177,7 +177,7 @@ func TestMaxStepsGraceSummaryBypassesIncompleteTodoReadiness(t *testing.T) {
 		}},
 		testutil.Turn{Text: "Progress saved; the todo remains unfinished."},
 	)
-	a := New(mp, reg, NewSession(""), Options{MaxSteps: 1, DeliveryProfile: true}, event.Discard)
+	a := New(mp, reg, NewSession(""), Options{MaxSteps: 1}, event.Discard)
 
 	err := a.Run(context.Background(), "start a long task")
 	var pause *maxStepsPause

@@ -382,7 +382,7 @@ func PrepareAppBundleUpdateHandoff(fromVersion, toVersion, appPath, backupPath, 
 		return nil, fmt.Errorf("prepare update: lock targets: %w", err)
 	}
 	defer unlockTargets()
-	tx.HandoffAppTreeID, err = repairPlanTreeContentStateID(tx.HandoffAppPath)
+	tx.HandoffAppTreeID, err = repairPlanTreePayloadStateID(tx.HandoffAppPath)
 	if err != nil {
 		return nil, fmt.Errorf("prepare update: stage bundle digest: %w", err)
 	}
@@ -1345,14 +1345,14 @@ func VerifyAppBundleUpdateHandoffSource(tx *UpdateTransaction) error {
 	if err := validateAppBundleHandoffSourcePaths(tx); err != nil {
 		return err
 	}
-	actual, err := repairPlanTreeContentStateID(tx.HandoffAppPath)
+	matched, err := repairPlanTreeHandoffAppMatches(tx.HandoffAppPath, tx.HandoffAppTreeID)
 	if err != nil {
 		return fmt.Errorf("read staged bundle digest: %w", err)
 	}
-	if actual != tx.HandoffAppTreeID {
+	if !matched {
 		return fmt.Errorf("staged bundle changed after verification")
 	}
-	actual, err = repairPlanTreeContentStateID(tx.HandoffStagingPath)
+	actual, err := repairPlanTreeContentStateID(tx.HandoffStagingPath)
 	if err != nil {
 		return fmt.Errorf("read staging directory digest: %w", err)
 	}
@@ -1423,11 +1423,11 @@ func verifyAppBundleUpdateHandoffReplacement(tx *UpdateTransaction, path, subjec
 	if strings.TrimSpace(tx.HandoffAppTreeID) == "" {
 		return fmt.Errorf("handoff target digest is missing")
 	}
-	actual, err := repairPlanTreeContentStateID(path)
+	matched, err := repairPlanTreeHandoffAppMatches(path, tx.HandoffAppTreeID)
 	if err != nil {
 		return fmt.Errorf("read %s bundle digest: %w", subject, err)
 	}
-	if actual != tx.HandoffAppTreeID {
+	if !matched {
 		return fmt.Errorf("%s bundle differs from verified staging", subject)
 	}
 	return nil

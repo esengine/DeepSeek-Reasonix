@@ -407,25 +407,6 @@ func resolveTerminalCommand(_ string, shellID string) (terminalCommand, error) {
 	return namedTerminalCommand(shellID)
 }
 
-func terminalCommandFromConfig(prefer, configuredPath string) (terminalCommand, bool) {
-	prefer = strings.ToLower(strings.TrimSpace(prefer))
-	configuredPath = strings.TrimSpace(configuredPath)
-	if prefer == "" || prefer == "auto" {
-		return terminalCommand{}, false
-	}
-	if prefer != "bash" && prefer != "powershell" && prefer != "pwsh" {
-		return terminalCommand{}, false
-	}
-	if configuredPath != "" {
-		if path, err := exec.LookPath(configuredPath); err == nil {
-			label := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-			return commandForShellPath(path, label), true
-		}
-	}
-	command, err := namedTerminalCommand(prefer)
-	return command, err == nil
-}
-
 func defaultTerminalCommand() (terminalCommand, error) {
 	if runtime.GOOS != "windows" {
 		if path := strings.TrimSpace(os.Getenv("SHELL")); path != "" {

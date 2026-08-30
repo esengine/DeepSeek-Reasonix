@@ -1,17 +1,16 @@
-import { formatSearchFootnotesMarkdown } from "../lib/searchSources";
+import { lazy, Suspense } from "react";
 import type { SearchSource } from "../lib/searchSources";
-import { Markdown } from "./Markdown";
 
+const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel })));
+
+// Backwards-compatible export for callers that still use the old name. The
+// display implementation is now the structured, collapsed sources panel.
 export function SearchFootnotes({ sources }: { sources?: SearchSource[] }) {
-  const footnotes = formatSearchFootnotesMarkdown(sources ?? []);
-  if (!footnotes) return null;
   return (
-    <div className="msg-search-sources">
-      <Markdown text={footnotes} />
-    </div>
+    <Suspense fallback={null}>
+      <SearchSourcesPanel sources={sources} />
+    </Suspense>
   );
 }
 
-export function hasSearchFootnotes(sources?: SearchSource[]): boolean {
-  return formatSearchFootnotesMarkdown(sources ?? []) !== "";
-}
+export const hasSearchFootnotes = (sources?: SearchSource[]) => Boolean(sources?.length);

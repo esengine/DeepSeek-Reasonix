@@ -15,6 +15,9 @@ type summaryProjectionCommit struct {
 	activeTurn                                       int64
 	trigger, summary, inputHash, outputHash          string
 	sourceTokens, projectionTokens                   int
+	// covered is the canonical length the frozen projection body represents;
+	// messages past it splice live from the transcript.
+	covered int
 }
 
 // commitSummaryProjection CAS-installs a checkpoint under compactionMu:
@@ -57,11 +60,11 @@ func (a *Agent) summaryProjectionState(commit summaryProjectionCommit) Compactio
 	projectionVersion := commit.projectionVersion + 1
 	now := time.Now().UTC()
 	summaryHash := summaryContentHash(commit.summary)
-	coveredHash := coveredPrefixHash(commit.canonical, len(commit.canonical))
+	coveredHash := coveredPrefixHash(commit.canonical, commit.covered)
 	receipt := &ContextMaintenanceReceipt{
 		OperationID: fmt.Sprintf("summary-%d-%s", projectionVersion, commit.outputHash), Status: "applied",
 		Action: "summary", Trigger: commit.trigger, SourceProjection: commit.projectionVersion,
-		ProjectionVersion: projectionVersion, CoveredCount: len(commit.canonical), CoveredPrefixHash: coveredHash,
+		ProjectionVersion: projectionVersion, CoveredCount: commit.covered, CoveredPrefixHash: coveredHash,
 		InputHash: commit.inputHash, OutputHash: commit.outputHash, InputTokens: commit.sourceTokens,
 		ResultTokens: commit.projectionTokens, SavedTokens: max(0, commit.sourceTokens-commit.projectionTokens),
 		SummaryHash: summaryHash, CacheBreak: true, CreatedAt: now,
@@ -73,7 +76,7 @@ func (a *Agent) summaryProjectionState(commit summaryProjectionCommit) Compactio
 		Generation: commit.generation + 1, PromptCacheKey: a.currentPromptCacheKey(),
 		Projection: ContextProjection{
 			Messages: commit.projected, TranscriptVersion: commit.transcriptVersion,
-			ProjectionVersion: projectionVersion, CoveredCount: len(commit.canonical), CoveredPrefixHash: coveredHash,
+			ProjectionVersion: projectionVersion, CoveredCount: commit.covered, CoveredPrefixHash: coveredHash,
 			SummaryHash: summaryHash, SourceTokens: commit.sourceTokens, ProjectionTokens: commit.projectionTokens,
 			ViewInputHash: commit.inputHash, ViewOutputHash: commit.outputHash, CreatedAt: now,
 		},

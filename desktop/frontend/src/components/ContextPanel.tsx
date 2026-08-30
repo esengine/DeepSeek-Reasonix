@@ -1,17 +1,23 @@
 // ContextPanel shows the active tab's context gauge and token usage.
 // All visible text is routed through the i18n dictionary.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { formatTokens, formatOptionalTokens } from "../lib/format";
+import { appendRateBand, normalizeRateBand, rateBandLabel, type DisplayRateBand } from "../lib/costRateBand";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
-
+import { contextSessionCache } from "../lib/contextSessionCache";
+import { ContextBudgetCard, resolveContextBudget } from "./ContextBudgetCard";
+import type { Item } from "../lib/useController";
+export { contextSessionCache } from "../lib/contextSessionCache";
+const McpListLayers = lazy(() => import("./McpListLayers").then((module) => ({ default: module.McpListLayers })));
 interface ContextPanelProps {
   tabId?: string;
+  items?: Item[];
   context?: ContextInfo;
   usage?: WireUsage;
   sessionTokens?: number;
@@ -20,6 +26,7 @@ interface ContextPanelProps {
   sessionTurns?: number;
   turnTokens?: number;
   turnCost?: number;
+  turnRateBand?: string;
   balance?: BalanceInfo;
   sessionGen?: number;
   refreshKey?: number;
@@ -202,27 +209,6 @@ export function contextCostDisplay({
   };
 }
 
-// contextSessionCache picks the session-cumulative cache hit/miss pair for the
-// panel's session average. The shared ContextInfo is refreshed after every
-// usage event and also drives StatusBar, so prefer it over the panel's
-// independently throttled snapshot. Panel telemetry remains the all-sources
-// fallback for callers without live context; executor-only wire counters only
-// bridge the pre-refresh gap. The pair always comes from one source so the
-// computed rate never mixes scopes.
-export function contextSessionCache(
-  info?: Pick<ContextPanelInfo, "sessionCacheHitTokens" | "sessionCacheMissTokens"> | null,
-  context?: Pick<ContextInfo, "cacheHitTokens" | "cacheMissTokens">,
-  usage?: Pick<WireUsage, "sessionCacheHitTokens" | "sessionCacheMissTokens">,
-): { hit: number; miss: number } {
-  const ctxHit = context?.cacheHitTokens ?? 0;
-  const ctxMiss = context?.cacheMissTokens ?? 0;
-  if (ctxHit + ctxMiss > 0) return { hit: ctxHit, miss: ctxMiss };
-  const infoHit = info?.sessionCacheHitTokens ?? 0;
-  const infoMiss = info?.sessionCacheMissTokens ?? 0;
-  if (infoHit + infoMiss > 0) return { hit: infoHit, miss: infoMiss };
-  return { hit: usage?.sessionCacheHitTokens ?? 0, miss: usage?.sessionCacheMissTokens ?? 0 };
-}
-
 interface ContextBreakdown {
   promptTokens: number;
   completionTokens: number;
@@ -399,6 +385,7 @@ export function contextSourceRows(info: ContextPanelInfo | null, sessionCurrency
 
 export function ContextPanel({
   tabId,
+  items,
   context,
   usage,
   sessionTokens,
@@ -406,6 +393,7 @@ export function ContextPanel({
   sessionCurrency,
   turnTokens,
   turnCost,
+  turnRateBand,
   balance,
   sessionGen,
   refreshKey,
@@ -490,7 +478,7 @@ export function ContextPanel({
   const usagePercentages = contextWindowPercentages(usedTokens, windowTokens);
   const rawUsagePct = usagePercentages.raw;
   const usagePct = usagePercentages.display;
-  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
+  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.80;
   const compactPct = Math.round(compactRatio * 100);
   const reportedTriggerTokens = context?.maintenance?.triggerTokens ?? 0;
   const triggerTokens = reportedTriggerTokens > 0
@@ -514,14 +502,21 @@ export function ContextPanel({
   const turnEstimated = usage?.estimated === true || info?.estimated === true;
   const sessionEstimated = info?.sessionEstimated === true || context?.estimated === true;
   const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
-  const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated);
-  const sessionCostLabel = cost.labelKind === "bucketed"
+  const turnCostLabel = appendRateBand(markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated), turnRateBand, t);
+  const rawSessionCostLabel = cost.labelKind === "bucketed"
     ? t("context.sessionCostBucketed")
     : cost.labelKind === "unavailable"
       ? t("context.sessionCostUnavailable")
       : cost.labelKind === "fallback"
         ? `${markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated)} (${t("context.sessionCostFallback")})`
         : markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated);
+  const sessionCostLabel = rawSessionCostLabel;
+  const turnRateBandTitle = rateBandLabel(turnRateBand, t) ? t("billing.rateBand.tooltip") : undefined;
+  const sessionRateBand = normalizeRateBand(info?.sessionCostQuote?.rateBand);
+  const sessionRateBandTitle = sessionRateBand ? t("billing.rateBand.tooltip") : undefined;
+  const sessionRateBandBadge = sessionRateBand
+    ? { label: rateBandLabel(sessionRateBand, t) ?? sessionRateBand, tone: sessionRateBand, title: sessionRateBandTitle }
+    : undefined;
   const totalTokensTitle = totalTokensMetric.exact === "-" ? "-" : t("context.tokensValue", { value: totalTokensMetric.exact });
   const usedLabel = formatTokens(usedTokens);
   const windowLabel = formatTokens(windowTokens);
@@ -624,14 +619,17 @@ export function ContextPanel({
                   <strong>{compactRemainingLabel}</strong>
                 </span>
               </div>
-            </div>
+            </div><ContextBudgetCard budget={resolveContextBudget(context, info)} t={t} />
           </section>
+          <Suspense fallback={null}>
+            <McpListLayers items={items} t={t} />
+          </Suspense>
           <section className="context-panel__section context-panel__session-section">
             <SectionHeading title={t("context.sessionMetrics")} />
             <div className="context-panel__session-metrics">
               <div className="context-panel__summary-rows">
                 <MiniStat label={t("status.cacheAvgLabel")} value={formatCacheHitRate(sessionCacheHit, sessionCacheMiss)} tone={cacheHitTone(sessionCacheHit, sessionCacheMiss)} />
-                <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} />
+                <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} title={sessionRateBandTitle} badge={sessionRateBandBadge} />
                 <MiniStat label={t("context.time")} value={fmtDuration(elapsed, t)} />
                 <MiniStat label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
                 <MiniStat label={t("context.sessionTokensShort")} value={markEstimated(totalTokensMetric.display, sessionEstimated)} title={totalTokensTitle} wide />
@@ -641,7 +639,7 @@ export function ContextPanel({
           <section className="context-panel__creation-grid" aria-label={t("context.overview")}>
             <MetricCard label={t("status.cacheLabel")} value={fmtUsageCacheRate(usage)} tone="accent" />
             <MetricCard label={t("status.turnTokensLabel")} value={formatOptionalTokens(turnTokens)} />
-            <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} />
+            <MetricCard label={t("status.turnCostLabel")} value={turnCostLabel} valueTitle={turnRateBandTitle} />
             <MetricCard label={t("status.balanceLabel")} value={balanceLabel} tone="accent" />
           </section>
           <section className="context-panel__section context-panel__analysis">
@@ -771,13 +769,29 @@ function TokenLegend({ label, value, color }: { label: string; value: number; co
   );
 }
 
-function MiniStat({ label, value, title, tone, wide }: { label: string; value: string; title?: string; tone?: MetricTone; wide?: boolean }) {
+interface MiniStatBadge {
+  label: string;
+  tone: DisplayRateBand;
+  title?: string;
+}
+
+function MiniStat({ label, value, title, tone, wide, badge }: { label: string; value: string; title?: string; tone?: MetricTone; wide?: boolean; badge?: MiniStatBadge }) {
   const toneClass = tone ? ` context-panel__mini-stat--${tone}` : "";
   const wideClass = wide ? " context-panel__mini-stat--wide" : "";
   const exactTitle = title && title !== value ? title : undefined;
+  const accessibleLabel = badge || exactTitle
+    ? `${label}: ${value}${badge ? `, ${badge.label}` : ""}${exactTitle ? `. ${exactTitle}` : ""}`
+    : undefined;
   return (
-    <div className={`context-panel__mini-stat${toneClass}${wideClass}`} aria-label={exactTitle ? `${label}: ${exactTitle}` : undefined}>
-      <span>{label}</span>
+    <div className={`context-panel__mini-stat${toneClass}${wideClass}`} aria-label={accessibleLabel}>
+      <div className="context-panel__mini-stat-head">
+        <span className="context-panel__mini-stat-label">{label}</span>
+        {badge && (
+          <span className={`context-panel__rate-band context-panel__rate-band--${badge.tone}`} title={badge.title}>
+            {badge.label}
+          </span>
+        )}
+      </div>
       <strong title={exactTitle}>{value}</strong>
     </div>
   );

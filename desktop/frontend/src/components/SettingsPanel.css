@@ -382,7 +382,7 @@
 
 .status-bar-items-editor__empty span {
   max-width: 240px;
-  font-size: var(--font-control-xsmall);
+  font-size: var(--text-xs);
   line-height: 1.55;
 }
 
@@ -411,7 +411,7 @@
 
 .status-bar-item-row__position {
   color: var(--fg-faint);
-  font-size: var(--font-control-xsmall);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-align: center;
@@ -443,6 +443,21 @@
   .settings-page--general .settings-field--stacked .settings-field__control {
     width: 100%;
     margin-left: 0;
+  }
+}
+
+@container settings-general (max-width: 440px) {
+  .settings-sound-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .settings-sound-row .sound-select,
+  .settings-sound-row .notification-volume-control {
+    width: 100%;
+    justify-self: stretch;
   }
 }
 

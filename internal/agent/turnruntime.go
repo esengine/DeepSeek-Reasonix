@@ -2,7 +2,7 @@ package agent
 
 import (
 	"reasonix/internal/completion"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 )
 
 // turnRuntime is the host state for exactly one Agent.Run. beginRunTurn builds
@@ -10,9 +10,8 @@ import (
 // State an external caller arms before a Run lives in pendingTurn; state that
 // outlives the Run lives in taskRuntime or sessionRuntime.
 type turnRuntime struct {
-	runMaxSteps       int
-	runMaxStepsKey    string
-	runLimitHostOwned bool
+	runMaxSteps    int
+	runMaxStepsKey string
 
 	emptyFinalBlocks   int
 	handoffNudges      int
@@ -25,6 +24,11 @@ type turnRuntime struct {
 	trackingTodoProgress bool
 	todoStallRounds      int
 	seenTodoProgress     map[string]struct{}
+	// standardTodoContinuations is the bounded same-Run repair for a Standard
+	// execution turn that wrote an active todo and then tried to stop. The
+	// fingerprint gates the optional second nudge on new host-observed work.
+	standardTodoContinuations int
+	standardTodoProgress      string
 
 	executorHandoff bool
 	input           string
@@ -43,13 +47,9 @@ type turnRuntime struct {
 	// completion is the report built as the turn ends; the host reads it while
 	// emitting TurnDone, before the next turn resets this state.
 	completion *completion.Report
-	// Delivery expectations classified from the task text (see taskintent).
 	// deliveryCriteriaEstablished may inherit an unfinished canonical task
 	// list on continuation, but the flag itself is recomputed every turn.
 	deliveryCriteriaEstablished bool
-	deliveryTaskExpected        bool
-	deliveryMutationExpected    bool
-	deliveryPersistentExpected  bool
 	deliveryScopeActive         bool
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final
@@ -75,11 +75,12 @@ type turnRuntime struct {
 	// repeatSuccessCounts catches the shape stormSig cannot see: the same write
 	// succeeding over and over leaves no error for a failure-only breaker.
 	repeatSuccessCounts map[string]int
+	loop                turnLoopState
+	softBudgetMutation  bool
 
-	// policy is frozen at the start of the Run and never observes a mid-turn
-	// SetAgentPreset change. policySet marks that beginRunTurn derived it.
-	policy    taskpolicy.TaskPolicy
-	policySet bool
+	// constraints and engine are frozen at the start of the Run.
+	constraints runtimepolicy.Constraints
+	engine      *runtimepolicy.Engine
 
 	// reviewWarnings are warn-level findings to surface in the final summary.
 	reviewWarnings []string
@@ -97,6 +98,8 @@ type turnRuntime struct {
 	// lastReasoning is the previous executor round's reasoning-token spend,
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
+
+	phase phaseClock
 }
 
 // pendingTurn is what someone outside the Run arms for the next one: a
@@ -109,10 +112,12 @@ type pendingTurn struct {
 	// of resetting it, so a review_report completion nudge can cite the read
 	// receipts the subagent already earned. Consumed by that Run.
 	preserveEvidence bool
-	// deliveryRecovery is armed only when this agent exhausts final readiness.
-	// An explicit host recovery action can consume it to preserve the failed
-	// turn's receipts once; an ordinary user turn still resets evidence.
-	deliveryRecovery bool
+	// finalReadinessRecovery is armed after final readiness fails. An explicit
+	// host action preserves receipts once; an ordinary turn resets evidence.
+	finalReadinessRecovery bool
+	// finalReadinessRecoveryPrepared prevents the durable marker fallback from
+	// being consumed twice before the prepared Run starts.
+	finalReadinessRecoveryPrepared bool
 	// forkRestore, when armed, swaps the frozen fork-bundle conversation in
 	// right after beginRunTurn — the counterfactual-continuation seam.
 	forkRestore func(*turnRuntime)

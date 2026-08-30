@@ -3,35 +3,64 @@ package control
 import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/sessioninbox"
 )
 
-// inboxEventSink observes Steer and unapplied-steer events so durable inbox
-// state tracks consumption without frontends matching on text.
+// inboxEventSink observes unapplied-steer events and forwards optional inbox
+// snapshot notifications without stripping the desktop sink capability.
 type inboxEventSink struct {
 	inner event.Sink
 	c     *Controller
 }
 
+var _ event.OptionalSinkCapabilities = (*inboxEventSink)(nil)
+var _ event.CheckedSink = (*inboxEventSink)(nil)
+
 func (s *inboxEventSink) Emit(e event.Event) {
+	_ = s.emit(e, false)
+}
+
+func (s *inboxEventSink) EmitChecked(e event.Event) error {
+	return s.emit(e, true)
+}
+
+func (s *inboxEventSink) emit(e event.Event, checked bool) error {
 	if s == nil {
-		return
+		return nil
 	}
 	if s.inner != nil {
-		s.inner.Emit(e)
+		if checked {
+			if err := event.EmitChecked(s.inner, e); err != nil {
+				return err
+			}
+		} else {
+			s.inner.Emit(e)
+		}
 	}
 	if s.c == nil {
-		return
+		return nil
 	}
-	switch e.Kind {
-	case event.Steer:
-		if e.ItemID != "" {
-			s.c.onInboxSteerConsumed(e.ItemID)
-		}
-	case event.Notice:
+	if e.Kind == event.Notice {
 		if e.Code == event.NoticeCodeUnappliedSteer && e.ItemID != "" {
 			s.c.onInboxUnappliedSteer(e.ItemID)
 		}
 	}
+	return nil
+}
+
+func notifyInboxChanged(sink event.Sink, snap sessioninbox.InboxSnapshot) {
+	if target, ok := sink.(interface {
+		InboxChanged(sessioninbox.InboxSnapshot)
+	}); ok {
+		target.InboxChanged(snap)
+	}
+}
+
+func (s *inboxEventSink) InboxChanged(snap sessioninbox.InboxSnapshot) {
+	if s == nil {
+		return
+	}
+	notifyInboxChanged(s.inner, snap)
 }
 
 // Forward optional sink capabilities so wrapping does not strip accounting.
@@ -48,6 +77,13 @@ func (s *inboxEventSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 		return
 	}
 	event.RecordReadinessAudit(s.inner, a)
+}
+
+func (s *inboxEventSink) RecordAnchorSafetyAudit(a event.AnchorSafetyAudit) {
+	if s == nil {
+		return
+	}
+	event.RecordAnchorSafetyAudit(s.inner, a)
 }
 
 func (s *inboxEventSink) RecordContractShadow(a event.ContractShadowAudit) {
@@ -106,4 +142,25 @@ func (s *inboxEventSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 		return
 	}
 	event.RecordProtocolRecovery(s.inner, a)
+}
+
+func (s *inboxEventSink) RecordDelegationAudit(a evidence.DelegationAudit) {
+	if s == nil {
+		return
+	}
+	event.RecordDelegationAudit(s.inner, a)
+}
+
+func (s *inboxEventSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	if s == nil {
+		return
+	}
+	event.RecordWorkspaceMutation(s.inner, m)
+}
+
+func (s *inboxEventSink) RecordRunBudget(sample event.RunBudgetSample) {
+	if s == nil {
+		return
+	}
+	event.RecordRunBudget(s.inner, sample)
 }

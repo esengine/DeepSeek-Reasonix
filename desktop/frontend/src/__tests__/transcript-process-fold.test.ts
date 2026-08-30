@@ -83,7 +83,7 @@ const warningTurn: Item[] = [
         id: "n-delivery",
         level: "info",
         variant: "delivery",
-        title: "Delivery checks are not complete",
+        title: "Task completion checks are not complete",
         text: "The response was generated, but verification and review still need to be completed.",
         detail: "final-answer readiness failed 3 times: missing verification",
         action: "continue_delivery",
@@ -246,7 +246,176 @@ const warningTurn: Item[] = [
   }
 }
 
-// ── Phase 3: summaries disabled ─────────────────────────────────────────────
+// ── Phase 3: auto reasoning follows the active turn, not just its phase ──────
+{
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "auto" });
+  const container = harness.container;
+  try {
+    const runningItems: Item[] = [
+      { kind: "user", id: "u-auto-owner", text: "inspect" },
+      {
+        kind: "assistant",
+        id: "a-auto-owner",
+        text: "",
+        reasoning: "long live reasoning stays mounted across the first answer token",
+        streaming: true,
+        reasoningComplete: false,
+      },
+    ];
+    await render(harness, runningItems, {
+      running: true,
+      live: {
+        id: "a-auto-owner",
+        text: "",
+        reasoning: "long live reasoning stays mounted across the first answer token",
+        reasoningComplete: false,
+      },
+    });
+    await harness.waitFor(
+      () => Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .reasoning__stream-text")),
+      "auto reasoning to open while its turn runs",
+    );
+
+    await render(harness, runningItems, {
+      running: true,
+      live: {
+        id: "a-auto-owner",
+        text: "first answer token",
+        reasoning: "long live reasoning stays mounted across the first answer token",
+        reasoningComplete: true,
+      },
+    });
+    await harness.waitFor(
+      () => Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")),
+      "completed reasoning to remain expanded while its turn still runs",
+    );
+    ok(
+      container.querySelector(".turn-collapse__reasoning-phase")?.getAttribute("data-transcript-layout-variant") === "reasoning-expanded",
+      "first answer token keeps the auto reasoning layout expanded",
+    );
+    ok(!container.querySelector(".turn-collapse__body .reasoning-summary"), "active turn does not replace full reasoning with a summary");
+
+    const toolItems: Item[] = [
+      runningItems[0],
+      { ...runningItems[1], text: "first answer token", streaming: false, reasoningComplete: true } as Item,
+      { kind: "tool", id: "t-auto-owner", name: "read_file", args: "{}", status: "running", readOnly: true },
+    ];
+    await render(harness, toolItems, { running: true });
+    await harness.waitFor(() => container.querySelectorAll(".turn-collapse").length === 2, "tool work to open a second process segment");
+    ok(container.querySelectorAll(".turn-collapse--open").length === 2, "all untouched process segments stay open while their turn runs");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "tool dispatch does not collapse reasoning from the same active turn");
+
+    const settledItems: Item[] = toolItems.map((item) => item.kind === "tool"
+      ? { ...item, status: "done" }
+      : item);
+    await render(harness, settledItems, { running: false });
+    await harness.waitFor(
+      () => container.querySelectorAll(".turn-collapse--open").length === 0,
+      "auto process segments to collapse after the owning turn settles",
+    );
+    ok(!container.querySelector(".turn-collapse__body"), "settled turn releases the expanded process layout once");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Phase 4: expanded reasoning pins its parent process fold ─────────────────
+{
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "expanded" });
+  const container = harness.container;
+  try {
+    const runningItems: Item[] = [
+      { kind: "user", id: "u-expanded-parent", text: "inspect" },
+      {
+        kind: "assistant",
+        id: "a-expanded-parent",
+        text: "done",
+        reasoning: "completed reasoning should remain visible",
+        streaming: true,
+        reasoningComplete: false,
+        workDurationMs: 1_000,
+      },
+    ];
+    await render(harness, runningItems, { running: true });
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .reasoning__stream-text"),
+      ),
+      "expanded live reasoning",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded reasoning starts with its running parent fold open");
+    ok(
+      container.querySelector(".turn-collapse__reasoning-phase--open .reasoning__stream-text")?.textContent?.includes("completed reasoning should remain visible") ?? false,
+      "expanded running reasoning streams its full body as plain text",
+    );
+
+    const completedItems: Item[] = runningItems.map((item) => item.kind === "assistant"
+      ? { ...item, streaming: false, reasoningComplete: true }
+      : item);
+    await render(harness, completedItems, { running: false });
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .md"),
+      ),
+      "expanded completed reasoning",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded reasoning keeps its parent fold open after completion");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "expanded completed reasoning remains visible");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".turn-collapse > .reasoning__head")?.click();
+    });
+    await harness.flush();
+    ok(!container.querySelector(".turn-collapse--open"), "manual parent collapse still wins in expanded reasoning mode");
+    ok(!container.querySelector(".turn-collapse__body"), "manual parent collapse unmounts the expanded reasoning body");
+
+    await render(harness, completedItems, { running: false });
+    ok(!container.querySelector(".turn-collapse--open"), "completed rerenders preserve a manual parent collapse");
+    await harness.settle();
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// A completed reasoning fold restored from history has no live transition to
+// open it, so the expanded-mode default must pin it on first reconciliation.
+{
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "expanded" });
+  const container = harness.container;
+  try {
+    await render(harness, [
+      { kind: "user", id: "u-expanded-history", text: "inspect" },
+      {
+        kind: "assistant",
+        id: "a-expanded-history",
+        text: "done",
+        reasoning: "restored completed reasoning",
+        streaming: false,
+        reasoningComplete: true,
+        workDurationMs: 1_000,
+      },
+    ]);
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .md"),
+      ),
+      "expanded reasoning restored from history",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded history restores the parent reasoning fold open");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "expanded history restores completed reasoning visible");
+    await harness.settle();
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Phase 5: summaries disabled ─────────────────────────────────────────────
 {
   const harness = await createTranscriptHarness({
     storage: { "reasonix-process-fold": "expanded", "reasonix-reasoning-summary": "0" },

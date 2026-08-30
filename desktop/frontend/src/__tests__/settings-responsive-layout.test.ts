@@ -54,6 +54,17 @@ eq(declaration(compactGeneralField, "gap"), "10px", "stacked general settings ke
 const compactGeneralControl = ruleBlock(generalContainer, ".settings-page--general .settings-field__control");
 eq(declaration(compactGeneralControl, "min-width"), "0", "compact general controls may shrink within the content pane");
 
+const soundContainerStart = panelStyles.indexOf("@container settings-general (max-width: 440px)");
+const soundContainerEnd = panelStyles.indexOf("@media (max-width: 980px)", soundContainerStart);
+const compactSound = panelStyles.slice(soundContainerStart, soundContainerEnd);
+const compactSoundRow = ruleBlock(compactSound, ".settings-sound-row");
+eq(declaration(compactSoundRow, "grid-template-columns"), "minmax(0, 1fr)", "narrow sound settings stack labels above their controls");
+eq(
+  compactSound.includes(".settings-sound-row .notification-volume-control") && compactSound.includes("width: 100%"),
+  true,
+  "notification volume expands without overflowing a narrow settings pane",
+);
+
 const fallbackPanel = panelStyles.slice(generalFallbackStart, panelStyles.indexOf("@media (max-width: 760px)", generalFallbackStart));
 const fallbackGeneralField = ruleBlock(fallbackPanel, ".settings-page--general .settings-field");
 eq(declaration(fallbackGeneralField, "grid-template-columns"), "1fr", "980px fallback stacks general settings without container queries");

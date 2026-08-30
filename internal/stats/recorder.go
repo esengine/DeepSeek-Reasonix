@@ -25,6 +25,8 @@ type Recorder struct {
 	source     string
 }
 
+var _ event.OptionalSinkCapabilities = (*Recorder)(nil)
+
 const recorderQueueSize = 2048
 
 type dispatchItem struct {
@@ -136,13 +138,20 @@ func (r *Recorder) Emit(e event.Event) {
 	} else if r != nil && r.writer != nil && e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil {
 		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "")
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
-		r.RecordTurnCompletion()
+		r.recordTurnCompletion()
 	}
 }
 
 // RecordTurnCompletion records synchronous controller runs that deliberately do
 // not emit TurnDone into the UI event stream.
 func (r *Recorder) RecordTurnCompletion() {
+	r.recordTurnCompletion()
+	if r != nil {
+		event.RecordTurnCompletion(r.inner)
+	}
+}
+
+func (r *Recorder) recordTurnCompletion() {
 	if r == nil || r.dispatcher == nil {
 		return
 	}
@@ -187,6 +196,10 @@ func (r *Recorder) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	event.RecordReadinessAudit(r.inner, a)
 }
 
+func (r *Recorder) RecordAnchorSafetyAudit(a event.AnchorSafetyAudit) {
+	event.RecordAnchorSafetyAudit(r.inner, a)
+}
+
 // RecordProtocolRecovery preserves the wrapped sink's audit capability.
 func (r *Recorder) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	event.RecordProtocolRecovery(r.inner, a)
@@ -221,6 +234,14 @@ func (r *Recorder) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
 	event.RecordDelegationAdmission(r.inner, a)
 }
 
+func (r *Recorder) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	event.RecordWorkspaceMutation(r.inner, m)
+}
+
+func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
+	event.RecordRunBudget(r.inner, sample)
+}
+
 func (r *Recorder) recordUsage(e event.Event) {
 	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource)
 }
@@ -249,6 +270,8 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 		rec.CostCurrency = quote.Original.Currency
 		rec.PricingFingerprint = quote.PricingFingerprint
 		rec.RateDate = quote.RateDate
+		rec.RateBand = quote.RateBand
+		rec.RatedAt = quote.RatedAt
 		rec.IncompleteReason = quote.IncompleteReason
 		rec.BillingMode = quote.BillingMode
 		rec.CostEstimated = quote.Estimated

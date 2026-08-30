@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -96,6 +98,31 @@ func TestFleetOrderedWritersMayShareWritePaths(t *testing.T) {
 	}
 	if err := concurrent.validateConcurrentWriteClaims([]WritePathSet{claim, claim}); err == nil {
 		t.Fatal("two writers that can run at once must still fail preflight on overlap")
+	}
+}
+
+func TestFleetConcurrentDirectoryClaimsPassPreflight(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent, err := planFor(t, fleetTaskItem{ID: "a"}, fleetTaskItem{ID: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := concurrent.validateConcurrentWriteClaims([]WritePathSet{claim, claim}); err != nil {
+		t.Fatalf("concurrent directory claims must pass preflight: %v", err)
+	}
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := concurrent.validateConcurrentWriteClaims([]WritePathSet{whole, whole}); err != nil {
+		t.Fatalf("omitted write_paths must queue in the scheduler, not fail preflight: %v", err)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"reasonix/internal/netclient"
 )
 
 func TestFetchModels(t *testing.T) {
@@ -164,5 +166,45 @@ func TestFetchModelsResponseTooLarge(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("error should mention the size limit, got: %v", err)
+	}
+}
+
+// TestFetchModelsRoutesThroughConfiguredProxy pins the #9560 fix: model
+// discovery must ride the same network policy as chat requests. The fake
+// gateway host only resolves through the proxy, so success proves the proxy
+// transport was used; the plain spec must fail to reach it directly.
+func TestFetchModelsRoutesThroughConfiguredProxy(t *testing.T) {
+	const gateway = "http://reasonix-fetch-probe.invalid/v1"
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.String(), gateway) {
+			http.Error(w, "unexpected proxied target "+r.URL.String(), http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer proxied-key" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]string{{"id": "model-a", "object": "model"}},
+		})
+	}))
+	defer proxy.Close()
+
+	spec := netclient.ProxySpec{Mode: netclient.ModeCustom, URL: proxy.URL}
+	if err := netclient.Validate(spec); err != nil {
+		t.Fatalf("proxy spec: %v", err)
+	}
+
+	models, err := FetchModelsWithOptions(context.Background(), gateway, "proxied-key", FetchModelsOptions{Proxy: spec})
+	if err != nil {
+		t.Fatalf("fetch through proxy: %v", err)
+	}
+	if fmt.Sprint(models) != "[model-a]" {
+		t.Fatalf("models = %v, want [model-a]", models)
+	}
+
+	if _, err := FetchModelsWithOptions(context.Background(), gateway, "proxied-key", FetchModelsOptions{}); err == nil {
+		t.Fatal("direct fetch to a proxy-only host must fail, otherwise this test proves nothing")
 	}
 }

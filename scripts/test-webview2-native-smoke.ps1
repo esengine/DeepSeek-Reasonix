@@ -163,6 +163,48 @@ function Assert-NativeSmokeSelfTest {
     }
 }
 
+function Remove-NativeSmokeDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath,
+        [int]$MaxAttempts = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if (-not (Test-Path -LiteralPath $LiteralPath)) {
+            return
+        }
+        try {
+            # Windows PowerShell 5.1 still routes Remove-Item through MAX_PATH.
+            # Session inbox names can push the isolated smoke tree past that
+            # boundary, where the provider reports an existing child as
+            # DirectoryNotFound and leaves the whole profile behind. The .NET
+            # directory API accepts the extended-length prefix and preserves
+            # the same locked-file failure semantics exercised below.
+            $fullPath = [IO.Path]::GetFullPath($LiteralPath)
+            $deletePath = if ($fullPath.StartsWith("\\")) {
+                "\\?\UNC\" + $fullPath.Substring(2)
+            }
+            else {
+                "\\?\" + $fullPath
+            }
+            [IO.Directory]::Delete($deletePath, $true)
+            return
+        }
+        catch {
+            # A child can disappear between enumeration and deletion. Treat
+            # that race as success only when the requested root is gone.
+            if (-not (Test-Path -LiteralPath $LiteralPath)) {
+                return
+            }
+            if ($attempt -eq $MaxAttempts) {
+                throw
+            }
+            Start-Sleep -Milliseconds (50 * $attempt)
+        }
+    }
+}
+
 function New-NativeSmokeSelfTestState {
     param(
         [bool]$Exited = $false,
@@ -207,6 +249,43 @@ function Invoke-NativeSmokeStateMachineSelfTest {
     }
     $result = Update-NativeSmokeStability -Tracker @{ HealthySince = $null } -State (New-NativeSmokeSelfTestState -Exited $true) -Now $start -RequiredHealthySeconds 5
     Assert-NativeSmokeSelfTest ($result -eq "Exited") "process exit must remain terminal"
+
+    $cleanupRoot = Join-Path ([IO.Path]::GetTempPath()) ("reasonix-native-smoke-cleanup-test-" + [guid]::NewGuid().ToString("N"))
+    Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
+    Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must accept an absent root"
+    $nestedCleanupPath = Join-Path $cleanupRoot "nested"
+    New-Item -ItemType Directory -Path $nestedCleanupPath | Out-Null
+    Set-Content -LiteralPath (Join-Path $nestedCleanupPath "state.txt") -Value "cleanup-self-test"
+    Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
+    Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must remove an ordinary nested tree"
+
+    $longNestedCleanupPath = $cleanupRoot
+    while ($longNestedCleanupPath.Length -lt 280) {
+        $longNestedCleanupPath = Join-Path $longNestedCleanupPath "long-cleanup-segment"
+    }
+    $longNestedCleanupExtendedPath = "\\?\" + [IO.Path]::GetFullPath($longNestedCleanupPath)
+    [IO.Directory]::CreateDirectory($longNestedCleanupExtendedPath) | Out-Null
+    [IO.File]::WriteAllText(($longNestedCleanupExtendedPath + "\state.txt"), "long-cleanup-self-test")
+    Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
+    Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must remove a tree beyond MAX_PATH"
+
+    New-Item -ItemType Directory -Path $cleanupRoot | Out-Null
+    $lockedPath = Join-Path $cleanupRoot "locked.txt"
+    Set-Content -LiteralPath $lockedPath -Value "locked-cleanup-self-test"
+    $lockedStream = [IO.File]::Open($lockedPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $lockedCleanupFailed = $false
+    try {
+        Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot -MaxAttempts 1
+    }
+    catch {
+        $lockedCleanupFailed = $true
+    }
+    finally {
+        $lockedStream.Dispose()
+    }
+    Assert-NativeSmokeSelfTest $lockedCleanupFailed "cleanup must surface a persistent file lock"
+    Remove-NativeSmokeDirectory -LiteralPath $cleanupRoot
+    Assert-NativeSmokeSelfTest (-not (Test-Path -LiteralPath $cleanupRoot)) "cleanup must succeed after the lock is released"
     Write-Host "WebView2 native smoke state-machine self-test passed"
 }
 
@@ -284,7 +363,8 @@ finally {
     if ($null -ne $process -and -not $process.HasExited) {
         & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
     }
-    if (Test-Path $smokeRoot) {
-        Remove-Item -LiteralPath $smokeRoot -Recurse -Force
-    }
+    # WebView2 can release profile files just after the main process exits.
+    # Retry those bounded races, but surface a persistent lock or permission
+    # failure so a green smoke run never leaves its temporary profile behind.
+    Remove-NativeSmokeDirectory -LiteralPath $smokeRoot
 }

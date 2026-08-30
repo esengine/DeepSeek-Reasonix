@@ -62,7 +62,8 @@ install runtimes you trust completely.
 Changing an installed extension (install, update, enable/disable, or
 `--link` content changes) never mutates a running turn. Reloading is one
 fail-atomic operation through every interactive frontend — CLI `/reload`,
-Desktop **Reload Runtime** (command palette), Serve `/reload`, and the ACP
+Desktop `/reload` (composer slash menu) or **Reload Runtime** (command palette),
+Serve `/reload`, and the ACP
 vendor method `_reasonix.io/session/reloadExtensions`:
 
 1. If a turn or background work is running, CLI/Desktop/ACP queue exactly one

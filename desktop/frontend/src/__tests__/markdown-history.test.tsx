@@ -2,13 +2,14 @@
 //
 // MarkdownHistory (worker-driven history rendering): transcript markdown cache
 // hits avoid re-parsing, revision (content) changes re-parse, and huge
-// documents mount their blocks progressively via idle callbacks. Uses the
-// in-process fallback client with a spy — jsdom has no Worker.
+// documents keep a viewport-driven tail window. Uses the in-process fallback
+// client with a spy — jsdom has no Worker.
 
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import MarkdownHistory from "../components/MarkdownHistory";
+import { TranscriptScrollWriteProvider } from "../components/TranscriptLayoutIntentContext";
 import { parseMarkdown, markdownContentRevision } from "../lib/markdownPipeline";
 import {
   disposeMarkdownWorkerClient,
@@ -48,23 +49,54 @@ globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
-let pendingIdle: Array<() => void> = [];
-Object.defineProperty(dom.window, "requestIdleCallback", {
-  configurable: true,
-  value: (callback: () => void) => {
-    pendingIdle.push(callback);
-    return pendingIdle.length;
-  },
-});
-Object.defineProperty(dom.window, "cancelIdleCallback", {
-  configurable: true,
-  value: () => undefined,
-});
+const intersectionCallbacks = new Map<Element, IntersectionObserverCallback>();
+class TestIntersectionObserver {
+  readonly callback: IntersectionObserverCallback;
+  readonly targets = new Set<Element>();
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+  observe(target: Element) {
+    this.targets.add(target);
+    intersectionCallbacks.set(target, this.callback);
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+    intersectionCallbacks.delete(target);
+  }
+  disconnect() {
+    for (const target of this.targets) intersectionCallbacks.delete(target);
+    this.targets.clear();
+  }
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly thresholds = [0];
+}
+globalThis.IntersectionObserver = TestIntersectionObserver as unknown as typeof IntersectionObserver;
+dom.window.IntersectionObserver = TestIntersectionObserver as unknown as typeof IntersectionObserver;
 
-function runIdle() {
-  const callbacks = pendingIdle;
-  pendingIdle = [];
-  for (const callback of callbacks) callback();
+async function intersectSentinel(selector: string, isIntersecting: boolean) {
+  const sentinel = rootEl?.querySelector(selector);
+  if (!sentinel) throw new Error(`missing sentinel ${selector}`);
+  await act(async () => {
+    intersectionCallbacks.get(sentinel)?.([{ isIntersecting, target: sentinel } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function intersectSentinels(selectors: string[], isIntersecting: boolean) {
+  const sentinels = selectors.map((selector) => {
+    const sentinel = rootEl?.querySelector(selector);
+    if (!sentinel) throw new Error(`missing sentinel ${selector}`);
+    return sentinel;
+  });
+  await act(async () => {
+    for (const sentinel of sentinels) {
+      intersectionCallbacks.get(sentinel)?.([{ isIntersecting, target: sentinel } as IntersectionObserverEntry], {} as IntersectionObserver);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 const flush = () => act(async () => {
@@ -170,30 +202,142 @@ console.log("\nmarkdown history rendering");
   await act(async () => root4.unmount());
 }
 
+// ── a worker result cannot replace the reader's mid-document fallback ────────
+{
+  rootEl.className = "transcript";
+  rootEl.scrollTop = 400;
+  Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_000 });
+  Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
+  (globalThis as { Worker?: unknown }).Worker = class {};
+  let resolveParse: ((result: ReturnType<typeof parseMarkdown>) => void) | null = null;
+  const deferred = new MarkdownWorkerClient({
+    createWorker: () => Promise.resolve({
+      onmessage: null,
+      onerror: null,
+      postMessage(request) {
+        resolveParse = (result) => {
+          const message = { data: { id: request.id, result } };
+          (this.onmessage as ((event: unknown) => void) | null)?.(message);
+        };
+      },
+      terminate() {},
+    }),
+  });
+  setMarkdownWorkerClientForTest(deferred);
+  const root5 = createRoot(rootEl);
+  const text = Array.from({ length: 60 }, (_, index) => `# Anchor ${index + 1}\n\nBody ${index + 1}.`).join("\n\n");
+  await act(async () => {
+    root5.render(<MarkdownHistory text={text} entryId="md-history-mid-read" fallback={<div className="md">{text}</div>} />);
+  });
+  await act(async () => {
+    resolveParse?.(parseMarkdown(text));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  ok(!rootEl.querySelector(".md[data-markdown-blocks]"), "worker completion keeps the full fallback while the reader is away from bottom");
+  ok(rootEl.textContent?.includes("Anchor 1"), "the reader's prefix remains mounted during the deferred handoff");
+
+  rootEl.scrollTop = 700;
+  await act(async () => {
+    rootEl.dispatchEvent(new dom.window.Event("scroll"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  ok(rootEl.querySelector('.md[data-markdown-blocks="120"]'), "returning to bottom commits the cached parsed blocks");
+  ok(rootEl.textContent?.includes("Anchor 60"), "the parsed tail is visible after the safe handoff");
+  await act(async () => root5.unmount());
+  rootEl.className = "";
+  delete (globalThis as { Worker?: unknown }).Worker;
+  setMarkdownWorkerClientForTest(newSpyClient());
+}
+
 // ── progressive mounting for huge documents ──────────────────────────────────
 {
-  const text = Array.from({ length: 60 }, (_, i) => `Paragraph ${i} with some *content*.`).join("\n\n");
-  const root5 = createRoot(rootEl);
+  rootEl.className = "transcript";
+  rootEl.scrollTop = 1_000;
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    const top = this.hasAttribute("data-markdown-older-sentinel")
+      ? 100
+      : this.hasAttribute("data-markdown-newer-sentinel")
+        ? 700
+        : this.hasAttribute("data-markdown-scroll-anchor")
+          ? Number(this.getAttribute("data-markdown-scroll-anchor")) < 300 ? 500 : 300
+          : 0;
+    const height = this.hasAttribute("data-markdown-older-sentinel") ? 1 : 0;
+    return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) };
+  };
+  const text = Array.from({ length: 420 }, (_, i) => `Paragraph ${i} with some *content*.`).join("\n\n");
+  const root6 = createRoot(rootEl);
+  const writeTranscriptOffset = (_owner: "block-window-prepend", top: number) => {
+    rootEl.scrollTop = top;
+    return true;
+  };
   await act(async () => {
-    root5.render(<MarkdownHistory text={text} entryId="md-history-huge" fallback={null} />);
+    root6.render(
+      <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
+        <MarkdownHistory text={text} entryId="md-history-huge" fallback={null} />
+      </TranscriptScrollWriteProvider>,
+    );
   });
   await flush();
   const container = rootEl.querySelector(".md[data-markdown-blocks]");
   ok(container, "huge document renders through blocks");
-  eq(container?.getAttribute("data-markdown-blocks"), "60", "all 60 blocks are in the render model");
-  eq(container?.getAttribute("data-markdown-visible-blocks"), "24", "visible block count exposes the initial idle chunk");
+  eq(container?.getAttribute("data-markdown-blocks"), "420", "all 420 blocks are in the render model");
+  eq(container?.getAttribute("data-markdown-visible-blocks"), "24", "visible block count exposes the initial tail window");
   const initialCount = container?.children.length ?? 0;
-  eq(initialCount, 24, "first commit mounts only the initial block chunk");
-  for (let i = 0; i < 5 && (rootEl.querySelector(".md[data-markdown-blocks]")?.children.length ?? 0) < 60; i += 1) {
-    await act(async () => {
-      runIdle();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  }
-  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.children.length, 60, "idle callbacks mount the remaining blocks");
-  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "60", "visible block count reaches the render model");
-  ok(rootEl.textContent?.includes("Paragraph 59"), "the final block's content mounts");
-  await act(async () => root5.unmount());
+  eq(initialCount, 25, "first commit mounts the tail plus one inert viewport sentinel");
+  ok(!rootEl.textContent?.includes("Paragraph 0"), "the cold prefix stays out of the DOM");
+  ok(rootEl.textContent?.includes("Paragraph 419"), "the newest block mounts immediately");
+
+  await intersectSentinel("[data-markdown-older-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "120", "entering the older edge prepends one bounded page");
+  eq(rootEl.scrollTop, 1_199, "prepending compensates for the old leading block boundary's measured movement");
+  await intersectSentinel("[data-markdown-older-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "120", "a stationary sentinel cannot start a render loop");
+  await intersectSentinel("[data-markdown-older-sentinel]", false);
+  await intersectSentinel("[data-markdown-older-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "216", "leaving and re-entering requests the next page");
+  await intersectSentinel("[data-markdown-older-sentinel]", false);
+  await intersectSentinel("[data-markdown-older-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "216", "the resident block window stays bounded while paging toward the start");
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-start"), "108", "older paging advances the bounded window start");
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-end"), "324", "older paging trims cold blocks from the newer edge");
+  ok(rootEl.textContent?.includes("Paragraph 108"), "the requested older page is mounted");
+  ok(!rootEl.textContent?.includes("Paragraph 419"), "the distant tail is evicted after the window reaches its cap");
+
+  await intersectSentinel("[data-markdown-older-sentinel]", false);
+  await intersectSentinels(["[data-markdown-older-sentinel]", "[data-markdown-newer-sentinel]"], true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-start"), "12", "simultaneous edge callbacks apply only the first window move");
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-end"), "228", "an opposite-edge callback cannot overwrite the in-flight window move");
+
+  await intersectSentinel("[data-markdown-newer-sentinel]", false);
+  const beforeNewerPage = rootEl.scrollTop;
+  await intersectSentinel("[data-markdown-newer-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-start"), "108", "newer paging trims cold blocks from the older edge");
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-end"), "324", "newer paging advances toward the document tail");
+  eq(rootEl.scrollTop, beforeNewerPage - 200, "trimming above compensates for the old trailing boundary's measured movement");
+  await intersectSentinel("[data-markdown-newer-sentinel]", false);
+  await intersectSentinel("[data-markdown-newer-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-start"), "204", "a second newer page keeps the resident window bounded");
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-window-end"), "420", "newer paging can return to the document tail");
+  ok(rootEl.textContent?.includes("Paragraph 419"), "newer paging restores the document tail");
+
+  const replacement = Array.from({ length: 420 }, (_, i) => `Replacement ${i} with some *content*.`).join("\n\n");
+  await act(async () => {
+    root6.render(
+      <TranscriptScrollWriteProvider value={writeTranscriptOffset}>
+        <MarkdownHistory text={replacement} entryId="md-history-huge-replacement" fallback={null} />
+      </TranscriptScrollWriteProvider>,
+    );
+  });
+  await flush();
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "24", "an equal-sized replacement document resets to its own tail");
+  ok(!rootEl.textContent?.includes("Replacement 0"), "the replacement cannot inherit the previous document's expanded prefix");
+  ok(rootEl.textContent?.includes("Replacement 419"), "the replacement's newest block mounts immediately");
+  await intersectSentinel("[data-markdown-older-sentinel]", true);
+  eq(rootEl.querySelector(".md[data-markdown-blocks]")?.getAttribute("data-markdown-visible-blocks"), "120", "a replacement document re-arms viewport paging");
+  await act(async () => root6.unmount());
+  dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
+  rootEl.className = "";
 }
 
 // ── worker failure falls back through onError ────────────────────────────────

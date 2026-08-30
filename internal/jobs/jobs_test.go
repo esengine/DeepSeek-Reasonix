@@ -28,7 +28,7 @@ func (s *recordingSink) texts() []string {
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.events))
 	for _, ev := range s.events {
-		out = append(out, ev.Text)
+		out = append(out, ev.Text+" "+ev.Detail)
 	}
 	return out
 }
@@ -319,7 +319,7 @@ func TestStalledWarningIgnoresReturnedJobBeforeTerminalStatusPublished(t *testin
 
 	time.Sleep(50 * time.Millisecond)
 	note := m.DrainCompletedNote()
-	if strings.Contains(note, "may be stalled") {
+	if strings.Contains(note, "still running after") || strings.Contains(note, "may be stalled") {
 		t.Fatalf("got false stalled warning for already-returned job %s: %q", j.ID, note)
 	}
 	if !strings.Contains(note, j.ID) || !strings.Contains(note, string(Done)) {
@@ -443,7 +443,7 @@ func TestStalledWarningEmitsNoticeAndDrainNote(t *testing.T) {
 
 	waitFor(t, func() bool {
 		for _, text := range sink.texts() {
-			if strings.Contains(text, "may be stalled") && strings.Contains(text, j.ID) {
+			if strings.Contains(text, "still running after") && strings.Contains(text, j.ID) && !strings.Contains(text, "may be stalled") && strings.Contains(text, "heads-up, not an error") && strings.Contains(text, "stalled_warning_seconds") {
 				return true
 			}
 		}
@@ -453,7 +453,7 @@ func TestStalledWarningEmitsNoticeAndDrainNote(t *testing.T) {
 		t.Fatalf("stalled job output status = %q ok=%v, want running", st, ok)
 	}
 	note := m.DrainCompletedNote()
-	if !strings.Contains(note, "may be stalled") || !strings.Contains(note, j.ID) {
+	if !strings.Contains(note, "still running after") || !strings.Contains(note, j.ID) || strings.Contains(note, "may be stalled") || !strings.Contains(note, "stalled_warning_seconds") {
 		t.Fatalf("stalled drain note = %q, want stalled update for %s", note, j.ID)
 	}
 	// The warning is once per job.

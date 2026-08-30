@@ -11,7 +11,7 @@ import (
 )
 
 type billingRuntimeController struct {
-	control.SessionAPI
+	stubSessionAPI
 	status  control.RuntimeStatus
 	started chan struct{}
 	release chan struct{}

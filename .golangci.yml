@@ -58,6 +58,14 @@ linters:
         linters:
           - staticcheck
         text: SA5011
+      # SA4023 is trivially true on GOOS=windows: dialAgent's Windows stub
+      # (agent_windows.go) always returns a non-nil error until named-pipe
+      # transport lands. Suppress only this call site; the comparison stays
+      # meaningful on Unix where dialAgent can succeed.
+      - path: internal/remote/auth\.go
+        linters:
+          - staticcheck
+        text: SA4023
 
 issues:
   max-issues-per-linter: 0

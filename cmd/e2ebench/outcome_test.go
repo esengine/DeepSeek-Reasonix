@@ -126,6 +126,46 @@ func TestSummarizeOutcomeTracksDebtAndTTFDC(t *testing.T) {
 	}
 }
 
+func TestSummarizeRunwayShadowDistinguishesOldDataFromZeroBalance(t *testing.T) {
+	path := writeTrajectory(t, "runway.trajectory.jsonl", []string{
+		`{"seq":1,"ts":1000,"event":{"kind":"turn_started"}}`,
+		`{"seq":2,"ts":2000,"outcome_progress":{"round":1,"runway":8,"runway_dry":4,"runway_idle":4}}`,
+		`{"seq":3,"ts":3000,"outcome_progress":{"round":2,"runway":4,"runway_dry":5,"runway_idle":5}}`,
+		`{"seq":4,"ts":4000,"outcome_progress":{"round":3,"runway":0,"runway_dry":6,"runway_idle":6,"runway_spent":true}}`,
+	})
+	s, err := summarizeTrajectory(path)
+	if err != nil {
+		t.Fatalf("summarizeTrajectory: %v", err)
+	}
+	o := s.Outcome
+	if o == nil || o.RunwaySamples != 3 || o.RunwayMin != 0 || o.RunwayFinal != 0 || o.RunwayFirstSpentRound != 3 {
+		t.Fatalf("runway summary = %+v, want 3 samples and spent at round 3", o)
+	}
+	if o.RunwayDryMax != 6 || o.RunwayIdleMax != 6 {
+		t.Fatalf("runway maxima = dry %d idle %d, want 6/6", o.RunwayDryMax, o.RunwayIdleMax)
+	}
+	got := renderOutcomeProgress([]result{{Trajectory: s}})
+	for _, want := range []string{"**runway shadow** would spend in 1/1 runs (100%)", "median round 3", "max dry/idle 6/6"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("render missing %q in:\n%s", want, got)
+		}
+	}
+
+	old := writeTrajectory(t, "pre-runway.trajectory.jsonl", []string{
+		`{"seq":1,"ts":1000,"outcome_progress":{"round":1,"exploration":1}}`,
+	})
+	legacy, err := summarizeTrajectory(old)
+	if err != nil {
+		t.Fatalf("summarize old trajectory: %v", err)
+	}
+	if legacy.Outcome == nil || legacy.Outcome.RunwaySamples != 0 {
+		t.Fatalf("old outcome = %+v, want no runway observations", legacy.Outcome)
+	}
+	if strings.Contains(renderOutcomeProgress([]result{{Trajectory: legacy}}), "runway shadow") {
+		t.Fatal("old trajectory was misclassified as a spent runway")
+	}
+}
+
 func TestSummarizeOutcomeDerivesEBMChain(t *testing.T) {
 	path := writeTrajectory(t, "ebm.trajectory.jsonl", []string{
 		`{"seq":1,"ts":1000,"event":{"kind":"turn_started"}}`,

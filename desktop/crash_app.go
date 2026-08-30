@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,6 +65,8 @@ type crashBreadcrumb struct {
 }
 
 type crashReport struct {
+	EventID         string                `json:"eventId,omitempty"`
+	DedupKey        string                `json:"dedupKey,omitempty"`
 	InstallID       string                `json:"installId,omitempty"`
 	Kind            string                `json:"kind"`
 	Version         string                `json:"version"`
@@ -159,6 +164,37 @@ func baseCrashReport(kind string) crashReport {
 		Device:  collectDeviceInfo(),
 		Channel: channel,
 	}
+}
+
+func ensureCrashIdentity(report *crashReport) error {
+	if report.EventID == "" {
+		value := make([]byte, 16)
+		if _, err := rand.Read(value); err != nil {
+			return fmt.Errorf("generate crash event id: %w", err)
+		}
+		report.EventID = hex.EncodeToString(value)
+	}
+	if report.DedupKey == "" {
+		basis := strings.Join([]string{
+			report.Kind,
+			report.Version,
+			report.Source,
+			report.Label,
+			report.ErrorType,
+			normalizeCrashFingerprintField(report.ErrorMessage),
+			normalizeCrashFingerprintField(report.TopFrame),
+			normalizeCrashFingerprintField(report.FingerprintHint),
+		}, "\n")
+		sum := sha256.Sum256([]byte(basis))
+		report.DedupKey = hex.EncodeToString(sum[:])
+	}
+	return nil
+}
+
+var crashFingerprintNumber = regexp.MustCompile(`\b\d+\b`)
+
+func normalizeCrashFingerprintField(value string) string {
+	return crashFingerprintNumber.ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "<n>")
 }
 
 func topFrameFromStack(stack string) string {
@@ -259,6 +295,9 @@ func (a *App) ReportCrash(kind, detail string) error {
 	}
 	c, err := httpClient()
 	if err != nil {
+		return err
+	}
+	if err := ensureCrashIdentity(&r); err != nil {
 		return err
 	}
 	return postCrashReport(a.reqCtx(), c, crashEndpoint, r)

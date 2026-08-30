@@ -3,9 +3,11 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -113,35 +115,40 @@ func TestChromeDevtoolsMCPLive(t *testing.T) {
 		t.Fatal("new_page returned empty output")
 	}
 	t.Logf("step 06/12 new_page=%s", strings.TrimSpace(out))
+	pageID, err := parseSelectedChromePageID(out)
+	if err != nil {
+		t.Fatalf("step 06/12 selected page ID: %v; output=%q", err, out)
+	}
 
 	pageHTML := `data:text/html,<title>Reasonix%20MCP</title><h1>Reasonix%20MCP%20Ready</h1>`
-	out = executeLiveChromeTool(t, callCtx, tools, "navigate_page", map[string]any{"type": "url", "url": pageHTML})
+	out = executeLiveChromeTool(t, callCtx, tools, "navigate_page", map[string]any{"pageId": pageID, "type": "url", "url": pageHTML})
 	t.Logf("step 07/12 navigate_page=%s", strings.TrimSpace(out))
-	out = executeLiveChromeTool(t, callCtx, tools, "wait_for", map[string]any{"text": []string{"Reasonix MCP Ready"}, "timeout": 10_000})
+	out = executeLiveChromeTool(t, callCtx, tools, "wait_for", map[string]any{"pageId": pageID, "text": []string{"Reasonix MCP Ready"}, "timeout": 10_000})
 	if !strings.Contains(out, "Reasonix MCP Ready") {
 		t.Fatalf("step 08/12 wait_for output = %q", out)
 	}
 	t.Log("step 08/12 page content became observable")
-	out = executeLiveChromeTool(t, callCtx, tools, "take_snapshot", map[string]any{})
+	out = executeLiveChromeTool(t, callCtx, tools, "take_snapshot", map[string]any{"pageId": pageID})
 	if !strings.Contains(out, "Reasonix MCP Ready") {
 		t.Fatalf("step 09/12 snapshot output = %q", out)
 	}
 	t.Log("step 09/12 accessibility snapshot captured")
 	out = executeLiveChromeTool(t, callCtx, tools, "evaluate_script", map[string]any{
+		"pageId":   pageID,
 		"function": `() => { console.log("reasonix-mcp-console"); return document.title; }`,
 	})
 	if !strings.Contains(out, "Reasonix MCP") {
 		t.Fatalf("step 10/12 evaluate_script output = %q", out)
 	}
 	t.Log("step 10/12 evaluate_script returned the document title")
-	consoleOut := executeLiveChromeTool(t, callCtx, tools, "list_console_messages", map[string]any{})
-	networkOut := executeLiveChromeTool(t, callCtx, tools, "list_network_requests", map[string]any{})
+	consoleOut := executeLiveChromeTool(t, callCtx, tools, "list_console_messages", map[string]any{"pageId": pageID})
+	networkOut := executeLiveChromeTool(t, callCtx, tools, "list_network_requests", map[string]any{"pageId": pageID})
 	if !strings.Contains(consoleOut, "reasonix-mcp-console") || strings.TrimSpace(networkOut) == "" {
 		t.Fatalf("step 11/12 diagnostics console=%q network=%q", consoleOut, networkOut)
 	}
 	t.Log("step 11/12 console and network diagnostics are readable")
 	screenshotPath := filepath.Join(workspaceRoot, "chrome-devtools-live.png")
-	_ = executeLiveChromeTool(t, callCtx, tools, "take_screenshot", map[string]any{"filePath": screenshotPath, "format": "png"})
+	_ = executeLiveChromeTool(t, callCtx, tools, "take_screenshot", map[string]any{"pageId": pageID, "filePath": screenshotPath, "format": "png"})
 	info, statErr := os.Stat(screenshotPath)
 	if statErr != nil || info.Size() == 0 {
 		t.Fatalf("step 12/12 screenshot file: info=%v err=%v", info, statErr)
@@ -150,6 +157,66 @@ func TestChromeDevtoolsMCPLive(t *testing.T) {
 		t.Fatal("step 12/12 shared Chrome MCP client disappeared before host close")
 	}
 	t.Logf("step 12/12 screenshot persisted (%d bytes); shared client healthy before graceful close", info.Size())
+}
+
+func parseSelectedChromePageID(output string) (int, error) {
+	selected := 0
+	for rawLine := range strings.SplitSeq(output, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasSuffix(line, "[selected]") {
+			continue
+		}
+		rawID, _, ok := strings.Cut(line, ":")
+		if !ok {
+			return 0, fmt.Errorf("malformed selected page line %q", line)
+		}
+		pageID, err := strconv.Atoi(strings.TrimSpace(rawID))
+		if err != nil || pageID <= 0 {
+			return 0, fmt.Errorf("invalid selected page ID in %q", line)
+		}
+		if selected != 0 {
+			return 0, fmt.Errorf("multiple selected pages in output")
+		}
+		selected = pageID
+	}
+	if selected == 0 {
+		return 0, fmt.Errorf("selected page not found")
+	}
+	return selected, nil
+}
+
+func TestParseSelectedChromePageID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		output  string
+		want    int
+		wantErr bool
+	}{
+		{name: "new page", output: "## Pages\n1: about:blank\n2: about:blank [selected]", want: 2},
+		{name: "URL with colon", output: "## Pages\r\n17: https://example.com:8443/docs [selected]\r\n", want: 17},
+		{name: "missing selection", output: "## Pages\n1: about:blank", wantErr: true},
+		{name: "invalid ID", output: "## Pages\npage-2: about:blank [selected]", wantErr: true},
+		{name: "multiple selections", output: "## Pages\n1: about:blank [selected]\n2: about:blank [selected]", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseSelectedChromePageID(test.output)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("parseSelectedChromePageID(%q) = %d, want error", test.output, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseSelectedChromePageID(%q): %v", test.output, err)
+			}
+			if got != test.want {
+				t.Fatalf("parseSelectedChromePageID(%q) = %d, want %d", test.output, got, test.want)
+			}
+		})
+	}
 }
 
 func executeLiveChromeTool(t *testing.T, ctx context.Context, tools []tool.Tool, rawName string, args any) string {

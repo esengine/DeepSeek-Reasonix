@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "reasoning-extent-cycle",
+  "viewport": 800,
+  "direction": 1,
+  "samples": [
+    { "top": 11800, "height": 12600 },
+    { "top": 18200, "height": 19000 },
+    { "top": 23800, "height": 24600 },
+    { "top": 18200, "height": 19000 },
+    { "top": 23800, "height": 24600 }
+  ],
+  "expected": { "stableHeight": 24600, "maximumReverse": 96 }
+}

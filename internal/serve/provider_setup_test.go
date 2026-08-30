@@ -281,6 +281,7 @@ func TestProviderSetupIsLoopbackOnlyAndAuthenticated(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/provider-setup", nil)
+	req.Host = "127.0.0.1"
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -294,6 +295,7 @@ func TestProviderSetupIsLoopbackOnlyAndAuthenticated(t *testing.T) {
 	protected := New(s.ctl(), s.bc, config.ServeConfig{AuthMode: "token", Token: "serve-token"})
 	protected.EnableProviderSetupForListener("127.0.0.1:8787")
 	req = httptest.NewRequest(http.MethodGet, "/provider-setup", nil)
+	req.Host = "127.0.0.1"
 	req.Header.Set("Accept", "application/json")
 	rec = httptest.NewRecorder()
 	protected.Handler().ServeHTTP(rec, req)

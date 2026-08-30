@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -112,5 +113,38 @@ func TestOutcomeTrackerVerificationDebtLifecycle(t *testing.T) {
 	// counts as discriminating without any mutated-path match.
 	if s := tr.ScoreRound([]Receipt{bashReceipt("go test ./pkg", true)}); s.Discriminating != 1 || s.DebtAge != 0 {
 		t.Fatalf("verification round = %+v, want discriminating 1, no debt", s)
+	}
+}
+
+func TestOutcomeTrackerCarriesRunwayShadowAcrossForks(t *testing.T) {
+	tracker := NewOutcomeTracker()
+	var before OutcomeSample
+	for range 5 {
+		before = tracker.ScoreRound(nil)
+	}
+	if before.Runway != runwayRoundCost || before.RunwaySpent {
+		t.Fatalf("pre-fork runway = %+v, want one empty round remaining", before)
+	}
+
+	restored := RestoreOutcomeTracker(tracker.ForkSeed())
+	after := restored.ScoreRound(nil)
+	if after.Runway != 0 || !after.RunwaySpent || after.RunwayDry != 6 || after.RunwayIdle != 6 {
+		t.Fatalf("post-fork runway = %+v, want continuous spent transition", after)
+	}
+}
+
+func TestRunwayShadowDoesNotReplaceTheLiveNoveltyScorer(t *testing.T) {
+	tracker := NewOutcomeTracker()
+	var sample OutcomeSample
+	for i := range explorationRunLimit + 1 {
+		read := readReceipt(fmt.Sprintf("file-%d.go", i))
+		read.OutputBytes = 1
+		sample = tracker.ScoreRound([]Receipt{read})
+	}
+	if sample.Exploration != 1 || sample.LegacyGain != 0 {
+		t.Fatalf("comparison sample = %+v, want outcome exploration while the unchanged live scorer is zero", sample)
+	}
+	if sample.Runway != runwayStartBalance-(explorationRunLimit+1) {
+		t.Fatalf("runway balance = %d, want independent shadow accounting", sample.Runway)
 	}
 }

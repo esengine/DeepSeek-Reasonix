@@ -96,6 +96,9 @@ func botStart(args []string, version string) int {
 	rememberInboundRemote := botruntime.NewRemoteRememberer(logger)
 
 	// 构建网关配置
+	botChannels := botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == "")
+	botConnectionChannels := botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == "")
+	botChannels, botConnectionChannels = botruntime.MergeLegacyDingtalkChannel(cfg.Bot.Dingtalk, botChannels, botConnectionChannels)
 	gwCfg := bot.GatewayConfig{
 		Model:              modelName,
 		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
@@ -108,46 +111,25 @@ func botStart(args []string, version string) int {
 		PairingMaxPending:  cfg.Bot.Pairing.MaxPendingPerPlatform,
 		IgnoreSelfMessages: cfg.Bot.IgnoreSelfMessages,
 		SelfUserIDs: map[bot.Platform][]string{
-			bot.PlatformQQ:     cfg.Bot.SelfUserIDs.QQ,
-			bot.PlatformFeishu: cfg.Bot.SelfUserIDs.Feishu,
-			bot.PlatformWeixin: cfg.Bot.SelfUserIDs.Weixin,
+			bot.PlatformQQ:       cfg.Bot.SelfUserIDs.QQ,
+			bot.PlatformFeishu:   cfg.Bot.SelfUserIDs.Feishu,
+			bot.PlatformWeixin:   cfg.Bot.SelfUserIDs.Weixin,
+			bot.PlatformDingtalk: cfg.Bot.SelfUserIDs.Dingtalk,
 		},
 		ControlEnabled:     cfg.Bot.Control.Enabled,
 		ControlAddr:        cfg.Bot.Control.Addr,
 		ControlToken:       os.Getenv(strings.TrimSpace(cfg.Bot.Control.TokenEnv)),
 		WorkspaceRoot:      workspaceRoot,
-		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
-		ConnectionChannels: botruntime.ConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
+		Channels:           botChannels,
+		ConnectionChannels: botConnectionChannels,
 		Routes:             botruntime.RouteConfigs(cfg.Bot.Routes, *model == "", *dir == ""),
 		ConnectionAccess:   botruntime.ConnectionAccessConfigs(cfg),
 		Enabled:            enabledPlatforms,
-		Allowlist: bot.AllowlistConfig{
-			Enabled:  cfg.Bot.Allowlist.Enabled,
-			AllowAll: cfg.Bot.Allowlist.AllowAll,
-			Users: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQUsers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuUsers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinUsers,
-			},
-			Approvers: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQApprovers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuApprovers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinApprovers,
-			},
-			Admins: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQAdmins,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuAdmins,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinAdmins,
-			},
-			Groups: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQGroups,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuGroups,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
-			},
-		},
-		Debounce:       time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
-		OnInbound:      rememberInboundRemote,
-		OnSessionReady: botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
+		Allowlist:          botAllowlistConfig(cfg.Bot.Allowlist),
+		Debounce:           time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
+		ModelResolver:      botruntime.ModelResolver(cfg),
+		OnInbound:          rememberInboundRemote,
+		OnSessionReady:     botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 	}
 
 	feishuDomains := botruntime.RequestedFeishuDomains(requestedChannels)
@@ -580,4 +562,36 @@ Configuration:
 
   All secrets are read from environment variables; never put keys in config files.
 `)
+}
+
+// botAllowlistConfig 把 [bot.allowlist] 全局名单合成进网关 Allowlist（含钉钉）。
+func botAllowlistConfig(al config.BotAllowlist) bot.AllowlistConfig {
+	return bot.AllowlistConfig{
+		Enabled:  al.Enabled,
+		AllowAll: al.AllowAll,
+		Users: map[bot.Platform][]string{
+			bot.PlatformQQ:       al.QQUsers,
+			bot.PlatformFeishu:   al.FeishuUsers,
+			bot.PlatformWeixin:   al.WeixinUsers,
+			bot.PlatformDingtalk: al.DingtalkUsers,
+		},
+		Approvers: map[bot.Platform][]string{
+			bot.PlatformQQ:       al.QQApprovers,
+			bot.PlatformFeishu:   al.FeishuApprovers,
+			bot.PlatformWeixin:   al.WeixinApprovers,
+			bot.PlatformDingtalk: al.DingtalkApprovers,
+		},
+		Admins: map[bot.Platform][]string{
+			bot.PlatformQQ:       al.QQAdmins,
+			bot.PlatformFeishu:   al.FeishuAdmins,
+			bot.PlatformWeixin:   al.WeixinAdmins,
+			bot.PlatformDingtalk: al.DingtalkAdmins,
+		},
+		Groups: map[bot.Platform][]string{
+			bot.PlatformQQ:       al.QQGroups,
+			bot.PlatformFeishu:   al.FeishuGroups,
+			bot.PlatformWeixin:   al.WeixinGroups,
+			bot.PlatformDingtalk: al.DingtalkGroups,
+		},
+	}
 }

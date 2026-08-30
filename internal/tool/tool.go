@@ -34,6 +34,23 @@ type Tool interface {
 	ReadOnly() bool
 }
 
+// CallClass is a pure, argument-aware dispatch classification. Generation is a
+// target schema/lifecycle fingerprint checked again by the execution adapter;
+// an empty generation keeps the call on the serial path.
+type CallClass struct {
+	Known        bool
+	ReadOnly     bool
+	ParallelSafe bool
+	ResourceKey  string
+	Generation   string
+}
+
+// BatchClassifier lets a fixed proxy classify its resolved target without
+// executing discovery, starting a process, or making a network request.
+type BatchClassifier interface {
+	ClassifyCall(json.RawMessage) CallClass
+}
+
 // ContextualTool is an execution-time availability contract for tools whose
 // ownership depends on the active workflow context. Provider schemas remain
 // static for cache stability; the host must still consult this contract before

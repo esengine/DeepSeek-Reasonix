@@ -249,7 +249,7 @@ func TestWindowsUpdateRequiresObservedHelperHandoff(t *testing.T) {
 	if strings.Contains(source, "return installerCommand(installerPath, installDir).Start()") {
 		t.Fatal("Windows update silently falls back to an unobserved installer")
 	}
-	if !strings.Contains(source, "cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}") {
+	if !strings.Contains(source, "cmd := proc.Command(helperPath") || strings.Contains(source, "proc.VisibleCommand(helperPath") {
 		t.Fatal("Windows handoff helper should stay hidden while NSIS shows update progress")
 	}
 	helperData, err := os.ReadFile("cmd/update-helper/main_windows.go")

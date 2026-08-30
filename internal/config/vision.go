@@ -59,23 +59,27 @@ func modelTokenSeparator(r rune) bool {
 	return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
 }
 
-// CanConfigureVision reports whether user-supplied vision metadata may enable
-// image input for this endpoint. DeepSeek's official APIs currently accept text
-// message content only, so their protocol constraint is authoritative over
-// persisted provider-wide flags, vision_models, and model overrides. Custom
-// DeepSeek-compatible gateways remain configurable because they may implement
-// their own multimodal translation layer.
+// CanConfigureVision reports whether Settings may expose per-model image-input
+// checkboxes. Official DeepSeek uses the same editor as other providers; the
+// wire layer still refuses Flash/Pro image payloads.
 func CanConfigureVision(e *ProviderEntry) bool {
-	return e != nil && !openai.IsDeepSeek(e.BaseURL)
+	return e != nil
 }
 
 // EffectiveVision resolves whether the selected model accepts image input.
-// Explicit provider vision still wins for custom vision-capable gateways; the
-// MiMo endpoint heuristic is deliberately limited to known MiMo endpoints so
-// arbitrary OpenAI-compatible proxies do not get image payloads unexpectedly.
+// Official DeepSeek Settings can mark any enabled model for image input, but
+// only the pinned vision SKU actually receives image parts. An unconfigured
+// catalog (VisionModels == nil) still enables that SKU so CLI/model-switch
+// users keep image input without a Settings round-trip. Explicit provider
+// vision still wins for custom gateways; the MiMo endpoint heuristic is
+// deliberately limited to known MiMo endpoints so arbitrary OpenAI-compatible
+// proxies do not get image payloads unexpectedly.
 func EffectiveVision(e *ProviderEntry) bool {
-	if !CanConfigureVision(e) {
+	if e == nil {
 		return false
+	}
+	if openai.IsDeepSeek(e.BaseURL) {
+		return officialDeepSeekEffectiveVision(e)
 	}
 	if enabled, explicit := explicitModelVision(e); explicit {
 		return enabled
@@ -91,11 +95,27 @@ func EffectiveVision(e *ProviderEntry) bool {
 // Keep this query separate from EffectiveVision so callers can distinguish a
 // model-scoped capability from provider-wide or endpoint-inferred support.
 func ExplicitModelVision(e *ProviderEntry) bool {
-	if !CanConfigureVision(e) {
+	if e == nil {
 		return false
+	}
+	if openai.IsDeepSeek(e.BaseURL) {
+		return officialDeepSeekEffectiveVision(e)
 	}
 	enabled, explicit := explicitModelVision(e)
 	return explicit && enabled
+}
+
+func officialDeepSeekEffectiveVision(e *ProviderEntry) bool {
+	if e == nil || !openai.IsOfficialDeepSeekVisionModel(e.Model) {
+		return false
+	}
+	if enabled, explicit := explicitModelVision(e); explicit {
+		return enabled
+	}
+	if e.Vision {
+		return true
+	}
+	return e.VisionModels == nil
 }
 
 func explicitModelVision(e *ProviderEntry) (enabled, explicit bool) {

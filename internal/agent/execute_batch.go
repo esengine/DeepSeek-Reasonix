@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -62,6 +63,9 @@ type toolOutcome struct {
 	// execution is local shell metadata (optional). Provider messages strip it
 	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
 	execution *tool.ShellExecution
+	// mcpApp is the optional MCP Apps presentation; provider-excluded like
+	// execution, persisted for Desktop cards.
+	mcpApp *provider.MCPAppPresentation
 	// recoveryGeneration is the gate generation captured before execution so
 	// ObserveResult can ignore stale results after a mode switch.
 	recoveryGeneration uint64
@@ -76,6 +80,7 @@ type batchExecution struct {
 	outcomes           []toolOutcome
 	images             [][]string
 	executions         []*tool.ShellExecution
+	err                error
 	recoveryStopTurn   bool
 	recoveryStopReason string
 }
@@ -90,15 +95,19 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// state separate so refreshing a dependent preview never mutates shared
 	// session memory outside Session's lock.
 	calls = append([]provider.ToolCall(nil), calls...)
-	for _, c := range calls {
-		a.emitFullToolDispatch(ctx, c, false)
+	if err := a.prepareToolBatch(ctx, calls); err != nil {
+		return batchExecution{err: err}
+	}
+	if a.task.ledger != nil {
+		ctx = withObservationBoundary(ctx, a.task.ledger.ObservationBoundary())
 	}
 
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
 	durations := make([]int64, len(calls))
 	startedAt := make([]int64, len(calls))
-	completedStepInBatch := false
+	ranParallel := make([]bool, len(calls))
+	batchStart := time.Now()
 	// Snapshot the receipt count before the batch runs: if a loop guard fires
 	// for this batch, successes recorded during it (a mixed batch where only one
 	// call was guard-blocked) must already count as progress against the pass.
@@ -111,6 +120,8 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// previews. The first writer stays on the single-preview fast path.
 	earlierWriterRan := false
 	surfaceWriters := make([]bool, len(calls))
+	var batchErr error
+	var batchErrOnce sync.Once
 	run := func(i int) {
 		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
@@ -120,21 +131,17 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			if refreshed, changed := refreshCurrentFileDiff(ctx, t, calls[i]); changed {
 				calls[i] = refreshed
 				a.sess.conversation.UpdateToolCallPreview(refreshed)
-				a.emitFullToolDispatch(ctx, refreshed, true)
+				if err := a.emitFullToolDispatch(ctx, refreshed, true); err != nil {
+					wrapped := fmt.Errorf("persist refreshed tool dispatch %s: %w", refreshed.ID, err)
+					batchErrOnce.Do(func() { batchErr = wrapped })
+					outcomes[i] = toolOutcome{output: "cancelled: tool dispatch was not durable", errMsg: wrapped.Error()}
+					results[i] = outcomes[i].output
+					return
+				}
 			}
 		}
 		start := time.Now()
 		startedAt[i] = start.UnixMilli()
-		if calls[i].Name == "complete_step" && completedStepInBatch {
-			output := "blocked: only one successful complete_step is allowed per tool-call round. Continue from the newly promoted in_progress todo in the next round instead of batching sign-offs."
-			outcomes[i] = toolOutcome{output: output, blocked: true, errMsg: "blocked: complete_step sign-offs must be serial"}
-			if a.task.ledger != nil {
-				a.task.ledger.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
-			}
-			durations[i] = time.Since(start).Milliseconds()
-			results[i] = output
-			return
-		}
 		outcomes[i] = a.executeOne(ctx, turn, calls[i])
 		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {
@@ -146,9 +153,6 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			calls[i].CapabilityID = outcomes[i].capabilityID
 			calls[i].ResolvedReadOnly = &readOnly
 			surfaceWriters[i] = !readOnly
-		}
-		if calls[i].Name == "complete_step" && outcomes[i].errMsg == "" {
-			completedStepInBatch = true
 		}
 		durations[i] = time.Since(start).Milliseconds()
 		results[i] = outcomes[i].output
@@ -221,7 +225,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			if !batchCallStaticallySkippable(a, calls[j]) {
 				continue
 			}
-			isVerification := calls[j].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
+			isVerification := calls[j].Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
 			msg := cause.message()
 			var ex *tool.ShellExecution
 			if calls[j].Name == "bash" {
@@ -258,7 +262,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		mutationBatchStop = true
 	}
 
-	for _, batch := range partitionToolCalls(a.svc.tools, calls) {
+	for _, batch := range a.toolCallBatches(calls) {
 		if ctx.Err() != nil {
 			markCancelled(batch.start)
 			break
@@ -271,6 +275,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			// Parallel segments are read-only by construction; no mutation barrier.
 			ranUntil := runParallel(ctx, batch.start, batch.end, run)
 			for i := batch.start; i < ranUntil; i++ {
+				ranParallel[i] = true
 				finalize(i)
 			}
 			// After parallel execution completes, check if context was cancelled.
@@ -350,41 +355,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		}
 	}
 
-	for i, c := range calls {
-		o := outcomes[i]
-		t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
-		ok := t != nil && len(ambiguous) == 0
-		readOnly := ok && t.ReadOnly()
-		if c.ResolvedReadOnly != nil {
-			readOnly = *c.ResolvedReadOnly
-		}
-		tr := event.Tool{
-			ID:           c.ID,
-			Name:         c.Name,
-			Args:         c.Arguments,
-			ResolvedName: c.ResolvedName,
-			CapabilityID: c.CapabilityID,
-			Output:       o.output,
-			Err:          o.errMsg,
-			ReadOnly:     readOnly,
-			Truncated:    o.truncated,
-			DurationMs:   durations[i],
-			Execution:    toEventShellExecution(o.execution, durations[i]),
-		}
-		if startedAt[i] > 0 {
-			tr.StartedAt = startedAt[i]
-			tr.EndedAt = startedAt[i] + durations[i]
-			if mutation := o.workspaceMutation; mutation != nil {
-				tr.WorkspaceMutation = true
-				tr.WorkspacePaths = append([]string(nil), mutation.Paths...)
-				tr.WorkspaceAllPaths = mutation.AllPaths
-			}
-		}
-		a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
-		if o.truncated && o.truncMsg != "" {
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
-		}
-	}
+	a.emitBatchToolResults(calls, outcomes, durations, startedAt, ranParallel, batchStart)
 	a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
@@ -403,6 +374,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		outcomes:           outcomes,
 		images:             images,
 		executions:         executions,
+		err:                batchErr,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}
@@ -435,7 +407,7 @@ func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutco
 		readOnly = o.effective.readOnly
 	}
 	effects := evidence.ClassifyToolCall(toolName, toolArgs, readOnly)
-	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
+	if toolName == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
 		return nil
 	}
 	if !effects.StateMutation {
@@ -474,7 +446,7 @@ func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
 		return false
 	}
 	readOnly := t.ReadOnly()
-	isVerification := call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
+	isVerification := call.Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
 	if isVerification {
 		return true
 	}
@@ -487,6 +459,20 @@ type toolCallBatch struct {
 	parallel bool
 }
 
+// toolCallBatches preserves read-only fan-out unless a tool hook can mutate the
+// workspace. Such hooks are covered by a whole-workspace claim, so their calls
+// must run in provider order instead of racing that claim against each other.
+func (a *Agent) toolCallBatches(calls []provider.ToolCall) []toolCallBatch {
+	batches := partitionToolCalls(a.svc.tools, calls)
+	if !toolHooksMayMutateWorkspace(a.svc.hooks) {
+		return batches
+	}
+	for i := range batches {
+		batches[i].parallel = false
+	}
+	return batches
+}
+
 // partitionToolCalls keeps provider order while letting contiguous known
 // read-only tools run together; unknown and writer tools are single-call
 // serial batches. Evidence-ledger tools (complete_step, todo_write, wait,
@@ -495,10 +481,10 @@ type toolCallBatch struct {
 func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
 	var batches []toolCallBatch
 	for i := 0; i < len(calls); {
-		if parallelisable(r, calls[i].Name) {
+		if parallelisableCall(r, calls[i]) {
 			start := i
 			i++
-			for i < len(calls) && parallelisable(r, calls[i].Name) {
+			for i < len(calls) && parallelisableCall(r, calls[i]) {
 				i++
 			}
 			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
@@ -510,13 +496,23 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallB
 	return batches
 }
 
-func parallelisable(r *tool.Registry, name string) bool {
-	switch name {
-	case "complete_step", "todo_write", "wait", "bash_output", "use_capability", "compress":
+func parallelisableCall(r *tool.Registry, call provider.ToolCall) bool {
+	switch call.Name {
+	case "complete_step", "todo_write", "wait", "bash_output", "compress":
 		return false
 	}
-	t, _, ambiguous := r.ResolveCall(name)
-	return t != nil && len(ambiguous) == 0 && t.ReadOnly()
+	target, _, ambiguous := r.ResolveCall(call.Name)
+	if target == nil || len(ambiguous) != 0 {
+		return false
+	}
+	if classifier, ok := target.(tool.BatchClassifier); ok {
+		class := classifier.ClassifyCall(json.RawMessage(call.Arguments))
+		return class.Known && class.ReadOnly && class.ParallelSafe
+	}
+	if _, dynamic := target.(tool.CallResolver); dynamic {
+		return false
+	}
+	return target.ReadOnly()
 }
 
 func runParallel(ctx context.Context, start, end int, run func(int)) int {

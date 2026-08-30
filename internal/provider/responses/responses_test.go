@@ -52,6 +52,10 @@ func TestDetectVendorAndModeDefaults(t *testing.T) {
 		{"https://api.xiaomimimo.com/v1", "mimo", "stateless"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
 		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://api.stepfun.com/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.com/step_plan/v1", "stepfun", "stateless"},
+		{"https://api.stepfun.ai/v1", "stepfun", "stateless"},
+		{"https://gateway.stepfun.com/v1", "", "stateful"},
 		{"https://api.deepseek.com.attacker.example/v1", "", "stateful"},
 		{"https://example.com/api.deepseek.com/v1", "", "stateful"},
 		{"https://example.com/v1", "", "stateful"},
@@ -90,6 +94,28 @@ func TestDeepSeekEffortUsesResponsesReasoningShape(t *testing.T) {
 	}
 }
 
+func TestDeepSeekProLowUsesResponsesReasoningShape(t *testing.T) {
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "low"}).(*client)
+	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("Pro low effort = %q, want low", got)
+	}
+}
+
+func TestDeepSeekV4ResponsesEffortAliasesNormalizeToHigh(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		for _, alias := range []string{"medium", "xhigh"} {
+			client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, Effort: alias}).(*client)
+			body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+			reasoning, _ := body["reasoning"].(map[string]any)
+			if got, _ := reasoning["effort"].(string); got != "high" {
+				t.Fatalf("%s/%s effort = %q", model, alias, got)
+			}
+		}
+	}
+}
+
 func TestRequestSerializesExplicitMaxOutputTokens(t *testing.T) {
 	client := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{
@@ -106,21 +132,21 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want high-reasoning auto %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := deepseekBody["max_output_tokens"]; exists {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want omitted official 384K ceiling", deepseekBody["max_output_tokens"])
 	}
 
 	high := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "high"}).(*client)
 	highBody, _, _ := high.buildRequestBody(provider.Request{Messages: message})
-	if got := highBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("high-effort DeepSeek budget = %#v, want %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := highBody["max_output_tokens"]; exists {
+		t.Fatalf("high-effort DeepSeek budget = %#v, want omitted", highBody["max_output_tokens"])
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
 		thinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: effort}).(*client)
 		thinkingDisabledBody, _, _ := thinkingDisabled.buildRequestBody(provider.Request{Messages: message})
-		if got := thinkingDisabledBody["max_output_tokens"]; got != provider.DefaultOrdinaryOutputTokens {
-			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want ordinary %d", effort, got, provider.DefaultOrdinaryOutputTokens)
+		if _, exists := thinkingDisabledBody["max_output_tokens"]; exists {
+			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want omitted", effort, thinkingDisabledBody["max_output_tokens"])
 		}
 	}
 
@@ -1154,7 +1180,8 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 	}
 }
 
-// TestVendorTableMaxOutputTokens: automatic ladder is 16K/32K/64K, never 128K.
+// TestVendorTableMaxOutputTokens: MiMo keeps the 16K/32K ladder; official
+// DeepSeek omits max_output_tokens so the server uses its 384K ceiling.
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
@@ -1170,7 +1197,43 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 	}
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
-	if got := db["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("deepseek auto budget = %#v, want high-reasoning %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := db["max_output_tokens"]; exists {
+		t.Fatalf("deepseek auto budget = %#v, want omitted official ceiling", db["max_output_tokens"])
+	}
+}
+
+// TestStepFunResponsesSummaryRequired: StepFun's Responses API rejects input
+// reasoning items without a `summary` list (verified live: 400 without,
+// 200 with), like DashScope. The vendor capability must carry the flag so the
+// replay path emits it, and its reasoning.effort shape follows the OpenAI
+// contract.
+func TestStepFunResponsesSummaryRequired(t *testing.T) {
+	c := New(Config{Name: "stepfun-responses", BaseURL: "https://api.stepfun.com/v1", Model: "step-3.7-flash", Effort: "low"}).(*client)
+	body, _, _ := c.buildRequestBody(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "hi"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "think",
+				ReasoningID: "rs_1", ReasoningStatus: "completed"},
+		},
+	})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("stepfun reasoning.effort = %q, want low", got)
+	}
+	items := body["input"].([]map[string]any)
+	var reasoningItem map[string]any
+	for _, item := range items {
+		if item["type"] == "reasoning" {
+			reasoningItem = item
+		}
+	}
+	if reasoningItem == nil {
+		t.Fatal("stepfun input must replay the reasoning item")
+	}
+	if _, ok := reasoningItem["summary"].([]map[string]string); !ok {
+		t.Fatalf("stepfun reasoning item must carry summary, got %#v", reasoningItem["summary"])
+	}
+	if reasoningItem["id"] != "rs_1" {
+		t.Fatalf("stepfun reasoning item id = %v, want rs_1", reasoningItem["id"])
 	}
 }

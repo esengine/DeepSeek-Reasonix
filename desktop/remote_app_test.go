@@ -2,29 +2,168 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/jobs"
 	"reasonix/internal/remote"
 )
 
+func TestReloadServeProvidersCancelsBusyTurn(t *testing.T) {
+	if remoteProviderReloadTimeout <= jobs.DefaultTeardownGrace {
+		t.Fatalf("provider reload timeout = %s, want more than teardown grace", remoteProviderReloadTimeout)
+	}
+	var mu sync.Mutex
+	canceled := false
+	jobsCanceled := false
+	reloadCalls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /cancel", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		canceled = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"jobs":[{"id":"job-1"}]}`))
+	})
+	mux.HandleFunc("POST /jobs/cancel", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.IDs) != 1 || body.IDs[0] != "job-1" {
+			http.Error(w, "bad jobs", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		jobsCanceled = true
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /providers/reload", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		reloadCalls++
+		if !canceled || !jobsCanceled {
+			http.Error(w, "busy", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mgr := newDesktopRemoteManager(&App{})
+	mgr.mu.Lock()
+	mgr.hosts["box"] = &managedHost{serves: map[string]*serveEntry{
+		"ws": {view: RemoteServerView{LocalURL: srv.URL + "/"}, token: "tok"},
+	}}
+	mgr.mu.Unlock()
+
+	if ok := mgr.reloadServeProviders(context.Background(), mgr.hosts["box"], "box", "ws", srv.URL+"/", "tok"); !ok {
+		t.Fatal("reloadServeProviders = false, want true after cancel + retry")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !canceled || !jobsCanceled || reloadCalls < 2 {
+		t.Fatalf("canceled=%v jobsCanceled=%v reloadCalls=%d, want turn/jobs cancellation and retry", canceled, jobsCanceled, reloadCalls)
+	}
+}
+
+func TestCredentialProviderReloadBudgetScalesWithTrackedServes(t *testing.T) {
+	if got, want := credentialProviderReloadBudget(4), 4*remoteProviderReloadTimeout; got != want {
+		t.Fatalf("four-target reload budget = %s, want %s", got, want)
+	}
+	if got := credentialProviderReloadBudget(0); got != remoteProviderReloadTimeout {
+		t.Fatalf("empty-target reload budget = %s, want one-target floor %s", got, remoteProviderReloadTimeout)
+	}
+}
+
+func TestCredentialProviderHealBudgetScalesWithTrackedWorkspaces(t *testing.T) {
+	if got, want := credentialProviderHealBudget(4), 4*30*time.Second; got != want {
+		t.Fatalf("four-workspace heal budget = %s, want %s", got, want)
+	}
+	if got := credentialProviderHealBudget(0); got != 30*time.Second {
+		t.Fatalf("empty-workspace heal budget = %s, want one-workspace floor", got)
+	}
+}
+
+func TestReloadServeProvidersRejectsReplacedHostGeneration(t *testing.T) {
+	var reloadCalls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/token", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("POST /providers/reload", func(w http.ResponseWriter, _ *http.Request) { reloadCalls++; w.WriteHeader(http.StatusNoContent) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mgr := newDesktopRemoteManager(&App{})
+	old := &managedHost{serves: map[string]*serveEntry{"ws": {view: RemoteServerView{LocalURL: srv.URL}, token: "old"}}}
+	mgr.hosts["box"] = old
+	mgr.hosts["box"] = &managedHost{serves: map[string]*serveEntry{"ws": {view: RemoteServerView{LocalURL: srv.URL}, token: "new"}}}
+	if mgr.reloadServeProviders(context.Background(), old, "box", "ws", "", "") {
+		t.Fatal("obsolete host generation reloaded replacement serves")
+	}
+	if reloadCalls != 0 {
+		t.Fatalf("replacement serve received %d reloads from obsolete watchdog", reloadCalls)
+	}
+}
+
+func TestCredentialChannelDecision(t *testing.T) {
+	cases := []struct {
+		name string
+		d    credentialChannelDecision
+		want bool
+	}{
+		{"healthy", credentialChannelDecision{HasForward: true, ForwardPort: 41000, HealedPort: 41000, ProbeOK: true}, false},
+		{"no forward", credentialChannelDecision{}, true},
+		{"probe dead", credentialChannelDecision{HasForward: true, ForwardPort: 41000, HealedPort: 41000}, true},
+		{"never healed", credentialChannelDecision{HasForward: true, ForwardPort: 41000, ProbeOK: true}, true},
+		{"port rebound", credentialChannelDecision{HasForward: true, ForwardPort: 42000, HealedPort: 41000, ProbeOK: true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.d.needsHeal(); got != tc.want {
+				t.Fatalf("needsHeal=%v, want %v", got, tc.want)
+			}
+		})
+	}
+	for state, want := range map[string]bool{"connected": true, "degraded": true, "connecting": false, "error": false} {
+		if got := credentialWatchdogEligibleState(state); got != want {
+			t.Fatalf("credentialWatchdogEligibleState(%q)=%v, want %v", state, got, want)
+		}
+	}
+}
+
 // fakeRemoteKernel implements remoteKernel for binding-layer tests.
 type fakeRemoteKernel struct {
-	hosts           []RemoteHostView
-	statuses        []RemoteConnectionStatusView
-	writeResult     RemoteWriteResult
-	ensureView      RemoteServerView
-	ensureToken     string
-	ensureErr       error
-	resolveCalls    []bool
-	secretCalls     []remoteSecretAnswer
-	secretPromptIDs []string
-	closed          bool
+	hosts             []RemoteHostView
+	statuses          []RemoteConnectionStatusView
+	writeResult       RemoteWriteResult
+	ensureView        RemoteServerView
+	ensureToken       string
+	ensureErr         error
+	ensureCalls       int
+	snapshotMiss      bool
+	switchProxyErr    error
+	switchProxyCalls  [][5]string
+	platformErr       error
+	platformChecks    []string
+	stoppedWorkspaces []string
+	resolveCalls      []bool
+	secretCalls       []remoteSecretAnswer
+	secretPromptIDs   []string
+	closed            bool
 }
 
 func TestRemoteConnectionErrorDetailsPreserveHostKeyMismatch(t *testing.T) {
@@ -102,12 +241,31 @@ func (f *fakeRemoteKernel) AddForward(string, RemoteForwardInput) (RemoteForward
 }
 func (f *fakeRemoteKernel) RemoveForward(string, string) error { return nil }
 func (f *fakeRemoteKernel) EnsureServer(context.Context, string, string) (RemoteServerView, string, error) {
+	f.ensureCalls++
 	return f.ensureView, f.ensureToken, f.ensureErr
 }
-func (f *fakeRemoteKernel) StopServer(string) error              { return nil }
-func (f *fakeRemoteKernel) ServerStatus(string) RemoteServerView { return f.ensureView }
-func (f *fakeRemoteKernel) ServerLogs(context.Context, string, int) (string, error) {
+func (f *fakeRemoteKernel) SwitchCredentialProxyModel(_ context.Context, hostID, workspace, currentRef, nextRef, expectedPath string) error {
+	f.switchProxyCalls = append(f.switchProxyCalls, [5]string{hostID, workspace, currentRef, nextRef, expectedPath})
+	return f.switchProxyErr
+}
+func (f *fakeRemoteKernel) StopServer(_ string, workspace string) error {
+	f.stoppedWorkspaces = append(f.stoppedWorkspaces, workspace)
+	return nil
+}
+func (f *fakeRemoteKernel) ServerStatus(string, string) RemoteServerView { return f.ensureView }
+func (f *fakeRemoteKernel) ServeSnapshot(string, string) (RemoteServerView, string, bool) {
+	if f.snapshotMiss || f.ensureErr != nil || f.ensureView.State != "ready" || f.ensureView.LocalURL == "" || f.ensureToken == "" {
+		return RemoteServerView{}, "", false
+	}
+	return f.ensureView, f.ensureToken, true
+}
+func (f *fakeRemoteKernel) ServerLogs(context.Context, string, string, int) (string, error) {
 	return "log line", nil
+}
+
+func (f *fakeRemoteKernel) CheckPlatform(_ context.Context, hostID string) error {
+	f.platformChecks = append(f.platformChecks, hostID)
+	return f.platformErr
 }
 func (f *fakeRemoteKernel) Close() error { f.closed = true; return nil }
 
@@ -146,6 +304,23 @@ func TestConfirmRemoteHostKeyDelegates(t *testing.T) {
 	}
 	if len(fake.resolveCalls) != 1 || fake.resolveCalls[0] != true {
 		t.Fatalf("resolve calls = %+v", fake.resolveCalls)
+	}
+}
+
+func TestCheckRemotePlatformDelegatesAndPropagatesError(t *testing.T) {
+	fake := &fakeRemoteKernel{platformErr: errors.New("unsupported remote OS")}
+	a := appWithFakeKernel(fake)
+	if err := a.CheckRemotePlatform("box"); err == nil || !strings.Contains(err.Error(), "unsupported remote OS") {
+		t.Fatalf("err = %v, want unsupported remote OS", err)
+	}
+	if len(fake.platformChecks) != 1 || fake.platformChecks[0] != "box" {
+		t.Fatalf("platform checks = %+v", fake.platformChecks)
+	}
+
+	ok := &fakeRemoteKernel{}
+	a2 := appWithFakeKernel(ok)
+	if err := a2.CheckRemotePlatform("box"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -238,6 +413,42 @@ func TestUpdateHostPreservesHiddenFields(t *testing.T) {
 	}
 	if len(h.Forwards) != 1 || h.Forwards[0].Bind != "127.0.0.1:8080" {
 		t.Fatalf("edit wiped persisted forwards: %+v", h.Forwards)
+	}
+}
+
+func TestUpdateHostStopsCredentialWatchdogWhenLocalProxyDisabled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	if err := editUserConfig(func(c *config.Config) error {
+		return c.UpsertRemoteHost(config.RemoteHostEntry{
+			Name: "box", Host: "10.0.0.9", Port: 22, User: "dev", CredentialMode: "local-proxy",
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	watchCtx, cancel := context.WithCancel(context.Background())
+	mgr := newDesktopRemoteManager(&App{})
+	mh := &managedHost{}
+	mh.credWatch.cancel = cancel
+	mh.credWatch.workspace = "/srv/app"
+	mgr.hosts["box"] = mh
+
+	if _, err := mgr.UpdateHost("box", RemoteHostInput{
+		Label: "box", Host: "10.0.0.9", Port: 22, User: "dev", ServeInstall: "auto", CredentialMode: "remote",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-watchCtx.Done():
+	default:
+		t.Fatal("credential watchdog remained active after local-proxy was disabled")
+	}
+	mh.credWatch.mu.Lock()
+	defer mh.credWatch.mu.Unlock()
+	if mh.credWatch.cancel != nil || mh.credWatch.workspace != "" {
+		t.Fatalf("credential watchdog state = cancel:%v workspace:%q, want stopped", mh.credWatch.cancel != nil, mh.credWatch.workspace)
 	}
 }
 
@@ -479,7 +690,9 @@ func TestOpenRemoteWorkspacePersistsLastWorkspace(t *testing.T) {
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("HOME", home)
 	a := &App{ctx: context.Background()}
-	a.saveLastRemoteWorkspace("box", "/home/dev/app")
+	if err := a.saveLastRemoteWorkspace("box", "/home/dev/app"); err != nil {
+		t.Fatal(err)
+	}
 	got := a.RemoteLastWorkspace("box")
 	if got != "/home/dev/app" {
 		t.Fatalf("last workspace = %q, want /home/dev/app", got)

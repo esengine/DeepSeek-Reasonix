@@ -267,6 +267,110 @@ func TestPlanModeCanReplacePriorExecutionTodoState(t *testing.T) {
 	}
 }
 
+func TestPlanModeTodoWriteCanCompleteCurrentItem(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SeedTodoState([]evidence.TodoItem{
+		{Content: "inspect the request", Status: "in_progress"},
+		{Content: "draft a plan", Status: "pending"},
+	})
+	a.SetPlanMode(true)
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "mark-done",
+		Name: "todo_write",
+		Arguments: `{"todos":[
+			{"content":"inspect the request","status":"completed"},
+			{"content":"draft a plan","status":"in_progress"}
+		]}`,
+	})
+	if out.errMsg != "" {
+		t.Fatalf("plan-mode todo completion was blocked: %s", out.errMsg)
+	}
+	got := a.CanonicalTodoState()
+	if len(got) != 2 || got[0].Status != "completed" || got[1].Status != "in_progress" {
+		t.Fatalf("plan-mode todo state = %+v, want first item completed", got)
+	}
+}
+
+func TestPlanModeTodoCreatedInTurnUsesTodoWriteRecovery(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	reg.Add(mustBuiltinTool(t, "complete_step"))
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetPlanMode(true)
+
+	created := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "todo",
+		Name: "todo_write",
+		Arguments: `{"todos":[
+			{"content":"finish the cleanup","status":"in_progress","step_id":"cleanup_step_01"}
+		]}`,
+	})
+	if created.blocked || created.errMsg != "" {
+		t.Fatalf("create Plan todo outcome = %+v", created)
+	}
+
+	signoff := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "sign-off",
+		Name: "complete_step",
+		Arguments: `{
+			"step_id":"cleanup_step_01",
+			"result":"cleanup finished",
+			"evidence":[{"kind":"manual","summary":"confirmed the cleanup output"}]
+		}`,
+	})
+	if !signoff.blocked || !strings.Contains(signoff.output, "only available after plan approval") {
+		t.Fatalf("Plan complete_step outcome = %+v, want phase block", signoff)
+	}
+	if got := a.CanonicalTodoState(); len(got) != 1 || got[0].Status != "in_progress" {
+		t.Fatalf("blocked sign-off changed canonical todos = %+v", got)
+	}
+
+	completed := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "complete-todo",
+		Name: "todo_write",
+		Arguments: `{"todos":[
+			{"content":"finish the cleanup","status":"completed","step_id":"cleanup_step_01"}
+		]}`,
+	})
+	if completed.blocked || completed.errMsg != "" {
+		t.Fatalf("todo_write recovery outcome = %+v", completed)
+	}
+	if got := a.CanonicalTodoState(); len(got) != 1 || got[0].Status != "completed" {
+		t.Fatalf("todo_write recovery state = %+v, want completed", got)
+	}
+}
+
+func TestPlanModeKeepsCompleteStepUnavailable(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mustBuiltinTool(t, "complete_step"))
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SeedTodoState([]evidence.TodoItem{{Content: "inspect the request", Status: "in_progress"}})
+	a.SetPlanMode(true)
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "sign-off",
+		Name: "complete_step",
+		Arguments: `{
+			"step":"inspect the request",
+			"result":"inspected",
+			"evidence":[{"kind":"manual","summary":"checked"}]
+		}`,
+	})
+	if !out.blocked {
+		t.Fatalf("plan-mode complete_step outcome = %+v, want blocked", out)
+	}
+	if !strings.Contains(out.output, "plan approval") && !strings.Contains(out.output, "unavailable during planning") && !strings.Contains(out.errMsg, "unavailable") {
+		t.Fatalf("plan-mode complete_step = %+v, want a planning-phase unavailability", out)
+	}
+	got := a.CanonicalTodoState()
+	if len(got) != 1 || got[0].Status != "in_progress" {
+		t.Fatalf("blocked complete_step advanced canonical todos: %+v", got)
+	}
+}
+
 // TestPlanModeDoesNotMutateSystemOrTools is the cache-stability test. Toggling
 // plan mode between two stream calls must not change the system prompt or the
 // tool list seen by the provider — those are the cache-key prefix, and any

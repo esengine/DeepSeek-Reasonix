@@ -14,6 +14,9 @@ import (
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
 	Kind            string              `json:"kind"`
+	TurnID          string              `json:"turnId,omitempty"`
+	Sequence        uint64              `json:"seq,omitempty"`
+	Status          string              `json:"status,omitempty"`
 	Text            string              `json:"text,omitempty" externalizable:"true"`
 	Detail          string              `json:"detail,omitempty" externalizable:"true"`
 	Code            string              `json:"code,omitempty"`
@@ -24,6 +27,7 @@ type Event struct {
 	Usage           *Usage              `json:"usage,omitempty"`
 	Approval        *Approval           `json:"approval,omitempty"`
 	Ask             *Ask                `json:"ask,omitempty"`
+	MCPInteraction  *MCPInteraction     `json:"mcpInteraction,omitempty"`
 	Compaction      *Compaction         `json:"compaction,omitempty"`
 	Maintenance     *ContextMaintenance `json:"maintenance,omitempty"`
 	Guardian        *Guardian           `json:"guardian,omitempty"`
@@ -36,12 +40,22 @@ type Event struct {
 	CheckpointTurn  *int                `json:"checkpointTurn,omitempty"`
 	RetryAttempt    int                 `json:"retryAttempt,omitempty"`
 	RetryMax        int                 `json:"retryMax,omitempty"`
-	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream" | "protocol"; omit for older clients
 	StreamAttempt   *StreamAttempt      `json:"streamAttempt,omitempty"`
 	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
 	// session-inbox entry. Empty for legacy text-only guidance.
-	ItemID    string            `json:"itemId,omitempty"`
-	Workspace *WorkspaceChanged `json:"workspace,omitempty"`
+	ItemID string `json:"itemId,omitempty"`
+	// SessionPath routes frames emitted by detached Serve controllers. Older
+	// clients ignore the omitted/unknown field and keep single-session behavior.
+	SessionPath string `json:"sessionPath,omitempty"`
+	// SessionCurrent is set by Serve at publication time for frames belonging
+	// to its foreground controller. It lets all-session clients adopt an
+	// externally selected/recovered foreground without polling on every token.
+	SessionCurrent bool `json:"sessionCurrent,omitempty"`
+	// SessionReset distinguishes a fresh /new or /clear target from a resumed
+	// durable session when a different client rotates the foreground.
+	SessionReset bool              `json:"sessionReset,omitempty"`
+	Workspace    *WorkspaceChanged `json:"workspace,omitempty"`
 	// Phase is set on turn_phase events: working | checking | verifying | reviewing.
 	Phase string `json:"phase,omitempty"`
 	// Completion is set on completion_summary events (content-free quality summary).
@@ -50,7 +64,7 @@ type Event struct {
 
 // CompletionSummary is the JSON form of event.CompletionSummaryInfo.
 type CompletionSummary struct {
-	Preset             string   `json:"preset"`
+	Preset             string   `json:"preset"` // deprecated; pinned compat value
 	Verdict            string   `json:"verdict"`
 	Mutations          int      `json:"mutations"`
 	ChecksPassed       int      `json:"checks_passed"`
@@ -59,6 +73,8 @@ type CompletionSummary struct {
 	Review             string   `json:"review"`
 	GapKinds           []string `json:"gap_kinds,omitempty"`
 	ConstraintDegraded bool     `json:"constraint_degraded"`
+	Floor              string   `json:"floor,omitempty"`
+	Attention          bool     `json:"attention"`
 }
 
 type WorkspaceChanged struct {
@@ -94,22 +110,14 @@ type StreamAttempt struct {
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
-	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID}
+	w := Event{Kind: kindNames[e.Kind], TurnID: e.TurnID, Sequence: e.Sequence, Status: string(e.Status), Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID, SessionPath: e.SessionPath, SessionReset: e.SessionReset}
 	if len(e.MemoryCitations) > 0 {
 		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
 	}
 	switch e.Kind {
 	case event.Notice:
-		w.Code = e.Code
-		if e.DecisionReceipt != nil {
-			w.DecisionReceipt = ToWireDecisionReceipt(e.DecisionReceipt)
-		}
-		if e.Level == event.LevelWarn {
-			w.Level = "warn"
-		} else {
-			w.Level = "info"
-		}
-	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+		w.applyNotice(e)
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
 		wt := &Tool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			ResolvedName: e.Tool.ResolvedName, CapabilityID: e.Tool.CapabilityID,
@@ -144,30 +152,11 @@ func ToWire(e event.Event) Event {
 	case event.Usage:
 		w.Usage = toWireUsage(e)
 	case event.ApprovalRequest:
-		w.Approval = &Approval{
-			ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject,
-			Reason: e.Approval.Reason, Fresh: e.Approval.Fresh, Kind: e.Approval.Kind,
-		}
-		if e.Approval.Recovery != nil {
-			r := e.Approval.Recovery
-			w.Approval.Recovery = &RecoveryApproval{
-				SourceAgent:     r.SourceAgent,
-				FailedTool:      r.FailedTool,
-				FailedSummary:   r.FailedSummary,
-				Diagnosis:       r.Diagnosis,
-				NextTool:        r.NextTool,
-				NextAction:      r.NextAction,
-				ChangeKind:      r.ChangeKind,
-				ChangeRationale: r.ChangeRationale,
-				ReviewRationale: r.ReviewRationale,
-				PlanBefore:      r.PlanBefore,
-				PlanAfter:       r.PlanAfter,
-				CanGrantTask:    r.CanGrantTask,
-				TaskGrantScope:  r.TaskGrantScope,
-			}
-		}
+		w.Approval = toWireApproval(e.Approval)
 	case event.AskRequest:
 		w.Ask = ToWireAsk(e.Ask)
+	case event.MCPInteractionRequest:
+		w.MCPInteraction = ToWireMCPInteraction(e.MCPInteraction)
 	case event.CompactionStarted, event.CompactionDone:
 		w.Compaction = &Compaction{
 			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
@@ -229,6 +218,8 @@ func ToWire(e event.Event) Event {
 				Review:             c.Review,
 				GapKinds:           append([]string(nil), c.GapKinds...),
 				ConstraintDegraded: c.ConstraintDegraded,
+				Floor:              c.Floor,
+				Attention:          c.Attention,
 			}
 		}
 	}
@@ -356,6 +347,41 @@ type Ask struct {
 	Questions []AskQuestion `json:"questions"`
 }
 
+// MCPInteraction is the JSON form of an event.MCPInteraction: one
+// server-initiated elicitation awaiting the user's accept/decline/cancel.
+// Schema and URL come from the MCP server; form answers travel only in the
+// resolve call, never on this event.
+type MCPInteraction struct {
+	ID              string          `json:"id"`
+	Server          string          `json:"server"`
+	Mode            string          `json:"mode"`
+	Message         string          `json:"message" externalizable:"true"`
+	RequestedSchema json.RawMessage `json:"requestedSchema,omitempty"`
+	URL             string          `json:"url,omitempty"`
+	ElicitationID   string          `json:"elicitationId,omitempty"`
+}
+
+// applyNotice fills the Notice-specific wire fields.
+func (w *Event) applyNotice(e event.Event) {
+	w.Code = e.Code
+	if e.DecisionReceipt != nil {
+		w.DecisionReceipt = ToWireDecisionReceipt(e.DecisionReceipt)
+	}
+	if e.Level == event.LevelWarn {
+		w.Level = "warn"
+	} else {
+		w.Level = "info"
+	}
+}
+
+// ToWireMCPInteraction converts event.MCPInteraction to its wire form.
+func ToWireMCPInteraction(i event.MCPInteraction) *MCPInteraction {
+	return &MCPInteraction{
+		ID: i.ID, Server: i.Server, Mode: i.Mode, Message: i.Message,
+		RequestedSchema: i.RequestedSchema, URL: i.URL, ElicitationID: i.ElicitationID,
+	}
+}
+
 // Profile carries the subagent model/effort resolved for a tool call.
 type Profile struct {
 	Model  string `json:"model,omitempty"`
@@ -471,34 +497,6 @@ type CacheDiagnostics struct {
 	ToolSchemaTokens    int      `json:"toolSchemaTokens"`
 	CacheMissTokens     int      `json:"cacheMissTokens"`
 	CacheHitTokens      int      `json:"cacheHitTokens"`
-}
-
-// Approval is the JSON form of an event.Approval.
-type Approval struct {
-	ID       string            `json:"id"`
-	Tool     string            `json:"tool"`
-	Subject  string            `json:"subject" externalizable:"true"`
-	Reason   string            `json:"reason,omitempty" externalizable:"true"`
-	Fresh    bool              `json:"fresh,omitempty"`
-	Kind     string            `json:"kind,omitempty"` // tool | plan | recovery
-	Recovery *RecoveryApproval `json:"recovery,omitempty"`
-}
-
-// RecoveryApproval is the JSON form of an event.RecoveryApproval.
-type RecoveryApproval struct {
-	SourceAgent     string `json:"source_agent,omitempty"`
-	FailedTool      string `json:"failed_tool,omitempty"`
-	FailedSummary   string `json:"failed_summary,omitempty"`
-	Diagnosis       string `json:"diagnosis,omitempty"`
-	NextTool        string `json:"next_tool,omitempty"`
-	NextAction      string `json:"next_action,omitempty"`
-	ChangeKind      string `json:"change_kind,omitempty"`
-	ChangeRationale string `json:"change_rationale,omitempty"`
-	ReviewRationale string `json:"review_rationale,omitempty"`
-	PlanBefore      string `json:"plan_before,omitempty"`
-	PlanAfter       string `json:"plan_after,omitempty"`
-	CanGrantTask    bool   `json:"can_grant_task,omitempty"`
-	TaskGrantScope  string `json:"task_grant_scope,omitempty"`
 }
 
 // Guardian is the JSON form of an event.GuardianResult.
@@ -622,6 +620,11 @@ var kindNames = map[event.Kind]string{
 	event.WorkspaceChanged:        "workspace_changed",
 	event.TurnPhase:               "turn_phase",
 	event.CompletionSummary:       "completion_summary",
+	event.ToolResultPreview:       "tool_result_preview",
+	event.TurnStatusChanged:       "turn_status",
+	event.MCPInteractionRequest:   "mcp_interaction",
+	event.PromptAnswered:          "prompt_answered",
+	event.SessionChanged:          "session_changed",
 }
 
 // ContextMaintenance is the JSON form of event.ContextMaintenance.

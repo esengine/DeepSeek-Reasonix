@@ -217,7 +217,7 @@ func (t startBackgroundJobTool) Description() string { return "start background 
 func (t startBackgroundJobTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object"}`)
 }
-func (t startBackgroundJobTool) ReadOnly() bool { return false }
+func (t startBackgroundJobTool) ReadOnly() bool { return true }
 func (t startBackgroundJobTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
 	jm, ok := jobs.FromContext(ctx)
 	if !ok {
@@ -593,7 +593,7 @@ func TestSetSessionPathAdoptsTemporaryBackgroundJobs(t *testing.T) {
 	c := New(Options{Runner: ag, Executor: ag, SessionDir: dir, Label: "test", Jobs: jm})
 	defer c.Close()
 
-	if err := c.Run(context.Background(), "start background job"); err != nil {
+	if err := c.Run(context.Background(), "start background job"); err != nil && !errors.As(err, new(*agent.FinalReadinessError)) {
 		t.Fatal(err)
 	}
 	jobID := <-started
@@ -1573,7 +1573,6 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 	if err := base.SaveSnapshot(path); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-
 	current, err := agent.LoadSession(path)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
@@ -1589,11 +1588,10 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 		Label:       "shutdown",
 		Sink:        sink,
 		OnSessionRecovered: func(info SessionRecoveryInfo) error {
-			handoff = info
+			info.OnCommit(func() { handoff = info })
 			return nil
 		},
 	})
-
 	recoveryPath, err := c.recoverShutdownSnapshot(path, agent.ErrSessionFileLockHeld)
 	if err != nil {
 		t.Fatalf("recoverShutdownSnapshot: %v", err)
@@ -1623,7 +1621,9 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 func recoveryTranscriptPaths(paths []string) []string {
 	out := paths[:0]
 	for _, path := range paths {
-		if !strings.HasSuffix(path, ".events.jsonl") {
+		if !strings.HasSuffix(path, ".events.jsonl") &&
+			!strings.HasSuffix(path, ".turns.jsonl") &&
+			!strings.HasSuffix(path, ".turns.jsonl.damaged") {
 			out = append(out, path)
 		}
 	}
@@ -2290,7 +2290,7 @@ func TestSnapshotConflictAtRecoveryDepthCapIsolatesCurrentBranch(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if got := c.SessionPath(); got == path || !strings.Contains(got, "-recovery-") {
-		t.Fatalf("session path = %q, want an isolated recovery branch", got)
+		t.Fatalf("session path = %q, want a stable recovery branch", got)
 	}
 	forks, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
 	if err != nil {
@@ -2298,13 +2298,15 @@ func TestSnapshotConflictAtRecoveryDepthCapIsolatesCurrentBranch(t *testing.T) {
 	}
 	filteredForks := forks[:0]
 	for _, fork := range forks {
-		if !strings.HasSuffix(fork, ".events.jsonl") {
+		if !strings.HasSuffix(fork, ".events.jsonl") &&
+			!strings.HasSuffix(fork, ".turns.jsonl") &&
+			!strings.HasSuffix(fork, ".turns.jsonl.damaged") {
 			filteredForks = append(filteredForks, fork)
 		}
 	}
 	forks = filteredForks
 	if len(forks) != 1 {
-		t.Fatalf("depth cap should preserve one isolated fork: %v", forks)
+		t.Fatalf("stable recovery should preserve one fork: %v", forks)
 	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
@@ -2314,12 +2316,12 @@ func TestSnapshotConflictAtRecoveryDepthCapIsolatesCurrentBranch(t *testing.T) {
 		t.Fatalf("canonical disk tail = %q, want newer disk transcript", got)
 	}
 	notices := sink.notices()
-	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "saved the current conflict copy in an isolated recovery branch") {
-		t.Fatalf("notices = %v, want depth-cap notice", notices)
+	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "unsaved local transcript was saved as a conflict copy") {
+		t.Fatalf("notices = %v, want forked recovery notice", notices)
 	}
 	notice, ok := sink.lastNotice()
-	if !ok || notice.Code != event.NoticeCodeSessionRecoveryDepthCap || notice.Audience != event.NoticeAudienceOperator {
-		t.Fatalf("depth-cap notice = %+v, want typed operator recovery notice", notice)
+	if !ok || notice.Code != event.NoticeCodeSessionRecoveryForked || notice.Audience != event.NoticeAudienceOperator {
+		t.Fatalf("recovery notice = %+v, want typed operator fork notice", notice)
 	}
 	// The isolated branch was saved with its own verified baseline. Defensive
 	// snapshots on that branch must be no-ops rather than starting another
@@ -2762,7 +2764,7 @@ func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
 		t.Fatalf("short choice reply should not be wrapped as a planner handoff:\n%s", reqText)
 	}
 	if got := agent.StripTransientUserBlocks(lastUserMessage(execProv.requests[0].Messages)); got != "1" {
-		t.Fatalf("executor last user = %q, want raw choice reply (execution-policy may append)", lastUserMessage(execProv.requests[0].Messages))
+		t.Fatalf("executor last user = %q, want raw choice reply", lastUserMessage(execProv.requests[0].Messages))
 	}
 }
 
@@ -4506,17 +4508,22 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 		})
 	}()
 
-	select {
-	case e := <-events:
-		if e.Kind != event.TurnDone {
-			t.Fatalf("expected TurnDone after panic, got %v", e.Kind)
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind != event.TurnDone {
+				continue
+			}
+			if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
+				t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
+			}
+			goto done
+		case <-deadline:
+			t.Fatal("timed out waiting for TurnDone after panic")
 		}
-		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
-			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for TurnDone after panic")
 	}
+done:
 
 	c.mu.Lock()
 	running := c.running

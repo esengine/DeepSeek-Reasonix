@@ -160,6 +160,9 @@ console.log("diagnostics settings page");
   ok(calls[0] === false, "initial load must request static report (includeSessionRuntime=false)");
   ok((rootEl.textContent || "").includes("skill.missing_description"), "warnings must render");
   ok(rootEl.querySelector(".diag-summary"), "health summary must render");
+  const frontendToggle = rootEl.querySelector('[data-testid="frontend-diagnostics-settings"] [role="switch"]');
+  ok(frontendToggle, "frontend diagnostics switch must be visible in the production diagnostics settings page");
+  ok(frontendToggle?.getAttribute("aria-checked") === "false", "frontend diagnostics switch starts off");
 
   const runtimeToggle = rootEl.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
   ok(runtimeToggle, "runtime toggle must exist");

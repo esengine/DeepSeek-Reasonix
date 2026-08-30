@@ -33,7 +33,7 @@ func (a *App) startWindowsWebView2StartupFallback(ctx context.Context) {
 
 		// Show the native shell first so a dialog failure can never leave the app
 		// completely invisible. The dark native background is already configured.
-		runtime.WindowShow(ctx)
+		a.showMainWindowFrom("webview2_startup_timeout")
 		if a.startupReady.Load() {
 			return
 		}

@@ -49,6 +49,17 @@ type DisplayRequest struct {
 	Source   string `json:"source,omitempty"`
 }
 
+// PricingContext is trusted host metadata derived from resolved provider
+// configuration. In particular, ScheduleID must never be inferred from a model
+// name alone because compatible gateways may use unrelated pricing.
+type PricingContext struct {
+	ProviderKind  string
+	ModelID       string
+	BillingMode   string
+	ScheduleID    string
+	CatalogSource string
+}
+
 const (
 	DisplaySourceExplicit = "explicit"
 	DisplaySourceWallet   = "wallet"
@@ -86,6 +97,8 @@ type CostQuote struct {
 	UsageSource        string `json:"usageSource,omitempty"`
 	PricingFingerprint string `json:"pricingFingerprint,omitempty"`
 	RateDate           string `json:"rateDate,omitempty"` // YYYY-MM-DD of FX used, if any
+	RateBand           string `json:"rateBand,omitempty"` // peak | off_peak | mixed
+	RatedAt            string `json:"ratedAt,omitempty"`  // RFC3339 UTC for scheduled quotes
 	IncompleteReason   string `json:"incompleteReason,omitempty"`
 	LegacyEstimate     bool   `json:"legacyEstimate,omitempty"`
 	CatalogSource      string `json:"catalogSource,omitempty"`
@@ -144,6 +157,9 @@ type QuoteInput struct {
 	UsageSource        string
 	CatalogSource      string
 	PricingFingerprint string
+	// ScheduleID is set only after config resolution proves that this is an
+	// official scheduled price anchor. Model names alone must not enable it.
+	ScheduleID string
 	// ProviderKind is deepseek|longcat|mimo|… for official dual-table lookup.
 	// When empty, ModelRef and Rates are used to infer a catalog match.
 	ProviderKind string
@@ -220,9 +236,21 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 	occurred := in.OccurredAt
 	if occurred.IsZero() {
 		occurred = time.Now().UTC()
+	} else {
+		occurred = occurred.UTC()
+	}
+	providerKind, modelID := resolveCatalogIdentity(in)
+	resolvedBand := ""
+	resolvedSchedule := false
+	if MatchesScheduleAnchor(providerKind, modelID, in.ScheduleID, in.Rates) {
+		if resolved, ok := ResolveScheduledRate(providerKind, modelID, in.Rates.Currency, mode, in.ScheduleID, occurred); ok {
+			in.Rates = resolved.Card
+			resolvedBand = resolved.RateBand
+			resolvedSchedule = true
+		}
 	}
 	fingerprint := strings.TrimSpace(in.PricingFingerprint)
-	if fingerprint == "" {
+	if fingerprint == "" || resolvedSchedule {
 		fingerprint = PricingFingerprint(in.Rates)
 	}
 	amount := OriginalCostAmount(in.Rates, in.Usage)
@@ -240,6 +268,10 @@ func newQuoteBuildState(in QuoteInput) *quoteBuildState {
 		UsageSource:        strings.TrimSpace(in.UsageSource),
 		PricingFingerprint: fingerprint,
 		CatalogSource:      strings.TrimSpace(in.CatalogSource),
+		RateBand:           resolvedBand,
+	}
+	if resolvedSchedule {
+		q.RatedAt = occurred.Format(time.RFC3339Nano)
 	}
 	q.Valuations[currency] = Valuation{
 		Money: q.Original, Basis: BasisIdentity,
@@ -278,11 +310,29 @@ func usageHasFacts(u UsageTokens) bool {
 
 func (s *quoteBuildState) matchOfficialCatalog() {
 	providerKind, modelID := resolveCatalogIdentity(s.input)
-	s.official, s.isOfficial = MatchesCatalog(providerKind, modelID, s.input.Rates)
+	if s.input.ScheduleID != "" {
+		s.official, s.isOfficial = LookupCatalogAt(providerKind, modelID, s.currency, s.input.BillingMode,
+			s.input.ScheduleID, s.quote.RateBand, s.occurred)
+		if s.isOfficial {
+			card := RateCardFromCatalog(s.official)
+			s.isOfficial = card.CacheHit == s.input.Rates.CacheHit && card.Input == s.input.Rates.Input && card.Output == s.input.Rates.Output
+		}
+	} else {
+		s.official, s.isOfficial = MatchesCatalog(providerKind, modelID, s.input.Rates)
+	}
 	if !s.isOfficial && providerKind != "" && modelID != "" {
 		rates := s.input.Rates
 		rates.Currency = s.currency
-		s.official, s.isOfficial = MatchesCatalog(providerKind, modelID, rates)
+		if s.input.ScheduleID != "" {
+			s.official, s.isOfficial = LookupCatalogAt(providerKind, modelID, s.currency, s.input.BillingMode,
+				s.input.ScheduleID, s.quote.RateBand, s.occurred)
+			if s.isOfficial {
+				card := RateCardFromCatalog(s.official)
+				s.isOfficial = card.CacheHit == rates.CacheHit && card.Input == rates.Input && card.Output == rates.Output
+			}
+		} else {
+			s.official, s.isOfficial = MatchesCatalog(providerKind, modelID, rates)
+		}
 	}
 	if s.isOfficial && s.quote.CatalogSource == "" {
 		s.quote.CatalogSource = s.official.DocURL
@@ -305,9 +355,14 @@ func (s *quoteBuildState) addOfficialValuation(target string) bool {
 	if !s.isOfficial {
 		return false
 	}
-	peer, ok := LookupCatalog(
-		s.official.Provider, s.official.Model, target, s.official.BillingMode,
-	)
+	var peer CatalogEntry
+	var ok bool
+	if s.input.ScheduleID != "" {
+		peer, ok = LookupCatalogAt(s.official.Provider, s.official.Model, target, s.official.BillingMode,
+			s.input.ScheduleID, s.quote.RateBand, s.occurred)
+	} else {
+		peer, ok = LookupCatalog(s.official.Provider, s.official.Model, target, s.official.BillingMode)
+	}
 	if !ok {
 		return false
 	}
@@ -442,6 +497,8 @@ type quoteAccumulator struct {
 	costFactsComplete bool
 	displayComplete   bool
 	modes             map[string]struct{}
+	rateBands         map[string]struct{}
+	unknownRateBand   bool
 }
 
 func emptyAggregate(display string) CostQuote {
@@ -459,7 +516,7 @@ func newQuoteAccumulator(display string) *quoteAccumulator {
 		out:     CostQuote{Valuations: map[string]Valuation{}, Estimated: true},
 		display: NormalizeCurrency(display), totals: map[string]Amount{}, originalTotals: map[string]Amount{},
 		originalComplete: true, costFactsComplete: true, displayComplete: true,
-		modes: map[string]struct{}{},
+		modes: map[string]struct{}{}, rateBands: map[string]struct{}{},
 	}
 }
 
@@ -474,6 +531,12 @@ func (a *quoteAccumulator) add(quote CostQuote) {
 	a.out.LegacyEstimate = a.out.LegacyEstimate || quote.LegacyEstimate
 	if quote.BillingMode != "" {
 		a.modes[quote.BillingMode] = struct{}{}
+	}
+	switch quote.RateBand {
+	case RateBandPeak, RateBandOffPeak:
+		a.rateBands[quote.RateBand] = struct{}{}
+	default:
+		a.unknownRateBand = true
 	}
 	if quote.RateDate > a.out.RateDate {
 		a.out.RateDate = quote.RateDate
@@ -559,6 +622,16 @@ func (a *quoteAccumulator) finish() CostQuote {
 			a.out.BillingMode = mode
 		}
 	}
+	if !a.unknownRateBand {
+		switch len(a.rateBands) {
+		case 1:
+			for band := range a.rateBands {
+				a.out.RateBand = band
+			}
+		case 2:
+			a.out.RateBand = RateBandMixed
+		}
+	}
 	if a.display == "" && a.originalComplete && a.costFactsComplete {
 		selected := a.out.Original
 		a.out.Selected = &selected
@@ -614,6 +687,9 @@ func NormalizeQuote(q CostQuote) CostQuote {
 	}
 	if q.AggregateMode != "" && q.AggregateMode != AggregateModeSingleCurrency && q.AggregateMode != AggregateModeCommonValuation && q.AggregateMode != AggregateModeCurrencyBuckets {
 		q.AggregateMode = ""
+	}
+	if q.RateBand != "" && q.RateBand != RateBandPeak && q.RateBand != RateBandOffPeak && q.RateBand != RateBandMixed {
+		q.RateBand = ""
 	}
 	if q.DisplayStatus == "" {
 		switch {

@@ -39,6 +39,11 @@ const (
 	listAllow = "allow"
 	listAsk   = "ask"
 	listDeny  = "deny"
+
+	// CompactRatioMin and CompactRatioMax are the bounds shared by the
+	// programmatic config editor and all CLI/Desktop callers.
+	CompactRatioMin = 0.30
+	CompactRatioMax = 0.85
 )
 
 // SetDefaultModel points default_model at an existing model. It accepts both
@@ -74,6 +79,33 @@ func (c *Config) SetPlannerModel(name string) error {
 		return fmt.Errorf("set planner: no provider %q (configured: %s)", name, c.providerNames())
 	}
 	c.Agent.PlannerModel = name
+	return nil
+}
+
+// SetVisionModel sets (or clears) the optional image-understanding fallback.
+// "auto" is resolved by the runtime within the active provider; an explicit
+// value must be a configured vision-capable model.
+func (c *Config) SetVisionModel(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		c.Agent.VisionModel = ""
+		return nil
+	}
+	if strings.EqualFold(name, "auto") {
+		c.Agent.VisionModel = "auto"
+		return nil
+	}
+	entry, ok := c.ResolveModel(name)
+	if !ok {
+		return fmt.Errorf("set vision model: no such model %q (configured: %s)", name, c.providerNames())
+	}
+	if !EffectiveVision(entry) {
+		return fmt.Errorf("set vision model: %q does not support image input", name)
+	}
+	if !entry.Configured() {
+		return fmt.Errorf("set vision model: provider %q has no key", entry.Name)
+	}
+	c.Agent.VisionModel = entry.Name + "/" + entry.Model
 	return nil
 }
 
@@ -405,10 +437,11 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 }
 
 // SetCompactRatio updates the sole user-controlled automatic compaction
-// threshold. Allowed range is 0.65–0.85; presets are 0.70 / 0.80 / 0.85.
+// threshold. Allowed range is CompactRatioMin–CompactRatioMax; presets are
+// 0.70 / 0.80 / 0.85.
 func (c *Config) SetCompactRatio(ratio float64) error {
-	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
-		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < CompactRatioMin || ratio > CompactRatioMax {
+		return fmt.Errorf("compact ratio %v: must be between %.2f and %.2f", ratio, CompactRatioMin, CompactRatioMax)
 	}
 	c.Agent.CompactRatio = ratio
 	return nil
@@ -548,7 +581,8 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 
 	fallback := ""
-	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+	visionRefsProvider := c.modelRefTargetsProvider(c.Agent.VisionModel, name)
+	if defaultRefsProvider || plannerRefsProvider || visionRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
 		fallback = c.providerRemovalFallback(name)
 	}
 	if defaultRefsProvider && fallback == "" {
@@ -562,6 +596,9 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 	if plannerRefsProvider {
 		c.Agent.PlannerModel = fallback
+	}
+	if visionRefsProvider {
+		c.Agent.VisionModel = ""
 	}
 	if subagentRefsProvider {
 		c.Agent.SubagentModel = fallback

@@ -3,8 +3,11 @@
 import {
   projectTreeFolderDisclosure,
   mergeProjectTopicPage,
+  projectTreeWithoutTopic,
+  projectTreeShellChildren,
   projectTreeEventAffectsFolder,
   projectTreeRevisionIsFresh,
+  projectTreeTopicPageIsFresh,
   projectTreeShouldApplyShellSnapshot,
   defaultExpandedProjectTreeKeys,
   activeSessionAncestorKeys,
@@ -23,9 +26,16 @@ import {
   projectTreeTopicHoverCardModel,
   projectTreeTopicMenuOffersPin,
   projectTreeDedupedExactTime,
+  projectTreeShellSignature,
 } from "../components/ProjectTree";
 import { projectTreeTrashingTopics } from "../lib/projectTreeArchive";
+import { normalizeProjectTreeRuntimeSnapshot } from "../lib/projectTreeRuntime";
+import { runProjectTreeSortRuntimeTests } from "./project-tree-sort-runtime.test";
+import { runProjectTreePinnedShellRuntimeTests } from "./project-tree-pinned-shell-runtime.test";
 import type { ProjectNode } from "../lib/types";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 let passed = 0;
 let failed = 0;
@@ -41,6 +51,12 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nproject tree runtime sessions");
+
+eq(
+  normalizeProjectTreeRuntimeSnapshot({ revision: 0, topics: null }),
+  { revision: 0, topics: [] },
+  "runtime bridge normalizes a legacy/null Wails topic array",
+);
 
 const noTrashingTopics = new Set<string>();
 const topicATrashing = projectTreeTrashingTopics(noTrashingTopics, "topic-a", true);
@@ -572,18 +588,18 @@ eq(
 
 eq(
   projectTreeTopicHoverCardModel(
-    { key: "topic_t", kind: "topic", label: "● Busy topic", root: "/repo", topicId: "t", turns: 3, status: "streaming" },
+    { key: "topic_t", kind: "topic", label: "● Busy topic", preview: "Full first-message preview", root: "/repo", topicId: "t", turns: 3, status: "streaming" },
     testT,
     "my-project",
   ),
   {
-    title: "Busy topic",
+    title: "Full first-message preview",
     statusLabel: "projectTree.status.streaming",
     metaLine: "3 turns",
     exactTime: "",
     projectLabel: "my-project",
   },
-  "hover card model strips the running marker and carries turns, status, and project",
+  "hover card model shows the full preview and carries turns, status, and project",
 );
 
 const day = 24 * 60 * 60 * 1000;
@@ -674,6 +690,15 @@ eq(
 
 eq(
   [
+    projectTreeTopicPageIsFresh({ "project-a": 11, "project-b": 9 }, "project-a", 10),
+    projectTreeTopicPageIsFresh({ "project-a": 11, "project-b": 9 }, "project-b", 10),
+  ],
+  [false, true],
+  "a newer revision in one project does not discard another project's slower page",
+);
+
+eq(
+  [
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: true }),
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: false }),
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 2, treeEmpty: false }),
@@ -699,6 +724,44 @@ eq(
 );
 
 eq(
+  projectTreeWithoutTopic(
+    [
+      {
+        key: "p",
+        kind: "project",
+        label: "P",
+        children: [
+          { key: "topic_archive", kind: "topic", label: "Archive me", topicId: "topic_archive" },
+          { key: "topic_keep", kind: "topic", label: "Keep me", topicId: "topic_keep" },
+        ],
+      },
+    ],
+    "topic_archive",
+  ).map((node) => (node.children ?? []).map((child) => child.topicId)),
+  [["topic_keep"]],
+  "archiving a topic removes it from loaded children before the catalog reloads",
+);
+
+eq(
+  projectTreeShellChildren(
+    [{ key: "topic_keep", kind: "topic", label: "Keep me", topicId: "topic_keep" }],
+  ),
+  [{ key: "topic_keep", kind: "topic", label: "Keep me", topicId: "topic_keep" }],
+  "a mutation refresh keeps sibling conversations visible until the replacement page arrives",
+);
+
+const projectTreeSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../components/ProjectTree.tsx"), "utf8");
+const projectTreeArchiveSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../lib/projectTreeArchive.ts"), "utf8");
+eq(projectTreeSource.includes("projectTreeWithoutTopic("), true, "TrashTopic removes the archived row before the shell refresh");
+eq(
+  projectTreeArchiveSource.includes("reloadTopicKeys"),
+  true,
+  "archive refresh reloads only the affected topic folder after preserving the painted siblings",
+);
+runProjectTreePinnedShellRuntimeTests(eq, projectTreeSource);
+await runProjectTreeSortRuntimeTests(eq, projectTreeSource);
+
+eq(
   [
     projectTreeEventAffectsFolder({ key: "global", kind: "global_folder", label: "Global" }, [""]),
     projectTreeEventAffectsFolder({ key: "p", kind: "project", label: "P", root: "/repo" }, ["/other"]),
@@ -706,6 +769,23 @@ eq(
   ],
   [true, false, true],
   "revision events refresh only affected expanded roots, with an empty roots list as broadcast",
+);
+
+const shellWithTopics = (label: string): ProjectNode => ({
+  key: "p1",
+  kind: "project",
+  label,
+  root: "/repo",
+  children: [{ key: "t1", kind: "topic", label: "T1", topicId: "t1" }],
+});
+eq(
+  [
+    projectTreeShellSignature([{ key: "p1", kind: "project", label: "P" }]),
+    projectTreeShellSignature([shellWithTopics("P")]),
+    projectTreeShellSignature([{ key: "p1", kind: "project", label: "P" }, { key: "p2", kind: "project", label: "P2" }]),
+  ],
+  ["p1", "p1", "p1\u001fp2"],
+  "shell signature tracks project arrivals only, so topic page loads cannot re-arm the reload effect",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -108,6 +108,9 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 		Content: "partial answer", ReasoningContent: "partial reasoning", LocalOnly: true,
 		ToolCalls:       []ToolCall{{ID: "partial", Name: "write_file"}},
 		InterruptedTurn: &InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"write_file"}},
+		FinalReadinessRecovery: &FinalReadinessRecovery{
+			Pending: true, Missing: []string{"verification"}, Checkpoint: json.RawMessage(`{"receipts":[]}`),
+		},
 	}
 	in := []Message{
 		{Role: RoleUser, Content: "task"},
@@ -123,7 +126,7 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 		t.Fatalf("SanitizeToolPairing leaked local-only record: %+v", wire)
 	}
 	session := NormalizeSessionMessages(in)
-	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content {
+	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content || session[1].FinalReadinessRecovery == nil {
 		t.Fatalf("session normalization did not preserve local display: %+v", session)
 	}
 }
@@ -215,6 +218,24 @@ func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing
 	}
 	if stored[0].Content != "fix the bug" || stored[0].ProviderContent == "" {
 		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+func TestModelMessagesStripsVisionSummaryMetadataButKeepsSummaryContent(t *testing.T) {
+	stored := []Message{{
+		Role:    RoleUser,
+		Content: "question\n\n<reasonix-image-context>chart</reasonix-image-context>",
+		VisionSummary: &VisionSummary{
+			Version: 1, PromptVersion: "image-summary-v1", ModelRef: "vision/model",
+			ImageDigests: []string{"digest"}, Summary: "chart",
+		},
+	}}
+	model := ModelMessages(stored)
+	if len(model) != 1 || model[0].VisionSummary != nil || model[0].Content != stored[0].Content {
+		t.Fatalf("provider projection = %+v", model)
+	}
+	if stored[0].VisionSummary == nil {
+		t.Fatal("provider projection mutated stored metadata")
 	}
 }
 

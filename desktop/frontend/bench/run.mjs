@@ -22,6 +22,7 @@
 //   REASONIX_BENCH_LONGTASK_P95_MS      (50)
 //   REASONIX_BENCH_LONGTASK_MAX_MS      (500)
 //   REASONIX_BENCH_MARKDOWN_PARSE_MAX_MS (3000)
+//   REASONIX_BENCH_IDLE_CPU_PERCENT     (3)
 //   REASONIX_BENCH_HEAP_GROWTH_MIB      (20)
 //   REASONIX_BENCH_SWITCHES             (100)
 //   REASONIX_BENCH_COLD_RUNS            (5)
@@ -58,6 +59,7 @@ const GATES = {
   longTaskP95Ms: numEnv("REASONIX_BENCH_LONGTASK_P95_MS", 50),
   longTaskMaxMs: numEnv("REASONIX_BENCH_LONGTASK_MAX_MS", 500),
   markdownParseMaxMs: numEnv("REASONIX_BENCH_MARKDOWN_PARSE_MAX_MS", 3000),
+  idleCpuPercent: numEnv("REASONIX_BENCH_IDLE_CPU_PERCENT", 3),
   heapGrowthMiB: numEnv("REASONIX_BENCH_HEAP_GROWTH_MIB", 20),
 };
 const SWITCHES = Math.round(numEnv("REASONIX_BENCH_SWITCHES", 100));
@@ -213,6 +215,12 @@ async function forceGcAndHeap(cdp, page) {
   });
 }
 
+async function rendererTaskDuration(cdp) {
+  await cdp.send("Performance.enable").catch(() => {});
+  const response = await cdp.send("Performance.getMetrics");
+  return response.metrics.find((metric) => metric.name === "TaskDuration")?.value ?? 0;
+}
+
 const INTERACTIVE_FN = () => {
   const input = document.querySelector("textarea.composer__input");
   const inputReady = Boolean(input && !input.disabled);
@@ -268,14 +276,14 @@ async function settleMarkdownWorker(page, timeoutMs = 10_000) {
     .catch(() => {});
 }
 
-// Progressive history blocks intentionally mount in idle slices after parsing.
-// Stabilize that deferred work only around heap/DOM snapshots; waiting on every
-// switch would change the interaction workload the benchmark is measuring.
+// Giant history rows retain only a viewport-driven Markdown tail. Stabilize
+// worker/React publication around heap/DOM snapshots without forcing cold
+// blocks into the DOM; scrolling the older sentinel owns those later pages.
 async function settleMarkdownMounts(page, timeoutMs = 10_000) {
   try {
     await page.waitForFunction(() => (
       [...document.querySelectorAll(".transcript [data-markdown-blocks]")].every((element) => (
-        element.getAttribute("data-markdown-visible-blocks") === element.getAttribute("data-markdown-blocks")
+        Number(element.getAttribute("data-markdown-visible-blocks")) > 0
       ))
     ), undefined, { timeout: timeoutMs, polling: 100 });
   } catch (error) {
@@ -370,6 +378,14 @@ async function main() {
     }
 
     await settleMarkdownMounts(page);
+    // Session activation is complete and the worker is drained. Sustained task
+    // time here is background UI churn; the original regression kept
+    // committing Markdown blocks after the visible switch had finished.
+    const idleSampleMs = 3_000;
+    const idleTaskStart = await rendererTaskDuration(cdp);
+    await page.waitForTimeout(idleSampleMs);
+    const idleTaskEnd = await rendererTaskDuration(cdp);
+    const idleMainThreadPercent = ((idleTaskEnd - idleTaskStart) * 1000 / idleSampleMs) * 100;
 
     // Freeze interaction metrics before the explicit HeapProfiler GC below.
     // The GC is part of retained-heap measurement, not the user switching
@@ -409,6 +425,7 @@ async function main() {
       domNodes: { baseline: baseline.domNodes, final: final.domNodes },
       transcriptCache: cache,
       markdownWorker: worker,
+      idleMainThreadPercent,
       baselineCache: baselineStats?.transcriptCache,
     };
 
@@ -426,6 +443,7 @@ async function main() {
       GATES.markdownParseMaxMs,
       (worker.completed ?? 0) >= 1 && (worker.maxParseMs ?? Infinity) <= GATES.markdownParseMaxMs,
     );
+    check("B settled renderer task time", idleMainThreadPercent, GATES.idleCpuPercent, idleMainThreadPercent <= GATES.idleCpuPercent, "%");
     check("B retained heap growth", heapGrowthMiB, GATES.heapGrowthMiB, heapGrowthMiB <= GATES.heapGrowthMiB, "MiB");
     check(
       "B cache: body bytes within budget",

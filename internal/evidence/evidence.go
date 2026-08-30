@@ -359,6 +359,8 @@ type DeliveryCheckpoint struct {
 type Ledger struct {
 	mu               sync.Mutex
 	receipts         []Receipt
+	observations     []TextObservation
+	nextSequence     uint64
 	backgroundLeases []BackgroundLease
 }
 
@@ -372,6 +374,8 @@ func (l *Ledger) Reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.receipts = nil
+	l.observations = nil
+	l.nextSequence = 0
 	l.backgroundLeases = nil
 }
 
@@ -440,6 +444,8 @@ func (l *Ledger) Record(r Receipt) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.nextSequence++
+	r.Sequence = l.nextSequence
 	if r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
 		if match := latestTodoStep(r.Step, l.receipts); match.Found {
 			r.TodoStep = &match
@@ -1403,7 +1409,7 @@ func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) b
 
 type contextKey struct{}
 type sessionMessagesKey struct{}
-type deliveryProfileKey struct{}
+type closedLoopKey struct{}
 type todoStateKey struct{}
 
 func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
@@ -1418,17 +1424,14 @@ func FromContext(ctx context.Context) (*Ledger, bool) {
 	return ledger, ok && ledger != nil
 }
 
-// WithDeliveryProfile marks tool execution as subject to the delivery-first
-// final-readiness contract. Tools use this only for stricter evidence validation;
-// it is ephemeral host state and is never serialized into sessions or prompts.
-func WithDeliveryProfile(ctx context.Context) context.Context {
-	return context.WithValue(ctx, deliveryProfileKey{}, true)
+// WithClosedLoopExecution marks a tool call for closed-loop evidence checks.
+func WithClosedLoopExecution(ctx context.Context) context.Context {
+	return context.WithValue(ctx, closedLoopKey{}, true)
 }
 
-// DeliveryProfileFromContext reports whether the current tool call must produce
-// evidence that the delivery final-readiness gate can accept.
-func DeliveryProfileFromContext(ctx context.Context) bool {
-	enabled, _ := ctx.Value(deliveryProfileKey{}).(bool)
+// ClosedLoopExecutionFromContext reports whether closed-loop evidence is required.
+func ClosedLoopExecutionFromContext(ctx context.Context) bool {
+	enabled, _ := ctx.Value(closedLoopKey{}).(bool)
 	return enabled
 }
 
@@ -1575,10 +1578,8 @@ func ToolCallPaths(args json.RawMessage) []string {
 	return out
 }
 
-// ToolCallRequiresDeliveryCriteria reports whether a call begins execution
-// work that needs an acceptance contract. Mutations always qualify; verification
-// commands also qualify even though they are intentionally not mutations.
-func ToolCallRequiresDeliveryCriteria(toolName string, args json.RawMessage, readOnly bool) bool {
+// ToolCallRequiresAcceptanceCriteria reports mutations and verification commands.
+func ToolCallRequiresAcceptanceCriteria(toolName string, args json.RawMessage, readOnly bool) bool {
 	if ToolCallMutates(toolName, args, readOnly) {
 		return true
 	}
@@ -1859,11 +1860,8 @@ func bashStaticArgv(command string) ([]string, bool) {
 	return fields, malformed == "" && len(fields) > 0
 }
 
-// IsDeliveryVerificationCommand reports whether command is a host-recognized
-// verification command for delivery finalization. Keep complete_step and the
-// final-readiness gate on this single classifier so a sign-off cannot claim a
-// command that the final gate will immediately reject.
-func IsDeliveryVerificationCommand(command string) bool {
+// IsVerificationCommand reports whether command is a recognized verifier.
+func IsVerificationCommand(command string) bool {
 	return bashCommandIsVerification(command)
 }
 

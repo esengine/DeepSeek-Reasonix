@@ -36,14 +36,24 @@ func Load() (*Config, error) {
 // mergeRuntimeTOMLFileSnapshot). Callers that must not mutate config files should use
 // LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) {
-	return loadForRoot(root, true)
+	return loadForRoot(root, loadForRootOptions{migrateOnDisk: true, loadCredentials: true})
 }
 
 // LoadForRootReadOnly is like LoadForRoot but never writes config files: it skips
 // on-disk legacy MCP tier migration. Prefer this for diagnostics, doctor, and
 // other read-only inspection paths.
 func LoadForRootReadOnly(root string) (*Config, error) {
-	return loadForRoot(root, false)
+	return loadForRoot(root, loadForRootOptions{loadCredentials: true})
+}
+
+// LoadForRootWithoutCredentialsReadOnly is the credential-free form of
+// LoadForRootReadOnly. It still merges the effective user + project config and
+// carries project .env values for workspace-scoped expansion, but it neither
+// pins Reasonix credentials into the process environment nor resolves provider
+// API keys. Settings probes use it when they need runtime network policy before
+// resolving only the edited provider's credential explicitly.
+func LoadForRootWithoutCredentialsReadOnly(root string) (*Config, error) {
+	return loadForRoot(root, loadForRootOptions{})
 }
 
 // LoadUserConfigReadOnly loads only the trusted user-global config. It never
@@ -65,9 +75,17 @@ func LoadUserConfigReadOnly() (*Config, error) {
 	return cfg, nil
 }
 
-func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
+type loadForRootOptions struct {
+	migrateOnDisk   bool
+	loadCredentials bool
+}
+
+func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	root = resolveRoot(root)
-	expansionEnv := loadDotEnvForRoot(root)
+	expansionEnv := loadProjectDotEnvForExpansion(root)
+	if opts.loadCredentials {
+		loadCredentialStoreForRoot(root)
+	}
 	cfg := Default()
 	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
@@ -86,7 +104,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 
 	mergeTOML := mergeFileSnapshot
-	if migrateOnDisk {
+	if opts.migrateOnDisk {
 		mergeTOML = mergeRuntimeTOMLFileSnapshot
 	}
 
@@ -133,7 +151,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalDesktopLanguage := cfg.Desktop.Language
 	globalPricingCurrency := cfg.Desktop.Currency
 	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
-	globalTelemetry := cfg.Telemetry
+	globalTelemetry, globalLegacyAnchorSafetyGate := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate
 
 	tomlSources = append(tomlSources, projectTOML)
 	projectMeta, err := mergeTOML(cfg, projectTOML)
@@ -168,7 +186,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
 	// CLI telemetry is an explicit user-global privacy choice. Project config
 	// cannot opt a user in or out, including when the global value is absent.
-	cfg.Telemetry = globalTelemetry
+	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate = globalTelemetry, globalLegacyAnchorSafetyGate
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -224,7 +242,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyLongCatContextWindows(cfg)
 	normalizeLegacyQwenContextWindows(cfg)
 	normalizeLegacyKimiK3Catalog(cfg)
-	normalizeLegacyOpenCodeGoKimiK3Catalog(cfg)
+	normalizeLegacyOpenCodeGoInstalls(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -240,7 +258,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 	cfg.CredentialsStore = credentialsStoreMode()
 	cfg.setExpansionEnv(expansionEnv)
-	resolveProviderCredentialsForRoot(root, cfg)
+	if opts.loadCredentials {
+		resolveProviderCredentialsForRoot(root, cfg)
+	}
 	return cfg, nil
 }
 
@@ -807,7 +827,7 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	changed = normalizeLegacyLongCatContextWindows(cfg) || changed
 	changed = normalizeLegacyQwenContextWindows(cfg) || changed
 	changed = normalizeLegacyKimiK3Catalog(cfg) || changed
-	changed = normalizeLegacyOpenCodeGoKimiK3Catalog(cfg) || changed
+	changed = normalizeLegacyOpenCodeGoInstalls(cfg) || changed
 	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -1526,7 +1546,7 @@ func mergeMissingKimiK3Override(p *ProviderEntry, defaults ProviderModelOverride
 // catalog from the original editable OpenCode Go preset. A user-curated model
 // list or custom endpoint is left alone, while other provider edits (headers,
 // key env, provider-wide context) survive the additive K3 capability update.
-func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
+func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) (changed bool) {
 	if c == nil {
 		return false
 	}
@@ -1548,9 +1568,9 @@ func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
 			DefaultEffort:     "max",
 			ContextWindow:     1_048_576,
 		})
-		return true
+		changed = true
 	}
-	return false
+	return changed
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {
@@ -1757,6 +1777,7 @@ func legacyMimoConfigRefs(c *Config) []string {
 	refs := []string{
 		c.DefaultModel,
 		c.Agent.PlannerModel,
+		c.Agent.VisionModel,
 		c.Agent.SubagentModel,
 		c.Bot.Model,
 	}
@@ -1917,6 +1938,7 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	}
 	addRef(c.DefaultModel)
 	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.VisionModel)
 	addRef(c.Agent.SubagentModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
@@ -2463,6 +2485,7 @@ func firstKnownModel(current string, models []string, fallback string) string {
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
 	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
 	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.VisionModel = retargetDesktopOfficialRef(c.Agent.VisionModel, access)
 	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
 	for skill, ref := range c.Agent.SubagentModels {
 		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)

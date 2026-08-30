@@ -1,7 +1,20 @@
 import { replaceAttachmentRefsForDisplay } from "./attachmentDisplay";
 import type { Item } from "./useController";
 
-export type QuestionAnchor = { id: string; text: string; turn: number; checkpointTurn?: number };
+export type QuestionAnchor = { id: string; text: string; turn: number; checkpointTurn?: number; loaded?: boolean };
+export type QuestionAnchorPosition = { turn: number; top: number };
+
+export function activeQuestionTurn(
+  positions: readonly QuestionAnchorPosition[],
+  viewportTop = 0,
+): number | undefined {
+  let active = positions[0];
+  for (const position of positions) {
+    if (position.top > viewportTop) break;
+    active = position;
+  }
+  return active?.turn;
+}
 
 export interface TurnGroup {
   userItem: Item;

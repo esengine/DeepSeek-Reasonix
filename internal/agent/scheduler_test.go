@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -92,6 +94,223 @@ func TestSchedulerWriterPathConflictQueues(t *testing.T) {
 		t.Fatal(err)
 	}
 	release2()
+}
+
+func TestSchedulerDirectoryClaimsStartInParallel(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release1, id1, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release1()
+	release2, id2, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim, Nested: true})
+	if err != nil {
+		t.Fatalf("second directory claim must start: %v", err)
+	}
+	defer release2()
+	if id1 == 0 || id2 == 0 || id1 == id2 {
+		t.Fatalf("claim ids = %d, %d", id1, id2)
+	}
+}
+
+func TestSchedulerWholeClaimCannotStartBehindUnrealizedDirectoryWriter(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseDir, _, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseDir()
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseWhole, _, err := s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: whole, Nested: true,
+	})
+	if err == nil {
+		releaseWhole()
+		t.Fatal("whole-workspace claim bypassed an active unrealized directory writer")
+	}
+	releaseDir()
+	releaseWhole, _, err = s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: whole, Nested: true,
+	})
+	if err != nil {
+		t.Fatalf("whole-workspace claim after directory writer release: %v", err)
+	}
+	releaseWhole()
+}
+
+func TestSchedulerRealizeSameFileConflicts(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id1, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id2, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := NormalizeWritePaths(root, []string{"src/a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Realize(id1, file); err != nil {
+		t.Fatalf("first realize: %v", err)
+	}
+	if err := s.Realize(id2, file); err == nil {
+		t.Fatal("second realize of the same file must fail")
+	}
+	other, err := NormalizeWritePaths(root, []string{"src/b.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Realize(id2, other); err != nil {
+		t.Fatalf("disjoint realize: %v", err)
+	}
+}
+
+func TestSchedulerMarkOpaqueBlocksRealize(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id1, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id2, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkOpaque(id1); err != nil {
+		t.Fatal(err)
+	}
+	file, err := NormalizeWritePaths(root, []string{"src/a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Realize(id2, file); err == nil {
+		t.Fatal("realize must fail after sibling goes opaque")
+	}
+}
+
+func TestSchedulerParentFileWriteAfterChildRealize(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := t.TempDir()
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: whole})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := NormalizeWritePaths(root, []string{"b.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveParentWrite(before); err == nil {
+		t.Fatal("parent file write must wait while child still claims the whole workspace")
+	}
+	fileA, err := NormalizeWritePaths(root, []string{"a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Realize(id, fileA); err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.ReserveParentWrite(before)
+	if err != nil {
+		t.Fatalf("parent write of disjoint file after realize: %v", err)
+	}
+	release()
+	if err := s.MarkOpaque(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveParentWrite(before); err == nil {
+		t.Fatal("parent write must fail after child goes opaque")
+	}
+}
+
+func TestSchedulerWholeClaimNarrowsForNewSiblingsAndOpaqueRestoresExclusion(t *testing.T) {
+	s := NewSubagentScheduler(4, 3)
+	root := t.TempDir()
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseWhole, id, err := s.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: whole})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseWhole()
+
+	fileA, err := NormalizeWritePaths(root, []string{"a.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileB, err := NormalizeWritePaths(root, []string{"b.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: fileB, Nested: true,
+	}); err == nil {
+		t.Fatal("new sibling must wait before the whole claim realizes a path")
+	}
+	if err := s.Realize(id, fileA); err != nil {
+		t.Fatal(err)
+	}
+	releaseB, _, err := s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: fileB, Nested: true,
+	})
+	if err != nil {
+		t.Fatalf("new disjoint sibling after realize: %v", err)
+	}
+	if _, _, err := s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: fileA, Nested: true,
+	}); err == nil {
+		t.Fatal("new same-file sibling must remain blocked")
+	}
+	releaseB()
+	if err := s.MarkOpaque(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AcquireWithID(context.Background(), AcquireRequest{
+		Writer: true, WritePaths: fileB, Nested: true,
+	}); err == nil {
+		t.Fatal("opaque mutation must restore whole-workspace exclusion")
+	}
 }
 
 func TestSchedulerTryClaimWritePaths(t *testing.T) {

@@ -1,39 +1,60 @@
 package agent
 
 import (
+	"slices"
+	"time"
+
+	"reasonix/internal/agentpreset"
+	"reasonix/internal/completion"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/taskcontract"
-	"reasonix/internal/taskpolicy"
 )
+
+type phaseClock struct {
+	last event.TurnPhaseName
+	at   time.Time
+}
 
 // emitTurnPhase publishes a content-free host phase for the active turn.
 func (a *Agent) emitTurnPhase(phase event.TurnPhaseName) {
 	if a == nil || a.svc.sink == nil || phase == "" {
 		return
 	}
+	now := time.Now()
+	if !a.turn.phase.at.IsZero() && a.capabilityAudit != nil {
+		a.capabilityAudit.RecordPhaseMs(phaseAuditName(a.turn.phase.last), now.Sub(a.turn.phase.at).Milliseconds())
+	}
+	a.turn.phase = phaseClock{last: phase, at: now}
 	a.svc.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
+}
+
+func phaseAuditName(phase event.TurnPhaseName) string {
+	switch phase {
+	case event.TurnPhaseWorking:
+		return "provider"
+	case event.TurnPhaseChecking, event.TurnPhaseVerifying:
+		return "tool"
+	case event.TurnPhaseReviewing:
+		return "review"
+	default:
+		return ""
+	}
 }
 
 // emitCompletionSummary publishes the content-free end-of-turn quality summary
 // when the turn mutated state or finished Partial/Blocked. Pure conversation
 // and ordinary read-only success do not emit a quality card.
-func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
+func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completion.Report) {
 	if a == nil || a.svc.sink == nil || c == nil {
 		return
 	}
 	mutations := 0
 	if a.task.ledger != nil {
 		for _, r := range a.task.ledger.Receipts() {
-			if r.Success && (r.Mutation || r.Write) {
+			if evidence.IsDeliveryMutation(r, a.writeWorkspaceRoot, nil) {
 				mutations++
 			}
-		}
-	}
-	verdict := c.GoalVerdict()
-	// Skip noise: no mutations and ordinary complete/continue conversation.
-	if mutations == 0 && (verdict == taskcontract.VerdictComplete || verdict == taskcontract.VerdictContinue || verdict == taskcontract.VerdictUncertain) {
-		if !c.HasSuppressed() {
-			return
 		}
 	}
 	passed, failed, suppressed := 0, 0, 0
@@ -47,20 +68,25 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			suppressed++
 		}
 	}
+	verdict := c.GoalVerdict()
+	floor := a.turn.constraints.PolicyFloor.String()
+	attention := completion.NeedsAttention(completion.AttentionInput{
+		Verdict:            verdict.String(),
+		ChecksFailed:       failed,
+		GapKinds:           report.GapKinds(),
+		Floor:              floor,
+		RequiredSuppressed: c.HasSuppressed(),
+	})
+	if mutations == 0 && !attention {
+		return
+	}
 	review := "none"
-	if a.turn.policySet {
-		switch a.turn.policy.Review {
-		case taskpolicy.ReviewNone:
-			review = "none"
-		default:
-			if a.task.ledger != nil {
-				if mut, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
-					if a.task.ledger.HasSuccessfulReviewAfter(mut) {
-						review = "passed"
-					} else if a.turn.policy.RequiresIndependentReview() {
-						review = "unavailable"
-					}
-				}
+	if a.task.ledger != nil {
+		if mut, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
+			if a.task.ledger.HasSuccessfulReviewAfter(mut) {
+				review = "passed"
+			} else if a.requiresIndependentReview() {
+				review = "unavailable"
 			}
 		}
 	}
@@ -80,7 +106,8 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			break
 		}
 	}
-	constraintDegraded := a.turn.policySet && (a.turn.policy.Constraints.ForbidTests || len(a.turn.policy.Constraints.AllowedChecks) > 0)
+	gaps = completionGapKinds(gaps, report)
+	constraintDegraded := a.turn.constraints.ForbidTests || len(a.turn.constraints.AllowedChecks) > 0
 	summaryVerdict := verdict.String()
 	switch verdict {
 	case taskcontract.VerdictComplete:
@@ -95,7 +122,10 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 	a.svc.sink.Emit(event.Event{
 		Kind: event.CompletionSummary,
 		Completion: &event.CompletionSummaryInfo{
-			Preset:             a.AgentPreset(),
+			// Preset is a deprecated wire-compat field: it is pinned to the
+			// historical default so one-version-old clients keep parsing. New
+			// surfaces read the verdict/check/review/gap fields instead.
+			Preset:             string(agentpreset.Standard),
 			Verdict:            summaryVerdict,
 			Mutations:          mutations,
 			ChecksPassed:       passed,
@@ -104,6 +134,18 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			Review:             review,
 			GapKinds:           gaps,
 			ConstraintDegraded: constraintDegraded,
+			Floor:              floor,
+			Attention:          attention,
 		},
 	})
+}
+
+func completionGapKinds(gaps []string, report completion.Report) []string {
+	for _, gap := range report.Gaps {
+		kind := gap.Kind.String()
+		if !slices.Contains(gaps, kind) {
+			gaps = append(gaps, kind)
+		}
+	}
+	return gaps
 }

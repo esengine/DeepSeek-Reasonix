@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/filelock"
@@ -22,6 +23,8 @@ import (
 )
 
 type Mode string
+
+var memoryDatabaseSequence atomic.Uint64
 
 const (
 	ModeDisk   Mode = "disk"
@@ -66,6 +69,9 @@ type OpenOptions struct {
 	Now          func() time.Time
 	SecureDelete bool
 	AutoVacuum   bool
+	// RetainBackup keeps the previous database at its generated .replaced-
+	// timestamp path so disposable projections can offer a rollback point.
+	RetainBackup bool
 }
 
 type Handle struct {
@@ -192,7 +198,11 @@ func diskFileDSN(path string) string {
 func open(ctx context.Context, opts OpenOptions, mode Mode) (*sql.DB, error) {
 	var dsn string
 	if mode == ModeMemory {
-		dsn = fmt.Sprintf("file:reasonix-%s-%d?mode=memory&cache=shared", url.PathEscape(opts.MemoryName), opts.Now().UnixNano())
+		// time.Now has coarse resolution on some platforms, notably Windows.
+		// A process-local sequence prevents concurrently opened projections with
+		// the same logical name from sharing one SQLite memory database by accident.
+		dsn = fmt.Sprintf("file:reasonix-%s-%d-%d?mode=memory&cache=shared", url.PathEscape(opts.MemoryName),
+			opts.Now().UnixNano(), memoryDatabaseSequence.Add(1))
 	} else {
 		dsn = diskFileDSN(opts.Path)
 	}
@@ -490,7 +500,7 @@ func Rebuild(ctx context.Context, opts OpenOptions, populate func(context.Contex
 		return fmt.Errorf("install projection replacement: %w", err)
 	}
 	_ = os.Chmod(opts.Path, 0o600)
-	if hadOld {
+	if hadOld && !opts.RetainBackup {
 		_ = os.Remove(backup)
 		_ = os.Remove(backup + "-wal")
 		_ = os.Remove(backup + "-shm")

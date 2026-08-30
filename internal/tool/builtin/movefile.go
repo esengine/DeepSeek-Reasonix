@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -23,6 +24,7 @@ var renameFile = os.Rename
 // resolves relative paths.
 type moveFile struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -40,6 +42,17 @@ func (moveFile) Schema() json.RawMessage {
 
 func (moveFile) ReadOnly() bool { return false }
 
+func (m moveFile) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	var p struct {
+		SourcePath      string `json:"source_path"`
+		DestinationPath string `json:"destination_path"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return tool.WriteAccessDeclaration{}, fmt.Errorf("invalid args: %w", err)
+	}
+	return declareParentWriteDirs(m.workDir, p.SourcePath, p.DestinationPath)
+}
+
 func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		SourcePath      string `json:"source_path"`
@@ -56,10 +69,11 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	src := resolveIn(m.workDir, p.SourcePath)
 	dst := resolveIn(m.workDir, p.DestinationPath)
-	if err := confineWrite(ctx, m.roots, m.guard, m.managed, src); err != nil {
+	roots := effectiveWriteRoots(ctx, m.rootSet, m.roots)
+	if err := confineWrite(ctx, roots, m.guard, m.managed, src); err != nil {
 		return "", err
 	}
-	if err := confineWrite(ctx, m.roots, m.guard, m.managed, dst); err != nil {
+	if err := confineWrite(ctx, roots, m.guard, m.managed, dst); err != nil {
 		return "", err
 	}
 	info, err := os.Stat(src)

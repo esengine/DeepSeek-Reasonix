@@ -5,6 +5,7 @@
  * 两个场景的偏好分别存入 localStorage:
  *   notificationSoundSuccess  —— 生成完成
  *   notificationSoundAttention —— AI 提问
+ *   notificationSoundVolume —— 统一通知音量（0–100）
  *   值："off" | "synth" | "positive" | "correct" | "start" | "back"
  */
 
@@ -12,6 +13,10 @@ export type SoundWavPref = "off" | "synth" | "positive" | "correct" | "start" | 
 
 const SUCCESS_KEY = "notificationSoundSuccess";
 const ATTENTION_KEY = "notificationSoundAttention";
+export const NOTIFICATION_VOLUME_STORAGE_KEY = "notificationSoundVolume";
+export const NOTIFICATION_VOLUME_MIN = 0;
+export const NOTIFICATION_VOLUME_MAX = 100;
+export const DEFAULT_NOTIFICATION_VOLUME = 70;
 
 function readPref(key: string): SoundWavPref {
   if (typeof localStorage === "undefined") return "off";
@@ -30,6 +35,59 @@ export function getSuccessPreference(): SoundWavPref { return readPref(SUCCESS_K
 export function setSuccessPreference(pref: SoundWavPref): void { writePref(SUCCESS_KEY, pref); }
 export function getAttentionPreference(): SoundWavPref { return readPref(ATTENTION_KEY); }
 export function setAttentionPreference(pref: SoundWavPref): void { writePref(ATTENTION_KEY, pref); }
+
+export function normalizeNotificationVolume(value: unknown): number {
+  const raw = typeof value === "string" ? value.trim() : value;
+  if (raw === "" || raw === null || raw === undefined) return DEFAULT_NOTIFICATION_VOLUME;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return DEFAULT_NOTIFICATION_VOLUME;
+  return Math.min(NOTIFICATION_VOLUME_MAX, Math.max(NOTIFICATION_VOLUME_MIN, Math.round(numeric)));
+}
+
+export function getNotificationVolume(): number {
+  if (typeof localStorage === "undefined") return DEFAULT_NOTIFICATION_VOLUME;
+  try {
+    const value = localStorage.getItem(NOTIFICATION_VOLUME_STORAGE_KEY);
+    return value === null ? DEFAULT_NOTIFICATION_VOLUME : normalizeNotificationVolume(value);
+  } catch {
+    return DEFAULT_NOTIFICATION_VOLUME;
+  }
+}
+
+export function setNotificationVolume(volume: number): number {
+  const normalized = normalizeNotificationVolume(volume);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(NOTIFICATION_VOLUME_STORAGE_KEY, String(normalized));
+    }
+  } catch {
+    // Private browsing and locked-down WebViews may reject localStorage writes.
+  }
+  return normalized;
+}
+
+export function notificationVolumeToGain(volume: unknown): number {
+  return normalizeNotificationVolume(volume) / NOTIFICATION_VOLUME_MAX;
+}
+
+type WavSoundPref = Exclude<SoundWavPref, "off" | "synth">;
+
+// The bundled WAV files differ by up to 4.1 LUFS. These trims normalize them
+// to the quietest source (-18.9 LUFS) without boosting any asset above its
+// recorded peak. The master volume is applied after the source trim.
+const WAV_LOUDNESS_TRIM: Record<WavSoundPref, number> = {
+  positive: 0.62,
+  correct: 0.85,
+  start: 1,
+  back: 0.70,
+};
+
+export function notificationWavGain(pref: WavSoundPref, outputVolume: number): number {
+  const safeVolume = Number.isFinite(outputVolume)
+    ? Math.min(1, Math.max(0, outputVolume))
+    : 0;
+  return safeVolume * WAV_LOUDNESS_TRIM[pref];
+}
 
 function soundFilePath(pref: SoundWavPref): string {
   switch (pref) {
@@ -97,32 +155,32 @@ function playSynthNote(ctx: AudioContext, dest: AudioNode, freq: number, startTi
   shimmer.stop(startTime + duration);
 }
 
-function playSynthSuccess(ctx: AudioContext): void {
-  playSynthNote(ctx, ctx.destination, 1318.5, 0, 0.20, 0.12);
-  playSynthNote(ctx, ctx.destination, 1568.0, 0.07, 0.22, 0.10);
-  playSynthNote(ctx, ctx.destination, 2093.0, 0.14, 0.30, 0.08);
+function playSynthSuccess(ctx: AudioContext, outputVolume: number): void {
+  playSynthNote(ctx, ctx.destination, 1318.5, 0, 0.20, outputVolume * 0.35);
+  playSynthNote(ctx, ctx.destination, 1568.0, 0.07, 0.22, outputVolume * 0.30);
+  playSynthNote(ctx, ctx.destination, 2093.0, 0.14, 0.30, outputVolume * 0.24);
 }
 
-function playSynthAttention(ctx: AudioContext): void {
-  playSynthNote(ctx, ctx.destination, 1760.0, 0, 0.14, 0.10);
-  playSynthNote(ctx, ctx.destination, 1318.5, 0.09, 0.22, 0.08);
+function playSynthAttention(ctx: AudioContext, outputVolume: number): void {
+  playSynthNote(ctx, ctx.destination, 1760.0, 0, 0.14, outputVolume * 0.40);
+  playSynthNote(ctx, ctx.destination, 1318.5, 0.09, 0.22, outputVolume * 0.34);
 }
 
 // ── Play helpers ─────────────────────────────────────────────────────────────
 
-async function playWav(pref: SoundWavPref, volume: number, fallback: (ctx: AudioContext) => void): Promise<void> {
+async function playWav(pref: WavSoundPref, volume: number, fallback: (ctx: AudioContext, outputVolume: number) => void): Promise<void> {
   const url = soundFilePath(pref);
   if (!url) return;
   const ctx = new AudioContext();
   try {
     const buf = await loadBuffer(ctx, url);
     if (buf) {
-      playBuffer(ctx, buf, volume);
+      playBuffer(ctx, buf, notificationWavGain(pref, volume));
     } else {
-      fallback(ctx);
+      fallback(ctx, volume);
     }
   } catch {
-    fallback(ctx);
+    fallback(ctx, volume);
   }
   setTimeout(() => ctx.close(), 2000);
 }
@@ -132,28 +190,32 @@ async function playWav(pref: SoundWavPref, volume: number, fallback: (ctx: Audio
 export function playSuccessChime(): void {
   const pref = getSuccessPreference();
   if (pref === "off") return;
+  const volume = notificationVolumeToGain(getNotificationVolume());
+  if (volume <= 0) return;
   if (pref === "synth") {
     try {
       const ctx = new AudioContext();
-      playSynthSuccess(ctx);
+      playSynthSuccess(ctx, volume);
       setTimeout(() => ctx.close(), 600);
     } catch { /* silent */ }
   } else {
-    void playWav(pref, 0.35, playSynthSuccess);
+    void playWav(pref, volume, playSynthSuccess);
   }
 }
 
 export function playAttentionChime(): void {
   const pref = getAttentionPreference();
   if (pref === "off") return;
+  const volume = notificationVolumeToGain(getNotificationVolume());
+  if (volume <= 0) return;
   if (pref === "synth") {
     try {
       const ctx = new AudioContext();
-      playSynthAttention(ctx);
+      playSynthAttention(ctx, volume);
       setTimeout(() => ctx.close(), 500);
     } catch { /* silent */ }
   } else {
-    void playWav(pref, 0.25, playSynthAttention);
+    void playWav(pref, volume, playSynthAttention);
   }
 }
 

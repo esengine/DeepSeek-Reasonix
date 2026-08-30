@@ -41,9 +41,6 @@ func (t *countingToolsTransport) call(ctx context.Context, method string, params
 	return json.RawMessage(`{"tools":[{"name":"zed","description":"Sorted after echo.","inputSchema":{"type":"object"}},{"name":"echo","description":"Echo back the message.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["z","msg"]},"annotations":{"readOnlyHint":true}}]}`), nil
 }
 
-func (t *countingToolsTransport) notify(ctx context.Context, method string, params any) error {
-	return nil
-}
 func (t *countingToolsTransport) close() {}
 
 func (t *countingToolsTransport) toolsListCalls() int {
@@ -75,9 +72,6 @@ func (t *sequenceToolsTransport) call(ctx context.Context, method string, params
 	return t.raws[idx], nil
 }
 
-func (t *sequenceToolsTransport) notify(ctx context.Context, method string, params any) error {
-	return nil
-}
 func (t *sequenceToolsTransport) close() {}
 
 func (t *sequenceToolsTransport) toolsListCalls() int {
@@ -113,9 +107,6 @@ func (t *deadlineRecordingTransport) call(ctx context.Context, method string, pa
 	return json.RawMessage(`{}`), nil
 }
 
-func (t *deadlineRecordingTransport) notify(ctx context.Context, method string, params any) error {
-	return nil
-}
 func (t *deadlineRecordingTransport) close() {}
 
 func (t *deadlineRecordingTransport) lastDeadline(tst *testing.T) time.Duration {
@@ -415,11 +406,11 @@ func TestClientListToolsRetriesAdvertisedEmptyToolList(t *testing.T) {
 		json.RawMessage(`{"tools":[{"name":"echo","description":"Echo back the message.","inputSchema":{"type":"object"}}]}`),
 	}}
 	c := &Client{
-		name:      "race",
-		t:         tr,
-		spec:      Spec{Name: "race"},
-		transport: "stdio",
-		hasTools:  true,
+		name:         "race",
+		t:            tr,
+		spec:         Spec{Name: "race"},
+		transport:    "stdio",
+		capabilities: clientCapabilities{tools: true},
 	}
 
 	tools, err := c.listTools(ctx)
@@ -456,14 +447,14 @@ func TestClientListToolsQuarantinesMalformedSchema(t *testing.T) {
 	if got := string(tools[0].Schema()); got != `{"properties":{"msg":{"type":"string"}},"type":"object"}` {
 		t.Fatalf("valid sibling schema changed: %s", got)
 	}
-	if len(c.tools) != 2 {
-		t.Fatalf("tool status count = %d, want both advertised tools", len(c.tools))
+	if len(c.toolCatalog.infos) != 2 {
+		t.Fatalf("tool status count = %d, want both advertised tools", len(c.toolCatalog.infos))
 	}
-	if c.tools[0].Name != "echo" || c.tools[0].SchemaError != "" {
-		t.Fatalf("valid tool status = %+v", c.tools[0])
+	if c.toolCatalog.infos[0].Name != "echo" || c.toolCatalog.infos[0].SchemaError != "" {
+		t.Fatalf("valid tool status = %+v", c.toolCatalog.infos[0])
 	}
-	if c.tools[1].Name != "generate_yso_bytes" || !strings.Contains(c.tools[1].SchemaError, "/properties/options/items/type") {
-		t.Fatalf("quarantined tool status = %+v", c.tools[1])
+	if c.toolCatalog.infos[1].Name != "generate_yso_bytes" || !strings.Contains(c.toolCatalog.infos[1].SchemaError, "/properties/options/items/type") {
+		t.Fatalf("quarantined tool status = %+v", c.toolCatalog.infos[1])
 	}
 }
 
@@ -491,10 +482,10 @@ func TestClientListToolsQuarantinesNonObjectRootSchemas(t *testing.T) {
 	if got := string(tools[1].Schema()); got != `{"properties":{},"type":"object"}` {
 		t.Fatalf("no_args schema = %s, want normalized empty object schema", got)
 	}
-	if len(c.tools) != 4 {
-		t.Fatalf("tool status count = %d, want all advertised tools", len(c.tools))
+	if len(c.toolCatalog.infos) != 4 {
+		t.Fatalf("tool status count = %d, want all advertised tools", len(c.toolCatalog.infos))
 	}
-	for _, info := range c.tools {
+	for _, info := range c.toolCatalog.infos {
 		switch info.Name {
 		case "echo", "no_args":
 			if info.SchemaError != "" {
@@ -551,8 +542,8 @@ func TestClientListToolsPropagatesReadOnlyAndDestructiveHints(t *testing.T) {
 	if !ok || !annotations.MCPDestructiveHint() {
 		t.Fatalf("tool annotations = (%T, %v), want destructive hint", tools[0], ok)
 	}
-	if len(c.tools) != 1 || !c.tools[0].ReadOnlyHint || !c.tools[0].DestructiveHint {
-		t.Fatalf("tool status = %+v, want both MCP hints", c.tools)
+	if len(c.toolCatalog.infos) != 1 || !c.toolCatalog.infos[0].ReadOnlyHint || !c.toolCatalog.infos[0].DestructiveHint {
+		t.Fatalf("tool status = %+v, want both MCP hints", c.toolCatalog.infos)
 	}
 }
 
@@ -1288,6 +1279,67 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	in := bufio.NewReader(os.Stdin)
+	var outMu sync.Mutex
+	respond := func(id int, method string, params json.RawMessage) {
+		var result any
+		switch method {
+		case "server/discover":
+			response := map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{
+				"code": -32601, "message": "Method not found",
+			}}
+			body, _ := json.Marshal(response)
+			outMu.Lock()
+			_, _ = os.Stdout.Write(append(body, '\n'))
+			outMu.Unlock()
+			return
+		case "initialize":
+			if initDelay > 0 {
+				time.Sleep(initDelay)
+			}
+			caps := map[string]any{}
+			if os.Getenv("GO_WANT_HELPER_PROMPTS") == "1" {
+				caps["prompts"] = map[string]any{}
+			}
+			result = map[string]any{
+				"protocolVersion": testLegacyProtocolVersion,
+				"serverInfo":      map[string]any{"name": "mock", "version": "0"},
+				"capabilities":    caps,
+			}
+		case "prompts/list":
+			if ms := os.Getenv("GO_WANT_HELPER_PROMPT_DELAY_MS"); ms != "" {
+				if value, err := time.ParseDuration(ms + "ms"); err == nil && value > 0 {
+					time.Sleep(value)
+				}
+			}
+			result = map[string]any{"prompts": []map[string]any{{
+				"name": "hello", "description": "say hi", "arguments": []map[string]any{},
+			}}}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name": "zed", "description": "Sorted after echo.", "inputSchema": map[string]any{"type": "object"},
+			}, {
+				"name": "echo", "description": "Echo back the message.",
+				"inputSchema": map[string]any{
+					"type": "object", "properties": map[string]any{"msg": map[string]any{"type": "string"}},
+					"required": []string{"z", "msg"},
+				},
+			}}}
+		case "tools/call":
+			incrementHelperCounter(os.Getenv("GO_WANT_HELPER_CALL_COUNT"))
+			var call struct {
+				Arguments struct {
+					Msg string `json:"msg"`
+				} `json:"arguments"`
+			}
+			_ = json.Unmarshal(params, &call)
+			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "echo: " + call.Arguments.Msg}}}
+		}
+		response := map[string]any{"jsonrpc": "2.0", "id": id, "result": result}
+		body, _ := json.Marshal(response)
+		outMu.Lock()
+		_, _ = os.Stdout.Write(append(body, '\n'))
+		outMu.Unlock()
+	}
 	for {
 		line, err := in.ReadBytes('\n')
 		if err != nil {
@@ -1309,63 +1361,7 @@ func TestHelperProcess(t *testing.T) {
 		if req.ID == nil {
 			continue // notification: no response
 		}
-
-		var result any
-		switch req.Method {
-		case "initialize":
-			if initDelay > 0 {
-				time.Sleep(initDelay)
-			}
-			caps := map[string]any{}
-			if os.Getenv("GO_WANT_HELPER_PROMPTS") == "1" {
-				caps["prompts"] = map[string]any{}
-			}
-			result = map[string]any{
-				"protocolVersion": protocolVersion,
-				"serverInfo":      map[string]any{"name": "mock", "version": "0"},
-				"capabilities":    caps,
-			}
-		case "prompts/list":
-			if ms := os.Getenv("GO_WANT_HELPER_PROMPT_DELAY_MS"); ms != "" {
-				if v, err := time.ParseDuration(ms + "ms"); err == nil && v > 0 {
-					time.Sleep(v)
-				}
-			}
-			result = map[string]any{"prompts": []map[string]any{{
-				"name":        "hello",
-				"description": "say hi",
-				"arguments":   []map[string]any{},
-			}}}
-		case "tools/list":
-			result = map[string]any{"tools": []map[string]any{{
-				"name":        "zed",
-				"description": "Sorted after echo.",
-				"inputSchema": map[string]any{"type": "object"},
-			}, {
-				"name":        "echo",
-				"description": "Echo back the message.",
-				"inputSchema": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{"msg": map[string]any{"type": "string"}},
-					"required":   []string{"z", "msg"},
-				},
-			}}}
-		case "tools/call":
-			incrementHelperCounter(os.Getenv("GO_WANT_HELPER_CALL_COUNT"))
-			var p struct {
-				Arguments struct {
-					Msg string `json:"msg"`
-				} `json:"arguments"`
-			}
-			_ = json.Unmarshal(req.Params, &p)
-			result = map[string]any{"content": []map[string]any{
-				{"type": "text", "text": "echo: " + p.Arguments.Msg},
-			}}
-		}
-
-		resp := map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}
-		b, _ := json.Marshal(resp)
-		os.Stdout.Write(append(b, '\n'))
+		go respond(*req.ID, req.Method, append(json.RawMessage(nil), req.Params...))
 	}
 }
 
@@ -1396,15 +1392,6 @@ func readHelperCounter(t *testing.T, path string) int {
 		t.Fatalf("parse helper counter %q: %v", body, err)
 	}
 	return value
-}
-
-func findToolByName(tools []tool.Tool, name string) tool.Tool {
-	for _, candidate := range tools {
-		if candidate.Name() == name {
-			return candidate
-		}
-	}
-	return nil
 }
 
 func TestStdioWriterPreservesPersistentProcessByDefault(t *testing.T) {
@@ -1648,6 +1635,7 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close()
+	host.bgWrites.Wait()
 	target := findToolByName(tools, "mcp__reader-revoked__echo")
 	if target == nil {
 		t.Fatalf("tool missing from %v", toolNames(tools))
@@ -1656,7 +1644,6 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected remoteTool adapter, got %T", target)
 	}
-
 	// The installed server is authorized and currently advertises a reader.
 	rt.client.toolsMu.Lock()
 	rt.readOnly = true

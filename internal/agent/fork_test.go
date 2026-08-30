@@ -17,8 +17,10 @@ import (
 func forkScriptTurns() [][]provider.Chunk {
 	return [][]provider.Chunk{
 		{toolCallChunk("c1", "write_file", `{"path":"a.py","content":"x"}`)},
-		{toolCallChunk("c2", "write_file", `{"path":"b.py","content":"x"}`)},
-		{toolCallChunk("c3", "write_file", `{"path":"c.py","content":"x"}`)},
+		// Keep this fixture single-target: it measures the evidence-blindness
+		// fork, not the cumulative multi-file precondition guard.
+		{toolCallChunk("c2", "write_file", `{"path":"a.py","content":"y"}`)},
+		{toolCallChunk("c3", "write_file", `{"path":"a.py","content":"z"}`)},
 		{{Type: provider.ChunkText, Text: "done"}},
 	}
 }
@@ -35,7 +37,7 @@ func captureForkFixture(t *testing.T) (*ForkBundle, *scriptedProvider) {
 	t.Setenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR", dir)
 	prov := &scriptedProvider{name: "p", turns: forkScriptTurns()}
 	a := New(prov, forkRegistry(), NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fix the widget"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fix the widget"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	b, err := LoadForkBundle(filepath.Join(dir, "bundle.json"))
@@ -53,6 +55,9 @@ func TestForkControlContinuationMatchesOriginalRequest(t *testing.T) {
 	if b.BlindAtFork != 3 || b.DebtAtFork == 0 || b.EligibleRound != 3 {
 		t.Fatalf("bundle = blind %d debt %d round %d, want 3/>0/3", b.BlindAtFork, b.DebtAtFork, b.EligibleRound)
 	}
+	if !b.RunwayObserved || b.RunwayBalance <= 0 {
+		t.Fatalf("bundle runway = observed %v balance %d, want an observed solvent account", b.RunwayObserved, b.RunwayBalance)
+	}
 	if b.Input != "fix the widget" {
 		t.Fatalf("bundle input = %q", b.Input)
 	}
@@ -61,7 +66,7 @@ func TestForkControlContinuationMatchesOriginalRequest(t *testing.T) {
 	cont := &scriptedProvider{name: "p", turns: [][]provider.Chunk{{{Type: provider.ChunkText, Text: "done"}}}}
 	a := New(cont, forkRegistry(), NewSession("sys"), Options{}, event.Discard)
 	a.armForkContinuation(b, "")
-	if err := a.Run(context.Background(), b.Input); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), b.Input); err != nil {
 		t.Fatalf("continuation Run: %v", err)
 	}
 	if len(cont.requests) == 0 {
@@ -76,13 +81,27 @@ func TestForkControlContinuationMatchesOriginalRequest(t *testing.T) {
 	}
 }
 
+func TestLoadLegacyForkBundleLeavesRunwayUnobserved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-bundle.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"policy":"ebm","input":"x","messages":[]}`), 0o600); err != nil {
+		t.Fatalf("write legacy bundle: %v", err)
+	}
+	b, err := LoadForkBundle(path)
+	if err != nil {
+		t.Fatalf("LoadForkBundle: %v", err)
+	}
+	if b.RunwayObserved || b.RunwayBalance != 0 || b.RunwayDry != 0 || b.RunwayIdle != 0 {
+		t.Fatalf("legacy runway fields = %+v, want unobserved zero values", b)
+	}
+}
+
 func TestForkTreatmentDiffersOnlyByNudge(t *testing.T) {
 	b, orig := captureForkFixture(t)
 	os.Unsetenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR")
 	cont := &scriptedProvider{name: "p", turns: [][]provider.Chunk{{{Type: provider.ChunkText, Text: "done"}}}}
 	a := New(cont, forkRegistry(), NewSession("sys"), Options{}, event.Discard)
 	a.armForkContinuation(b, ebmNudge)
-	if err := a.Run(context.Background(), b.Input); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), b.Input); err != nil {
 		t.Fatalf("treatment Run: %v", err)
 	}
 	want, got := orig.requests[3], cont.requests[0]
@@ -114,7 +133,7 @@ func TestForkCaptureRefusesTreatedState(t *testing.T) {
 	t.Setenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR", dir)
 	prov := &scriptedProvider{name: "p", turns: forkScriptTurns()}
 	a := New(prov, forkRegistry(), NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fix the widget"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fix the widget"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	// The live run nudged (treatment applied)…
@@ -146,7 +165,7 @@ func TestGovernorCaptureFreezesExpensiveExplorationState(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}},
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "find the bug"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "find the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	b, err := LoadForkBundle(filepath.Join(dir, "bundle.json"))

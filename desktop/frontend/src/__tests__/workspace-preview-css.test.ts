@@ -96,7 +96,17 @@ eq(finalDeclaration(".code-search__actions", "display"), "flex", "search actions
 eq(finalDeclaration(".code-search__actions", "margin-left"), "auto", "wrapped search actions stay aligned to the toolbar edge");
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
+eq(finalDeclaration(".workspace-preview__body--code .code", "max-height"), "none", "workspace code clears the shared scroll-y height cap");
 eq(finalDeclaration(".workspace-preview__body--code .code", "margin"), "0", "code viewport scrollbar sits at the visible pane bottom");
+eq(
+  computedDeclaration(
+    `<html><head></head><body><div class="workspace-preview__body workspace-preview__body--code"><pre class="code code--scroll-y"></pre></div></body></html>`,
+    ".code--scroll-y",
+    "max-height",
+  ),
+  "none",
+  "workspace selector wins over the shared virtual-scroll cap",
+);
 eq(finalDeclaration(".code-search__input", "min-width"), "60px", "search input reserves a minimum readable width");
 eq(
   computedDeclaration(
@@ -107,24 +117,25 @@ eq(
   "0px",
   "themed workspace code keeps the line-number gutter flush",
 );
+const splitDom = `<html><head></head><body><aside class="workspace-panel"><section class="workspace-files"></section><section class="workspace-preview"></section><button class="workspace-tree-resizer"></button></aside></body></html>`;
 eq(
-  finalDeclaration(".workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden)", "grid-template-columns"),
-  "var(--workspace-tree-rail-width) var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr)",
-  "split mode keeps a narrow tree toggle rail beside the file tree",
+  computedDeclaration(splitDom, ".workspace-panel", "grid-template-columns"),
+  "minmax(var(--workspace-preview-min-width), 1fr) var(--workspace-tree-width)",
+  "split mode is a two-column layout: preview on the left, file tree on the right (the tree toggle rail is gone)",
 );
-eq(finalDeclaration(".workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden) .workspace-files", "grid-column"), "2", "file tree sits beside the rail");
-eq(finalDeclaration(".workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden) .workspace-preview", "grid-column"), "3", "preview sits after rail and tree");
+eq(computedDeclaration(splitDom, ".workspace-files", "grid-column"), "2", "file tree sits at the far right after the preview");
+eq(computedDeclaration(splitDom, ".workspace-preview", "grid-column"), "1", "preview sits to the left of the tree");
 eq(
-  finalDeclaration(".workspace-panel--with-tree-rail .workspace-tree-resizer", "left"),
-  "calc(var(--workspace-tree-rail-width) + var(--workspace-tree-width) - 4px)",
-  "tree resizer accounts for the persistent rail",
+  computedDeclaration(splitDom, ".workspace-tree-resizer", "left"),
+  "calc(100% - var(--workspace-tree-width) - 4px)",
+  "tree resizer sits at the tree's left edge (tree is on the right)",
 );
 eq(
   finalDeclaration(".workspace-panel--tree-hidden", "grid-template-columns"),
-  "var(--workspace-tree-rail-width) minmax(0, 1fr)",
-  "preview-only mode keeps a narrow tree toggle rail",
+  "minmax(0, 1fr)",
+  "preview-only mode drops the file tree",
 );
-eq(finalDeclaration(".workspace-panel--tree-hidden .workspace-preview", "grid-column"), "2", "preview sits beside the rail");
+eq(finalDeclaration(".workspace-panel--tree-hidden .workspace-preview", "grid-column"), "1", "preview fills the panel when the tree is hidden");
 eq(
   /const filePreviewLimit = 2 \* 1024 \* 1024/.test(appGo),
   true,

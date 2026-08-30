@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -224,10 +223,17 @@ func TestProjectTreeShowsBackgroundJobStatus(t *testing.T) {
 func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	var refreshes atomic.Int32
 	app := NewApp()
-	app.projectTreeChangedHook = func() {
-		refreshes.Add(1)
+	app.ctx = context.Background()
+	legacyInvalidations := 0
+	app.projectTreeChangedHook = func() { legacyInvalidations++ }
+	events := make(chan ProjectTreeRuntimeSnapshot, 1)
+	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
+		if name == "project-tree:runtime-changed" && len(payload) == 1 {
+			if snapshot, ok := payload[0].(ProjectTreeRuntimeSnapshot); ok {
+				events <- snapshot
+			}
+		}
 	}
 	app.tabs["job"] = &WorkspaceTab{
 		ID:          "job",
@@ -239,8 +245,16 @@ func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	sink := &tabEventSink{tabID: "job", app: app}
 
 	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "background bash finished: bash-1"})
-	if got := refreshes.Load(); got != 1 {
-		t.Fatalf("project-tree refreshes = %d, want 1 for background job finish notice", got)
+	if legacyInvalidations != 0 {
+		t.Fatalf("catalog/legacy invalidations = %d, want 0 for runtime-only status", legacyInvalidations)
+	}
+	select {
+	case snapshot := <-events:
+		if snapshot.Revision == 0 || snapshot.Topics == nil {
+			t.Fatalf("runtime snapshot = %+v, want versioned non-nil projection", snapshot)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background job finish notice emitted no project-tree runtime snapshot")
 	}
 }
 

@@ -9,13 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"reasonix/internal/mcplaunch"
+	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
 )
 
@@ -214,7 +214,7 @@ func resolveNPMPackage(ctx context.Context, spec Spec, locator string) (string, 
 	if !ok {
 		return "", "", fmt.Errorf("npm is required to lock %q", locator)
 	}
-	cmd := exec.CommandContext(ctx, npm, "view", locator, "version", "dist.integrity", "--json")
+	cmd := proc.CommandContext(ctx, npm, "view", locator, "version", "dist.integrity", "--json")
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
@@ -335,7 +335,7 @@ func resolveGitLocator(ctx context.Context, spec Spec, locator string) (string, 
 		return "", "", fmt.Errorf("git is required to resolve %q", locator)
 	}
 	remote := strings.TrimPrefix(repo, "git+")
-	cmd := exec.CommandContext(ctx, git, "ls-remote", remote, ref)
+	cmd := proc.CommandContext(ctx, git, "ls-remote", remote, ref)
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {

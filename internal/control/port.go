@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 )
 
@@ -49,6 +50,7 @@ type Lifecycle interface {
 type TurnControl interface {
 	Submit(input string)
 	SubmitDisplay(display, input string)
+	SubmitFinalReadinessRecovery(display, input string)
 	SubmitDeliveryRecovery(display, input string)
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitEditedDisplay(display, input, original string)
@@ -59,6 +61,7 @@ type TurnControl interface {
 	SendWithRaw(input, raw string)
 	Run(ctx context.Context, input string) error
 	RunTurn(ctx context.Context, input string) error
+	RunFinalReadinessRecovery(ctx context.Context, input string) error
 	RunShell(command string)
 	Cancel()
 	Steer(text string)
@@ -75,11 +78,18 @@ type TurnControl interface {
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
 type Approvals interface {
 	Approve(id string, allow, session, persist bool)
+	ResolveApproval(id string, allow bool, scope sandbox.ApprovalScope) error
 	ResolvePlanDecision(id string, action PlanDecisionAction) error
+	ResolvePlanDecisionWithFeedback(id string, action PlanDecisionAction, feedback string) error
 	// ResolveRecovery answers an Auto Guard card: continue|continue_task|revise. Revise
 	// refuses the mutation and steers feedback.
 	ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error
+	AnswerMCPInteraction(id, action string, content map[string]any)
 	AnswerQuestion(id string, answers []event.AskAnswer)
+	AnswerQuestionChecked(id string, answers []event.AskAnswer) error
+	// AnswerMCPInteractionChecked resolves an mcp_interaction prompt after its
+	// durable transition (serve /mcp-interaction, desktop bridge).
+	AnswerMCPInteractionChecked(id, action string, content map[string]any) error
 	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
 	ReplayPendingPrompts()
 	ReplayPendingPromptsTo(sink event.Sink)
@@ -111,11 +121,17 @@ type Goals interface {
 	ResetPlannerSession()
 	PlanMode() bool
 	SetPlanMode(v bool)
-	// AgentPreset is the session role setting (light|balanced|delivery).
+	// AgentPreset is the session role setting (standard|delivery), derived
+	// from the quality floor.
 	AgentPreset() string
 	// SetAgentPreset updates the role setting for subsequent turns without
 	// rebuilding the controller.
 	SetAgentPreset(preset string)
+	// QualityFloor is the session delivery floor (standard|delivery).
+	QualityFloor() string
+	// SetQualityFloor updates the session delivery floor for subsequent
+	// turns without rebuilding the controller.
+	SetQualityFloor(floor string) error
 }
 
 // SessionHistory covers checkpoint/rewind, branch/fork, and the log-restructuring
@@ -177,6 +193,10 @@ type Capabilities interface {
 	HookRunner() *hook.Runner
 	CustomCommand(input string) (sent string, found bool)
 	MCPPrompt(ctx context.Context, input string) (sent string, found bool, err error)
+	// MCPCapabilityViews returns the host's four-layer capability matrix
+	// (Protocol Connection, Core Host, Interactive Host, Apps Host) as
+	// read-only diagnostics for MCP status surfaces.
+	MCPCapabilityViews() []plugin.CapabilityView
 	RunSkill(input string) (sent string, found bool)
 	AddMCPServer(e config.PluginEntry) (int, error)
 	ConnectMCPServer(e config.PluginEntry) (int, error)
@@ -208,6 +228,10 @@ type Status interface {
 	Balance(ctx context.Context) (*billing.Balance, error)
 	Jobs() []jobs.View
 	Todos() []evidence.TodoItem
+	// BoundShell reports the interpreter this controller generation bound at
+	// build time, so hosts can distinguish the live session's shell from what
+	// a reload would resolve now.
+	BoundShell() sandbox.Shell
 }
 
 // SessionPersistence covers snapshotting a session and tearing down its on-disk
@@ -243,6 +267,7 @@ type Settings interface {
 	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
+	ApplyComposerProfile(plan bool, toolApprovalMode, goal string) ([]string, error)
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port. A

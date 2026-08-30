@@ -126,6 +126,20 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_ordinary
 ON catalog_sessions(scope, workspace_root, ordinary_visible, last_activity_at DESC);
 `
 
+// Folded-topic tombstones remember that lineage projection re-anchored a
+// recovery copy's sessions onto the canonical topic. SyncMetadata consults
+// them so the desktop topic registry cannot resurrect the copy's pre-reanchor
+// topic as a standalone sidebar row after its session rows moved away.
+const migrationV8 = `
+CREATE TABLE IF NOT EXISTS catalog_folded_topics (
+    scope TEXT NOT NULL,
+    workspace_root TEXT NOT NULL DEFAULT '',
+    topic_id TEXT NOT NULL,
+    folded_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(scope, workspace_root, topic_id)
+);
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -154,6 +168,10 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 7, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV7)
+			return err
+		}},
+		{Version: 8, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV8)
 			return err
 		}},
 	}

@@ -20,6 +20,17 @@ test("every release uses the version-ledger hero", () => {
   assert.doesNotMatch(css, /\.release-hero--compact|\.release-hero__actions|\.release-hero blockquote/);
 });
 
+test("targeted releases split Desktop and CLI updates without removing legacy sections", () => {
+  assert.match(component, /release\.targetingVersion === 1/);
+  assert.match(component, /id=\{target\.id\}/);
+  assert.match(component, /Desktop updates/);
+  assert.match(component, /CLI updates/);
+  assert.match(component, /CLI users may skip this version if preferred/);
+  assert.match(component, /<section id="highlights"/);
+  assert.match(css, /\.release-target-section__summary/);
+  assert.match(css, /\.release-item-targets/);
+});
+
 test("changelog has one official navigation and marks archives noindex", () => {
   assert.doesNotMatch(component, /release-channel-tabs/);
   assert.match(component, /Historical archive/);

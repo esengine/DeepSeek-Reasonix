@@ -1,0 +1,135 @@
+.scroll-diagnostics {
+  --wails-draggable: no-drag;
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: var(--z-inline-sticky);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  box-shadow: var(--shadow-2);
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+}
+
+.scroll-diagnostics button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scroll-diagnostics button:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+}
+
+.scroll-diagnostics button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.scroll-diagnostics button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.scroll-diagnostics__start,
+.scroll-diagnostics__export {
+  white-space: nowrap;
+}
+
+.frontend-diagnostics__toggle {
+  border: 1px solid var(--border) !important;
+  background: var(--bg-elev) !important;
+  color: var(--fg-dim) !important;
+  white-space: nowrap;
+}
+
+.frontend-diagnostics__toggle:hover,
+.frontend-diagnostics__toggle--on {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border)) !important;
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.frontend-diagnostics__toggle--on {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.frontend-diagnostics--embedded {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.scroll-diagnostics__export {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.scroll-diagnostics__icon-button {
+  width: 28px;
+  padding: 0 !important;
+}
+
+.scroll-diagnostics__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.scroll-diagnostics__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.scroll-diagnostics--stopped .scroll-diagnostics__dot {
+  background: var(--ok);
+}
+
+@media (max-width: 620px) {
+  .scroll-diagnostics {
+    left: 8px;
+    bottom: 8px;
+  }
+
+  .scroll-diagnostics__status {
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .scroll-diagnostics__export span {
+    display: none;
+  }
+
+  .scroll-diagnostics__export {
+    width: 28px;
+    padding: 0 !important;
+  }
+}

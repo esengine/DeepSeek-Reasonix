@@ -1,9 +1,14 @@
 package agent
 
-import "context"
+import (
+	"context"
+
+	"reasonix/internal/provider"
+)
 
 type rawUserInputKey struct{}
 type subagentImageCandidatesKey struct{}
+type visionSummaryContextKey struct{}
 
 // WithRawUserInput keeps user-authored text separate from host-rendered turn
 // context. Runner implementations can persist the raw text while sending their
@@ -47,4 +52,32 @@ func SubagentImageCandidates(ctx context.Context) []string {
 	}
 	images, _ := ctx.Value(subagentImageCandidatesKey{}).([]string)
 	return append([]string(nil), images...)
+}
+
+// WithVisionSummary carries a hidden image-understanding result into the
+// foreground turn. The run loop persists it on the user message while keeping
+// RawContent as the user-visible text.
+func WithVisionSummary(ctx context.Context, summary *provider.VisionSummary) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if summary == nil {
+		return ctx
+	}
+	cp := *summary
+	cp.ImageDigests = append([]string(nil), summary.ImageDigests...)
+	return context.WithValue(ctx, visionSummaryContextKey{}, &cp)
+}
+
+func VisionSummaryFromContext(ctx context.Context) *provider.VisionSummary {
+	if ctx == nil {
+		return nil
+	}
+	summary, _ := ctx.Value(visionSummaryContextKey{}).(*provider.VisionSummary)
+	if summary == nil {
+		return nil
+	}
+	cp := *summary
+	cp.ImageDigests = append([]string(nil), summary.ImageDigests...)
+	return &cp
 }

@@ -6,6 +6,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "migrate:diagnostics-v2": "node scripts/apply-diagnostics-v2.mjs",
+    "migrate:firebase-crash": "node scripts/apply-firebase-crash.mjs",
+    "migrate:firebase-data": "node scripts/migrate-firebase-data.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

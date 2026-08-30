@@ -13,6 +13,8 @@ const (
 	webView2RecoveryNotApplicable = "not_applicable"
 	webView2RecoverySucceeded     = "reload_succeeded"
 	webView2RecoveryFailed        = "reload_failed"
+	webView2RecoveryPending       = "reload_navigation_succeeded"
+	webView2RecoverySuppressed    = "reload_suppressed"
 )
 
 type webView2Diagnostic struct {
@@ -35,6 +37,7 @@ type webRuntimeDiagnostic struct {
 	FailureSourceModule string `json:"failureSourceModule,omitempty"`
 	RuntimeVersion      string `json:"runtimeVersion"`
 	GPUMode             string `json:"gpuMode"`
+	CompatibilityMode   bool   `json:"compatibilityMode,omitempty"`
 	Recovery            string `json:"recovery"`
 }
 
@@ -107,7 +110,7 @@ func sanitizeFailureSourceModule(value string) string {
 
 func normalizeWebView2Recovery(value string) string {
 	switch value {
-	case webView2RecoverySucceeded, webView2RecoveryFailed:
+	case webView2RecoverySucceeded, webView2RecoveryFailed, webView2RecoveryPending, webView2RecoverySuppressed:
 		return value
 	default:
 		return webView2RecoveryNotApplicable
@@ -122,7 +125,9 @@ func webView2Outcome(event webView2NativeEvent) (reportKind, outcome string) {
 		switch event.Recovery {
 		case webView2RecoverySucceeded:
 			return "performance", "recovered"
-		case webView2RecoveryFailed:
+		case webView2RecoveryPending:
+			return "performance", "reload_pending"
+		case webView2RecoveryFailed, webView2RecoverySuppressed:
 			return "exception", "recovery_failed"
 		default:
 			return "performance", "degraded"

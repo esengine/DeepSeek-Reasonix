@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -232,7 +234,8 @@ func (a *Agent) interceptProviderResponse(ctx context.Context, text, reasoning, 
 	return text, reasoning, signature, calls, usage, nil
 }
 
-// interceptToolBefore runs tool.before right after the call parsed. A block
+// interceptToolBefore runs tool.before after the host resolved and validated
+// the concrete target. A block
 // fails the call with the reason as the tool-result error (mirroring a
 // PreToolUse hook block). A replacement substitutes the provider-visible name
 // and arguments, but only after host revalidation — the arguments must decode
@@ -274,9 +277,6 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 	}
 	plan.call.Name = payload.Name
 	plan.call.Arguments = payload.Arguments
-	if blocked, early := a.parseToolCall(ctx, plan); early {
-		return blocked, true
-	}
 	return toolOutcome{}, false
 }
 
@@ -403,6 +403,10 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 		Messages: providerconv.MessagesToProtocol(fold),
 		Guidance: guidance,
 	}
+	originalMessages, err := json.Marshal(payload.Messages)
+	if err != nil {
+		return nil, "", err
+	}
 	result, err := d.Intercept(ctx, extension.PointCompactionPrepare, &payload)
 	if err != nil {
 		return nil, "", err
@@ -419,6 +423,13 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 	}
 	d.Event(extension.PointCompactionPrepare, payload)
 	if len(result.Applied) > 0 || replaced {
+		preparedMessages, marshalErr := json.Marshal(payload.Messages)
+		if marshalErr != nil {
+			return nil, "", marshalErr
+		}
+		if bytes.Equal(preparedMessages, originalMessages) {
+			return fold, payload.Guidance, nil
+		}
 		return providerconv.MessagesFromProtocol(payload.Messages), payload.Guidance, nil
 	}
 	return fold, guidance, nil

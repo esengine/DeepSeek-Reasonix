@@ -34,7 +34,12 @@ MSG
   exit 1
 fi
 
-for workflow in "$root"/.github/workflows/ci.yml "$root"/.github/workflows/release-desktop.yml; do
+workflow_pins=(
+  "$root/.github/workflows/ci.yml"
+  "$root/.github/workflows/release-desktop.yml"
+  "$root/.github/workflows/transcript-native-smoke.yml"
+)
+for workflow in "${workflow_pins[@]}"; do
   if grep -q "cmd/wails@v" "$workflow"; then
     echo "check-wails-pin: $(basename "$workflow") hard-codes a CLI version; read .wails-version instead" >&2
     exit 1
@@ -53,6 +58,7 @@ install_lines="$(git -C "$root" grep -nF "$module@" -- . || true)"
 unexpected_sources="$(awk -v module="$module" '
   index($0, ".github/workflows/ci.yml:") == 1 && index($0, module "@$(cat \"$GITHUB_WORKSPACE/.wails-version\")") { next }
   index($0, ".github/workflows/release-desktop.yml:") == 1 && index($0, module "@$(cat \"$GITHUB_WORKSPACE/.wails-version\")") { next }
+  index($0, ".github/workflows/transcript-native-smoke.yml:") == 1 && index($0, module "@$(cat \"$GITHUB_WORKSPACE/.wails-version\")") { next }
   index($0, "Makefile:") == 1 && index($0, module "@$(WAILS_VERSION)") { next }
   index($0, "prod_test:") == 1 && index($0, module "@$wails_pin") { next }
   { print }
@@ -77,7 +83,7 @@ MSG
 fi
 
 workflow_install="go install \"$module@\$(cat \"\$GITHUB_WORKSPACE/.wails-version\")\""
-for workflow in "$root"/.github/workflows/ci.yml "$root"/.github/workflows/release-desktop.yml; do
+for workflow in "${workflow_pins[@]}"; do
   grep -Fq "$workflow_install" "$workflow" || {
     echo "check-wails-pin: $(basename "$workflow") must install Wails from \$GITHUB_WORKSPACE/.wails-version" >&2
     exit 1

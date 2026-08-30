@@ -1,80 +1,67 @@
-// Package agentpreset defines the three Agent role settings (角色设定) that
-// control planning depth, verification breadth, and independent review
-// frequency without changing tool schemas or security boundaries.
+// Package agentpreset holds the session role vocabulary. The role is a
+// session quality floor (standard|delivery): it records intent and writes
+// through the controller's floor setting; enforcement lives in the fact
+// contract. Light and its historical aliases fold to standard silently.
 package agentpreset
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-// AgentPreset is a session-scoped role setting. It is independent of
-// sub-agent ProfileDefinition values.
+// AgentPreset is the session role label.
 type AgentPreset string
 
 const (
-	// Light is 轻量 · 快速可靠: direct when simple, targeted verification,
-	// independent review only for high risk.
-	Light AgentPreset = "light"
-	// Balanced is 均衡 · 智能适配: complexity-adaptive planning and review.
-	// It is the zero-configuration default for every new entry point.
-	Balanced AgentPreset = "balanced"
-	// Delivery is 交付 · 证据闭环: full acceptance evidence and forced
-	// independent review on medium/high-risk mutations.
+	// Standard is the 默认 (standard) floor: the adaptive policy unchanged.
+	Standard AgentPreset = "standard"
+	// Delivery is the 交付 floor: session-sticky delivery completion gates.
 	Delivery AgentPreset = "delivery"
 )
 
-// PolicyVersion is the host-visible policy schema version embedded in the
-// transient execution-policy block. Bump when the block shape changes.
-const PolicyVersion = 1
-
-// Normalize maps free-form and legacy values onto a canonical AgentPreset.
-// Empty and unknown values fall back to Balanced. One compatibility version
-// of old token/work-mode names is accepted.
-func Normalize(raw string) AgentPreset {
+// Normalize maps free-form and legacy values onto the canonical label. Light
+// and its aliases fold to Standard; unknown values are an error so no new
+// vocabulary can appear.
+func Normalize(raw string) (AgentPreset, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(Light), "economy", "eco", "save", "saving", "low", "lite", "minimal":
-		return Light
-	case string(Delivery), "deliver", "quality", "performance":
-		return Delivery
-	case string(Balanced), "full", "":
-		return Balanced
+	case "", string(Standard), "balanced", "full", "normal",
+		"light", "economy", "eco", "save", "saving", "low", "lite", "minimal":
+		return Standard, nil
+	case string(Delivery), "deliver", "quality":
+		return Delivery, nil
 	default:
-		return Balanced
+		return "", fmt.Errorf("unknown role setting %q (accepted: standard, delivery; legacy light folds to standard)", raw)
 	}
 }
 
-// IsValid reports whether raw is an exact canonical preset name.
+// IsValid reports whether raw is an exact canonical preset label.
 func IsValid(raw string) bool {
-	switch AgentPreset(strings.ToLower(strings.TrimSpace(raw))) {
-	case Light, Balanced, Delivery:
-		return true
-	default:
-		return false
-	}
+	p, err := Normalize(raw)
+	return err == nil && p != ""
 }
 
-// All returns the three canonical presets in stable menu order.
-func All() []AgentPreset {
-	return []AgentPreset{Light, Balanced, Delivery}
-}
-
-// LegacyTokenMode returns the one-version dual-write tokenMode value for
-// older clients. Unknown/empty presets map to "full" (historical balanced).
+// LegacyTokenMode returns the deprecated dual-write tokenMode value older
+// clients expect next to a persisted preset. It is a wire-compat mapping only.
 func LegacyTokenMode(p AgentPreset) string {
-	switch Normalize(string(p)) {
-	case Light:
-		return "economy"
-	case Delivery:
+	if p == Delivery {
 		return "delivery"
-	default:
-		return "full"
 	}
+	return "full"
 }
 
-// FromLegacyTokenMode maps a persisted or CLI tokenMode onto AgentPreset.
+// FromLegacyTokenMode maps a persisted or CLI tokenMode onto a preset label.
 func FromLegacyTokenMode(mode string) AgentPreset {
-	return Normalize(mode)
+	p, err := Normalize(mode)
+	if err != nil {
+		return Standard
+	}
+	return p
 }
+
+// FloorNotice is printed once when a legacy mode value is folded.
+const FloorNotice = "The execution-mode setting is now a session quality floor: standard (default) or delivery. Light has been folded into standard; the adaptive policy already runs light work lightly."
 
 // String returns the canonical identifier.
 func (p AgentPreset) String() string {
-	return string(Normalize(string(p)))
+	return string(p)
 }

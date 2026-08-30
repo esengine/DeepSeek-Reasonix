@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/provider"
+	"reasonix/internal/turnevent"
 )
 
 func TestDisplayTurnBufferPreservesStreamingReplacementAndTools(t *testing.T) {
@@ -84,7 +86,9 @@ func TestDisplayTurnBufferStreamingAllocationsStayNearLinear(t *testing.T) {
 func TestPendingDisplayWriteRetriesWithoutDroppingTurn(t *testing.T) {
 	state := &tabDisplayState{}
 	var attempts atomic.Int32
+	var acknowledgements atomic.Int32
 	persisted := make(chan struct{})
+	acknowledged := make(chan struct{})
 	write := &pendingDisplayWrite{
 		dir:         "sessions",
 		sessionPath: "sessions/session.jsonl",
@@ -101,6 +105,10 @@ func TestPendingDisplayWriteRetriesWithoutDroppingTurn(t *testing.T) {
 			close(persisted)
 			return nil
 		},
+		onPersisted: func() {
+			acknowledgements.Add(1)
+			close(acknowledged)
+		},
 	}
 	persistOrEnqueueDisplayWrite(state, write)
 	select {
@@ -108,21 +116,49 @@ func TestPendingDisplayWriteRetriesWithoutDroppingTurn(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("pending display write was not retried")
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		state.mu.Lock()
-		pending := len(state.pendingWrites)
-		running := state.persistRunning
-		state.mu.Unlock()
-		if pending == 0 && !running {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("retry worker did not drain: pending=%d running=%v", pending, running)
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-acknowledged:
+	case <-time.After(time.Second):
+		t.Fatal("durable display write was not acknowledged")
+	}
+	state.mu.Lock()
+	pending := len(state.pendingWrites)
+	running := state.persistRunning
+	state.mu.Unlock()
+	if pending != 0 || running {
+		t.Fatalf("retry worker did not drain before acknowledgement: pending=%d running=%v", pending, running)
 	}
 	if got := attempts.Load(); got != 3 {
 		t.Fatalf("persist attempts = %d, want 3", got)
+	}
+	if got := acknowledgements.Load(); got != 1 {
+		t.Fatalf("projection acknowledgements = %d, want exactly one after persistence", got)
+	}
+}
+
+func TestDisplayMessagesFromInterruptedProjectionKeepsPartialOutput(t *testing.T) {
+	textEvent := event.Event{Kind: event.Text, Source: event.UsageSourceExecutor, Text: "partial answer"}
+	toolEvent := event.Event{Kind: event.ToolDispatch, Source: event.UsageSourceExecutor, Tool: event.Tool{ID: "call-1", Name: "read_file", Args: `{"path":"notes.txt"}`}}
+	projection := turnevent.PendingProjection{
+		TurnID: "turn-1", Status: event.TurnInterrupted,
+		Events: []turnevent.Envelope{
+			{TurnID: "turn-1", Sequence: 1, Kind: "text", Source: textEvent.Source, Event: eventwire.ToWire(textEvent)},
+			{TurnID: "turn-1", Sequence: 2, Kind: "tool_dispatch", Source: toolEvent.Source, Event: eventwire.ToWire(toolEvent)},
+			{TurnID: "turn-1", Sequence: 3, Kind: "turn_done", Status: event.TurnInterrupted, Event: eventwire.ToWire(event.Event{Kind: event.TurnDone})},
+		},
+	}
+
+	got := displayMessagesFromProjection(projection)
+	if len(got) != 3 {
+		t.Fatalf("recovered display messages = %d, want partial answer, tool card and notice: %+v", len(got), got)
+	}
+	if got[0].Role != "assistant" || got[0].Content != "partial answer" {
+		t.Fatalf("partial assistant output changed: %+v", got[0])
+	}
+	if got[1].Role != "assistant" || len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("tool dispatch projection changed: %+v", got[1])
+	}
+	if got[2].Role != "notice" || got[2].Code != event.NoticeCodeCancelledTurn {
+		t.Fatalf("interruption notice missing: %+v", got[2])
 	}
 }

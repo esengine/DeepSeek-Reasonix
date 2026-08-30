@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -16,6 +17,7 @@ func init() { tool.RegisterBuiltin(multiEdit{}) }
 // directory a relative path resolves against (see resolveIn).
 type multiEdit struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -64,6 +66,10 @@ func (multiEdit) Schema() json.RawMessage {
 
 func (multiEdit) ReadOnly() bool { return false }
 
+func (m multiEdit) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(m.workDir, args)
+}
+
 func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path  string     `json:"path"`
@@ -79,7 +85,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
-	if err := confineWrite(ctx, m.roots, m.guard, m.managed, p.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, m.rootSet, m.roots), m.guard, m.managed, p.Path); err != nil {
 		return "", err
 	}
 

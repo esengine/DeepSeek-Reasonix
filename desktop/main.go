@@ -20,7 +20,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
-
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
 	_ "reasonix/internal/provider/anthropic"
@@ -82,6 +81,9 @@ func windowsWebview2GPUDisabled() bool {
 }
 
 func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
+	if linuxRendererCompatibilityMode() {
+		return linux.WebviewGpuPolicyNever
+	}
 	matches, err := filepath.Glob(pattern)
 	if err == nil {
 		for _, path := range matches {
@@ -95,7 +97,15 @@ func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
 	return linux.WebviewGpuPolicyNever
 }
 
+func preparePrimaryDesktopRuntime(app *App) {
+	// Recovery remains active when optional diagnostics telemetry is disabled.
+	installWebView2ProcessObserver(app)
+	prepareDesktopDiagnostics(app)
+	capturePendingUpdateHealthIdentity(app)
+}
+
 func main() {
+	prepareLinuxRendererCompatibilityEnvironment()
 	// Detached macOS self-update child: wait for the old PID, hold the shared
 	// repair mutation lock, then swap the .app bundle. Must run before Wails.
 	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {
@@ -112,8 +122,9 @@ func main() {
 	appMenu := app.createAppMenu()
 	dragAndDrop := &options.DragAndDrop{EnableFileDrop: true}
 	bindings := []any{app}
+	remoteWindow := launch.RemoteWindowTicket != ""
 
-	if launch.RemoteWindowTicket != "" {
+	if remoteWindow {
 		// A remote web child window: a second Reasonix process that hosts the
 		// SSH Serve page for one remote host. It deliberately skips local
 		// runtimes (tabs, tray, heartbeat, providers) and exposes no Wails
@@ -134,13 +145,11 @@ func main() {
 		dragAndDrop = &options.DragAndDrop{DisableWebViewDrop: true}
 		bindings = nil
 	} else {
-		// Claim diagnostics before Wails so second processes cannot create evidence.
-		prepareDesktopDiagnostics(app)
+		preparePrimaryDesktopRuntime(app)
 		defer app.releaseDesktopDiagnosticsOwnership()
-		capturePendingUpdateHealthIdentity(app)
 	}
 
-	width, height := initialDesktopWindowSize()
+	width, height := initialDesktopWindowSize(remoteWindow)
 
 	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
 	zoomFactor := 1.0
@@ -156,7 +165,7 @@ func main() {
 		Title:     title,
 		Width:     width,
 		Height:    height,
-		Frameless: goruntime.GOOS == "windows",
+		Frameless: desktopWindowFrameless(goruntime.GOOS, remoteWindow),
 		Logger:    newCrashCaptureLogger(app),
 		MinWidth:  760,
 		MinHeight: 480,

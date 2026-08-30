@@ -36,6 +36,8 @@ mem.prof
 .env
 .env.local
 *.local
+**/.firebase-crash-migration-state.json
+**/.firebase-crash-migration-state.json.tmp-*
 /reasonix.toml
 /desktop/.env
 /desktop/reasonix.toml

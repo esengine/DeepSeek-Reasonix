@@ -126,6 +126,10 @@ go test ./internal/agent/ -v            # verbose, one package
 go test ./internal/tool/builtin/ -run TestGrep  # one test
 ```
 
+Desktop transcript scroll changes follow the discipline in
+`desktop/AGENTS.md` (single scroll writer, deterministic race tests via
+`pnpm test:transcript` in `desktop/frontend/`).
+
 ### Code style
 
 - `gofmt` is enforced by CI — format before committing

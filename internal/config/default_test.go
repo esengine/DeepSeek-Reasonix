@@ -2,6 +2,12 @@ package config
 
 import "testing"
 
+func TestDefaultCompactRatioIsEightyPercent(t *testing.T) {
+	if got := Default().Agent.CompactRatio; got != 0.80 {
+		t.Fatalf("compact ratio = %v, want 0.80", got)
+	}
+}
+
 func TestDefaultRetiredAutoPlanCompatibilityOff(t *testing.T) {
 	if got := Default().Agent.AutoPlan; got != "off" {
 		t.Fatalf("default auto_plan = %q, want off", got)

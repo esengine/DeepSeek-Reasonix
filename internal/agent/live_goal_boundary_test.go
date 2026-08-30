@@ -62,23 +62,28 @@ func TestLiveGoalBoundaryMatrix(t *testing.T) {
 			})
 
 			t.Run("deterministic-stuck", func(t *testing.T) {
-				metrics := &liveGoalMetrics{}
-				var executions atomic.Int32
-				reg := tool.NewRegistry()
-				reg.Add(liveGoalFailureTool{executions: &executions})
-				a := newLiveGoalAgent(prov, reg, metrics)
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-				defer cancel()
-				ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-stuck", TaskText: "validate deterministic Goal stuck detection"})
-				started := time.Now()
-				err := a.Run(ctx, "This is a deterministic host-failure conformance probe requiring three failed tool rounds. Call live_goal_failure exactly once now. After each of the first two failures, call it exactly once again in the next assistant response. After the third failure, return a short summary. Do not switch tools, change arguments, or batch calls.")
-				if err != nil {
-					t.Fatalf("stuck guard paused Goal: err=%v executions=%d requests=%d", err, executions.Load(), metrics.requests.Load())
+				const maxConformanceAttempts = 2
+				for attempt := 1; attempt <= maxConformanceAttempts; attempt++ {
+					metrics := &liveGoalMetrics{}
+					var executions atomic.Int32
+					reg := tool.NewRegistry()
+					reg.Add(liveGoalFailureTool{executions: &executions})
+					a := newLiveGoalAgent(prov, reg, metrics)
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+					ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-stuck", TaskText: "validate deterministic Goal stuck detection"})
+					started := time.Now()
+					err := a.Run(ctx, "This is a deterministic host-failure conformance probe requiring three failed tool rounds. Call live_goal_failure exactly once now. After each of the first two failures, call it exactly once again in the next assistant response. After the third failure, return a short summary. Do not switch tools, change arguments, or batch calls.")
+					cancel()
+					if err != nil {
+						t.Fatalf("stuck guard paused Goal: attempt=%d err=%v executions=%d requests=%d", attempt, err, executions.Load(), metrics.requests.Load())
+					}
+					if executions.Load() == 3 {
+						logLiveGoalMetrics(t, tc.model, "deterministic-stuck", 3, metrics, "redirect->complete", time.Since(started))
+						return
+					}
+					t.Logf("provider conformance deviation: attempt=%d failure_executions=%d want=3", attempt, executions.Load())
 				}
-				if executions.Load() != 3 {
-					t.Fatalf("failure executions = %d, want 3", executions.Load())
-				}
-				logLiveGoalMetrics(t, tc.model, "deterministic-stuck", 3, metrics, "redirect->complete", time.Since(started))
+				t.Fatalf("provider failed three-round stuck conformance after %d attempts", maxConformanceAttempts)
 			})
 
 			t.Run("beyond-sixteen-rounds", func(t *testing.T) {

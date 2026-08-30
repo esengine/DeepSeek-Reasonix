@@ -223,6 +223,17 @@ await render({
   id: "a-auto",
   text: "answer",
   reasoning: "live thought",
+  streaming: true,
+  reasoningComplete: true,
+});
+ok(Boolean(document.querySelector(".reasoning__body")), "auto mode keeps reasoning open after its first answer token while the turn streams");
+ok(!document.querySelector(".reasoning-summary"), "active turn does not replace full reasoning with a summary");
+
+await render({
+  kind: "assistant",
+  id: "a-auto",
+  text: "answer",
+  reasoning: "live thought",
   streaming: false,
   reasoningComplete: true,
 });
@@ -248,6 +259,22 @@ await render({
   reasoningComplete: true,
 });
 ok(Boolean(document.querySelector(".reasoning__body")), "manual reasoning expansion survives auto completion");
+
+await act(async () => {
+  applyReasoningDisplayMode("expanded");
+});
+await render({
+  kind: "assistant",
+  id: "a-expanded",
+  text: "",
+  reasoning: "kept thought",
+  streaming: false,
+  reasoningComplete: true,
+});
+ok(Boolean(document.querySelector(".reasoning__body")), "expanded mode keeps completed reasoning open");
+ok(!document.querySelector(".reasoning-summary"), "expanded mode never falls back to a summary");
+await click(document.querySelector(".reasoning__head"));
+ok(!document.querySelector(".reasoning__body"), "a manual collapse still wins inside expanded mode");
 
 await act(async () => {
   applyReasoningDisplayMode("hidden");

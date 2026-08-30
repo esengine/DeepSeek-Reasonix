@@ -38,10 +38,8 @@ func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 	}
 	if parent != nil {
 		if tl, ok := parent.Get("use_capability"); ok {
-			if uc, ok := tl.(*UseCapabilityTool); ok {
-				sub.Add(uc.CloneForAgent(nil, nil))
-			} else {
-				sub.Add(tl)
+			if cloned := cloneCapabilityFrontend(tl); cloned != nil {
+				sub.Add(cloned)
 			}
 		}
 	}

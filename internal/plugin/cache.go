@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -38,12 +39,14 @@ func cacheableToolsOf(tools []tool.Tool) []CachedTool {
 		}
 		declaredReadOnly, _, destructive := rt.securitySnapshot()
 		out = append(out, CachedTool{
-			Name:         rt.rawName,
-			Description:  rt.desc,
-			Schema:       rt.schema,
-			OutputSchema: rt.outputSchema,
-			ReadOnly:     declaredReadOnly,
-			Destructive:  destructive,
+			Name:          rt.rawName,
+			Description:   rt.desc,
+			Schema:        rt.schema,
+			OutputSchema:  rt.outputSchema,
+			ReadOnly:      declaredReadOnly,
+			Destructive:   destructive,
+			Visibility:    append([]string(nil), rt.visibility...),
+			UIResourceURI: rt.uiResourceURI,
 		})
 	}
 	return out
@@ -51,8 +54,12 @@ func cacheableToolsOf(tools []tool.Tool) []CachedTool {
 
 // cacheVersion bumps whenever CachedSchema shape changes incompatibly. Old
 // files with a smaller version are treated as a miss so a stale layout never
-// crashes a reader.
+// crashes a reader. Version 2 is the legacy shared layout; profiles that
+// declare capabilities beyond the legacy surface write version 3 into a
+// profile-isolated file instead (see SaveCachedSchemaForProfile).
 const cacheVersion = 2
+
+const enhancedCacheVersion = 3
 
 // CachedSchema is the persisted snapshot of one server's handshake result.
 // CacheKey gates reuse — Capabilities/Tools are only trusted when the
@@ -66,6 +73,9 @@ type CachedSchema struct {
 	Capabilities  map[string]bool `json:"capabilities"`
 	Tools         []CachedTool    `json:"tools"`
 	LastValidated time.Time       `json:"last_validated"`
+	// Profile records which host capability profile produced this catalog.
+	// Only set in enhanced (v3) caches; empty in the legacy shared layout.
+	Profile string `json:"profile,omitempty"`
 }
 
 // CachedTool mirrors the subset of an MCP tool definition we need to register
@@ -79,6 +89,21 @@ type CachedTool struct {
 	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 	ReadOnly     bool            `json:"read_only"`
 	Destructive  bool            `json:"destructive,omitempty"`
+	// Visibility is the MCP Apps tool visibility ("model", "app"). Zero value
+	// means the spec default ["model","app"]. Enhanced caches only.
+	Visibility []string `json:"visibility,omitempty"`
+	// UIResourceURI is the _meta.ui.resourceUri an App uses to render. Empty
+	// for tools without an App surface. Enhanced caches only.
+	UIResourceURI string `json:"ui_resource_uri,omitempty"`
+}
+
+// ToolIsModelVisible reports whether a cached tool may enter the model catalog.
+// App-only tools stay in the server-private App catalog.
+func (t CachedTool) ToolIsModelVisible() bool {
+	if len(t.Visibility) == 0 {
+		return true
+	}
+	return slices.Contains(t.Visibility, "model")
 }
 
 // SchemaCacheKey hashes the load-bearing, non-secret parts of a Spec. Secret
@@ -221,6 +246,84 @@ func cachePath(name string) string {
 		return ""
 	}
 	return filepath.Join(base, "mcp", slug(name)+".json")
+}
+
+// SaveCachedSchemaForProfile writes the handshake snapshot under the profile's
+// cache identity. The legacy profile keeps writing the shared v2 file so old
+// binaries keep working during rolling upgrades; capability-declaring profiles
+// write an isolated v3 file (<slug>.host-<hash>.json) whose catalog reflects
+// the tools/list the server returned for exactly those declared capabilities.
+// The two writers never touch each other's files.
+func SaveCachedSchemaForProfile(profile HostProfile, name string, cs CachedSchema) error {
+	profile = profile.Normalize()
+	p := cachePathForProfile(name, profile)
+	if p == "" {
+		return nil
+	}
+	if profile.UsesEnhancedCache() {
+		cs.Version = enhancedCacheVersion
+		cs.Profile = profile.String()
+	} else {
+		cs.Version = cacheVersion
+		cs.Profile = ""
+	}
+	if cs.LastValidated.IsZero() {
+		cs.LastValidated = time.Now().UTC()
+	}
+	b, err := json.MarshalIndent(cs, "", "  ")
+	if err != nil {
+		slog.Debug("plugin cache: marshal", "name", name, "err", err)
+		return err
+	}
+	if err := fileutil.AtomicWriteFile(p, b, 0o600); err != nil {
+		slog.Debug("plugin cache: atomic write", "name", name, "err", err)
+		return err
+	}
+	return nil
+}
+
+// cachePathForProfile maps a profile onto its cache file. The legacy profile
+// keeps the shared <slug>.json; enhanced profiles get
+// <slug>.host-<profileHash>.json.
+func cachePathForProfile(name string, profile HostProfile) string {
+	base := config.CacheDir()
+	if base == "" {
+		return ""
+	}
+	if !profile.UsesEnhancedCache() {
+		return cachePath(name)
+	}
+	return filepath.Join(base, "mcp", slug(name)+".host-"+profile.ProfileCacheHash()+".json")
+}
+
+// LoadCachedSchemaForSpecProfile loads the handshake snapshot for the
+// profile's cache identity. An enhanced profile treats the legacy file as a
+// miss — the old catalog was negotiated under different client capabilities
+// and must not pose as this profile's catalog. A future version is a miss for
+// every reader.
+func LoadCachedSchemaForSpecProfile(s Spec, profile HostProfile) (*CachedSchema, bool) {
+	profile = profile.Normalize()
+	if !profile.UsesEnhancedCache() {
+		return LoadCachedSchemaForSpec(s)
+	}
+	current := SchemaCacheKey(s)
+	p := cachePathForProfile(s.Name, profile)
+	if p == "" {
+		return nil, false
+	}
+	b, err := fileencoding.ReadFileUTF8(p)
+	if err != nil {
+		return nil, false
+	}
+	var out CachedSchema
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, false
+	}
+	if out.Version != enhancedCacheVersion || out.Profile != profile.String() || out.CacheKey != current {
+		return nil, false
+	}
+	out.Tools = filterValidCachedTools(out.Tools)
+	return &out, true
 }
 
 // slugReplace strips characters that aren't safe in a filename across the

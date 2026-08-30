@@ -83,9 +83,9 @@ func (grepTool) Name() string { return "grep" }
 
 func (g grepTool) Description() string {
 	if g.rg != "" {
-		return "Search for a regular expression in a file, or recursively under a directory — ripgrep-backed, so it honors .gitignore. Returns matching lines as path:line:text, capped at 200 matches."
+		return "Search for a regular expression in a file, or recursively under a directory — ripgrep-backed, so it honors .gitignore. Returns matching lines as path:line:text, capped at 200 matches. Independent searches with no data dependency should be issued in the same round."
 	}
-	return "Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches."
+	return "Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. Independent searches with no data dependency should be issued in the same round."
 }
 
 func (grepTool) Schema() json.RawMessage {
@@ -313,7 +313,7 @@ func (g grepTool) runRipgrep(ctx context.Context, pattern, path string, to time.
 		return "", wrapped, nil
 	}
 
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := proc.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = applyEnvOverrides(secrets.ProcessEnv(), prepared.EnvOverrides)
 	proc.HideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()

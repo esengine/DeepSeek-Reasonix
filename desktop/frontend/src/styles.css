@@ -1,4 +1,5 @@
 /*
+/*
  * Reasonix desktop — single-column, developer-dense, terminal-flavored chat UI.
  *
  * Multi-platform notes:
@@ -42,6 +43,22 @@
   --fg: #f4f5f7;
   --fg-dim: #c0c4cc;
   --fg-faint: #858b96;
+
+  /* Shared semantic contract. Theme directions may override any of these,
+     while partial directions such as Amber inherit a complete, usable set. */
+  --stage: var(--bg);
+  --surface: var(--bg-elev);
+  --surface-2: var(--bg-elev-2);
+  --surface-3: var(--bg-soft);
+  --panel: var(--bg-elev);
+  --border-2: color-mix(in srgb, var(--fg) 20%, transparent);
+  --text: var(--fg);
+  --text-2: var(--fg-dim);
+  --text-3: var(--fg-faint);
+  --shadow-color: #000;
+  /* Operational overlays are opaque unless a background theme pack opts into
+     the existing pane-opacity contract. */
+  --overlay-surface-bg: var(--bg-elev);
   --global-font-scale: 1;
   --font-scale: var(--global-font-scale);
   --text-2xs: calc(10px * var(--font-scale));
@@ -330,7 +347,7 @@
     --bg-soft: #eef2f7;
     --bg-elev: #ffffff;
     --bg-elev-2: #f2f5f9;
-    --sidebar-bg: #f3f6fa;
+    --sidebar-bg: #f9f9f9;
     --sidebar-hover: #e8edf4;
     --sidebar-active: #eaf1ff;
     --chat-bg: #ffffff;
@@ -405,7 +422,7 @@
   --bg-soft: #eef2f7;
   --bg-elev: #ffffff;
   --bg-elev-2: #f2f5f9;
-  --sidebar-bg: #f3f6fa;
+  --sidebar-bg: #f9f9f9;
   --sidebar-hover: #e8edf4;
   --sidebar-active: #eaf1ff;
   --chat-bg: #ffffff;
@@ -475,6 +492,7 @@
   color-scheme: dark;
 }
 
+/* Theme styles are "directions" — graphite / aurora / slate / carbon /
 /* Theme styles are "directions" — graphite / aurora / slate / carbon /
    nocturne / amber — and each is independent of light/dark. Dark accent (brighter, dark fg) is the
    default for every direction; the light accent is applied when the user
@@ -956,7 +974,7 @@
   --bg-soft: #eef0f4;
   --bg-elev: #ffffff;
   --bg-elev-2: #f7f8fb;
-  --sidebar-bg: #ffffff;
+  --sidebar-bg: #f9f9f9;
   --sidebar-hover: #eef0f4;
   --sidebar-active: rgba(47, 111, 224, 0.12);
   --chat-bg: #f5f6f9;
@@ -1025,7 +1043,7 @@
     --bg-soft: #eef0f4;
     --bg-elev: #ffffff;
     --bg-elev-2: #f7f8fb;
-    --sidebar-bg: #ffffff;
+    --sidebar-bg: #f9f9f9;
     --sidebar-hover: #eef0f4;
     --sidebar-active: rgba(47, 111, 224, 0.12);
     --chat-bg: #f5f6f9;
@@ -1507,6 +1525,7 @@
   --accent-strong: #de7a4b;
 }
 :root[data-theme="light"][data-theme-style="amber"] {
+  --sidebar-bg: #f3f6fa;
   --accent: #dd5b28;
   --accent-fg: #ffffff;
   --accent-soft: rgba(221, 91, 40, 0.12);
@@ -1514,6 +1533,7 @@
 }
 @media (prefers-color-scheme: light) {
   :root[data-theme-style="amber"]:not([data-theme]) {
+    --sidebar-bg: #f3f6fa;
     --accent: #dd5b28;
     --accent-fg: #ffffff;
     --accent-soft: rgba(221, 91, 40, 0.12);
@@ -1941,6 +1961,12 @@ body,
 }
 html {
   cursor: default;
+  /* WebKit/WKWebView auto-inflates text when layout changes (e.g. the file
+     preview split appearing on first open). Nothing else in the app depends
+     on text inflation, and it rescaled code rows so line spacing ballooned
+     until the layout settled. Pin it off app-wide; the code viewer also
+     re-asserts it locally. */
+  -webkit-text-size-adjust: 100%;
 }
 body {
   --font-scale: var(--typography-interface-scale, var(--global-font-scale));
@@ -1965,8 +1991,10 @@ textarea {
 }
 
 /* Independent typography regions. Missing custom properties deliberately fall
+/* Independent typography regions. Missing custom properties deliberately fall
    back to the global appearance settings, preserving existing installations. */
-.transcript {
+.transcript,
+.transcript__live-region {
   --font-scale: var(--typography-conversation-scale, var(--global-font-scale));
   --text-base: var(--typography-conversation-size, calc(14px * var(--font-scale)));
   --font-content: var(--text-base);
@@ -2006,10 +2034,12 @@ textarea {
 }
 
 /* Root typography tokens are computed before inheritance, so a descendant
+/* Root typography tokens are computed before inheritance, so a descendant
    --font-scale cannot retroactively change them. Re-declare the proportional
    tokens at each semantic region root to make independent scaling real. */
 body,
 .transcript,
+.transcript__live-region,
 .composer-wrap,
 .code,
 .md-code,
@@ -2032,6 +2062,7 @@ body,
 }
 
 /* Only real hyperlinks get the pointer cursor; everything else (buttons, tabs,
+/* Only real hyperlinks get the pointer cursor; everything else (buttons, tabs,
    tree rows, menu items) stays default so the UI reads as native chrome. */
 a[href] {
   cursor: pointer;
@@ -2046,7 +2077,7 @@ a[href] {
 
 .layout {
   --sidebar-width: var(--sidebar-expanded-width, clamp(264px, 18vw, 300px));
-  --chat-min-width: 760px;
+  --chat-min-width: 400px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
   --terminal-height: 280px;
@@ -2111,6 +2142,7 @@ a[href] {
   grid-template-columns: 0px minmax(0, 1fr) minmax(0, var(--workspace-width));
 }
 /* Skip dock-column interpolation in creation mode. WebKit can mount the
+/* Skip dock-column interpolation in creation mode. WebKit can mount the
    overview at zero inline size and fail to repaint its text on reopen. */
 .app--creation .layout.layout--workspace-open,
 .app--creation .layout.layout--workspace-open.layout--sidebar-collapsed {
@@ -2124,11 +2156,15 @@ a[href] {
   grid-template-columns: 0px minmax(0, 1fr);
 }
 /* Terminal drawer — an independent bottom panel below the chat pane.
+/* Terminal drawer — an independent bottom panel below the chat pane.
    Sidebar and workspace panel stay full-height in columns 1 and 3;
    the terminal occupies column 2 row 3, statusbar at row 4. */
 .layout--terminal-drawer-open {
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height);
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 /* Disable the open/close transition during a terminal resize drag. */
 .layout--terminal-resizing.layout--terminal-drawer-open {
@@ -2169,6 +2205,7 @@ a[href] {
   overflow: hidden;
 }
 /* Border and background only visible when the terminal is actually expanded,
+/* Border and background only visible when the terminal is actually expanded,
    avoiding a 1px artifact line when the drawer is collapsed to 0px. */
 .layout--terminal-drawer-expanded .terminal-drawer {
   background: var(--terminal-bg, #111315);
@@ -2181,6 +2218,7 @@ a[href] {
   border-bottom: 1px solid var(--terminal-border);
 }
 /* When the terminal drawer is open, the sidebar and workspace panel span the
+/* When the terminal drawer is open, the sidebar and workspace panel span the
    full content height (rows 2–3) so only the chat pane is shortened. */
 .layout.layout--terminal-drawer-open .sidebar {
   grid-row: 2 / 4;
@@ -2188,8 +2226,18 @@ a[href] {
 .layout.layout--terminal-drawer-open .workbench-dock {
   grid-row: 2 / 4;
 }
+/* The dock's vertical drag handle must span the same rows as the dock so the
+/* The dock's vertical drag handle must span the same rows as the dock so the
+   resizer line extends from the top of the chat area down to the bottom of
+   the terminal drawer. */
+.layout--terminal-drawer-open .workspace-panel-resizer {
+  grid-row: 2 / 4;
+}
 /* Chrome-hidden variants: rows shift up by one (3 rows total: content, terminal, statusbar). */
 .layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open .sidebar {
+  grid-row: 1 / 3 !important;
+}
+.layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open .workspace-panel-resizer {
   grid-row: 1 / 3 !important;
 }
 .layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open .workbench-dock {
@@ -2198,16 +2246,25 @@ a[href] {
 .app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open .sidebar {
   grid-row: 1 / 3 !important;
 }
+.app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open .workspace-panel-resizer {
+  grid-row: 1 / 3 !important;
+}
 .app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open .workbench-dock {
   grid-row: 1 / 3 !important;
 }
 .layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 .app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 /* StatusBar shifts to row 4 when the terminal drawer adds an extra row. */
 .layout--terminal-drawer-open .statusbar {
@@ -2217,6 +2274,7 @@ a[href] {
   grid-row: 3;
 }
 
+/* Keep the old layout--terminal-open rules for backward compat — they are
 /* Keep the old layout--terminal-open rules for backward compat — they are
    no longer added by App.tsx but may remain in cached localStorage styles. */
 .layout--terminal-open {
@@ -2320,6 +2378,7 @@ a[href] {
   overflow: hidden;
 }
 
+/* Windows window movement belongs to the dedicated chrome surfaces. Keep the
 /* Windows window movement belongs to the dedicated chrome surfaces. Keep the
    navigation sidebar and its adjacent resize handle out of the native drag path. */
 .app--windows .sidebar {
@@ -2530,7 +2589,7 @@ a[href] {
   border: 1px solid var(--border-soft);
   border-radius: 9px;
   background: color-mix(in srgb, var(--bg-elev) 86%, var(--sidebar-bg));
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--shadow) 11%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--shadow-color) 11%, transparent);
   padding: 7px;
 }
 .sidebar-im__panel-head {
@@ -2730,28 +2789,34 @@ a[href] {
   position: absolute;
   top: var(--app-chrome-height);
   bottom: var(--statusbar-height);
-  left: calc(var(--sidebar-width) - 4px);
+  /* The sidebar is position:static, so anchor via left from the layout
+     container. 1px width means the hairline sits exactly on the sidebar's
+     right edge (no -4px centering offset from the old 8px rail). */
+  left: calc(var(--sidebar-width) - 1px);
   z-index: var(--z-layout-resizer);
-  width: 8px;
+  width: 1px;
   padding: 0;
   border: 0;
-  background: transparent;
+  /* Same visual model as .workspace-panel-resizer: the element itself is the
+     1px hairline, ::before widens the drag hit area, hover paints accent. */
+  background: var(--border-soft);
   cursor: col-resize;
+  touch-action: none;
 }
-.sidebar-resizer::after {
+.sidebar-resizer::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: transparent;
-  transition: background 0.12s, box-shadow 0.12s;
+  left: -3px;
+  right: -3px;
 }
-.sidebar-resizer:hover::after,
-.sidebar-resizer:focus-visible::after,
-.layout--sidebar-resizing .sidebar-resizer::after {
+.sidebar-resizer::after {
+  display: none;
+}
+.sidebar-resizer:hover,
+.sidebar-resizer:focus-visible,
+.layout--sidebar-resizing .sidebar-resizer {
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
@@ -2780,8 +2845,8 @@ a[href] {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
-  right: -3px;
+  left: 0;
+  right: -7px;
 }
 .workspace-panel-resizer::after {
   display: none;
@@ -3285,6 +3350,7 @@ a[href] {
 }
 
 /* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
+/* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
    the Wails bridge and background startup work settle, then yields to the app. */
 .startup-splash {
   position: fixed;
@@ -3378,6 +3444,10 @@ a[href] {
      inset on the scroller; rows own --transcript-inline-pad. */
   --transcript-inline-pad: 32px;
   position: relative;
+  /* Virtuoso owns the logical anchor. Browser scroll anchoring reacts to
+     asynchronous Markdown boxes before Virtuoso receives their size and can
+     move the scroller in the opposite direction during an upward gesture. */
+  overflow-anchor: none;
   height: 100%;
   overflow-y: auto;
   overflow-y: overlay;
@@ -3393,6 +3463,84 @@ a[href] {
   min-height: 0;
   height: 100%;
 }
+.transcript-navigation-surface {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.transcript-navigation-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+.transcript-navigation-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-inline-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--fg);
+  background: var(--chat-bg, var(--bg));
+  pointer-events: auto;
+  user-select: none;
+  cursor: progress;
+}
+.transcript-navigation-overlay__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--fg) 24%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: transcript-navigation-spin 0.8s linear infinite;
+}
+@keyframes transcript-navigation-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .transcript-navigation-overlay__spinner { animation: none; }
+}
+/* The active turn streams as the virtual list's in-flow Footer: inside the
+   scroller, right after the last history row, but outside Virtuoso's
+   measured size tree — unbounded growth never reaches the list's anchors or
+   recovery machinery (#8657/#8688). */
+.transcript__live-region {
+  position: relative;
+  width: 100%;
+}
+.transcript__live-region--overlay {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: var(--z-local-raised);
+  pointer-events: none;
+}
+.transcript__live-content {
+  position: relative;
+  width: 100%;
+}
+.transcript[data-transcript-reader-visual-guard="true"] [data-testid="virtuoso-item-list"] {
+  transform: translateY(var(--transcript-reader-visual-offset, 0));
+  will-change: transform;
+}
+.transcript__live-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 4px var(--transcript-inline-pad, 32px) 12px;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+}
 .transcript > * {
   max-width: var(--maxw);
   margin-left: auto;
@@ -3400,6 +3548,7 @@ a[href] {
 }
 
 /* ── Virtual transcript rows ─────────────────────────────────────── */
+/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
 /* React Virtuoso owns list offsets and row measurement. Rows stay in normal
    flow; flow-root contains child margins so ResizeObserver sees the complete
    dynamic height instead of a collapsed margin outside the measured item. */
@@ -3416,6 +3565,18 @@ a[href] {
   max-width: none;
   margin-left: 0;
   margin-right: 0;
+  /* Virtuoso's inline style pins only top (position:absolute; top:0;
+     width:100%). With the scroller's horizontal padding, width:100%
+     resolves against the padding box and starts at padding-left, so the
+     right edge overflows past the content box and gets clipped by
+     overflow-x:hidden. Pin left/right to the content box edges instead
+     (following --transcript-pad-x) so rows keep the scroller's padding
+     on both sides and never overflow. */
+  left: var(--transcript-pad-x, 32px);
+  right: var(--transcript-pad-x, 32px);
+  /* Virtuoso sets width:100% inline; without !important the inline width
+     wins over left/right and right-edge clipping returns. */
+  width: auto !important;
 }
 .transcript__row {
   position: relative;
@@ -3436,6 +3597,22 @@ a[href] {
   max-width: var(--maxw);
   margin-left: auto;
   margin-right: auto;
+}
+.transcript__older-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+.transcript__older-status .btn {
+  flex-shrink: 0;
+}
+.transcript__older-spinner {
+  flex-shrink: 0;
+  animation: spin 0.8s linear infinite;
 }
 .transcript-selection-overlay {
   position: absolute;
@@ -3461,6 +3638,15 @@ a[href] {
 .history-preview__body .transcript__row > * {
   max-width: none;
 }
+/* Keep the lazy Markdown source readable while Virtuoso waits for the real
+   parser result. The row itself remains free to measure once the marker is
+   removed; no manual-scroll path writes a forced row height. */
+.transcript__row .msg--assistant .msg__body > .md[data-transcript-geometry-pending] {
+  box-sizing: border-box;
+  height: max(0px, calc(var(--transcript-row-estimate) - 32px));
+  overflow: hidden;
+}
+/* Offscreen rows are unmounted by the virtualizer, so content-visibility
 /* Offscreen rows are unmounted by the virtualizer, so content-visibility
    culling is redundant inside rows — and skipping it keeps offsetHeight
    measurements exact instead of contain-intrinsic-size placeholders. */
@@ -3531,6 +3717,22 @@ a[href] {
 .transcript--empty > .welcome {
   margin-block: auto;
   margin-inline: 0;
+}
+.transcript__loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: auto;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+.transcript__loading-icon {
+  width: 16px;
+  height: 16px;
+  animation: navigation-surface-spin 0.8s linear infinite;
+}
+@keyframes navigation-surface-spin {
+  to { transform: rotate(360deg); }
 }
 .warm-collapse {
   display: block;
@@ -3825,40 +4027,26 @@ a[href] {
   animation: jump-bar-in 0.18s ease-out 0.08s forwards;
 }
 .jump-scroll {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  max-height: 100%;
-  padding: 8px 0;
-  overflow-y: auto;
+  position: relative;
+  width: 32px;
+  height: 100%;
   cursor: pointer;
   pointer-events: auto;
-  scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
-}
-.jump-scroll::-webkit-scrollbar {
-  display: none;
+  outline: none;
 }
 .jump-item {
-  position: relative;
+  position: absolute;
+  left: 0;
   display: flex;
-  flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
   width: 32px;
-  min-height: 14px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
+  height: 3px;
+  transform: translateY(-50%);
   pointer-events: none;
 }
-.jump-item:focus {
-  outline: none;
-}
-.jump-item:focus-visible .jump-dot {
+.jump-scroll:focus-visible {
+  border-radius: 4px;
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .jump-dot {
@@ -3870,6 +4058,15 @@ a[href] {
     background 200ms,
     width 400ms cubic-bezier(0.34, 1.56, 0.64, 1),
     box-shadow 150ms;
+}
+.jump-scroll[data-density="compact"] .jump-dot {
+  height: 2px;
+}
+.jump-scroll[data-density="packed"] .jump-dot {
+  height: 1px;
+}
+.jump-item[data-loaded="false"] .jump-dot {
+  background: color-mix(in srgb, var(--border) 55%, transparent);
 }
 .jump-dot[data-d="0"] {
   background: var(--accent);
@@ -4097,6 +4294,17 @@ a[href] {
   -webkit-user-select: text;
   content-visibility: auto;
   contain-intrinsic-size: 1px 60px;
+}
+/* Virtuoso already owns transcript virtualization. A second content-visibility
+/* Virtuoso already owns transcript virtualization. A second content-visibility
+ * viewport inside each mounted row gives the browser a 60px intrinsic box and
+ * then expands it when the row crosses the viewport, which makes Virtuoso's
+ * upward compensation write a large reverse frame during manual reading. Keep
+ * content-visibility for non-transcript message lists, but let the transcript
+ * size tree see the real row geometry from its first mount. */
+.transcript__row .msg {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 .msg--user {
   display: flex;
@@ -4555,7 +4763,7 @@ a[href] {
 }
 .msg-pasted-head button:hover {
   color: var(--fg);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 .msg-pasted-expanded {
   padding: 8px 10px 10px;
@@ -4606,6 +4814,7 @@ a[href] {
   contain-intrinsic-size: 1px 36px;
 }
 /* T1: a tone-colored sweep bar along the bottom while the card is running
+/* T1: a tone-colored sweep bar along the bottom while the card is running
    (running cards render a .process-card__spin status icon). */
 @media (prefers-reduced-motion: no-preference) {
   .process-card:has(.process-card__spin)::after {
@@ -4629,6 +4838,8 @@ a[href] {
 .reasoning {
   margin: 2px 0 4px;
 }
+.reasoning--loading { height: 58px; }
+.reasoning--loading[data-expanded] { height: min(40vh, 480px); }
 .reasoning__head {
   display: inline-flex;
   align-items: center;
@@ -4681,6 +4892,7 @@ a[href] {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* While streaming the summary scrolls to the line tail, where a trailing
 /* While streaming the summary scrolls to the line tail, where a trailing
    ellipsis would sit on top of the live text. */
 .reasoning-summary[data-follow-end] {
@@ -4740,13 +4952,119 @@ button.reasoning-summary:focus-visible {
 }
 
 .msg-search-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 0.75em;
+  color: var(--fg-faint);
+  font-size: var(--text-md);
 }
-.msg-search-sources .md {
+.msg-search-sources__toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 8px 2px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.msg-search-sources__toggle:hover,
+.msg-search-sources__toggle:focus-visible {
   color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
-.msg-search-sources .md a {
+.msg-search-sources__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.2s;
+}
+.msg-search-sources__chevron--open {
+  transform: rotate(90deg);
+}
+.msg-search-sources__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 2px 32px;
+  max-width: min(760px, 100%);
+}
+.msg-search-source {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.msg-search-source__link {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.msg-search-source__link:hover .msg-search-source__title,
+.msg-search-source__link:focus-visible .msg-search-source__title {
   color: var(--accent);
+}
+.msg-search-source__title {
+  overflow-wrap: anywhere;
+  font-weight: 560;
+  line-height: 1.35;
+}
+.msg-search-source__url {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+}
+.msg-search-source__url > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-search-source__copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.msg-search-source__copy:hover,
+.msg-search-source__copy:focus-visible {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.tool__search-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.tool__search-query {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.tool__search-count {
+  color: var(--fg-faint);
 }
 
 .msg-memory-citations {
@@ -5007,7 +5325,10 @@ button.reasoning-summary:focus-visible {
 }
 .reasoning__body,
 .turn-collapse__inline-reasoning {
-  overflow: hidden;
+  max-height: min(40vh, 480px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 2px 0 6px 8px;
   border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding-left: 12px;
@@ -5026,6 +5347,15 @@ button.reasoning-summary:focus-visible {
   line-height: inherit;
   white-space: normal;
 }
+/* Streaming reasoning renders as plain append-only text (#8657/#8688). */
+.reasoning__stream-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .reasoning__body > .md p,
 .turn-collapse__inline-reasoning > .md p,
 .tool__subagent-preview-text--markdown > .md p {
@@ -5041,6 +5371,19 @@ button.reasoning-summary:focus-visible {
 .md {
   font-family: var(--font-content-family);
   font-weight: var(--font-weight-regular);
+}
+/* KaTeX \boxed draws its frame as an empty .fbox span that relies on
+   width:100% resolving against an inline-table + table-layout:fixed row.
+   WKWebView resolves that percentage to the empty span's intrinsic width (0),
+   so the box's top/bottom borders collapse to nothing and the left/right
+   borders merge into a single tall vertical bar. Fill the frame to its
+   containing row with -webkit-fill-available instead, which preserves the
+   span's inline-block baseline alignment (its vertical position) while giving
+   it the full content width. Keep a standards-compatible fallback for
+   browsers that do not implement the WebKit value. */
+.md .katex .fbox {
+  width: 100%;
+  width: -webkit-fill-available;
 }
 .md--stream-tail {
   overflow-wrap: anywhere;
@@ -5144,6 +5487,7 @@ button.reasoning-summary:focus-visible {
   padding: 1px 5px;
 }
 /* Horizontal overflow only: never create a vertical nested scroller. CSS
+/* Horizontal overflow only: never create a vertical nested scroller. CSS
    forces overflow-y to "auto" when overflow-x is non-visible, so tables use a
    wrapper (below) for x-scroll and the table itself stays overflow:visible. */
 .md-table-scroll {
@@ -5153,6 +5497,7 @@ button.reasoning-summary:focus-visible {
   overflow-y: hidden;
   margin: 0 0 12px;
 }
+/* Large tables default to an in-flow preview; expand mounts the virtual
 /* Large tables default to an in-flow preview; expand mounts the virtual
    scroller only when the user opts in (see MarkdownTable.tsx). */
 .md-table-fold {
@@ -5211,6 +5556,7 @@ button.reasoning-summary:focus-visible {
   background: var(--bg-soft);
   font-weight: var(--font-weight-strong);
 }
+/* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
 /* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
    wrapper owns vertical scroll, the thead stays pinned, and body rows are
    absolutely positioned by the virtualizer. Flex rows keep header/body cells
@@ -5278,6 +5624,7 @@ button.reasoning-summary:focus-visible {
   opacity: 0.55;
 }
 
+/* Override browser user-agent <code> monospace so inherited font (from
 /* Override browser user-agent <code> monospace so inherited font (from
    .code / .code-lines-wrap) reaches highlighted tokens and line text. */
 .code code,
@@ -5351,6 +5698,11 @@ button.reasoning-summary:focus-visible {
   font-size: var(--font-code);
   line-height: 1.55;
   color: var(--fg);
+  /* The preview pane changes width while a file opens (split initializes).
+     WebKit re-runs text inflation on that relayout; code rows must never be
+     rescaled — their row height is line-height × font-size, so inflation
+     shows up as huge gaps between lines until the layout settles. */
+  -webkit-text-size-adjust: 100%;
 }
 .code-line-row {
   display: flex;
@@ -5382,6 +5734,13 @@ button.reasoning-summary:focus-visible {
   padding: 0 13px;
   white-space: pre;
   line-height: inherit;
+  /* A wrapped code line would double the row height (the "big gaps between
+     lines" symptom). white-space: pre already prevents wrapping; re-assert
+     it explicitly so theme packs or later cascades cannot downgrade the
+     line to pre-wrap/normal and fold long lines during the preview's
+     width transition. */
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* ── search bar (Ctrl+F) ──────────────────────────────────────────────── */
@@ -5400,7 +5759,7 @@ button.reasoning-summary:focus-visible {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   max-width: calc(100% - 16px);
   font-family: var(--font-sans);
-  font-size: var(--font-sm);
+  font-size: var(--text-sm);
 }
 .code-search__icon {
   display: flex;
@@ -5430,7 +5789,7 @@ button.reasoning-summary:focus-visible {
   color: var(--fg-faint);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-size: var(--font-xs);
+  font-size: var(--text-xs);
   padding: 0 4px;
 }
 .code-search__count--error {
@@ -5461,7 +5820,7 @@ button.reasoning-summary:focus-visible {
   flex-shrink: 0;
 }
 .code-search__close:hover {
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   color: var(--fg);
 }
 .code-search__copy.copybtn {
@@ -5481,7 +5840,7 @@ button.reasoning-summary:focus-visible {
 .code-search__copy.copybtn:hover,
 .code-search__copy.copybtn:focus-visible {
   gap: 0;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   color: var(--fg);
 }
 .code-search__nav {
@@ -5499,7 +5858,7 @@ button.reasoning-summary:focus-visible {
   flex-shrink: 0;
 }
 .code-search__nav:hover {
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   color: var(--fg);
 }
 .code-search__toggle {
@@ -5519,7 +5878,7 @@ button.reasoning-summary:focus-visible {
   flex-shrink: 0;
 }
 .code-search__toggle:hover {
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   color: var(--fg);
 }
 .code-search__toggle--on {
@@ -5676,8 +6035,7 @@ button.reasoning-summary:focus-visible {
 }
 
 .mermaid-diagram__preview:active,
-.mermaid-diagram__preview svg:active,
-.mermaid-diagram__preview .svg-pan-zoom_viewport:active {
+.mermaid-diagram__preview svg:active {
   cursor: grabbing;
 }
 
@@ -5687,6 +6045,7 @@ button.reasoning-summary:focus-visible {
   height: 100%;
   max-width: none;
   cursor: grab;
+  touch-action: none;
 }
 
 .mermaid-diagram__preview a {
@@ -6056,6 +6415,7 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--accent-soft);
 }
 /* Read-only research calls keep the same process-card shell, but their content
+/* Read-only research calls keep the same process-card shell, but their content
    is visually quieter than write/shell/sub-agent calls. */
 .tool--quiet {
   border-color: var(--border-soft);
@@ -6149,6 +6509,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 /* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
+/* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
  * carries the phase color; the chip never grows the head beyond one line. */
 .tool__subagent-chip {
   display: inline-flex;
@@ -6184,11 +6545,11 @@ body > .mermaid-diagram--fullscreen {
 }
 .tool__subagent-chip--reasoning .tool__subagent-dot,
 .tool__subagent-chip--responding .tool__subagent-dot {
-  background: var(--accent-warm);
+  background: var(--accent);
 }
 .tool__subagent-chip--tool .tool__subagent-dot,
 .tool__subagent-chip--retrying .tool__subagent-dot {
-  background: var(--accent-cool);
+  background: var(--accent);
 }
 .tool__subagent-chip--completed .tool__subagent-dot {
   background: var(--ok);
@@ -6201,6 +6562,7 @@ body > .mermaid-diagram--fullscreen {
   50% { opacity: 0.35; }
 }
 
+/* Expanded sub-agent preview: reasoning / response preview / notices live in
 /* Expanded sub-agent preview: reasoning / response preview / notices live in
  * their own block and never mix with ordinary tool output. Long text wraps;
  * it must not widen the chat column. */
@@ -6440,10 +6802,11 @@ body > .mermaid-diagram--fullscreen {
 /* ── footer: composer + status line ──────────────────────────────────────── */
 .footer {
   flex: 0 0 auto;
-  border-top: 1px solid var(--border-soft);
+  border-top: 0px solid var(--border-soft);
   background: var(--chat-bg);
   padding: 12px 32px 10px;
 }
+/* Decision cards (plan/tool approval, ask, clear-context) can grow tall; cap
 /* Decision cards (plan/tool approval, ask, clear-context) can grow tall; cap
    the footer and let it scroll so approval buttons never slip behind the
    status bar (#7030). Scoped to the decision state only: an unconditional
@@ -6529,9 +6892,9 @@ body > .mermaid-diagram--fullscreen {
   transition: border-color 0.12s;
 }
 .composer-card--resized {
-  /* --composer-height is always the user's logical height; the run strip's
-     reservation lives in this calc so the live resize drag (which writes the
-     raw logical height) and the React render path can never disagree. */
+  /* --composer-height excludes the run strip and may grow above the user's
+     saved minimum to reveal a longer draft. The strip reservation stays in
+     this calc so live resize and content sizing share one coordinate space. */
   height: calc(var(--composer-height) + var(--composer-run-strip-reserved, 0px));
   display: flex;
   flex-direction: column;
@@ -6539,10 +6902,10 @@ body > .mermaid-diagram--fullscreen {
 .composer-card:focus-within {
   border-color: var(--fg-faint);
 }
-/* Run strip: an in-flow bar at the top of the card. For user-resized cards
-   (fixed --composer-height), the JS adds the strip's reserved height so the
-   meta row stays fully visible. For auto-height cards the card grows
-   naturally. */
+/* Run strip: an in-flow bar at the top of the card. For user-sized cards JS
+/* Run strip: an in-flow bar at the top of the card. For user-sized cards JS
+   adds the strip's reserved height so the input's logical minimum is unchanged.
+   For natural-height cards the card grows without the explicit reservation. */
 .composer-run-strip {
   display: flex;
   align-items: center;
@@ -6577,6 +6940,7 @@ body > .mermaid-diagram--fullscreen {
 .composer-run-strip--waiting .composer-run-strip__dot {
   animation: none;
 }
+/* Attention handoff: while a prompt card is waiting on the user, the card
 /* Attention handoff: while a prompt card is waiting on the user, the card
    drops the accent running tint and takes a calm warn edge instead. */
 .composer-card--waiting {
@@ -6619,6 +6983,7 @@ body > .mermaid-diagram--fullscreen {
   opacity: 0.95;
 }
 /* Hide the resize handle while the input is focused — the user is typing,
+/* Hide the resize handle while the input is focused — the user is typing,
    not resizing.  The handle otherwise appears as a colored pill above the
    card on hover (which always co-occurs with focus after a click). */
 .composer-card:focus-within .composer-resize-handle::before {
@@ -6643,7 +7008,6 @@ body > .mermaid-diagram--fullscreen {
      its anchor while a menu is open; 50vh is a no-JS/pre-measure fallback. */
   max-height: min(360px, var(--composer-menu-available-height, 50vh));
   overflow-y: auto;
-  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 5px;
@@ -6757,6 +7121,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 1;
 }
 .composer__content {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -6854,7 +7219,7 @@ body > .mermaid-diagram--fullscreen {
 .invocation-display__remove:hover,
 .invocation-display__remove:focus-visible {
   outline: none;
-  background: var(--hover);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
   color: var(--fg);
 }
 @media (hover: none) {
@@ -6961,8 +7326,8 @@ body > .mermaid-diagram--fullscreen {
   vertical-align: text-bottom;
 }
 .composer-card--resized .composer__rich-input {
-  /* Fill the user's fixed card height and scroll inside; height: auto would
-     collapse the input to its intrinsic height and break the resized layout. */
+  /* Fill the current logical card height during live resize; content sizing
+     supplies an inline height after the gesture settles. */
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -6982,8 +7347,8 @@ body > .mermaid-diagram--fullscreen {
   display: none;                    /* Chrome / Safari / Wails webview */
 }
 .composer-card--resized .composer__input {
-  /* The resized card gets no inline textarea height from JS; height: auto
-     would pin the rows=1 textarea to a single visible line forever. */
+  /* Fill the current logical card height during live resize; content sizing
+     supplies an inline height after the gesture settles. */
   height: 100%;
   min-height: 0;
   max-height: none;
@@ -6991,6 +7356,17 @@ body > .mermaid-diagram--fullscreen {
   scrollbar-width: thin;           /* restore scrollbar when resized */
 }
 .composer-card--resized .composer__input::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.composer-card--auto-overflow .composer__input {
+  /* Autosize mode keeps the scrollbar hidden while content fits; once the
+     inline overflow-y flips to auto (content exceeds the max height) restore
+     the thin scrollbar so long drafts expose their scrollability
+     (#8494/#8742/#9019). */
+  scrollbar-width: thin;
+}
+.composer-card--auto-overflow .composer__input::-webkit-scrollbar {
   display: block;
   width: 6px;
 }
@@ -7182,14 +7558,13 @@ body > .mermaid-diagram--fullscreen {
   max-width: min(168px, 28vw);
 }
 
-.composer-meta__control--profile {
-  flex: 0 0 auto;
-  max-width: min(158px, 24vw);
-}
-
-.composer-meta__control--profile .tooltip-trigger {
-  min-width: 0;
-  max-width: 100%;
+.composer-meta__control--floor {
+  flex: 0 1 auto;
+  min-width: 132px;
+  max-width: min(220px, 26vw);
+  margin-inline-start: 2px;
+  display: flex;
+  align-items: center;
 }
 
 .composer-meta__control--approval {
@@ -7243,6 +7618,28 @@ body > .mermaid-diagram--fullscreen {
   --composer-modebar-active-bg: var(--mode-auto-bg);
   --composer-modebar-active-border: var(--mode-auto-border);
   --composer-modebar-active-fg: var(--mode-auto-fg);
+}
+
+/* Two segments instead of three, so the thumb spans half the track. Standard
+/* Two segments instead of three, so the thumb spans half the track. Standard
+   needs a solid neutral thumb, not the near-invisible default: otherwise
+   leaving delivery reads as the pill vanishing rather than sliding. */
+.composer-modebar--floor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  --composer-modebar-active-bg: color-mix(in srgb, var(--fg) 16%, var(--surface-2));
+  --composer-modebar-active-border: color-mix(in srgb, var(--fg) 30%, transparent);
+  --composer-modebar-active-fg: var(--fg);
+}
+
+.composer-modebar--floor .composer-modebar__thumb {
+  width: calc((100% - 4px) / 2);
+}
+
+.composer-modebar--floor[data-floor="delivery"] {
+  --composer-modebar-index: 1;
+  --composer-modebar-active-bg: var(--accent);
+  --composer-modebar-active-border: var(--accent-strong);
+  --composer-modebar-active-fg: var(--accent-fg);
 }
 
 .composer-modebar--approval[data-mode="auto"] {
@@ -7597,8 +7994,10 @@ body > .mermaid-diagram--fullscreen {
     max-width: 100%;
   }
 
-  .composer-meta__control--profile {
-    max-width: 126px;
+  .composer-meta__control--floor {
+    flex-basis: 120px;
+    min-width: 110px;
+    max-width: 120px;
   }
 
   .composer-meta__control--intent {
@@ -7654,10 +8053,10 @@ body > .mermaid-diagram--fullscreen {
     max-width: 92px;
   }
 
-  .composer-meta__control--profile {
-    flex-basis: 68px;
-    width: 68px;
-    max-width: 68px;
+  .composer-meta__control--floor {
+    flex-basis: 62px;
+    min-width: 58px;
+    max-width: 62px;
   }
 
   .composer-meta__divider {
@@ -7760,7 +8159,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
@@ -7880,6 +8278,17 @@ body > .mermaid-diagram--fullscreen {
   color: var(--accent);
 }
 
+.composer-modebar__inferred {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
 .composer-intent-menu__stop {
   --wails-draggable: no-drag;
   align-self: flex-end;
@@ -7923,7 +8332,7 @@ body > .mermaid-diagram--fullscreen {
   display: block;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--dim);
+  color: var(--fg-faint);
 }
 
 .composer-intent-menu__goal-runtime-line--blocked {
@@ -8098,7 +8507,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--panel);
   box-shadow: var(--shadow-2);
   color: var(--fg);
 }
@@ -8349,7 +8757,6 @@ body > .mermaid-diagram--fullscreen {
   min-width: 200px;
   max-height: 50vh;
   overflow-y: auto;
-  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 9px;
   padding: 5px;
@@ -8543,6 +8950,57 @@ body > .mermaid-diagram--fullscreen {
 }
 .reasonix-confirm-dialog__actions .btn { min-width: 84px; }
 .reasonix-confirm-dialog__actions .btn--danger { font-weight: 600; }
+.blank-project-backdrop {
+  --wails-draggable: no-drag;
+  z-index: var(--z-overlay-backdrop);
+}
+.blank-project-dialog {
+  max-width: 460px;
+  color: var(--fg);
+}
+.blank-project-dialog__field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.blank-project-dialog__label {
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+  font-weight: 600;
+}
+.blank-project-dialog__path {
+  display: block;
+  overflow: hidden;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blank-project-dialog__input {
+  width: 100%;
+}
+.blank-project-dialog__created,
+.blank-project-dialog__error {
+  margin: 0 0 12px;
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.blank-project-dialog__created {
+  color: var(--fg-dim);
+}
+.blank-project-dialog__error {
+  min-height: 1.45em;
+  color: var(--err);
+}
+.blank-project-dialog__actions .btn {
+  min-width: 92px;
+}
 .btn {
   display: inline-flex;
   align-items: center;
@@ -8613,6 +9071,9 @@ body > .mermaid-diagram--fullscreen {
   margin: 0 auto 10px;
   animation: shelf-in var(--dur-slow) var(--ease-out) both;
 }
+.todo-exit {
+  animation: shelf-in 240ms 900ms ease reverse both;
+}
 @keyframes shelf-in {
   from {
     opacity: 0;
@@ -8628,15 +9089,51 @@ body > .mermaid-diagram--fullscreen {
 .composer-decision-host[hidden] {
   display: none !important;
 }
+.composer-decision-host--footprint-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+.footer--navigation-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
 .prompt-shelf__card {
   display: grid;
   gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-  border-radius: 10px;
-  background: var(--bg-elev);
-  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.08);
-  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: rgba(64, 64, 64, 0.06);
+  padding: 7px 12px;
   outline: none;
+}
+
+.prompt-shelf__card--collapsible {
+  cursor: pointer;
+}
+
+.prompt-shelf__card--collapsed .prompt-shelf__content > :not(.prompt-shelf__header) {
+  display: none;
+}
+
+/* Todo shelf: header actions (collapse/close) appear on card hover/focus. */
+.prompt-shelf--todo .prompt-shelf__header-actions {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.prompt-shelf--todo:hover .prompt-shelf__header-actions,
+.prompt-shelf--todo .prompt-shelf__header-button:focus-visible {
+  opacity: 1;
+}
+
+:root[data-theme="light"] .prompt-shelf__card,
+:root[data-theme="light"][data-theme-style] .prompt-shelf__card {
+  background: rgba(64, 64, 64, 0.05);
+}
+
+:root[data-theme="dark"] .prompt-shelf__card,
+:root[data-theme="dark"][data-theme-style] .prompt-shelf__card {
+  background: rgba(255, 255, 255, 0.08);
 }
 .prompt-shelf__content {
   display: grid;
@@ -8644,10 +9141,8 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
 }
 .prompt-shelf__card:focus-visible {
-  border-color: var(--accent);
-  box-shadow:
-    0 7px 18px rgba(0, 0, 0, 0.1),
-    0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--fg-faint) 40%, transparent);
+  box-shadow: none;
 }
 .prompt-shelf__header {
   display: flex;
@@ -8663,21 +9158,26 @@ body > .mermaid-diagram--fullscreen {
 }
 .prompt-shelf__title {
   display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   color: var(--fg);
   font-size: 12.5px;
   font-weight: 650;
   line-height: 1.25;
 }
 .prompt-shelf__heading {
+  flex: 0 0 auto;
   min-width: 0;
 }
 .prompt-shelf__badges {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 .prompt-shelf__badge {
   display: inline-flex;
@@ -8702,13 +9202,19 @@ body > .mermaid-diagram--fullscreen {
   color: color-mix(in srgb, var(--err) 70%, var(--fg));
 }
 .prompt-shelf__meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg-dim);
   font-size: 11.5px;
-  line-height: 1.4;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  font-weight: 500;
+  line-height: 1.25;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+  overflow-wrap: normal;
 }
 .prompt-shelf__header-actions,
 .prompt-shelf__quick-actions {
@@ -8854,6 +9360,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   min-width: 88px;
 }
+/* Unified decision surface: vertical full-width options, sticky footer, and
 /* Unified decision surface: vertical full-width options, sticky footer, and
    one bounded content scroller. Never collapses to horizontal pills. */
 .prompt-shelf--decision .prompt-shelf__card {
@@ -9618,6 +10125,7 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 /* Tool-approval consequence preview: same quick-pick pattern as the ask
+/* Tool-approval consequence preview: same quick-pick pattern as the ask
    detail row — pill buttons stay compact, the row spells out what the
    hovered/selected action will do. */
 .approval-consequence {
@@ -9796,13 +10304,13 @@ body > .mermaid-diagram--fullscreen {
 /* ── workspace side panel ────────────────────────────────────────────────── */
 .workspace-panel {
   --workspace-tree-width: 280px;
-  --workspace-tree-rail-width: 44px;
   --workspace-preview-min-width: 360px;
   position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr);
+  /* Preview on the left, file tree on the right (user preference). */
+  grid-template-columns: minmax(var(--workspace-preview-min-width), 1fr) var(--workspace-tree-width);
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
   background: var(--workspace-preview-bg);
@@ -9811,29 +10319,19 @@ body > .mermaid-diagram--fullscreen {
 .workspace-panel--embedded {
   border-left: none;
 }
-.workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden) {
-  grid-template-columns: var(--workspace-tree-rail-width) var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr);
-}
-.workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden) .workspace-files {
-  grid-column: 2;
-}
-.workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden) .workspace-preview {
-  grid-column: 3;
-}
 .workspace-panel--tree-hidden {
-  grid-template-columns: var(--workspace-tree-rail-width) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 .workspace-panel--tree-hidden .workspace-files {
   display: none;
 }
 .workspace-panel--tree-hidden .workspace-preview {
-  grid-column: 2;
+  grid-column: 1;
 }
 .workspace-panel--detail-only {
   grid-template-columns: minmax(0, 1fr);
 }
-.workspace-panel--detail-only .workspace-files,
-.workspace-panel--detail-only .workspace-tree-rail {
+.workspace-panel--detail-only .workspace-files {
   display: none;
 }
 .workspace-panel--detail-only .workspace-preview {
@@ -9854,19 +10352,21 @@ body > .mermaid-diagram--fullscreen {
 }
 .workspace-preview {
   grid-row: 1;
-  grid-column: 2;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   background: var(--workspace-preview-bg);
 }
 .workspace-panel--embedded.workspace-panel--split-preview .workspace-preview {
-  border-left: 1px solid var(--border-soft);
+  border-left: 0;
 }
 .workspace-tree-resizer {
   --wails-draggable: no-drag;
   position: absolute;
   top: 0;
-  left: calc(var(--workspace-tree-width) - 4px);
+  /* Tree sits on the right after the files/preview swap, so the resizer
+     rides the tree's left edge. */
+  left: calc(100% - var(--workspace-tree-width) - 4px);
   bottom: 0;
   z-index: var(--z-layout-resizer-active);
   width: 8px;
@@ -9875,9 +10375,6 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
   cursor: col-resize;
   touch-action: none;
-}
-.workspace-panel--with-tree-rail .workspace-tree-resizer {
-  left: calc(var(--workspace-tree-rail-width) + var(--workspace-tree-width) - 4px);
 }
 .workspace-tree-resizer::after {
   content: "";
@@ -9927,6 +10424,13 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   color: var(--fg-faint);
 }
+.workspace-current-file__icon.workspace-file-icon,
+.workspace-current-file__icon .workspace-file-icon {
+  width: 18px;
+  height: 20px;
+  flex: 0 0 18px;
+  font-size: 20px;
+}
 .workspace-current-file__text {
   flex: 1 1 auto;
   min-width: 0;
@@ -9947,7 +10451,8 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 .workspace-current-file__path {
-  display: block;
+  display: flex;
+  align-items: center;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-faint);
@@ -9955,6 +10460,25 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.workspace-current-file__crumb {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.15;
+}
+.workspace-current-file__crumb-sep {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin: 0 3px;
+  color: var(--fg-faint);
+  font-size: 16px;
+  line-height: 0;
 }
 .workspace-current-file__recent {
   --wails-draggable: no-drag;
@@ -9989,7 +10513,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 .workspace-recent-menu__title {
@@ -10075,78 +10598,6 @@ body > .mermaid-diagram--fullscreen {
 .workspace-iconbtn--on {
   color: var(--fg-dim);
 }
-.workspace-tree-rail {
-  grid-row: 1;
-  grid-column: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 6px;
-  background: var(--workspace-files-bg);
-  border-right: 1px solid var(--border-soft);
-}
-.workspace-panel--embedded .workspace-tree-rail {
-  padding-top: 9px;
-}
-.workspace-tree-reveal {
-  background: var(--bg-elev);
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-}
-.workspace-preview__meta {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border-soft);
-  color: var(--fg-faint);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-.workspace-panel--embedded .workspace-preview__meta {
-  padding: 7px 12px;
-}
-.workspace-preview__meta span,
-.workspace-crumb {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workspace-crumb,
-.workspace-crumb-group {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 7px;
-}
-.workspace-crumb {
-  --wails-draggable: no-drag;
-  max-width: 160px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--fg-dim);
-  font: inherit;
-}
-.workspace-crumb:hover {
-  color: var(--fg);
-}
-.workspace-crumb--current {
-  color: var(--fg);
-  cursor: default;
-}
-.workspace-crumb--current:hover {
-  color: var(--fg);
-}
-.workspace-preview__size {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-family: var(--mono);
-}
 .workspace-preview__body {
   position: relative;
   flex: 1 1 auto;
@@ -10188,10 +10639,14 @@ body > .mermaid-diagram--fullscreen {
   max-width: none;
 }
 .workspace-preview__body--code .code {
+  /* max-height: none overrides .code--scroll-y's min(60vh, 28rem) so the
+     preview fills its container even for virtual-scrolled (large) files
+     that opt into the .code--scroll-y class */
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   max-width: none;
+  max-height: none;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -10280,6 +10735,9 @@ body > .mermaid-diagram--fullscreen {
 .workspace-completion-summary--attention {
   border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft));
 }
+.workspace-completion-summary {
+  cursor: default;
+}
 .workspace-completion-summary__head,
 .workspace-completion-summary__metrics,
 .workspace-completion-summary__details {
@@ -10287,9 +10745,11 @@ body > .mermaid-diagram--fullscreen {
   flex-wrap: wrap;
   gap: 4px 8px;
 }
-.workspace-completion-summary__head strong {
-  margin-right: auto;
+.workspace-completion-summary__title {
+  margin: 0 auto 0 0;
   color: var(--fg);
+  font: inherit;
+  font-weight: 650;
 }
 .workspace-completion-summary__metrics {
   margin-top: 6px;
@@ -10309,7 +10769,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-elev);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36);
   transform-origin: top left;
   animation: menu-pop-in var(--dur-base) var(--ease-out) both;
@@ -10436,6 +10895,7 @@ body > .mermaid-diagram--fullscreen {
   font-size: 11px;
 }
 /* past:chats hover preview (PR-C2). Inherits colors from the .tooltip container
+/* past:chats hover preview (PR-C2). Inherits colors from the .tooltip container
    (--fg / --fg-dim / --fg-faint / --border / --bg-elev) and only adjusts layout. */
 .past-chat-hover {
   display: flex;
@@ -10481,7 +10941,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .workspace-files {
   grid-row: 1;
-  grid-column: 1;
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   background: var(--workspace-files-bg);
@@ -10664,6 +11124,15 @@ body > .mermaid-diagram--fullscreen {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+/* Guides appear only while hovering the files panel so the expanded-tree
+/* Guides appear only while hovering the files panel so the expanded-tree
+   connectors don't clutter the default view. */
+.workspace-files:hover .workspace-tree__guides,
+.workspace-files:focus-within .workspace-tree__guides {
+  opacity: 1;
 }
 .workspace-tree__guide {
   position: absolute;
@@ -10716,9 +11185,82 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   text-align: left;
 }
-.workspace-change:hover {
+.workspace-change > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+.workspace-change-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border-radius: var(--tree-row-radius);
+}
+/* Hover/selection highlight spans the whole row (file entry + revert button)
+/* Hover/selection highlight spans the whole row (file entry + revert button)
+   so the revert control sits inside the same background as the file. The
+   inner file button stays transparent and inherits the row's surface. */
+.workspace-change-row:hover {
   background: var(--tree-row-hover-bg);
+}
+.workspace-change-row:hover .workspace-change {
   color: var(--fg);
+}
+.workspace-change-row:has(.workspace-change--active) {
+  background: var(--tree-row-current-bg);
+}
+.workspace-change-row:has(.workspace-change--active) .workspace-change {
+  color: var(--tree-row-current-fg);
+}
+.workspace-change-row .workspace-change {
+  flex: 1 1 auto;
+  border-radius: 0;
+}
+.workspace-change__revert {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  min-width: 42px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  /* Opaque surface so the overlay fully covers the status text beneath it —
+     a transparent fill would let the badge glyphs show through the button. */
+  background: var(--bg-soft);
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+}
+/* The revert control is a per-row action overlaid on the status badge: hidden
+/* The revert control is a per-row action overlaid on the status badge: hidden
+   until the row is hovered, then revealed in the same right-hand slot so it
+   reads as replacing the badge. Keyboard focus reveals it too, so the action
+   is reachable without a pointer. */
+.workspace-change-row:hover .workspace-change__revert,
+.workspace-change-row:has(.workspace-change--active) .workspace-change__revert,
+.workspace-change__revert:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.workspace-change__revert:hover,
+.workspace-change__revert:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--danger) 9%, var(--bg-soft));
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
+}
+.workspace-change__revert:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--danger) 24%, transparent);
+  outline-offset: 2px;
 }
 .workspace-change--disabled {
   cursor: default;
@@ -10728,7 +11270,8 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-dim);
 }
 .workspace-change--active {
-  background: var(--tree-row-current-bg);
+  /* Background now lives on the row (see .workspace-change-row:has(...)); the
+     entry itself only tints the text so the revert button shares the surface. */
   color: var(--tree-row-current-fg);
 }
 .workspace-change__body {
@@ -10767,19 +11310,16 @@ body > .mermaid-diagram--fullscreen {
   gap: 3px;
 }
 .workspace-change__badge {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 5px;
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  /* Pure status label — intentionally non-interactive: no border, no
+     background, no button affordance. The revert button carries the only
+     interactive affordance in the row. */
+  display: inline;
   color: var(--fg-faint);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1;
 }
 .workspace-change__badge--git {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  color: var(--fg-faint);
 }
 .workspace-change-scope {
   display: flex;
@@ -11112,6 +11652,7 @@ body > .mermaid-diagram--fullscreen {
   }
 }
 /* Overlays that opt into exit animation via useMountTransition flip
+/* Overlays that opt into exit animation via useMountTransition flip
  * data-state="closing" before unmount; reverse the backdrop fade. */
 .drawer-backdrop[data-state="closing"] {
   animation: backdrop-out var(--dur-base) var(--ease-out) both;
@@ -11135,7 +11676,7 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
-  border: 1px solid var(--border-strong, var(--border));
+  border: 1px solid var(--border-2, var(--border));
   border-radius: 14px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
   overflow: hidden;
@@ -11637,8 +12178,8 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 .mem-ws-select__trigger:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elev-1);
+  border-color: var(--border-2);
+  background: var(--bg-elev);
 }
 .mem-ws-select__label {
   max-width: 180px;
@@ -11657,7 +12198,6 @@ body > .mermaid-diagram--fullscreen {
   max-width: min(90vw, 320px);
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
   padding: 4px;
 }
@@ -11834,6 +12374,13 @@ body > .mermaid-diagram--fullscreen {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+.provider-name-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.mem-hint.provider-name-readonly-hint {
+  color: var(--fg-dim);
+}
 .mem-input {
   flex: 1;
   min-width: 0;
@@ -11884,7 +12431,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elev-1) 76%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 76%, transparent);
 }
 .mem-add-card__head {
   display: flex;
@@ -12014,7 +12561,7 @@ body > .mermaid-diagram--fullscreen {
   display: grid;
   place-items: center;
   min-height: 28px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
 }
 .mem-doc__identity > div {
   display: flex;
@@ -12617,7 +13164,6 @@ body > .mermaid-diagram--fullscreen {
   z-index: var(--z-menu);
   min-width: 160px;
   padding: 5px;
-  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 9px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
@@ -14948,7 +15494,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--bg-elev);
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--text-sm);
 }
 .recovery-lineage-dialog__actions {
@@ -16094,6 +16640,42 @@ body > .mermaid-diagram--fullscreen {
   justify-self: end;
 }
 
+.settings-sound-row .notification-volume-control {
+  width: clamp(190px, 36vw, 260px);
+  min-width: 0;
+  justify-self: end;
+}
+
+.notification-volume-control {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-volume-control input[type="range"] {
+  --wails-draggable: no-drag;
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.notification-volume-control input[type="range"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.notification-volume-control output {
+  min-width: 42px;
+  color: var(--fg);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+  text-align: right;
+}
+
 .sound-select {
   display: flex;
   align-items: center;
@@ -16121,8 +16703,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .sound-select__trigger:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-elev-1);
+  border-color: var(--border-2);
+  background: var(--bg-elev);
 }
 
 .sound-select__trigger:focus-visible {
@@ -16153,7 +16735,6 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
   box-shadow: 0 18px 42px rgba(0,0,0,0.46);
   isolation: isolate;
 }
@@ -16301,6 +16882,7 @@ body > .mermaid-diagram--fullscreen {
   margin: 0;
 }
 
+/* Preserve the original wide-screen flex relationship. The narrow breakpoint
 /* Preserve the original wide-screen flex relationship. The narrow breakpoint
    turns this wrapper into a real flex item to keep its controls together. */
 .memory-tabs-row__tail {
@@ -16673,8 +17255,8 @@ body > .mermaid-diagram--fullscreen {
   cursor: pointer;
 }
 .settings-model-picker__trigger:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--bg-elev-1);
+  border-color: var(--border-2);
+  background: var(--bg-elev);
 }
 .settings-model-picker__trigger:focus-visible {
   outline: none;
@@ -16725,7 +17307,6 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
   isolation: isolate;
 }
@@ -16733,7 +17314,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   padding: 8px;
   border-bottom: 1px solid var(--border-soft);
-  background: var(--bg-elev);
+  background: transparent;
 }
 .settings-model-picker__search input {
   width: 100%;
@@ -16809,7 +17390,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .settings-model-picker__option--pinned {
   margin-bottom: 6px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
 }
 .settings-model-picker__option > span {
   display: flex;
@@ -16965,6 +17546,38 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--font-control-small);
   line-height: 1.45;
 }
+.provider-quick-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+}
+.provider-quick-setup__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.provider-quick-setup__intro strong {
+  color: var(--fg);
+  font-size: var(--text-xl);
+}
+.provider-quick-setup__intro span {
+  max-width: 64ch;
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  line-height: 1.5;
+}
+.provider-quick-setup__key {
+  min-height: 42px;
+}
+.provider-quick-setup__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
 .provider-add-segmented {
   width: fit-content;
   display: inline-flex;
@@ -17001,6 +17614,66 @@ body > .mermaid-diagram--fullscreen {
   align-items: stretch;
   gap: 8px;
 }
+.provider-featured-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.provider-featured-picker__label {
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  font-weight: 650;
+}
+.provider-featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.provider-featured-grid .provider-template-card {
+  min-height: 84px;
+}
+.provider-preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev-2) 45%);
+}
+.provider-preset-group > h4,
+.provider-preset-section > h5 {
+  margin: 0;
+  color: var(--fg);
+}
+.provider-preset-group > h4 {
+  font-size: var(--text-lg);
+}
+.provider-preset-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.provider-preset-section > h5 {
+  font-size: var(--font-control);
+}
+.provider-preset-section__hint {
+  margin: -2px 0 0;
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+}
+.provider-preset-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+.provider-preset-details > summary {
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  font-weight: 650;
+  cursor: pointer;
+}
 .provider-template-card {
   display: flex;
   flex-direction: column;
@@ -17011,7 +17684,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   color: var(--fg);
   text-align: left;
   cursor: pointer;
@@ -17027,7 +17700,7 @@ body > .mermaid-diagram--fullscreen {
 .provider-template-card--installed,
 .provider-template-card--installed-modified,
 .provider-template-card--name-conflict {
-  background: color-mix(in srgb, var(--bg-elev-1) 82%, var(--bg) 18%);
+  background: color-mix(in srgb, var(--bg-elev) 82%, var(--bg) 18%);
 }
 .provider-template-card--installed-modified,
 .provider-template-card--name-conflict {
@@ -17035,7 +17708,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-template-card--similar-existing {
   border-color: color-mix(in srgb, var(--warning, #b7791f) 34%, var(--border));
-  background: color-mix(in srgb, var(--warning-soft, #fff7ed) 24%, var(--bg-elev-1) 76%);
+  background: color-mix(in srgb, var(--warning-soft, #fff7ed) 24%, var(--bg-elev) 76%);
 }
 .provider-template-card--active {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
@@ -17224,7 +17897,7 @@ body > .mermaid-diagram--fullscreen {
 .provider-model-draft__head span {
   display: block;
   margin-top: 3px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
 }
 .provider-model-draft__tools,
@@ -17239,7 +17912,7 @@ body > .mermaid-diagram--fullscreen {
   min-height: 34px;
 }
 .provider-model-draft__context-guide {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   line-height: 1.45;
 }
@@ -17280,7 +17953,7 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: auto minmax(88px, 1fr);
   align-items: center;
   gap: 7px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-family: var(--font-sans);
   font-size: var(--font-control-small);
 }
@@ -17304,7 +17977,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.35;
 }
 .provider-model-draft__vision {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-family: var(--font-sans);
   font-size: var(--font-control-small);
 }
@@ -17312,7 +17985,7 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-family: var(--font-sans);
   font-size: var(--text-2xs);
 }
@@ -17320,7 +17993,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   line-height: 1.35;
 }
 .provider-model-draft__option input {
@@ -17331,7 +18004,7 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 .provider-model-draft__empty {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
 }
 .provider-capabilities {
@@ -17358,7 +18031,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   flex-direction: column;
   gap: 4px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   line-height: 1.4;
 }
@@ -17389,7 +18062,7 @@ body > .mermaid-diagram--fullscreen {
   height: 14px;
   margin: 2px;
   border-radius: 50%;
-  background: var(--fg-muted);
+  background: var(--fg-faint);
   transition: transform 140ms ease, background 140ms ease;
 }
 .provider-capability-row__switch:checked {
@@ -17425,7 +18098,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
 }
 .provider-key-status strong {
   min-width: 0;
@@ -17463,6 +18136,20 @@ body > .mermaid-diagram--fullscreen {
   gap: 6px;
   padding-top: 2px;
 }
+.provider-route-settings {
+  padding-top: 2px;
+}
+.provider-route-settings > summary {
+  width: fit-content;
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+}
+.provider-route-settings[open] > summary {
+  margin-bottom: 8px;
+}
 .provider-profile-row {
   display: grid;
   grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr) auto auto;
@@ -17492,7 +18179,7 @@ body > .mermaid-diagram--fullscreen {
   border: 1px dashed var(--border);
   border-radius: 8px;
   color: var(--fg-dim);
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
 }
 .provider-empty strong {
   color: var(--fg);
@@ -17531,7 +18218,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 0 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
   color: var(--fg);
   font-size: var(--font-control);
   font-weight: 650;
@@ -17544,7 +18231,7 @@ body > .mermaid-diagram--fullscreen {
   min-height: 64px;
 }
 .provider-readonly-field--stacked span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   font-weight: 500;
   line-height: 1.35;
@@ -17556,10 +18243,91 @@ body > .mermaid-diagram--fullscreen {
   padding: 0 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
   color: var(--fg);
   font-size: var(--font-control);
   font-weight: 650;
+}
+.shell-support {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shell-support__detection {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.shell-capability__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+}
+.shell-capability__row svg {
+  flex: none;
+  color: var(--fg-faint);
+}
+.shell-capability__name {
+  flex: none;
+  font-weight: 650;
+}
+.shell-capability__detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-faint);
+  font-size: var(--font-control-small);
+}
+.set-shell-reload {
+  margin-left: auto;
+}
+.shell-support__card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+}
+.shell-support__hint {
+  font-size: var(--font-control-small);
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+.shell-support__repair-command {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.shell-support__repair-command code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-control-small);
+}
+.shell-support__repair-safety {
+  margin-top: 6px;
+  color: var(--fg-faint);
+  font-size: var(--font-control-small);
+  line-height: 1.4;
+}
+.shell-support__actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .provider-models-row {
   display: grid;
@@ -17574,7 +18342,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px 10px;
 }
 .provider-model-fetch-row span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   line-height: 1.4;
 }
@@ -17604,7 +18372,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 8px;
   font-size: var(--font-control-small);
   line-height: 1.4;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
 }
 .provider-fetch-banner--ok {
   border-color: color-mix(in srgb, var(--ok) 38%, var(--border));
@@ -17618,7 +18386,7 @@ body > .mermaid-diagram--fullscreen {
   margin-top: 4px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
 }
 .provider-editor-advanced > summary {
   min-height: 40px;
@@ -17648,7 +18416,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-editor-advanced__icon {
   flex: 0 0 auto;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   transition: transform 160ms ease;
 }
 .provider-editor-advanced[open] .provider-editor-advanced__icon {
@@ -17656,7 +18424,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-editor-advanced__hint {
   flex: 0 1 auto;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   font-weight: 500;
   text-align: right;
@@ -18156,7 +18924,7 @@ body > .mermaid-diagram--fullscreen {
 .bot-mobile-remote__qr--empty svg {
   width: 34px;
   height: 34px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
 }
 .bot-mobile-remote__qr-code {
   display: block;
@@ -18286,8 +19054,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
 }
 .bot-channel-entry__icon,
-.bot-channel-entry-card__icon,
-.bot-channel-tab__icon {
+.bot-channel-entry-card__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -18381,7 +19148,7 @@ body > .mermaid-diagram--fullscreen {
   width: fit-content;
   border-radius: 999px;
   background: var(--bg-elev);
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
   font-weight: 720;
   line-height: 1.15;
@@ -18477,8 +19244,20 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .bot-channel-tab__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   width: 44px;
   height: 44px;
+  color: var(--fg-faint);
+}
+.bot-channel-tab__icon .bot-channel-tab__brand {
+  width: 24px;
+  height: 24px;
+}
+.bot-channel-tab--active .bot-channel-tab__icon {
+  color: var(--accent);
 }
 .bot-channel-tab__text {
   display: grid;
@@ -18506,10 +19285,10 @@ body > .mermaid-diagram--fullscreen {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: var(--fg-muted);
+  background: var(--fg-faint);
 }
 .bot-channel-tab__dot--configured {
-  background: var(--warn);
+  background: var(--ok);
 }
 .bot-channel-tab__dot--online {
   background: var(--ok);
@@ -18910,6 +19689,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.45;
 }
 .bot-pairing-row .set-seg {
+  display: inline-flex;
   flex: 0 0 auto;
 }
 .bot-simple-roles {
@@ -19878,7 +20658,7 @@ body > .mermaid-diagram--fullscreen {
   margin-top: 8px;
 }
 .bot-diagnostic-actions small {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -19966,15 +20746,15 @@ body > .mermaid-diagram--fullscreen {
 .bot-detail-card .bot-secret-row .btn {
   justify-self: flex-end;
 }
-.bot-detail-section--danger {
+/* 凭据操作按钮（保存/清除）横向排列在同一行。 */
+.bot-secret-row__actions {
+  display: flex;
   align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.bot-detail-section--danger {
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border-soft));
-  border-left: 3px solid color-mix(in srgb, var(--danger) 70%, var(--border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--danger) 3%, var(--bg-elev-2));
-  padding: 11px 12px 11px 10px;
 }
 .bot-detail-section--danger .bot-detail-section__head {
   color: var(--fg);
@@ -19984,6 +20764,15 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
   line-height: 1.45;
+}
+/* 危险操作按钮文字始终红色（含未 armed 的「删除」按钮）。 */
+.bot-detail-section--danger .inline-confirm .btn {
+  color: var(--button-danger-fg);
+}
+.bot-detail-section--danger .inline-confirm .btn--danger {
+  background: var(--button-danger-bg);
+  border-color: var(--button-danger-border);
+  color: var(--button-danger-fg);
 }
 .bot-legacy-grid {
   display: grid;
@@ -20001,7 +20790,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
 }
 .bot-channel-card--enabled {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
@@ -20453,6 +21242,16 @@ body > .mermaid-diagram--fullscreen {
     align-items: start;
   }
 
+  /* 危险操作区块在中等宽度下改为纵向堆叠，避免两列 grid 压缩导致
+     右侧按钮被 .settings-center__content 的 overflow-x: hidden 裁切。 */
+  .bot-detail-section--danger {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+  .bot-detail-section--danger .inline-confirm {
+    justify-content: flex-start;
+  }
+
   .settings-field__control,
   .settings-inline-controls {
     justify-content: flex-start;
@@ -20522,7 +21321,6 @@ body > .mermaid-diagram--fullscreen {
 
   .bot-pairing-row {
     align-items: flex-start;
-    flex-direction: column;
   }
 
   .bot-simple-advanced__summary {
@@ -20645,6 +21443,15 @@ body > .mermaid-diagram--fullscreen {
   }
   .provider-access-card__actions {
     flex-wrap: wrap;
+  }
+  .provider-quick-setup__actions {
+    flex-direction: column-reverse;
+  }
+  .provider-quick-setup__actions .btn {
+    width: 100%;
+  }
+  .provider-featured-grid {
+    grid-template-columns: 1fr;
   }
   .provider-profile-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -20816,6 +21623,7 @@ body > .mermaid-diagram--fullscreen {
   margin-top: 2px;
 }
 /* sub-agent calls render indented under their parent task card — the base
+/* sub-agent calls render indented under their parent task card — the base
    tool__body already provides border-left + 12px padding, so subagent just
    needs left indent for hierarchy.  Expanded padding is handled by
    .tool--open .tool__body. */
@@ -20893,6 +21701,14 @@ body > .mermaid-diagram--fullscreen {
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border-soft));
   color: var(--accent);
 }
+.todobar__status--waiting {
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--border-soft));
+  color: var(--warn);
+}
+.todobar__status--paused {
+  border-color: color-mix(in srgb, var(--fg-dim) 32%, var(--border-soft));
+  color: var(--fg-dim);
+}
 .todobar__text {
   min-width: 0;
 }
@@ -20902,6 +21718,11 @@ body > .mermaid-diagram--fullscreen {
 }
 .todobar__item--in_progress .todobar__text {
   color: var(--fg);
+  font-weight: 500;
+}
+.todobar__item--waiting .todobar__text,
+.todobar__item--paused .todobar__text {
+  color: var(--fg-dim);
   font-weight: 500;
 }
 .todobar__item--pending .todobar__text {
@@ -21272,7 +22093,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-dim);
 }
 .slashmenu__item--back:hover {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 .slashmenu__item--empty {
   color: var(--fg-faint);
@@ -21344,7 +22165,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .composer__pasted-head button:hover {
   color: var(--fg);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 .composer__pasted-preview {
   max-height: 180px;
@@ -21582,6 +22403,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* onboarding — first-run gate covering the whole window. Sits above every
+/* onboarding — first-run gate covering the whole window. Sits above every
    other layer; the card is centered, terminal-styled, with a faint scanline
    accent so it reads as "stop and paste a key" rather than a generic modal. */
 .onboarding {
@@ -21703,7 +22525,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .onboarding__provider:hover:not(:disabled) {
   background: var(--bg-hover, rgba(128, 128, 128, 0.08));
-  border-color: var(--border-strong, var(--border));
+  border-color: var(--border-2, var(--border));
 }
 .onboarding__provider:disabled {
   opacity: 0.5;
@@ -21769,6 +22591,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Memory filter input: a full-width mem-input variant that sits below
+/* Memory filter input: a full-width mem-input variant that sits below
    the section title. The existing mem-input already has a 28px height
    and the right border tokens; this just sets margin so it doesn't
    crowd the doc list. */
@@ -21778,6 +22601,7 @@ body > .mermaid-diagram--fullscreen {
 
 }
 
+/* InlineDiff: a compact before/after diff card. The header strip carries
 /* InlineDiff: a compact before/after diff card. The header strip carries
    the filename, the +/- counts, and a Copy button. The body is a monospace
    pre with +/- row coloring. The CSS tokens are the same --add-bg /
@@ -21939,7 +22763,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 4px;
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -22121,22 +22945,6 @@ body > .mermaid-diagram--fullscreen {
   margin-left: 0;
 }
 
-.app-chrome__tools--workspace-pressed .app-chrome__command {
-  animation: app-chrome-command-follow-toggle 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-@keyframes app-chrome-command-follow-toggle {
-  0% {
-    transform: translateX(1px) scale(0.985);
-  }
-  58% {
-    transform: translateX(-1px) scale(1.01);
-  }
-  100% {
-    transform: translateX(0) scale(1);
-  }
-}
-
 .windows-window-controls {
   position: fixed;
   top: 0;
@@ -22158,6 +22966,17 @@ body > .mermaid-diagram--fullscreen {
   transition: opacity var(--dur-base) ease;
 }
 
+/* The image viewer is an app-level fullscreen surface. Hide the custom
+/* The image viewer is an app-level fullscreen surface. Hide the custom
+   Windows caption controls while it is open so the preview owns the only
+   visible close affordance; native shortcuts such as Alt+F4 remain intact. */
+.app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* When the workspace panel is closed (no layout--workspace-open or
 /* When the workspace panel is closed (no layout--workspace-open or
    layout--workspace-maximized), make the window controls box transparent so it
    blends into the title bar / background instead of showing a distinct box. */
@@ -22172,6 +22991,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
 }
 
+/* When a drawer/palette overlay is open, dim the window controls so they
 /* When a drawer/palette overlay is open, dim the window controls so they
    visually sit behind the backdrop instead of staying highlighted on top. */
 .drawer-backdrop[data-state="open"] ~ .windows-window-controls {
@@ -22390,14 +23210,6 @@ body > .mermaid-diagram--fullscreen {
   animation: mac-sidebar-icon-press 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.app--darwin .app-chrome--tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed:not(.app-chrome__panel-toggle--active) svg {
-  animation: mac-workspace-icon-open-press 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.app--darwin .app-chrome--tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed.app-chrome__panel-toggle--active svg {
-  animation: mac-workspace-icon-close-press 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
 @keyframes mac-sidebar-button-press {
   0% {
     opacity: 1;
@@ -22423,30 +23235,6 @@ body > .mermaid-diagram--fullscreen {
   }
   100% {
     transform: scale(1);
-  }
-}
-
-@keyframes mac-workspace-icon-open-press {
-  0% {
-    transform: translateX(2px) scale(0.9);
-  }
-  58% {
-    transform: translateX(-1px) scale(1.04);
-  }
-  100% {
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes mac-workspace-icon-close-press {
-  0% {
-    transform: translateX(-2px) scale(0.9);
-  }
-  58% {
-    transform: translateX(1px) scale(1.04);
-  }
-  100% {
-    transform: translateX(0) scale(1);
   }
 }
 
@@ -22672,16 +23460,6 @@ body > .mermaid-diagram--fullscreen {
   animation: mac-sidebar-icon-press 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.app--windows .app-chrome--native-tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed:not(.app-chrome__panel-toggle--active) svg,
-.app--linux .app-chrome--native-tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed:not(.app-chrome__panel-toggle--active) svg {
-  animation: mac-workspace-icon-open-press 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.app--windows .app-chrome--native-tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed.app-chrome__panel-toggle--active svg,
-.app--linux .app-chrome--native-tabs .app-chrome__panel-toggle--right.app-chrome__panel-toggle--pressed.app-chrome__panel-toggle--active svg {
-  animation: mac-workspace-icon-close-press 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
 .app--windows .app-chrome--native-tabs .tabbar,
 .app--linux .app-chrome--native-tabs .tabbar {
   height: 100%;
@@ -22816,7 +23594,7 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   gap: 10px;
   min-height: 48px;
-  padding: 6px 18px;
+  padding: 6px 8px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border-soft);
   --wails-draggable: drag;
@@ -22840,7 +23618,7 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
   color: var(--fg-faint);
   line-height: 1;
-  transition: color 0.12s, border-color 0.12s, background 0.12s, transform 0.12s;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 
 .topicbar__chrome-btn:hover:not(.topicbar__chrome-btn--blocked),
@@ -22854,10 +23632,6 @@ body > .mermaid-diagram--fullscreen {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-elev));
-}
-
-.topicbar__chrome-btn--pressed {
-  transform: scale(0.94);
 }
 
 .topicbar__chrome-btn--blocked {
@@ -22894,7 +23668,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .topicbar__title-edit {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -22904,26 +23678,27 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .topicbar__title-input {
-  flex: 1 1 auto;
-  min-width: 140px;
-  width: min(420px, 100%);
+  flex: 0 0 auto;
+  width: 280px;
   height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   outline: none;
-  background: var(--bg-elev);
+  background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: 15px;
   line-height: 1.25;
   font-weight: 680;
   --wails-draggable: no-drag;
+  transition: border-color 0.12s, background 0.12s;
 }
 
 .topicbar__title-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--fg-faint) 28%, transparent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .topicbar__spacer {
@@ -22937,6 +23712,15 @@ body > .mermaid-diagram--fullscreen {
   gap: 6px;
   position: relative;
   --wails-draggable: no-drag;
+}
+/* When the dock is closed in workbench mode, the fixed top-right dock-toggle
+/* When the dock is closed in workbench mode, the fixed top-right dock-toggle
+   overlaps the topic bar's right edge; leave room so the actions don't
+   collide with it. When the dock is open it occupies the right column, so no
+   extra margin is needed. Classic/creation keep the toggle inside the actions
+   row, so the extra margin does not apply there. */
+.layout--workbench:not(.layout--workspace-open) .topicbar__actions {
+  margin-right: 36px;
 }
 
 .topicbar__actions > .tooltip-trigger {
@@ -23076,6 +23860,56 @@ body > .mermaid-diagram--fullscreen {
 .topicbar__export-menu button:focus-visible {
   color: var(--fg);
   background: var(--button-bg);
+}
+
+/* ── Topic bar "More" overflow menu ──────────────────────────────── */
+.topicbar__more {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Borderless icon-only entries: file opener, More menu, workspace toggle,
+/* Borderless icon-only entries: file opener, More menu, workspace toggle,
+   and the utility (search) button. Default state has no background/border —
+   hover/focus still highlight so the controls stay discoverable. */
+.topicbar__actions .external-opener,
+.topicbar__actions .external-opener__primary,
+.topicbar__actions .external-opener__menu-trigger,
+.topicbar__actions .topicbar__more .topicbar__action-btn,
+.topicbar__actions .topicbar__chrome-btn,
+.topicbar__actions .topicbar__action-btn--utility {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.topicbar__actions .external-opener__menu-trigger {
+  border-left: none !important;
+}
+
+.topicbar__actions .topicbar__more .topicbar__action-btn:hover:not(:disabled),
+.topicbar__actions .topicbar__more .topicbar__action-btn:focus-visible:not(:disabled),
+.topicbar__actions .external-opener__primary:hover:not(:disabled),
+.topicbar__actions .external-opener__primary:focus-visible:not(:disabled),
+.topicbar__actions .external-opener__menu-trigger:hover:not(:disabled),
+.topicbar__actions .external-opener__menu-trigger:focus-visible:not(:disabled),
+.topicbar__actions .topicbar__action-btn--utility:hover:not(:disabled),
+.topicbar__actions .topicbar__action-btn--utility:focus-visible:not(:disabled),
+.topicbar__actions .topicbar__chrome-btn:hover:not(:disabled),
+.topicbar__actions .topicbar__chrome-btn:focus-visible:not(:disabled) {
+  background: var(--button-bg) !important;
+  color: var(--fg) !important;
+}
+
+/* Compact icon + caret: shrink the primary so the app icon sits close to
+/* Compact icon + caret: shrink the primary so the app icon sits close to
+   the caret instead of being spread across two centered halves. */
+.topicbar__actions .external-opener__primary {
+  width: 24px;
+}
+
+.topicbar__actions .external-opener__menu-trigger {
+  width: 18px;
 }
 
 .topicbar__icon-btn {
@@ -23299,7 +24133,6 @@ body > .mermaid-diagram--fullscreen {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--bg-elev);
   box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
   --wails-draggable: no-drag;
 }
@@ -23579,6 +24412,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* L1: command-search bar — opens the ⌘K palette. Sits after the new-tab
+/* L1: command-search bar — opens the ⌘K palette. Sits after the new-tab
    button and fills the remaining strip width like the prototype. */
 .tabbar__command {
   flex: 1 1 auto;
@@ -23609,7 +24443,7 @@ body > .mermaid-diagram--fullscreen {
     color 0.12s;
 }
 .tabbar__command:hover {
-  border-color: var(--border-strong, var(--border));
+  border-color: var(--border-2, var(--border));
   background: var(--bg-elev);
   color: var(--fg-dim);
 }
@@ -23828,7 +24662,7 @@ body > .mermaid-diagram--fullscreen {
   height: 22px;
   border-radius: 7px;
   background: var(--bg-elev);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 9%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 9%, transparent);
 }
 
 .project-tree__add-project:hover:not(:disabled),
@@ -23854,6 +24688,7 @@ body > .mermaid-diagram--fullscreen {
   opacity: 0.96;
 }
 
+/* Header-action-btn in the header-actions row uses min-width so it can
 /* Header-action-btn in the header-actions row uses min-width so it can
    expand when a time-filter label is shown alongside the clock icon. */
 .project-tree__header-actions .project-tree__header-action-btn {
@@ -23913,7 +24748,7 @@ body > .mermaid-diagram--fullscreen {
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 12px;
   white-space: nowrap;
   cursor: pointer;
@@ -23944,6 +24779,7 @@ body > .mermaid-diagram--fullscreen {
   user-select: none;
 }
 
+/* Classic hover preview card: rendered through a body portal so the sidebar's
 /* Classic hover preview card: rendered through a body portal so the sidebar's
    overflow clipping cannot cut it off; pointer-events stay off so it never
    steals the hover from the row underneath. */
@@ -23984,7 +24820,7 @@ body > .mermaid-diagram--fullscreen {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
 }
 
@@ -24012,7 +24848,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__topic-window-toggle:hover {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
 }
 
 .project-tree__topic-window-toggle:focus-visible {
@@ -24028,6 +24864,28 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
   font-size: 12px;
   user-select: none;
+}
+
+.project-tree__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.project-tree__skeleton-bar {
+  display: block;
+  height: 12px;
+  width: 72%;
+  border-radius: 4px;
+  background: var(--fg-faint);
+  opacity: 0.16;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.project-tree__skeleton-bar--short {
+  width: 48%;
 }
 
 .project-tree__header-actions .project-tree__add-project:focus-visible,
@@ -24281,6 +25139,10 @@ body > .mermaid-diagram--fullscreen {
   background: var(--list-row-hover-bg);
 }
 
+.project-tree__topic--remote-static:hover {
+  background: transparent;
+}
+
 .project-tree__topic--active:hover {
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 10%, var(--sidebar-hover));
 }
@@ -24332,6 +25194,36 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-tree__topic-recovery {
+  flex: none;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 4px;
+}
+
+.project-tree__catalog-rebuild {
+  flex: none;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.project-tree__catalog-rebuild:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .project-tree__topic-im {
@@ -24390,6 +25282,22 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 
+.project-tree__topic-recovery-copies {
+  flex: 0 0 auto;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  font-weight: 620;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .project-tree__topic-status--waiting_confirmation {
   background: color-mix(in srgb, var(--warn) 13%, transparent);
   color: color-mix(in srgb, var(--warn) 82%, var(--fg));
@@ -24439,6 +25347,7 @@ body > .mermaid-diagram--fullscreen {
   outline-offset: -2px;
 }
 
+/* Classic single-line rows: the activity time sits right-aligned on the title
 /* Classic single-line rows: the activity time sits right-aligned on the title
    line (turns and the exact date live in the hover preview card). Mirrors the
    workbench side recipe, including the swap with the shortcut badge. */
@@ -24577,7 +25486,7 @@ body > .mermaid-diagram--fullscreen {
 }
 :root[data-theme-style] .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: 500;
 }
 
 /* Extra spacing after expanded project section */
@@ -24646,7 +25555,7 @@ body > .mermaid-diagram--fullscreen {
 /* Active topic: keep text style unchanged (no color/font-weight change) */
 :root[data-theme-style] .sidebar--workbench .project-tree__topic--active .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: 500;
 }
 
 /* Topic action icons (pin, archive): clean, no background, no border */
@@ -24719,7 +25628,6 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg-elev);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
   transform-origin: top left;
   animation: menu-pop-in var(--dur-base) var(--ease-out) both;
@@ -24767,7 +25675,7 @@ body > .mermaid-diagram--fullscreen {
 
 .context-menu__shortcut {
   margin-left: 16px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
   font-family: inherit;
   pointer-events: none;
@@ -24775,7 +25683,7 @@ body > .mermaid-diagram--fullscreen {
 
 .context-menu__item:hover .context-menu__shortcut,
 .context-menu__item:focus-visible .context-menu__shortcut {
-  color: var(--fg-normal);
+  color: var(--fg);
 }
 
 .context-menu--composer-input .context-menu__item {
@@ -24850,13 +25758,13 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
 }
 
-.transcript-selection-action button:hover,
-.transcript-selection-action button:focus-visible {
+.transcript-selection-action button:not(:disabled):hover,
+.transcript-selection-action button:not(:disabled):focus-visible {
   background: var(--sidebar-hover);
   outline: none;
 }
 
-.transcript-selection-action button:focus-visible {
+.transcript-selection-action button:not(:disabled):focus-visible {
   box-shadow: var(--focus-ring);
 }
 
@@ -24909,8 +25817,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .project-tree__catalog-progress {
+	display: flex;
+	align-items: center;
+	gap: 8px;
   padding: 4px 10px 6px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -24954,6 +25865,33 @@ body > .mermaid-diagram--fullscreen {
   opacity: 0.45;
 }
 
+.project-tree__empty-secondary {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  margin: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+.project-tree__empty-secondary:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+
+.project-tree__empty-secondary:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .context-inspector,
 .workbench-dock {
   grid-row: 2;
@@ -24962,8 +25900,11 @@ body > .mermaid-diagram--fullscreen {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--workspace-files-bg);
-  border-left: 1px solid var(--border-soft);
+  /* Unify the dock surface with the chat pane; inner panels inherit this. */
+  --workspace-files-bg: var(--chat-bg);
+  --workspace-preview-bg: var(--chat-bg);
+  background: var(--chat-bg);
+  border-left: 0px solid var(--border-soft);
   overflow: hidden;
 }
 
@@ -24995,6 +25936,37 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px 10px 3px;
   border-bottom: 1px solid transparent;
   --wails-draggable: drag;
+}
+
+/* Dock collapse/expand toggle pinned to the top-right corner of the window.
+/* Dock collapse/expand toggle pinned to the top-right corner of the window.
+   Fixed position keeps it at the same spot whether the dock is open (it
+   overlaps the dock's tools row) or closed (it sits on the topic bar's
+   right edge) — the icon never shifts. */
+.app__dock-toggle {
+  position: fixed;
+  top: 0;
+  right: 12px;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-app-chrome);
+  --wails-draggable: no-drag;
+  pointer-events: auto;
+}
+.app__dock-toggle .topicbar__chrome-btn {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.app__dock-toggle .topicbar__chrome-btn:hover:not(:disabled),
+.app__dock-toggle .topicbar__chrome-btn:focus-visible:not(:disabled) {
+  background: var(--button-bg) !important;
+  color: var(--fg) !important;
+}
+.app__dock-toggle .topicbar__chrome-btn--workspace:not(:hover):not(:focus-visible) {
+  color: var(--fg-faint);
 }
 
 .workbench-dock__tabs {
@@ -25141,6 +26113,31 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg);
 }
 
+.context-panel__mcp-empty {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.context-panel__mcp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-panel__mcp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.context-panel__mcp-row strong {
+  font-variant-numeric: tabular-nums;
+}
+
 .context-panel__section-head {
   display: flex;
   align-items: baseline;
@@ -25267,7 +26264,7 @@ body > .mermaid-diagram--fullscreen {
   border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg)) 0%, var(--bg) 100%);
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--chat-bg)) 0%, color-mix(in srgb, var(--chat-bg) 86%, var(--stage, #000)) 100%);
 }
 
 .context-panel__capacity-card--good {
@@ -25363,7 +26360,7 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--shadow) 10%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--shadow-color) 10%, transparent);
   transform: translateX(-50%);
   font-variant-numeric: tabular-nums;
 }
@@ -25426,6 +26423,43 @@ body > .mermaid-diagram--fullscreen {
   font-size: 13.5px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+.context-panel__budget {
+  margin-top: 12px;
+}
+
+.context-panel__budget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.context-panel__budget-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.context-panel__budget-grid span {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.context-panel__budget-grid strong {
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-panel__budget-source,
+.context-panel__budget-note,
+.context-panel__budget-recovery {
+  margin: 8px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .context-panel__usage-progress {
@@ -25538,16 +26572,49 @@ body > .mermaid-diagram--fullscreen {
   border-left: 1px solid var(--border-soft);
 }
 
-.context-panel__mini-stat span {
+.context-panel__mini-stat-head {
   order: 1;
-  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
+  min-width: 0;
+}
+
+.context-panel__mini-stat-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11.5px;
   font-weight: 430;
+}
+
+.context-panel__rate-band {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--fg-dim) 24%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-dim) 9%, transparent);
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 620;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.context-panel__rate-band--peak {
+  border-color: color-mix(in srgb, var(--warn) 36%, transparent);
+  background: color-mix(in srgb, var(--warn) 11%, transparent);
+  color: var(--warn);
+}
+
+.context-panel__rate-band--off_peak {
+  border-color: color-mix(in srgb, var(--ok) 34%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  color: var(--ok);
 }
 
 .context-panel__mini-stat strong {
@@ -25576,7 +26643,7 @@ body > .mermaid-diagram--fullscreen {
   border-left: 0;
 }
 
-.context-panel__mini-stat--wide span {
+.context-panel__mini-stat--wide .context-panel__mini-stat-head {
   order: 1;
   flex: 0 1 auto;
   width: 100%;
@@ -25761,7 +26828,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-panel__runtime-metric span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 10px;
   line-height: 1.2;
 }
@@ -25850,7 +26917,7 @@ body > .mermaid-diagram--fullscreen {
 
 .context-panel__source-overview-head span {
   flex: 0 0 auto;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
 }
 
@@ -25926,7 +26993,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-panel__source-head em {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-style: normal;
 }
 
@@ -25943,7 +27010,7 @@ body > .mermaid-diagram--fullscreen {
 .context-panel__source-tone--slate { background: #64748b; }
 .context-panel__source-tone--violet { background: #7c3aed; }
 .context-panel__source-tone--rose { background: #e11d48; }
-.context-panel__source-tone--default { background: var(--fg-muted); }
+.context-panel__source-tone--default { background: var(--fg-faint); }
 
 .context-panel__source-summary,
 .context-panel__source-metrics {
@@ -25959,7 +27026,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-panel__source-metric span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 10px;
 }
 
@@ -25980,7 +27047,7 @@ body > .mermaid-diagram--fullscreen {
 .context-panel__source-bar-row > span {
   min-width: 0;
   overflow: hidden;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 10px;
   line-height: 1;
   text-overflow: ellipsis;
@@ -26022,7 +27089,7 @@ body > .mermaid-diagram--fullscreen {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
   line-height: 1.2;
 }
@@ -26104,7 +27171,7 @@ body > .mermaid-diagram--fullscreen {
 
 .context-panel__type-overview-head span {
   flex: 0 0 auto;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 11px;
 }
 
@@ -26164,9 +27231,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* ----------------------------------------------------------------------------
+/* ----------------------------------------------------------------------------
  * Native-feel: overscroll containment, reduced-motion, view-transition suppression
  * -------------------------------------------------------------------------- */
 
+/* Prevent rubber-band / pull-to-refresh on scrollable panels so the webview
 /* Prevent rubber-band / pull-to-refresh on scrollable panels so the webview
    feels like a native window, not a browser tab. */
 .transcript,
@@ -26189,7 +27258,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 5px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 12px;
 }
 
@@ -26227,7 +27296,7 @@ body > .mermaid-diagram--fullscreen {
   margin-left: auto;
   border: none;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   cursor: pointer;
   padding: 2px;
   border-radius: 3px;
@@ -26274,7 +27343,7 @@ body > .mermaid-diagram--fullscreen {
 
 .workspace-branch-menu__loading {
   padding: 10px 12px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: 12px;
   text-align: center;
 }
@@ -26319,6 +27388,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Respect the OS reduced-motion preference: squash all animations and force
+/* Respect the OS reduced-motion preference: squash all animations and force
    instant scrolling so the UI feels immediate rather than web-like. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -26332,10 +27402,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* ----------------------------------------------------------------------------
+/* ----------------------------------------------------------------------------
  * Native Workbench refresh
  * -------------------------------------------------------------------------- */
 
-:root {
+:root:not([data-theme-style]) {
   --bg: #090b0e;
   --bg-soft: #101318;
   --bg-elev: #141820;
@@ -26363,12 +27434,12 @@ body > .mermaid-diagram--fullscreen {
   --sans: var(--font-ui);
 }
 
-:root[data-theme="light"] {
+:root[data-theme="light"]:not([data-theme-style]) {
   --bg: #e9edf3;
   --bg-soft: #f0f3f8;
   --bg-elev: #ffffff;
   --bg-elev-2: #eef2f7;
-  --sidebar-bg: #f3f6fa;
+  --sidebar-bg: #f9f9f9;
   --sidebar-hover: #e7edf5;
   --sidebar-active: color-mix(in srgb, var(--accent) 9%, #ffffff);
   --chat-bg: #f8fafc;
@@ -26383,12 +27454,12 @@ body > .mermaid-diagram--fullscreen {
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
+  :root:not([data-theme]):not([data-theme-style]) {
     --bg: #e9edf3;
     --bg-soft: #f0f3f8;
     --bg-elev: #ffffff;
     --bg-elev-2: #eef2f7;
-    --sidebar-bg: #f3f6fa;
+    --sidebar-bg: #f9f9f9;
     --sidebar-hover: #e7edf5;
     --sidebar-active: color-mix(in srgb, var(--accent) 9%, #ffffff);
     --chat-bg: #f8fafc;
@@ -26404,7 +27475,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .layout {
-  --chat-min-width: 700px;
+  --chat-min-width: 400px;
   --topicbar-height: 58px;
   --statusbar-height: var(--statusbar-dock-height);
   background:
@@ -26673,7 +27744,7 @@ body > .mermaid-diagram--fullscreen {
 
 .topicbar {
   min-height: 48px;
-  padding: 6px 18px;
+  padding: 6px 8px;
   gap: 10px;
   background: var(--bg-elev);
 }
@@ -26865,7 +27936,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock {
-  background: color-mix(in srgb, var(--bg-elev) 60%, var(--chat-bg));
+  background: var(--chat-bg);
   border-left: 1px solid var(--border-soft);
 }
 
@@ -26923,8 +27994,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 7px;
 }
 
-.workspace-preview__head,
-.workspace-preview__meta {
+.workspace-preview__head {
   border-color: var(--border-soft);
 }
 
@@ -26947,6 +28017,7 @@ body > .mermaid-diagram--fullscreen {
   }
 }
 
+/* -------------------------------------------------------------------------
 /* -------------------------------------------------------------------------
    Shared desktop implementation
    Keeps every theme on the Graphite-tuned app shell. Theme styles should swap
@@ -27504,7 +28575,8 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .sidebar {
   padding: 14px 12px 8px;
   background: var(--sidebar-bg);
-  border-right: 1px solid var(--border-soft);
+  /* The resize rail already draws the divider; a border here would double it. */
+  border-right: 0;
 }
 
 :root[data-theme-style] .sidebar__nav {
@@ -27676,7 +28748,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .project-tree__search:focus-within,
 :root[data-theme-style] .project-tree__search:hover {
-  border-color: var(--border-strong, var(--border));
+  border-color: var(--border-2, var(--border));
 }
 
 :root[data-theme-style] .project-tree__header {
@@ -27871,8 +28943,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .topicbar {
-  min-height: 48px;
-  padding: 6px 18px;
+  min-height: 45px;
+  padding: 6px 8px;
   gap: 10px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border-soft);
@@ -28270,9 +29342,6 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
 }
 
-
-
-
 @media (prefers-reduced-motion: no-preference) {
   :root[data-theme-style] .process-card:has(.process-card__spin)::after {
     background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -28283,7 +29352,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .footer {
   padding: 12px 16px 10px;
   background: color-mix(in srgb, var(--chat-bg) 96%, var(--bg-elev));
-  border-top: 1px solid var(--border-soft);
+  border-top: 0px solid var(--border-soft);
 }
 
 :root[data-theme-style] .composer-wrap {
@@ -28743,19 +29812,18 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-
 :root[data-theme-style] .sidebar-resizer::after {
   background: var(--border-soft);
 }
 
 :root[data-theme-style] .workbench-dock {
-  background: var(--bg-elev);
-  border-left: 1px solid var(--border-soft);
+  background: var(--chat-bg);
+  border-left: 0px solid var(--border-soft);
   box-shadow: none;
 }
 
 :root[data-theme-style] .workbench-dock__tools {
-  height: 40px;
+  height: 45px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -28766,9 +29834,9 @@ body > .mermaid-diagram--fullscreen {
   height: 100%;
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: flex-start;
-  gap: 2px;
+  gap: 4px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -28780,17 +29848,18 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   min-width: auto;
   max-width: none;
-  height: 40px;
+  height: 27px;
   width: auto;
-  padding: 0 12px 1px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 0;
+  border-radius: 7px;
   justify-content: flex-start;
   gap: 6px;
   color: var(--fg-faint);
   font-size: 12.5px;
   font-weight: 600;
   background: transparent;
+  transition: color var(--dur-fast), background var(--dur-fast);
 }
 
 :root[data-theme-style] .workbench-dock__tab svg {
@@ -28807,27 +29876,22 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workbench-dock__tab--active {
   color: var(--fg);
-  background: transparent;
+  /* Simple flat selected fill — a touch darker than the dock background,
+     no shadow, like a focused browser tab. */
+  background: color-mix(in srgb, var(--fg) 8%, var(--chat-bg));
   box-shadow: none;
 }
 
 :root[data-theme-style] .workbench-dock__tab:hover {
   color: var(--fg-dim);
-  background: transparent;
+  background: color-mix(in srgb, var(--fg) 4%, var(--chat-bg));
 }
 
 :root[data-theme-style] .workbench-dock__tab--active::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-  animation: graphite-tab-underline var(--dur-base) var(--ease-out) both;
+  display: none;
 }
 
+/* Classic and Workbench use compact text tabs in the right dock. A restrained
 /* Classic and Workbench use compact text tabs in the right dock. A restrained
    hairline clarifies each hit target without turning the strip into boxed
    segmented controls. Creation keeps its separate equal-column treatment. */
@@ -28849,6 +29913,14 @@ body > .mermaid-diagram--fullscreen {
   transform: translateY(-50%);
 }
 
+/* Theme-style turns the strip into browser-like tabs (small rounded rects,
+/* Theme-style turns the strip into browser-like tabs (small rounded rects,
+   selected one raised); the hairline separator reads as clutter between them. */
+:root[data-theme-style] .app--classic .workbench-dock__tab + .workbench-dock__tab::before,
+:root[data-theme-style] .app--workbench .workbench-dock__tab + .workbench-dock__tab::before {
+  display: none;
+}
+
 :root[data-theme-style] .workspace-panel,
 :root[data-theme-style] .workspace-files,
 :root[data-theme-style] .workspace-preview,
@@ -28858,16 +29930,17 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workspace-panel {
   border-left: 0;
-  background: var(--bg-elev);
+  background: var(--chat-bg);
 }
 
 :root[data-theme-style] .workspace-panel--embedded.workspace-panel--split-preview .workspace-preview {
-  border-left: 1px solid var(--border-soft);
+  /* The split resizer already draws the divider; a border here doubles it. */
+  border-left: 0;
   animation: graphite-viewer-in var(--dur-slow) var(--ease-out) both;
 }
 
 :root[data-theme-style] .workspace-files {
-  background: var(--bg-elev);
+  background: var(--chat-bg);
   border-right: 1px solid var(--border-soft);
 }
 
@@ -28920,15 +29993,29 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .workspace-tree__row:hover,
-:root[data-theme-style] .workspace-change:hover,
 :root[data-theme-style] .workspace-recent-menu__item:hover {
   background: var(--workspace-files-hover);
   color: var(--fg);
-  transform: translateX(2px);
+  transform: none;
 }
 
-:root[data-theme-style] .workspace-tree__row--active,
-:root[data-theme-style] .workspace-change--active {
+/* Change rows: the highlight spans the whole row (file entry + revert button).
+/* Change rows: the highlight spans the whole row (file entry + revert button).
+   The entry button inherits the row surface instead of painting its own. */
+:root[data-theme-style] .workspace-change-row:hover {
+  background: var(--workspace-files-hover);
+}
+:root[data-theme-style] .workspace-change-row:hover .workspace-change {
+  color: var(--fg);
+}
+:root[data-theme-style] .workspace-change-row:has(.workspace-change--active) {
+  background: var(--workspace-selection-bg);
+}
+:root[data-theme-style] .workspace-change-row:has(.workspace-change--active) .workspace-change {
+  color: var(--workspace-selection-fg);
+}
+
+:root[data-theme-style] .workspace-tree__row--active {
   background: var(--workspace-selection-bg);
   color: var(--workspace-selection-fg);
 }
@@ -28954,8 +30041,8 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .workspace-change {
   min-height: 56px;
   padding: 8px 9px;
-  border: 1px solid transparent;
-  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
+  border: 0;
+  transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
 
 :root[data-theme-style] .workspace-change-scope__head {
@@ -28963,12 +30050,24 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-soft);
 }
 
-:root[data-theme-style] .workspace-change:hover {
-  border-color: color-mix(in srgb, var(--fg-faint) 20%, transparent);
+/* The changed-tab content sits directly in the preview body whose theme-style
+/* The changed-tab content sits directly in the preview body whose theme-style
+   left/right padding is 0 (code/markdown views supply their own). Give the
+   outer containers a horizontal inset. Only the outermost layer gets padding:
+   in the changed overview the change-scope nests inside workspace-git-history
+   (which already pads 14px), so applying 14px to both would double the inset
+   to 28px. A change-scope that hangs directly off the body (scoped file list
+   in the files tab) gets the inset via the direct-child rule instead. */
+:root[data-theme-style] .workspace-git-history {
+  padding: 0 14px;
+}
+:root[data-theme-style] .workspace-preview__body > .workspace-change-scope {
+  padding: 0 14px;
 }
 
-:root[data-theme-style] .workspace-change--active {
-  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+:root[data-theme-style] .workspace-change__revert {
+  border-color: var(--border);
+  background: var(--bg-soft);
 }
 
 :root[data-theme-style] .workspace-change__name {
@@ -28982,15 +30081,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .workspace-change__badge {
-  height: 18px;
-  border-radius: 5px;
-  background: var(--bg-soft);
   color: var(--fg-faint);
 }
 
 :root[data-theme-style] .workspace-change__badge--git {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--fg-faint);
 }
 
 :root[data-theme-style] .workspace-empty {
@@ -29002,8 +30097,7 @@ body > .mermaid-diagram--fullscreen {
   text-align: center;
 }
 
-:root[data-theme-style] .workspace-preview__head,
-:root[data-theme-style] .workspace-preview__meta {
+:root[data-theme-style] .workspace-preview__head {
   border-color: var(--border-soft);
 }
 
@@ -29011,7 +30105,7 @@ body > .mermaid-diagram--fullscreen {
   height: 42px;
   gap: 9px;
   padding: 0 12px;
-  background: var(--bg-elev);
+  background: var(--chat-bg);
 }
 
 :root[data-theme-style] .workspace-current-file__icon {
@@ -29023,8 +30117,7 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 650;
 }
 
-:root[data-theme-style] .workspace-current-file__path,
-:root[data-theme-style] .workspace-preview__meta {
+:root[data-theme-style] .workspace-current-file__path {
   font-family: var(--mono);
 }
 
@@ -29034,20 +30127,6 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   border-color: var(--border);
   background: var(--bg-soft);
-}
-
-:root[data-theme-style] .workspace-preview__meta {
-  min-height: 32px;
-  padding: 6px 12px;
-  background: color-mix(in srgb, var(--bg-elev) 94%, var(--bg-soft));
-}
-
-:root[data-theme-style] .workspace-crumb {
-  color: var(--fg-dim);
-}
-
-:root[data-theme-style] .workspace-crumb--current {
-  color: var(--fg);
 }
 
 :root[data-theme-style] .workspace-preview__body {
@@ -29091,15 +30170,23 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: var(--app-graphite-shadow);
 }
 
-:root[data-theme-style] .workspace-note,
 :root[data-theme-style] .workspace-recent-menu,
 :root[data-theme-style] .floating-menu,
 :root[data-theme-style] .context-menu,
 :root[data-theme-style] .modelsw__menu {
   border-color: var(--app-graphite-hairline-strong);
   border-radius: 8px;
-  background: var(--bg-elev);
+  background: var(--overlay-surface-bg);
   box-shadow: var(--app-graphite-shadow-float);
+}
+
+/* Inline note panels (completion summary, git warnings) sit inside the
+/* Inline note panels (completion summary, git warnings) sit inside the
+   workspace surface — no floating elevation, just a hairline + soft fill. */
+:root[data-theme-style] .workspace-note {
+  border-color: var(--app-graphite-hairline-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
 }
 
 :root[data-theme-style] .modelsw__item:hover,
@@ -29132,8 +30219,10 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .context-panel__section {
   border-color: var(--border);
   border-radius: 8px;
-  background: var(--bg-elev);
-  box-shadow: var(--app-graphite-shadow);
+  /* Cards sit slightly deeper than the dock surface so sections keep a
+     quiet hierarchy without a hard contrast band. */
+  background: color-mix(in srgb, var(--chat-bg) 86%, var(--stage, #000));
+  box-shadow: none;
 }
 
 :root[data-theme-style] .context-panel__donut-core {
@@ -29247,7 +30336,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   background: var(--accent-soft);
   outline: none;
-  transform: translateX(2px);
+  transform: none;
 }
 
 @keyframes graphite-message-in {
@@ -29304,17 +30393,6 @@ body > .mermaid-diagram--fullscreen {
   }
 }
 
-@keyframes graphite-tab-underline {
-  from {
-    opacity: 0;
-    transform: scaleX(0.3);
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-}
-
 @keyframes graphite-tab-breathe {
   0%,
   100% {
@@ -29339,6 +30417,7 @@ body > .mermaid-diagram--fullscreen {
   background: linear-gradient(120deg, #ff5a2c, #ff8a3d);
 }
 
+/* Theme direction accents for the design-signature controls copied from the
 /* Theme direction accents for the design-signature controls copied from the
    new_design comps: panel toggles, run-mode badges, active sessions, and file
    tree folder rows all use each theme's accent + accent-soft pair. */
@@ -29417,8 +30496,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-:root[data-theme-style] .workspace-tree__row--active,
-:root[data-theme-style] .workspace-change--active {
+:root[data-theme-style] .workspace-tree__row--active {
   background: var(--workspace-selection-bg);
   color: var(--workspace-selection-fg);
 }
@@ -29807,6 +30885,29 @@ body > .mermaid-diagram--fullscreen {
   text-transform: none;
 }
 
+.sidebar--workbench .project-tree__section-title--pinned,
+:root[data-theme-style] .sidebar--workbench .project-tree__section-title--pinned {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 0 0 8px;
+  color: var(--fg-dim);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sidebar--workbench .project-tree__section-title-icon,
+:root[data-theme-style] .sidebar--workbench .project-tree__section-title-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--fg-faint);
+  stroke-width: 1.9;
+}
+
 .sidebar--workbench .project-tree__folder {
   height: 32px;
   min-height: 32px;
@@ -29975,7 +31076,7 @@ body > .mermaid-diagram--fullscreen {
 
 .sidebar--workbench .project-tree__topic--active .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .sidebar--workbench .project-tree__topic-im {
@@ -30155,7 +31256,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-elev) 92%, var(--sidebar-bg));
   color: var(--fg-faint);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--shadow) 10%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--shadow-color) 10%, transparent);
   transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
 }
 
@@ -30194,9 +31295,9 @@ body > .mermaid-diagram--fullscreen {
 .sidebar--workbench .sidebar__nav--footer {
   flex: 0 0 auto;
   gap: 5px;
-  margin-top: 12px;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--sidebar-workbench-border);
+  margin-top: 6px;
+  padding: 6px 0 0;
+  border-top: 0;
 }
 
 .sidebar--workbench .sidebar__nav--footer .sidebar__navitem,
@@ -30259,6 +31360,89 @@ body > .mermaid-diagram--fullscreen {
 .sidebar--workbench .sidebar__utility-button svg {
   flex: 0 0 auto;
   stroke-width: 1.9;
+}
+
+.project-tree__group {
+  position: relative;
+}
+.project-tree__group-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  border-radius: 6px;
+  color: var(--color-text-muted, inherit);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed transparent;
+}
+.project-tree__group-main:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.project-tree__group-main--drop-target {
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+.project-tree__group-chevron {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.project-tree__group-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.project-tree__group-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
+}
+.project-tree__group-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.project-tree__group-children {
+  padding-left: 0;
+}
+.project-tree__folder-active-indicator {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  margin-left: 6px;
+  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: project-tree-spin 0.9s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-tree__folder-active-indicator {
+    animation: none;
+    border-color: currentColor;
+    opacity: 0.72;
+  }
+}
+.project-tree__topic--drop-before {
+  box-shadow: inset 0 2px 0 currentColor;
+}
+.project-tree__topic--drop-after {
+  box-shadow: inset 0 -2px 0 currentColor;
 }
 
 @keyframes project-tree-spin {
@@ -30384,6 +31568,7 @@ body > .mermaid-diagram--fullscreen {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ==========================================================================
 /* ==========================================================================
    Creation desktop style — scaffold
    --------------------------------------------------------------------------
@@ -30746,6 +31931,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Scope compact swatches to real theme cards only — do not crush
+/* Scope compact swatches to real theme cards only — do not crush
    AppearanceOverview hero (.appearance-overview__thumb-base.theme-card__swatches). */
 .app--creation .theme-card .theme-card__swatches,
 :root[data-theme-style] .app--creation .theme-card .theme-card__swatches {
@@ -30774,6 +31960,7 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* Creation Graphite swatch colors apply to both theme cards and
 /* Creation Graphite swatch colors apply to both theme cards and
    AppearanceOverview hero (do not nest under .theme-card). */
 :root[data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
@@ -30988,15 +32175,13 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .topicbar__title-input,
 :root[data-theme-style] .app--creation .topicbar__title-input {
-  flex: 0 1 auto;
-  min-width: 4ch;
-  width: auto;
-  max-width: min(56ch, 100%);
+  flex: 0 0 auto;
+  width: 280px;
   height: 20px;
-  padding: 0 4px;
-  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg-elev) 22%, transparent);
+  padding: 0 6px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
 }
 
 .app--creation .topicbar__actions .topicbar__action-btn,
@@ -31228,7 +32413,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 1 1 auto !important;
   line-height: 1.25 !important;
   min-height: 20px !important;
-  max-height: 96px !important;
+  max-height: min(30vh, 160px) !important;
   padding: 4px 0 !important;
   overflow-y: auto !important;
   resize: none !important;
@@ -31283,7 +32468,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .composer-run-strip,
 :root[data-theme-style] .app--creation .composer-run-strip {
-  color: color-mix(in srgb, var(--accent) 88%, var(--fg-muted));
+  color: color-mix(in srgb, var(--accent) 88%, var(--fg-faint));
   font-size: calc(11.5px * var(--font-scale));
 }
 
@@ -31324,13 +32509,13 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .composer-run-strip__text,
 :root[data-theme-style] .app--creation .composer-run-strip__text {
-  color: color-mix(in srgb, var(--fg-muted) 72%, var(--accent));
+  color: color-mix(in srgb, var(--fg-faint) 72%, var(--accent));
   font-weight: 540;
 }
 
 .app--creation .composer-run-strip--waiting .composer-run-strip__text,
 :root[data-theme-style] .app--creation .composer-run-strip--waiting .composer-run-strip__text {
-  color: color-mix(in srgb, var(--warn) 64%, var(--fg-muted));
+  color: color-mix(in srgb, var(--warn) 64%, var(--fg-faint));
 }
 
 .app--creation .composer-card,
@@ -31566,6 +32751,21 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   font-size: var(--font-content);
   line-height: 1.55;
+}
+
+.composer__input.composer__input--measure,
+.app--creation .composer__input.composer__input--measure,
+:root[data-theme-style] .app--creation .composer__input.composer__input--measure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
 }
 
 .app--creation .composer__input::placeholder,
@@ -31843,7 +33043,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer-modebar__item:focus-visible,
 :root[data-theme-style] .app--creation .composer-modebar__item:hover:not(:disabled),
 :root[data-theme-style] .app--creation .composer-modebar__item:focus-visible {
-  color: color-mix(in srgb, var(--fg-muted) 86%, var(--accent));
+  color: color-mix(in srgb, var(--fg-faint) 86%, var(--accent));
   transform: none;
 }
 
@@ -31978,6 +33178,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* popover 卡片 —— 对齐 context-panel__capacity-card 风格（portal 到 body，无 .app--creation 前缀） */
+/*
 /*
  * NOTE (font-scale): this popover is portaled to <body>, so it has no
  * .app--creation prefix, yet it is ONLY rendered in creation layout
@@ -32662,6 +33863,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .sidebar-resizer::after,
 :root[data-theme-style] .app--creation .sidebar-resizer::after {
+  display: block;
   background: color-mix(in srgb, var(--fg-faint) 14%, transparent);
   box-shadow: none;
 }
@@ -32685,6 +33887,7 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
 }
 
+/* Creation: hide native chat scrollbar and use a controllable custom rail.
 /* Creation: hide native chat scrollbar and use a controllable custom rail.
    Native WebView2 thumb hover-size is unreliable; custom thumb can snap thick/thin.
    Keep this scrolling layer opaque too: transparent transcript backgrounds can
@@ -33207,6 +34410,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* ── Creation: 工具信息流 ───────────────────────────────────────────────────
+/* ── Creation: 工具信息流 ───────────────────────────────────────────────────
    状态圆点替代左侧文字图标（done=绿 / error=红 / stopped=橙 / running 无点）；
    圆点置于工具头最右端（折叠箭头之后）。classic/workbench 下圆点默认隐藏，
    左侧文字图标不变，零影响。 */
@@ -33344,6 +34548,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* 工具头与深度思考头对齐：reasoning__head 在 Creation 下 padding:0（flush），
+/* 工具头与深度思考头对齐：reasoning__head 在 Creation 下 padding:0（flush），
    tool__head 默认 padding:3px 8px 会比思考头左右各多 8px，导致层级错位。
    Creation 下统一为 0，与 reasoning__head 同起点。 */
 .app--creation .tool__head,
@@ -33351,6 +34556,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 0;
 }
 
+/* 移除非思考卡片的左侧竖线（思考模式 .reasoning__body 保留）。
 /* 移除非思考卡片的左侧竖线（思考模式 .reasoning__body 保留）。
    readonly-batch__body / turn-collapse__body / tool__body 的 border-left 统一去掉。 */
 .app--creation .tool__body,
@@ -33371,6 +34577,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* 限制工具头标题宽度，给右侧 meta（耗时/箭头/圆点）留出可见空间。
+/* 限制工具头标题宽度，给右侧 meta（耗时/箭头/圆点）留出可见空间。
    Bash 等命令常超长，不限宽会把箭头和圆点挤出视野。仅 Creation 作用域。
    summary 在 Creation 下直接隐藏——它对 bash 只是"N 行"摘要，信息量低，
    留着反而挤占右侧关键元素。 */
@@ -33389,6 +34596,7 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* Tool and process typography follows the semantic region preferences in every
 /* Tool and process typography follows the semantic region preferences in every
    layout; Creation only changes spacing and color treatment. */
 .app--creation .tool,
@@ -33437,6 +34645,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* 工具卡片内的代码块（命令参数/输出/diff）与 diff 标签、错误/提示统一思源黑体。
+/* 工具卡片内的代码块（命令参数/输出/diff）与 diff 标签、错误/提示统一思源黑体。
    注意：思源黑体为比例字体，代码列对齐会丢失，但字体风格绝对统一。
    Noto Sans SC 是思源黑体的开源同源版本，系统已装。 */
 .app--creation .tool__body .code,
@@ -33455,6 +34664,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* 工具错误信息：Creation 下去掉醒目的红底块（base 用 --del-bg），
+/* 工具错误信息：Creation 下去掉醒目的红底块（base 用 --del-bg），
    改为左对齐纯文本，与命令输出同起点（base 有 30px 左缩进，这里清零）。
    仅 .app--creation 作用域，classic/workbench 的红底错误框保持不变。 */
 .app--creation .tool__err,
@@ -33466,6 +34676,7 @@ body > .mermaid-diagram--fullscreen {
   text-align: left;
 }
 
+/* 工具体内代码块（命令参数/输出/diff）底部的横向滚动条：Creation 下隐藏滑道，
 /* 工具体内代码块（命令参数/输出/diff）底部的横向滚动条：Creation 下隐藏滑道，
    只留一条 4px 细滑块（默认半透明，hover 略加深）。所有工具通用，不只 shell。
    仅作用于 .app--creation .tool__body .code，不碰全局 --scrollbar-* token，
@@ -33759,6 +34970,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Emergency only: when the dock is forced below the Creation default (viewport
+/* Emergency only: when the dock is forced below the Creation default (viewport
    squeeze), drop labels. Equal columns remain so icons stay self-centered. */
 @container (max-width: 250px) {
   .app--creation .workbench-dock__tab,
@@ -33795,6 +35007,7 @@ body > .mermaid-diagram--fullscreen {
   height: 1px;
 }
 
+/* Creation workspace tree — align with left project-tree language.
 /* Creation workspace tree — align with left project-tree language.
    Virtualized rows estimate 24px (WorkspacePanel useVirtualizer); keep row
    height at/near that value so scroll math does not drift. */
@@ -33944,17 +35157,41 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
 }
 
-.app--creation .workbench-dock .workspace-change:hover,
-:root[data-theme-style] .app--creation .workbench-dock .workspace-change:hover {
+.app--creation .workbench-dock .workspace-change-row:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change-row:hover {
   background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+}
+.app--creation .workbench-dock .workspace-change-row:hover .workspace-change,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change-row:hover .workspace-change {
   color: var(--fg);
 }
 
-.app--creation .workbench-dock .workspace-change--active,
-.app--creation .workbench-dock .workspace-change--active:hover,
-:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active,
-:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active:hover {
+.app--creation .workbench-dock .workspace-change__revert,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__revert {
+  height: 24px;
+  min-width: 38px;
+  padding: 0 7px;
+  border-color: color-mix(in srgb, var(--fg-faint) 14%, transparent);
+  background: var(--bg-soft);
+  color: color-mix(in srgb, var(--fg-faint) 82%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-change__revert:hover,
+.app--creation .workbench-dock .workspace-change__revert:focus-visible,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__revert:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__revert:focus-visible {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-soft));
+  color: color-mix(in srgb, var(--danger) 78%, var(--fg));
+}
+
+.app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active),
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active) {
   background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+}
+.app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active) .workspace-change,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active) .workspace-change {
   color: var(--fg);
 }
 
@@ -33974,19 +35211,13 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock .workspace-change__badge,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-change__badge {
-  height: 17px;
-  padding: 0 5px;
-  border-color: color-mix(in srgb, var(--fg-faint) 12%, transparent);
-  border-radius: 5px;
-  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
-  font-size: calc(10px * var(--font-scale));
-  background: transparent;
+  color: color-mix(in srgb, var(--fg-faint) 78%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
 }
 
 .app--creation .workbench-dock .workspace-change__badge--git,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-change__badge--git {
-  color: color-mix(in srgb, var(--accent) 82%, var(--fg-dim));
-  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--fg-faint);
 }
 
 .app--creation .workbench-dock .workspace-change-scope__head,
@@ -34012,6 +35243,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
 }
 
+/* Creation "Changes" overview: keep the first-line path context, drop the
 /* Creation "Changes" overview: keep the first-line path context, drop the
    second-line breadcrumb meta (duplicate path). Only when no file selected
    (.workspace-panel--changed-overview). File preview keeps normal head/meta. */
@@ -34056,12 +35288,6 @@ body > .mermaid-diagram--fullscreen {
 /* Recent-files dropdown is not useful on Changes overview. */
 .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__recent,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__recent {
-  display: none;
-}
-
-/* Second layer: breadcrumb path row (hide — duplicates the first path). */
-.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__meta,
-:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__meta {
   display: none;
 }
 
@@ -34396,10 +35622,17 @@ body > .mermaid-diagram--fullscreen {
   border-left: 1px solid color-mix(in srgb, var(--creation-panel-border) 72%, transparent);
 }
 
-.app--creation .context-panel__mini-stat span {
+.app--creation .context-panel__mini-stat-head {
   order: 1;
-  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
+  min-width: 0;
+}
+
+.app--creation .context-panel__mini-stat-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -34434,7 +35667,7 @@ body > .mermaid-diagram--fullscreen {
   border-left: 0;
 }
 
-.app--creation .context-panel__mini-stat--wide span {
+.app--creation .context-panel__mini-stat--wide .context-panel__mini-stat-head {
   order: 1;
   flex: 0 1 auto;
   width: 100%;
@@ -34618,6 +35851,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* When workspace panel is open the workbench-dock covers the right edge, so the
+/* When workspace panel is open the workbench-dock covers the right edge, so the
    topicbar no longer needs the window-controls safe space — use the normal 18px
    padding instead to prevent buttons from being pushed off-screen or overlapping
    the dock. */
@@ -34628,6 +35862,7 @@ body > .mermaid-diagram--fullscreen {
   padding-right: 18px;
 }
 
+/* Workbench hides AppChrome, so its dock is also the native title surface.
 /* Workbench hides AppChrome, so its dock is also the native title surface.
    Keep the Windows caption buttons on a dedicated first row and render the
    complete dock tab strip below it, matching Classic's separated chrome. */
@@ -34650,6 +35885,17 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
+/* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
+/* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
+   instead of an AppChrome rail; shift it left of the Windows caption strip
+   (min/max/close) so it never sits under the window controls. Same safe inset
+   as the classic-mode panel toggle. */
+.app--windows-frameless.app--workbench .app__dock-toggle,
+:root[data-theme-style] .app--windows-frameless.app--workbench .app__dock-toggle {
+  right: calc(var(--windows-window-controls-safe) + 8px);
+}
+
+/* Creation sets tools padding via shorthand; re-assert the Windows safe
 /* Creation sets tools padding via shorthand; re-assert the Windows safe
    inset with higher specificity so 「文件 / 改动」 cannot sit under min/max/close.
    Tabs fill this free strip; each tab is an equal column that self-centers. */
@@ -34734,6 +35980,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* ============================================================================
+/* ============================================================================
    Windows + Creation: Vertical alignment for titlebar elements
    ========================================================================= */
 
@@ -34743,6 +35990,7 @@ body > .mermaid-diagram--fullscreen {
   margin-top: -32px !important;
 }
 
+/* Align topicbar (replaces app-chrome in Creation mode) with Windows controls
 /* Align topicbar (replaces app-chrome in Creation mode) with Windows controls
    without changing the shared macOS/Linux Creation geometry above. */
 .app--windows.app--creation .topicbar,
@@ -34760,6 +36008,7 @@ body > .mermaid-diagram--fullscreen {
   transform: none;
 }
 
+/* Reduce session title font size and weight. The rename input replaces the h1
 /* Reduce session title font size and weight. The rename input replaces the h1
    while editing (App.tsx topicbarEditing), so it must carry the same size or
    entering rename mode visibly jumps back to the 10px Creation default. */
@@ -34787,6 +36036,7 @@ body > .mermaid-diagram--fullscreen {
   transform: translateY(0.5px) scale(0.94) !important;
 }
 
+/* Windows 控制框在 Creation 下默认用 --bg-elev（近纯白），与右侧 workbench-dock
 /* Windows 控制框在 Creation 下默认用 --bg-elev（近纯白），与右侧 workbench-dock
    的统一底色（sidebar-bg 88%）有明显色差。改用相同底色，让控制框与右侧面板连成一片。 */
 .app--windows.app--creation .windows-window-controls,
@@ -34886,6 +36136,97 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   min-width: 0;
 }
+.diag-section__body--frontend {
+  padding-top: 12px;
+}
+.diag-frontend-recording__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.diag-frontend-recording__copy strong {
+  font-size: 14px;
+}
+.diag-frontend-recording__copy span {
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.diag-page .frontend-diagnostics--embedded {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px;
+  border: 1px solid var(--border, rgba(127,127,127,.25));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev, #fff) 94%, transparent);
+  box-shadow: var(--shadow-2);
+  color: var(--fg-dim, #777);
+  font-size: var(--font-caption, 12px);
+}
+.diag-page .frontend-diagnostics--embedded button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.diag-page .frontend-diagnostics--embedded button:hover {
+  background: var(--bg-hover, rgba(127,127,127,.12));
+  color: var(--fg, inherit);
+}
+.diag-page .frontend-diagnostics--embedded button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.diag-page .frontend-diagnostics--embedded button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+.diag-page .frontend-diagnostics--embedded .frontend-diagnostics__toggle {
+  border: 1px solid var(--border, rgba(127,127,127,.25));
+  background: var(--bg-elev, #fff);
+  color: var(--fg-dim, #777);
+  white-space: nowrap;
+}
+.diag-page .frontend-diagnostics--embedded .frontend-diagnostics__toggle--on {
+  border-color: color-mix(in srgb, var(--accent, #4af) 48%, var(--border, rgba(127,127,127,.25)));
+  background: var(--accent-soft, rgba(68,136,255,.12));
+  color: var(--accent, #4af);
+}
+.diag-page .frontend-diagnostics--embedded .scroll-diagnostics__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.diag-page .frontend-diagnostics--embedded .scroll-diagnostics__dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--danger, #e35);
+}
+.diag-page .frontend-diagnostics--embedded.scroll-diagnostics--stopped .scroll-diagnostics__dot {
+  background: var(--success, #2a6);
+}
+.diag-page .frontend-diagnostics--embedded .scroll-diagnostics__export {
+  background: var(--accent-soft, rgba(68,136,255,.12));
+  color: var(--accent, #4af);
+  white-space: nowrap;
+}
 .diag-issue-group h4 {
   margin: 8px 0 4px;
   font-size: 12px;
@@ -34945,6 +36286,7 @@ body > .mermaid-diagram--fullscreen {
   vertical-align: middle;
 }
 
+/* ==========================================================================
 /* ==========================================================================
    Theme Pack V1 — background layer, scene, library editor
    Overlay CSS variables are injected last by themePack.ts so pack tokens win
@@ -35036,12 +36378,29 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /*
+/*
   Background visibility: .layout paints opaque var(--bg) by default, which fully
   covers .theme-bg underneath. When a pack background is active, make the layout
   shell transparent so the image can show through; panes keep their own fills.
 */
 :root[data-theme-has-bg="true"] .app:not(.app--creation) .layout {
   background: transparent;
+}
+
+:root[data-theme-pack][data-theme-has-bg="true"] {
+  --overlay-surface-bg: color-mix(
+    in srgb,
+    var(--bg-elev) var(--theme-pane-overlay-pct, 90%),
+    transparent
+  );
+}
+
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] {
+  --overlay-surface-bg: color-mix(
+    in srgb,
+    var(--bg-elev) var(--theme-pane-task-overlay-pct, 100%),
+    transparent
+  );
 }
 
 /* Home: semi-transparent panes so the full-strength image reads through */
@@ -35443,6 +36802,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /*
+/*
   WebView2 can retain stale raster pixels when children are removed from a
   transparent scrolling layer (#6359, #7011). Scope the opaque backing to the
   primary chat transcript: history previews already own an opaque card surface,
@@ -35460,6 +36820,7 @@ body > .mermaid-diagram--fullscreen {
   background-size: 100% 100%, 100% 100% !important;
 }
 
+/*
 /*
   Background packs normally show a fixed image through translucent panes. The
   two fixed pseudo-layers preserve the existing .theme-bg geometry exactly:
@@ -35719,7 +37080,6 @@ body > .mermaid-diagram--fullscreen {
 .theme-library__grid--base .theme-lib-card__thumb {
   height: 40px;
 }
-
 
 /* Appearance overview (demo 1) */
 .appearance-overview {
@@ -36541,7 +37901,6 @@ body > .mermaid-diagram--fullscreen {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: var(--z-local-popover);
   min-width: 160px; padding: 6px;
   border: 1px solid var(--border); border-radius: var(--r, 8px);
-  background: var(--panel, var(--bg-elev));
   box-shadow: 0 8px 24px color-mix(in srgb, #000 28%, transparent);
   display: flex; flex-direction: column; gap: 2px;
 }
@@ -36567,7 +37926,7 @@ body > .mermaid-diagram--fullscreen {
   max-height: calc(100vh - 40px);
   max-height: calc(100dvh - 40px);
   overflow: hidden;
-  background: var(--panel); border-radius: var(--r-l, 12px);
+  border-radius: var(--r-l, 12px);
   padding: 0; border: 1px solid var(--border);
   box-shadow: 0 24px 72px color-mix(in srgb, #000 42%, transparent);
   container: theme-editor / inline-size;
@@ -36808,6 +38167,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* The settings navigation consumes part of the window width, so gallery
+/* The settings navigation consumes part of the window width, so gallery
    responsiveness must follow its own content box rather than the viewport. */
 @container theme-gallery (max-width: 760px) {
   .theme-gallery__body,
@@ -36952,7 +38312,6 @@ body > .mermaid-diagram--fullscreen {
   gap: 16px;
   padding: 18px 20px;
   border-bottom: 1px solid var(--border-soft);
-  background: var(--bg-elev);
 }
 .theme-editor__header strong { font-size: var(--text-lg, 1rem); }
 .theme-editor__header p,
@@ -37078,7 +38437,6 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   padding: 18px;
   border-left: 1px solid var(--border-soft);
-  background: var(--bg-elev);
   overflow-y: auto;
 }
 .theme-editor__live-head { margin-bottom: 12px; }
@@ -37089,7 +38447,35 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   padding: 12px 20px;
   border-top: 1px solid var(--border-soft);
-  background: var(--bg-elev);
+}
+
+/* Operational surfaces share one background recipe, including menus whose
+   component CSS is loaded lazily and popovers portaled directly to body. */
+.anchored-popover,
+.slashmenu,
+.composer-access-menu,
+.jobs-popover,
+.modelsw__menu,
+.workspace-recent-menu,
+.floating-menu,
+.mem-ws-select__menu,
+.menu,
+.sound-select__menu,
+.settings-model-picker__menu,
+.external-opener__menu,
+.context-menu,
+.theme-gallery__menu,
+.theme-gallery__editor,
+.theme-editor__header,
+.theme-editor__live,
+.theme-gallery__editor > .theme-editor__actions,
+.provider-access-more__menu,
+.topicbar__more-menu,
+.topicbar__more-export-menu,
+.heartbeat-filter-menu,
+.heartbeat-project-menu,
+.heartbeat-task-menu {
+  background: var(--overlay-surface-bg);
 }
 .theme-editor__warn ul { margin: 6px 0 0; padding-left: 18px; }
 
@@ -37781,7 +39167,7 @@ body > .mermaid-diagram--fullscreen {
 .remote-switcher__disconnect:hover,
 .remote-switcher__disconnect:focus-visible {
   outline: none;
-  border-color: var(--border-strong);
+  border-color: var(--border-2);
   background: var(--bg-soft);
   color: var(--fg);
 }
@@ -37838,9 +39224,9 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev-2);
 }
 /* Task Monitor panel. The Codex-style popover keeps the chat composer clear. */
-.taskmonitor-popover { position:absolute; top:calc(100% + 8px); right:0; width:min(440px, calc(100vw - 32px)); max-height:min(72vh, 680px); z-index:var(--z-dock); border:1px solid var(--border,#333); border-radius:10px; background:var(--bg,#111); box-shadow:0 14px 36px rgba(0,0,0,.42); overflow:hidden; }
+.taskmonitor-popover { position:absolute; top:calc(100% + 8px); right:0; width:min(440px, calc(100vw - 32px)); max-height:min(72vh, 680px); z-index:var(--z-dock); border:1px solid var(--border,#333); border-radius:10px; background:var(--overlay-surface-bg, var(--bg,#111)); box-shadow:0 14px 36px rgba(0,0,0,.42); overflow:hidden; }
 .taskmonitor { background:var(--bg,#111); }
-.taskmonitor--popover { max-height:inherit; }
+.taskmonitor--popover { max-height:inherit; background:transparent; }
 .taskmonitor__head { display:flex; align-items:center; gap:6px; width:100%; padding:8px 12px; font-size:13px; }
 .taskmonitor__toggle,.taskmonitor__refresh,.taskmonitor__close { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:0; border-radius:6px; background:none; color:inherit; cursor:pointer; }
 .taskmonitor__toggle:hover,.taskmonitor__refresh:hover,.taskmonitor__close:hover,.taskmonitor__toggle:focus-visible,.taskmonitor__refresh:focus-visible,.taskmonitor__close:focus-visible { background:var(--bg-elev-2); outline:none; }
@@ -37890,6 +39276,9 @@ body > .mermaid-diagram--fullscreen {
   --terminal-faint: var(--fg-faint);
   --terminal-cursor: var(--accent);
   --terminal-selection: color-mix(in srgb, var(--accent) 28%, transparent);
+  /* Auto mode leaves selectionForeground unset: xterm keeps the natural
+     foreground, which stays readable over the selection tint on both light
+     and dark app themes. */
 }
 :root[data-terminal-theme="dark"] {
   --terminal-bg: #111315;
@@ -37900,7 +39289,8 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #a7a19a;
   --terminal-faint: #70777f;
   --terminal-cursor: #e6a15c;
-  --terminal-selection: #344c68;
+  --terminal-selection: #4a6d8c;
+  --terminal-selection-fg: #ffffff;
 }
 :root[data-terminal-theme="light"] {
   --terminal-bg: #f7f8fa;
@@ -37911,7 +39301,8 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #5f6670;
   --terminal-faint: #8b929b;
   --terminal-cursor: #9a4f00;
-  --terminal-selection: #b9d7ff;
+  --terminal-selection: #6ea8fe;
+  --terminal-selection-fg: #0b0f14;
 }
 :root[data-terminal-theme="dark"] .terminal-panel { color-scheme: dark; }
 :root[data-terminal-theme="light"] .terminal-panel { color-scheme: light; }
@@ -37991,6 +39382,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Terminal-drawer footer compaction (terminal is open + non-Creation layout).
+/* Terminal-drawer footer compaction (terminal is open + non-Creation layout).
    !important is necessary because the footer padding is set by multiple theme /
    media-query rules with varying specificity that are hard to predict.
    Keep the top spacing (composer→statusbar) intact; only reduce the bottom
@@ -37999,6 +39391,7 @@ body > .mermaid-diagram--fullscreen {
   padding-bottom: 4px !important;
 }
 
+/* Classic and Workbench share the same compact four-view strip at the dock's
 /* Classic and Workbench share the same compact four-view strip at the dock's
    minimum width. Creation keeps its equal-column tab treatment. */
 @container (max-width: 420px) {
@@ -38010,4 +39403,222 @@ body > .mermaid-diagram--fullscreen {
     padding-right: 10px;
     gap: 4px;
   }
+}
+
+/* DingTalk bot channel: the credential row and manual setup form need
+/* DingTalk bot channel: the credential row and manual setup form need
+   their own multi-column layout; the shared .bot-secret-row is forced to a
+   single column inside .bot-detail-card, which stacks five elements. */
+.bot-connect-panel--dingtalk {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+}
+.bot-connect-panel--dingtalk .bot-connect-panel__body {
+  gap: 12px;
+}
+.bot-manual-form.bot-manual-form--dingtalk {
+  gap: 10px;
+  max-width: none;
+}
+.bot-manual-form.bot-manual-form--dingtalk .bot-card-field {
+  grid-template-columns: minmax(92px, 128px) minmax(0, 1fr);
+}
+.bot-manual-form.bot-manual-form--dingtalk .bot-card-field > div {
+  justify-content: flex-start;
+}
+/* 钉钉凭据区与飞书一致：单列竖排（通用 .bot-detail-card .bot-secret-row
+/* 钉钉凭据区与飞书一致：单列竖排（通用 .bot-detail-card .bot-secret-row
+   已强制为 1fr；这里不再覆盖为多列横排，避免 5 个元素挤一行放不下）。 */
+
+/* ── Topic bar title button (click-to-rename in every layout) ────── */
+.topicbar__workspace-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+  user-select: none;
+}
+
+.topicbar__title-button,
+:root[data-theme-style] .topicbar__title-button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.topicbar__title-button:hover,
+.topicbar__title-button:focus-visible,
+:root[data-theme-style] .topicbar__title-button:hover,
+:root[data-theme-style] .topicbar__title-button:focus-visible {
+  color: var(--fg);
+}
+
+/* ── Topic bar background ───────────────────────────────────────────
+/* ── Topic bar background ───────────────────────────────────────────
+   Unify the chat-pane header with the surrounding chat surface. The
+   topic bar defaults to --bg-elev; in light themes that reads as a hard
+   white band, so use #F5F6F9 to blend it into the chat area. Dark themes
+   keep the themed elevation so the header never turns light-on-dark.
+   !important beats the theme-style / chrome-hidden topicbar rules. */
+.topicbar,
+:root[data-theme="dark"] .topicbar,
+:root[data-theme-style] .topicbar {
+  background: var(--bg-elev) !important;
+}
+
+:root[data-theme="light"][data-theme-style] .topicbar,
+:root[data-theme="light"] .topicbar {
+  background: #f5f6f9 !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .topicbar {
+    background: #f5f6f9 !important;
+  }
+}
+/* ── Remote project group extras (badge + session rows) ───────────────── */
+.project-tree__remote-badge {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  vertical-align: middle;
+}
+.project-tree__remote-badge--connected,
+.project-tree__remote-badge--degraded {
+  background: var(--ok);
+}
+.project-tree__remote-badge--connecting,
+.project-tree__remote-badge--reconnecting,
+.project-tree__remote-badge--pending_hostkey {
+  background: var(--warn, var(--fg));
+}
+.project-tree__remote-badge--stopped,
+.project-tree__remote-badge--disconnected {
+  background: var(--fg-faint);
+}
+.project-tree__remote-badge--error {
+  background: var(--danger, var(--fg));
+}
+/* Per-workspace serve state: green only when that group's serve is ready. */
+.project-tree__remote-badge--serve-ready {
+  background: var(--ok);
+}
+.project-tree__remote-badge--serve-busy {
+  background: var(--warn, var(--fg));
+}
+.project-tree__remote-badge--serve-error {
+  background: var(--danger, var(--fg));
+}
+.project-tree__remote-badge--serve-idle {
+  background: var(--fg-faint);
+}
+
+/* ── Remote session surface (remote tab content area) ─────────────── */
+.remote-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+.remote-surface--waiting,
+.remote-surface--warning,
+.remote-surface--error,
+.remote-surface--disconnected {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--fg-dim);
+  font-size: var(--text-md);
+}
+.remote-surface--warning { color: var(--warn, var(--fg)); }
+.remote-surface--error { color: var(--danger, var(--fg)); }
+.remote-surface__detail {
+  max-width: 60%;
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.remote-surface__spinner { animation: remote-surface-spin 1s linear infinite; }
+@keyframes remote-surface-spin { to { transform: rotate(360deg); } }
+.remote-surface__approval,
+.remote-surface__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 760px;
+  margin: 8px auto 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn, var(--fg)) 45%, var(--border));
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
+.remote-surface__approval-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; }
+.remote-surface__approval-body {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.remote-surface__approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.remote-surface__ask-question { display: flex; flex-direction: column; gap: 6px; }
+.remote-surface__ask-prompt { font-size: var(--text-sm); font-weight: 600; }
+.remote-surface__ask-options { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── MCP Apps inline surface ─────────────────────────────────────────── */
+.mcp-app-card {
+  margin-top: 8px;
+  border: 1px solid var(--soft-border, #d0d0d0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mcp-app-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  transition: height 120ms ease;
+}
+
+.tool__mcp-app-open {
+  margin-top: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--soft-border, #d0d0d0);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool__mcp-app-open:hover {
+  filter: brightness(0.95);
 }

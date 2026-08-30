@@ -1,6 +1,8 @@
 package main
 
 import (
+	"runtime"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
@@ -36,7 +38,14 @@ func (a *App) defaultSettingsView() SettingsView {
 		ProviderPresets: providerPresetViewsForRootWithResolver(nil, a.activeWorkspaceRoot(), nil),
 		ProviderKinds:   nonNil(provider.Kinds()),
 		Permissions:     PermissionsView{Mode: "ask", Allow: []string{}, Ask: []string{}, Deny: []string{}},
-		Sandbox:         SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
+		Sandbox: SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto",
+			EffectiveShell:      sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
+			ResolvedShell:       sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
+			ShellCapabilities:   sandboxCapabilityViews("", ""),
+			GitCapability:       gitCapabilityView("", ""),
+			ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS),
+			ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
+			GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS)},
 		Agent: AgentView{
 			PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth,
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,

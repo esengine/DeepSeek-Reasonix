@@ -157,6 +157,7 @@ export default function LineNumberCode({
   language,
   showLineNumbers,
   maxHeight,
+  scrollMode,
   sourceSize,
   searchRequestPending,
   onSearchRequestConsumed,
@@ -333,6 +334,7 @@ export default function LineNumberCode({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isVirtual = showLineNumbers !== false && lines.length > VIRTUAL_THRESHOLD;
+  const bounded = scrollMode === "bounded" || (scrollMode !== "expand" && maxHeight != null) || isVirtual;
   const virtualizer = useVirtualizer({
     count: isVirtual ? lines.length : 0,
     getScrollElement: () => scrollRef.current,
@@ -343,6 +345,28 @@ export default function LineNumberCode({
     // React render loop for a long code block.
     directDomUpdates: true,
   });
+
+  // The virtualizer writes positioning straight onto DOM nodes (container
+  // height, scroll offset, per-row transforms). When a large (virtual) file
+  // stays mounted via SWR and is replaced by a small (non-virtual) file, React
+  // reuses those nodes; clear the direct DOM writes so the non-virtual rows
+  // lay out fresh instead of keeping stale offsets and gaps.
+  useEffect(() => {
+    if (isVirtual) return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    scrollEl.scrollTop = 0;
+    const wrap = scrollEl.querySelector<HTMLElement>(".code-lines-wrap");
+    if (!wrap) return;
+    wrap.style.removeProperty("height");
+    wrap.querySelectorAll<HTMLElement>("[data-line-index]").forEach((row) => {
+      row.style.removeProperty("transform");
+      row.style.removeProperty("position");
+      row.style.removeProperty("top");
+      row.style.removeProperty("left");
+      row.style.removeProperty("width");
+    });
+  }, [isVirtual]);
 
   const scrollToLine = useCallback(
     (index: number) => {
@@ -405,6 +429,7 @@ export default function LineNumberCode({
         key={index}
         data-line-index={index}
         className={`code-line-row${isCurrent ? " code-line-row--current" : ""}${isDimmed ? " code-line-row--dim" : ""}`}
+        style={{ transform: "none" }}
       >
         {showLineNumbers !== false && (
           <span
@@ -587,13 +612,14 @@ export default function LineNumberCode({
 
       <div
         ref={scrollRef}
-        className="code hljs code--lines"
+        className={`code hljs code--lines${bounded ? " code--scroll-y" : ""}`}
+        data-nested-scroll={bounded ? "" : undefined}
         data-lang={language}
         data-highlight-mode={syntaxHighlight ? "syntax" : "plain"}
         tabIndex={0}
         style={{
           maxHeight: maxHeight ?? undefined,
-          overflow: maxHeight != null || isVirtual ? "auto" : undefined,
+          overflow: bounded ? "auto" : undefined,
         }}
       >
         {isVirtual ? (
@@ -612,6 +638,12 @@ export default function LineNumberCode({
                   top: 0,
                   left: 0,
                   width: "100%",
+                  // directDomUpdates writes the transform straight onto the
+                  // DOM, but right after switching a non-virtual view to a
+                  // virtual one the virtualizer may emit before its element
+                  // cache is populated; rendering the offset here keeps the
+                  // rows positioned (no stack-up) until then.
+                  transform: `translate3d(0, ${row.start}px, 0)`,
                 }}
               >
                 {renderRow(row.index)}
@@ -619,7 +651,7 @@ export default function LineNumberCode({
             ))}
           </div>
         ) : (
-          <div className="code-lines-wrap">
+          <div className="code-lines-wrap" style={{ height: undefined }}>
             {lines.map((_, index) => renderRow(index))}
           </div>
         )}

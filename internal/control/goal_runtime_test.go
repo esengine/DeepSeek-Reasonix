@@ -634,9 +634,9 @@ func (f minimalFakeTool) Execute(context.Context, json.RawMessage) (string, erro
 }
 
 // TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff covers the
-// Goal + Delivery combination: the model works (edit → verify → review →
-// complete_step), reports complete via update_goal, and the goal completes —
-// no user-facing recovery card.
+// Goal + closed-loop evidence combination: the model works (edit → verify →
+// review → complete_step), reports complete via update_goal, and the goal
+// completes — no user-facing recovery card.
 func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 	todoWrite, _ := tool.LookupBuiltin("todo_write")
 	completeStep, _ := tool.LookupBuiltin("complete_step")
@@ -658,7 +658,8 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 			textTurn("Ship main delivered."),
 		},
 	)}
-	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{DeliveryProfile: true}, event.Discard)
+	// An active Goal is a closed-loop delivery scope; no profile option needed.
+	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	var doneReadiness *event.FinalReadiness
 	c := New(Options{
@@ -685,10 +686,10 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 	}
 }
 
-// TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries covers
-// the plain (non-Goal) Delivery combination: readiness failure ends the run on
-// the first final answer, surfaces the recovery card, and never auto-continues.
-func TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries(t *testing.T) {
+// TestPlainDeliveryReadinessFailureSurfacesRecoveryCard covers the plain
+// (non-Goal) closed-loop case: Delivery stops after the visible turn and leaves
+// the explicit recovery action to the user.
+func TestPlainDeliveryReadinessFailureSurfacesRecoveryCard(t *testing.T) {
 	todoWrite, _ := tool.LookupBuiltin("todo_write")
 	reg := tool.NewRegistry()
 	reg.Add(todoWrite)
@@ -697,9 +698,12 @@ func TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries(t *test
 		{toolCallChunk("w1", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("t0", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		textTurn("premature final"),
-		textTurn("extra turn that must never run"),
+		textTurn("must not be consumed by a hidden readiness retry"),
 	}}
-	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{DeliveryProfile: true}, event.Discard)
+	// "implement main" is an unanchored mutation. The delivery floor is what
+	// turns its closed-loop evidence gap into a pause; the standard floor lets
+	// the answer stand (TestStandardFloorNeverPausesOnReadinessGap).
+	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	c := New(Options{
 		Runner:   ag,
@@ -711,13 +715,16 @@ func TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries(t *test
 		}),
 	})
 
+	if err := c.SetQualityFloor(QualityFloorDelivery); err != nil {
+		t.Fatalf("SetQualityFloor: %v", err)
+	}
 	c.Submit("implement main")
 	ev := <-done
 	if ev.Readiness == nil || len(ev.Readiness.Missing) == 0 {
 		t.Fatalf("TurnDone.Readiness = %+v, want missing requirements for the recovery card", ev.Readiness)
 	}
 	if prov.call != 3 {
-		t.Fatalf("provider calls = %d, want 3 (work turn + final answer, no readiness retries)", prov.call)
+		t.Fatalf("provider calls = %d, want 3 (work + todo + final answer)", prov.call)
 	}
 	if got := c.GoalStatus(); got != GoalStatusStopped {
 		t.Fatalf("GoalStatus() = %q, want stopped (no goal involved)", got)

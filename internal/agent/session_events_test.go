@@ -343,7 +343,7 @@ func TestReplaySessionEventLogEnforcesResourceBudgetsWithoutMutation(t *testing.
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := replaySessionEventLogWithLimits(logPath, tc.limits); !errors.Is(err, ErrSessionReplayLimitExceeded) {
+			if _, err := replaySessionEventLogWithLimits(logPath, tc.limits, nil); !errors.Is(err, ErrSessionReplayLimitExceeded) {
 				t.Fatalf("replay error = %v, want ErrSessionReplayLimitExceeded", err)
 			} else {
 				var limitErr *SessionReplayLimitError
@@ -376,7 +376,7 @@ func TestReplayChecksMessageBudgetBeforeDecodingOverLimitElement(t *testing.T) {
 
 	replay, err := replaySessionEventLogWithLimits(logPath, sessionReplayLimits{
 		maxBytes: int64(len(events) + 1), maxRecords: 10, maxMessages: 2,
-	})
+	}, nil)
 	if !errors.Is(err, ErrSessionReplayLimitExceeded) {
 		t.Fatalf("replay error = %v, want message replay limit", err)
 	}
@@ -400,7 +400,7 @@ func TestReplayChecksCollectionBudgetBeforeDecodingOverLimitElement(t *testing.T
 
 	replay, err := replaySessionEventLogWithLimits(logPath, sessionReplayLimits{
 		maxBytes: int64(len(events) + 1), maxRecords: 10, maxMessages: 10, maxCollectionItems: 2,
-	})
+	}, nil)
 	if !errors.Is(err, ErrSessionReplayLimitExceeded) {
 		t.Fatalf("replay error = %v, want collection replay limit", err)
 	}
@@ -427,7 +427,7 @@ func TestReplayCollectionBudgetAggregatesAcrossRecords(t *testing.T) {
 
 	replay, err := replaySessionEventLogWithLimits(logPath, sessionReplayLimits{
 		maxBytes: int64(len(events) + 1), maxRecords: 10, maxMessages: 10, maxCollectionItems: 2,
-	})
+	}, nil)
 	if !errors.Is(err, ErrSessionReplayLimitExceeded) {
 		t.Fatalf("replay error = %v, want aggregate collection replay limit", err)
 	}
@@ -455,7 +455,7 @@ func TestLoadSessionMessagesDoesNotFallbackAfterEventReplayBudget(t *testing.T) 
 
 	msgs, fromEvents, damaged, err := loadSessionMessagesWithLimits(path, sessionReplayLimits{
 		maxBytes: int64(len(events) + 1), maxRecords: 10, maxMessages: 1,
-	})
+	}, nil)
 	if !errors.Is(err, ErrSessionReplayLimitExceeded) {
 		t.Fatalf("load error = %v, want ErrSessionReplayLimitExceeded", err)
 	}
@@ -585,7 +585,7 @@ func TestEventLogCompactionBoundsGrowth(t *testing.T) {
 	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != strings.Repeat("z", 60) {
 		t.Fatalf("compacted transcript tail wrong: %q", got[:min(8, len(got))])
 	}
-	anchor, err := loadSessionMessagesFromJSONL(path)
+	anchor, err := loadSessionMessagesFromJSONL(path, nil)
 	if err != nil {
 		t.Fatalf("read anchor: %v", err)
 	}

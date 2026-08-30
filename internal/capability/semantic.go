@@ -29,7 +29,8 @@ type SemanticRouter struct {
 	Effort   string
 	// Pricing prices the router's own usage events; without it the routing
 	// cost always displays as zero.
-	Pricing *provider.Pricing
+	Pricing      *provider.Pricing
+	QuoteContext *event.QuoteContext
 	// Audit receives router token/cost/latency counters (RecordRouterUsage).
 	Audit *Audit
 
@@ -171,23 +172,18 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 		if usage == nil {
 			return
 		}
+		e := event.Event{Kind: event.Usage, ModelRef: strings.TrimSpace(r.Model), Usage: usage,
+			Pricing: r.Pricing, UsageSource: event.UsageSourceCapabilityRouter}
+		e.CostQuote = event.EnsureCostQuote(e, r.QuoteContext)
 		if (usage.PromptTokens > 0 || usage.CompletionTokens > 0) && r.Audit != nil {
-			// Host-side audit only: cost is estimated from the rate card and never
-			// enters the model request. Prefer CostQuote when wiring new audit sinks.
 			cost := 0.0
-			if r.Pricing != nil && usage != nil {
-				cost = r.Pricing.Cost(usage)
+			if e.CostQuote != nil && e.CostQuote.CostComplete {
+				cost = e.CostQuote.Original.Float64()
 			}
 			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, cost, time.Since(start).Milliseconds())
 		}
 		if r.Sink != nil {
-			r.Sink.Emit(event.Event{
-				Kind:        event.Usage,
-				ModelRef:    strings.TrimSpace(r.Model),
-				Usage:       usage,
-				Pricing:     r.Pricing,
-				UsageSource: event.UsageSourceCapabilityRouter,
-			})
+			r.Sink.Emit(e)
 		}
 	}()
 	ch, err := r.Provider.Stream(ctx, req)

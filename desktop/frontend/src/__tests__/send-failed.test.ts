@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acceptsRuntimeEventEpoch, initialState, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
+import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, isLocalRuntimeCommand, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
 import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
@@ -115,6 +115,9 @@ eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", r
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "failed", epoch: "e1" } }), false, "failed runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: true, eventChannel: "", cwd: "", runtime: { phase: "ready", epoch: "e1" } }), true, "ready runtime can submit");
 eq(normalizeTurnSubmit(" visible prompt ", " provider prompt ").submit, "provider prompt", "submit normalization trims provider input");
+eq(isLocalRuntimeCommand(" /reload "), true, "/reload remains a host-only command without a turn receipt");
+eq(isLocalRuntimeCommand("/effort max"), true, "/effort remains a host-only command without a turn receipt");
+eq(isLocalRuntimeCommand("/reload now"), false, "non-command /reload text still starts an agent turn");
 let rejectedVisibleOnlySubmit = false;
 try {
   normalizeTurnSubmit("visible prompt", "   ");
@@ -181,13 +184,29 @@ const readinessNotice = readinessState.items[readinessState.items.length - 1];
 eq(readinessNotice.kind, "notice", "final readiness appends a notice");
 eq(readinessNotice.kind === "notice" && readinessNotice.level, "info", "final readiness uses informational severity");
 eq(readinessNotice.kind === "notice" && readinessNotice.variant, "delivery", "final readiness uses the delivery status treatment");
-eq(readinessNotice.kind === "notice" && readinessNotice.title, "Delivery checks are not complete", "final readiness uses localized product copy");
+eq(readinessNotice.kind === "notice" && readinessNotice.title, "Delivery checks are not complete", "final readiness uses the explicit Delivery recovery title");
+eq(
+  readinessNotice.kind === "notice" && readinessNotice.text,
+  "The response was generated, but verification and review still need to be completed.",
+  "final readiness explains the explicit Delivery recovery boundary",
+);
 eq(readinessNotice.kind === "notice" && readinessNotice.detail, "Still needed: verification, change review", "structured requirements produce localized detail");
 eq(readinessNotice.kind === "notice" && readinessNotice.action, "continue_delivery", "final readiness offers a recovery action");
 const readinessUser = readinessState.items.find((it) => it.kind === "user");
 eq(readinessUser?.kind === "user" && Boolean(readinessUser.failed), false, "final readiness does not mark the delivered user message as failed");
 eq(readinessState.running, false, "an unclicked continue-check action does not keep the turn running");
 eq(readinessState.pendingPrompt, false, "an unclicked continue-check action does not create a pending prompt");
+
+const reloadedReadiness = historyMessagesToItems([{
+  role: "notice",
+  content: "Task status needs one more check; continue the remaining work.",
+  code: "final_readiness",
+  level: "info",
+  pending: true,
+  readiness: { attempts: 1, missing: ["verification"] },
+}], "h").items[0];
+eq(reloadedReadiness.kind === "notice" && reloadedReadiness.action, "continue_delivery", "reloaded readiness metadata restores the explicit action");
+eq(reloadedReadiness.kind === "notice" && reloadedReadiness.detail, "Still needed: verification", "reloaded readiness metadata restores structured detail");
 
 const recovering = reducer(readinessState, { type: "user", text: "Continue checks", seq: readinessState.seq, submissionId: "recovery-submit", deliveryRecovery: true });
 const recovered = reducer(recovering, { type: "event", e: { kind: "turn_done", submissionId: "recovery-submit" } as WireEvent });
@@ -282,19 +301,14 @@ eq(
   "collaboration mode changes always reconcile the remembered plan restore intent",
 );
 eq(
-  appSource.includes("runtimeTransitionTabsRef.current.has(tabId)"),
+  !appSource.includes("runtimeTransitionTabsRef") && !appSource.includes("pending.tokenMode"),
   true,
-  "runtime profile transitions reject rapid duplicate switches for one tab",
-);
-eq(
-  appSource.includes("delete pending.tokenMode") && appSource.includes("tokenMode: previous"),
-  true,
-  "failed runtime profile transitions roll back the optimistic token mode",
+  "execution-mode switch state is gone from the app shell",
 );
 eq(
   appSource.includes("!state.backendActivationPending &&") && appSource.includes("!runtimeTransitioning"),
   true,
-  "runtime profile transitions keep submit behind the controller-ready gate",
+  "composer submit stays behind the controller-ready gate",
 );
 eq(
     appSource.includes("activateGoalAndSubmitOnTab({") &&

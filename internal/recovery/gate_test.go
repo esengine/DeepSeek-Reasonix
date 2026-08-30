@@ -11,6 +11,51 @@ import (
 	"time"
 )
 
+func TestResolveAfterKeepsRecoveryDecisionRetryableUntilPersistenceCommits(t *testing.T) {
+	g := NewGate(Options{Mode: func() string { return "auto" }})
+	reply := make(chan resolvePayload, 1)
+	g.mu.Lock()
+	g.waiters["approval-1"] = reply
+	g.taskOf["approval-1"] = "root"
+	g.pending["approval-1"] = PendingProposal{TaskGrantKey: "same-edit", TaskGrantTaskScope: "turn-1"}
+	g.awaiting["root"] = struct{}{}
+	g.mu.Unlock()
+
+	want := errors.New("ledger unavailable")
+	err := g.ResolveAfter("approval-1", ActionContinueTask, "", func() error {
+		if !g.HasApproval("approval-1") {
+			t.Fatal("persistence callback ran after the recovery decision was removed")
+		}
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("ResolveAfter error = %v, want %v", err, want)
+	}
+	if !g.HasApproval("approval-1") {
+		t.Fatal("failed persistence removed the pending recovery decision")
+	}
+	metrics := g.Metrics()
+	if metrics.HumanContinues != 0 || metrics.TaskGrantContinues != 0 {
+		t.Fatalf("failed persistence mutated recovery metrics: %+v", metrics)
+	}
+
+	if err := g.ResolveAfter("approval-1", ActionContinueTask, "", nil); err != nil {
+		t.Fatalf("retry ResolveAfter: %v", err)
+	}
+	select {
+	case payload := <-reply:
+		if payload.action != ActionContinueTask {
+			t.Fatalf("resolved action = %q, want %q", payload.action, ActionContinueTask)
+		}
+	default:
+		t.Fatal("committed recovery decision did not release the waiter")
+	}
+	metrics = g.Metrics()
+	if metrics.HumanContinues != 1 || metrics.TaskGrantContinues != 1 {
+		t.Fatalf("committed recovery metrics = %+v", metrics)
+	}
+}
+
 func TestHasApprovalIncludesWaiterOnlyPlanTransition(t *testing.T) {
 	// A normal-execution plan transition parks a waiter without arming failure
 	// state. Snapshot must not be required for legacy Approve routing.

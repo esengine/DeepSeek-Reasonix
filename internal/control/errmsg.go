@@ -10,6 +10,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
+	"reasonix/internal/turnevent"
 )
 
 // explainError maps a provider HTTP failure to an actionable, localized message
@@ -19,11 +20,24 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// Filesystem errors can satisfy net.Error on some platforms. Preserve the
+	// storage sentinel before provider retry classification so a poisoned WAL
+	// is never reported as a model-stream disconnect.
+	if errors.Is(err, turnevent.ErrTurnLedgerUnavailable) {
+		return err
+	}
 	if provider.IsStreamInterrupted(err) {
 		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())
 	}
 	if provider.IsConnReset(err) {
 		return fmt.Errorf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error())
+	}
+	if limit := provider.AsContextLimitError(err); limit != nil {
+		msg := fmt.Sprintf(i18n.M.ProviderErrContextOverflowFmt, limit.PromptTokens, limit.CompletionTokens, limit.RequestedTokens, limit.WindowTokens)
+		if reason := apiErrorReason(limit.APIError); reason != "" {
+			return fmt.Errorf("%s\n%s", msg, reason)
+		}
+		return errors.New(msg)
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
@@ -44,6 +58,19 @@ func explainError(err error) error {
 	}
 	var authErr *provider.AuthError
 	if errors.As(err, &authErr) {
+		reason := redactAuthReason(providerBodyReason(authErr.Body))
+		if modelFormatMismatchReason(reason) {
+			details := []string{i18n.M.ProviderErrModelFormatMismatch}
+			lower := strings.ToLower(reason)
+			isOpenCodeGo := strings.Contains(strings.ToLower(authErr.Provider), "opencode-go") || strings.EqualFold(authErr.KeyEnv, "OPENCODE_GO_API_KEY")
+			if isOpenCodeGo && strings.Contains(lower, "grok-4.5") && strings.Contains(lower, "format anthropic") {
+				details = append(details, i18n.M.ProviderErrOpenCodeGoGrokRoute)
+			}
+			if reason != "" {
+				details = append(details, reason)
+			}
+			return errors.New(strings.Join(details, "\n"))
+		}
 		msg := i18n.M.ProviderErrAuth
 		if authErr.HasKey {
 			msg = i18n.M.ProviderErrAuthRejected
@@ -57,12 +84,17 @@ func explainError(err error) error {
 		// Relays explain *why* auth failed in the body ("token expired", key
 		// not entitled to the model) — as diagnostic here as on APIError, but
 		// auth bodies also echo credentials, so scrub key material first.
-		if reason := redactAuthReason(providerBodyReason(authErr.Body)); reason != "" {
+		if reason != "" {
 			return fmt.Errorf("%s\n%s", msg, reason)
 		}
 		return errors.New(msg)
 	}
 	return err
+}
+
+func modelFormatMismatchReason(reason string) bool {
+	lower := strings.ToLower(strings.TrimSpace(reason))
+	return strings.Contains(lower, "model") && strings.Contains(lower, "not supported for format")
 }
 
 // apiErrorReason returns the provider's verbatim reason for a failed request —

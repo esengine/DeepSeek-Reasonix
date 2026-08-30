@@ -1,15 +1,35 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
 
-func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
+// A closed-loop turn is a delivery-floor turn: the floor alone arms the
+// readiness pause, so the scope on its own no longer produces one.
+func withClosedLoopContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = runtimepolicy.WithContext(ctx, runtimepolicy.Constraints{PolicyFloor: taskcontract.PolicyFloorDelivery})
+	return WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "test-closed-loop", TaskText: "closed-loop test"})
+}
+
+func withNoClosedLoop(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func TestClosedLoopReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "bash",
@@ -21,7 +41,11 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{deliveryScopeActive: true},
+	}
 
 	got := a.deliveryReviewGateFailure()
 	for _, want := range []string{"high-risk", "git status --short", "git diff", "mutation did not report file paths"} {
@@ -55,28 +79,32 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	}
 }
 
-func TestNonDeliveryProfileNeverRequiresStructuredReview(t *testing.T) {
+func TestUnsetTaskPolicyNeverRequiresStructuredReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: false, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	if got := a.deliveryReviewGateFailure(); got != "" {
-		t.Fatalf("non-Delivery review gate = %q, want disabled", got)
+		t.Fatalf("unset TaskPolicy review gate = %q, want disabled", got)
 	}
 }
 
-func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
+func TestClosedLoopReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{deliveryScopeActive: true},
+	}
 
 	if got := a.deliveryReviewGateFailure(); !strings.Contains(got, "high-risk") {
 		t.Fatalf("review gate = %q, want high-risk review demand", got)
@@ -103,7 +131,7 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	}
 }
 
-func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
+func TestClosedLoopReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
 	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, true))
@@ -115,7 +143,11 @@ func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *tes
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{deliveryScopeActive: true},
+	}
 	if got := a.deliveryReviewGateFailure(); got != "" {
 		t.Fatalf("medium-risk host proof was rejected: %q", got)
 	}
@@ -129,14 +161,40 @@ func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *tes
 	}
 }
 
-func TestDeliveryReviewGateDefersToParentInSubagents(t *testing.T) {
+func TestClosedLoopReviewGateMediumCapsAtTwoSuccessfulReviews(t *testing.T) {
+	ledger := evidence.NewLedger()
+	report := json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/agent/parser.go"],"findings":[]}`)
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: report})
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: report})
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{deliveryScopeActive: true},
+	}
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("medium-risk auto review after two successes = %q, want capped", got)
+	}
+}
+
+func TestClosedLoopReviewGateDefersToParentInSubagents(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{agentConfig: agentConfig{subagentDepth: 1}, deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		agentConfig: agentConfig{subagentDepth: 1},
+		task:        taskRuntime{ledger: ledger},
+		svc:         agentServices{tools: reg},
+		turn:        turnRuntime{deliveryScopeActive: true},
+	}
 
 	// Inside a sub-agent the structured-review contract belongs to the parent,
 	// which receives the child's mutation receipts via mergeChildEvidence. The

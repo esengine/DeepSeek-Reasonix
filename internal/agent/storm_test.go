@@ -59,7 +59,7 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	args := []string{`{"content":"Mountains are`, `{"path":"n.txt","content":"Peaks rise`, `{}`}
+	args := []string{`{"content":"Mountains are"}`, `{"path":"n.txt","content":"Peaks rise"}`, `{}`}
 	var last string
 	for i := range stormBreakThreshold {
 		call := provider.ToolCall{Name: "write_file", Arguments: args[i]}
@@ -189,8 +189,8 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
-		{Name: "write_a", Arguments: `{"content":"x`},
-		{Name: "write_b", Arguments: `{"content":"y`},
+		{Name: "write_a", Arguments: `{"content":"x"}`},
+		{Name: "write_b", Arguments: `{"content":"y"}`},
 	}
 	var first string
 	for range stormBreakThreshold {
@@ -219,7 +219,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
-		{Name: "write_file", Arguments: `{"content":"x`},
+		{Name: "write_file", Arguments: `{"content":"x"}`},
 		{Name: "read_file", Arguments: `{"path":"x"}`},
 	}
 	var first string
@@ -243,7 +243,7 @@ func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
+	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x"}`}
 	var last string
 	for range stormBreakThreshold - 1 {
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
@@ -266,7 +266,7 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
-	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
+	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x"}`}
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 

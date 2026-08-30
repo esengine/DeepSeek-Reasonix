@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/remote-secret-dialog.test.tsx
 
-import { JSDOM } from "jsdom";
 import React from "react";
+import { JSDOM } from "jsdom";
 import { act } from "react";
 
 import type { AppBindings } from "../lib/bridge";

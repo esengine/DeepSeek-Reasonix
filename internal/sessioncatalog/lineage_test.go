@@ -2,6 +2,7 @@ package sessioncatalog
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,6 +145,54 @@ func TestOrdinaryContinuePathFollowsParentOnly(t *testing.T) {
 	}
 }
 
+func TestOrdinaryContinuePathFollowsUniqueLinearCompactedLeaf(t *testing.T) {
+	root := filepath.Join("/s", "root.jsonl")
+	parentID := "root"
+	sessions := []SessionRecord{{
+		Path: root, RecoveryRole: RecoveryRoleNormal,
+		Turns: 9, TurnsState: TurnsValid, LastActivityAt: 1,
+	}}
+	for i := 1; i <= 130; i++ {
+		id := fmt.Sprintf("recovery-%03d", i)
+		sessions = append(sessions, SessionRecord{
+			Path: filepath.Join("/s", id+".jsonl"), Recovered: true,
+			ParentID: parentID, RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged,
+			Turns: 9 + (i*63)/130, TurnsState: TurnsValid, LastActivityAt: int64(i + 1),
+		})
+		parentID = id
+	}
+	leaf := sessions[len(sessions)-1].Path
+	if got := OrdinaryContinuePath(sessions, root); got != leaf {
+		t.Fatalf("parent continue = %q, want unique 72-turn leaf %q", got, leaf)
+	}
+	if got := topicRepresentativePath(sessions); got != leaf {
+		t.Fatalf("representative = %q, want unique 72-turn leaf %q", got, leaf)
+	}
+	if got := OrdinaryContinuePath(sessions, leaf); got != "" {
+		t.Fatalf("leaf continue = %q, want keep current leaf", got)
+	}
+}
+
+func TestOrdinaryContinuePathRejectsForkedOrRegressingLineage(t *testing.T) {
+	root := SessionRecord{Path: "/s/root.jsonl", RecoveryRole: RecoveryRoleNormal, Turns: 9, TurnsState: TurnsValid, LastActivityAt: 1}
+	linear := SessionRecord{
+		Path: "/s/linear.jsonl", Recovered: true, ParentID: "root", RecoveryGroupID: "root",
+		RecoveryRole: RecoveryRoleDiverged, Turns: 10, TurnsState: TurnsValid, LastActivityAt: 2,
+	}
+	fork := SessionRecord{
+		Path: "/s/fork.jsonl", Recovered: true, ParentID: "root", RecoveryGroupID: "root",
+		RecoveryRole: RecoveryRoleDiverged, Turns: 11, TurnsState: TurnsValid, LastActivityAt: 3,
+	}
+	if got := OrdinaryContinuePath([]SessionRecord{root, linear, fork}, root.Path); got != "" {
+		t.Fatalf("forked continue = %q, want unresolved", got)
+	}
+	regressed := linear
+	regressed.Turns = 8
+	if got := OrdinaryContinuePath([]SessionRecord{root, regressed}, root.Path); got != "" {
+		t.Fatalf("regressing continue = %q, want unresolved", got)
+	}
+}
+
 func TestExplicitPreferredRecoveryWinsWithoutMakingPeersCovered(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root.jsonl")
@@ -197,6 +246,55 @@ func TestReconcilePersistsContentProvenCanonicalLeaf(t *testing.T) {
 	}
 	if record.RecoveryRole != RecoveryRoleAdopted || !record.RecoveryCanonical {
 		t.Fatalf("reconciled recovery = %+v, want adopted canonical", record)
+	}
+}
+
+func TestReconcileOpensUniqueLinearCompactedLeafWithoutAuthorizingCleanup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	rootMessages := make([]string, 0, 18)
+	for i := range 9 {
+		rootMessages = append(rootMessages, fmt.Sprintf("root question %d", i), fmt.Sprintf("root answer %d", i))
+	}
+	leafMessages := make([]string, 0, 144)
+	for i := range 72 {
+		leafMessages = append(leafMessages, fmt.Sprintf("compacted question %d", i), fmt.Sprintf("compacted answer %d", i))
+	}
+	saveLineageSession(t, root, rootMessages...)
+	saveLineageSession(t, leaf, leafMessages...)
+	for path, meta := range map[string]agent.BranchMeta{
+		root: {ID: "root", Scope: "global", TopicID: "conversation", TopicTitle: "Compacted"},
+		leaf: {ID: "leaf", Scope: "global", TopicID: "conversation", TopicTitle: "Compacted", Recovered: true, ParentID: "root", RecoveryDepth: 1},
+	} {
+		if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close(ctx)
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "conversation"})
+	if err != nil || !ok {
+		t.Fatalf("GetTopic ok=%v err=%v", ok, err)
+	}
+	if topic.RepresentativePath != leaf {
+		t.Fatalf("representative = %q, want compacted leaf %q", topic.RepresentativePath, leaf)
+	}
+	if topic.RecoveryCleanupEligibleCount != 0 {
+		t.Fatalf("cleanup eligible = %d, want 0 without content coverage", topic.RecoveryCleanupEligibleCount)
+	}
+	if got := CanonicalSessionPathForTopic(topic.Sessions, root); got != "" {
+		t.Fatalf("cleanup canonical = %q, want unresolved", got)
+	}
+	if got := OrdinaryContinuePath(topic.Sessions, root); got != leaf {
+		t.Fatalf("ordinary continue = %q, want compacted leaf %q", got, leaf)
 	}
 }
 
@@ -263,7 +361,7 @@ func TestRecoveryFilenameParentID(t *testing.T) {
 }
 
 func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
-	// Simulates 1.24.2-style multi-topic recovery storm → new v4 projection →
+	// Simulates 1.24.2-style multi-topic recovery storm → new v5 projection →
 	// discard cache → reindex. Ordinary list stays one row; JSONL/meta bytes
 	// are never rewritten (the 1.23.0→new-version reinstall path).
 	ctx := context.Background()
@@ -330,9 +428,9 @@ func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
 			t.Fatalf("authority file mutated during catalog rebuild: %s", path)
 		}
 	}
-	// v4 path is independent of older disposable caches.
-	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v4.sqlite") && DefaultPath() != "" {
-		t.Fatalf("DefaultPath = %q, want v4.sqlite", DefaultPath())
+	// v5 path is independent of all older disposable caches.
+	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v5.sqlite") && DefaultPath() != "" {
+		t.Fatalf("DefaultPath = %q, want v5.sqlite", DefaultPath())
 	}
 }
 

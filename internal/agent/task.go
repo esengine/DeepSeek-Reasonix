@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
@@ -81,6 +82,7 @@ var subagentAlwaysHiddenTools = []string{
 	"parallel_tasks",
 	"fleet",
 	"read_subagent_result",
+	"set_session_title",
 	"install_skill",
 	"install_source",
 }
@@ -245,6 +247,7 @@ func (readOnlyBash) ReadOnly() bool { return true }
 type TaskTool struct {
 	prov                          provider.Provider
 	pricing                       *provider.Pricing
+	quoteContext                  *event.QuoteContext
 	parentReg                     *tool.Registry
 	maxSteps                      int
 	contextWindow                 int
@@ -263,7 +266,6 @@ type TaskTool struct {
 	baseEffort                    string
 	identityProfile               func(modelRef, effort string) (string, string)
 	maxSubagentDepth              int
-	deliveryProfile               bool
 	ablation                      ablation.Set
 	workspaceLease                *workspacelease.Owner
 	// scheduler is the session-scoped concurrency + write-claim controller.
@@ -284,6 +286,7 @@ type TaskTool struct {
 	// recoveryGate is the shared Auto Guard boundary for
 	// this session (root + sub-agents). nil disables recovery in children.
 	recoveryGate RecoveryGate
+	writeRoots   *sandbox.WritableRootSet
 	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
@@ -296,6 +299,7 @@ type TaskTool struct {
 type TaskToolOptions struct {
 	Provider                              provider.Provider
 	Pricing                               *provider.Pricing
+	QuoteContext                          *event.QuoteContext
 	ParentRegistry                        *tool.Registry
 	MaxSteps                              int
 	ContextWindow                         int
@@ -325,6 +329,7 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 	return &TaskTool{
 		prov:             opts.Provider,
 		pricing:          opts.Pricing,
+		quoteContext:     opts.QuoteContext,
 		parentReg:        opts.ParentRegistry,
 		maxSteps:         opts.MaxSteps,
 		contextWindow:    opts.ContextWindow,
@@ -394,14 +399,6 @@ func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort 
 
 func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 	t.maxSubagentDepth = NormalizeMaxSubagentDepth(depth)
-	return t
-}
-
-// WithDeliveryProfile propagates the parent's runtime delivery contract into
-// writer-capable sub-agents. Read-only sub-agents may receive the flag too, but
-// the mutation gate remains dormant for them.
-func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
-	t.deliveryProfile = enabled
 	return t
 }
 
@@ -764,7 +761,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		spec.Worker.SystemPrompt = t.sysPrompt
 	}
 
-	maxSteps := t.childMaxStepsForContext(ctx, spec.Sched.MaxSteps)
+	ctx, maxSteps := t.childMaxStepsForSpec(ctx, &spec)
 	childDepth, err := t.nextSubagentDepth(ctx)
 	if err != nil {
 		return "", err
@@ -774,26 +771,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	if err != nil {
 		return "", err
 	}
-	var subReg *tool.Registry
-	if spec.Grant.ReadOnly {
-		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
-		if subReg.Len() == 0 && !spec.Grant.AllowNoTools {
-			return "", fmt.Errorf("no read-only tools available for this sub-agent")
-		}
-	} else {
-		subReg = t.buildSubReg(toolNames, childDepth)
-		// Explicit paths are an execution boundary and rebind/drop tools that
-		// cannot honor it. A synthesized whole-workspace claim is a scheduling
-		// boundary for omitted write_paths; it preserves the legacy registry and
-		// the parent session's existing sandbox/permission boundaries.
-		if !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace {
-			keepBash := t.bashCanEnforceWriteRoots()
-			bound, removed := BindWritePaths(subReg, spec.Grant.WritePaths, t.workspaceRoot, keepBash)
-			subReg = bound
-			if len(removed) > 0 && subReg.Len() == 0 {
-				return "", fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
-			}
-		}
+	subReg, childWriteRoots, err := t.buildSubagentRegistry(spec, toolNames, childDepth)
+	if err != nil {
+		return "", err
 	}
 
 	modelRef, effortRef := spec.Worker.Model, spec.Worker.Effort
@@ -844,9 +824,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			defer mutationObserver.UnregisterWriter(recoveryTaskID)
 		}
 		if spec.Grant.ReadOnly {
-			return t.runReadOnlySubSession(runCtx, spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+			return t.runReadOnlySubSession(runCtx, composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
 		}
-		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, childWriteRoots)
 	}
 
 	if spec.Sched.RunInBackground {
@@ -903,7 +883,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer run.Release()
-			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
+			defer publishBackgroundEvidence(jobCtx, backgroundEvidence, t.workspaceRoot)
 			defer func() {
 				if r := recover(); r != nil {
 					panicErr := fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
@@ -916,11 +896,12 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			}()
 			// Queue for a concurrency/write slot here — not before Start —
 			// so the parent tool call returns a job id immediately.
-			releaseSlot, slotErr := t.acquireSlot(jobCtx, slotReq)
+			releaseSlot, claimID, slotErr := t.acquireSlot(jobCtx, slotReq)
 			if slotErr != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(slotErr, t.transcripts.SaveFailed(run))
 			}
 			defer releaseSlot()
+			jobCtx = WithSubagentClaimID(jobCtx, claimID)
 			trk.running()
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
 			if err != nil {
@@ -946,13 +927,14 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	}
 
 	// Foreground: acquire a slot (queue if needed), then run synchronously.
-	releaseSlot, err := t.acquireSlot(ctx, acquireReq)
+	releaseSlot, claimID, err := t.acquireSlot(ctx, acquireReq)
 	if err != nil {
 		run.Release()
 		return "", err
 	}
 	defer releaseSlot()
 	defer run.Release()
+	ctx = WithSubagentClaimID(ctx, claimID)
 	answer, err := runSession(ctx, trk.wrap(), false)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
@@ -966,12 +948,12 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	return GuardSubagentHostDecisionText(answer), nil
 }
 
-func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest) (func(), error) {
+func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest) (func(), int64, error) {
 	noop := func() {}
 	if t.scheduler == nil {
-		return noop, nil
+		return noop, 0, nil
 	}
-	return t.scheduler.Acquire(ctx, req)
+	return t.scheduler.AcquireWithID(ctx, req)
 }
 
 func (t *TaskTool) bashCanEnforceWriteRoots() bool {
@@ -1165,6 +1147,17 @@ type restrictedCapabilityProxy struct {
 	servers map[string]bool
 }
 
+func (t *restrictedCapabilityProxy) ClassifyCall(args json.RawMessage) tool.CallClass {
+	if t == nil || t.check(args) != nil {
+		return tool.CallClass{}
+	}
+	classifier, ok := t.Tool.(tool.BatchClassifier)
+	if !ok {
+		return tool.CallClass{}
+	}
+	return classifier.ClassifyCall(args)
+}
+
 // Description is fixed: never embed dynamic capability IDs (they change with
 // MCP install/tool-list and would break the stable provider tool prefix).
 func (t *restrictedCapabilityProxy) Description() string {
@@ -1179,12 +1172,16 @@ func (t *restrictedCapabilityProxy) check(args json.RawMessage) error {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return fmt.Errorf("invalid args: %w", err)
 	}
-	if strings.EqualFold(strings.TrimSpace(p.Action), "list") {
+	action := strings.ToLower(strings.TrimSpace(p.Action))
+	if action == "list" || action == "search" {
 		return nil
 	}
 	id := strings.TrimSpace(p.CapabilityID)
 	if id == "" {
 		return fmt.Errorf("capability_id is required")
+	}
+	if id == sessionToolResultCapabilityID {
+		return nil
 	}
 	if !t.allowed[id] {
 		return fmt.Errorf("capability %q is outside this subagent's allowed-tools", id)
@@ -1204,8 +1201,14 @@ func (t *restrictedCapabilityProxy) ResolveCall(ctx context.Context, args json.R
 		Action string `json:"action"`
 	}
 	_ = json.Unmarshal(args, &p)
-	if strings.EqualFold(strings.TrimSpace(p.Action), "list") && rc.SkipExecute {
-		rc.Result = filterCapabilityListResult(rc.Result, t.servers)
+	action := strings.ToLower(strings.TrimSpace(p.Action))
+	if rc.SkipExecute {
+		switch action {
+		case "list":
+			rc.Result = filterCapabilityListResult(rc.Result, t.servers)
+		case "search":
+			rc.Result = filterCapabilitySearchResult(rc.Result, t.allowed)
+		}
 	}
 	return rc, nil
 }
@@ -1222,59 +1225,13 @@ func (t *restrictedCapabilityProxy) Execute(ctx context.Context, args json.RawMe
 		Action string `json:"action"`
 	}
 	_ = json.Unmarshal(args, &p)
-	if strings.EqualFold(strings.TrimSpace(p.Action), "list") {
+	switch strings.ToLower(strings.TrimSpace(p.Action)) {
+	case "list":
 		return filterCapabilityListResult(out, t.servers), nil
+	case "search":
+		return filterCapabilitySearchResult(out, t.allowed), nil
 	}
 	return out, nil
-}
-
-// emptyCapabilityListResult is the fail-closed list payload: no server metadata.
-func emptyCapabilityListResult(note string) string {
-	if strings.TrimSpace(note) == "" {
-		note = "list is filtered to this subagent's allowed MCP servers."
-	}
-	b, err := json.MarshalIndent(map[string]any{
-		"servers": []listServerInfo{},
-		"note":    note,
-	}, "", "  ")
-	if err != nil {
-		return `{"servers":[],"note":"list is filtered to this subagent's allowed MCP servers."}`
-	}
-	return string(b)
-}
-
-// filterCapabilityListResult keeps only servers in the allowlist for restricted
-// proxies. Empty allowlist or unreadable payloads fail closed (empty server
-// list) so discovery never leaks the full configured MCP inventory.
-func filterCapabilityListResult(raw string, servers map[string]bool) string {
-	const baseNote = "list is filtered to this subagent's allowed MCP servers."
-	if len(servers) == 0 {
-		return emptyCapabilityListResult(baseNote + " No allowed MCP servers were resolved from the profile allowlist.")
-	}
-	var payload struct {
-		Servers []listServerInfo `json:"servers"`
-		Note    string           `json:"note"`
-	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return emptyCapabilityListResult(baseNote + " List payload was unreadable; returning no servers (fail-closed).")
-	}
-	filtered := make([]listServerInfo, 0, len(payload.Servers))
-	for _, s := range payload.Servers {
-		if servers[strings.TrimSpace(s.Name)] {
-			filtered = append(filtered, s)
-		}
-	}
-	payload.Servers = filtered
-	if payload.Note == "" {
-		payload.Note = baseNote
-	} else if !strings.Contains(payload.Note, "Filtered to this subagent") {
-		payload.Note = payload.Note + " Filtered to this subagent's allowed MCP servers."
-	}
-	b, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return emptyCapabilityListResult(baseNote + " Failed to encode filtered list (fail-closed).")
-	}
-	return string(b)
 }
 
 // validMCPServerCapabilityID accepts mcp-server:<non-empty-name> only.
@@ -1370,10 +1327,7 @@ func newSubagentCapabilityFrontend(parent *tool.Registry, runtime *MCPCapability
 	if !ok {
 		return nil
 	}
-	if uc, ok := inner.(*UseCapabilityTool); ok {
-		return uc.CloneForAgent(nil, nil)
-	}
-	return inner
+	return cloneCapabilityFrontend(inner)
 }
 
 // mcpCapabilityAllowlist converts profile/call tool names into capability IDs
@@ -1582,8 +1536,11 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, writeRoots *sandbox.WritableRootSet) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
+	if writeRoots != nil {
+		opts.WriteRoots = writeRoots
+	}
 	opts.ModelRef = modelRef
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
@@ -1606,37 +1563,6 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
-// subagentOptions is the single construction point for the run options every
-// sub-agent spawned through this tool shares (task, read_only_task, and
-// parallel_tasks children). Compaction, language preferences, and depth limits
-// must stay uniform across those paths — add new fields here, not at call sites.
-func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, mutationObserver *checkpoint.MutationObserver) Options {
-	opts := Options{
-		MaxSteps:          maxSteps,
-		Temperature:       t.temperature,
-		Pricing:           pricing,
-		UsageSource:       event.UsageSourceSubagent,
-		Gate:              t.gate,
-		ContextWindow:     ctxWin,
-		RecentKeep:        t.recentKeep,
-		CompactRatio:      t.compactRatio,
-		ArchiveDir:        t.archiveDir,
-		KeepPolicy:        t.keepPolicy,
-		ResponseLanguage:  ResponseLanguageFromContext(ctx),
-		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
-		SubagentDepth:     childDepth,
-		MaxSubagentDepth:  t.maxDepth(),
-		DeliveryProfile:   t.deliveryProfile,
-		Ablation:          t.ablation,
-		WorkspaceLease:    t.workspaceLease,
-		RecoveryGate:      t.recoveryGate,
-		RecoveryAgentID:   "subagent",
-		RecoveryTaskID:    recoveryTaskID,
-		MutationObserver:  mutationObserver,
-	}
-	return opts
-}
-
 func subagentRecoveryTaskID(ctx context.Context, ref string) string {
 	if ref = strings.TrimSpace(ref); ref != "" {
 		return "subagent:" + ref
@@ -1648,6 +1574,14 @@ func subagentRecoveryTaskID(ctx context.Context, ref string) string {
 }
 
 // WithRecoveryGate shares Auto Guard with spawned sub-agents.
+func (t *TaskTool) WithWriteRoots(set *sandbox.WritableRootSet) *TaskTool {
+	if t == nil {
+		return nil
+	}
+	t.writeRoots = set
+	return t
+}
+
 func (t *TaskTool) WithRecoveryGate(g RecoveryGate) *TaskTool {
 	if t == nil {
 		return nil
@@ -1778,6 +1712,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	ctx, releaseTemp := withSubagentSessionTemp(ctx)
 	defer releaseTemp()
+	opts.SessionTemp = sessiontemp.FromContext(ctx)
 	if opts.SubagentDepth > 0 {
 		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
 	}

@@ -85,6 +85,18 @@ v0.x sessions are in a custom Windows install/data directory, use
 See
 [Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
+### Desktop topic metadata
+
+Desktop automatically migrates its four legacy `desktop-topic-*.json` indexes
+to an authoritative per-scope SQLite database under the Reasonix state root.
+Existing scopes keep the JSON files synchronized so a normal downgrade to the
+previous Desktop can still read titles and timestamps. Fresh scopes write only
+SQLite. An older Desktop cannot read that SQLite-only state directly: existing
+session metadata may recover titles, but creation times and automatic-title
+stages are not guaranteed. The migration never deletes the legacy files or
+changes project-owned `.reasonix` assets. Running old and new Desktop versions
+concurrently against the same workspace is not supported.
+
 ## Context Engine v2 upgrade
 
 Instruction and memory upgrades are automatic and do not require a setup mode,
@@ -201,8 +213,7 @@ LE/BE, and GB18030 (a superset of GBK). This matches v1's behavior.
 
 ## Reporting issues
 
-Issues and PRs are labelled by line: **`v1`** (legacy TypeScript) and **`v2`**
-(Go). File new reports against the line you're using. The legacy `v1` line is in
-maintenance mode — bug fixes only, no new features.
+Issues and PRs are labelled by line: **`v2`** (Go, `main-v2`) and **`v3`**
+(Studio, `studio`). File new reports against the line you're using.
 
 Questions? Open a [Discussion](https://github.com/esengine/DeepSeek-Reasonix/discussions).

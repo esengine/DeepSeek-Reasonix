@@ -6,6 +6,7 @@
 // refs, and the markdown cache budget.
 
 import { TranscriptStore } from "../lib/transcriptStore";
+import { historyPageRequestBudget } from "../lib/historyPaging";
 import { historyMessagesToItems, type Item } from "../lib/useController";
 import type {
   HistoryContentChunk,
@@ -104,7 +105,8 @@ class FakeBackend {
     };
   }
 
-  // Turn-budgeted windowing, mirroring the Go slice semantics.
+  // Turn- and entry-budgeted windowing, mirroring the Go slice semantics for
+  // the compact stress fixtures used below.
   async HistorySliceForTab(_tabID: string, req: HistorySliceRequest): Promise<HistorySlice> {
     this.sliceCalls.push(req);
     if (this.sliceGate) {
@@ -135,6 +137,8 @@ class FakeBackend {
         if (turnsOf[i] >= oldestTurn) { lo = i; break; }
       }
     }
+    const entries = Math.max(1, Math.floor(req.entries || 120));
+    lo = Math.max(lo, before - entries);
     return this.slice(lo, before);
   }
 
@@ -181,6 +185,34 @@ function bigTranscript(turns: number): HistoryMessage[] {
   return messages;
 }
 
+function longArchivedTranscript(turns: number): HistoryMessage[] {
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= turns; turn += 1) {
+    const callId = `archived-${turn}`;
+    messages.push({ role: "user", content: `prompt ${turn}` });
+    messages.push({
+      role: "assistant",
+      content: `answer ${turn}`,
+      toolCalls: [{
+        id: callId,
+        name: "bash",
+        arguments: "",
+        argumentsArchived: true,
+        subject: `command ${turn}`,
+        summary: "1 line",
+      }],
+    });
+    messages.push({
+      role: "tool",
+      toolCallId: callId,
+      toolName: "bash",
+      content: "",
+      toolResultArchived: true,
+    });
+  }
+  return messages;
+}
+
 // Canonical shape for cross-scheme equality (ids are scheme-dependent and
 // verified separately).
 function canon(items: Item[]): unknown[] {
@@ -219,6 +251,11 @@ console.log("\ntranscript store");
   const first = await store.loadLatest("tab-1", "/s/one.jsonl", { turns: 12 });
   ok(!!first && first.items.length > 0, "latest page projects items");
   eq(first?.hasOlder, true, "latest page reports older history");
+  const projectedTurns = (first?.items ?? [])
+    .filter((item): item is Extract<Item, { kind: "user" }> => item.kind === "user")
+    .map((item) => item.historyTurn);
+  eq(projectedTurns[projectedTurns.length - 1], 46, "history user items retain their absolute turn for complete-session navigation");
+  ok(projectedTurns.every((turn) => Number.isInteger(turn) && (turn ?? 0) > 0), "every paged user item carries an absolute history turn");
   const firstIds = (first?.items ?? []).map((item) => item.id);
   await drainOlder(store, "tab-1", "/s/one.jsonl", 12);
   const full = store.peek("tab-1", "/s/one.jsonl");
@@ -228,6 +265,36 @@ console.log("\ntranscript store");
   eq(JSON.stringify(fullIds.slice(fullIds.length - firstIds.length)), JSON.stringify(firstIds), "newest page item ids are stable across prepends");
   const unique = new Set(fullIds);
   eq(unique.size, fullIds.length, "item ids are unique across the full projection");
+}
+
+// ── 10,000-turn targeted paging stays bounded ──────────────────────────────
+{
+  const messages = longArchivedTranscript(10_000);
+  const backend = new FakeBackend(messages, new Map(), "stress");
+  const store = new TranscriptStore(backend);
+  const startedAt = performance.now();
+  let projection = await store.loadLatest("tab-stress", "/s/stress.jsonl", { turns: 60 });
+  let pages = 1;
+  while (projection?.hasOlder && pages <= 40) {
+    const budget = historyPageRequestBudget(projection.startTurn, projection.totalTurns, 1);
+    const older = await store.loadOlder("tab-stress", "/s/stress.jsonl", budget);
+    if (!older) break;
+    projection = older;
+    pages += 1;
+  }
+  const elapsedMs = performance.now() - startedAt;
+  const users = (projection?.items ?? []).filter((item): item is Extract<Item, { kind: "user" }> => item.kind === "user");
+  eq(projection?.hasOlder, false, "10,000-turn target paging reaches the first page");
+  eq(pages, 32, "10,000-turn target paging respects both turn and production entry bounds");
+  eq(backend.sliceCalls.length, 32, "10,000-turn target paging performs the expected bounded backend calls");
+  ok(backend.sliceCalls.slice(1).every((request) => request.entries === 1000), "targeted pages use the backend's bounded 1000-entry capacity");
+  eq(users.length, 10_000, "10,000-turn target paging preserves every question");
+  eq(users[0]?.historyTurn, 1, "10,000-turn target paging lands on absolute turn one");
+  eq(users[users.length - 1]?.historyTurn, 10_000, "10,000-turn target paging keeps the tail coordinate");
+  ok(new Set(projection?.items.map((item) => item.id)).size === projection?.items.length, "10,000-turn target paging keeps item ids unique");
+  const stats = store.stats();
+  ok(stats.bodyBytes <= stats.bodyBudgetBytes, "10,000-turn transcript stays within the production history body budget");
+  ok(elapsedMs < 10_000, `10,000-turn targeted paging completes within 10s (${elapsedMs.toFixed(1)}ms)`);
 }
 
 // ── cross-page tool call/result merge ───────────────────────────────────────

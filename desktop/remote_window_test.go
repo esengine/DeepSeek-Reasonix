@@ -868,10 +868,8 @@ func TestOpenRemoteWorkspaceConcurrentDisconnectClosesLateWindow(t *testing.T) {
 	}
 }
 
-// TestOpenRemoteWorkspaceWindowOpenFailureKeepsServeReady covers the two-phase
-// switch contract: when the Serve and tunnel succeeded but the window open
-// fails, the error surfaces, the serve stays ready for the new workspace, and
-// no stale last-workspace is recorded.
+// TestOpenRemoteWorkspaceWindowOpenFailureKeepsServeReady covers a successful
+// serve/tunnel followed by a failed window open without losing ready state.
 func TestOpenRemoteWorkspaceWindowOpenFailureKeepsServeReady(t *testing.T) {
 	const hostID = "open-fail-box"
 	fake := &fakeRemoteKernel{
@@ -887,9 +885,8 @@ func TestOpenRemoteWorkspaceWindowOpenFailureKeepsServeReady(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "window spawn failed") {
 		t.Fatalf("open error = %v, want the opener failure", err)
 	}
-	// The serve is up and ready for the new workspace; the recorded last
-	// workspace matches the running serve so the next open reuses it.
-	status, _ := a.RemoteServerStatus(hostID)
+	// The recorded workspace stays aligned with the ready serve for reuse.
+	status, _ := a.RemoteServerStatus(hostID, "/srv2")
 	if status.State != "ready" || status.Workspace != "/srv2" {
 		t.Fatalf("serve state after failed open = %+v, want ready /srv2", status)
 	}
@@ -902,27 +899,29 @@ func TestRemoteWindowDisconnectAndStopCloseWindow(t *testing.T) {
 	fake := &fakeRemoteKernel{}
 	a := NewApp()
 	a.remoteRuntime = fake
-	key := remoteWindowHostKey("box")
+	verify := func(err error, wantOpen bool) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := a.hasRemoteWindow("box"); got != wantOpen {
+			t.Fatalf("window open = %v, want %v", got, wantOpen)
+		}
+	}
 	p := spawnRemoteWindowHelper(t)
 	defer waitRemoteWindowHelperExit(t, p)
-	a.remoteWindows.record(key, p)
-
-	if err := a.DisconnectRemoteHost("box"); err != nil {
-		t.Fatal(err)
-	}
+	a.remoteWindows.record(remoteWindowHostKey("box"), p)
+	err := a.DisconnectRemoteHost("box")
 	waitRemoteWindowHelperExit(t, p)
-	if a.hasRemoteWindow("box") {
-		t.Fatal("window survived explicit disconnect")
-	}
-
+	verify(err, false)
 	p2 := spawnRemoteWindowHelper(t)
 	defer waitRemoteWindowHelperExit(t, p2)
-	a.remoteWindows.record(key, p2)
-	if err := a.StopRemoteServer("box"); err != nil {
-		t.Fatal(err)
-	}
+	a.remoteWindows.record(remoteWindowHostKey("box"), p2)
+	a.remoteWindows.setWorkspace(remoteWindowHostKey("box"), "/srv")
+	verify(a.StopRemoteServer("box", "/other"), true)
+	err = a.StopRemoteServer("box", "/srv")
 	waitRemoteWindowHelperExit(t, p2)
-	if a.hasRemoteWindow("box") {
-		t.Fatal("window survived stop-server")
+	verify(err, false)
+	if got := fake.stoppedWorkspaces; len(got) != 2 || got[0] != "/other" || got[1] != "/srv" {
+		t.Fatalf("StopRemoteServer forwarded %v, want [/other /srv]", got)
 	}
 }

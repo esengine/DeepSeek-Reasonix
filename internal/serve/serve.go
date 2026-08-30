@@ -1,8 +1,8 @@
 // Package serve exposes a control.Controller over HTTP: the typed event stream
 // as Server-Sent Events, and the commands as small JSON POST endpoints. It is a
 // second frontend alongside the chat TUI — proof that the controller is
-// transport-agnostic, and the basis for a browser/desktop client. One server
-// drives one session; multiple browser tabs share it.
+// transport-agnostic, and the basis for a browser/desktop client. A server has
+// one foreground session and may finish switched-away sessions in background.
 package serve
 
 import (
@@ -28,7 +28,9 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
+	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/stats"
 	"reasonix/internal/store"
 )
@@ -58,23 +60,45 @@ type Server struct {
 	// Nil in production (switchModel falls back to boot.Build); tests inject a
 	// fake so switchModel can be exercised without real provider IO.
 	buildController func(ctx context.Context, ref string) (*control.Controller, error)
+	// buildControllerWithOptions is the multi-session test seam. Production
+	// uses boot.Build; the legacy builder above stays source-compatible with
+	// existing switch-model tests.
+	buildControllerWithOptions func(ctx context.Context, ref string, opts boot.Options) (*control.Controller, error)
+	// buildOptions preserves process-local CLI knobs when multi-session Serve
+	// creates a foreground replacement after detaching a busy controller.
+	buildOptions boot.Options
 	// rebuildController rebuilds the same model/runtime generation for an
 	// extension reload. Tests inject it to exercise publication and failure
 	// paths without starting real providers or sidecars.
-	rebuildController func(ctx context.Context, old *control.Controller, ref string) (*control.Controller, error)
-	titleProv         provider.Provider // lightweight flash provider for session titles
-	titlePrice        *provider.Pricing
-	titleModelRef     string
-	titleUsageSink    event.Sink
-	titles            *titleCache
-	auth              *authGate // nil when auth is disabled
-	providerSetupMu   sync.RWMutex
-	providerSetup     providerSetupState
+	rebuildController            func(ctx context.Context, old *control.Controller, ref string) (*control.Controller, error)
+	rebuildControllerWithOptions func(ctx context.Context, old *control.Controller, ref string, opts boot.Options) (*control.Controller, error)
+	titleProv                    provider.Provider // lightweight flash provider for session titles
+	titlePrice                   *provider.Pricing
+	titleModelRef                string
+	titleUsageSink               event.Sink
+	titles                       *titleCache
+	auth                         *authGate // nil when auth is disabled
+	providerSetupMu              sync.RWMutex
+	providerSetup                providerSetupState
 	// leases guards the active session file against other runtimes (a desktop
 	// window, another CLI). Wired by the serve CLI command with the keeper that
 	// already holds the startup session's lease; nil (tests, embedded use)
 	// disables lease gating.
-	leases *control.SessionLeaseKeeper
+	leases        *control.SessionLeaseKeeper
+	leaseOwnersMu sync.Mutex
+	leaseOwners   map[*control.Controller]*control.SessionLeaseKeeper
+	detachedMu    sync.Mutex
+	detached      map[string]*detachedSession
+	tagsMu        sync.Mutex
+	tags          map[*control.Controller]*sessionTagSink
+	hostGate      hostGateState // hostGuard allowlist state; see hostguard.go
+}
+
+// SetControllerBuildOptions records the process-local options used to build
+// Serve's initial controller. Replacement controllers override only fields
+// that necessarily change with their session tag and active model.
+func (s *Server) SetControllerBuildOptions(opts boot.Options) {
+	s.buildOptions = opts
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -84,11 +108,15 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 		bc = NewBroadcaster()
 	}
 	s := &Server{
-		ctrl:   ctrl,
-		bc:     bc,
-		titles: newTitleCache(ctrl.SessionDir()),
-		auth:   newAuthGate(serveCfg),
+		ctrl:        ctrl,
+		bc:          bc,
+		titles:      newTitleCache(ctrl.SessionDir()),
+		auth:        newAuthGate(serveCfg),
+		detached:    map[string]*detachedSession{},
+		tags:        map[*control.Controller]*sessionTagSink{},
+		leaseOwners: map[*control.Controller]*control.SessionLeaseKeeper{},
 	}
+	bc.SetCurrentSession(agent.CanonicalSessionPath(ctrl.SessionPath()))
 	if cfg, err := config.Load(); err == nil {
 		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
 	}
@@ -108,6 +136,10 @@ func (s *Server) ctl() control.SessionAPI {
 // between the lease rebind and the controller Resume. Tests use it to force
 // the interleaving bindMu exists to prevent; production never sets it.
 var resumeBindHookForTest func()
+
+// registerDetachedHookForTest pauses after recovery callback installation but
+// before the registry publication. Production never sets it.
+var registerDetachedHookForTest func()
 
 // sessionInUseError renders a lease refusal for HTTP clients using the shared
 // CLI wording, without the session file path.
@@ -170,17 +202,20 @@ func titleProviderConfig(entry *config.ProviderEntry) provider.Config {
 // switchModel rebuilds the controller with a new model, carrying over the
 // conversation history. This replicates the TUI/desktop model-switch path.
 //
-// The heavy steps — Snapshot (may touch disk), Build (provider init IO), and the
-// old controller's Close (jobs.CloseWithGrace up to 15s + SessionEnd hook) — all
-// run OFF s.mu. Holding the write lock across them would wedge every HTTP handler
-// on s.ctl()'s RLock for the duration, stalling the whole serve frontend
-// (mirrors the acp rebuildSession fix and PR #5920). bindMu serializes the
-// switch against every other session-path-changing entry point (/resume,
-// /new, /fork), preserving the old "second switch waits" semantics without
-// pinning s.mu.
+// The heavy steps (Snapshot, Build, the old controller's Close) all run OFF
+// s.mu — holding the write lock would wedge every HTTP handler on s.ctl()'s
+// RLock for the duration (mirrors the acp rebuildSession fix and PR #5920).
+// bindMu serializes the switch against /resume, /new, /fork.
 func (s *Server) switchModel(ctx context.Context, ref string) error {
+	return s.switchModelExpected(ctx, ref, "")
+}
+
+func (s *Server) switchModelExpected(ctx context.Context, ref, expectedPath string) error {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
+	if err := s.expectedSessionPathErrorLocked(expectedPath); err != nil {
+		return err
+	}
 	return s.switchModelLocked(ctx, ref)
 }
 
@@ -206,7 +241,7 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	prevPath := cur.SessionPath()
 	carried := cur.History()
 
-	newCtrl, err := s.build(ctx, ref)
+	newCtrl, tag, err := s.buildTagged(ctx, ref, true)
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
 	}
@@ -228,7 +263,8 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 		}
 	}
 	newCtrl.AdoptHistory(carried, newPath)
-	newCtrl.SetOnSessionRecovered(sessionLeaseRecoveryHandler(s.leases))
+	tag.PrimePath(newCtrl.SessionPath())
+	newCtrl.SetOnSessionRecovered(s.sessionRecoveryHandler(newCtrl, s.leases))
 	// A rebuild must not force the user to re-approve tools already granted
 	// this session, or re-trust Plan-mode read-only commands already trusted
 	// this session.
@@ -240,7 +276,7 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// would report a successful switch whose refreshed system contract disappears
 	// on restart. AdoptHistory retained the loaded CAS baseline for this rewrite.
 	if err := s.rebindSessionLeaseFor(newPath, newCtrl); err != nil {
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return fmt.Errorf("switch model: %s", sessionInUseError(err))
 		}
@@ -251,13 +287,14 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 			if oldCtrl, ok := cur.(*control.Controller); ok {
 				_ = s.rebindSessionLeaseFor(prevPath, oldCtrl)
 			}
-			newCtrl.Close()
+			s.closeTaggedController(newCtrl)
 			return fmt.Errorf("switch model: snapshot adopted history: %w", err)
 		}
 	}
 	activePath := newCtrl.SessionPath()
+	tag.PrimePath(activePath)
 	if err := s.rebindSessionLeaseFor(activePath, newCtrl); err != nil {
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return fmt.Errorf("switch model: %s", sessionInUseError(err))
 		}
@@ -270,44 +307,25 @@ func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// defensive: it keeps a future controller-swapping path (or a test doing so)
 	// from being silently clobbered after the off-lock build. On a mismatch,
 	// discard the fresh controller off-lock instead of leaking it.
-	s.mu.Lock()
-	if s.ctrl != cur {
-		s.mu.Unlock()
+	if !s.publishControllerSwap(cur, newCtrl, activePath) {
 		oldCtrl, _ := cur.(*control.Controller)
 		if restoreErr := s.rebindSessionLeaseFor(cur.SessionPath(), oldCtrl); restoreErr != nil {
-			newCtrl.Close()
+			s.closeTaggedController(newCtrl)
 			slog.Error("serve: restore outgoing session lease after aborted model switch", "err", restoreErr)
 			return fmt.Errorf("switch model: session changed during switch; unable to restore outgoing session ownership")
 		}
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		return fmt.Errorf("switch model: session changed during switch")
 	}
-	s.ctrl = newCtrl
-	s.mu.Unlock()
+	tag.Activate()
 	s.refreshProviderSetup(currentModelRef(newCtrl))
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
+	if oldCtrl, ok := cur.(*control.Controller); ok {
+		s.forgetSessionTag(oldCtrl)
+	}
 	return nil
-}
-
-// build returns the replacement controller for a model switch, using the
-// injected builder in tests and boot.Build in production.
-func (s *Server) build(ctx context.Context, ref string) (*control.Controller, error) {
-	if s.buildController != nil {
-		return s.buildController(ctx, ref)
-	}
-	opts := boot.Options{
-		Model:       ref,
-		Sink:        s.bc,
-		Stderr:      os.Stderr,
-		StatsSource: "serve",
-	}
-	// Keep the logical-session private temporary directory across model switches.
-	if cur, ok := s.ctl().(*control.Controller); ok && cur != nil {
-		opts.SessionTemp = cur.SessionTemp()
-	}
-	return boot.Build(ctx, opts)
 }
 
 // reloadExtensions fail-atomically rebuilds the active controller generation
@@ -336,9 +354,9 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 		return fmt.Errorf("reload extensions: %w", err)
 	}
 	newCtrl.EnableInteractiveApproval()
-	newCtrl.SetOnSessionRecovered(sessionLeaseRecoveryHandler(s.leases))
+	newCtrl.SetOnSessionRecovered(s.sessionRecoveryHandler(newCtrl, s.leases))
 	if err := s.rebindSessionLeaseFor(newCtrl.SessionPath(), newCtrl); err != nil {
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return fmt.Errorf("reload extensions: %s", sessionInUseError(err))
 		}
@@ -347,56 +365,91 @@ func (s *Server) reloadExtensions(ctx context.Context) error {
 	if newCtrl.SessionPath() != "" {
 		if err := newCtrl.Snapshot(); err != nil {
 			_ = s.rebindSessionLeaseFor(cur.SessionPath(), cur)
-			newCtrl.Close()
+			s.closeTaggedController(newCtrl)
 			return fmt.Errorf("reload extensions: snapshot migrated session: %w", err)
 		}
 	}
 	if err := s.rebindSessionLeaseFor(newCtrl.SessionPath(), newCtrl); err != nil {
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return fmt.Errorf("reload extensions: %s", sessionInUseError(err))
 		}
 		return fmt.Errorf("reload extensions: unable to secure replacement session")
 	}
 
-	s.mu.Lock()
-	if s.ctrl != curAPI {
-		s.mu.Unlock()
+	if !s.publishControllerSwap(curAPI, newCtrl, newCtrl.SessionPath()) {
 		if restoreErr := s.rebindSessionLeaseFor(cur.SessionPath(), cur); restoreErr != nil {
-			newCtrl.Close()
+			s.closeTaggedController(newCtrl)
 			slog.Error("serve: restore outgoing session lease after aborted extension reload", "err", restoreErr)
 			return fmt.Errorf("reload extensions: session changed during reload; unable to restore outgoing session ownership")
 		}
-		newCtrl.Close()
+		s.closeTaggedController(newCtrl)
 		return fmt.Errorf("reload extensions: session changed during reload")
 	}
-	s.ctrl = newCtrl
-	s.mu.Unlock()
+	if tag := s.tagFor(newCtrl); tag != nil {
+		tag.Activate()
+	}
 	s.refreshProviderSetup(currentModelRef(newCtrl))
 
 	cur.Close()
+	s.forgetSessionTag(cur)
 	return nil
 }
 
 func (s *Server) rebuild(ctx context.Context, old *control.Controller, ref string) (*control.Controller, error) {
+	tag := newSessionTagSink(s.bc)
+	tag.PrimePath(old.SessionPath())
+	opts := boot.Options{
+		Model:          ref,
+		Sink:           tag,
+		Stderr:         os.Stderr,
+		StatsSource:    "serve",
+		SessionDir:     old.SessionDir(),
+		WorkspaceRoot:  old.WorkspaceRoot(),
+		MCPHostProfile: plugin.HostProfileInteractive,
+	}
+	if s.rebuildControllerWithOptions != nil {
+		ctrl, err := s.rebuildControllerWithOptions(ctx, old, ref, opts)
+		if err == nil {
+			s.RegisterSessionTag(ctrl, tag)
+		}
+		return ctrl, err
+	}
 	if s.rebuildController != nil {
-		return s.rebuildController(ctx, old, ref)
+		ctrl, err := s.rebuildController(ctx, old, ref)
+		if err == nil {
+			s.RegisterSessionTag(ctrl, tag)
+		}
+		return ctrl, err
 	}
 	res, err := boot.Rebuild(ctx, old, boot.Options{
-		Model:       ref,
-		Sink:        s.bc,
-		Stderr:      os.Stderr,
-		StatsSource: "serve",
+		Model:          ref,
+		Sink:           tag,
+		Stderr:         os.Stderr,
+		StatsSource:    "serve",
+		SessionDir:     old.SessionDir(),
+		WorkspaceRoot:  old.WorkspaceRoot(),
+		MCPHostProfile: plugin.HostProfileInteractive,
 	})
 	if err != nil {
 		return nil, err
 	}
+	s.RegisterSessionTag(res.Controller, tag)
 	return res.Controller, nil
 }
 
 // switchEffort persists a new reasoning-effort level for the active provider and
-// rebuilds via switchModel (which serializes on bindMu).
+// rebuilds the controller in the same bindMu epoch.
 func (s *Server) switchEffort(ctx context.Context, level string) error {
+	return s.switchEffortExpected(ctx, level, "")
+}
+
+func (s *Server) switchEffortExpected(ctx context.Context, level, expectedPath string) error {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	if err := s.expectedSessionPathErrorLocked(expectedPath); err != nil {
+		return err
+	}
 	cur := s.ctl()
 	if controllerHasActiveRuntimeWork(cur) {
 		return fmt.Errorf("cannot change effort while active work or background jobs are running")
@@ -437,7 +490,7 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 	}(); err != nil {
 		return err
 	}
-	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+	return s.switchModelLocked(ctx, entry.Name+"/"+entry.Model)
 }
 
 func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
@@ -491,31 +544,45 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /context", s.context)
 	mux.HandleFunc("POST /submit", s.submit)
 	s.registerInboxRoutes(mux)
-	mux.HandleFunc("POST /cancel", s.cancel)
-	mux.HandleFunc("POST /approve", s.approve)
-	mux.HandleFunc("POST /plan", s.plan)
-	mux.HandleFunc("POST /compact", s.compact)
+	mux.HandleFunc("POST /cancel", s.foregroundMutation(s.cancel))
+	mux.HandleFunc("POST /approve", s.foregroundMutation(s.approve))
+	mux.HandleFunc("POST /plan-decision", s.foregroundMutation(s.planDecision))
+	mux.HandleFunc("POST /plan", s.foregroundMutation(s.plan))
+	mux.HandleFunc("POST /composer-profile", s.composerProfile)
+	mux.HandleFunc("POST /compact", s.foregroundMutation(s.compact))
 	mux.HandleFunc("POST /new", s.newSession)
+	mux.HandleFunc("POST /clear", s.clearSession)
 	mux.HandleFunc("POST /rewind", s.rewind)
 	mux.HandleFunc("POST /fork", s.fork)
-	mux.HandleFunc("POST /summarize", s.summarize)
-	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
-	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
-	mux.HandleFunc("POST /bypass", s.bypass)
-	mux.HandleFunc("POST /goal", s.goal)
-	mux.HandleFunc("POST /answer", s.answer)
+	mux.HandleFunc("POST /summarize", s.foregroundMutation(s.summarize))
+	mux.HandleFunc("POST /tool-approval-mode", s.foregroundMutation(s.toolApprovalMode))
+	mux.HandleFunc("POST /providers/reload", s.providersReload)
+	mux.HandleFunc("POST /auto-approve-tools", s.foregroundMutation(s.autoApproveTools))
+	mux.HandleFunc("POST /bypass", s.foregroundMutation(s.bypass))
+	mux.HandleFunc("POST /goal", s.foregroundMutation(s.goal))
+	mux.HandleFunc("POST /goal/pause", s.foregroundMutation(s.goalPause))
+	mux.HandleFunc("POST /goal/resume", s.foregroundMutation(s.goalResume))
+	mux.HandleFunc("POST /jobs/cancel", s.foregroundMutation(s.jobsCancel))
+	mux.HandleFunc("POST /answer", s.foregroundMutation(s.answer))
+	mux.HandleFunc("POST /mcp-interaction", s.foregroundMutation(s.mcpInteraction))
 	mux.HandleFunc("POST /resume", s.resume)
-	mux.HandleFunc("POST /forget", s.forget)
+	mux.HandleFunc("POST /forget", s.foregroundMutation(s.forget))
 	mux.HandleFunc("GET /checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /branches", s.branches)
 	mux.HandleFunc("GET /models", s.models)
+	mux.HandleFunc("POST /model", s.modelSwitch)
+	mux.HandleFunc("POST /effort", s.effortSwitch)
+	mux.HandleFunc("POST /quality-floor", s.qualityFloorSwitch)
 	mux.HandleFunc("POST /extensions/reload", s.reloadExtensionsHTTP)
+	mux.HandleFunc("POST /extension-form", s.foregroundMutation(s.submitExtensionForm))
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
+	mux.HandleFunc("GET /commands", s.commands)
+	mux.HandleFunc("GET /pending-prompts", s.pendingPrompts)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("GET /todos", s.todos)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(s.auth.middleware(csrfGuard(mux)))
+	return logMiddleware(gzipMiddleware(s.auth.middleware(s.hostGuard(csrfGuard(mux)))))
 }
 
 func (s *Server) reloadExtensionsHTTP(w http.ResponseWriter, r *http.Request) {
@@ -526,33 +593,11 @@ func (s *Server) reloadExtensionsHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// csrfGuard rejects state-changing requests that don't carry a JSON content type.
-// The command endpoints have no auth and bind to localhost, so a page the user
-// visits could otherwise drive them with a simple cross-origin POST (text/plain,
-// no preflight) — submitting prompts or auto-approving tool calls. Requiring
-// application/json forces a CORS preflight the unauthenticated server never
-// answers, blocking cross-site requests; the same-origin frontend (which always
-// sends JSON) is unaffected.
-func csrfGuard(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			ct := r.Header.Get("Content-Type")
-			if i := strings.IndexByte(ct, ';'); i >= 0 {
-				ct = ct[:i]
-			}
-			if !strings.EqualFold(strings.TrimSpace(ct), "application/json") {
-				http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // Run serves until the process is killed. Interactive approval is enabled so
 // "ask" decisions surface as approval_request events answered via POST /approve.
 func (s *Server) Run(addr string) error {
 	s.ctl().EnableInteractiveApproval()
+	s.setListenAddr(addr)
 	return http.ListenAndServe(addr, s.Handler())
 }
 
@@ -560,6 +605,7 @@ func (s *Server) Run(addr string) error {
 // the provided context and drains active connections for up to 10 seconds
 // before returning.
 func (s *Server) RunGraceful(ctx context.Context, addr string) error {
+	s.setListenAddr(addr)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -572,6 +618,7 @@ func (s *Server) RunGraceful(ctx context.Context, addr string) error {
 // listen first, record ln.Addr(), then hand the listener here.
 func (s *Server) RunGracefulListener(ctx context.Context, ln net.Listener) error {
 	s.ctl().EnableInteractiveApproval()
+	s.setListenAddr(ln.Addr().String())
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -626,68 +673,6 @@ func (s *Server) logoWordmark(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(logoWordmarkSVG)
 }
 
-// sseKeepaliveInterval is how often the /events handler emits a `: ping`
-// SSE comment. Most reverse proxies (nginx, ALB, Cloudflare) close idle
-// upstream connections after 30–60 s; a long quiet turn (the agent
-// thinking, the model generating a single long response) easily hits
-// that window. The comment is one byte on the wire and is dropped by
-// the EventSource client, so it's a no-op for the consumer while it
-// keeps the TCP socket warm for the proxy.
-const sseKeepaliveInterval = 15 * time.Second
-
-// events streams the controller's event flow as SSE until the client
-// disconnects. Each event is one `data:` frame of the JSON wire form.
-func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	var ch <-chan []byte
-	var unsubscribe func()
-	// Subscribe and replay as one handoff. Prompt producers are serialized with
-	// this operation, so no original event can land between the two steps.
-	s.ctl().ReplayPendingPromptsWith(func() event.Sink {
-		ch, unsubscribe = s.bc.Subscribe()
-		return event.FuncSink(func(e event.Event) {
-			s.bc.EmitTo(ch, e)
-		})
-	})
-	defer unsubscribe()
-
-	fmt.Fprint(w, ": connected\n\n") // open the stream immediately
-	flusher.Flush()
-
-	keepalive := time.NewTicker(sseKeepaliveInterval)
-	defer keepalive.Stop()
-
-	for {
-		select {
-		case data, ok := <-ch:
-			if !ok {
-				return
-			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		case <-keepalive.C:
-			// SSE comment lines start with `:` and are ignored by the
-			// client. Emit one every sseKeepaliveInterval so the
-			// upstream socket stays warm; without this, a long quiet
-			// turn (e.g. a model thinking) lets a proxy like nginx
-			// or an ALB close the idle connection and the next
-			// event arrives on a half-closed stream.
-			fmt.Fprint(w, ": ping\n\n")
-			flusher.Flush()
-		case <-r.Context().Done():
-			return
-		}
-	}
-}
-
 // submit runs raw user input as a turn (slash commands and @-references
 // resolved by the controller). Returns 202 — output arrives on the event stream.
 // An optional "format":"json_object" asks the model for structured JSON output
@@ -696,12 +681,14 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Input  string `json:"input"`
 		Format string `json:"format"`
+		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input == "" {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
 	body.Format = strings.TrimSpace(body.Format)
+	body.Action = strings.TrimSpace(body.Action)
 	switch body.Format {
 	case "", "json_object":
 		// Supported: empty = default text output, json_object = structured.
@@ -709,30 +696,37 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `unsupported format (supported: "json_object")`, http.StatusBadRequest)
 		return
 	}
+	if err := validateSubmitAction(body.Format, body.Action); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	trimmed := strings.TrimSpace(body.Input)
 	if strings.HasPrefix(trimmed, "!") {
 		http.Error(w, "shell commands are unavailable over HTTP", http.StatusForbidden)
 		return
 	}
+	// Session rotations must complete while bindMu is held. Controller.Submit
+	// dispatches these verbs asynchronously, which would let a following model,
+	// resume, or extension command cross the rotation generation boundary.
+	switch trimmed {
+	case "/new":
+		s.newSessionFromSubmit(w, r)
+		return
+	case "/clear":
+		s.clearSessionFromSubmit(w, r)
+		return
+	}
 	// Intercept /model <ref> for runtime model switching (the controller's
 	// Submit path only lists models — switching is frontend-specific).
-	if strings.HasPrefix(trimmed, "/model ") {
-		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
-		if ref != "" {
-			if err := s.switchModel(r.Context(), ref); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if s.submitModelCommand(w, r, trimmed) {
+		return
 	}
 	// Intercept /effort <level> for reasoning effort switching.
 	if strings.HasPrefix(trimmed, "/effort ") {
 		level := strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort"))
 		if level != "" {
-			if err := s.switchEffort(r.Context(), level); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			if err := s.switchEffortExpected(r.Context(), level, r.Header.Get(expectedSessionPathHeader)); err != nil {
+				http.Error(w, err.Error(), runtimeSwitchErrorStatus(err))
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
@@ -745,6 +739,10 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	// published replacement. This closes the check/build/swap race where a
 	// request could otherwise start on cur after reload's initial busy check.
 	s.bindMu.Lock()
+	if !s.validateExpectedSessionLocked(w, r) {
+		s.bindMu.Unlock()
+		return
+	}
 	ctrl := s.ctl()
 	// Fix false 202 while a turn is active: SubmitHTTPFormat silently drops
 	// concurrent input. Clients must use POST /inbox/items for durable follow-up.
@@ -753,7 +751,13 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session is busy; use POST /inbox/items for durable follow-up", http.StatusConflict)
 		return
 	}
-	ctrl.SubmitHTTPFormat(body.Input, body.Format)
+	submitWithAction(ctrl, body.Input, body.Format, body.Action)
+	if isServeManagementCommand(trimmed) && !ctrl.Running() && !ctrl.RuntimeStatus().PendingPrompt {
+		// Management notices/status are successful non-turn operations.
+		s.bindMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	// After synchronous admission, a successful start sets Running. A silent
 	// drop (rotating/closed) leaves Running false — return 409 instead of 202.
 	// Finishing-window park also leaves Running false briefly; prefer 202 only
@@ -783,47 +787,17 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	s.ctl().Approve(body.ID, body.Allow, body.Session, body.Persist)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		On bool `json:"on"`
+	scope := sandbox.ApprovalScopeOnce
+	if body.Allow {
+		switch {
+		case body.Persist:
+			scope = sandbox.ApprovalScopeProject
+		case body.Session:
+			scope = sandbox.ApprovalScopeSession
+		}
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "bad body", http.StatusBadRequest)
-		return
-	}
-	s.ctl().SetPlanMode(body.On)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) compact(w http.ResponseWriter, r *http.Request) {
-	if err := s.ctl().Compact(r.Context(), ""); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Persist the compacted session to disk — ctrl.Compact() only mutates in-memory.
-	if err := s.ctl().Snapshot(); err != nil {
-		slog.Warn("serve: snapshot after compact", "err", err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
-	// Session-path-changing entry point: serialize with /resume, /fork, and
-	// switchModel so the controller and the lease keeper move together.
-	s.bindMu.Lock()
-	defer s.bindMu.Unlock()
-	if err := s.ctl().NewSession(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.bc.ResetSession()
-	// Fresh path — the lease follows it; failure is theoretical but not silent.
-	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
-		http.Error(w, sessionInUseError(err), http.StatusConflict)
+	if err := s.ctl().ResolveApproval(body.ID, body.Allow, scope); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -838,6 +812,7 @@ type historyToolCall struct {
 type historyMessage struct {
 	Role       string            `json:"role"`
 	Content    string            `json:"content"`
+	Missing    []string          `json:"missing,omitempty"`
 	Reasoning  string            `json:"reasoning,omitempty"`
 	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
 	ToolCallID string            `json:"toolCallId,omitempty"`
@@ -847,6 +822,10 @@ type historyMessage struct {
 func historyMessages(msgs []provider.Message) []historyMessage {
 	out := make([]historyMessage, 0, len(msgs))
 	for _, m := range msgs {
+		if recovered, handled := finalReadinessHistoryMessage(m); handled {
+			out = append(out, recovered...)
+			continue
+		}
 		// Steer messages are surfaced as a notice, not a user message.
 		if m.Role == provider.RoleUser {
 			if text, handled := agent.ReplaySteerText(m.Content); handled {
@@ -856,7 +835,7 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 				continue
 			}
 		}
-		hm := historyMessage{Role: string(m.Role), Content: m.Content}
+		hm := historyMessage{Role: string(m.Role), Content: historyMessageContent(m)}
 		if m.Role == provider.RoleAssistant {
 			hm.Reasoning = m.ReasoningContent
 			if len(m.ToolCalls) > 0 {
@@ -880,6 +859,8 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 // if the client sends If-None-Match with the current ETag, the server returns
 // 304 Not Modified with no body, saving bandwidth on reconnects.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
 	writeJSONCached(w, r, historyMessages(s.ctl().History()))
 }
 
@@ -929,7 +910,7 @@ func corsMiddleware(next http.Handler, origin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+expectedSessionPathHeader)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -959,6 +940,8 @@ type responseWriter struct {
 	status int
 }
 
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
@@ -971,30 +954,6 @@ func (rw *responseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// rewind rewinds the session to a checkpoint.
-func (s *Server) rewind(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Turn  int    `json:"turn"`
-		Scope string `json:"scope"` // "code", "conversation", "both"
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Turn < 0 {
-		http.Error(w, "missing turn", http.StatusBadRequest)
-		return
-	}
-	scope := control.RewindBoth
-	switch body.Scope {
-	case "code":
-		scope = control.RewindCode
-	case "conversation":
-		scope = control.RewindConversation
-	}
-	if err := s.ctl().Rewind(body.Turn, scope); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // fork creates a new branch at a checkpoint.
@@ -1012,12 +971,22 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 	// Taken after body decoding so a slow client cannot hold the binding lock.
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
+	if !s.validateExpectedSessionLocked(w, r) {
+		return
+	}
 	path, err := s.ctl().ForkNamed(body.Turn, body.Name)
 	if err != nil {
+		if control.IsSessionRotationBusy(err) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.bc.ResetSession()
+	if ctrl, ok := s.ctl().(*control.Controller); ok {
+		s.setControllerPath(ctrl, ctrl.SessionPath())
+	}
+	s.bc.ResetSessionPath(s.ctl().SessionPath())
 	// The controller switched to the fork (a fresh path); the lease follows it.
 	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
 		http.Error(w, sessionInUseError(err), http.StatusConflict)
@@ -1113,20 +1082,6 @@ func (s *Server) goal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// answer responds to an ask_request.
-func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ID      string            `json:"id"`
-		Answers []event.AskAnswer `json:"answers"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
-		http.Error(w, "missing id", http.StatusBadRequest)
-		return
-	}
-	s.ctl().AnswerQuestion(body.ID, body.Answers)
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // resume loads a previous session from a JSONL file.
 func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -1173,9 +1128,13 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	// cannot land on different sessions. Validate first to avoid slow holders.
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
+	cur := s.ctl()
+	if s.resumeActiveSession(w, r, cur, realPath) {
+		return
+	}
 	// Snapshot the current session before switching away — while this process
 	// still holds its lease.
-	if err := s.ctl().Snapshot(); err != nil {
+	if err := cur.Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before resume", "err", err)
 	}
 	// Refuse to bind a session another runtime is writing (a desktop window,
@@ -1194,22 +1153,17 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The lease already moved to the target; re-point it at the session the
 		// controller still owns (best-effort).
-		_ = s.rebindSessionLease(s.ctl().SessionPath())
+		_ = s.rebindSessionLease(cur.SessionPath())
 		http.Error(w, "load session: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if hook := resumeBindHookForTest; hook != nil {
-		hook()
+	if !s.commitLoadedResume(w, cur, loaded, realPath) {
+		return
 	}
-	s.ctl().Resume(loaded, realPath)
-	if ctrl, ok := s.ctl().(*control.Controller); ok && s.leases != nil {
-		if err := s.leases.BindControllerAuthority(ctrl); err != nil {
-			http.Error(w, "session authority: unable to bind resumed session", http.StatusInternalServerError)
-			return
-		}
-	}
-	s.bc.ResetSession()
+	s.bc.ResetSessionPath(realPath)
+	s.announceSessionChanged(realPath, false)
 	w.WriteHeader(http.StatusNoContent)
+	s.replayPendingPromptsBroadcast()
 }
 
 // forget deletes a saved memory by name.
@@ -1226,21 +1180,6 @@ func (s *Server) forget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// checkpoints returns the session's checkpoint list for the rewind picker.
-func (s *Server) checkpoints(w http.ResponseWriter, _ *http.Request) {
-	type cp struct {
-		Turn   int    `json:"turn"`
-		Prompt string `json:"prompt"`
-		Files  int    `json:"files"`
-	}
-	raw := s.ctl().Checkpoints()
-	out := make([]cp, len(raw))
-	for i, c := range raw {
-		out[i] = cp{Turn: c.Turn, Prompt: c.Prompt, Files: len(c.Paths)}
-	}
-	writeJSON(w, out)
 }
 
 // branches returns the branch list and tree text.
@@ -1363,45 +1302,89 @@ func currentModelRef(c control.SessionAPI) string {
 	return strings.TrimSpace(c.Label())
 }
 
-// status returns a combined status snapshot.
+// status returns a combined status snapshot. The desktop's runtime-only path
+// skips provider balance IO while retaining all reconciliation fields.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	used, window := s.ctl().ContextSnapshot()
-	hit, miss := s.ctl().SessionCache()
+	// Session rotations publish the controller path and executor Session while
+	// holding bindMu. Read the combined snapshot in that same binding epoch so
+	// callers can never pair a newly published path with the outgoing history.
+	s.bindMu.Lock()
+	runtimeOnly := r.URL.Query().Get("runtime") == "1" || r.URL.Query().Get("lite") == "1"
+	ctrl := s.ctl()
+	used, window := ctrl.ContextSnapshot()
+	hit, miss := ctrl.SessionCache()
+	rs := ctrl.RuntimeStatus()
 	sess := map[string]any{
-		"label":            s.ctl().Label(),
-		"running":          s.ctl().Running(),
-		"plan":             s.ctl().PlanMode(),
-		"autoApproveTools": s.ctl().AutoApproveTools(),
-		"bypass":           s.ctl().AutoApproveTools(),
-		"toolApprovalMode": s.ctl().ToolApprovalMode(),
-		"goal":             s.ctl().Goal(),
-		"goalStatus":       s.ctl().GoalStatus(),
-		"cwd":              s.ctl().SessionDir(),
+		"label":            ctrl.Label(),
+		"running":          rs.Running,
+		"plan":             ctrl.PlanMode(),
+		"autoApproveTools": ctrl.AutoApproveTools(),
+		"bypass":           ctrl.AutoApproveTools(),
+		"toolApprovalMode": ctrl.ToolApprovalMode(),
+		"goal":             ctrl.Goal(),
+		"goalStatus":       ctrl.GoalStatus(),
+		"qualityFloor":     ctrl.QualityFloor(),
+		"cwd":              ctrl.SessionDir(),
 		"used":             used,
 		"window":           window,
 		"cacheHit":         hit,
 		"cacheMiss":        miss,
 	}
-	if u := s.ctl().LastUsage(); u != nil {
+	if ctrl.Goal() != "" {
+		sess["goalRuntime"] = ctrl.GoalRuntime()
+	}
+	sessionPath := strings.TrimSpace(ctrl.SessionPath())
+	if sessionPath != "" && store.IsSessionTranscriptName(filepath.Base(sessionPath)) {
+		sess["sessionName"] = strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
+		sess["sessionPath"] = agent.CanonicalSessionPath(sessionPath)
+	}
+	if cfg, err := config.Load(); err == nil {
+		if entry, ok := cfg.ResolveModel(currentModelRef(ctrl)); ok {
+			capability := config.EffortCapabilityForEntry(entry)
+			levels := capability.Levels
+			if levels == nil {
+				levels = []string{}
+			}
+			sess["effort"] = map[string]any{
+				"supported": capability.Supported,
+				"current":   config.EffortDisplay(entry),
+				"default":   capability.Default,
+				"levels":    levels,
+			}
+		}
+	}
+	// Runtime reconciliation fields for desktop running-state watchdogs: the
+	// remote tab surface polls /status and maps these onto the same
+	// reconciliation the local tabs get from ListTabs.
+	sess["pendingPrompt"] = rs.PendingPrompt
+	sess["backgroundJobs"] = rs.BackgroundJobs
+	sess["cancelRequested"] = rs.CancelRequested
+	sess["cancellable"] = rs.Cancellable
+	if u := ctrl.LastUsage(); u != nil {
 		sess["lastUsage"] = u
 	}
-	if b, err := s.ctl().Balance(r.Context()); err == nil && b != nil {
-		if cfg, loadErr := config.Load(); loadErr == nil && cfg.DisplayCurrencyPref() == "" {
-			// Runtime-only hint: a single wallet currency may select an existing
-			// valuation, but is never persisted as configuration or history.
-			s.bc.SetDisplayCurrency(b.PrimaryCurrency())
-		}
-		sess["balance"] = map[string]any{
-			"display":   b.Display(),
-			"available": b.Available,
-			"infos":     b.Infos,
-		}
-	} else if err != nil {
-		slog.Warn("serve: balance fetch failed", "err", err)
-	}
-	sess["sessionCostQuote"] = s.bc.SessionCostQuote()
-	if j := s.ctl().Jobs(); len(j) > 0 {
+	sess["sessionCostQuote"] = s.bc.SessionCostQuoteFor(agent.CanonicalSessionPath(sessionPath))
+	if j := ctrl.Jobs(); len(j) > 0 {
 		sess["jobs"] = j
+	}
+	// Balance can perform provider IO and does not participate in session
+	// identity. Release the binding epoch before that optional slow request.
+	s.bindMu.Unlock()
+	if !runtimeOnly {
+		if b, err := ctrl.Balance(r.Context()); err == nil && b != nil {
+			if cfg, loadErr := config.Load(); loadErr == nil && cfg.DisplayCurrencyPref() == "" {
+				// Runtime-only hint: a single wallet currency may select an existing
+				// valuation, but is never persisted as configuration or history.
+				s.bc.SetDisplayCurrency(b.PrimaryCurrency())
+			}
+			sess["balance"] = map[string]any{
+				"display":   b.Display(),
+				"available": b.Available,
+				"infos":     b.Infos,
+			}
+		} else if err != nil {
+			slog.Warn("serve: balance fetch failed", "err", err)
+		}
 	}
 	writeJSON(w, sess)
 }
@@ -1470,55 +1453,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 	return strings.TrimSpace(title)
 }
 
-// sessions lists saved session files from the session directory, enriched with
-// LLM-generated titles and turn counts.
-func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	dir := s.ctl().SessionDir()
-	if dir == "" {
-		writeJSON(w, []any{})
-		return
-	}
-	type sessionEntry struct {
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		Title   string `json:"title,omitempty"`
-		Turns   int    `json:"turns,omitempty"`
-		Current bool   `json:"current,omitempty"`
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		writeJSON(w, []any{})
-		return
-	}
-	current := filepath.Clean(s.ctl().SessionPath())
-	var out []sessionEntry
-	for _, e := range entries {
-		if e.IsDir() || !store.IsSessionTranscriptName(e.Name()) {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		if agent.IsCleanupPending(path) {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), ".jsonl")
-		entry := sessionEntry{Name: name, Path: path, Current: filepath.Clean(path) == current}
-		// Event-log aware: reading the .jsonl checkpoint directly would freeze
-		// turn counts and titles at the last checkpoint write.
-		if first, turns := agent.SessionPreview(path); turns > 0 {
-			entry.Turns = turns
-			entry.Title = s.sessionTitle(r.Context(), e.Name(), first, agent.SessionContentModTime(path).UnixNano())
-		}
-		out = append(out, entry)
-	}
-	// reverse so newest first
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	if out == nil {
-		out = []sessionEntry{}
-	}
-	writeJSON(w, out)
-}
+var deleteSessionBeforeOwnershipLockHookForTest func()
 
 // deleteSession removes a saved session by the session name returned from /sessions.
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
@@ -1538,6 +1473,15 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session name", http.StatusBadRequest)
 		return
 	}
+	// Serialize active/detached ownership checks with session promotion. A
+	// detached controller is removed from the background registry while it is
+	// being promoted; without bindMu a concurrent delete can pass both checks
+	// in that transfer window and remove the live controller's transcript.
+	if deleteSessionBeforeOwnershipLockHookForTest != nil {
+		deleteSessionBeforeOwnershipLockHookForTest()
+	}
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
 	dir := s.ctl().SessionDir()
 	if dir == "" {
 		http.Error(w, "sessions disabled", http.StatusBadRequest)
@@ -1561,6 +1505,10 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if filepath.Clean(abs) == filepath.Clean(s.ctl().SessionPath()) {
 		http.Error(w, "cannot delete active session", http.StatusConflict)
+		return
+	}
+	if s.detachedBusy(filepath.Clean(abs)) {
+		http.Error(w, "session is running in the background; switch to it and stop the turn first", http.StatusConflict)
 		return
 	}
 	destroy := s.ctl().BeginDestroySession(abs)

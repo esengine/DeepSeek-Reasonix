@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
+import { verifyDeferredHistoryCloseRace, verifyStaleHistoryFingerprint } from "./deferred-history-close-race";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySlice, HistorySliceRequest, JobView, Meta, TabMeta, TopicActivationEvent, TopicActivationRequest, WireEvent } from "../lib/types";
 
@@ -124,7 +125,6 @@ globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -134,7 +134,7 @@ const tabA = tabMeta("tab-a", { active: true });
 const tabB = tabMeta("tab-b");
 const tabC = tabMeta("tab-c");
 const tabD = tabMeta("tab-d");
-const tabE = tabMeta("tab-e");
+const tabE = tabMeta("tab-e", { turnStartedAt: Date.now() - 45_000 });
 const tabF = tabMeta("tab-f");
 const tabG = tabMeta("tab-g");
 const tabH = tabMeta("tab-h");
@@ -144,6 +144,7 @@ const tabK = tabMeta("tab-k", { sessionRevision: 1, sessionDigest: "digest-k-v1"
 const tabL = tabMeta("tab-l", { sessionRevision: 1, sessionDigest: "digest-l-v1" });
 const tabM = tabMeta("tab-m", { sessionRevision: 2, sessionDigest: "digest-m-v2" });
 const tabN = tabMeta("tab-n", { sessionRevision: 2, sessionDigest: "digest-n-v2" });
+const tabO = tabMeta("tab-o");
 let backendActiveId = "tab-a";
 const historyB = deferred<HistoryMessage[]>();
 const historyD = deferred<HistoryMessage[]>();
@@ -187,7 +188,7 @@ let staleForkStarted = false;
 let holdStaleForkReassertG = false;
 let staleForkReassertGStarted = false;
 const runningTabs = new Set<string>();
-const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG, tabH, tabI, tabK, tabL, tabM, tabN].map((tab) => [tab.id, tab]));
+const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG, tabH, tabI, tabK, tabL, tabM, tabN, tabO].map((tab) => [tab.id, tab]));
 const eventHandlers: Array<(e: WireEvent) => void> = [];
 const readyHandlers: Array<(tabId?: string) => void> = [];
 const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
@@ -240,6 +241,7 @@ window.go = {
       CheckpointsForTab: async () => checkpoints,
       HistoryForTab: async (tabID: string) => {
         historyCalls.push(tabID);
+        if (tabID === "tab-o") { failSetActiveFor = "tab-a"; throw new Error("history failed at /private/session.jsonl"); }
         if (tabID === "tab-b") return historyB.promise;
         if (tabID === "tab-d") return historyD.promise;
         if (tabID === "tab-e") return [userMessage("fork E")];
@@ -382,6 +384,11 @@ window.go = {
         cancelCalls.push(tabID);
         runningTabs.delete(tabID);
       },
+      CloseTabWithPolicy: async (tabID: string) => {
+        tabsById.delete(tabID);
+        runningTabs.delete(tabID);
+        if (backendActiveId === tabID) backendActiveId = "tab-a";
+      },
       SubmitToTab: async (tabID: string) => {
         runningTabs.add(tabID);
         if (tabID === "tab-c") await submitTabCGate.promise;
@@ -461,7 +468,6 @@ eq(newSessionTargets.join(","), "tab-b", "newSession keeps the selected tab as i
 
 await act(async () => {
   setActiveBGate.resolve();
-  await switchToB;
   await newSessionWhileSwitching;
   await flushPromises();
 });
@@ -478,7 +484,7 @@ eq(historyCalls.length, historyCallsBeforeReturnToA, "cached idle tab skips hist
 
 await act(async () => {
   historyB.resolve([userMessage("late B")]);
-  await historyB.promise;
+  await Promise.all([historyB.promise, switchToB]);
   await flushPromises();
 });
 
@@ -515,6 +521,7 @@ await act(async () => {
 });
 eq(controller?.activeTabId, "tab-e", "switching to a backend-running tab updates the active tab immediately");
 eq(controller?.state.running, true, "backend-running tab restores the stop state before backend activation settles");
+eq(controller?.state.turnStartAt, tabE.turnStartedAt, "backend-running tab restores the original turn timer before activation settles");
 eq(controller?.state.cancellable, true, "backend-running tab remains cancellable before backend activation settles");
 await act(async () => {
   controller?.cancel();
@@ -592,6 +599,14 @@ ok(controller?.state.items.some((item) => item.kind === "user" && item.text === 
 eq(historyCalls.length, historyCallsBeforeFailedSwitch, "failed backend tab switch does not hydrate the rejected target");
 failSetActiveFor = "";
 
+await act(async () => { await controller?.switchTab("tab-o", tabO); await flushPromises(); });
+await waitFor("failed history and failed source restore settle on target", () => controller?.activeTabId === "tab-o" && Boolean(controller.state.hydrateError));
+eq(controller?.activeTabId, "tab-o", "failed source rebind does not falsely restore the frontend source");
+eq(backendActiveId, "tab-o", "failed source rebind keeps frontend and backend on the same target");
+failSetActiveFor = "";
+await act(async () => { await controller?.switchTab("tab-a", tabA); await flushPromises(); });
+await waitFor("tab-a restored after failed source rebind", () => controller?.activeTabId === "tab-a");
+
 await act(async () => {
   for (const handler of eventHandlers) handler({ kind: "phase", text: "Planner is thinking", tabId: "tab-a" });
   for (const handler of eventHandlers) handler({ kind: "message", text: "Planner kept", reasoning: "Planner notes", tabId: "tab-a" });
@@ -642,7 +657,7 @@ await act(async () => {
 });
 eq(controller?.activeTabId, "tab-d", "openProjectTab activates the opened tab");
 eq(controller?.state.items.length, 0, "open topic keeps the new tab transcript empty while hydrating");
-ok(controller?.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "streaming C") ?? false, "open topic stores previous transcript only as a hydration placeholder");
+eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "cross-session open never reuses the source transcript as a placeholder");
 
 await act(async () => {
   historyD.resolve([userMessage("history D")]);
@@ -779,6 +794,7 @@ await waitFor("single-surface activation replaces visible tab", () =>
   controller?.activeTabId === "tab-g" &&
   (controller.state.items.some((item) => item.kind === "user" && item.text === "history G") ?? false)
 );
+await act(async () => { controller?.commitSingleSurfaceNavigation("tab-g"); await flushPromises(); });
 await act(async () => {
   metaH.resolve({ ...metaFor(tabH), label: "stale-model-tab-h" });
   await metaH.promise;
@@ -792,10 +808,9 @@ await act(async () => {
   await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
   await flushPromises();
 });
-await waitFor("reopened tab-h treats stale late meta as discarded", () =>
-  controller?.activeTabId === "tab-h" &&
-  controller.state.hydrating === true &&
-  (controller.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "history G") ?? false)
+await waitFor("reopened tab-h isolates the prior surface while loading", () =>
+  controller?.activeTabId === "tab-h" && controller.state.hydrating === true && controller.state.items.length === 0 &&
+  (controller.state.hydratePlaceholderItems?.length ?? 0) === 0
 );
 await act(async () => {
   historyH.resolve([userMessage("history H after stale meta")]);
@@ -807,8 +822,7 @@ await waitFor("reopened tab-h finishes after stale meta discard", () =>
   (controller.state.items.some((item) => item.kind === "user" && item.text === "history H after stale meta") ?? false)
 );
 
-// A stale repair is itself asynchronous. Force a third navigation to complete
-// while that repair is pending and verify the repair follows the newest tab.
+// A third navigation must remain authoritative while stale repair is pending.
 holdStaleSwitchF = true;
 holdStaleSwitchReassertG = true;
 let threeWaySwitchToF: Promise<TabMeta[] | undefined> | undefined;
@@ -853,10 +867,7 @@ eq(controller?.activeTabId, "tab-h", "third navigation remains visible after sta
 eq(backendActiveId, "tab-h", "third navigation remains backend-active after stale fork repair");
 runningTabs.delete("tab-j");
 
-// A same-path session can advance while this tab is inactive (another runtime,
-// crash recovery, or a completed turn). Matching only the path would reuse the
-// old transcript and hide the newer durable suffix. The persisted fingerprint
-// must force one fresh history read, then allow reuse once the cache is current.
+// A changed durable fingerprint must defeat same-path cache reuse, then become reusable.
 await act(async () => {
   await controller?.openProjectTab(tabK.workspaceRoot, tabK.topicId || "");
   await flushPromises();
@@ -886,9 +897,7 @@ await act(async () => {
 await waitFor("matching fingerprint reuses tab history", () => controller?.activeTabId === "tab-k");
 eq(historyCalls.length, historyCallsAfterFingerprintRefresh, "matching fingerprint reuses the hydrated transcript after navigation");
 
-// Older-page hydration must use the same canonical fingerprint as the visible
-// page. A session can advance while the tab is open; an older response must be
-// discarded instead of being prepended to the newer transcript.
+// An older response with a stale fingerprint must not prepend into the newer page.
 await act(async () => {
   await controller?.openProjectTab(tabL.workspaceRoot, tabL.topicId || "");
   await flushPromises();
@@ -905,28 +914,20 @@ await act(async () => {
 });
 await waitFor("tab-l metadata advances", () => controller?.state.meta?.sessionRevision === 2);
 historyLOlder = deferred<HistorySlice>();
-let olderLoad: Promise<void> | undefined;
-await act(async () => {
-  olderLoad = controller?.loadOlderHistory("tab-l");
-  await flushPromises();
+await verifyStaleHistoryFingerprint({
+  olderPage: historyLOlder, loadOlderHistory: () => controller?.loadOlderHistory("tab-l"),
+  historyCalls: () => historyLCalls, waitFor, flushPromises, equal: eq,
+  getState: () => controller?.state,
 });
-await waitFor("tab-l older page request", () => historyLCalls === 2);
-historyLOlder.resolve(historySliceFromMessages(
-  "tab-l",
-  [userMessage("stale older L")],
-  { cursor: "", turns: 12 },
-  { revision: 1, digest: "digest-l-v1" },
-));
-await act(async () => {
-  await olderLoad;
-  await flushPromises();
-});
-ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "stale older L") ?? false), "stale older page is discarded after session fingerprint changes");
-eq(controller?.state.historyOlderLoading, false, "stale older page releases its loading state");
 
-// The backend transcript and sidecar are separate durable files. If a save
-// advances between those reads, hydration must reconcile the pair instead of
-// caching an older page under the newer metadata fingerprint.
+historyLOlder = deferred<HistorySlice>();
+await verifyDeferredHistoryCloseRace({
+  olderPage: historyLOlder, loadOlderHistory: () => controller?.loadOlderHistory("tab-l"),
+  closeTab: async () => Boolean(await controller?.closeTab("tab-l", "stop_and_close")),
+  historyCalls: () => historyLCalls, waitFor, flushPromises, equal: eq, sessionPath: tabL.sessionPath,
+});
+
+// Transcript and sidecar reads must reconcile when a save advances between them.
 await act(async () => {
   await controller?.openProjectTab(tabM.workspaceRoot, tabM.topicId || "");
   await flushPromises();
@@ -938,9 +939,7 @@ await waitFor("split transcript/meta read reconciles", () =>
 eq(historyMCalls, 2, "mismatched page and metadata trigger one bounded history reload");
 ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "stale M v1") ?? false), "reconciled hydration does not retain the stale page");
 
-// A live turn may start after the first durable page returns but before the
-// metadata fingerprint is sampled. That live state owns the transcript; the
-// bounded durable reconciliation must stop instead of replacing it.
+// A live turn that starts between durable page and metadata reads owns the transcript.
 startTabNDuringMeta = true;
 await act(async () => {
   await controller?.openProjectTab(tabN.workspaceRoot, tabN.topicId || "");

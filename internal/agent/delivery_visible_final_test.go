@@ -31,8 +31,8 @@ func TestRunSubAgentSalvagesCurrentAnswerBeforePairedGoalError(t *testing.T) {
 		},
 	}}
 	sess := NewSession("sys")
-	answer, err := RunSubAgentWithSession(context.Background(), prov, reg, sess,
-		"add explanations to the question bank", Options{DeliveryProfile: true, SubagentDepth: 1}, event.Discard)
+	answer, err := RunSubAgentWithSession(withClosedLoopContext(context.Background()), prov, reg, sess,
+		"add explanations to the question bank", Options{SubagentDepth: 1}, event.Discard)
 	if err != nil {
 		t.Fatalf("paired Goal error hid the current salvage answer: %v", err)
 	}
@@ -177,9 +177,9 @@ func TestRunSubAgentReadinessSalvageDoesNotReuseStaleToolText(t *testing.T) {
 	}}
 	sess := NewSession("sys")
 	answer, err := RunSubAgentWithSession(
-		context.Background(), deepseekThinkingProvider{prov}, reg, sess,
+		withClosedLoopContext(context.Background()), deepseekThinkingProvider{prov}, reg, sess,
 		"add explanations to the question bank",
-		Options{DeliveryProfile: true, SubagentDepth: 1}, event.Discard,
+		Options{SubagentDepth: 1}, event.Discard,
 	)
 	var readinessErr *FinalReadinessError
 	if !errors.As(err, &readinessErr) {

@@ -123,7 +123,6 @@ func prepareDesktopDiagnostics(app *App) {
 	if tracker.start() == nil {
 		app.lifecycle.tracker = tracker
 	}
-	installWebView2ProcessObserver(app)
 }
 
 func (a *App) releaseDesktopDiagnosticsOwnership() {
@@ -138,7 +137,14 @@ func (a *App) releaseDesktopDiagnosticsOwnership() {
 }
 
 func initializeLifecycleDiagnostics(app *App) {
-	if app == nil || app.remoteWindowTicket != "" || !app.diagnosticsOwner {
+	if app == nil || app.remoteWindowTicket != "" {
+		return
+	}
+	// Native WebKit recovery is a reliability mechanism, not telemetry. Always
+	// install it; the flag only controls whether sanitized diagnostics upload.
+	telemetry := app.diagnosticsOwner && app.diagnosticsConfigLoaded && version != "dev" && app.diagnosticsTelemetry
+	installWebKitProcessObserver(app, telemetry)
+	if !app.diagnosticsOwner {
 		return
 	}
 	if !app.diagnosticsConfigLoaded || version == "dev" {
@@ -154,7 +160,6 @@ func initializeLifecycleDiagnostics(app *App) {
 		app.lifecycle.previousRun = legacy
 	}
 	app.lifecycle.previousRuns = tracker.consumePrevious(enabled)
-	installWebKitProcessObserver(app, enabled)
 	if enabled {
 		refreshWebRuntimeContext()
 	}

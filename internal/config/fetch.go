@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"reasonix/internal/netclient"
+	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 )
 
@@ -25,6 +27,14 @@ var knownModelFetchCompatSuffixes = []string{
 // FetchModels queries the provider's OpenAI-compatible GET /models endpoint and
 // returns the available model IDs, sorted alphabetically.
 func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
+	return e.FetchModelsWithProxy(ctx, netclient.ProxySpec{})
+}
+
+// FetchModelsWithProxy is FetchModels routed through the same network policy as
+// chat requests. Passing cfg.NetworkProxySpec() makes model discovery fail at
+// setup time when the proxy path is broken, instead of succeeding here and
+// stalling the first chat turn later (#9560).
+func (e *ProviderEntry) FetchModelsWithProxy(ctx context.Context, proxy netclient.ProxySpec) ([]string, error) {
 	if e.BaseURL == "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
 	}
@@ -43,9 +53,10 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		models, err := openai.FetchModelsWithOptions(ctx, u, key, openai.FetchModelsOptions{
 			Headers:  e.Headers,
 			AuthMode: authMode,
+			Proxy:    proxy,
 		})
 		if err == nil {
-			return models, nil
+			return provider.FilterOfficialOpenCodeGoModels(e.Kind, e.BaseURL, models), nil
 		}
 		lastErr = err
 		if !openai.IsModelFetchEndpointMiss(err) && firstHardErr == nil {
@@ -70,10 +81,17 @@ func modelFetchAuthMode(e *ProviderEntry) openai.ModelFetchAuthMode {
 
 // BuildModelFetchURLs derives likely OpenAI-compatible model-list endpoints.
 // It keeps Reasonix's historical {base}/models path first, then tries the common
-// {base}/v1/models shape used by many aggregators.
+// {base}/v1/models shape used by many aggregators. Known official Token Rhythm
+// URLs collapse to a single /v1/models candidate because that /v1 route is complete.
 func BuildModelFetchURLs(baseURL, override string) ([]string, error) {
 	if trimmed := strings.TrimSpace(override); trimmed != "" {
+		if canonical, ok := canonicalVendorModelsURL(trimmed); ok {
+			return []string{canonical}, nil
+		}
 		return []string{trimmed}, nil
+	}
+	if canonical, ok := canonicalVendorModelsURL(baseURL); ok {
+		return []string{canonical}, nil
 	}
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
@@ -93,6 +111,15 @@ func BuildModelFetchURLs(baseURL, override string) ([]string, error) {
 		candidates = append(candidates, root+"/models", root+"/v1/models")
 	}
 	return uniqueStrings(candidates), nil
+}
+
+// canonicalVendorModelsURL rewrites official vendor bases whose documented
+// form differs from the OpenAI-compatible shape (Token Rhythm, StepFun step_plan).
+func canonicalVendorModelsURL(raw string) (string, bool) {
+	if canonical, ok := openai.CanonicalTokenRhythmModelsURL(raw); ok {
+		return canonical, true
+	}
+	return openai.CanonicalStepFunPlanModelsURL(raw)
 }
 
 func endsWithVersionSegment(raw string) bool {

@@ -84,3 +84,32 @@ func TestBuildRequestStableWhenLocalExecutionAdded(t *testing.T) {
 		t.Fatalf("openai request diverged after local execution metadata\nbase=%s\nmeta=%s", a, b)
 	}
 }
+
+func TestBuildRequestExcludesMCPAppPresentation(t *testing.T) {
+	msgs := provider.ModelMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run app tool"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+			{ID: "call_app", Name: "mcp__srv__render", Arguments: `{"q":"x"}`},
+		}},
+		{
+			Role: provider.RoleTool, ToolCallID: "call_app", Name: "mcp__srv__render", Content: "rendered",
+			MCPApp: &provider.MCPAppPresentation{
+				Server: "srv", Tool: "render", Generation: 7,
+				ResourceURI: "ui://app/must-not-leak.html",
+				RawResult:   json.RawMessage(`{"content":[{"type":"text","text":"mcp-app-marker-must-not-leak"}]}`),
+				Structured:  json.RawMessage(`{"secret":"mcp-structured-marker-must-not-leak"}`),
+			},
+		},
+	})
+	req := (&client{model: "deepseek-v4"}).buildRequest(provider.Request{Messages: msgs})
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	for _, banned := range []string{"mcp_app", "resourceUri", "ui://app/must-not-leak", "mcp-app-marker-must-not-leak", "mcp-structured-marker-must-not-leak"} {
+		if strings.Contains(s, banned) {
+			t.Fatalf("openai wire leaked %q: %s", banned, s)
+		}
+	}
+}

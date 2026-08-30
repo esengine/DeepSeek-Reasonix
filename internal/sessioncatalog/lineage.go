@@ -1,9 +1,6 @@
 package sessioncatalog
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -457,66 +454,6 @@ func recoveryCandidateCovers(candidate, root int, idxs []int, content map[int]ag
 	return true
 }
 
-func (c *Catalog) refreshDirectoryRecoveryLineage(ctx context.Context, target DirectoryTarget, records []SessionRecord) error {
-	for i := range records {
-		records[i] = classifyRecoveryLineageFromContent(normalizeSessionRecord(records[i]))
-	}
-	records = promoteCanonicalLeaves(records)
-	c.mutationMu.Lock()
-	defer c.mutationMu.Unlock()
-	tx, err := c.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	affected := map[TopicKey]struct{}{}
-	changed := false
-	for _, record := range records {
-		// Capture the previously projected topic so re-anchored recovery rows
-		// can delete empty legacy topic shells.
-		var previous TopicKey
-		if err := tx.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id FROM catalog_sessions WHERE path=?`, record.Path).
-			Scan(&previous.Scope, &previous.WorkspaceRoot, &previous.TopicID); err == nil && previous.TopicID != "" {
-			affected[previous] = struct{}{}
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			_ = tx.Rollback()
-			return err
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET recovered=?,recovery_copy=?,recovery_group_id=?,recovery_role=?,recovery_canonical=?,topic_id=?,topic_title=?,logical_topic_id=?,ordinary_visible=?,parent_id=? WHERE path=?`,
-			boolToInt(record.Recovered), boolToInt(record.RecoveryCopy), record.RecoveryGroupID, record.RecoveryRole,
-			boolToInt(record.RecoveryCanonical), record.TopicID, record.TopicTitle, record.LogicalTopicID,
-			boolToInt(record.OrdinaryVisible), record.ParentID, record.Path)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if rows, _ := result.RowsAffected(); rows > 0 {
-			changed = true
-		}
-		if record.TopicID != "" {
-			affected[TopicKey{Scope: record.Scope, WorkspaceRoot: record.WorkspaceRoot, TopicID: record.TopicID}] = struct{}{}
-		}
-	}
-	if !changed {
-		return tx.Rollback()
-	}
-	for key := range affected {
-		if err := recomputeTopic(ctx, tx, key); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	revision, err := bumpRevision(ctx, tx)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	c.publishRevision(revision, []string{target.WorkspaceRoot}, "recovery_lineage")
-	return nil
-}
-
 func recoveryParentPath(record SessionRecord) string {
 	parentID := strings.TrimSpace(record.ParentID)
 	if parentID == "" {
@@ -570,16 +507,18 @@ func CanonicalSessionPathForTopic(sessions []SessionRecord, current string) stri
 	return canonical
 }
 
-// OrdinaryContinuePath returns the unique covering leaf when current is the
-// ordinary parent (or a stale parent path after re-anchoring). An explicit
-// recovery fork stays put so History can inspect it.
+// OrdinaryContinuePath returns a safe continuation when current is the ordinary
+// parent. Explicit recovery paths stay put so History can inspect them.
 func OrdinaryContinuePath(sessions []SessionRecord, current string) string {
 	canonical := CanonicalSessionPathForTopic(sessions, current)
 	if canonical == "" {
-		return ""
+		canonical = uniqueLinearRecoveryLeaf(sessions)
 	}
 	current = strings.TrimSpace(current)
-	if current == "" || current == canonical {
+	if canonical == "" || current == canonical {
+		return ""
+	}
+	if current == "" {
 		return canonical
 	}
 	for _, session := range sessions {
@@ -592,4 +531,75 @@ func OrdinaryContinuePath(sessions []SessionRecord, current string) string {
 		return canonical
 	}
 	return canonical
+}
+
+// uniqueLinearRecoveryLeaf selects the only monotonic descendant in a complete
+// parent chain. It is an open target only; content coverage still exclusively
+// controls adoption and cleanup.
+func uniqueLinearRecoveryLeaf(sessions []SessionRecord) string {
+	if len(sessions) < 2 {
+		return ""
+	}
+	byID := make(map[string]int, len(sessions))
+	root := -1
+	recovered := 0
+	for i, session := range sessions {
+		id := agent.BranchID(session.Path)
+		if id == "" {
+			return ""
+		}
+		if _, duplicate := byID[id]; duplicate {
+			return ""
+		}
+		byID[id] = i
+		if session.Recovered {
+			recovered++
+			continue
+		}
+		if root >= 0 {
+			return ""
+		}
+		root = i
+	}
+	if root < 0 || recovered == 0 {
+		return ""
+	}
+	children := make(map[string]int, recovered)
+	for i, session := range sessions {
+		if !session.Recovered {
+			continue
+		}
+		parentID := strings.TrimSpace(session.ParentID)
+		parent, ok := byID[parentID]
+		if parentID == "" || !ok {
+			return ""
+		}
+		if _, forked := children[parentID]; forked {
+			return ""
+		}
+		if session.TurnsState == TurnsValid && sessions[parent].TurnsState == TurnsValid && session.Turns < sessions[parent].Turns {
+			return ""
+		}
+		if session.LastActivityAt > 0 && sessions[parent].LastActivityAt > 0 && session.LastActivityAt < sessions[parent].LastActivityAt {
+			return ""
+		}
+		children[parentID] = i
+	}
+	seen := make(map[int]struct{}, recovered+1)
+	leaf := root
+	for {
+		if _, duplicate := seen[leaf]; duplicate {
+			return ""
+		}
+		seen[leaf] = struct{}{}
+		next, ok := children[agent.BranchID(sessions[leaf].Path)]
+		if !ok {
+			break
+		}
+		leaf = next
+	}
+	if len(seen) != len(sessions) || !sessions[leaf].Recovered {
+		return ""
+	}
+	return strings.TrimSpace(sessions[leaf].Path)
 }

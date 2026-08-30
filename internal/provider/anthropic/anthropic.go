@@ -42,7 +42,7 @@ import (
 // mid-stream) sends no RST, so scanner.Scan() would block forever. Generous on
 // purpose; live streams emit far more often. Stored per-client (client.idleTimeout)
 // so a test can shorten it without a shared global that races other watchdogs.
-const defaultStreamIdleTimeout = 120 * time.Second
+const defaultStreamIdleTimeout = 300 * time.Second
 
 const (
 	// anthropicVersion is the required API version header value.
@@ -51,8 +51,8 @@ const (
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
 	// defaultMaxTokens is the mandatory Anthropic fallback when neither config
-	// nor request supplies max_tokens. Ordinary turns use 16K; reasoning-capable
-	// paths raise via AutoOutputBudget. 128K is never automatic.
+	// nor request supplies max_tokens. Native Anthropic stays at 16K; official
+	// DeepSeek sends the documented 384K ceiling because budget_tokens is ignored.
 	defaultMaxTokens = provider.DefaultOrdinaryOutputTokens
 )
 
@@ -94,6 +94,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL = root + "/v1/messages"
 	}
 	officialDeepSeek := openai.IsDeepSeek(root)
+	reasoningProtocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	reasoningProtocol = strings.ToLower(strings.TrimSpace(reasoningProtocol))
+	deepSeekReplay := officialDeepSeek
+	switch reasoningProtocol {
+	case "deepseek":
+		deepSeekReplay = true
+	case "none":
+		deepSeekReplay = false
+	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
@@ -101,10 +110,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
-	// DeepSeek's official Anthropic-compatible endpoint is text-only. Enforce
-	// that wire constraint here as defense in depth, independent of config or
-	// extension capability metadata.
-	vision = vision && !officialDeepSeek
+	// Official DeepSeek image input is pinned to one SKU. Ignore Extra["vision"]
+	// so stale config cannot send image blocks to Flash/Pro.
+	if officialDeepSeek {
+		vision = openai.IsOfficialDeepSeekVisionModel(cfg.Model)
+	}
 	webSearch, _ := cfg.Extra["web_search"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
@@ -112,13 +122,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if maxOutputTokens <= 0 {
 		// Messages requires max_tokens. 0 = automatic; negative also falls back
 		// because the wire field is mandatory.
-		reasoningOn := officialDeepSeek &&
-			!strings.EqualFold(thinking, "disabled") &&
-			!strings.EqualFold(effort, "disabled") &&
-			!strings.EqualFold(effort, "off") &&
-			!strings.EqualFold(effort, "none")
 		if officialDeepSeek {
-			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
+			maxOutputTokens = provider.DeepSeekMaxOutputTokens
 		} else {
 			// Native Anthropic and unknown gateways: conservative ordinary default.
 			maxOutputTokens = defaultMaxTokens
@@ -140,7 +145,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL:       requestURL,
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
-		deepseek:         officialDeepSeek,
+		deepseek:         deepSeekReplay,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -156,7 +161,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{})
+	return netclient.NewHTTPClient(spec, netclient.TransportOptions{
+		DialTimeout:           30 * time.Second,
+		KeepAlive:             30 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 300 * time.Second,
+	})
 }
 
 type client struct {
@@ -188,27 +198,12 @@ func (c *client) deepSeekThinkingEnabled() bool {
 	return c != nil && c.deepseek && c.thinking != "disabled" && c.effort != "disabled"
 }
 
-// deepSeekAnthropicUsesProEffortMapping mirrors DeepSeek's model routing for the
-// Anthropic endpoint. Opus aliases route to V4 Pro; Sonnet/Haiku aliases and
-// unsupported model names route to V4 Flash.
-func deepSeekAnthropicUsesProEffortMapping(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "deepseek-v4-pro" || strings.HasPrefix(model, "claude-opus")
-}
-
 func normalizeDeepSeekAnthropicEffort(model, effort string) string {
+	_ = model
 	switch effort {
 	case "low":
-		if deepSeekAnthropicUsesProEffortMapping(model) {
-			return "high"
-		}
 		return "low"
-	case "medium":
-		return "high"
-	case "xhigh":
-		if deepSeekAnthropicUsesProEffortMapping(model) {
-			return "max"
-		}
+	case "medium", "xhigh":
 		return "high"
 	case "high", "max":
 		return effort
@@ -220,6 +215,13 @@ func normalizeDeepSeekAnthropicEffort(model, effort string) string {
 func (c *client) RequiresToolCallReasoning() bool {
 	return c.deepSeekThinkingEnabled()
 }
+
+func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	activity := len(m.ToolCalls) > 0 || len(m.ServerSearch) > 0
+	return c != nil && c.deepseek && activity && (c.deepSeekThinkingEnabled() || strings.TrimSpace(m.ReasoningContent) != "")
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool { return false }
 
 func (c *client) MissingToolCallReasoningWarningIdentity() string {
 	if c == nil {
@@ -265,7 +267,7 @@ func cleanCustomHeaders(in map[string]string) map[string]string {
 
 func reservedCustomHeader(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "content-type", "accept", "x-api-key", "authorization", "anthropic-version":
+	case "content-type", "accept", "x-api-key", "authorization", "anthropic-version", "anthropic-beta":
 		return true
 	default:
 		return false
@@ -309,6 +311,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 			httpReq.Header.Set("x-api-key", c.apiKey)
 		}
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
+		if visionRequestUsesFileID(req) {
+			httpReq.Header.Set("anthropic-beta", "files-api-2025-04-14")
+		}
 		applyCustomHeaders(httpReq.Header, c.headers)
 		return httpReq, nil
 	}
@@ -328,9 +333,10 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 // become `tool_use` blocks; RoleTool results become `tool_result` blocks in a user
 // turn. Consecutive same-role messages are coalesced because the API requires
 // alternating user/assistant turns (tool results are user turns).
-func (c *client) buildRequest(_ context.Context, req provider.Request) anthRequest {
+func (c *client) buildRequest(ctx context.Context, req provider.Request) anthRequest {
 	var system []textBlock
 	var msgs []anthMessage
+	recoveryWithoutThinking := c.missingReasoningFallback(ctx)
 
 	// appendBlocks adds blocks under role, merging into the previous message when
 	// it shares the role (keeps user/assistant strictly alternating).
@@ -345,7 +351,8 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 		msgs = append(msgs, anthMessage{Role: role, Content: blocks})
 	}
 
-	for _, m := range provider.SanitizeToolPairing(req.Messages) {
+	messages := c.replayMessages(req.Messages, recoveryWithoutThinking)
+	for _, m := range provider.SanitizeToolPairing(messages) {
 		switch m.Role {
 		case provider.RoleSystem:
 			if m.Content != "" {
@@ -356,9 +363,9 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 				appendBlocks("user", contentBlock{Type: "text", Text: m.Content})
 			}
 			if c.vision {
-				for _, url := range m.Images {
-					if mt, data, ok := provider.ParseImageDataURL(url); ok {
-						appendBlocks("user", contentBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: mt, Data: data}})
+				for _, ref := range m.Images {
+					if src := imageSourceFromRef(ref); src != nil {
+						appendBlocks("user", contentBlock{Type: "image", Source: src})
 					}
 				}
 			}
@@ -368,7 +375,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 				content = "(no output)" // tool_result content must be non-empty
 			}
 			block := contentBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content}
-			if c.vision {
+			if c.vision && !c.deepseek {
 				if blocks := toolResultBlocks(content, m.Images); blocks != nil {
 					block.Content = blocks
 				}
@@ -381,10 +388,8 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			// turn in every subsequent request, even if the current request no longer
 			// declares tools or has since disabled thinking. Anthropic proper requires
 			// a signature, so reasoning without one cannot be replayed on that endpoint.
-			if c.deepseek && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent})
-			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
+			if block, ok := c.replayReasoningBlock(m, recoveryWithoutThinking); ok {
+				blocks = append(blocks, block)
 			}
 			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
 			if m.Content != "" {
@@ -401,20 +406,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 		}
 	}
 
-	var tools []anthTool
-	if c.webSearch {
-		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
-	}
-	for _, t := range req.Tools {
-		schema := t.Parameters
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		if c.mimo {
-			schema = provider.NormalizeLegacyTupleItemsForDraft202012(schema)
-		}
-		tools = append(tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: schema})
-	}
+	tools := encodeAnthTools(c, req)
 
 	// Prompt-cache breakpoints (ephemeral, prefix-match). DeepSeek ignores
 	// cache_control and manages prefix caching automatically, so keep those fields
@@ -459,22 +451,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 	// uses type=adaptive plus display/output_config. LongCat-style compatible
 	// gateways use the simpler enabled|disabled knob and reject output_config.
 	if c.deepseek {
-		r.Temperature = req.Temperature
-		t := c.thinking
-		if t != "disabled" {
-			t = "enabled"
-		}
-		if c.effort == "disabled" {
-			t = "disabled"
-		}
-		r.Thinking = &thinkingConfig{Type: t}
-		if t != "disabled" {
-			effort := normalizeDeepSeekAnthropicEffort(c.model, c.effort)
-			switch effort {
-			case "low", "high", "max":
-				r.OutputConfig = &outputConfig{Effort: effort}
-			}
-		}
+		c.applyDeepSeekThinking(&r, req, recoveryWithoutThinking)
 	} else {
 		switch c.thinking {
 		case "adaptive":
@@ -642,6 +619,15 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						return
 					}
 				}
+			case "web_search_tool_result_delta":
+				// Some DeepSeek-compatible streams deliver the result array in a
+				// delta instead of the block-start content; without this the card
+				// stays empty and the model-written source list is all that shows.
+				if next := searches.resultsDelta(ev.Index, ev.Delta.WebSearchResults); next != nil {
+					if !send(provider.Chunk{Type: provider.ChunkServerSearch, ServerSearch: next}) {
+						return
+					}
+				}
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
@@ -793,9 +779,11 @@ type contentBlock struct {
 }
 
 type imageSource struct {
-	Type      string `json:"type"` // "base64"
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	Type      string `json:"type"` // base64 | url | file
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 // toolResultBlocks builds array content for a tool_result whose message carries
@@ -820,6 +808,8 @@ type anthTool struct {
 	Name         string          `json:"name,omitempty"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	Strict       bool            `json:"strict,omitempty"`
+	DeferLoading bool            `json:"defer_loading,omitempty"`
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 

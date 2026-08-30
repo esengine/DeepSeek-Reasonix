@@ -23,16 +23,22 @@ export function useComposerInboxRefresh(
   bump: () => void,
 ) {
   const inboxSessionKeyRef = useRef(inboxSessionKey);
+  const appliedRevisionRef = useRef<{ scope: string; revision: number }>({ scope: inboxSessionKey, revision: -1 });
   const clearQueue = useCallback(() => applyQueue([]), [applyQueue]);
   useLayoutEffect(() => {
     if (inboxSessionKeyRef.current === inboxSessionKey) return;
     inboxSessionKeyRef.current = inboxSessionKey;
+    appliedRevisionRef.current = { scope: inboxSessionKey, revision: -1 };
     clearQueue();
   }, [draftKey, inboxSessionKey, clearQueue]);
-  useEffect(() => onInboxChanged((changedTab) => {
-    if (changedTab && tabId && changedTab !== tabId) return;
+  useEffect(() => onInboxChanged((changed) => {
+    if (changed.tabId && tabId && changed.tabId !== tabId) return;
+    if (!inboxSnapshotBelongsToScope(changed.sessionPath, inboxSessionKey)) return;
+    if (changed.revision !== undefined
+      && appliedRevisionRef.current.scope === inboxSessionKey
+      && changed.revision <= appliedRevisionRef.current.revision) return;
     bump();
-  }), [tabId, bump]);
+  }), [tabId, inboxSessionKey, bump]);
   useEffect(() => {
     if (guidanceDraftKey !== draftKey) return;
     let live = true;
@@ -44,6 +50,10 @@ export function useComposerInboxRefresh(
     }
     void app.InboxSnapshot(tabId || "").then((snap) => {
       if (!live || !inboxSnapshotBelongsToScope(snap?.sessionPath, inboxSessionKey)) return;
+      const rawRevision = Number(snap?.revision ?? -1);
+      const revision = Number.isFinite(rawRevision) ? rawRevision : -1;
+      if (appliedRevisionRef.current.scope === inboxSessionKey && revision < appliedRevisionRef.current.revision) return;
+      appliedRevisionRef.current = { scope: inboxSessionKey, revision };
       const durable = guidanceFromInboxSnapshot(snap);
       applyQueue(mergeGuidanceSnapshot(durable, fallback));
       collapse();

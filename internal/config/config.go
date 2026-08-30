@@ -773,6 +773,7 @@ type BotConfig struct {
 	QQ                 QQBotConfig           `toml:"qq"`
 	Feishu             FeishuBotConfig       `toml:"feishu"`
 	Weixin             WeixinBotConfig       `toml:"weixin"`
+	Dingtalk           DingtalkBotConfig     `toml:"dingtalk"`
 	Routes             []BotRouteConfig      `toml:"routes"`
 	Connections        []BotConnectionConfig `toml:"connections"`
 	// DesktopWatchers persists /desktop watch subscriptions so god-view
@@ -792,9 +793,10 @@ type BotDesktopWatcherConfig struct {
 }
 
 type BotSelfUserIDs struct {
-	QQ     []string `toml:"qq"`
-	Feishu []string `toml:"feishu"`
-	Weixin []string `toml:"weixin"`
+	QQ       []string `toml:"qq"`
+	Feishu   []string `toml:"feishu"`
+	Weixin   []string `toml:"weixin"`
+	Dingtalk []string `toml:"dingtalk"`
 }
 
 type BotControlConfig struct {
@@ -817,20 +819,24 @@ type BotRouteConfig struct {
 
 // BotAllowlist 控制哪些用户可以使用 bot。
 type BotAllowlist struct {
-	Enabled         bool     `toml:"enabled"`
-	AllowAll        bool     `toml:"allow_all"`
-	QQUsers         []string `toml:"qq_users"`
-	FeishuUsers     []string `toml:"feishu_users"`
-	WeixinUsers     []string `toml:"weixin_users"`
-	QQApprovers     []string `toml:"qq_approvers"`
-	FeishuApprovers []string `toml:"feishu_approvers"`
-	WeixinApprovers []string `toml:"weixin_approvers"`
-	QQAdmins        []string `toml:"qq_admins"`
-	FeishuAdmins    []string `toml:"feishu_admins"`
-	WeixinAdmins    []string `toml:"weixin_admins"`
-	QQGroups        []string `toml:"qq_groups"`
-	FeishuGroups    []string `toml:"feishu_groups"`
-	WeixinGroups    []string `toml:"weixin_groups"`
+	Enabled           bool     `toml:"enabled"`
+	AllowAll          bool     `toml:"allow_all"`
+	QQUsers           []string `toml:"qq_users"`
+	FeishuUsers       []string `toml:"feishu_users"`
+	WeixinUsers       []string `toml:"weixin_users"`
+	QQApprovers       []string `toml:"qq_approvers"`
+	FeishuApprovers   []string `toml:"feishu_approvers"`
+	WeixinApprovers   []string `toml:"weixin_approvers"`
+	QQAdmins          []string `toml:"qq_admins"`
+	FeishuAdmins      []string `toml:"feishu_admins"`
+	WeixinAdmins      []string `toml:"weixin_admins"`
+	QQGroups          []string `toml:"qq_groups"`
+	FeishuGroups      []string `toml:"feishu_groups"`
+	WeixinGroups      []string `toml:"weixin_groups"`
+	DingtalkUsers     []string `toml:"dingtalk_users"`
+	DingtalkApprovers []string `toml:"dingtalk_approvers"`
+	DingtalkAdmins    []string `toml:"dingtalk_admins"`
+	DingtalkGroups    []string `toml:"dingtalk_groups"`
 }
 
 type BotPairingConfig struct {
@@ -885,6 +891,25 @@ type WeixinBotConfig struct {
 	AccountID string `toml:"account_id"`
 	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
 	APIBase   string `toml:"api_base"`  // iLink API base URL
+}
+
+// DingtalkBotConfig 钉钉企业内部应用机器人（Stream 模式）配置。
+type DingtalkBotConfig struct {
+	Enabled          bool            `toml:"enabled"`
+	ClientID         string          `toml:"client_id"`          // 钉钉应用 AppKey（ClientID）
+	ClientSecret     string          `toml:"client_secret"`      // 钉钉应用 AppSecret（ClientSecret）
+	ClientIDEnv      string          `toml:"client_id_env"`      // 环境变量名，如 DINGTALK_CLIENT_ID
+	SecretEnv        string          `toml:"secret_env"`         // 环境变量名，如 DINGTALK_CLIENT_SECRET
+	BotName          string          `toml:"bot_name"`           // 机器人昵称；群聊 @ 剥离时匹配
+	RequireMention   bool            `toml:"require_mention"`    // 群聊是否必须 @ 机器人
+	Model            string          `toml:"model"`              // 会话模型；空 = 全局默认
+	ToolApprovalMode string          `toml:"tool_approval_mode"` // ask|auto|yolo；空 = 全局默认
+	WorkspaceRoot    string          `toml:"workspace_root"`     // 会话工作目录；空 = 启动 Bot 时的 cwd
+	Access           BotAccessConfig `toml:"access"`             // 该渠道访问控制（allowlist）
+	// SessionMappings 直配渠道的会话绑定（与 [[bot.connections]] 同构）。
+	// legacy [bot.dingtalk] 没有 connection 记录，/new 旋转后的新会话路径
+	// 持久化在这里，重启后仍能恢复（见 botruntime.rememberInbound）。
+	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
 }
 
 // BotConnectionConfig is the desktop-friendly connection record for IM bot
@@ -1264,10 +1289,13 @@ type AgentConfig struct {
 	// Deprecated compatibility fields. Old TOML and desktop clients may still
 	// send them, but config loading normalizes both to zero and rendering omits
 	// them. One-off CLI and unattended bot limits remain separate controls.
-	MaxSteps            int     `toml:"max_steps"`
-	PlannerMaxSteps     int     `toml:"planner_max_steps"`
-	Temperature         float64 `toml:"temperature"`
-	PlannerModel        string  `toml:"planner_model"`
+	MaxSteps        int     `toml:"max_steps"`
+	PlannerMaxSteps int     `toml:"planner_max_steps"`
+	Temperature     float64 `toml:"temperature"`
+	PlannerModel    string  `toml:"planner_model"`
+	// VisionModel is empty (off), "auto", or a canonical provider/model ref
+	// used to summarize images before a text-only executor turn.
+	VisionModel         string  `toml:"vision_model"`
 	GuardianModel       string  `toml:"guardian_model"`
 	GuardianTemperature float64 `toml:"guardian_temperature"`
 	// RecoveryModel optionally names a dedicated model for the independent
@@ -1319,9 +1347,8 @@ type AgentConfig struct {
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
 	// ContextEditing is retired; native tool clearing is no longer an auto path.
 	ContextEditing string `toml:"context_editing"`
-	// Keep controls which compactable messages stay verbatim beyond the current
-	// user-fact/digest floor and recent tail. Empty uses the conservative default
-	// of keeping error tool results.
+	// Keep and RecentKeep are deprecated compatibility fields. They remain
+	// readable and writable but Harness-style compaction ignores them.
 	Keep       []string `toml:"keep"`
 	RecentKeep int      `toml:"recent_keep"`
 	// ColdResumePrune elides stale tool results when a session reopens past the
@@ -1330,6 +1357,7 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	LegacyAnchorSafetyGate   bool     `toml:"legacy_anchor_safety_gate"` // user-global rollback to the full-read guard
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1363,12 +1391,11 @@ type ProviderEntry struct {
 	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow     int    `toml:"context_window"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
-	// Zero means automatic (not unlimited): ordinary 16K, reasoning 32K, high/max
-	// 64K — DeepSeek's default effort is high, so auto is typically ~64K.
-	// User guidance: 0 recommended; 32768 ordinary coding/cost control;
-	// 65536 heavy reasoning/long tools; 131072 only after finish_reason=length.
-	// A negative value omits optional wire limits when the protocol allows;
-	// Anthropic still requires max_tokens. Never feeds compact_ratio.
+	// Zero means official DeepSeek omits the field (server 384K ceiling) and
+	// other vendors keep their own defaults. Effort selects thinking depth only.
+	// A positive value is an explicit cost cap. A negative value omits optional
+	// wire limits when the protocol allows; official DeepSeek Anthropic still
+	// sends 384K because max_tokens is mandatory. Never feeds compact_ratio.
 	MaxOutputTokens int                          `toml:"max_output_tokens"`
 	Price           *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices          map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
@@ -1830,7 +1857,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    6,
+		ConfigVersion:    7,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
@@ -1852,7 +1879,7 @@ func Default() *Config {
 			// Soft/snip/force are load-only compatibility; CompactRatio alone drives maintenance.
 			SoftCompactRatio:       0,
 			ToolResultSnipRatio:    0,
-			CompactRatio:           0.85,
+			CompactRatio:           0.80,
 			CompactForceRatio:      0,
 			ContextEditing:         "",
 			MaxSubagentDepth:       2,
@@ -1885,12 +1912,12 @@ func Default() *Config {
 			Allowlist:          BotAllowlist{Enabled: true},
 			QQ:                 QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Dingtalk:           DingtalkBotConfig{RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		// New installs use DeepSeek's Anthropic-compatible Messages endpoint so
 		// provider-executed web search is available by default. Existing explicit
-		// provider entries are merged on top of these defaults and keep their
-		// configured protocol unchanged.
+		// provider entries are merged on top, keeping their configured protocol.
 		Providers: []ProviderEntry{
 			{
 				Name: "deepseek-flash", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
@@ -1904,7 +1931,7 @@ func Default() *Config {
 				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
 				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
 				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
-				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
 				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
 				BillingCurrency: "USD", BillingMode: "payg",
 			},

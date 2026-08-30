@@ -49,7 +49,9 @@ In an interactive CLI or desktop chat, use a slash command:
 
 This is a real isolated subagent run, not prompt text inserted into the parent
 agent. The parent conversation retains the task and the child's final answer,
-not the child's full working context.
+not the child's full working context. Review and security-review children also
+receive a compact parent facts pack (confirmed decisions, evidence summary, file
+anchors) and default to 8 steps plus a 2048 output-token cap.
 
 The parent model can also select a profile at call time without listing profile
 names in the tool schema (prompt-cache stability):
@@ -66,11 +68,15 @@ fleet(tasks=[
   (explicit names may call `invocation: manual` profiles).
 - The profile body becomes the **full** child system prompt — no implicit
   concise default is stacked on top.
-- `write_paths` declares non-overlapping write targets so parallel writers can
-  share one workspace. Writer tasks that omit `write_paths` claim the whole
-  workspace (serializing against every other writer claim). In `fleet`,
-  multiple whole-workspace claims or any path overlap fail preflight and start
-  nothing.
+- `write_paths` declares write targets so parallel writers can share one
+  workspace. File claims must be disjoint to start together. Directory claims
+  may start together and only serialize when they realize the same file.
+  Writer tasks that omit `write_paths` start as a whole-workspace claim
+  (serializing at start). After path-bound writes only, that reservation
+  shrinks to the files touched; `bash`/MCP makes it whole-workspace again. In
+  `fleet`, concurrent omitted claims queue in the scheduler instead of failing
+  preflight; concurrent directory claims start together. Once a whole-workspace
+  writer is queued, later writers cannot bypass it.
 - Session defaults: `agent.max_subagent_concurrency = 6`,
   `agent.max_parallel_writers = 3` (both configurable 1–32; writers ≤ total).
 

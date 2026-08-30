@@ -23,5 +23,10 @@
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Wails v2.13 dev spinner anchor: the dev runtime mounts its loading
+         overlay here; without the element the overlay anchors on null and its
+         Svelte internals crash ("Cannot read properties of null (reading
+         'nodes')"), which the app's error screen then escalates. -->
+    <div id="wails-spinner" aria-hidden="true"></div>
   </body>
 </html>

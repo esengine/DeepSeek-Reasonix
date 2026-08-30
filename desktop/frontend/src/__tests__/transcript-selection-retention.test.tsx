@@ -5,7 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import type { TranscriptScrollMode } from "../lib/transcriptScrollController";
+import type { TranscriptScrollMode } from "../lib/transcriptScrollArbiter";
 import { transcriptSelectionStore, type TranscriptSelectableRow } from "../lib/transcriptSelectionStore";
 
 type RetentionApi = ReturnType<typeof useTranscriptSelectionRetention>;
@@ -183,11 +183,11 @@ await act(async () => {
 });
 eq(transcriptSelectionStore.getSnapshot().mode, "logical-dragging", "cross-row selection promotes before the pointer gesture settles");
 await flushFramesOnce();
-eq(frames.size, 1, "loaded-history boundary schedules one final focus reconciliation");
+eq(frames.size, 2, "loaded-history boundary keeps edge observation and focus reconciliation alive");
 await flushFramesOnce();
-eq(frames.size, 1, "the final focus reconciliation waits for the virtual DOM commit");
+eq(frames.size, 2, "focus reconciliation waits while edge observation watches for an extent rebound");
 await flushFramesOnce();
-eq(frames.size, 0, "edge scrolling stops scheduling frames at the loaded-history boundary");
+eq(frames.size, 2, "a false loaded-history boundary cannot strand the active drag");
 
 committedCaretOffset = 2;
 await act(async () => {
@@ -195,7 +195,7 @@ await act(async () => {
 });
 api?.reconcileLogicalFocus();
 await flushFramesOnce();
-eq(frames.size, 1, "a coalesced virtual commit retains one post-commit focus reconciliation");
+eq(frames.size, 2, "a coalesced virtual commit retains focus reconciliation beside edge observation");
 await flushFramesOnce();
 eq(transcriptSelectionStore.getSnapshot().focus?.textOffset, 2, "virtual range commit re-resolves the logical focus without relying on DOM mutation delivery");
 
@@ -233,7 +233,7 @@ await act(async () => {
   document.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 40 }));
 });
 eq(transcriptSelectionStore.getSnapshot().mode, "logical-dragging", "a dead native range still promotes from the frozen anchor during drag");
-eq(mode, "logical-selecting", "dead-native promotion transfers scroll ownership to logical selection");
+eq(mode, "selection", "dead-native promotion transfers scroll ownership to logical selection");
 await act(async () => {
   document.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 100, clientY: 40 }));
 });

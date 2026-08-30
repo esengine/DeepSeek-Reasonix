@@ -7,6 +7,22 @@ on:
       - 'workers/crash-report/**'
       - '.github/workflows/deploy-crash-worker.yml'
   workflow_dispatch:
+    inputs:
+      firebase_data_action:
+        description: Firebase crash history operation (migration actions do not deploy the Worker)
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - dry-run
+          - apply
+          - verify-only
+      confirmation:
+        description: Enter APPLY_FIREBASE_CRASH_DATA when selecting apply
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -17,6 +33,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'push' || inputs.firebase_data_action == 'none'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -36,6 +53,28 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npm run migrate:diagnostics-v2
+      - name: Apply and verify Firebase crash D1 migration
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run migrate:firebase-crash
+      - name: Sync Firebase crash secrets
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+        run: |
+          configured=0
+          [ -n "$FIREBASE_DATABASE_URL" ] && configured=$((configured + 1))
+          [ -n "$FIREBASE_CLIENT_EMAIL" ] && configured=$((configured + 1))
+          [ -n "$FIREBASE_PRIVATE_KEY" ] && configured=$((configured + 1))
+          if [ "$configured" -ne 0 ] && [ "$configured" -ne 3 ]; then
+            echo "Firebase crash secrets must be either all configured or all absent."
+            exit 1
+          fi
+          node -e 'process.stdout.write(JSON.stringify({FIREBASE_DATABASE_URL:process.env.FIREBASE_DATABASE_URL||null,FIREBASE_CLIENT_EMAIL:process.env.FIREBASE_CLIENT_EMAIL||null,FIREBASE_PRIVATE_KEY:process.env.FIREBASE_PRIVATE_KEY||null}))' | npx wrangler secret bulk
       - name: Deploy
         working-directory: workers/crash-report
         env:
@@ -58,3 +97,67 @@ jobs:
             exit 0
           fi
           printf '%s' "$ALERT_WEBHOOK" | npx wrangler secret put ALERT_WEBHOOK
+
+  migrate-firebase-data:
+    if: github.event_name == 'workflow_dispatch' && inputs.firebase_data_action != 'none'
+    runs-on: ubuntu-latest
+    environment: canary
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require the protected production branch
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main-v2" ]; then
+            echo "Firebase crash data migration must run from main-v2."
+            exit 1
+          fi
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/crash-report/package-lock.json
+      - name: Validate
+        working-directory: workers/crash-report
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Run Firebase crash history operation
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_DATA_ACTION: ${{ inputs.firebase_data_action }}
+          FIREBASE_DATA_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          configured=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] && configured=$((configured + 1))
+          [ -n "$FIREBASE_DATABASE_URL" ] && configured=$((configured + 1))
+          [ -n "$FIREBASE_CLIENT_EMAIL" ] && configured=$((configured + 1))
+          [ -n "$FIREBASE_PRIVATE_KEY" ] && configured=$((configured + 1))
+          if [ "$configured" -ne 4 ]; then
+            echo "Cloudflare and Firebase migration secrets must all be configured."
+            exit 1
+          fi
+
+          case "$FIREBASE_DATA_ACTION" in
+            dry-run)
+              npm run migrate:firebase-data
+              ;;
+            apply)
+              if [ "$FIREBASE_DATA_CONFIRMATION" != "APPLY_FIREBASE_CRASH_DATA" ]; then
+                echo "Apply requires the exact confirmation APPLY_FIREBASE_CRASH_DATA."
+                exit 1
+              fi
+              npm run migrate:firebase-data -- --apply
+              npm run migrate:firebase-data -- --verify-only
+              ;;
+            verify-only)
+              npm run migrate:firebase-data -- --verify-only
+              ;;
+            *)
+              echo "Unsupported Firebase crash data action."
+              exit 1
+              ;;
+          esac

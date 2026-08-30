@@ -64,6 +64,9 @@ func beginContentBlock(index int, block *streamContentBlock, tools map[int]*prov
 		}
 	case "web_search_tool_result":
 		if result := searches.result(block.ToolUseID, block.Content); result != nil {
+			// Register the result block's stream index too: streams that do not
+			// inline the content deliver it via web_search_tool_result_delta.
+			searches.byIndex[index] = searches.byID[block.ToolUseID]
 			return &provider.Chunk{Type: provider.ChunkServerSearch, ServerSearch: result}
 		}
 	}
@@ -92,6 +95,19 @@ func (s *searchStream) result(id string, raw json.RawMessage) *provider.ServerSe
 		block.call.Raw = append(json.RawMessage(nil), raw...)
 		block.call.Results = provider.ParseServerSearchHits(raw)
 	}
+	return cloneServerSearch(block.call)
+}
+
+// resultsDelta ingests a web_search_tool_result_delta payload: the result
+// array arrives after block start on streams that do not inline it in the
+// web_search_tool_result content_block_start content.
+func (s *searchStream) resultsDelta(index int, raw json.RawMessage) *provider.ServerSearchCall {
+	block := s.byIndex[index]
+	if block == nil || len(raw) == 0 {
+		return nil
+	}
+	block.call.Raw = append(json.RawMessage(nil), raw...)
+	block.call.Results = provider.ParseServerSearchHits(raw)
 	return cloneServerSearch(block.call)
 }
 

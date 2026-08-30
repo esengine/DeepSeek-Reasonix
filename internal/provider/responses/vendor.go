@@ -91,9 +91,8 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
-		// Auto ceiling for ordinary reasoning; high/max is applied via
-		// AutoOutputBudget at construction/request time (64K). Never 128K.
-		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		// 0 = omit max_output_tokens; official server ceiling is 384K.
+		defaultMaxOutputTokens: 0,
 		// Compaction summaries use a dedicated 16K-class budget, independent of
 		// ordinary answer output.
 		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
@@ -106,6 +105,22 @@ var vendorTable = map[string]vendorCapabilities{
 		ignoresTemperature:     true,
 		// Coding-agent default 32K; users may raise explicitly. Not 128K auto.
 		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
+	},
+	// StepFun's Responses API accepts reasoning items only with a `summary`
+	// list and silently ignores previous_response_id (verified live: a
+	// continuation request billed only the new-turn tokens and the model
+	// hallucinated unrelated context), so it is stateless like DeepSeek but
+	// needs the summary field like DashScope. Only step-3.7-flash is enabled
+	// server-side; the wire shape is identical on the standard and step_plan
+	// hosts, so one entry covers both.
+	"stepfun": {
+		stateless:              true,
+		sessionCacheHeader:     false,
+		toolCallReasoning:      true,
+		singleSegmentReasoning: false,
+		ignoresTemperature:     false,
+		summaryRequired:        true,
 		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
@@ -133,6 +148,8 @@ func DetectVendor(baseURL string) string {
 		return "deepseek"
 	case host == "api.xiaomimimo.com", strings.HasSuffix(host, ".xiaomimimo.com"):
 		return "mimo"
+	case host == "api.stepfun.com", host == "api.stepfun.ai":
+		return "stepfun"
 	default:
 		return ""
 	}

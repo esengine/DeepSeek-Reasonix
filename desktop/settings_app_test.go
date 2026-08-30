@@ -19,6 +19,7 @@ import (
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 	"reasonix/internal/sandbox"
 )
 
@@ -113,28 +114,6 @@ func TestProviderViewFromEntry_MigratesProviderWideVision(t *testing.T) {
 	}
 	if !view.VisionModelsSet {
 		t.Fatal("ProviderView.VisionModelsSet = false, want true for provider-wide vision")
-	}
-}
-
-func TestProviderViewFromEntryReportsOfficialDeepSeekVisionUnsupported(t *testing.T) {
-	p := config.ProviderEntry{
-		Name:         "deepseek",
-		Kind:         "openai",
-		BaseURL:      "https://api.deepseek.com",
-		Models:       []string{"deepseek-v4-flash", "deepseek-v4-pro"},
-		VisionModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"},
-	}
-	view := providerViewFromEntry(p, true, true)
-	if view.VisionCapability != "unsupported" {
-		t.Fatalf("VisionCapability = %q, want unsupported", view.VisionCapability)
-	}
-	if !reflect.DeepEqual(view.VisionModels, p.VisionModels) {
-		t.Fatalf("ProviderView should preserve stale metadata for a lossless settings round trip: got %v want %v", view.VisionModels, p.VisionModels)
-	}
-	resolved := p
-	resolved.Model = "deepseek-v4-pro"
-	if config.EffectiveVision(&resolved) {
-		t.Fatal("preserved stale settings metadata must not enable runtime image input")
 	}
 }
 
@@ -1899,11 +1878,14 @@ func TestOfficialDeepSeekTemplateUsesRegionalPricing(t *testing.T) {
 		if got.Kind != "anthropic" || got.BaseURL != "https://api.deepseek.com/anthropic" || !config.EffectiveWebSearch(&got) || got.Thinking != "enabled" {
 			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Anthropic-compatible with web search", language, got.Kind, got.BaseURL, config.EffectiveWebSearch(&got), got.Thinking)
 		}
-		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 0.28 {
+		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 1.32 {
 			t.Fatalf("%s deepseek-v4-flash price = %+v, want frozen USD table", language, price)
 		}
-		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != "$" || price.Output != 0.87 {
+		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != "$" || price.Output != 3.96 {
 			t.Fatalf("%s deepseek-v4-pro price = %+v, want frozen USD table", language, price)
+		}
+		if price := got.Prices[openai.OfficialDeepSeekVisionModel]; price == nil || price.Currency != "$" || price.Output != 1.32 {
+			t.Fatalf("%s vision SKU price = %+v, want Flash USD table", language, price)
 		}
 	}
 }
@@ -1957,8 +1939,8 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 
 	app := NewApp()
 	defaultView := app.Settings()
-	if defaultView.Agent.CompactRatio != 0.85 || defaultView.Agent.EffectiveCompactRatio != 0.85 {
-		t.Fatalf("default compact ratios = %v/%v, want 0.85/0.85", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
+	if defaultView.Agent.CompactRatio != 0.80 || defaultView.Agent.EffectiveCompactRatio != 0.80 {
+		t.Fatalf("default compact ratios = %v/%v, want 0.80/0.80", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
 	}
 	if err := app.SetCompactRatio(0.7); err != nil {
 		t.Fatalf("SetCompactRatio: %v", err)
@@ -1977,12 +1959,23 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 	if cfg.Agent.ToolResultSnipRatio != 0 || cfg.Agent.CompactForceRatio != 0 {
 		t.Fatalf("setting compact ratio revived deprecated thresholds: %+v", cfg.Agent)
 	}
+	if err := app.SetCompactRatio(0.3); err != nil {
+		t.Fatalf("SetCompactRatio lower bound: %v", err)
+	}
+	view = app.Settings()
+	if view.Agent.CompactRatio != 0.3 {
+		t.Fatalf("Settings().Agent.CompactRatio = %v, want 0.3", view.Agent.CompactRatio)
+	}
+	cfg = config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.CompactRatio != 0.3 {
+		t.Fatalf("saved compact ratio = %v, want 0.3", cfg.Agent.CompactRatio)
+	}
 
 	if err := app.SetCompactRatio(0.9); err == nil {
 		t.Fatal("SetCompactRatio should reject values outside the Desktop safety range")
 	}
 	cfg = config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.CompactRatio != 0.7 {
+	if cfg.Agent.CompactRatio != 0.3 {
 		t.Fatalf("rejected update changed saved compact ratio to %v", cfg.Agent.CompactRatio)
 	}
 }
@@ -1996,7 +1989,7 @@ func TestSetCompactRatioRejectsActiveWorkBeforeSaving(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
 		t.Fatalf("SetCompactRatio with background job error = %v, want active-work guard", err)
 	}
-	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.85 {
+	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.80 {
 		t.Fatalf("compact ratio changed after rejected update: %v", got)
 	}
 }
@@ -2066,7 +2059,7 @@ func TestSetDesktopCurrencyPersistsDisplayWithoutRewritingOfficialPricing(t *tes
 	}
 	flash, ok := cfg.Provider("deepseek-flash")
 	// Display currency must not rewrite frozen list prices (default USD table).
-	if !ok || flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+	if !ok || flash.Price == nil || flash.Price.Output != 1.32 || flash.Price.Currency != "$" {
 		t.Fatalf("saved DeepSeek flash price = %+v, want frozen USD official price", flash)
 	}
 }

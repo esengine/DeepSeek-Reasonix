@@ -25,31 +25,7 @@ ALTER TABLE cli_pings ADD COLUMN runtime_engine TEXT NOT NULL DEFAULT '';
 ALTER TABLE cli_pings ADD COLUMN runtime_version TEXT NOT NULL DEFAULT '';
 ALTER TABLE cli_pings ADD COLUMN gpu_mode TEXT NOT NULL DEFAULT '';
 
-ALTER TABLE metric_users ADD COLUMN arch TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN os_build INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE metric_users ADD COLUMN os_revision INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE metric_users ADD COLUMN channel TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN distro_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN distro_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN kernel_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN session_type TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN runtime_engine TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN runtime_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN gpu_mode TEXT NOT NULL DEFAULT '';
-ALTER TABLE metric_users ADD COLUMN event_count INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE cli_metric_users ADD COLUMN arch TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN os_build INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE cli_metric_users ADD COLUMN os_revision INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE cli_metric_users ADD COLUMN channel TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN distro_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN distro_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN kernel_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN session_type TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN runtime_engine TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN runtime_version TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN gpu_mode TEXT NOT NULL DEFAULT '';
-ALTER TABLE cli_metric_users ADD COLUMN event_count INTEGER NOT NULL DEFAULT 0;
-
+-- metric_users and cli_metric_users were retired in #9379 and must not be recreated.
 CREATE TABLE IF NOT EXISTS report_daily (
   date TEXT NOT NULL,
   fingerprint TEXT NOT NULL,

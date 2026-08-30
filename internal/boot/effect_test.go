@@ -29,9 +29,14 @@ func (p *effectRecordingProvider) Stream(_ context.Context, req provider.Request
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
 	p.mu.Unlock()
-	ch := make(chan provider.Chunk, 2)
-	ch <- provider.Chunk{Type: provider.ChunkText, Text: "ok"}
-	ch <- provider.Chunk{Type: provider.ChunkDone}
+	chunks := []provider.Chunk{
+		{Type: provider.ChunkText, Text: "ok"},
+		{Type: provider.ChunkDone},
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
 	close(ch)
 	return ch, nil
 }
@@ -59,6 +64,9 @@ default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
+
+[environment]
+enabled = false
 
 [[providers]]
 name = "test-model"

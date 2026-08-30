@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,14 +21,15 @@ func (a *App) catalogReadContext() (context.Context, context.CancelFunc) {
 }
 
 type catalogRuntimeSnapshot struct {
-	scope         string
-	workspaceRoot string
-	topicID       string
-	sessionPath   string
-	activity      string
-	topicTitle    string
-	ctrl          control.SessionAPI
-	open          bool
+	scope            string
+	workspaceRoot    string
+	topicID          string
+	sessionPath      string
+	activity         string
+	topicTitle       string
+	topicTitleSource string
+	ctrl             control.SessionAPI
+	open             bool
 }
 
 type catalogRuntimeOverlay struct {
@@ -60,28 +59,9 @@ func catalogRuntimeStatus(activity string, runtimeStatus control.RuntimeStatus) 
 }
 
 func (a *App) catalogRuntimeOverlays() (map[string]catalogRuntimeOverlay, map[string]catalogRuntimeOverlay) {
-	a.mu.RLock()
-	snapshots := make([]catalogRuntimeSnapshot, 0, len(a.tabs)+len(a.detachedSessions))
-	collect := func(tab *WorkspaceTab, open bool) {
-		if tab == nil || strings.TrimSpace(tab.TopicID) == "" {
-			return
-		}
-		snapshots = append(snapshots, catalogRuntimeSnapshot{
-			scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID,
-			sessionPath: tab.SessionPath, activity: tab.ActivityStatus, topicTitle: tab.TopicTitle,
-			ctrl: tab.Ctrl, open: open,
-		})
-	}
-	for _, tab := range a.tabs {
-		collect(tab, true)
-	}
-	for _, tab := range a.detachedSessions {
-		collect(tab, false)
-	}
-	a.mu.RUnlock()
 	topics := map[string]catalogRuntimeOverlay{}
 	sessions := map[string]catalogRuntimeOverlay{}
-	for _, snap := range snapshots {
+	for _, snap := range a.catalogRuntimeSnapshots() {
 		runtimeStatus := control.RuntimeStatus{}
 		path := strings.TrimSpace(snap.sessionPath)
 		if snap.ctrl != nil {
@@ -116,16 +96,19 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 	}
 	ids := f.GlobalTopics
 	pinnedIDs := f.GlobalPinnedTopics
+	manualOrder := f.GlobalManualTopicOrder
 	titleRoot := ""
 	projectColor := normalizeProjectColor(f.GlobalColor)
 	if scope == "project" {
 		ids = nil
 		pinnedIDs = nil
+		manualOrder = false
 		titleRoot = workspaceRoot
 		for _, project := range f.Projects {
 			if sameProjectRoot(project.Root, workspaceRoot) {
 				ids = project.Topics
 				pinnedIDs = project.PinnedTopics
+				manualOrder = project.ManualTopicOrder
 				projectColor = project.Color
 				break
 			}
@@ -142,7 +125,10 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 	}
 	out := []ProjectNode{}
 	seen := map[string]bool{}
-	for _, topicID := range pinnedTopicIDs(orderedTopicIDs(ids, titles), pinnedIDs) {
+	for sortOrder, topicID := range pinnedTopicIDs(orderedTopicIDs(ids, titles), pinnedIDs) {
+		if !manualOrder {
+			sortOrder = -1
+		}
 		if deleted[topicID] {
 			continue
 		}
@@ -160,7 +146,7 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 			Key: kind + "_" + topicID, Kind: kind,
 			Label: a.localizedTopicTitle(title, sources[topicID]), Root: workspaceRoot,
 			TopicID: topicID, ProjectColor: projectColor,
-			CreatedAt: topicCreatedAtForTree(created, topicID), Pinned: containsDesktopString(pinnedIDs, topicID),
+			CreatedAt: topicCreatedAtForTree(created, topicID), Pinned: containsDesktopString(pinnedIDs, topicID), SortOrder: sortOrder,
 			Open: overlay.open, Running: overlay.running, Status: overlay.status,
 			TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
 			Children: []ProjectNode{},
@@ -177,6 +163,7 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 		if seen[runtimeNode.TopicID] || deleted[runtimeNode.TopicID] {
 			continue
 		}
+		runtimeNode.RuntimeOnly = true
 		out = append(out, runtimeNode)
 	}
 	return out
@@ -192,32 +179,21 @@ func (a *App) runtimeOnlyProjectTopics(scope, workspaceRoot string) []ProjectNod
 // in the catalog (a restored tab may carry a legacy topic ID for a re-anchored
 // recovery lineage).
 func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) ([]ProjectNode, map[string][]string) {
-	a.mu.RLock()
 	snapshots := []catalogRuntimeSnapshot{}
-	collect := func(tab *WorkspaceTab, open bool) {
-		if tab == nil || strings.TrimSpace(tab.TopicID) == "" {
-			return
-		}
+	for _, snapshot := range a.catalogRuntimeSnapshots() {
 		if scope == "project" {
-			if tab.Scope != "project" || !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
-				return
+			if snapshot.scope != "project" || !sameProjectRoot(snapshot.workspaceRoot, workspaceRoot) {
+				continue
 			}
-		} else if tab.Scope == "project" {
-			return
+		} else if snapshot.scope == "project" {
+			continue
 		}
-		snapshots = append(snapshots, catalogRuntimeSnapshot{
-			scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID,
-			sessionPath: tab.SessionPath, activity: tab.ActivityStatus,
-			topicTitle: tab.TopicTitle, ctrl: tab.Ctrl, open: open,
-		})
+		snapshots = append(snapshots, snapshot)
 	}
-	for _, tab := range a.tabs {
-		collect(tab, true)
-	}
-	for _, tab := range a.detachedSessions {
-		collect(tab, false)
-	}
-	a.mu.RUnlock()
+	return a.runtimeProjectTopicNodes(scope, workspaceRoot, snapshots)
+}
+
+func (a *App) runtimeProjectTopicNodes(scope, workspaceRoot string, snapshots []catalogRuntimeSnapshot) ([]ProjectNode, map[string][]string) {
 	byTopic := map[string][]catalogRuntimeSnapshot{}
 	sessionsByTopic := map[string][]string{}
 	for _, snapshot := range snapshots {
@@ -248,7 +224,7 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 			label = sessions[0].topicTitle
 		}
 		node := ProjectNode{
-			Key: kind + "_" + topicID, Kind: kind, Label: label,
+			Key: kind + "_" + topicID, Kind: kind, Label: a.localizedTopicTitle(label, sessions[0].topicTitleSource),
 			Root: workspaceRoot, TopicID: topicID, TurnsState: string(sessioncatalog.TurnsUnknown),
 			Health: string(sessioncatalog.HealthOK), Children: []ProjectNode{},
 		}
@@ -272,7 +248,7 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 			}
 			node.Children = append(node.Children, ProjectNode{
 				Key: projectSessionNodeKey(scope, path), Kind: sessionKind, Label: sessionLabel,
-				Root: workspaceRoot, TopicID: topicID, SessionPath: path,
+				Root: workspaceRoot, TopicID: topicID, SessionPath: path, Preview: sessionPreviewForPath(path),
 				Open: session.open, Running: running, Status: status,
 				TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
 				Children: []ProjectNode{},
@@ -285,6 +261,7 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 
 func (a *App) metadataTopicPage(req ProjectTopicPageRequest) ProjectTopicPage {
 	items := a.metadataProjectTopics(req.Scope, req.WorkspaceRoot)
+	manualOrder := manualTopicOrderFor(req.Scope, req.WorkspaceRoot)
 	query := strings.ToLower(strings.TrimSpace(req.Query))
 	if query != "" {
 		filtered := items[:0]
@@ -295,11 +272,39 @@ func (a *App) metadataTopicPage(req ProjectTopicPageRequest) ProjectTopicPage {
 		}
 		items = filtered
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return projectTopicLess(items[i], items[j], req.SortMode, manualOrder)
+	})
 	start := 0
 	if lastID, ok := strings.CutPrefix(req.Cursor, "meta:"); ok {
 		for index, item := range items {
 			if item.TopicID == lastID {
 				start = index + 1
+				break
+			}
+		}
+	} else if strings.TrimSpace(req.Cursor) != "" {
+		start = len(items)
+		for index, item := range items {
+			var after bool
+			var err error
+			if manualOrder {
+				after, err = sessioncatalog.TopicSortKeyAfterOrderedCursor(
+					req.Cursor, item.Pinned, item.SortOrder,
+					projectTopicSortValue(item.CreatedAt, item.LastActivityAt, req.SortMode), item.TopicID,
+				)
+			} else {
+				after, err = sessioncatalog.TopicSortKeyAfterCursor(
+					req.Cursor, item.Pinned,
+					projectTopicSortValue(item.CreatedAt, item.LastActivityAt, req.SortMode), item.TopicID,
+				)
+			}
+			if err != nil {
+				start = 0
+				break
+			}
+			if after {
+				start = index
 				break
 			}
 		}
@@ -324,13 +329,32 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	if topic.Scope == "global" {
 		kind = "global_topic"
 	}
+	recoveryOnly := topic.RecoveryState == "recovery_only" && recoveryOnlyHasContent(topic.Sessions)
+	canonicalRecovery := topic.RecoveryState == "adopted" || topic.RecoveryState == "preferred"
+	recoveryState := ""
+	recoveryBranchCount := 0
+	recoveryUnresolvedCount := 0
+	recoveryCleanupEligibleCount := 0
+	if recoveryOnly {
+		recoveryState = topic.RecoveryState
+		recoveryBranchCount = topic.RecoveryBranchCount
+		recoveryUnresolvedCount = topic.RecoveryUnresolvedCount
+		recoveryCleanupEligibleCount = topic.RecoveryCleanupEligibleCount
+	} else if canonicalRecovery {
+		recoveryState = topic.RecoveryState
+	}
 	overlay := topicOverlays[topicSummaryKey(topic.Scope, topic.WorkspaceRoot, topic.TopicID)]
 	node := ProjectNode{
-		Key: kind + "_" + topic.TopicID, Kind: kind, Label: a.localizedTopicTitle(topic.Title, ""),
+		Key: kind + "_" + topic.TopicID, Kind: kind, Label: a.localizedTopicTitle(topic.Title, topic.TitleSource),
 		Root: topic.WorkspaceRoot, TopicID: topic.TopicID, Turns: topic.Turns,
+		Preview:    topicSessionPreview(topic.Sessions, topic.RepresentativePath),
 		TurnsState: string(topic.TurnsState), Health: string(topic.Health),
 		CreatedAt: topic.CreatedAt, LastActivityAt: topic.LastActivityAt,
-		Pinned: topic.Pinned, Open: overlay.open, Running: overlay.running, Status: overlay.status,
+		Pinned: topic.Pinned, SortOrder: topic.SortOrder,
+		Recovered: recoveryOnly || canonicalRecovery, RecoveryState: recoveryState,
+		RecoveryBranchCount: recoveryBranchCount, RecoveryUnresolvedCount: recoveryUnresolvedCount,
+		RecoveryCleanupEligibleCount: recoveryCleanupEligibleCount,
+		Open:                         overlay.open, Running: overlay.running, Status: overlay.status,
 		// Ordinary tree is zero-config: never surface recovery counts, badges,
 		// or forced-handling status. History "other saved versions" owns that.
 		Children: []ProjectNode{},
@@ -360,6 +384,9 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		// preferred conflict forks. Open/running recovery is still not a
 		// second row — status is already aggregated above.
 		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
+			if session.Recovered || session.RecoveryCopy {
+				node.RecoveryCopyCount++
+			}
 			continue
 		}
 		visible = append(visible, session)
@@ -368,14 +395,26 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		})
 	}
 	summary := topicSummaryFromCatalogTopic(topic, visible)
-	if topicHiddenAsRecoveryOnly(summary, topic.Pinned, append(runtimeSessions, runtimeSessionStatus{
+	if !recoveryOnly && topicHiddenAsRecoveryOnly(summary, topic.Pinned, append(runtimeSessions, runtimeSessionStatus{
 		open: overlay.open || node.Open, running: overlay.running || node.Running,
 	})) {
 		return ProjectNode{Children: []ProjectNode{}}, false
 	}
+	if a.ordinaryTreeHidesUnindexedBlank(topic) {
+		return ProjectNode{Children: []ProjectNode{}}, false
+	}
 	// After filtering non-preferred recovery forks, a topic may have nothing
-	// left. Keep pinned/open shells; otherwise drop the empty row.
+	// left. A recovery-only topic still gets one logical row so the user can
+	// reach its saved content; the physical copies remain history-only.
 	if len(visible) == 0 {
+		if recoveryOnly {
+			representative := recoveryOnlyRepresentative(topic.Sessions)
+			node.Recovered = true
+			node.Turns = representative.Turns
+			node.Preview = strings.TrimSpace(representative.Preview)
+			node.SessionPath = representative.Path
+			return node, true
+		}
 		if topic.Pinned || overlay.open || overlay.running || node.Open || node.Running {
 			return node, true
 		}
@@ -394,6 +433,21 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		node.SessionPath = visible[0].Path
 	}
 	return node, true
+}
+
+func (a *App) ordinaryTreeHidesUnindexedBlank(topic sessioncatalog.TopicRecord) bool {
+	if topic.Pinned || topic.Turns > 0 {
+		return false
+	}
+	if !isDefaultTopicTitle(topic.Title) && strings.TrimSpace(topic.Title) != "" {
+		return false
+	}
+	for _, session := range topic.Sessions {
+		if session.Turns > 0 || strings.TrimSpace(session.Preview) != "" {
+			return false
+		}
+	}
+	return !topicIndexedInRegistry(topic.Scope, topic.WorkspaceRoot, topic.TopicID)
 }
 
 func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []sessioncatalog.SessionRecord) topicSummary {
@@ -425,52 +479,33 @@ func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []se
 	return summary
 }
 
-func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
+func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
 	catalog := a.sessionCatalog.Load()
-	if catalog == nil || !a.catalogWorkspaceScanReady(catalog, req.Scope, req.WorkspaceRoot) {
-		// A freshly opened v4 cache is live but empty until the first directory
+	if catalog == nil {
+		return a.metadataTopicPage(req), nil
+	}
+	availability := a.catalogWorkspaceAvailability(catalog, req.Scope, req.WorkspaceRoot)
+	if !availability.usable {
+		// A freshly opened v5 cache is live but empty until the first directory
 		// scan. Treat that the same as "catalog unavailable" so upgrade does
 		// not blank the sidebar that desktop-projects.json still knows about.
 		page := a.metadataTopicPage(req)
-		if catalog == nil {
-			return page, nil
-		}
+		page = availability.decorate(page, catalog.Status().Revision)
 		return a.withLiveTopics(catalog, req, page), nil
 	}
 	page, err := a.catalogTopicPage(catalog, req)
 	if err != nil {
 		return page, err
 	}
+	// Metadata is a continuity source while some directories are pending or
+	// degraded. Once every target has completed, the catalog is authoritative:
+	// retaining metadata-only shells would resurrect recovery copies or deleted
+	// sessions that the completed scan deliberately folded/removed.
+	if !availability.complete {
+		page = a.mergeMetadataTopics(req, page)
+	}
+	page = availability.decorate(page, max(page.Revision, catalog.Status().Revision))
 	return a.withLiveTopics(catalog, req, page), nil
-}
-
-func (a *App) catalogWorkspaceScanReady(catalog *sessioncatalog.Catalog, scope, workspaceRoot string) bool {
-	if a == nil || catalog == nil {
-		return false
-	}
-	ctx, cancel := a.catalogReadContext()
-	defer cancel()
-	scope, workspaceRoot = normalizeDesktopTopicScope(scope, workspaceRoot)
-	matchedExisting := 0
-	for _, target := range a.sessionCatalogTargets() {
-		if target.Scope != scope {
-			continue
-		}
-		if scope == "project" && !sameProjectRoot(target.WorkspaceRoot, workspaceRoot) {
-			continue
-		}
-		if _, err := os.Stat(target.Path); os.IsNotExist(err) {
-			continue
-		}
-		matchedExisting++
-		if !catalog.DirectoryScanReady(ctx, target.Path) {
-			return false
-		}
-	}
-	if matchedExisting > 0 {
-		return true
-	}
-	return catalog.HasWorkspaceRecords(ctx, scope, workspaceRoot)
 }
 
 func normalizeDesktopTopicScope(scope, workspaceRoot string) (string, string) {
@@ -528,6 +563,7 @@ func (a *App) withLiveTopics(catalog *sessioncatalog.Catalog, req ProjectTopicPa
 		if deleted[node.TopicID] {
 			continue
 		}
+		node.RuntimeOnly = true
 		node.CreatedAt = topicCreatedAtForTree(created, node.TopicID)
 		node.LastActivityAt = node.CreatedAt
 		kept = append(kept, node)
@@ -559,6 +595,7 @@ func liveTopicProjectedOnPage(ctx context.Context, catalog *sessioncatalog.Catal
 
 func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopicPageRequest) (ProjectTopicPage, error) {
 	out := ProjectTopicPage{Items: []ProjectNode{}}
+	manualOrder := manualTopicOrderFor(req.Scope, req.WorkspaceRoot)
 	limit := req.Limit
 	if limit <= 0 {
 		limit = sessioncatalog.DefaultLimit
@@ -582,7 +619,8 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 	for {
 		page, err := catalog.ListTopics(ctx, sessioncatalog.TopicPageRequest{
 			Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: cursor,
-			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter,
+			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter, SortMode: req.SortMode,
+			ManualOrder: manualOrder,
 		})
 		if err != nil {
 			return out, err
@@ -596,7 +634,7 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 			out.Items = append(out.Items, node)
 			if len(out.Items) == limit {
 				if i+1 < len(page.Items) || page.NextCursor != "" {
-					out.NextCursor = encodeProjectTopicCursor(topic)
+					out.NextCursor = encodeProjectTopicCursor(topic, req.SortMode, manualOrder)
 				}
 				return out, nil
 			}
@@ -609,14 +647,17 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 	}
 }
 
-func encodeProjectTopicCursor(topic sessioncatalog.TopicRecord) string {
-	// Reuse the catalog's keyset cursor encoding by asking for the next page
-	// after this topic. ListTopics accepts the same opaque cursor it emits.
-	pinned := 0
-	if topic.Pinned {
-		pinned = 1
+func projectTopicSortValue(createdAt, lastActivityAt int64, sortMode string) int64 {
+	if strings.TrimSpace(sortMode) == "created" {
+		if createdAt > 0 {
+			return createdAt
+		}
+		return lastActivityAt
 	}
-	return sessioncatalog.EncodeTopicCursor(pinned, topic.LastActivityAt, topic.TopicID)
+	if lastActivityAt > 0 {
+		return lastActivityAt
+	}
+	return createdAt
 }
 
 func (a *App) GetTopicSummary(key ProjectTopicKey) (ProjectNode, error) {
@@ -656,21 +697,6 @@ func (a *App) GetSessionCatalogStatus() SessionCatalogStatus {
 	return a.currentSessionCatalogStatus()
 }
 
-func (a *App) RebuildSessionCatalog() error {
-	if a == nil || a.shuttingDown.Load() {
-		return errors.New("application is shutting down")
-	}
-	if !a.catalogRebuilding.CompareAndSwap(false, true) {
-		return nil
-	}
-	go func() {
-		a.stopSessionCatalog(250 * time.Millisecond)
-		a.catalogRebuilding.Store(false)
-		a.startSessionCatalog(true)
-	}()
-	return nil
-}
-
 // ListProjectTree is the one-release compatibility wrapper. It composes only
 // catalog pages and project shells; it never migrates, scans, or decodes a
 // session synchronously.
@@ -697,6 +723,13 @@ func (a *App) ListProjectTree() []ProjectNode {
 	}
 	for index := range snapshot.Projects {
 		project := &snapshot.Projects[index]
+		// The lightweight snapshot carries pinned topic shells for collapsed
+		// folders. This compatibility wrapper rebuilds the complete child list,
+		// so start clean to avoid duplicating those shells with catalog rows.
+		project.Children = []ProjectNode{}
+		if project.Remote != nil {
+			continue
+		}
 		scope := "project"
 		root := project.Root
 		if project.Kind == "global_folder" {
@@ -733,6 +766,9 @@ func (a *App) catalogSessionPathForTopic(scope, workspaceRoot, topicID string) s
 	topic, ok, err := catalog.GetTopic(a.bootContext(), sessioncatalog.TopicKey{Scope: scope, WorkspaceRoot: workspaceRoot, TopicID: topicID})
 	if err != nil || !ok || len(topic.Sessions) == 0 {
 		return ""
+	}
+	if representative := strings.TrimSpace(topic.RepresentativePath); representative != "" {
+		return representative
 	}
 	if canonical := sessioncatalog.CanonicalSessionPathForTopic(topic.Sessions, ""); canonical != "" {
 		return canonical

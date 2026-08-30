@@ -21,7 +21,9 @@ The setting is intentionally small:
 
 - `auto` anchors visible reasoning to Chinese when the raw user prompt is
   clearly Chinese, ignoring injected reference context such as `@file` contents;
-  English and ambiguous turns add no extra instruction.
+  English and ambiguous turns add no extra instruction. Official DeepSeek-V4-Pro
+  is the exception: `auto` pins visible reasoning to English so it cannot
+  override that model's agent persona.
 - `zh` asks visible reasoning to prefer Simplified Chinese.
 - `en` asks visible reasoning to prefer English.
 
@@ -99,11 +101,9 @@ for this auto decision.
 
 When set to `zh` or `en`, Reasonix always adds a small transient
 `<reasoning-language>` block to the user turn. In all modes, this does not
-change:
-
-- the system prompt
-- tool schema bytes or ordering
-- the stable provider-visible prefix
+change tool schema bytes or ordering. Official DeepSeek-V4-Pro also prepends a
+stable first-line persona to the system prompt; other models leave the system
+prompt unchanged.
 
 This keeps high prompt-cache hit rate intact while still letting an explicit
 preference affect the next model call.

@@ -82,7 +82,6 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 	t := p.script[p.seen]
 	p.seen++
 	p.mu.Unlock()
-
 	if t.StreamError != nil {
 		return nil, t.StreamError
 	}

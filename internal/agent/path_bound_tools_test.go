@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -281,6 +282,51 @@ func TestParentWriteReservationBashClaimsWholeWorkspace(t *testing.T) {
 	}
 	if !mcp.WholeWorkspace {
 		t.Fatalf("MCP writer reservation must claim whole workspace")
+	}
+}
+
+func TestAgentSubagentRealizeOnPathBoundWrite(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sched := NewSubagentScheduler(4, 2)
+	dir, err := NormalizeWritePaths(root, []string{"src/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id1, err := sched.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id2, err := sched.AcquireWithID(context.Background(), AcquireRequest{Writer: true, WritePaths: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordingWriter{name: "write_file"}
+	reg := tool.NewRegistry()
+	reg.Add(writer)
+	a := New(nil, reg, NewSession(""), Options{
+		WriteScheduler:     sched,
+		WriteWorkspaceRoot: root,
+		SubagentDepth:      1,
+	}, event.Discard)
+
+	out := a.executeOne(WithSubagentClaimID(context.Background(), id1), &a.turn, provider.ToolCall{
+		ID:        "write-1",
+		Name:      "write_file",
+		Arguments: string(mustJSON(t, map[string]string{"path": filepath.Join(root, "src", "a.go"), "content": "one"})),
+	})
+	if out.blocked || out.errMsg != "" {
+		t.Fatalf("first write: %+v", out)
+	}
+	out = a.executeOne(WithSubagentClaimID(context.Background(), id2), &a.turn, provider.ToolCall{
+		ID:        "write-2",
+		Name:      "write_file",
+		Arguments: string(mustJSON(t, map[string]string{"path": filepath.Join(root, "src", "a.go"), "content": "two"})),
+	})
+	if !out.blocked {
+		t.Fatalf("second write of the same file must be blocked, got %+v", out)
 	}
 }
 

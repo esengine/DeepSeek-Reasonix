@@ -86,7 +86,13 @@ func TestCompressContextAfterExcludesActiveTurnAndAppendsToolResult(t *testing.T
 		currentCall,
 	}}
 	before := sess.Snapshot()
-	a := New(&fakeProvider{reply: "completed turns summarized"}, tool.NewRegistry(), sess, Options{}, event.Discard)
+	telemetry := ""
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && e.Text == "compaction telemetry" {
+			telemetry = e.Detail
+		}
+	})
+	a := New(&fakeProvider{reply: "completed turns summarized"}, tool.NewRegistry(), sess, Options{}, sink)
 	a.activeTurnCreatedAt.Store(activeCreatedAt)
 
 	got, err := a.CompressContext(context.Background(), tool.CompressRequest{Direction: "after", Anchor: "folding at alpha"})
@@ -95,6 +101,9 @@ func TestCompressContextAfterExcludesActiveTurnAndAppendsToolResult(t *testing.T
 	}
 	if got.Status != "ok" || got.Messages != 4 {
 		t.Fatalf("result = %+v", got)
+	}
+	if !strings.Contains(telemetry, "summary_input="+SummaryInputNonPrefix) {
+		t.Fatalf("telemetry = %q, want non-prefix summary input", telemetry)
 	}
 	if !reflect.DeepEqual(sess.Snapshot(), before) {
 		t.Fatal("compress changed the active canonical turn")

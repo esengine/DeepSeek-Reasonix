@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -27,7 +28,7 @@ func remoteServeBrowserURL(ctx context.Context, bound, token string) string {
 func remoteServeSupportsFragmentToken(ctx context.Context, base string) bool {
 	probeCtx, cancel := context.WithTimeout(ctx, remoteServeCapabilityTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, base+"auth/token", nil)
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(base, "/")+"/auth/token", nil)
 	if err != nil {
 		return false
 	}

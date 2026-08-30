@@ -1,8 +1,6 @@
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BrainCircuit, ChevronDown, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
-import { MemoryCitations } from "./MemoryCitations";
-import { hasSearchFootnotes, SearchFootnotes } from "./SearchFootnotes";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ComposerContextCard } from "./ComposerContextCard";
@@ -14,7 +12,6 @@ import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
-import { historyEntryIdForItemId } from "../lib/transcriptRows";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
 import type { Item, MessageActionScope } from "../lib/useController";
@@ -22,9 +19,10 @@ import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
 import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
-import { AssistantReasoningPanel } from "./AssistantReasoningPanel";
 
-type AssistantItem = Extract<Item, { kind: "assistant" }>;
+const AssistantReasoningPanel = lazy(() => import("./AssistantReasoningPanel").then((module) => ({ default: module.AssistantReasoningPanel })));
+const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
+const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
@@ -119,7 +117,7 @@ export type SelectedTextBlockInfo = {
   path?: string;
   start: number;
   end: number;
-  kind: "chat" | "code";
+  kind: "chat" | "code" | "terminal";
 };
 
 export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
@@ -133,7 +131,7 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
   let start = text.length - suffix.length;
   return entries.map((entry) => {
     const label = formatSelectionLabels([entry]);
-    const kind = entry.path ? "code" : "chat";
+    const kind = entry.path ? "code" : entry.source === "terminal" ? "terminal" : "chat";
     const block = {
       label,
       content: entry.text,
@@ -225,14 +223,14 @@ export function UserMessage({
   type DisplaySegment =
     | { type: "text"; content: string }
     | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
-    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
+    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" | "terminal" };
 
   const displaySegments = useMemo((): DisplaySegment[] => {
     if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
     const segments: DisplaySegment[] = [];
     const ordered: Array<
       | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
-      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" | "terminal" }
     > = [
       ...pasteBlocks.map((block) => {
         const start = displayText.indexOf(block.label);
@@ -469,7 +467,7 @@ export function UserMessage({
                 <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
                     <div className="msg-pasted-head" data-transcript-selection-ignore>
-                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
+                      {seg.kind === "code" ? <FileText size={15} /> : <MessageSquare size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
@@ -483,8 +481,8 @@ export function UserMessage({
                       <div className="msg-pasted-expanded">
                         {seg.kind === "chat"
                           ? <Markdown text={seg.block.content} />
-                          : seg.kind === "code"
-                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                          : seg.kind === "code" || seg.kind === "terminal"
+                            ? <CodeViewer value={seg.block.content} language={seg.kind === "terminal" ? "console" : languageFor(seg.block.path ?? "")} maxHeight={360} />
                             : seg.block.content}
                       </div>
                     )}
@@ -802,32 +800,28 @@ export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
   expandWhileStreaming = false,
-  truncateStreamingReasoning = false,
   creationMode = false,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
   expandWhileStreaming?: boolean;
-  /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
-  truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
 }) {
   const reasoningDisplayMode = useReasoningDisplayMode();
   const hasText = item.streaming || item.text.trim() !== "";
-  const hasFootnotes = hasSearchFootnotes(item.searchSources);
+  const hasFootnotes = Boolean(item.searchSources?.length);
   const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
   const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
   if (processOnly && (reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending")) return null;
+  const reasoningFallback = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending" ? null
+    : <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || reasoningDisplayMode === "expanded" || (item.streaming && (reasoningDisplayMode === "auto" || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <AssistantReasoningPanel
-          item={item}
-          defaultExpanded={defaultExpanded}
-          expandWhileStreaming={expandWhileStreaming}
-          truncateStreamingReasoning={truncateStreamingReasoning}
-        />
+        <Suspense fallback={reasoningFallback}>
+          <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
+        </Suspense>
       )}
       {(hasText || hasFootnotes) && (
         <div className="msg__body" data-transcript-selectable="message">
@@ -836,13 +830,14 @@ export const AssistantMessage = memo(function AssistantMessage({
               text={item.text}
               plainStatusBlocks={creationMode}
               streaming={item.streaming}
-              entryId={historyEntryIdForItemId(item.id)}
+              cacheKey={item.id}
+              wasStreamed={item.wasStreamed}
             />
           )}
-          <SearchFootnotes sources={item.searchSources} />
+          <Suspense fallback={null}><SearchSourcesPanel sources={item.searchSources} /></Suspense>
         </div>
       )}
-      <MemoryCitations citations={item.memoryCitations} />
+      {Boolean(item.memoryCitations?.length) && <Suspense fallback={null}><MemoryCitations citations={item.memoryCitations} /></Suspense>}
     </div>
   );
 });

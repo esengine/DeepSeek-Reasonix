@@ -65,9 +65,10 @@ func webKitNativeFailureReport(event webKitNativeEvent) (crashReport, string, st
 	if gpuMode == "" {
 		gpuMode = "unknown"
 	}
+	compatibilityMode := linuxRendererCompatibilityMode()
 	diagnostic := &webRuntimeDiagnostic{
 		Engine: "webkitgtk", Kind: "web_process", Reason: reason,
-		RuntimeVersion: runtimeVersion, GPUMode: gpuMode, Recovery: recovery,
+		RuntimeVersion: runtimeVersion, GPUMode: gpuMode, CompatibilityMode: compatibilityMode, Recovery: recovery,
 	}
 	report := baseCrashReport(reportKind)
 	report.SchemaVersion = 3
@@ -87,6 +88,7 @@ reason: %s
 exit code: unavailable
 runtime version: %s
 GPU mode: %s
-recovery: %s`, reason, runtimeVersion, gpuMode, recovery), maxCrashDetailBytes)
+compatibility mode: %t
+recovery: %s`, reason, runtimeVersion, gpuMode, compatibilityMode, recovery), maxCrashDetailBytes)
 	return report, outcome, strings.Join([]string{"webkitgtk", "web_process", reason}, ".")
 }

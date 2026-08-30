@@ -52,9 +52,14 @@ function ev(s: typeof initialState, e: WireEvent) {
       review: "passed",
       gap_kinds: [],
       constraint_degraded: false,
+      floor: "standard",
+      attention: false,
     },
   });
-  eq(complete.items, before.items, "ordinary completion summary stays off the transcript");
+  eq(complete.items.length, before.items.length + 1, "workspace mutations add a neutral change notice");
+  const changeNotice = complete.items[complete.items.length - 1];
+  eq(changeNotice?.kind === "notice" ? changeNotice.level : "", "info", "workspace mutations use an info notice, not a warning");
+  eq(changeNotice?.kind === "notice" ? changeNotice.completionSummary : undefined, complete.completionSummary, "neutral change notice retains its own normalized summary");
   eq(complete.completionSummary?.preset, "balanced", "ordinary completion summary remains available to the change panel");
 
   const after = ev(complete, {
@@ -69,14 +74,47 @@ function ev(s: typeof initialState, e: WireEvent) {
       review: "passed",
       gap_kinds: ["stale_check"],
       constraint_degraded: true,
+      floor: "delivery",
+      attention: true,
     },
   });
-  eq(after.items.length, before.items.length + 1, "actionable completion summary adds one compact transcript notice");
+  eq(after.items.length, complete.items.length + 1, "actionable completion summary adds one compact transcript notice");
   const notice = after.items[after.items.length - 1];
   eq(notice?.kind === "notice" ? notice.variant : "", "completion", "quality gap uses the completion notice variant");
   eq(notice?.kind === "notice" ? notice.action : "", "open_changes", "quality gap links to the change panel");
+  eq(notice?.kind === "notice" ? notice.completionSummary : undefined, after.completionSummary, "completion notice retains its own normalized summary");
   eq(notice?.kind === "notice" ? notice.text.includes("balanced") : true, false, "compact notice does not expose internal preset values");
   eq(after.completionSummary?.checks_failed, 1, "actionable completion summary is retained for details");
+
+  const switchedFloor = ev({
+    ...complete,
+    meta: { label: "test", ready: true, eventChannel: "", cwd: "/repo", qualityFloor: "delivery" },
+  }, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      verdict: "partial",
+      gap_kinds: ["unverified_change"],
+      floor: "standard",
+      attention: false,
+    },
+  });
+  const switchedNotice = switchedFloor.items[switchedFloor.items.length - 1];
+  eq(switchedNotice?.kind === "notice" ? switchedNotice.level : "", "info", "turn-time standard summary stays neutral after switching to delivery");
+
+  const suppressed = ev(complete, {
+    kind: "completion_summary",
+    completion: {
+      ...complete.completionSummary!,
+      mutations: 0,
+      checks_suppressed: 1,
+      gap_kinds: ["suppressed_requirement"],
+      floor: "delivery",
+      attention: true,
+    },
+  });
+  const suppressedNotice = suppressed.items[suppressed.items.length - 1];
+  eq(suppressedNotice?.kind === "notice" ? suppressedNotice.title : "", "This turn still needs attention", "required suppression uses a generic attention notice");
 
   const restarted = ev(after, { kind: "turn_started" });
   eq(restarted.completionSummary, undefined, "a new turn clears the previous turn's quality details");
@@ -184,7 +222,9 @@ function ev(s: typeof initialState, e: WireEvent) {
   s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", args: '{"path":"a"}', readOnly: false } } as WireEvent);
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "c2").length, 1, "final success has committed parent tool card");
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent card still present after commit");
-  eq(s.live?.text, "full answer", "final text is the committed attempt only");
+  const committedAssistant = s.items.find((it) => it.kind === "assistant" && it.text === "full answer");
+  eq(Boolean(committedAssistant), true, "full dispatch settles the committed attempt text");
+  eq(s.live, undefined, "full dispatch closes the compatibility-path assistant segment");
 }
 
 // --- 1d. stale discard must not clear a newer attempt journal ---
@@ -198,6 +238,104 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "c-new").length, 1, "stale discard does not remove current partial card");
   s = ev(s, { kind: "turn_done" } as WireEvent);
   eq(s.streamAttemptJournal, undefined, "turn_done clears stream attempt journal");
+}
+
+// --- 1e. one backend turn keeps each provider sampling round in timeline order ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "final answer", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  const replayedStart = ev(s, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  eq(replayedStart.items.filter((item) => item.kind === "assistant").length, 2, "a replayed turn_started event does not duplicate settled segments");
+  s = replayedStart;
+  s = ev(s, { kind: "turn_done", turnId: "multi-round" } as WireEvent);
+
+  const timeline = s.items.filter((item) => item.kind === "assistant" || item.kind === "tool");
+  eq(timeline.map((item) => item.kind).join(","), "assistant,tool,assistant", "multi-round live order matches persisted history order");
+  eq(timeline[0]?.id, "a:multi-round:0", "first sample owns ordinal zero");
+  eq(timeline[2]?.id, "a:multi-round:1", "second sample owns a distinct ordinal");
+  eq(timeline[0]?.kind === "assistant" ? timeline[0].reasoning : "", "first analysis", "first reasoning is not overwritten");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].text : "", "final answer", "final answer remains in the second segment");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].wasStreamed : undefined, true, "live-origin identity survives completion");
+
+}
+
+// --- 1f. tool-only samples remove their placeholder before the next round ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "tool-only" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", readOnly: false, partial: true, attemptId: "tool-round" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "commit", attempt: 1, max: 2 } } as WireEvent);
+  eq(s.items.some((item) => item.kind === "assistant"), false, "tool-only commit removes its empty assistant placeholder");
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "answer-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "after tool" } as WireEvent);
+  s = ev(s, { kind: "message", text: "done", reasoning: "after tool" } as WireEvent);
+  const visible = s.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(visible.map((item) => item.kind).join(","), "tool,assistant", "next reasoning is appended below the committed tool");
+  eq(visible[1]?.id, "a:tool-only:1", "tool-only placeholder ordinal is not reused");
+}
+
+// --- 1g. discard retries preserve segment identity; legacy full tools retire placeholders ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "retry-segment" } as WireEvent);
+  const segmentId = s.currentAssistant;
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "discard me" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "discard", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "good", action: "begin", attempt: 2, max: 2 } } as WireEvent);
+  eq(s.currentAssistant, segmentId, "retry reuses the same sampling segment identity");
+  eq(s.live?.reasoning, "", "retry starts from the rolled-back reasoning baseline");
+
+  let legacy = ev({ ...initialState }, { kind: "turn_started", turnId: "legacy" } as WireEvent);
+  legacy = ev(legacy, { kind: "tool_dispatch", tool: { id: "legacy-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  legacy = ev(legacy, { kind: "reasoning", reasoning: "legacy follow-up" } as WireEvent);
+  const legacyTimeline = legacy.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(legacyTimeline.map((item) => item.kind).join(","), "tool,assistant", "full dispatch compatibility path retires the empty placeholder");
+  eq(legacyTimeline[1]?.id, "a:legacy:1", "legacy follow-up gets the next segment ordinal");
+
+  let partialLegacy = ev({ ...initialState, activeTurnId: "partial-legacy", running: true, turnActive: true }, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", readOnly: false, partial: true },
+  } as WireEvent);
+  eq(partialLegacy.currentAssistant, "a:partial-legacy:0", "first partial dispatch backfills a sampling segment");
+  partialLegacy = ev(partialLegacy, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", args: "{}", readOnly: false },
+  } as WireEvent);
+  eq(partialLegacy.items.some((item) => item.kind === "assistant"), false, "legacy full dispatch removes the partial path's empty segment");
+}
+
+// --- 1h. terminal duration belongs to the last retained assistant segment ---
+{
+  const originalNow = Date.now;
+  let now = 100_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started", turnId: "terminal-duration" } as WireEvent);
+    now = 101_000;
+    s = ev(s, { kind: "message", text: "first answer" } as WireEvent);
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+    s = ev(s, { kind: "tool_result", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+    now = 110_000;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "empty-final", action: "begin", attempt: 1, max: 1 } } as WireEvent);
+    s = ev(s, { kind: "turn_done", turnId: "terminal-duration", status: "interrupted" } as WireEvent);
+
+    const assistants = s.items.filter((item) => item.kind === "assistant");
+    eq(assistants.length, 1, "turn_done removes the empty terminal placeholder");
+    eq(assistants[0]?.kind === "assistant" ? assistants[0].workDurationMs : 0, 10_000, "turn_done assigns total work duration to the last visible assistant");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 // --- 2. usageSeq bumps for every source ---
@@ -246,6 +384,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   const completed = ev(repaired, { kind: "turn_done" } as WireEvent);
   eq(completed.running, false, "turn_done still ends the repaired turn");
   eq(completed.retry, undefined, "turn_done clears the retry indicator");
+
+  const failed = ev(repaired, { kind: "turn_done", err: "shared window overflow" } as WireEvent);
+  eq(failed.running, false, "terminal context error clears running");
+  eq(failed.pendingPrompt, false, "terminal context error clears pending prompt");
+  eq(failed.messageAction, undefined, "terminal context error restores message actions");
 
   const staleSnapshotAt = promptEventClock();
   s = ev(repaired, { kind: "retrying", retryAttempt: 4, retryMax: 10 } as WireEvent);

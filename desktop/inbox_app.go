@@ -95,6 +95,19 @@ type InboxReceiptView struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// InboxCancelResultView is the backend-confirmed withdrawal receipt. The
+// frontend must restore only these durable item IDs into the draft.
+type InboxCancelResultView struct {
+	DiscardedItemIDs []string `json:"discardedItemIds"`
+	Warning          string   `json:"warning,omitempty"`
+}
+
+type inboxChangedView struct {
+	TabID       string `json:"tabId"`
+	SessionPath string `json:"sessionPath,omitempty"`
+	Revision    int64  `json:"revision,omitempty"`
+}
+
 // InboxEnvelopeView is the full body for the editor (fetched by id only).
 type InboxEnvelopeView struct {
 	ID          string `json:"id"`
@@ -168,6 +181,26 @@ func (a *App) EnqueueInboxSteer(tabID, display, submit, idempotency string) (Inb
 	return a.enqueueInbox(tabID, sessioninbox.IntentSteer, display, submit, nil, idempotency, true)
 }
 
+// EnqueueInboxSteerForTurn durably records guidance while ensuring its
+// mid-turn injection is fenced to the exact turn observed by the frontend.
+// A raced completion keeps the item as a follow-up instead of steering the
+// replacement turn.
+func (a *App) EnqueueInboxSteerForTurn(tabID, turnID, display, submit, idempotency string) (InboxReceiptView, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return InboxReceiptView{}, fmt.Errorf("turnId is required")
+	}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return InboxReceiptView{}, err
+	}
+	status := ctrl.RuntimeStatus()
+	if status.TurnID != turnID || !status.Running {
+		return InboxReceiptView{}, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	}
+	return a.enqueueInboxWithController(tabID, ctrl, sessioninbox.IntentSteer, display, submit, nil, idempotency, true, turnID)
+}
+
 // SteerInboxItem attempts to apply an existing durable queue item to the
 // current turn. It never creates a second entry for the same instruction.
 func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
@@ -190,6 +223,39 @@ func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
 	}, nil
 }
 
+// SteerInboxItemForTurn is the exact-turn counterpart for an existing durable
+// guidance item.
+func (a *App) SteerInboxItemForTurn(tabID, turnID, itemID string) (InboxReceiptView, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return InboxReceiptView{}, fmt.Errorf("turnId is required")
+	}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return InboxReceiptView{}, err
+	}
+	status := ctrl.RuntimeStatus()
+	if status.TurnID != turnID || !status.Running {
+		return InboxReceiptView{}, fmt.Errorf("turn %q is not the active turn for tab %q", turnID, tabID)
+	}
+	exact, ok := ctrl.(interface {
+		TrySteerInboxItemForTurn(string, string) (sessioninbox.InboxReceipt, error)
+	})
+	if !ok {
+		return InboxReceiptView{}, fmt.Errorf("exact-turn steer is unavailable")
+	}
+	rec, err := exact.TrySteerInboxItemForTurn(turnID, strings.TrimSpace(itemID))
+	if err != nil {
+		err = inboxWailsError(err)
+		return InboxReceiptView{Error: err.Error()}, err
+	}
+	a.emitInboxChanged(tabID)
+	return InboxReceiptView{
+		ItemID: rec.ItemID, Disposition: string(rec.Disposition), Position: rec.Position,
+		Paused: rec.Paused, Idempotent: rec.Idempotent,
+	}, nil
+}
+
 // CancelTabWithInboxItems cancels the turn and atomically discards only the
 // durable pending items currently shown by that tab's Composer.
 func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
@@ -204,11 +270,33 @@ func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
 	return nil
 }
 
+// CancelTabWithInboxItemsResult is the receipt-capable cancellation API. It is
+// additive so older desktop frontends can continue using the legacy method.
+func (a *App) CancelTabWithInboxItemsResult(tabID string, itemIDs []string) (InboxCancelResultView, error) {
+	view := InboxCancelResultView{DiscardedItemIDs: []string{}}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return view, err
+	}
+	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
+	if err != nil {
+		return view, inboxWailsError(err)
+	}
+	view.DiscardedItemIDs = append(view.DiscardedItemIDs, result.DiscardedItemIDs...)
+	view.Warning = result.Warning
+	a.emitInboxChanged(tabID)
+	return view, nil
+}
+
 func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool) (InboxReceiptView, error) {
 	ctrl, err := a.inboxCtrl(tabID)
 	if err != nil {
 		return InboxReceiptView{}, err
 	}
+	return a.enqueueInboxWithController(tabID, ctrl, intent, display, submit, invocations, idempotency, trySteer, "")
+}
+
+func (a *App) enqueueInboxWithController(tabID string, ctrl control.SessionAPI, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool, turnID string) (InboxReceiptView, error) {
 	if ensurer, ok := ctrl.(interface{ EnsureSessionPath() }); ok {
 		ensurer.EnsureSessionPath()
 	}
@@ -229,9 +317,22 @@ func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, displa
 		Idempotency: strings.TrimSpace(idempotency),
 		Invocations: controlInvocationRequests(invocations),
 	}
-	var rec sessioninbox.InboxReceipt
+	var (
+		rec sessioninbox.InboxReceipt
+		err error
+	)
 	if trySteer {
-		rec, err = ctrl.TryEnqueueAndSteer(req)
+		if turnID != "" {
+			exact, ok := ctrl.(interface {
+				TryEnqueueAndSteerForTurn(string, control.InboxRequest) (sessioninbox.InboxReceipt, error)
+			})
+			if !ok {
+				return InboxReceiptView{}, fmt.Errorf("exact-turn steer is unavailable")
+			}
+			rec, err = exact.TryEnqueueAndSteerForTurn(turnID, req)
+		} else {
+			rec, err = ctrl.TryEnqueueAndSteer(req)
+		}
 	} else {
 		rec, err = ctrl.TryEnqueueFollowup(req)
 	}

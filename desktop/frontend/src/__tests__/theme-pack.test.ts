@@ -300,10 +300,23 @@ ok(styleProps.get("--theme-pane-task-card-pct") === "82%", "computes task card p
 ok(styleProps.get("--theme-pane-session-hover-pct") === "76%", "computes home session-hover opacity tier");
 ok(styleProps.get("--theme-pane-child-pct") === "80%", "computes home child opacity tier");
 ok(styleProps.get("--theme-pane-interact-pct") === "90%", "computes home interaction opacity tier");
+ok(styleProps.get("--theme-pane-overlay-pct") === "90%", "computes home operational overlay opacity tier");
 ok(styleProps.get("--theme-pane-task-session-hover-pct") === "94%", "computes task session-hover opacity tier");
 ok(styleProps.get("--theme-pane-task-child-pct") === "98%", "computes task child opacity tier");
 ok(styleProps.get("--theme-pane-task-interact-pct") === "100%", "caps task interaction opacity tier");
+ok(styleProps.get("--theme-pane-task-overlay-pct") === "100%", "caps task operational overlay opacity tier");
 ok(attrs.get("data-theme-safe-area") === "right", "task background controls safe area");
+
+for (const [paneOpacity, expected] of [[0, "40%"], [0.5, "90%"], [1, "100%"]] as const) {
+  const opacityDraft = draftPackView({
+    ...twoSceneDraft,
+    background: { ...twoSceneDraft.background!, paneOpacity },
+    taskBackground: { ...twoSceneDraft.taskBackground!, paneOpacity },
+  });
+  applyThemePack(opacityDraft);
+  ok(styleProps.get("--theme-pane-overlay-pct") === expected, `home overlay follows pane opacity ${paneOpacity}`);
+  ok(styleProps.get("--theme-pane-task-overlay-pct") === expected, `task overlay follows pane opacity ${paneOpacity}`);
+}
 
 // Older shells and partial mocks can expose the independent task scene without
 // the newly added paneOpacity field. It must inherit the home pane value rather
@@ -329,12 +342,19 @@ ok(
     "--theme-pane-session-hover-pct",
     "--theme-pane-child-pct",
     "--theme-pane-interact-pct",
+    "--theme-pane-overlay-pct",
     "--theme-pane-task-session-hover-pct",
     "--theme-pane-task-child-pct",
     "--theme-pane-task-interact-pct",
+    "--theme-pane-task-overlay-pct",
   ].every((property) => !styleProps.has(property)),
   "clearing a pack removes every extended pane opacity tier",
 );
+applyThemePack(tokenOnlyPreview);
+ok(!attrs.has("data-theme-has-bg"), "token-only themes keep operational overlays on the opaque base surface");
+ok(!styleProps.has("--theme-pane-overlay-pct"), "token-only themes do not inject home overlay transparency");
+ok(!styleProps.has("--theme-pane-task-overlay-pct"), "token-only themes do not inject task overlay transparency");
+clearThemePack();
 ok(styleText("reasonix-base-code-readability").includes("--code-add-bg:"), "applyTheme installs the base code readability stylesheet");
 beginThemePreview(draft);
 ok(attrs.get("data-theme-pack") === "preview-pack", "preview applies pack");

@@ -15,7 +15,7 @@ func TestBootToolContractMatchesProviderVisibleSurface(t *testing.T) {
 		tokenMode string
 	}{
 		{name: "default", tokenMode: ""},
-		{name: "economy", tokenMode: TokenModeEconomy},
+		{name: "economy", tokenMode: "economy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfigHome(t)

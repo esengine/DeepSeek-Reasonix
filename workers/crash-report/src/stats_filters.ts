@@ -23,7 +23,6 @@ export type StatsFilters = {
   newLatest: boolean;
   regressed: boolean;
   windowDays: 7 | 30;
-  preferenceMode: "users" | "opens";
 };
 
 const limited = (url: URL, name: string, max: number) => (url.searchParams.get(name) ?? "").slice(0, max);
@@ -57,6 +56,5 @@ export function statsFilters(url: URL): StatsFilters {
     newLatest: limited(url, "new", 6) === "latest",
     regressed: limited(url, "regressed", 1) === "1",
     windowDays: windowParam === "7d" ? 7 : 30,
-    preferenceMode: limited(url, "prefs", 5) === "opens" ? "opens" : "users",
   };
 }

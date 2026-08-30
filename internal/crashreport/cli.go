@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -52,10 +53,13 @@ var (
 	longBase64URLPattern  = regexp.MustCompile(`\b[A-Za-z0-9_-]{48,}\b`)
 	goLocationPattern     = regexp.MustCompile(`[^\s]+\.go:\d+`)
 	reportFilenamePattern = regexp.MustCompile(`^[0-9]{20}-[0-9]+-[0-9a-f]{16}\.json$`)
+	fingerprintNumber     = regexp.MustCompile(`\b\d+\b`)
 )
 
 // Report is the subset of the shared crash ingest protocol emitted by the CLI.
 type Report struct {
+	EventID       string `json:"eventId,omitempty"`
+	DedupKey      string `json:"dedupKey,omitempty"`
 	Kind          string `json:"kind"`
 	Version       string `json:"version"`
 	OS            string `json:"os"`
@@ -133,7 +137,16 @@ func List(home string) ([]Pending, error) {
 		if json.Unmarshal(body, &report) != nil || !valid(report) {
 			continue
 		}
-		out = append(out, Pending{ID: strings.TrimSuffix(entry.Name(), ".json"), Report: sanitizeReport(report)})
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		identityChanged := report.EventID == "" || report.DedupKey == ""
+		ensureReportIdentity(&report, id)
+		report = sanitizeReport(report)
+		if identityChanged {
+			if updated, marshalErr := json.Marshal(report); marshalErr == nil {
+				_ = fileutil.AtomicWriteFile(filepath.Join(dir, entry.Name()), updated, 0o600)
+			}
+		}
+		out = append(out, Pending{ID: id, Report: report})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out, nil
@@ -223,15 +236,16 @@ func write(home string, report Report) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(sanitizeReport(report))
-	if err != nil {
-		return err
-	}
 	nonce := make([]byte, 8)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
 	id := fmt.Sprintf("%020d-%d-%s", time.Now().UTC().UnixNano(), os.Getpid(), hex.EncodeToString(nonce))
+	ensureReportIdentity(&report, id)
+	body, err := json.Marshal(sanitizeReport(report))
+	if err != nil {
+		return err
+	}
 	queueMu.Lock()
 	defer queueMu.Unlock()
 	if err := fileutil.AtomicWriteFile(filepath.Join(dir, id+".json"), body, 0o600); err != nil {
@@ -239,6 +253,30 @@ func write(home string, report Report) error {
 	}
 	prune(dir)
 	return nil
+}
+
+func ensureReportIdentity(report *Report, stableID string) {
+	if report.EventID == "" {
+		sum := sha256.Sum256([]byte("reasonix-cli-event\n" + stableID))
+		report.EventID = hex.EncodeToString(sum[:16])
+	}
+	if report.DedupKey == "" {
+		basis := strings.Join([]string{
+			report.Kind,
+			report.Version,
+			report.Source,
+			report.Label,
+			report.ErrorType,
+			normalizeFingerprintField(report.ErrorMessage),
+			normalizeFingerprintField(report.TopFrame),
+		}, "\n")
+		sum := sha256.Sum256([]byte(basis))
+		report.DedupKey = hex.EncodeToString(sum[:])
+	}
+}
+
+func normalizeFingerprintField(value string) string {
+	return fingerprintNumber.ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "<n>")
 }
 
 func prune(dir string) {

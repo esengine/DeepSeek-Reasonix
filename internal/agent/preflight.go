@@ -20,11 +20,11 @@ func (a *Agent) modelVisibleMessages() []provider.Message {
 	if a == nil || a.sess.conversation == nil {
 		return nil
 	}
-	msgs, version := a.sess.conversation.snapshotMessagesVersion()
+	msgs, _ := a.sess.conversation.snapshotMessagesVersion()
 	a.sess.compactionMu.Lock()
 	st := a.sess.compactionState
 	a.sess.compactionMu.Unlock()
-	if projectionValid(st, msgs, version, a.currentPromptCacheKey()) {
+	if projectionValid(st, msgs, a.currentPromptCacheKey()) {
 		if visible := modelVisibleFromProjection(st.Projection, msgs); len(visible) > 0 {
 			return visible
 		}
@@ -66,13 +66,35 @@ func (a *Agent) InvalidateProjection() {
 	a.sess.compactionState = CompactionState{}
 	a.sess.compactionMu.Unlock()
 	a.sess.compaction.stuck = false
+	a.sess.compaction.stuckInputHash = ""
 	a.sess.compaction.consecutive = 0
+	a.sess.compaction.failedTurn.Store(0)
 	a.sess.compaction.lastTurn.Store(0)
 	if path != "" {
 		if err := RemoveCompactionState(path); err != nil {
 			slog.Warn("agent: remove context projection", "err", err)
 		}
 	}
+}
+
+// InvalidateProjectionIfStale keeps the projection when it still matches the
+// current transcript and performs the full invalidation otherwise. History
+// rewrites that only touch messages past CoveredCount keep their fold.
+func (a *Agent) InvalidateProjectionIfStale() {
+	if a == nil {
+		return
+	}
+	a.sess.compactionMu.Lock()
+	st := a.sess.compactionState
+	if len(st.Projection.Messages) > 0 && a.sess.conversation != nil {
+		msgs, _ := a.sess.conversation.snapshotMessagesVersion()
+		if projectionValid(st, msgs, a.currentPromptCacheKeyLocked()) {
+			a.sess.compactionMu.Unlock()
+			return
+		}
+	}
+	a.sess.compactionMu.Unlock()
+	a.InvalidateProjection()
 }
 
 // LoadProjectionSidecar loads the context sidecar into the agent. Corrupt or
@@ -103,6 +125,11 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		a.resetCompactionState()
 		return
 	}
+	var msgs, preRepair []provider.Message
+	if a.sess.conversation != nil {
+		msgs, preRepair = a.sess.conversation.projectionValidationMessages()
+	}
+	needsNormalization := migratePromotedCoveredPrefixHash(&st, msgs)
 	a.sess.compactionMu.Lock()
 	key := a.currentPromptCacheKeyLocked()
 	normalized, keyOK := lineageKeyCompatible(st.PromptCacheKey, key)
@@ -115,12 +142,12 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	if key != "" && !keyOK {
 		// Lineage key changed (upgrade, model/workspace switch). Rebind when
 		// the projection body still matches the canonical covered prefix.
-		var msgs []provider.Message
-		var version uint64
-		if a.sess.conversation != nil {
-			msgs, version = a.sess.conversation.snapshotMessagesVersion()
+		contentValid := projectionContentValid(st, msgs)
+		if !contentValid && migrateLegacyCoveredPrefixHash(&st, msgs, preRepair) {
+			contentValid = true
+			needsNormalization = true
 		}
-		if projectionContentValid(st, msgs, version) {
+		if contentValid {
 			normalized, keyOK = key, true
 		}
 	}
@@ -131,18 +158,15 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		return
 	}
 	// Only rewrite legacy native-editing lineage keys; exact matches stay pure-read.
-	needsNormalization := false
 	if keyOK && key != "" && normalized != st.PromptCacheKey {
 		st.PromptCacheKey = normalized
 		needsNormalization = true
 	}
 	// Only mark restored when the projection still matches the transcript.
-	var msgs []provider.Message
-	var version uint64
-	if a.sess.conversation != nil {
-		msgs, version = a.sess.conversation.snapshotMessagesVersion()
+	if !projectionContentValid(st, msgs) && migrateLegacyCoveredPrefixHash(&st, msgs, preRepair) {
+		needsNormalization = true
 	}
-	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, version, key)
+	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, key)
 	if !valid && len(st.Projection.Messages) > 0 {
 		// Keep blocked receipts / telemetry; drop unusable projection body.
 		st.Projection = ContextProjection{}
@@ -211,7 +235,9 @@ func (a *Agent) BindSessionPath(path string, loadSidecar bool) {
 	a.sess.cacheState = CacheStateUnknown
 	a.sess.compactionMu.Unlock()
 	a.sess.compaction.stuck = false
+	a.sess.compaction.stuckInputHash = ""
 	a.sess.compaction.consecutive = 0
+	a.sess.compaction.failedTurn.Store(0)
 	a.sess.compaction.lastTurn.Store(0)
 }
 

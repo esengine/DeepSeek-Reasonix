@@ -15,7 +15,7 @@ func (a *Agent) contextMaintenanceInputHash(visible []provider.Message) string {
 	if a == nil {
 		return ""
 	}
-	seed := a.currentPromptCacheKey() + "\n" + providerVisibleFingerprint(provider.ModelMessages(visible))
+	seed := a.currentPromptCacheKey() + "\n" + providerVisibleFingerprint(modelInputMessages(visible))
 	sum := sha256.Sum256([]byte(seed))
 	return hex.EncodeToString(sum[:])
 }
@@ -38,10 +38,17 @@ func (a *Agent) contextMaintenanceBlocked(inputHash string) (bool, string) {
 	if r.Status != "blocked" && r.Status != "failed" {
 		return false, ""
 	}
-	// Generation-scoped: once this generation fails, automatic maintenance
-	// does not pay for another summary until a successful install, manual
-	// compress, or lineage change advances the generation.
-	return true, firstNonEmpty(a.sess.compactionState.BlockedReason, r.Reason)
+	reason := firstNonEmpty(a.sess.compactionState.BlockedReason, r.Reason)
+	// A failed view stays blocked for this generation. Changed input may retry
+	// on a later turn, but not once per tool result in the same active turn.
+	if r.BlockedInputHash != "" && inputHash != "" && r.BlockedInputHash != inputHash {
+		turn := a.activeTurnCreatedAt.Load()
+		if turn != 0 && a.sess.compaction.failedTurn.Load() == turn {
+			return true, reason
+		}
+		return false, ""
+	}
+	return true, reason
 }
 
 func (a *Agent) emitContextMaintenance(r *ContextMaintenanceReceipt) {
@@ -85,9 +92,13 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 	a.sess.compactionMu.Lock()
 	state := a.sess.compactionState
 	previous := state
+	// Suppress only repeated failures of the same view; a failure on a new
+	// view must refresh the stored hash or later retries of that view are
+	// never backed off.
 	if state.LastReceipt != nil &&
 		(state.LastReceipt.Status == "blocked" || state.LastReceipt.Status == "failed") &&
-		state.LastReceipt.Action == action {
+		state.LastReceipt.Action == action &&
+		state.LastReceipt.BlockedInputHash == inputHash {
 		a.sess.compactionMu.Unlock()
 		return
 	}
@@ -118,21 +129,22 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 		a.sess.compactionMu.Unlock()
 		return
 	}
+	a.sess.compaction.failedTurn.Store(a.activeTurnCreatedAt.Load())
 	a.sess.compactionMu.Unlock()
 	a.emitContextMaintenance(state.LastReceipt)
 }
 
 func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d",
-		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
+	detail := fmt.Sprintf("trigger=%s mode=%s summary_input=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d",
+		t.Trigger, t.Mode, t.SummaryInputMode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
 		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount,
 		t.UserTurnsKept, t.UserTurnsDropped)
 	if t.ProviderRequestID != "" {
 		detail += " provider_request_id=" + t.ProviderRequestID
 	}
 	if t.Error != "" {
-		// A degraded fold carries the summarizer's error but still freed the
-		// context, so it is a notice with a cause rather than a failure.
+		// CompactionModeDegraded remains readable for legacy telemetry, although
+		// new summarizer failures never install a degraded projection.
 		if t.Mode != CompactionModeDegraded {
 			slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
 			return

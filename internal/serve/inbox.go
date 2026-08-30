@@ -12,15 +12,15 @@ import (
 
 func (s *Server) registerInboxRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /inbox", s.inboxList)
-	mux.HandleFunc("POST /inbox/items", s.inboxEnqueue)
+	mux.HandleFunc("POST /inbox/items", s.foregroundMutation(s.inboxEnqueue))
 	mux.HandleFunc("GET /inbox/items/{id}", s.inboxGet)
-	mux.HandleFunc("PATCH /inbox/items/{id}", s.inboxUpdate)
-	mux.HandleFunc("DELETE /inbox/items/{id}", s.inboxDelete)
-	mux.HandleFunc("POST /inbox/move", s.inboxMove)
-	mux.HandleFunc("POST /inbox/pause", s.inboxPause)
-	mux.HandleFunc("POST /inbox/resume", s.inboxResume)
-	mux.HandleFunc("POST /inbox/items/{id}/retry", s.inboxRetry)
-	mux.HandleFunc("POST /inbox/items/{id}/refresh", s.inboxRefresh)
+	mux.HandleFunc("PATCH /inbox/items/{id}", s.foregroundMutation(s.inboxUpdate))
+	mux.HandleFunc("DELETE /inbox/items/{id}", s.foregroundMutation(s.inboxDelete))
+	mux.HandleFunc("POST /inbox/move", s.foregroundMutation(s.inboxMove))
+	mux.HandleFunc("POST /inbox/pause", s.foregroundMutation(s.inboxPause))
+	mux.HandleFunc("POST /inbox/resume", s.foregroundMutation(s.inboxResume))
+	mux.HandleFunc("POST /inbox/items/{id}/retry", s.foregroundMutation(s.inboxRetry))
+	mux.HandleFunc("POST /inbox/items/{id}/refresh", s.foregroundMutation(s.inboxRefresh))
 }
 
 func (s *Server) inboxAPI() control.SessionAPI {

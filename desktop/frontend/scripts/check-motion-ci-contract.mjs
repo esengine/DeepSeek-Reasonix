@@ -10,6 +10,11 @@ const packageJSON = JSON.parse(readFileSync(resolve(repoRoot, "desktop/frontend/
 const appSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/App.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/lib/bridge.ts"), "utf8");
 const desktopMainSource = readFileSync(resolve(repoRoot, "desktop/main.go"), "utf8");
+const transcriptScrollBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-scroll-stability.mjs"), "utf8");
+const transcriptSelectionBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-selection.mjs"), "utf8");
+const transcriptSelectionComponentSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/components/TranscriptSelectionMenu.tsx"), "utf8");
+const transcriptSelectionSmokeSource = readFileSync(resolve(repoRoot, "desktop/transcript_selection_smoke_contract.js"), "utf8");
+const transcriptSelectionHostSource = readFileSync(resolve(repoRoot, "desktop/cmd/transcript-selection-smoke/host_windows.go"), "utf8");
 
 function jobBody(name, nextName) {
   const match = workflow.match(new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)\\n  ${nextName}:`));
@@ -34,9 +39,32 @@ for (const required of [
   "../scripts/test-webview2-native-smoke.ps1 -SelfTest",
   "Smoke-test Wails/WebView2 native startup",
   "../scripts/test-webview2-native-smoke.ps1",
+  "Test WebView2 transcript selection compositor",
+  "../scripts/test-transcript-selection-webview2.ps1 -Iterations 3",
+  "Upload WebView2 transcript selection evidence",
 ]) {
   if (!windowsJob.includes(required)) {
     throw new Error(`motion-ci-contract: desktop-windows must include ${required}`);
+  }
+}
+
+for (const required of [
+  "bench:selection-table",
+  "SELECTION REPAINT TARGET",
+  "clickIntervals = [400, 320, 180, 0]",
+  "maxTargetDelta <= 0.5",
+]) {
+  if (!transcriptSelectionBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript selection browser gate must retain ${required}`);
+  }
+}
+for (const required of [
+  'data-surface="transcript"',
+  "data-state={actionOverlay.phase}",
+  "actionOverlayStateRef.current.action",
+]) {
+  if (!transcriptSelectionComponentSource.includes(required)) {
+    throw new Error(`motion-ci-contract: stable transcript selection host must retain ${required}`);
   }
 }
 
@@ -49,11 +77,38 @@ for (const [path, source] of [
     "REASONIX_WEBVIEW2_APPROVAL_SMOKE",
     "__REASONIX_WEBVIEW2_APPROVAL_SMOKE__",
     "WebView2ApprovalSmokeBridge",
+    "__reasonixSelectionSmoke",
+    "reasonix_transcript_smoke",
   ]) {
     if (source.includes(forbidden)) {
       throw new Error(`motion-ci-contract: ${path} must not embed test-only WebView2 instrumentation (${forbidden})`);
     }
   }
+}
+for (const requiredPath of [
+  "desktop/cmd/transcript-selection-smoke/main.go",
+  "desktop/transcript_selection_smoke_contract.js",
+  "scripts/test-transcript-selection-webview2.ps1",
+]) {
+  if (!existsSync(resolve(repoRoot, requiredPath))) {
+    throw new Error(`motion-ci-contract: missing independent WebView2 selection smoke file ${requiredPath}`);
+  }
+}
+for (const required of [
+  "async settle()",
+  "data-transcript-geometry-pending",
+  ".reasoning--loading",
+  "stableSamples >= 4",
+]) {
+  if (!transcriptSelectionSmokeSource.includes(required)) {
+    throw new Error(`motion-ci-contract: native selection setup must retain ${required}`);
+  }
+}
+const compositorWarmIndex = transcriptSelectionHostSource.indexOf("host.warmCompositor()");
+const targetSettleIndex = transcriptSelectionHostSource.indexOf("host.settleTarget()");
+const pointerMoveIndex = transcriptSelectionHostSource.indexOf("movePointerToClientPoint(hwnd, settled.Point)");
+if (!(compositorWarmIndex >= 0 && compositorWarmIndex < targetSettleIndex && targetSettleIndex < pointerMoveIndex)) {
+  throw new Error("motion-ci-contract: native pointer coordinates must be measured after compositor warmup and target settling");
 }
 for (const retiredPath of [
   "desktop/webview2_approval_smoke.go",
@@ -104,6 +159,7 @@ for (const required of [
   "markdown-pipeline.test.tsx",
   "message-selection-copy.test.ts",
   "transcript-selection-menu.test.tsx",
+  "transcript-selection-rendering.test.ts",
   "transcript-store.test.ts",
   "transcript-virtualization.test.tsx",
 ]) {
@@ -120,22 +176,37 @@ for (const required of ["transcript-selection.mjs", "transcript-scroll-stability
 }
 
 const transcriptCommand = "pnpm --dir frontend test:transcript";
-const transcriptRuns = workflow.match(/pnpm --dir frontend test:transcript(?:\s|$)/g)?.length ?? 0;
-if (!jobBody("desktop", "desktop-macos").includes(transcriptCommand) || transcriptRuns !== 1) {
+const desktopLinuxJob = jobBody("desktop", "desktop-macos");
+const transcriptRuns = desktopLinuxJob.match(/pnpm --dir frontend test:transcript(?:\s|$)/g)?.length ?? 0;
+if (!desktopLinuxJob.includes(transcriptCommand) || transcriptRuns !== 1) {
   throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript exactly once");
 }
 
 const transcriptBrowserCommand = "pnpm --dir frontend test:transcript-browser";
-const transcriptBrowserRuns = workflow.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
-if (!jobBody("desktop", "desktop-macos").includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
+const transcriptBrowserRuns = desktopLinuxJob.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
+if (!desktopLinuxJob.includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
   throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript-browser exactly once");
 }
-if (!jobBody("desktop", "desktop-macos").includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
+if (!desktopLinuxJob.includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
   throw new Error("motion-ci-contract: Chromium must install into the path used by frontend browser tests");
+}
+if (!windowsJob.includes(transcriptBrowserCommand)) {
+  throw new Error("motion-ci-contract: desktop-windows must run the transcript browser replay");
 }
 for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
   if (!packageJSON.scripts?.["test:transcript-browser"]?.includes(required)) {
     throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
+  }
+}
+for (const required of [
+  "PerformanceObserver",
+  "__reasonixScrollPerfProbe",
+  "REASONIX_TRANSCRIPT_MAX_FRAME_GAP_MS",
+  "REASONIX_TRANSCRIPT_MAX_LONG_TASK_MS",
+  "Array.from({ length: 10 }",
+]) {
+  if (!transcriptScrollBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript scroll browser gate must retain performance probe ${required}`);
   }
 }
 

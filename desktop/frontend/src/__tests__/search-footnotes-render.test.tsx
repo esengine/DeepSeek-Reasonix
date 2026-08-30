@@ -30,7 +30,7 @@ function ok(value: boolean, label: string) {
   }
 }
 
-console.log("\nsearch footnote render");
+console.log("\nsearch sources panel render");
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -64,7 +64,7 @@ await act(async () => {
           text: "answer only",
           reasoning: "",
           streaming: false,
-          searchSources: [{ title: "新闻本文", url: "https://example.com/a" }],
+          searchSources: [{ title: "新闻本文", url: "https://example.com/a?utm_source=test#section" }],
         }}
       />
     </LocaleProvider>,
@@ -72,13 +72,21 @@ await act(async () => {
 });
 
 const body = document.querySelector(".msg__body");
-const footnotes = document.querySelector(".msg-search-sources");
-const title = footnotes?.querySelector("strong");
-const link = footnotes?.querySelector("a");
+const panel = document.querySelector(".msg-search-sources");
+const toggle = panel?.querySelector<HTMLButtonElement>(".msg-search-sources__toggle");
 ok(Boolean(body?.textContent?.includes("answer only")), "answer body keeps the model text");
-ok(Boolean(footnotes), "footnotes render under the answer");
-ok(title?.textContent === "新闻本文", "footnote shows the result title");
-ok(Boolean(link), "footnote title list keeps a rendered link");
+ok(Boolean(panel), "sources panel renders under the answer");
+ok(toggle?.getAttribute("aria-expanded") === "false", "sources panel is collapsed by default");
+ok(!panel?.querySelector(".msg-search-sources__body"), "collapsed panel does not expose source details");
+await act(async () => {
+  toggle?.click();
+});
+const title = panel?.querySelector(".msg-search-source__title");
+const link = panel?.querySelector<HTMLAnchorElement>(".msg-search-source__link");
+ok(toggle?.getAttribute("aria-expanded") === "true", "click expands the sources panel");
+ok(title?.textContent === "新闻本文", "expanded panel shows the result title");
+ok(link?.getAttribute("href") === "https://example.com/a", "source link uses the cleaned URL");
+ok(Boolean(panel?.querySelector(".msg-search-source__url")?.textContent?.includes("example.com/a")), "expanded panel shows the hostname and short URL");
 ok(!(document.querySelector(".msg__body > .md")?.textContent ?? "").includes("新闻本文"), "answer markdown does not include the search title");
 
 if (failed) {

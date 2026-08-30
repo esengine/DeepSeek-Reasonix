@@ -7,30 +7,13 @@ import (
 	"reasonix/internal/ablation"
 )
 
-func TestAppendBenchmarkProfileArgsBaselineIsByteIdentical(t *testing.T) {
-	args := []string{"run", "fix the bug"}
-	if got := appendBenchmarkProfileArgs(args, benchmarkProfileBaseline); !reflect.DeepEqual(got, args) {
-		t.Fatalf("baseline args changed: %v", got)
-	}
-}
-
-func TestAppendBenchmarkProfileArgsDeliveryUsesRealRuntimeProfile(t *testing.T) {
-	args := []string{"run"}
-	got := appendBenchmarkProfileArgs(args, benchmarkProfileDelivery)
-	want := []string{"run", "--profile", "delivery"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("delivery args = %v, want %v", got, want)
-	}
-}
-
 func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
-	cfg := suiteConfig{model: "e2e", profile: benchmarkProfileDelivery}
+	cfg := suiteConfig{model: "e2e"}
 	got := buildRunTaskArgs(cfg, "metrics.json", "run.trajectory.jsonl", 12, "fix it")
 	want := []string{
 		"run", "--auto", "--metrics", "metrics.json",
 		"--trajectory", "run.trajectory.jsonl",
-		"--model", "e2e", "--max-steps", "12",
-		"--profile", "delivery", "fix it",
+		"--model", "e2e", "--max-steps", "12", "fix it",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("run task args = %v, want %v", got, want)
@@ -38,7 +21,7 @@ func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
 }
 
 func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
-	cfg := suiteConfig{profile: benchmarkProfileBaseline, arm: ablation.New(ablation.Evidence, ablation.Planner)}
+	cfg := suiteConfig{arm: ablation.New(ablation.Evidence, ablation.Planner)}
 	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
 	want := []string{"run", "--auto", "--metrics", "m.json", "--ablate", "evidence,planner", "fix it"}
 	if !reflect.DeepEqual(got, want) {
@@ -46,12 +29,22 @@ func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
 	}
 }
 
-func TestBuildRunTaskArgsPassesEffortThrough(t *testing.T) {
-	cfg := suiteConfig{profile: benchmarkProfileEconomy, effort: "low"}
+func TestBuildRunTaskArgsPassesEffortThroughWithoutLegacyMode(t *testing.T) {
+	cfg := suiteConfig{effort: "low"}
 	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
-	want := []string{"run", "--auto", "--metrics", "m.json", "--profile", "economy", "--effort", "low", "fix it"}
+	want := []string{"run", "--auto", "--metrics", "m.json", "--effort", "low", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("effort args = %v, want %v", got, want)
+	}
+}
+
+func TestResolveExperimentAxesHasNoExecutionModeArm(t *testing.T) {
+	got, err := resolveExperimentAxes("evidence", "warm", "wrong")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.arm.String() != "evidence" || got.cache != "warm" || got.anchor != "wrong" {
+		t.Fatalf("axes = %+v", got)
 	}
 }
 
@@ -64,22 +57,6 @@ func TestDefaultSuiteBudgetCoversCurrentFiveTaskBaseline(t *testing.T) {
 	}
 }
 
-func TestNormalizeBenchmarkProfile(t *testing.T) {
-	for _, input := range []string{"", "baseline", " BASELINE "} {
-		if got, err := normalizeBenchmarkProfile(input); err != nil || got != benchmarkProfileBaseline {
-			t.Fatalf("normalize(%q) = %q, %v", input, got, err)
-		}
-	}
-	for _, tier := range []string{"economy", "balanced", "delivery"} {
-		if got, err := normalizeBenchmarkProfile(tier); err != nil || got != tier {
-			t.Fatalf("normalize(%q) = %q, %v", tier, got, err)
-		}
-	}
-	if _, err := normalizeBenchmarkProfile("fast"); err == nil {
-		t.Fatal("unknown profile should fail")
-	}
-}
-
 func TestNormalizeCacheArm(t *testing.T) {
 	for input, want := range map[string]string{"": "cold", "cold": "cold", " WARM ": "warm"} {
 		if got, err := normalizeCacheArm(input); err != nil || got != want {
@@ -88,15 +65,5 @@ func TestNormalizeCacheArm(t *testing.T) {
 	}
 	if _, err := normalizeCacheArm("hot"); err == nil {
 		t.Fatal("unknown cache arm should fail")
-	}
-}
-
-func TestAppendBenchmarkProfileArgsPassesToolSurfaceTiers(t *testing.T) {
-	for _, tier := range []string{"economy", "balanced"} {
-		got := appendBenchmarkProfileArgs([]string{"run"}, tier)
-		want := []string{"run", "--profile", tier}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s args = %v, want %v", tier, got, want)
-		}
 	}
 }

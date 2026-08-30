@@ -80,7 +80,7 @@ func loadSessionUserMessagesWithLimits(path string, limits sessionReplayLimits) 
 		return nil, fmt.Errorf("session event log for %s uses schema %d; this build supports up to %d", path, probe.schemaVersion, sessionEventSchemaVersion)
 	}
 	if probe.native && probe.size > 0 {
-		replay, err := replaySessionEventLogWithLimits(store.SessionEventLog(path), limits)
+		replay, err := replaySessionEventLogWithLimits(store.SessionEventLog(path), limits, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +102,7 @@ func loadSessionUserMessagesWithLimits(path string, limits sessionReplayLimits) 
 			return out, nil
 		}
 	}
-	msgs, err := loadSessionMessagesFromJSONL(path)
+	msgs, err := loadSessionMessagesFromJSONL(path, nil)
 	if err != nil {
 		return nil, err
 	}

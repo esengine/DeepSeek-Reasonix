@@ -731,8 +731,8 @@ func TestAuthCookieSecurePolicy(t *testing.T) {
 }
 
 func TestPlainHTTPAuthWarning(t *testing.T) {
-	if got := PlainHTTPAuthWarning(config.ServeConfig{AuthMode: "none"}, "0.0.0.0:8787"); got != "" {
-		t.Fatalf("none auth warning = %q, want empty", got)
+	if got := PlainHTTPAuthWarning(config.ServeConfig{AuthMode: "none"}, "0.0.0.0:8787"); !strings.Contains(got, "authentication disabled") {
+		t.Fatalf("none auth warning = %q, want the loudest unauthenticated warning", got)
 	}
 	if got := PlainHTTPAuthWarning(config.ServeConfig{AuthMode: "password"}, "127.0.0.1:8787"); got != "" {
 		t.Fatalf("loopback warning = %q, want empty", got)

@@ -19,7 +19,6 @@ interface AppChromeProps {
   sidebarToggleTitle: string;
   workspacePanelMaximized: boolean;
   workspacePanelRenderable: boolean;
-  workspaceTogglePressed: boolean;
   workspacePanelLabel: string;
   onToggleSidebar: () => void;
   onToggleWorkspacePanel: () => void;
@@ -45,7 +44,6 @@ export function AppChrome({
   sidebarToggleTitle,
   workspacePanelMaximized,
   workspacePanelRenderable,
-  workspaceTogglePressed,
   workspacePanelLabel,
   onToggleSidebar,
   onToggleWorkspacePanel,
@@ -129,7 +127,6 @@ export function AppChrome({
             className={[
               "app-chrome__tools",
               "app-chrome__tools--fixed",
-              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
             ].filter(Boolean).join(" ")}
             aria-label={t("tabBar.commandSearch")}
           >
@@ -156,7 +153,6 @@ export function AppChrome({
           <div
             className={[
               "app-chrome__tools",
-              workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
             ].filter(Boolean).join(" ")}
             aria-label={t("tabBar.commandSearch")}
           >
@@ -183,7 +179,6 @@ export function AppChrome({
             "app-chrome__panel-toggle",
             "app-chrome__panel-toggle--right",
             workspacePanelRenderable ? "app-chrome__panel-toggle--active" : "",
-            workspaceTogglePressed ? "app-chrome__panel-toggle--pressed" : "",
           ].filter(Boolean).join(" ")}
           type="button"
           onClick={onToggleWorkspacePanel}

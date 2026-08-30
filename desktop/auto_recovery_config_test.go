@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 )
@@ -61,7 +60,6 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		Scope:            "project",
 		WorkspaceRoot:    root,
 		model:            "test-model",
-		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAuto,
 		disabledMCP:      map[string]ServerView{},

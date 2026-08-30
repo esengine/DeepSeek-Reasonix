@@ -49,13 +49,18 @@ export function parseSearchSources(output: string): SearchSource[] {
   const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
   const out: SearchSource[] = [];
   for (const line of lines) {
-    if (/^https?:\/\//i.test(line)) {
+    // Tolerate the footnote-markdown shape (`- **title**` / `<url>`) as well:
+    // if a degraded plain-text dump ever reaches this parser (#8900), sources
+    // still resolve into cards/footnotes instead of leaking raw markup.
+    const urlMatch = /^<?(https?:\/\/[^>\s]+)>?$/i.exec(line);
+    if (urlMatch) {
       const last = out[out.length - 1];
-      if (last && !last.url) last.url = line;
-      else out.push({ url: line });
+      if (last && !last.url) last.url = urlMatch[1];
+      else out.push({ url: urlMatch[1] });
       continue;
     }
-    out.push({ title: line });
+    const titleMatch = /^[-*]\s+\*\*(.+)\*\*$/.exec(line);
+    out.push({ title: titleMatch?.[1] ?? line });
   }
   return out;
 }

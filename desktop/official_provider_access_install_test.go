@@ -33,10 +33,10 @@ language = "zh"
 	}
 	flash := p.Prices["deepseek-v4-flash"]
 	pro := p.Prices["deepseek-v4-pro"]
-	if flash == nil || flash.Output != 0.28 || flash.Currency != "$" {
+	if flash == nil || flash.Output != 1.32 || flash.Currency != "$" {
 		t.Fatalf("flash price = %+v, want frozen USD official table", flash)
 	}
-	if pro == nil || pro.Output != 0.87 || pro.Currency != "$" {
+	if pro == nil || pro.Output != 3.96 || pro.Currency != "$" {
 		t.Fatalf("pro price = %+v, want frozen USD official table", pro)
 	}
 	if got := cfg.ResolveDisplayCurrency(); got != "" {
@@ -105,8 +105,8 @@ headers = { X-Route = "official-custom" }
 	if p.Kind != "openai" || p.BaseURL != "https://api.deepseek.com/v1" || p.APIKeyEnv != "MY_DEEPSEEK_KEY" || p.Headers["X-Route"] != "official-custom" {
 		t.Fatalf("official transport customization was overwritten: %+v", p)
 	}
-	if got := p.ModelList(); len(got) != 2 || got[0] != "deepseek-v4-flash" || got[1] != "deepseek-v4-pro" {
-		t.Fatalf("repaired model catalog = %v, want official Flash/Pro models", got)
+	if got := p.ModelList(); len(got) != 3 || got[0] != "deepseek-v4-flash" || got[1] != "deepseek-v4-pro" || got[2] != "deepseek-v4-flash-vision-exp" {
+		t.Fatalf("repaired model catalog = %v, want official Flash/Pro/vision models", got)
 	}
 	if !config.CredentialStored("MY_DEEPSEEK_KEY") || config.CredentialStored("DEEPSEEK_API_KEY") {
 		t.Fatal("credential was not saved exclusively under the preserved api_key_env")

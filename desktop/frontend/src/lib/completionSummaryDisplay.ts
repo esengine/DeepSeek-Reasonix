@@ -1,16 +1,5 @@
 import type { Translator } from "./i18n";
 
-export function completionPresetLabel(preset: string, t: Translator): string {
-  switch (preset.trim().toLowerCase()) {
-    case "light":
-    case "economy": return t("composer.runtimeProfileEconomyShort");
-    case "delivery": return t("composer.runtimeProfileDeliveryShort");
-    case "balanced":
-    case "full": return t("composer.runtimeProfileBalancedShort");
-    default: return t("context.other");
-  }
-}
-
 export function completionVerdictLabel(verdict: string, t: Translator): string {
   switch (verdict.trim().toLowerCase()) {
     case "complete": return t("task.state.succeeded");

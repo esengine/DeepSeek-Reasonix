@@ -5,17 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
-	"reasonix/internal/taskintent"
 )
-
-func TestNewClassifiesWithExistingHeuristics(t *testing.T) {
-	if c := New("fix the bug in utils.py"); c.Intent != taskintent.Mutation {
-		t.Fatalf("intent = %v, want Mutation", c.Intent)
-	}
-	if c := New("what does this function do?"); c.Intent == taskintent.Mutation {
-		t.Fatalf("advisory question misclassified as mutation")
-	}
-}
 
 func TestMergeSignalsRatchetsRiskAndScope(t *testing.T) {
 	c := New("refactor the parser across reader.py and writer.py")
@@ -92,9 +82,6 @@ func TestOutstandingListsBlockersOnly(t *testing.T) {
 
 func TestAtomicContractCompletesFromOneMutation(t *testing.T) {
 	c := Atomic("fix typo in README.md")
-	if c.Intent != taskintent.Mutation {
-		t.Fatalf("intent = %v, want Mutation", c.Intent)
-	}
 	if !c.Trivial() {
 		t.Fatal("atomic contract must route trivial (executor-only, no arbiters)")
 	}

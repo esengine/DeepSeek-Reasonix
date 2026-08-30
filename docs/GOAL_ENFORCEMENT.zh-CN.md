@@ -73,7 +73,7 @@ runtime: turns 57 · requests 143 · tokens 2800000 · work time 42m
 新 API 将其解释为 `0`。新的 `budget_spend`（用户显式预算）不会被自动迁移；manual pause、evaluator
 failure、legacy archive block 和真实 blocker 同样不自动解锁。
 
-上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 85%）触发一次内容驱动摘要 checkpoint，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
+上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 80%）触发 Harness 风格的 prune/摘要维护，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
 
 ### 任务合约
 
@@ -149,15 +149,26 @@ Prometheus 会逐个问澄清问题：
 Delivery 收敛为纯 readiness 服务，宿主可消费的结构化结果为
 `ReadinessResult{Ready, Missing, Reason, ProgressKey}`：
 
-- Canonical todos（当前 todo 列表）
+- Canonical todos（Goal、已批准 Plan 或 strict obligation 等闭环回合可跨轮回退；Standard 只读取当前任务证据 ledger 中成功 `todo_write` 的最新列表，不用历史列表判定新任务）
 - Project checks（来自 AGENTS.md 的 verify 指令）
 - Delivery 专属验收项（mutation、verification、review、complete_step 签收、capability 门禁）
 
-Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合在第一次未满足的最终回答后立即结束并显示恢复卡；Goal + Delivery 回合由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
+Delivery 和 Standard 都不会注入通用的隐藏模型消息做 readiness 重试。Delivery 在可见模型回合
+结束后返回结构化缺口，由前端展示显式的 `Continue checks` 恢复入口，只有用户主动操作才会启动
+恢复回合；Standard 的 verification/review/signoff 缺口仍只作为完成提示处理。Standard 另有一个
+不属于 readiness 的同回合一致性保护：仅当可信宿主判定用户要求执行、当前回合刚成功写入唯一
+`in_progress` Todo、写工具可用且不处于 Plan/Goal/Delivery/只读/恢复边界时，允许在同一个前台
+`Agent.Run` 内追加一次固定续做提示；只有产生新的宿主 receipt 才允许第二次，最多两次。它不会
+把历史 Todo 隐式变成新任务，也不会跨回合自动执行。Goal + Delivery 或 approved Plan 回合仍由
+Goal/Plan FSM 自动续轮，不显示需要用户点击的重复卡片。
 
 ### 进展签名
 
-只有宿主可验证且对当前 Goal **新颖**的信息才能重置停滞计数：新的读取/搜索结果、todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。读取和查询由规范化工具名、参数及宿主观测到的结果摘要标识；完全相同的重复调用、仅改变措辞的回答或重复 continue 理由都不能伪造进展。证据摘要以有界窗口持久化，不保存工具输出正文。
+Goal 的停滞计数只由宿主可验证且对当前 Goal **新颖**的信息重置：新的读取/搜索结果、Todo
+状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化或
+终态 `update_goal` 报告。Delivery 不维护 task-progress 自动续跑指纹；Standard 只在上述同一
+`Agent.Run` 的 Todo 一致性保护中保存一个临时 receipt 指纹，用于阻止无进展的第二次提示，回合
+结束即清零。用户的显式恢复回合会重新建立当前 evidence 上下文。
 
 ### Todo 状态流
 

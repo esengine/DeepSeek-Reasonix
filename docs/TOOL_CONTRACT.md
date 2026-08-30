@@ -14,14 +14,14 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `delete_range` | false | Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions - smaller changes should use edit_file. |
 | `delete_symbol` | false | Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors. |
 | `edit_file` | false | Replace an exact string in a file with another. old_string must occur exactly once; add surrounding context to disambiguate. Use for targeted edits instead of rewriting the whole file. |
-| `glob` | true | Find files matching a glob pattern (e.g. "*.go", "internal/*/*.go", "**/*.test.ts"). Supports shell metacharacters * ? [] and the recursive ** pattern. |
-| `grep` | true | Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. |
+| `glob` | true | Find files matching a glob pattern (e.g. "*.go", "internal/*/*.go", "**/*.test.ts"). Supports shell metacharacters * ? [] and the recursive ** pattern. Independent globs with no data dependency should be issued in the same round. |
+| `grep` | true | Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. Independent searches with no data dependency should be issued in the same round. |
 | `kill_shell` | false | Terminate a running background job (bash or task) started with run_in_background. A no-op if the job has already finished or the id is unknown. |
-| `ls` | true | List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules). |
+| `ls` | true | List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules). Independent directory reads with no data dependency should be issued in the same round. |
 | `move_file` | false | Move or rename a file from source_path to destination_path. Creates the destination parent directory as needed. Use instead of shell mv, Move-Item, or ren for file moves so workspace confinement and file-edit permissions apply. |
 | `multi_edit` | false | Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls - a failure in step 3 leaves the file untouched instead of half-edited. |
 | `notebook_edit` | false | Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: "replace" (default) swaps the cell's source; "insert" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; "delete" removes the cell. cell_type is "code" or "markdown" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks - it keeps the JSON valid. |
-| `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. |
+| `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round. |
 | `todo_write` | true | Record and update a structured task list for the current work. Send the COMPLETE list every call - it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. |
 | `update_goal` | true | Report this turn's disposition for the active goal: `continue` (work is ongoing - give a concrete next_action), `complete` (the request is done and verification was attempted or reported unavailable), or `blocked` (only the user can unblock). An optional `completion` account may accompany `complete`: `verified` commands are reconciled against the session's real receipts, while `unverified` and `risks` are declarations the host cannot infer and do not block Light/Balanced completion. The host validates the claim against Delivery acceptance criteria and budget and decides whether to continue automatically. Outside an active goal turn the call fails closed without changing any state. |
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
@@ -43,13 +43,13 @@ The test checks that every registered built-in tool has a documented name, read-
 In a default full-token boot, Reasonix sends the built-in tools above plus the
 session, memory, skill, subagent, LSP, install, and slash-command tools below:
 
-Single-model Balanced uses this exact executor tool surface. Balanced with a
-distinct Planner and every Delivery session additionally expose one stable
+Every session uses this exact executor tool surface plus one stable
 proxy, `use_capability`, so optional MCP servers (including `auto_start=false`)
 can be inspected and called without changing provider-visible schemas
-mid-session. Delivery also
-adds a stable execution contract enforced by the host: state-changing and
-verification commands need acceptance criteria; changed work cannot finalize
+mid-session. The host also
+enforces a risk-adaptive execution contract: state-changing and
+verification commands need acceptance criteria when the turn is closed-loop;
+changed work cannot finalize
 without post-change review, verification, and an evidence-backed
 `complete_step` sign-off; Skill/MCP `require`/`prefer` routes are gated with
 host-proven evidence (including read-only answers — ordinary reads never skip
@@ -57,22 +57,33 @@ a required capability); and medium/high-risk mutations force structured
 `review` / `security_review` results via the review-only `review_report` tool,
 whose `reviewed_paths` must be backed by host-observed read/diff receipts.
 
+## Unified Boot Surface
+
+Every session uses the same provider-visible core tools and the same
+`use_capability` proxy.
+
 The two-model Planner and all task/fleet sub-agents also use `use_capability`
 (and never direct `mcp__*` schemas). Planner and ordinary writer-capable
 sub-agents may call installed or project-configured MCP without
 `readOnlyHint`; Planner leaves `destructiveHint` tools for the Executor, while
 ordinary sub-agents use the trusted MCP path (live authorization plus explicit
 deny only). Writer/destructive calls are still serialized and recorded as
-mutations for evidence, workspace leases, and Delivery guards. Strict read-only sub-agents
+mutations for evidence, workspace leases, and closed-loop guards. Strict read-only sub-agents
 share the same proxy schema and Host connections but still require
-`readOnlyHint` and non-destructive at execution time. Balanced dual-model
+`readOnlyHint` and non-destructive at execution time. Dual-model
 attaches independent proxy frontends to both Planner and Executor so a
 capability discovered during planning remains directly callable after handoff;
-their ledgers/audits are isolated while Host connections are shared. Economy
-remains single-model without an independent Planner.
+their ledgers/audits are isolated while Host connections are shared. A
+single-model session has no independent Planner.
 
-`use_capability` resolution is side-effect free: `action=list` returns sorted
-configured MCP servers without starting them; `action=call` on a
+`use_capability` is a fixed-schema proxy: prefer `search(query)` then `inspect`
+one exact id then `call`. `action=list` is a compact diagnostic inventory.
+Independent `list`/`search`/`inspect` calls are read-only and may be issued
+together. Resolution is side-effect free: `action=list` returns compact,
+sorted configured MCP server summaries without expanding every cached tool
+description or starting any server. Use `action=inspect` on one enabled
+`mcp-server:<name>` to read that server's live or cached tool directory without
+starting it. `action=call` on a
 not-yet-connected server resolves to a deferred target, Plan re-checks only an
 explicit phase opt-out on the real target, and the server process starts only
 after the permission gate and PreToolUse hooks approve the call. On-demand children
@@ -92,9 +103,20 @@ authorization, and exact Host connection identity; another project/tab's
 same-name shared client is rejected without process, network, or tool dispatch.
 
 The fixed proxy's provider-visible name, description, schema, and ordering do
-not change when MCP inventory changes. Balanced Executor deliberately retains
-its direct `mcp__*` tools, so its overall provider prefix may still change when
-those direct tools are installed, connected, or refreshed.
+not change when MCP inventory changes.
+
+When the current frontend has a session reader, the same fixed proxy also lists
+the read-only `session:tool_result` capability. It pages the complete local copy
+of one tool result by UTF-8 byte offset without adding a top-level schema. Calls
+require `tool_call_id`; new truncation markers also provide a stable
+`result_ref`, which is required to disambiguate repeated call IDs. `offset`
+defaults to 0, `limit` defaults to 16KiB and is capped at 24KiB. Each response
+starts with `result_ref`, actual offset, `next_offset`, `total_bytes`, full
+SHA-256, and `complete`, followed by the raw page. The reader is bound to the
+current Agent session and is not inherited from a parent when a capability
+frontend is cloned. A restricted child that already has `use_capability` may
+read only its own results; an allowed-tools profile without the proxy is not
+widened.
 
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
@@ -110,8 +132,8 @@ without injecting every report into the parent context at once. References are
 restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`) is on the
-provider-visible surface for every execution setting (`light` | `balanced` |
-`delivery`). Optional tools stay registered for host dispatch but are not
+provider-visible surface for every task. Host verification obligations come
+from real tool actions, not from preclassifying the prompt. Optional tools stay registered for host dispatch but are not
 expanded into the top-level provider schema; the model reaches them through
 `use_capability` without cache-breaking schema churn.
 
@@ -119,18 +141,17 @@ expanded into the top-level provider schema; the model reaches them through
 actual boot registry contract against the provider request, including read-only
 flags and canonical schemas.
 
-## Unified Boot Surface (all execution settings)
+## Unified Boot Surface (every task)
 
-Every execution setting starts with the same lean provider-visible core: direct
+Every task starts with the same lean provider-visible core: direct
 coding tools, background-shell lifecycle tools, and the stable capability proxy:
 
-`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
-`write_file`, `compress` (when registered), and `use_capability`.
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`,
+`wait`, `write_file`, `compress` (when registered), and `use_capability`.
 
 Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs,
 session history, memory mutation, workflow, and so on) remain in the host
 registry for dispatch. The model lists, inspects, calls, or declines them via
-`use_capability` without changing the provider tool list. Execution settings change
-host planning / verification / review policy, not which tools appear on the
-provider-visible surface. The retired `connect_tool_source` path is no longer
-registered.
+`use_capability` without changing the provider tool list. Task risk changes host
+planning, verification, and review policy, not which tools appear on the
+provider-visible surface. The retired `connect_tool_source` path is no longer registered.

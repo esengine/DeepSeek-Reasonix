@@ -18,8 +18,8 @@ func TestEnvPrefixVerification(t *testing.T) {
 		"CARGO_HOME=/y cargo test":                       true,
 	}
 	for c, want := range cases {
-		if got := IsDeliveryVerificationCommand(c); got != want {
-			t.Errorf("IsDeliveryVerificationCommand(%q) = %v, want %v", c, got, want)
+		if got := IsVerificationCommand(c); got != want {
+			t.Errorf("IsVerificationCommand(%q) = %v, want %v", c, got, want)
 		}
 	}
 }

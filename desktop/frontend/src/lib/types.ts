@@ -2,9 +2,12 @@
 // One event channel carries every kind; `kind` discriminates the payload.
 import type { HistoryServerSearch } from "./searchSources";
 import type { Todo } from "./tools";
-import type { ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
-export type { ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
-export type { ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionReference } from "./sessionCatalogTypes";
+import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
+import type { WireApproval } from "./approvalTypes";
+import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
+export * from "./remoteTypes";
+export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
+export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
 export type EventKind =
   | "turn_started"
   | "reasoning"
@@ -12,6 +15,10 @@ export type EventKind =
   | "message"
   | "tool_dispatch"
   | "tool_result"
+  | "tool_result_preview"
+  | "turn_status"
+  | "prompt_answered" | "session_changed"
+  | "mcp_interaction"
   | "tool_progress"
   | "usage"
   | "notice"
@@ -31,8 +38,31 @@ export type EventKind =
   | "context_maintenance"
   | "workspace_changed"
   | "turn_phase"
-  | "completion_summary";
+  | "completion_summary"
+  | "provider_unreachable";
 export type StreamAttemptAction = "begin" | "discard" | "commit";
+export type TurnStatus = "queued" | "in_progress" | "waiting_user" | "cancelling" | "completed" | "interrupted" | "failed" | "protocol_failed";
+export interface TurnEventEnvelope {
+  turnId: string;
+  seq: number;
+  status: TurnStatus | string;
+  runtimeEpoch?: string;
+  submissionId?: string;
+  transcriptRevision?: number;
+  transcriptDigest?: string;
+  event: WireEvent;
+}
+export interface TurnEventReplayView {
+  events: TurnEventEnvelope[];
+  floorSeq: number;
+  latestSeq: number;
+  nextAfterSeq: number;
+  hasMore: boolean;
+  resetRequired: boolean;
+  transcriptRevision?: number;
+  transcriptDigest?: string;
+  runtimeEpoch?: string;
+}
 export interface WireStreamAttempt {
   id: string;
   action: StreamAttemptAction;
@@ -165,6 +195,8 @@ export interface CostQuote {
   usageSource?: string;
   pricingFingerprint?: string;
   rateDate?: string;
+  rateBand?: "peak" | "off_peak" | "mixed" | string;
+  ratedAt?: string;
   incompleteReason?: string;
   legacyEstimate?: boolean;
   catalogSource?: string;
@@ -186,15 +218,7 @@ export interface WireRecoveryApproval {
   task_grant_scope?: string;
 }
 
-export interface WireApproval {
-  id: string;
-  tool: string;
-  subject: string;
-  reason?: string;
-  fresh?: boolean;
-  kind?: "tool" | "plan" | "recovery" | string;
-  recovery?: WireRecoveryApproval;
-}
+export type { WireApproval, WireWriteAccessApproval } from "./approvalTypes";
 
 export interface WireGuardian {
   id: string;
@@ -232,6 +256,20 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+}
+
+export type { MCPAppInstanceView, MCPAppPresentation } from "./mcpAppProtocol";
+
+// One server-initiated MCP elicitation awaiting accept/decline/cancel. Form
+// mode carries a flat primitive JSON schema; url mode a credential-free target.
+export interface WireMCPInteraction {
+  id: string;
+  server: string;
+  mode: "form" | "url";
+  message: string;
+  requestedSchema?: unknown;
+  url?: string;
+  elicitationId?: string;
 }
 
 // Extension UI surfaces (stage 8a) — structured-only documents published by
@@ -323,6 +361,9 @@ export interface MemoryCitation {
 
 export interface WireEvent {
   kind: EventKind;
+  turnId?: string;
+  seq?: number;
+  status?: TurnStatus;
   text?: string;
   detail?: string;
   // Stable notice id for localization; empty/absent = localize by text match.
@@ -334,6 +375,7 @@ export interface WireEvent {
   usage?: WireUsage;
   approval?: WireApproval;
   ask?: WireAsk;
+  mcpInteraction?: WireMCPInteraction;
   compaction?: WireCompaction;
   maintenance?: WireContextMaintenance;
   guardian?: WireGuardian;
@@ -342,15 +384,16 @@ export interface WireEvent {
   err?: string;
   checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
-  outcome?: "final_readiness" | "recovery_paused";
+  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
-  retryScope?: "headers" | "stream";
+  retryScope?: "headers" | "stream" | "protocol";
   streamAttempt?: WireStreamAttempt;
   /** Durable session-inbox item id for steer / TurnDone correlation. */
   itemId?: string;
+  sessionPath?: string; // Serve multi-session routing tag; absent locally.
   workspace?: WireWorkspaceChanged;
   /** turn_phase: working | checking | verifying | reviewing */
   phase?: string;
@@ -358,6 +401,8 @@ export interface WireEvent {
   completion?: WireCompletionSummary;
   tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
+  /** Unix milliseconds recorded by the desktop host when this turn began. */
+  turnStartedAt?: number;
   sessionHitTokens?: number;
   sessionMissTokens?: number;
   sessionCost?: number;
@@ -376,6 +421,10 @@ export interface WireCompletionSummary {
   review: string;
   gap_kinds?: string[];
   constraint_degraded: boolean;
+  /** Turn-time policy floor. Missing on historical events. */
+  floor?: "standard" | "delivery" | string;
+  /** Backend decision; authoritative when floor is present. */
+  attention?: boolean;
 }
 
 export type WorkspaceWatchState = "active" | "degraded" | "unavailable";
@@ -426,7 +475,7 @@ export interface WireFinalReadiness {
 }
 
 // Tab management types (desktop/tabs.go).
-export interface TabMeta {
+export interface TabMeta extends RemoteTabMetaFields {
   id: string;
   tabType?: "session" | "file";
   scope: string;
@@ -448,16 +497,23 @@ export interface TabMeta {
   ready: boolean;
   runtime?: SessionRuntimeView;
   running: boolean;
+  /** Unix milliseconds for the currently active foreground turn. */
+  turnStartedAt?: number;
   pendingPrompt?: boolean;
   backgroundJobs?: number;
   cancelRequested?: boolean;
   cancellable?: boolean;
+  turnId?: string;
+  turnStatus?: TurnStatus;
+  turnEventSeq?: number;
+  turnReplayAfterSeq?: number;
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   recovered?: boolean;
@@ -492,13 +548,14 @@ export interface TerminalWorkspaceView {
   shells: TerminalShellView[];
 }
 
-export interface ProjectNode {
+export interface ProjectNode extends RemoteProjectNodeFields {
   key: string;
   kind: "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session";
   label: string;
   root?: string;
   topicId?: string;
   sessionPath?: string;
+  preview?: string;
   projectColor?: string;
   turns?: number;
   turnsState?: "unknown" | "valid" | "corrupt" | string;
@@ -509,6 +566,7 @@ export interface ProjectNode {
   running?: boolean;
   status?: ProjectTopicStatus;
   pinned?: boolean;
+  sortOrder?: number;
   recovered?: boolean;
   recoveryReason?: string;
   recoveryDigest?: string;
@@ -517,7 +575,9 @@ export interface ProjectNode {
   recoveryBranchCount?: number;
   recoveryUnresolvedCount?: number;
   recoveryCleanupEligibleCount?: number;
+  recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
   isolatedWorktree?: boolean;
+  runtimeOnly?: boolean;
   children?: ProjectNode[];
 }
 
@@ -638,6 +698,7 @@ export interface ContextPanelInfo {
   mock?: boolean;
   readFiles: ReadFileRecord[];
   changedFiles: ChangedFileInfo[];
+  contextBudget?: ContextBudgetInfo;
 }
 
 export interface UsageSourceStats {
@@ -698,6 +759,7 @@ export interface HistoryMessage {
   summary?: string;
   archive?: string;
   decisionReceipt?: WireDecisionReceipt;
+  readiness?: WireFinalReadiness;
   serverSearch?: HistoryServerSearch[];
 }
 
@@ -853,25 +915,7 @@ export interface CheckpointMeta {
   disabledReason?: string;
 }
 
-export interface RewindPlanView {
-  planId?: string;
-  turn?: number;
-  scope?: string;
-  coverage?: string;
-  coverageGaps?: string[];
-  legacy?: boolean;
-  expiredFilePayload?: boolean;
-  canFiles?: boolean;
-  canConversation?: boolean;
-  disabledReason?: string;
-  conflicts?: string[];
-  files?: string[];
-  fileCount?: number;
-  activeWriters?: number;
-  path?: string;
-  ok?: boolean;
-  error?: string;
-}
+export type { RewindPlanView } from "./rewindTypes";
 
 export interface RewindResultView {
   ok?: boolean;
@@ -880,6 +924,12 @@ export interface RewindResultView {
   written?: string[];
   deleted?: string[];
   conversationOk?: boolean;
+  conversationForked?: boolean;
+  operationId?: string;
+  branch?: string;
+  partial?: boolean;
+  tabId?: string;
+  tab?: TabMeta;
   error?: string;
   conflicts?: string[];
   coverage?: string;
@@ -909,9 +959,10 @@ export interface ContextInfo {
   sessionCostQuote?: CostQuote;
   sources?: Record<string, UsageSourceStats>;
   maintenance?: ContextMaintenanceInfo;
+  contextBudget?: ContextBudgetInfo;
 }
 
-export interface Meta {
+export interface Meta extends RemoteSessionMetaFields {
   label: string;
   ready: boolean;
   runtime?: SessionRuntimeView;
@@ -927,13 +978,15 @@ export interface Meta {
   workspacePath?: string;
   gitBranch?: string;
   imageInputEnabled?: boolean;
+  visionFallbackEnabled?: boolean;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   tokenMode?: TokenMode;
-  /** Canonical role setting (light|balanced|delivery). Prefer over tokenMode. */
-  agentPreset?: AgentPreset;
+  agentPreset?: AgentPreset; // canonical role; prefer qualityFloor
+  qualityFloor?: QualityFloor; // absent means standard
+  floorInferred?: boolean; // facts, not user choice, put the session at delivery
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
@@ -942,11 +995,12 @@ export interface Meta {
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
-// TokenMode is the dual-write wire value for Agent role settings (角色设定).
-// Canonical product ids are light|balanced|delivery; economy/full remain one
-// compatibility version of persisted/API values.
+// TokenMode is the dual-write wire value for the session quality floor.
+// The floor itself is standard|delivery; light and its aliases fold to
+// standard, and full/economy remain one compatibility version of old values.
 export type TokenMode = "full" | "economy" | "delivery" | "light" | "balanced";
 export type AgentPreset = "light" | "balanced" | "delivery";
+export type QualityFloor = "standard" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
 // Optional Goal runtime summary; absent for old hosts or when no goal is active.
 export interface GoalRuntime {
@@ -1137,6 +1191,10 @@ export interface ServerView {
   /** @deprecated derived from enabled */
   startIntent?: "off" | "automatic" | string;
   runtimeState?: "idle" | "connecting" | "ready" | "issue" | string;
+  protocolVersion?: string;
+  sessionState?: "connecting" | "listening" | "ready" | "reconnecting" | "failed" | "closed" | string;
+  reconnectAttempts?: number;
+  errorKind?: "auth_required" | "session_missing" | "stream_closed" | "timeout" | "protocol" | "transport" | string;
   /** Product availability: available_on_demand | starting | connected | auth_required | project_auth_changed | start_failed | disabled */
   availability?: string;
   enabled?: boolean;
@@ -1508,161 +1566,6 @@ export interface MemoryView {
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
 export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
 
-// ── Remote SSH module (mirrors desktop/remote_app.go view structs) ──
-
-export type RemoteConnState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "pending_hostkey"
-  | "pending_secret"
-  | "stopped";
-
-export type RemoteServerState =
-  | "starting"
-  | "detect"
-  | "install"
-  | "waiting_lock"
-  | "launch"
-  | "health_check"
-  | "ready"
-  | "error"
-  | "stopped"
-  | "reuse";
-
-export interface RemoteHostView {
-  id: string;
-  label: string;
-  host: string;
-  port: number;
-  user: string;
-  identityFile: string;
-  proxyJump: string;
-  defaultWorkspace: string;
-  serveInstall: string;
-  useSSHConfig: boolean;
-  passwordSet?: boolean;
-  keyPassphraseSet?: boolean;
-}
-
-export interface RemoteHostInput {
-  label: string;
-  host: string;
-  port: number;
-  user: string;
-  identityFile: string;
-  proxyJump: string;
-  defaultWorkspace: string;
-  serveInstall: string;
-  useSSHConfig: boolean;
-  password?: string;
-  keyPassphrase?: string;
-  clearPassword?: boolean;
-  clearPassphrase?: boolean;
-  preserveExistingSettings?: boolean;
-}
-
-export interface RemoteFingerprintView {
-  hostId: string;
-  address: string;
-  keyType: string;
-  sha256: string;
-}
-
-export interface RemoteSecretPromptView {
-  promptId: string;
-  hostId: string;
-  host: string;
-  kind: "password" | "passphrase";
-  identity?: string;
-}
-
-export interface RemoteKnownHostLocation {
-  path: string;
-  line: number;
-}
-
-export interface RemoteConnectionErrorDetails {
-  code: "connection_failed" | "auth_failed" | "host_key_rejected" | "host_key_mismatch";
-  presentedSha256?: string;
-  knownHostRecords?: RemoteKnownHostLocation[];
-}
-
-export interface RemoteConnectionStatus {
-  hostId: string;
-  state: RemoteConnState;
-  error?: string;
-  errorDetails?: RemoteConnectionErrorDetails;
-  fingerprint?: RemoteFingerprintView;
-  secretPrompt?: RemoteSecretPromptView;
-  attempt?: number;
-}
-
-export interface RemoteDirEntry {
-  name: string;
-  path: string;
-  isDir: boolean;
-  size: number;
-  mtimeUnix: number;
-  symlink: boolean;
-}
-
-export interface RemoteFilePreview {
-  path: string;
-  body: string;
-  size: number;
-  mtimeUnix: number;
-  truncated: boolean;
-  binary: boolean;
-  err?: string;
-}
-
-export interface RemoteWriteResult {
-  ok: boolean;
-  conflict: boolean;
-  newMtimeUnix: number;
-}
-
-export interface RemoteForwardInput {
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-  label: string;
-}
-
-export interface RemoteForwardView {
-  id: string;
-  hostId: string;
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-  label: string;
-  state: string;
-  error?: string;
-}
-
-export interface RemoteServerView {
-  hostId: string;
-  workspace: string;
-  state: RemoteServerState;
-  message?: string;
-  localUrl?: string;
-  error?: string;
-}
-
-/** Path-free summary of files left behind by the removed Remote Workbench. */
-export interface RemoteLegacyWorkbenchData {
-  mirrorCount: number;
-  mirrorBytes: number;
-  trustFile: boolean;
-}
-
-export interface RemoteForwardsEvent {
-  hostId: string;
-  forwards: RemoteForwardView[];
-}
-
 /** Extension runtime doctor report from App.RuntimeDoctor. */
 export interface RuntimeDoctorReport {
   text: string;
@@ -1795,6 +1698,7 @@ export interface ProviderView {
   headers?: Record<string, string> | null; // optional extra request headers for compatible gateways
   extraBody?: Record<string, unknown> | null; // optional extra top-level request body fields for compatible gateways
   authHeader?: boolean; // Anthropic-compatible: send Authorization: Bearer instead of x-api-key
+  noProxy?: boolean; // reach this provider's endpoint directly, bypassing the configured/system proxy
   keySet: boolean; // the env var currently resolves to a value
   requiresKey?: boolean; // false for explicit no-auth providers
   configured?: boolean; // selectable: key is set or no key is required
@@ -1826,11 +1730,20 @@ export interface ProviderPresetView {
   label: string;
   description: string;
   keyEnv: string;
+  recommended?: boolean;
+  billingMode?: string;
+  displayGroup?: string;
+  displaySection?: string;
+  displayTier?: "primary" | "advanced" | "compatibility" | string;
+  routeKind?: string;
+  optional?: boolean;
+  displayOrder?: number;
   providerNames: string[];
   models: string[];
   added: boolean;
-  status?: "available" | "installed" | "installed_modified" | "name_conflict" | "similar_existing";
+  status?: "available" | "installed" | "installed_modified" | "partial" | "name_conflict" | "similar_existing";
   statusProviderNames?: string[];
+  missingProviderNames?: string[];
   keySet: boolean;
   requiresKey?: boolean;
   configured?: boolean;
@@ -1956,8 +1869,8 @@ export interface BackgroundRuntimeView {
 
 export interface WorkspaceConflictView {
   state: "none" | "local" | "external";
-  ownerTabId?: string;
-  ownerTitle?: string;
+  ownerTabId?: string; ownerTitle?: string;
+  ownerScope?: string; ownerLabel?: string;
   ownerWork: ActiveWorkView;
   canReveal: boolean;
   canCreateWorktree: boolean;
@@ -1978,7 +1891,37 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
-  effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  effectiveShell?: string; // bound shell: "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
+  resolvedShell?: string; // shell a reload would pick now
+  shellReloadRequired?: boolean;
+  shellCapabilities: ShellCapabilityView[];
+  gitCapability?: ShellCapabilityView | null;
+  shellInstallAction?: ShellInstallActionView | null;
+  shellRepairGuidance?: { manager: string; command?: string } | null;
+  gitRepairGuidance?: { manager: string; command?: string } | null;
+}
+// One discovered interpreter: usable on this host, where, and why not.
+export interface ShellCapabilityView {
+  id: string; // "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
+  variant?: string;
+  available: boolean;
+  path?: string;
+  source?: string;
+  reason?: string;
+}
+// Optional manual repair action the sandbox section may offer (Windows only).
+export interface ShellInstallActionView {
+  id: string; // "git-for-windows"
+  mode: string; // "manual"
+  available: boolean;
+  manualUrl?: string;
+}
+// Structured outcome of InstallShellSupport.
+export interface ShellInstallResult {
+  status: string; // "manual_required" | "unsupported_platform"
+  path?: string;
+  reason?: string;
+  manualUrl?: string;
 }
 
 export interface NetworkProxyView {
@@ -2025,6 +1968,10 @@ export interface BotAllowlistView {
   qqGroups: string[];
   feishuGroups: string[];
   weixinGroups: string[];
+  dingtalkUsers: string[];
+  dingtalkApprovers: string[];
+  dingtalkAdmins: string[];
+  dingtalkGroups: string[];
 }
 
 export interface BotAccessView {
@@ -2041,6 +1988,7 @@ export interface BotSelfUserIDsView {
   qq: string[];
   feishu: string[];
   weixin: string[];
+  dingtalk: string[];
 }
 
 export interface BotPairingView {
@@ -2099,6 +2047,19 @@ export interface WeixinBotView {
   apiBase: string;
 }
 
+export interface DingtalkBotView {
+  enabled: boolean;
+  clientId: string;
+  clientSecretEnv: string;
+  secretSet: boolean;
+  botName: string;
+  requireMention: boolean;
+  model: string;
+  toolApprovalMode: string;
+  workspaceRoot: string;
+  access: BotAccessView;
+}
+
 export interface BotConnectionCredentialView {
   appId: string;
   appSecretEnv: string;
@@ -2155,6 +2116,7 @@ export interface BotSettingsView {
   qq: QQBotView;
   feishu: FeishuBotView;
   weixin: WeixinBotView;
+  dingtalk: DingtalkBotView;
   connections: BotConnectionView[];
 }
 
@@ -2164,6 +2126,7 @@ export interface BotRuntimeStatusView {
   message: string;
   connections: number;
   startedAt: string;
+  platforms: Record<string, string>;
 }
 
 export interface BotInstallStartResult {
@@ -2221,6 +2184,7 @@ export interface BotConnectionDiagnostic {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
+  visionModel: string;
   subagentModel: string;
   subagentEffort: string;
   autoPlan: string;

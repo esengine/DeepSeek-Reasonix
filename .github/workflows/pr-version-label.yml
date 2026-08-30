@@ -2,7 +2,7 @@ name: Label PR version
 
 # Contributors (especially from forks) can't set labels themselves — that needs
 # triage rights. A PR's version line is fully determined by its base branch, so
-# this reads base.ref and applies v1/v2 on their behalf. pull_request_target runs
+# this reads base.ref and applies v1/v2/v3 on their behalf. pull_request_target runs
 # in the base repo's context so it has write access even for fork PRs; it only
 # reads trusted metadata (the base ref) and never checks out or runs PR code.
 on:
@@ -23,27 +23,28 @@ jobs:
       - uses: actions/github-script@v9
         with:
           script: |
+            const lineByBase = { v1: 'v1', 'main-v2': 'v2', studio: 'v3' };
+            const lines = Object.values(lineByBase);
             const base = context.payload.pull_request.base.ref;
-            const label = base === 'v1' ? 'v1'
-                        : base === 'main-v2' ? 'v2'
-                        : null;
+            const label = lineByBase[base] || null;
             if (!label) {
               core.info(`Base branch '${base}' isn't a release line; skipping.`);
               return;
             }
-            const other = label === 'v2' ? 'v1' : 'v2';
             await github.rest.issues.addLabels({
               ...context.repo,
               issue_number: context.payload.pull_request.number,
               labels: [label],
             });
-            // Drop the other line's label if the base was changed after opening.
-            try {
-              await github.rest.issues.removeLabel({
-                ...context.repo,
-                issue_number: context.payload.pull_request.number,
-                name: other,
-              });
-            } catch (e) {
-              core.info(`No ${other} label to remove.`);
+            // Drop other line labels if the base was changed after opening.
+            for (const other of lines.filter((l) => l !== label)) {
+              try {
+                await github.rest.issues.removeLabel({
+                  ...context.repo,
+                  issue_number: context.payload.pull_request.number,
+                  name: other,
+                });
+              } catch (e) {
+                core.info(`No ${other} label to remove.`);
+              }
             }

@@ -59,6 +59,27 @@ after the task is complete.
 The Goal-mode task contract rides the provider-visible user turn. It does not
 rewrite the cache-stable system prompt, memory prefix, or tool schemas.
 
+Host verification obligations are fact-driven. They come from approved plans,
+active goals, the latest todo, project checks, and actual receipts — never from
+classifying the prompt as simple, light, or complex. Subsequent related writes
+invalidate earlier targeted verification, review, and sign-off; every later
+workspace write invalidates project-wide verification. A targeted command does
+not satisfy a full-verification obligation unless it is one of the repository's
+declared checks and all declared checks have passed. Review evidence must cover
+the changed target, match the required review kind, and have a non-blocking
+verdict. Sequential writes to a second production target establish the same
+todo and acceptance-criteria preconditions as a multi-file write observed in a
+single tool call.
+
+Automatic independent review is attached only for architecture-worthy writes:
+protocol/schema/public API surfaces, concurrency-sensitive paths, cross-module
+edits, or large scope (eight or more files). Same-package multi-file edits and
+pathless opaque MCP writers do not auto-demand it. The host adds at most one
+first independent review and one re-review from receipts; explicit `/review` or
+`run_skill` review still runs. Review sub-agents default to 8 steps and a 2048
+output-token cap, and start from a parent facts pack (decisions, evidence
+summary, file anchors) rather than the parent transcript.
+
 ## Example
 
 ```text

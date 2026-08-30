@@ -1,6 +1,9 @@
 package capability
 
-import "sync"
+import (
+	"maps"
+	"sync"
+)
 
 // Audit is a non-persisted capability/routing counters sink, mirroring
 // readiness audit collection for run --metrics and e2ebench.
@@ -31,6 +34,192 @@ type Audit struct {
 	RouterCompletionTokens int
 	RouterCost             float64
 	RouterLatencyMs        int64
+	Discovery              DiscoveryAudit
+	Arguments              ArgumentAudit
+	LoopGuard              LoopGuardAudit
+	MCPLists               MCPListAudit
+	ToolExec               ToolExecAudit
+	Phases                 PhaseAudit
+}
+
+// DiscoveryAudit counts model list/search/inspect actions, not MCP network.
+type DiscoveryAudit struct {
+	Lists, Searches, Inspects int
+	ResultCount, ResultBytes  int
+	NetworkCalls              int
+}
+
+// ArgumentAudit is host-side schema validation without argument values.
+type ArgumentAudit struct {
+	Validations, Fail, Skip, RemoteDispatch int
+}
+
+// LoopGuardAudit records deterministic stop/retry actions.
+type LoopGuardAudit struct {
+	RepeatFailures, RepeatClarifications, SoftBudgetNudges int
+	BlockedCalls                                           int
+}
+
+// MCPListAudit distinguishes shared-host, disk-cache, and remote tools/list.
+type MCPListAudit struct {
+	SharedHost, DiskCache, Remote int
+	DurationMs                    int64
+	ToolCount, SchemaBytes        int
+	Triggers                      map[string]int `json:"triggers,omitempty"`
+}
+
+// ToolExecAudit records classified tool execution without payloads.
+type ToolExecAudit struct {
+	Calls, ReadOnly, Parallel int
+	QueueMs, ExecMs           int64
+	RawBytes, VisibleBytes    int
+}
+
+// PhaseAudit is content-free time spent in host phases.
+type PhaseAudit struct {
+	ProviderWaitMs, ToolExecMs, SubagentWaitMs int64
+	UserWaitMs, CompactMs, ReviewMs            int64
+}
+
+// RecordCapabilityDiscovery distinguishes model discovery actions from actual
+// MCP network traffic. action is list, search, or inspect.
+func (a *Audit) RecordCapabilityDiscovery(action string, results, bytes int, network bool) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch action {
+	case "list":
+		a.Discovery.Lists++
+	case "search":
+		a.Discovery.Searches++
+	case "inspect":
+		a.Discovery.Inspects++
+	}
+	a.Discovery.ResultCount += results
+	a.Discovery.ResultBytes += bytes
+	if network {
+		a.Discovery.NetworkCalls++
+	}
+}
+
+// RecordArgumentValidation records host validation without argument values.
+// remoteDispatched must stay false for validation failures.
+func (a *Audit) RecordArgumentValidation(failed, skipped, remoteDispatched bool) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Arguments.Validations++
+	if failed {
+		a.Arguments.Fail++
+	}
+	if skipped {
+		a.Arguments.Skip++
+	}
+	if remoteDispatched {
+		a.Arguments.RemoteDispatch++
+	}
+}
+
+// RecordRemoteDispatch marks that a host-validated call reached tools/call.
+func (a *Audit) RecordRemoteDispatch() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.Arguments.RemoteDispatch++
+	a.mu.Unlock()
+}
+
+// RecordMCPList records one tools/list observation by source and host trigger.
+func (a *Audit) RecordMCPList(source, trigger string, durationMs int64, toolCount, schemaBytes int) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch source {
+	case "shared_host":
+		a.MCPLists.SharedHost++
+	case "disk_cache":
+		a.MCPLists.DiskCache++
+	case "remote":
+		a.MCPLists.Remote++
+	}
+	a.MCPLists.DurationMs += durationMs
+	a.MCPLists.ToolCount += toolCount
+	a.MCPLists.SchemaBytes += schemaBytes
+	if trigger != "" {
+		if a.MCPLists.Triggers == nil {
+			a.MCPLists.Triggers = map[string]int{}
+		}
+		a.MCPLists.Triggers[trigger]++
+	}
+}
+
+// RecordLoopGuard records a host loop-guard action without payloads.
+func (a *Audit) RecordLoopGuard(kind string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch kind {
+	case "repeat_failure":
+		a.LoopGuard.RepeatFailures++
+	case "repeat_clarification":
+		a.LoopGuard.RepeatClarifications++
+	case "soft_budget":
+		a.LoopGuard.SoftBudgetNudges++
+	case "blocked":
+		a.LoopGuard.BlockedCalls++
+	}
+}
+
+// RecordToolExecution records one classified tool run without arguments.
+func (a *Audit) RecordToolExecution(readOnly, parallel bool, queueMs, execMs int64, rawBytes, visibleBytes int) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ToolExec.Calls++
+	if readOnly {
+		a.ToolExec.ReadOnly++
+	}
+	if parallel {
+		a.ToolExec.Parallel++
+	}
+	a.ToolExec.QueueMs += queueMs
+	a.ToolExec.ExecMs += execMs
+	a.ToolExec.RawBytes += rawBytes
+	a.ToolExec.VisibleBytes += visibleBytes
+}
+
+// RecordPhaseMs accumulates content-free phase durations.
+func (a *Audit) RecordPhaseMs(phase string, ms int64) {
+	if a == nil || ms <= 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch phase {
+	case "provider":
+		a.Phases.ProviderWaitMs += ms
+	case "tool":
+		a.Phases.ToolExecMs += ms
+	case "subagent":
+		a.Phases.SubagentWaitMs += ms
+	case "user":
+		a.Phases.UserWaitMs += ms
+	case "compact":
+		a.Phases.CompactMs += ms
+	case "review":
+		a.Phases.ReviewMs += ms
+	}
 }
 
 // RecordDecision captures the route-to-invocation funnel before the model acts.
@@ -207,6 +396,12 @@ func (a *Audit) Snapshot() Audit {
 		MCPInspect:             a.MCPInspect,
 		MCPCall:                a.MCPCall,
 		MCPCallFailures:        a.MCPCallFailures,
+		Discovery:              a.Discovery,
+		Arguments:              a.Arguments,
+		LoopGuard:              a.LoopGuard,
+		MCPLists:               cloneMCPListAudit(a.MCPLists),
+		ToolExec:               a.ToolExec,
+		Phases:                 a.Phases,
 		ReviewBlocks:           a.ReviewBlocks,
 		SecurityReviewBlocks:   a.SecurityReviewBlocks,
 		RouterPromptTokens:     a.RouterPromptTokens,
@@ -214,4 +409,13 @@ func (a *Audit) Snapshot() Audit {
 		RouterCost:             a.RouterCost,
 		RouterLatencyMs:        a.RouterLatencyMs,
 	}
+}
+
+func cloneMCPListAudit(in MCPListAudit) MCPListAudit {
+	out := in
+	if len(in.Triggers) > 0 {
+		out.Triggers = make(map[string]int, len(in.Triggers))
+		maps.Copy(out.Triggers, in.Triggers)
+	}
+	return out
 }

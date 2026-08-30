@@ -2,12 +2,14 @@ package control
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/turnevent"
 )
 
 func TestExplainError(t *testing.T) {
@@ -48,6 +50,19 @@ func TestExplainError(t *testing.T) {
 		}
 	}
 
+	formatMismatch := explainError(&provider.AuthError{
+		Provider: "opencode-go-anthropic", KeyEnv: "OPENCODE_GO_API_KEY", Status: 401, HasKey: true,
+		Body: `{"error":{"message":"Model grok-4.5 is not supported for format anthropic"}}`,
+	})
+	for _, want := range []string{i18n.M.ProviderErrModelFormatMismatch, i18n.M.ProviderErrOpenCodeGoGrokRoute, "not supported for format anthropic"} {
+		if !strings.Contains(formatMismatch.Error(), want) {
+			t.Errorf("format mismatch = %q, want it to contain %q", formatMismatch.Error(), want)
+		}
+	}
+	if strings.Contains(formatMismatch.Error(), i18n.M.ProviderErrAuthRejected) {
+		t.Errorf("format mismatch must not be classified as a rejected API key: %q", formatMismatch.Error())
+	}
+
 	authEcho := explainError(&provider.AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401, HasKey: true, Body: `{"error":{"message":"Authentication Fails, Your api key: ****ae54 is invalid"}}`})
 	if !strings.Contains(authEcho.Error(), "Authentication Fails") {
 		t.Errorf("401 should keep the readable reason, got %q", authEcho.Error())
@@ -66,6 +81,17 @@ func TestExplainError(t *testing.T) {
 	jsonBody := explainError(&provider.APIError{Provider: "deepseek", Status: 400, Body: `{"error":{"message":"This model's maximum context length is 65536 tokens.","type":"invalid_request_error"}}`})
 	if !strings.Contains(jsonBody.Error(), i18n.M.ProviderErrBadRequest) || !strings.Contains(jsonBody.Error(), "maximum context length") {
 		t.Errorf("400 should append the provider reason from a JSON body, got %q", jsonBody.Error())
+	}
+
+	limit := explainError(&provider.ContextLimitError{
+		APIError:         &provider.APIError{Provider: "deepseek", Status: 400, Body: `{"error":{"message":"This model's maximum context length is 1048576 tokens. However, you requested 1165351 tokens (810882 in the messages, 354469 in the completion)."}}`},
+		WindowTokens:     1_048_576,
+		RequestedTokens:  1_165_351,
+		PromptTokens:     810_882,
+		CompletionTokens: 354_469,
+	})
+	if !strings.Contains(limit.Error(), "810882") || !strings.Contains(limit.Error(), "1048576") || !strings.Contains(limit.Error(), "Compact") {
+		t.Errorf("context overflow should name numbers and recovery, got %q", limit.Error())
 	}
 
 	toolSchema := explainError(&provider.APIError{
@@ -153,6 +179,17 @@ func TestExplainError(t *testing.T) {
 	//nolint:errorlint // identity check: explainError must return the same error, unwrapped.
 	if explainError(plain) != plain {
 		t.Error("unknown errors should pass through unchanged")
+	}
+}
+
+func TestExplainErrorPreservesTurnLedgerFailure(t *testing.T) {
+	storageErr := fmt.Errorf("persist turn admission: %w", turnevent.ErrTurnLedgerUnavailable)
+	got := explainError(storageErr)
+	if !errors.Is(got, turnevent.ErrTurnLedgerUnavailable) {
+		t.Fatalf("explainError(%v) = %v, want storage sentinel preserved", storageErr, got)
+	}
+	if strings.Contains(got.Error(), "model stream") {
+		t.Fatalf("storage failure was misclassified as provider failure: %v", got)
 	}
 }
 

@@ -69,12 +69,12 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_depth = 2              # nested delegation depth; set 1 for the old single-layer boundary
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
-# compact_ratio = 0.85             # sole auto trigger; presets 0.70 / 0.80 / 0.85
-# max_output_tokens = 0            # recommended: automatic (DeepSeek default high → ~64K; not unlimited)
-# max_output_tokens = 32768        # ordinary coding / cost control
-# max_output_tokens = 65536        # heavy reasoning / long tool loops
-# max_output_tokens = 131072       # only after repeated finish_reason=length
-# max_output_tokens never changes compact_ratio; only the final send-time clip does
+# compact_ratio = 0.80             # sole auto trigger; presets 0.70 / 0.80 / 0.85
+# max_output_tokens = 0            # auto: official DeepSeek omits the field (server 384K) until the window is tight
+# max_output_tokens = 32768        # optional cost cap; still clipped to physical remaining
+# max_output_tokens = 65536        # optional cost cap
+# max_output_tokens = -1           # force-omit the wire field; compact if the known auto budget no longer fits
+# max_output_tokens never changes compact_ratio; 0 is the provider auto value, not "skip local checks"
 
 [[providers]]
 name        = "deepseek-flash"
@@ -177,7 +177,7 @@ code; unsent counters stay in a bounded local queue for a later invocation.
 The ping contains a dedicated random 128-bit CLI install ID, CLI version, OS,
 architecture, and the `cli` surface marker. Counter batches use that same ID for
 daily active-install deduplication and contain only fixed buckets such as CLI
-mode/profile, permission/session mode, turn latency, finish reason, cache-hit
+surface, permission/session mode, turn latency, finish reason, cache-hit
 range, generic Provider/tool error class, compaction, recovery counters, and
 normalized UI language. This ID is separate from the desktop install ID and is
 not an account, hardware, repository, or session identifier.
@@ -271,10 +271,12 @@ The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
 model and reasoning-effort controls, Goal, a live todo panel fed by the
 `todo_write` tool, extension status/card/form/notification surfaces, and
 provider balance when configured. Extension-hosted providers appear in the
-model picker. Run `/reload` while idle to fail-atomically reload extension
-sidecars and the runtime generation without restarting Serve. Use `--model`,
-`--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
-user-global `default_model`.
+model picker. Serve can keep several sessions active at once: creating or
+resuming another session detaches a busy turn instead of cancelling it, and the
+session list continues to report that background activity. Run `/reload` while
+idle to fail-atomically reload extension sidecars and the runtime generation
+without restarting Serve. Use `--model`, `--max-steps`, or `--resume` for
+one-off launches; otherwise `serve` uses the user-global `default_model`.
 
 If the selected Provider has no saved API key, a loopback-bound Serve still
 starts and shows a Provider setup page instead of failing before the browser can
@@ -358,21 +360,28 @@ Remote-side state lives under the remote host's `~/.reasonix/remote/`:
 `serve-<slug>.token` (0600; the auth token, passed to serve via `--token-file`
 so it never appears in `ps`), and `serve-<slug>.log`.
 
-In the desktop app, manage hosts under **Settings -> Remote SSH**, then use the
-status-bar chip or the host row's **Remote explorer** button to browse and edit
-files over SFTP, manage port forwards, and start/open the remote workspace.
-Opening a workspace creates a separate native Reasonix window, similar to a
-VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
-window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions. The remote web page uses the provider configuration and
-API keys on the **remote** host — the desktop never exposes its own providers
-to a remote host. If that host is missing the selected Provider's API key, the
-window shows the authenticated setup page first, saves the key only in the
-remote Reasonix credential file, and activates the Provider without restarting
-the remote Serve process. A transient SSH outage keeps the remote window open;
-the desktop reconnects in the background, re-attaches its loopback forward, and
-reloads the window against the recovered Serve. An authentication or host-key
-failure is terminal and closes the unusable remote window instead.
+In the desktop app, manage hosts under **Settings -> Remote SSH**. To add a
+remote project from the project tree, open the add-project menu and choose
+**Remote connection**. The three-step wizard saves or reuses an SSH host,
+connects and verifies that the remote OS is supported, then lets you browse and
+choose a workspace before opening an in-app remote session tab. The key-file
+button uses the native file picker so the saved identity is always an absolute
+desktop path. You can also use the status-bar chip or the host row's **Remote
+explorer** button to browse and edit files over SFTP, manage port forwards, and
+start/open the remote workspace.
+
+The project tree lists the workspace's remote sessions. Selecting a row resumes
+that exact session in the shared transcript and composer surface; starting or
+resuming another session leaves a busy turn running remotely and shows its
+running state in the tree. The desktop owns the SSH tunnel and never mixes local
+conversation sessions into the remote tab. In `remote` credential mode, the
+remote Serve uses provider configuration and API keys on the **remote** host.
+In `local-proxy` mode, the desktop keeps the key locally and model calls return
+through an authenticated reverse forward; the credential watchdog repairs that
+channel after transient forwarding failures. A transient SSH outage keeps the
+tab available while the desktop reconnects and re-attaches its forwards. An
+authentication or host-key failure is terminal and marks the remote workspace
+unavailable instead.
 
 ## Custom OpenAI-compatible providers
 
@@ -409,7 +418,16 @@ usually needs only the provider API key: the key value is stored in Reasonix hom
 environment-variable name, context window, vision model metadata, proxy bypass
 for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
 heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
-max-effort support, and OpenCode Go per-model reasoning overrides. The dedicated
+max-effort support, and OpenCode Go per-model reasoning overrides. Official DeepSeek Anthropic, Responses, and Chat Completions catalogs also
+include `deepseek-v4-flash-vision-exp`. In Settings, mark that SKU for image
+input with the same checkbox used by other providers, then select it. Composer
+and `@` user images are sent as official visual input using the three documented
+shapes: inline base64 `data:` URLs for local files, `http(s)` image URLs as-is,
+and Files API `file-api-` ids (local images over 32 MiB on official DeepSeek are
+uploaded automatically). Chat Completions uses `image_url` or `file`, Anthropic
+uses `image`+`source.base64|url|file`, and Responses uses `input_image`.
+Flash and Pro stay text-only on the wire even if checked, and tool screenshots
+are not forwarded as image parts. The vision SKU uses the Flash rate card. The dedicated
 OpenCode Go DeepSeek Anthropic and DeepSeek Responses presets expose the verified
 Flash routes and enable provider-side `web_search` by default; the Responses
 variant uses stateless context replay. The existing mixed OpenCode Go Anthropic
@@ -558,6 +576,12 @@ setting does not change desktop or web text fields.
 
 ### Desktop GUI
 
+The Desktop Todo shelf derives its label from both `todo_write` and the owning
+tab's runtime: active work is **In progress**, an approval or question is
+**Waiting for input**, and an idle/restored current item is **Ready to continue**.
+The latter exposes a **Continue** action that rechecks the captured tab before
+sending, so a rapid tab switch cannot route stale work into another session.
+
 Desktop shortcuts are managed from **Settings → Shortcuts**. Pick a configurable
 row, press a new key combination, and Reasonix saves it for the desktop app.
 Standard editing shortcuts such as Undo and Redo are shown as locked rows because
@@ -589,7 +613,7 @@ Composer shortcuts:
 | `Cmd+Z` on macOS, `Ctrl+Z` on Windows/Linux | Undoes the latest composer edit | Native typing stays in the WebView history; Reasonix-managed paste, cut, folded blocks, and structured tokens are restored as complete transactions. |
 | `Cmd+Shift+Z` on macOS, `Ctrl+Shift+Z` on Windows/Linux | Redoes the latest composer edit | On Windows/Linux, `Ctrl+Y` is also accepted after the YOLO shortcut has been rebound. |
 | `Cmd+Y` / `Ctrl+Y` (default) | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. The current binding is shown in **Settings → Shortcuts**. |
-| `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Clipboard images are attached; images can also be dropped into the composer. |
+| `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Clipboard images are attached; images can also be dropped into the composer. Official DeepSeek Flash/Pro stay text-only; switch to `deepseek-v4-flash-vision-exp` to send those images. |
 | Plain `Up` / `Down` at the prompt boundary | Recalls older or newer submitted prompts | Modified arrows and native text navigation stay with the textarea. |
 | `Esc` while a turn is running | Cancels the running turn | If the turn has not produced a response yet, the draft is restored. |
 
@@ -616,13 +640,12 @@ Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
 to select one of the named accent palettes shown by bare `/theme`.
 
 The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
-interaction state on the left. On wider terminals, model, effort, and work mode
+interaction state on the left. On wider terminals, model and effort
 stay together on the right; a second row shows available Git identity, cache hit
 rate, context use, compaction headroom, jobs, and balance. `ready` is the idle
 composer state, not a model-health check. Pickers, approvals, image paste, shell
 mode, and other active interactions replace it. Narrow terminals move, wrap, or
-compact whole groups; labels and displayed work-mode values follow `/language`,
-while `/work-mode` command arguments remain the stable English identifiers.
+compact whole groups; visible labels follow `/language`.
 
 Chat and transcript shortcuts:
 
@@ -661,7 +684,6 @@ Mode and display shortcuts:
 | `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
-| `/preset [light|balanced|delivery]` | Shows or switches the current session's execution setting (执行设定) | `/work-mode` and `/profile` are compatibility aliases (`economy` → `light`). Switching updates the execution setting in place without rebuilding the controller; blocked while a turn, approval, or background job is active. |
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
@@ -686,8 +708,8 @@ Mode meanings:
 | Mode | Meaning |
 | --- | --- |
 | Ask | Prompts for fallback writer approvals. |
-| Auto | Auto-allows fallback approvals; explicit `ask` / `deny` rules still apply. |
-| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, and plan approval prompts still wait. |
+| Auto | Auto-allows fallback approvals, including interactive `remember`/`forget`; explicit `ask` / `deny` rules still apply. |
+| YOLO | Skips ordinary tool approval prompts, including `remember`/`forget`; `deny`, user `ask` questions, and plan approval prompts still wait. |
 | Plan | Directs the model to plan first — a plan-first workflow, not an all-tools read-only mode. Built-in writers still follow the active Ask/Auto/YOLO rules and Sandbox; installed MCP writers, destructive targets, and readers from unauthorized servers are hard-blocked for the whole planning phase (approval cannot release them; they return once Plan exits), and explicit phase-only tools such as `complete_step` wait until approval. |
 | Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
@@ -722,10 +744,17 @@ The sandbox remains a second boundary after authorization; confinement cannot
 make ambiguous command parsing safe to authorize automatically.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
-*enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
+*enforcement*: they are two layers. A permitted call still cannot write outside
+the approved roots. The file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
 refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
 edits stay in the project), resolving symlinks and `..` so a link can't tunnel
-out. `forbid_read` optionally hides sensitive files or directories from the agent's
+out. Writing outside the workspace is an interactive *extend write access*
+approval (once / this session / add to project `reasonix.toml` / deny), not a
+sandbox escape. Bash must name those directories with `additional_write_dirs`
+plus a `justification`; the host does not infer paths from the command text.
+Headless `reasonix run` does not prompt: pass `--add-dir` or configure
+`[sandbox].allow_write`. The whole home directory can be approved with a
+high-risk warning; the filesystem root and Reasonix session/state paths cannot. `forbid_read` optionally hides sensitive files or directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
 itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
@@ -974,7 +1003,7 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/context`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. Built-in **skills** such as `/init`,
@@ -1048,10 +1077,13 @@ schemas. Use `/memory recall` to see the selected IDs, scores, reasons,
 freshness, budget, and suppression decision.
 
 New, bounded, non-sensitive project/reference facts can be created
-automatically with no setup or approval click. Global facts, user preferences,
-feedback, updates, duplicates, sensitive/oversized content, and every `forget`
-still require explicit confirmation. The storage layer makes the automatic
-grant create-only, so it cannot overwrite a fact that appears concurrently.
+automatically with no setup or approval click. In Ask, global facts, user
+preferences, feedback, updates, duplicates, sensitive/oversized content, and
+every `forget` require explicit confirmation. Interactive Auto treats these
+memory tools as normal fallback operations while preserving explicit `ask` and
+`deny` rules; interactive YOLO bypasses memory ask prompts but still honors
+deny. The storage layer makes the automatic create grant create-only, so it
+cannot overwrite a fact that appears concurrently.
 A top-level headless controller may use the same one-shot low-risk create path;
 sub-agents and headless surfaces without the owning scoped controller fail closed.
 
@@ -1107,8 +1139,8 @@ recovery, providers, or maintainer workflows.
 
 No setup, network connection, vector database, or embedding service is needed.
 Search results prefer the query language while retaining explicit `en`,
-`zh-CN`, audience, and catalog filters. Balanced and Delivery profiles expose the
-tool directly; Economy connects the `docs` source on demand. Every result reports
+`zh-CN`, audience, and catalog filters. The docs capability is exposed through
+the unified `use_capability` surface for every task. Every result reports
 the product version, immutable source revision, and corpus SHA-256 digest. Release
 CI compiles the CLI and rejects publication unless that embedded manifest matches
 the candidate's `docs/*.md`, `release-notes/releases.json`, and build identity. A
@@ -1159,7 +1191,7 @@ new read/search results, mutations, verification, todo/signoff changes, and
 reviews advance the goal; an exact tool/argument/result repeat does not.
 Cumulative turns, tokens, real provider requests, and active work time are
 tracked and shown as statistics; a token limit appears only when explicitly
-configured. A paused goal keeps its todos, Delivery
+configured. A paused goal keeps its todos, evidence
 checkpoint, and runtime history — use `/goal resume` to continue, or `/goal
 pause` to pause a running goal manually. `/goal status` shows turns, requests,
 tokens, and work time. Repeated host failures, zero-evidence rounds, and Todo
@@ -1181,14 +1213,22 @@ Legacy simple/write/research classes are still inferred for sidecar and CLI
 compatibility, but they no longer select an execution quota. There is no
 separate research runtime to configure. Goal state stays in the normal session sidecar, progress
 comes only from novel host receipts, canonical todos, `complete_step`, review
-and the Delivery checkpoint, and completion is decided by Delivery readiness
-plus the bounded Goal evaluator. Light/Balanced honor an `update_goal`
-`completion.unverified` account for checks the model could not run; a second
+and the evidence checkpoint, and completion is decided by closed-loop readiness
+plus the bounded Goal evaluator. An `update_goal`
+`completion.unverified` account is honored for checks the model could not run; a second
 identical complete on the same leftover checks finishes the Goal instead of
 looping. Legacy `.reasonix/autoresearch/<task-id>/` archives are
 read-only: an explicit old path can be recovered as an ordinary Goal, but new
 runs never create or update those directories. Deprecated budget flags are
 accepted for compatibility but are hidden from help and completion.
+
+### Ordered batch sign-offs
+
+The host may process multiple `complete_step` calls from one provider tool-call
+round. They must follow the canonical Todo order, and each step's work and
+evidence must already exist before its sign-off call. The host advances the
+Todo state after each successful call; skipped, pending, or out-of-order steps
+remain rejected. This does not change the provider-visible tool schema.
 
 ## @ references
 
@@ -1217,36 +1257,33 @@ The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
 research tool set, so it can inspect relevant files before handing a plan to the
 executor. Writer and workflow tools remain executor-only.
 
-Reasonix routes each turn deterministically without another classifier model:
-questions, short follow-ups, clear atomic edits, and bounded read-only actions
-go straight to the executor; bounded implementation work may receive a short
-light plan. Ambiguous, cross-surface, structured, high-risk, active-Goal, or
-Delivery work receives a full plan unless the request is clearly atomic or
-read-only. Explicit Plan Mode
-remains a separate host workflow and is never planned twice. An explicit
-`plan first` / `先规划` request forces planning, while `just do it` / `直接改`
-goes directly to the executor. Execution boundaries are recognized across the
-request, not only at its beginning, while quoted examples are ignored. Bare
-plan-first requests continue from the planner to the executor automatically.
-Requests that explicitly say to wait for confirmation pause at the host
-approval boundary and continue to the executor after approval. Only an
-explicit `plan only` / `不要执行` request ends the
+Reasonix routes each turn deterministically without another classifier model.
+Ordinary requests always stay with the executor. The dedicated planner runs
+only for an explicit `plan first` / `先规划` request, an explicit wait-for-
+approval boundary, an explicit `plan only` / `不要执行` request, or Goal
+start. Wording such as "complex refactor" or "fix login" does not start the
+planner. There is no automatic planning depth. Explicit Plan Mode
+remains a separate host workflow on the executor and is never planned twice.
+`just do it` / `直接改` also stays with the executor. Execution boundaries are
+recognized across the request, not only at its beginning, while quoted
+examples are ignored. Bare plan-first requests continue from the planner to
+the executor automatically. Requests that explicitly say to wait for
+confirmation pause at the host approval boundary and continue to the executor
+after approval. Only an explicit `plan only` / `不要执行` request ends the
 current turn with the plan persisted and no execution; a later user instruction
-can continue in the same session. The phase detail records a privacy-safe route,
-depth, and reason code for diagnosis without logging the user prompt.
+can continue in the same session. The phase detail records a privacy-safe route
+and reason code for diagnosis without logging the user prompt.
 
-Light plans contain a compact objective, at most four ordered steps, likely
-touchpoints, and the main verification. Full plans distinguish verified from
-candidate touchpoints and add relevant non-goals, risks, acceptance criteria,
-command-level verification, and rollback guidance when the operation is hard to
-reverse. These contracts are part of one stable planner system prompt; only the
-small per-turn depth instruction is appended to the user turn, preserving the
-planner's prefix cache after the one-time prompt upgrade. The host also gives
-light and full research different per-turn round budgets. If a planner still
-does not finalize after its bounded research and finalization round, ordinary
-plan-and-execute work continues with the executor using the original task.
-Plan-only and approval-gated requests remain fail-closed, and the incomplete
-planner turn is rolled back instead of leaving an unusable continuation tail.
+The planner uses one stable system prompt. A small host-authored
+`<planner-turn>` block names the explicit route and preserves the planner
+prefix cache after the one-time prompt upgrade. The plan should separate
+verified from candidate touchpoints and include non-goals, risks, acceptance
+criteria, and command-level verification when evidence supports them. If a
+planner still does not finalize after its bounded research and finalization
+round, ordinary plan-and-execute work continues with the executor using the
+original task. Plan-only and approval-gated requests remain fail-closed, and
+the incomplete planner turn is rolled back instead of leaving an unusable
+continuation tail.
 
 Reasonix manages normal execution automatically: if an active todo produces no
 new completion, unique read, command, or mutation for 8 tool-call rounds, the
@@ -1317,7 +1354,7 @@ subagents with only read-only research tools plus safe foreground bash, return
 only the final answer, and do not create resumable subagent transcripts.
 Read-only nested delegation may be available until `max_subagent_depth` is
 reached, but writer-capable `task` / `run_skill` remain unavailable inside these
-read-only child registries. Execution settings share one tool surface: call
+read-only child registries. Every task shares one tool surface: call
 `use_capability` for `read_only_skill` and other optional tools. Subsequent
 writer calls still pass through Permissions/Sandbox.
 
@@ -1364,7 +1401,7 @@ shared Host and connections, per-agent frontend/ledger) and may call installed
 or project-configured MCP without `readOnlyHint`. Those calls use the trusted
 MCP permission path (live authorization plus explicit deny only); writer and
 destructive calls are still serialized, recorded as mutations, and subject to
-Delivery evidence/lease guards rather than Planner handoff. Strict
+closed-loop evidence/lease guards rather than Planner handoff. Strict
 `read_only_task` / `read_only_skill` / review sub-agents share the stable proxy
 schema and connection reuse but keep the strict execution gate
 (`authorized && readOnlyHint && !destructiveHint`). Profile `allowed-tools`
@@ -1386,47 +1423,50 @@ is narrower than the dedicated Planner: the Planner accepts authorized opaque
 non-destructive MCP, while a strict child requires an explicit reader hint and
 never exposes writers at all.
 
-Choose the startup execution setting with
-`--preset light|balanced|delivery` (for example, `reasonix run --preset
-delivery "fix and verify this bug"`). Legacy `--profile economy|balanced|delivery`
-still works (`economy` maps to `light`). All three execution settings share the same
-provider-visible core tool surface: direct read/bash/edit/write, background-shell
-lifecycle tools, `ask`/`compress` when registered, and the stable
-`use_capability` proxy for optional tools (search, MCP, skills, subagents, docs,
-web_fetch, and so on). Calling `use_capability` never expands the top-level
-provider schema, so the prompt-cache tool prefix stays stable across execution
-settings.
+Reasonix uses **fact-driven execution**. Ordinary requests always enter the
+executor. There is no automatic task mode. The one session role is the quality floor: standard (default) or delivery; facts can still raise it. Planner,
+Goal, permission, sandbox, and the task contract are independent states.
 
-What differs by execution setting is host policy (planning route, verification
-intensity, independent review floor), not the tool list:
+Standard and Delivery do not perform general hidden final-readiness retries.
+Delivery returns readiness gaps as recoverable results and exposes the existing
+`Continue checks` action; the user must activate it before another recovery turn
+starts. Standard keeps verification, review and sign-off gaps as completion
+attention. Separately, a Standard execution turn that successfully writes one
+current `in_progress` todo may continue inside the same foreground `Agent.Run`
+when the trusted host knows the user asked for execution. This repair is excluded
+from Plan, Goal, Delivery, read-only, recovery, cancellation, and queued-user-work
+boundaries. It sends one fixed continuation prompt, permits a second only after a
+new host receipt, and never exceeds two prompts. Goal and approved Plan retain
+their own state-machine continuation. Historical canonical todos remain visible
+but idle ones render as Ready to continue rather than In progress; their Continue
+action targets the exact visible session. Provider-level stream/truncation
+recovery remains independent of final-readiness recovery.
 
-- **Light** — direct-first planning, targeted verification, independent review only
-  on high-risk/security class work; optional capabilities stay on-demand.
-- **Balanced** (default) — auto light/full planning by risk, risk-tiered
-  verification, conditional independent review on medium-risk multi-file work.
-- **Delivery** — full acceptance criteria, full verification, forced independent
-  review on medium+ risk, and security review on high-risk work. Mutations and
-  verification commands are blocked until a concrete acceptance list exists; a
-  changed result cannot finalize until it has been reviewed, verified after the
-  latest mutation, and signed off with `complete_step`.
+Every task shares the same provider-visible core tool surface: direct
+read/bash/edit/write, background-shell lifecycle tools, `ask`/`compress` when
+registered, and the stable `use_capability` proxy for optional tools (search,
+MCP, skills, subagents, docs, web_fetch, and so on). Calling `use_capability`
+never expands the top-level provider schema, so the prompt-cache tool prefix
+stays stable across every task. The Harness minimal preset is not a task
+complexity mode.
+
+The model decides whether to investigate, write todos, or spawn a sub-agent.
+The host then builds verification obligations from the actual tool call, the
+real target path, and the execution receipt:
+
+- A read-only call creates no obligation.
+- A local docs, i18n, fixture, or style edit is advisory targeted verification.
+- A single production-file edit is recoverable targeted verification plus
+  diff review.
+- Multi-file or unclear local writes require a todo and criteria first.
+- Schema, migration, public-interface, auth, or destructive work becomes
+  strict verification, review, and sign-off after the write is observed.
+- Goal items and approved Plan criteria are always strict.
+- Prompt words such as OAuth or token never create action risk by themselves.
 
 Meta tools such as `task`, `run_skill`, and `review` are not counted as mutations
 by themselves — only real child writes are. Read-only analysis remains available
 without forcing a write.
-
-Inside an interactive TUI session, use `/preset` to inspect the current choice or
-`/preset light|balanced|delivery` to switch it. `/work-mode` and `/profile` are
-compatibility aliases. The switch updates the execution setting in place without
-rebuilding the controller, preserves history, the session path, leases, and the
-Ask/Auto/YOLO posture, and is rejected while a turn, approval/question, background
-job, or another runtime switch is active. This command changes only the current
-session and does not persist a new global default. Because the provider-visible
-tool surface is unified, switching execution settings does not create a new tool-schema
-cache prefix.
-
-Desktop tabs expose the same three choices (shown as Light / Balanced / Delivery)
-and dual-write `agentPreset` with legacy `tokenMode` (`economy`/`full`/`delivery`)
-for one compatibility version.
 
 For interactive frontends, Plan Mode is always an explicit user choice. Select
 Plan in the desktop collaboration-mode control or cycle to Plan with

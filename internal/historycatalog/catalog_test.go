@@ -50,6 +50,30 @@ func TestReconcileAndSearchFTSWithoutStoredBody(t *testing.T) {
 	}
 }
 
+func TestDrainPendingIncludesRegisteredRoots(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "pending-root.jsonl")
+	saveMessages(t, path, provider.Message{Role: provider.RoleUser, Content: "registered root flush marker"})
+	catalog, err := Open(ctx, Options{InMemory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stop the background consumer so this test exercises drainPending's own
+	// contract deterministically instead of racing the worker's select loop.
+	catalog.cancel()
+	catalog.wg.Wait()
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	if !catalog.RegisterRoot(Root{Path: root, Scope: "global"}) {
+		t.Fatal("registered root was not queued")
+	}
+	catalog.drainPending(ctx)
+	result, err := catalog.Search(ctx, SearchRequest{Query: "marker", Roots: []string{root}})
+	if err != nil || len(result.Items) != 1 || result.Items[0].SessionPath != path {
+		t.Fatalf("drained root result=%#v err=%v", result, err)
+	}
+}
+
 func TestRewriteRemovesOldTerms(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

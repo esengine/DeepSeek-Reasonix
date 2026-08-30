@@ -11,10 +11,19 @@
 // "expanded"), and preference switches applying to folds already on screen.
 
 import { isHostRecoveryGuidance } from "./hostRecoverySteer";
+import { stableStringHash } from "./stableStringHash";
 import { isBatchedReadOnlyTool, isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
 import { appendTurnActionCopyText } from "./turnActionCopy";
 import { isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "../components/ToolGroup";
 import type { ProcessFoldPreference } from "./processFoldPreference";
+import type { ResolvedReasoningDisplayMode } from "./reasoningDisplayPreference";
+import {
+  estimateTranscriptRowGeometry,
+  resolveReasoningLayoutVariant,
+  resolveToolCardDefaultOpen,
+  type TranscriptGeometryEnvironment,
+  type TranscriptRowLayoutVariant,
+} from "./transcriptRowGeometry";
 
 export type UserItem = Extract<Item, { kind: "user" }>;
 export type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -118,7 +127,9 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
 }
 
 function assistantReasoningOnly(item: AssistantItem): AssistantItem {
-  return { ...item, text: "" };
+  const reasoning = { ...item, text: "" };
+  itemMeasurementVersionOverrides.set(reasoning, itemMeasurementVersion(item));
+  return reasoning;
 }
 
 export function turnWorkDurationMs(items: readonly Item[]): number {
@@ -145,6 +156,8 @@ export interface SegmentModel {
   displayItems: Item[];
   /** Turn-level: the turn renders anything outside its folds. */
   hasOutsideContent: boolean;
+  /** Disclosure ownership: every untouched segment stays open until its turn settles. */
+  foldActive: boolean;
   hasRunningWork: boolean;
   durationMs: number;
   /** "full" carries the work-duration label; earlier segments only list counts. */
@@ -162,6 +175,15 @@ export interface TurnModel {
   segments: SegmentModel[];
   /** Combined assistant answer text for the turn action row ("" → no row). */
   actionText: string;
+}
+
+function turnStableIdentity(model: TurnModel): string {
+  if (model.user) {
+    const user = model.user;
+    return JSON.stringify([user.id, user.submissionId ?? "", user.createdAt ?? null, user.text, user.submitText ?? "", user.historyTurn ?? null, user.checkpointTurn ?? null]);
+  }
+  const first = model.turnItems[0];
+  return JSON.stringify(["prelude", first?.kind ?? "", first?.id ?? ""]);
 }
 
 // Keep only items the fold body will actually render — an expandable fold over
@@ -232,17 +254,30 @@ export function buildTurnModels(
     model.isActive = running && index === turns.length - 1;
     const segments = partitionTurnItems(model.turnItems, live);
     const turnHasOutsideContent = segments.some((segment) => segment.outsideItems.length > 0);
+    const turnIdentity = turnStableIdentity(model);
     model.segments = segments.map((segment, segmentIndex) => {
       const isLastSegment = segmentIndex === segments.length - 1;
       const displayItems = foldDisplayItems(segment.processItems, live, hideReasoning);
       const turnActive = model.isActive && isLastSegment;
+      const hasRunningWork = segmentHasRunningWork(displayItems, turnActive, live);
       return {
-        key: segment.processItems[0]?.id ?? "",
+        // Duplicate raw ids occur in imported/merged histories. Derive the
+        // disambiguator from stable turn/item identity rather than occurrence
+        // order, so prepending older history never renames an already mounted row.
+        key: `${segment.processItems[0]?.id || "seg"}@${stableStringHash(
+          JSON.stringify([
+            turnIdentity,
+            segmentIndex,
+            segment.processItems[0]?.kind ?? "",
+            segment.processItems[0]?.id ?? "",
+          ]),
+        )}`,
         processItems: segment.processItems,
         outsideItems: segment.outsideItems,
         displayItems,
         hasOutsideContent: turnHasOutsideContent,
-        hasRunningWork: segmentHasRunningWork(displayItems, turnActive, live),
+        foldActive: model.isActive || hasRunningWork,
+        hasRunningWork,
         durationMs: isLastSegment ? turnWorkDurationMs(model.turnItems) : 0,
         labelStyle: isLastSegment ? "full" : "counts",
         turnActive,
@@ -264,6 +299,7 @@ export interface FoldEntry {
   open: boolean;
   userOverridden: boolean;
   running: boolean;
+  keepReasoningExpanded?: boolean;
 }
 
 export type FoldMap = ReadonlyMap<string, FoldEntry>;
@@ -271,24 +307,30 @@ export type FoldMap = ReadonlyMap<string, FoldEntry>;
 export const EMPTY_FOLDS: FoldMap = new Map();
 
 export function defaultFoldOpen(
-  segment: { hasOutsideContent: boolean; hasRunningWork: boolean },
+  segment: { hasOutsideContent: boolean; hasRunningWork: boolean; foldActive?: boolean; keepReasoningExpanded?: boolean },
   preference: ProcessFoldPreference,
 ): boolean {
-  return preference === "expanded" || !segment.hasOutsideContent || segment.hasRunningWork;
+  return preference === "expanded" || segment.keepReasoningExpanded === true || !segment.hasOutsideContent || segment.foldActive === true || segment.hasRunningWork;
 }
 
 export interface FoldSegmentState {
   key: string;
   hasOutsideContent: boolean;
   hasRunningWork: boolean;
+  keepReasoningExpanded: boolean;
 }
 
-export function foldSegmentStates(models: readonly TurnModel[]): FoldSegmentState[] {
+export function foldSegmentStates(models: readonly TurnModel[], keepReasoningExpanded = false): FoldSegmentState[] {
   const out: FoldSegmentState[] = [];
   for (const model of models) {
     for (const segment of model.segments) {
       if (segment.displayItems.length === 0) continue;
-      out.push({ key: segment.key, hasOutsideContent: segment.hasOutsideContent, hasRunningWork: segment.hasRunningWork });
+      out.push({
+        key: segment.key,
+        hasOutsideContent: segment.hasOutsideContent,
+        hasRunningWork: segment.foldActive,
+        keepReasoningExpanded: keepReasoningExpanded && segment.displayItems.some((item) => item.kind === "assistant"),
+      });
     }
   }
   return out;
@@ -322,17 +364,24 @@ export function reconcileFoldEntries(
         open: defaultFoldOpen(segment, preference),
         userOverridden: false,
         running: segment.hasRunningWork,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
       });
       continue;
     }
-    if (preferenceChanged) {
-      const open = preference === "expanded"
+    const reasoningPinChanged = Boolean(entry.keepReasoningExpanded) !== segment.keepReasoningExpanded;
+    if (preferenceChanged || reasoningPinChanged) {
+      const open = preference === "expanded" || segment.keepReasoningExpanded
         ? true
         : !segment.hasRunningWork && segment.hasOutsideContent
           ? false
           : entry.open;
-      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork) {
-        write(segment.key, { open, userOverridden: false, running: segment.hasRunningWork });
+      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork || reasoningPinChanged) {
+        write(segment.key, {
+          open,
+          userOverridden: false,
+          running: segment.hasRunningWork,
+          keepReasoningExpanded: segment.keepReasoningExpanded,
+        });
       }
       continue;
     }
@@ -342,13 +391,18 @@ export function reconcileFoldEntries(
       const userOverridden = entry.running ? entry.userOverridden : false;
       const open = userOverridden ? entry.open : true;
       if (open !== entry.open || userOverridden !== entry.userOverridden || !entry.running) {
-        write(segment.key, { open, userOverridden, running: true });
+        write(segment.key, { open, userOverridden, running: true, keepReasoningExpanded: segment.keepReasoningExpanded });
       }
       continue;
     }
     if (entry.running) {
-      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" ? false : entry.open;
-      write(segment.key, { open, userOverridden: entry.userOverridden, running: false });
+      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" && !segment.keepReasoningExpanded ? false : entry.open;
+      write(segment.key, {
+        open,
+        userOverridden: entry.userOverridden,
+        running: false,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
+      });
     }
   }
   for (const key of prev.keys()) {
@@ -364,7 +418,12 @@ export function reconcileFoldEntries(
 export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: !currentlyOpen, userOverridden: true, running: entry?.running ?? false });
+  next.set(key, {
+    open: !currentlyOpen,
+    userOverridden: true,
+    running: entry?.running ?? false,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 
@@ -372,17 +431,22 @@ export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boo
 export function foldMapWithReasoningOpen(prev: FoldMap, key: string, running: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: true, userOverridden: true, running: entry?.running ?? running });
+  next.set(key, {
+    open: true,
+    userOverridden: true,
+    running: entry?.running ?? running,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 
 // ── Virtual rows ──────────────────────────────────────────────────────────────
 
-export type TranscriptRow =
+type TranscriptRowContent =
   | { kind: "older-history"; key: string }
   | { kind: "user"; key: string; item: UserItem; turn: number | undefined }
   | { kind: "process-header"; key: string; segment: SegmentModel; open: boolean }
-  | { kind: "reasoning"; key: string; item: AssistantItem; segmentKey: string }
+  | { kind: "reasoning"; key: string; item: AssistantItem; segmentKey: string; autoFollowActive?: boolean }
   | { kind: "tool"; key: string; item: ToolItem }
   | { kind: "tool-batch"; key: string; items: ToolItem[] }
   | { kind: "tool-group"; key: string; items: ToolItem[]; groupKind: ToolGroupKind }
@@ -394,6 +458,89 @@ export type TranscriptRow =
   | { kind: "extension"; key: string; item: ExtensionItem }
   | { kind: "turn-actions"; key: string; turn: number; text: string };
 
+export type TranscriptRow = TranscriptRowContent & { layoutVariant?: TranscriptRowLayoutVariant };
+
+/** Initial geometry is present on every row built by buildTranscriptRows.
+ * Optional keeps compatibility with focused tests/extensions that construct
+ * a minimal TranscriptRow directly; consumers resolve their safe fallback. */
+export type TranscriptRowWithLayout = TranscriptRowContent & { layoutVariant: TranscriptRowLayoutVariant };
+
+// Derived reasoning-only assistant items intentionally blank the answer text;
+// retain the source semantic version for that projection without caching
+// mutable bridge objects themselves.
+const itemMeasurementVersionOverrides = new WeakMap<object, string>();
+
+function hashGeometryParts(parts: readonly string[]): string {
+  let hash = 2166136261;
+  for (const part of parts) {
+    for (let index = 0; index < part.length; index += 1) {
+      hash ^= part.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    hash ^= 31;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${hash >>> 0}:${parts.map((part) => part.length).join(",")}`;
+}
+
+/** Semantic content version: equal projections keep the same geometry even
+ * when the controller creates fresh objects for an unrelated UI update. */
+function itemMeasurementVersion(item: Item): string {
+  const override = itemMeasurementVersionOverrides.get(item);
+  if (override) return override;
+  const parts: string[] = [String(item.kind ?? ""), String(item.id ?? "")];
+  // Focused callers and older bridge payloads may provide a minimal item
+  // without the discriminant. Preserve its text in the semantic version so a
+  // late preview -> resolved patch cannot reuse the preview measurement.
+  if (!item.kind) {
+    const legacy = item as unknown as { text?: unknown; reasoning?: unknown; output?: unknown; args?: unknown };
+    parts.push(String(legacy.text ?? ""), String(legacy.reasoning ?? ""), String(legacy.args ?? ""), String(legacy.output ?? ""));
+  }
+  switch (item.kind) {
+    case "user":
+      parts.push(String(item.text ?? ""), String(item.submitText ?? ""), item.failed ? "1" : "0", String(item.createdAt ?? ""));
+      break;
+    case "assistant":
+      parts.push(String(item.text ?? ""), String(item.reasoning ?? ""), item.streaming ? "1" : "0", item.reasoningComplete ? "1" : "0", String(item.reasoningDurationMs ?? ""), String(item.workDurationMs ?? ""), JSON.stringify(item.searchSources ?? []), JSON.stringify(item.memoryCitations ?? []));
+      break;
+    case "phase":
+      parts.push(String(item.text ?? ""));
+      break;
+    case "notice":
+      parts.push(String(item.text ?? ""), String(item.detail ?? ""), String(item.title ?? ""), String(item.level ?? ""), String(item.variant ?? ""), String(item.action ?? ""), JSON.stringify(item.completionSummary ?? {}));
+      break;
+    case "compaction":
+      parts.push(item.pending ? "1" : "0", String(item.trigger ?? ""), String(item.messages ?? ""), String(item.summary ?? ""), String(item.archive ?? ""));
+      break;
+    case "tool":
+      parts.push(String(item.name ?? ""), String(item.args ?? ""), String(item.output ?? ""), String(item.error ?? ""), String(item.status ?? ""), String(item.subject ?? ""), String(item.summary ?? ""), item.truncated ? "1" : "0", item.dataArchived ? "1" : "0", JSON.stringify(item.fileDiff ?? {}), JSON.stringify(item.execution ?? {}), item.subagentProgress ? JSON.stringify(item.subagentProgress) : "");
+      break;
+    case "extension":
+      parts.push(String(item.surfaceKey ?? ""), String(item.pluginId ?? ""), String(item.surfaceId ?? ""), String(item.generation ?? ""), JSON.stringify(item.card ?? null));
+      break;
+  }
+  return hashGeometryParts(parts);
+}
+
+function measurementVersionForItems(items: readonly Item[]): string {
+  return hashGeometryParts(items.map((item) => itemMeasurementVersion(item)));
+}
+
+export function transcriptRowMeasurementVersion(row: TranscriptRow): string {
+  switch (row.kind) {
+    case "older-history":
+    case "turn-actions":
+      return "0:0";
+    case "process-header":
+      return measurementVersionForItems(row.segment.processItems);
+    case "tool-batch":
+    case "tool-group":
+      return measurementVersionForItems(row.items);
+    default:
+      return `1:${itemMeasurementVersion(row.item)}`;
+  }
+}
+
 export const OLDER_HISTORY_ROW_KEY = "older-history";
 
 export function userRowKey(itemId: string): string {
@@ -402,19 +549,40 @@ export function userRowKey(itemId: string): string {
 
 /** Body rows of one expanded process fold: read-only batches, creation tool
  *  groups, single tool cards, phases, info notices, compactions, reasoning. */
-function processBodyRows(segment: SegmentModel, creationMode: boolean): TranscriptRow[] {
-  const rows: TranscriptRow[] = [];
+function processBodyRows(
+  segment: SegmentModel,
+  creationMode: boolean,
+  reasoningDisplayMode: ResolvedReasoningDisplayMode,
+  subcallsByParent: ReadonlyMap<string, readonly ToolItem[]>,
+): TranscriptRowWithLayout[] {
+  const rows: TranscriptRowWithLayout[] = [];
   let roBatch: ToolItem[] = [];
   let toolBatch: ToolItem[] = [];
   let toolBatchKind: ToolGroupKind | null = null;
+  const pushToolRow = (item: ToolItem) => {
+    rows.push({
+      kind: "tool",
+      key: `t:${item.id}`,
+      item,
+      layoutVariant: resolveToolCardDefaultOpen(
+        item,
+        subcallsByParent.get(item.id)?.length ?? 0,
+        reasoningDisplayMode,
+      ) ? "tool-expanded" : "tool-collapsed",
+    });
+  };
   const flushRO = () => {
     if (roBatch.length === 0) return;
-    rows.push({ kind: "tool-batch", key: `tb:${roBatch[0].id}`, items: [...roBatch] });
+    rows.push({ kind: "tool-batch", key: `tb:${roBatch[0].id}`, items: [...roBatch], layoutVariant: "tool-batch-collapsed" });
     roBatch = [];
   };
   const flushToolBatch = () => {
     if (!toolBatchKind || toolBatch.length === 0) return;
-    rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind });
+    if (creationMode || toolBatch.length >= 2) {
+      rows.push({ kind: "tool-group", key: `tg:${toolBatch[0].id}`, items: [...toolBatch], groupKind: toolBatchKind, layoutVariant: "tool-group-collapsed" });
+    } else {
+      pushToolRow(toolBatch[0]);
+    }
     toolBatch = [];
     toolBatchKind = null;
   };
@@ -432,6 +600,19 @@ function processBodyRows(segment: SegmentModel, creationMode: boolean): Transcri
       flushToolBatch();
       flushRO();
     }
+    if (
+      !creationMode
+      && it.kind === "tool"
+      && it.status === "done"
+      && !it.fileDiff
+      && toolGroupKind(it as ToolItem) === "shell"
+    ) {
+      flushRO();
+      toolBatchKind = "shell";
+      toolBatch.push(it as ToolItem);
+      continue;
+    }
+    if (it.kind === "tool") flushToolBatch();
     if (!creationMode && it.kind === "tool" && it.status !== "running" && isBatchedReadOnlyTool(it.name, it.readOnly)) {
       roBatch.push(it as ToolItem);
       continue;
@@ -442,21 +623,36 @@ function processBodyRows(segment: SegmentModel, creationMode: boolean): Transcri
     }
     switch (it.kind) {
       case "tool":
-        rows.push({ kind: "tool", key: `t:${it.id}`, item: it as ToolItem });
+        pushToolRow(it as ToolItem);
         break;
       case "phase":
-        rows.push({ kind: "phase", key: `p:${it.id}`, item: it as PhaseItem });
+        rows.push({ kind: "phase", key: `p:${it.id}`, item: it as PhaseItem, layoutVariant: "static" });
         break;
       case "notice":
-        rows.push({ kind: "process-notice", key: `pn:${it.id}`, item: it as NoticeItem });
+        rows.push({ kind: "process-notice", key: `pn:${it.id}`, item: it as NoticeItem, layoutVariant: "static" });
         break;
       case "compaction":
-        rows.push({ kind: "compaction", key: `c:${it.id}`, item: it as CompactionItem });
+        rows.push({
+          kind: "compaction",
+          key: `c:${it.id}`,
+          item: it as CompactionItem,
+          layoutVariant: (it as CompactionItem).pending ? "static" : "compaction-collapsed",
+        });
         break;
       case "assistant":
         // Answer text renders outside the fold (partitionTurnItems strips it),
         // so the fold only ever shows the reasoning segment.
-        rows.push({ kind: "reasoning", key: `r:${it.id}`, item: it as AssistantItem, segmentKey: segment.key });
+        rows.push({
+          kind: "reasoning",
+          key: `r:${it.id}`,
+          item: it as AssistantItem,
+          segmentKey: segment.key,
+          autoFollowActive: segment.foldActive,
+          layoutVariant: resolveReasoningLayoutVariant(
+            reasoningDisplayMode,
+            segment.foldActive,
+          ) ?? "reasoning-summary",
+        });
         break;
     }
   }
@@ -474,34 +670,39 @@ export interface BuildRowsOptions {
   turnForUser: (item: UserItem) => number | undefined;
   /** A checkpoint may make a turn actionable even without assistant text. */
   hasCheckpointForTurn?: (turn: number) => boolean;
+  reasoningDisplayMode?: ResolvedReasoningDisplayMode;
+  subcallsByParent?: ReadonlyMap<string, readonly ToolItem[]>;
 }
 
-export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRow[] {
-  const rows: TranscriptRow[] = [];
-  if (options.hasOlderHistory) {
-    rows.push({ kind: "older-history", key: OLDER_HISTORY_ROW_KEY });
-  }
-  for (const model of models) {
+export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRowWithLayout[] {
+  const rows: TranscriptRowWithLayout[] = [];
+  const rowGroups: TranscriptRowWithLayout[][] = [];
+  const usedKeys = new Set<string>();
+  const reasoningDisplayMode = options.reasoningDisplayMode ?? "auto";
+  const subcallsByParent = options.subcallsByParent ?? new Map<string, readonly ToolItem[]>();
+  for (let modelIndex = models.length - 1; modelIndex >= 0; modelIndex -= 1) {
+    const model = models[modelIndex];
+    const modelRows: TranscriptRowWithLayout[] = [];
     const user = model.user;
     // Turn numbers come from the checkpoint-aware map, not the raw question
     // index, so rewind targets survive history paging.
     const turn = user ? options.turnForUser(user) : undefined;
     if (user) {
-      rows.push({ kind: "user", key: userRowKey(user.id), item: user, turn });
+      modelRows.push({ kind: "user", key: userRowKey(user.id), item: user, turn, layoutVariant: "text-flow" });
     }
     for (const segment of model.segments) {
       if (segment.displayItems.length > 0) {
         const open = options.folds.get(segment.key)?.open ?? defaultFoldOpen(segment, options.foldPreference);
-        rows.push({ kind: "process-header", key: `ph:${segment.key}`, segment, open });
-        if (open) rows.push(...processBodyRows(segment, options.creationMode));
+        modelRows.push({ kind: "process-header", key: `ph:${segment.key}`, segment, open, layoutVariant: "static" });
+        if (open) modelRows.push(...processBodyRows(segment, options.creationMode, reasoningDisplayMode, subcallsByParent));
       }
       for (const item of segment.outsideItems) {
         if (item.kind === "extension") {
-          rows.push({ kind: "extension", key: `x:${item.id}`, item });
+          modelRows.push({ kind: "extension", key: `x:${item.id}`, item, layoutVariant: "text-flow" });
         } else if (item.kind === "notice") {
-          rows.push({ kind: "notice", key: `n:${item.id}`, item });
+          modelRows.push({ kind: "notice", key: `n:${item.id}`, item, layoutVariant: "text-flow" });
         } else {
-          rows.push({ kind: "answer", key: `a:${item.id}`, item });
+          modelRows.push({ kind: "answer", key: `a:${item.id}`, item, layoutVariant: "text-flow" });
         }
       }
     }
@@ -514,45 +715,26 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
       (model.actionText.trim() || options.hasCheckpointForTurn?.(turn)) &&
       user
     ) {
-      rows.push({ kind: "turn-actions", key: `ta:${user.id}`, turn, text: model.actionText });
+      modelRows.push({ kind: "turn-actions", key: `ta:${user.id}`, turn, text: model.actionText, layoutVariant: "static" });
     }
+    for (let index = modelRows.length - 1; index >= 0; index -= 1) {
+      const row = modelRows[index];
+      if (usedKeys.has(row.key)) modelRows[index] = { ...row, key: `${row.key}@${stableStringHash(`${turnStableIdentity(model)}|${row.kind}|${row.key}`)}` };
+      usedKeys.add(modelRows[index].key);
+    }
+    rowGroups.push(modelRows);
   }
+  for (let index = rowGroups.length - 1; index >= 0; index -= 1) rows.push(...rowGroups[index]);
+  if (options.hasOlderHistory) rows.unshift({ kind: "older-history", key: OLDER_HISTORY_ROW_KEY, layoutVariant: "static" });
   return rows;
 }
 
 // ── Measurement / identity helpers ────────────────────────────────────────────
 
-/** Ballpark row heights; measureElement corrects them on mount. */
-export function estimateTranscriptRowSize(row: TranscriptRow | undefined): number {
-  if (!row) return 48;
-  switch (row.kind) {
-    case "older-history":
-      return 44;
-    case "user":
-      return 88;
-    case "process-header":
-      return 28;
-    case "reasoning":
-      return 96;
-    case "tool":
-      return 96;
-    case "tool-batch":
-    case "tool-group":
-      return 32 + row.items.length * 24;
-    case "phase":
-      return 28;
-    case "process-notice":
-    case "notice":
-      return 44;
-    case "compaction":
-      return 36;
-    case "answer":
-      return 160;
-    case "extension":
-      return 160;
-    case "turn-actions":
-      return 28;
-  }
+/** Ballpark row heights; Virtuoso replaces them with real measurements on mount. */
+export function estimateTranscriptRowSize(row: TranscriptRow | undefined, contentWidth?: number): number {
+  const environment: TranscriptGeometryEnvironment = { contentWidth, typographySignature: "default" };
+  return estimateTranscriptRowGeometry(row, environment);
 }
 
 /**

@@ -3,10 +3,13 @@
 Reasonix keeps session transcripts, event logs, metadata sidecars, and
 `desktop-projects.json` as the only authoritative session data. The desktop
 project tree reads a disposable SQLite projection from
-`<cache root>/session-catalog/v3.sqlite`; deleting that database never deletes
-or changes a conversation. The earlier `v1.sqlite` and `v2.sqlite` caches are
+`<cache root>/session-catalog/v5.sqlite`; deleting that database never deletes
+or changes a conversation. The earlier `v1.sqlite` through `v4.sqlite` caches are
 left in place so a concurrent or downgraded process cannot cross-write the
-projection.
+projection. v5 is the repair-release generation; it is rebuilt from
+authoritative files on first use while the old v4 file remains available for
+rollback. A manual rebuild of v5 also leaves a timestamped `.replaced-*` copy
+of the previous index.
 
 ## Invariants
 
@@ -24,6 +27,9 @@ projection.
 - Catalog, migration, plugin, and MCP work is cancellable and never participates
   in the desktop shutdown lock. Shutdown gives pending catalog writes at most
   250 ms.
+- A ready directory is reused only when its authoritative session path set,
+  scope/workspace assignment, topic projection, and recovery-derived fields
+  match the current files. Equal row counts are not sufficient.
 
 ## Storage and migration
 
@@ -70,8 +76,8 @@ longer has a synchronous filesystem fallback.
 Inspect the catalog without creating or changing it:
 
 ```sh
-reasonix doctor sessions
-reasonix doctor sessions --json
+reasonix sessions diagnose
+reasonix sessions diagnose --json
 ```
 
 Replace only the disposable projection and index all saved desktop projects:
@@ -83,7 +89,8 @@ reasonix sessions reindex --json
 
 Use repeated `--dir PATH` flags to rebuild from an explicit set of directories.
 Explicit directories are treated as global scope. Reindexing never edits or
-deletes transcript, event, metadata, recovery, archive, or project files.
+deletes transcript, event, metadata, recovery, archive, or project files; the
+previous index is retained for rollback.
 
 ## Plugin isolation
 

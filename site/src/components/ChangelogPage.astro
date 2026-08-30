@@ -1,8 +1,8 @@
 ---
 import Base from '../layouts/Base.astro';
 import SiteHeader from './SiteHeader.astro';
-import type { ReleaseItem, ReleaseRecord } from '../data/releases';
-import { releasePath } from '../data/releases';
+import type { ReleaseItem, ReleaseRecord, ReleaseTarget } from '../data/releases';
+import { releasePath, releaseTargetCount } from '../data/releases';
 import '../styles/changelog.css';
 
 const { release, releases, canonical } = Astro.props as {
@@ -33,15 +33,44 @@ const surfaceLabel = (surface: string) => ({
   security: { en: 'Security', zh: '安全' },
   provider: { en: 'Provider', zh: '模型服务' },
   plugin: { en: 'Plugins', zh: '插件' },
+  site: { en: 'Site', zh: '网站' },
+  service: { en: 'Service', zh: '服务端' },
 }[surface] ?? { en: surface, zh: surface });
+
+const targetingEnabled = release.targetingVersion === 1;
+const changeKinds = ['new', 'improved', 'fixed'] as const;
+const clientTargets: { id: ReleaseTarget; en: string; zh: string }[] = [
+  { id: 'desktop', en: 'Desktop updates', zh: '桌面端更新' },
+  { id: 'cli', en: 'CLI updates', zh: 'CLI 端更新' },
+];
+const hasTarget = (item: ReleaseItem, target: ReleaseTarget) => item.targets?.includes(target) ?? false;
+const clientHighlights = (target: ReleaseTarget) => release.highlights.filter((item) => hasTarget(item, target));
+const clientChanges = (target: ReleaseTarget, kind: typeof changeKinds[number]) =>
+  release.changes[kind].filter((item) => hasTarget(item, target));
+const hasClientChangeContent = (target: ReleaseTarget) =>
+  clientHighlights(target).length > 0 || changeKinds.some((kind) => clientChanges(target, kind).length > 0);
+const isOtherOnly = (item: ReleaseItem) =>
+  Boolean(item.targets?.length) && !hasTarget(item, 'desktop') && !hasTarget(item, 'cli');
+const otherHighlights = release.highlights.filter(isOtherOnly);
+const otherChanges = Object.fromEntries(
+  changeKinds.map((kind) => [kind, release.changes[kind].filter(isOtherOnly)]),
+) as Record<typeof changeKinds[number], ReleaseItem[]>;
+const hasOtherChanges = otherHighlights.length > 0 || changeKinds.some((kind) => otherChanges[kind].length > 0);
 
 /* Sections render only when they have content; numbering is sequential. */
 const sectionDefs = [
   ...(release.guides.length ? [{ id: 'guides', en: 'Guides', zh: '使用攻略' }] : []),
-  { id: 'highlights', en: 'Highlights', zh: '重点内容' },
-  ...(['new', 'improved', 'fixed'] as const)
-    .filter((kind) => release.changes[kind].length)
-    .map((kind) => ({ id: kind, ...kindLabel(kind) })),
+  ...(targetingEnabled
+    ? [
+        ...clientTargets,
+        ...(hasOtherChanges ? [{ id: 'other', en: 'Other project updates', zh: '其他项目更新' }] : []),
+      ]
+    : [
+        { id: 'highlights', en: 'Highlights', zh: '重点内容' },
+        ...changeKinds
+          .filter((kind) => release.changes[kind].length)
+          .map((kind) => ({ id: kind, ...kindLabel(kind) })),
+      ]),
   ...(release.upgrade.length ? [{ id: 'upgrade', en: 'Upgrade notes', zh: '升级提醒' }] : []),
   ...(release.risks.length ? [{ id: 'risks', en: 'Risk notes', zh: '风险提示' }] : []),
   ...(release.contributors.length ? [{ id: 'thanks', en: 'Thanks', zh: '致谢' }] : []),
@@ -136,6 +165,12 @@ const description = release.summary.en;
               <span><strong>npm</strong> {release.builds.npm}</span>
             </div>
           )}
+          {targetingEnabled && (
+            <div class="release-target-summary" aria-label="Updates by product">
+              <span><strong>Desktop</strong> {releaseTargetCount(release, 'desktop')}</span>
+              <span><strong>CLI</strong> {releaseTargetCount(release, 'cli')}</span>
+            </div>
+          )}
           <p class="release-lede"><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></p>
         </header>
 
@@ -154,45 +189,147 @@ const description = release.summary.en;
           </section>
         )}
 
-        <section id="highlights" class="release-section">
-          <div class="release-section__head"><span>{sectionNum.get('highlights')}</span><h2><span class="l-en">Highlights</span><span class="l-zh">重点内容</span></h2></div>
-          <div class="release-highlight-list">
-            {release.highlights.map((item, index) => {
-              const kind = kindLabel(item.kind);
+        {targetingEnabled ? (
+          <>
+            {clientTargets.map((target) => {
+              const highlights = clientHighlights(target.id);
+              const total = releaseTargetCount(release, target.id);
               return (
-                <article class="release-highlight" data-kind={item.kind}>
-                  <div class="release-highlight__index">{String(index + 1).padStart(2, '0')}</div>
-                  <div>
-                    <div class="release-highlight__kind"><span class="l-en">{kind.en}</span><span class="l-zh">{kind.zh}</span></div>
-                    <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
-                    <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
-                    {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
-                  </div>
-                </article>
+                <section id={target.id} class="release-section release-target-section" data-target={target.id}>
+                  <div class="release-section__head"><span>{sectionNum.get(target.id)}</span><h2><span class="l-en">{target.en}</span><span class="l-zh">{target.zh}</span></h2></div>
+                  <p class="release-target-section__summary">
+                    <span class="l-en">{total} update{total === 1 ? '' : 's'} relevant to {target.id === 'desktop' ? 'Desktop' : 'CLI'}.</span>
+                    <span class="l-zh">与{target.id === 'desktop' ? '桌面端' : ' CLI'}相关的更新共 {total} 项。</span>
+                  </p>
+
+                  {highlights.length > 0 && (
+                    <div class="release-target-group">
+                      <h3 class="release-target-group__title"><span class="l-en">Highlights</span><span class="l-zh">重点内容</span></h3>
+                      <div class="release-highlight-list">
+                        {highlights.map((item, index) => {
+                          const kind = kindLabel(item.kind);
+                          return (
+                            <article class="release-highlight" data-kind={item.kind}>
+                              <div class="release-highlight__index">{String(index + 1).padStart(2, '0')}</div>
+                              <div>
+                                <div class="release-item-meta">
+                                  <div class="release-highlight__kind"><span class="l-en">{kind.en}</span><span class="l-zh">{kind.zh}</span></div>
+                                  <div class="release-item-targets">{item.targets?.map((itemTarget) => {
+                                    const label = surfaceLabel(itemTarget);
+                                    return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
+                                  })}</div>
+                                </div>
+                                <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                                <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                                {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {changeKinds.map((kind) => {
+                    const items = clientChanges(target.id, kind);
+                    if (!items.length) return null;
+                    const label = kindLabel(kind);
+                    return (
+                      <div class="release-target-group">
+                        <h3 class="release-target-group__title"><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></h3>
+                        <div class="release-change-list">
+                          {items.map((item: ReleaseItem) => (
+                            <article>
+                              <div class="release-item-targets">{item.targets?.map((itemTarget) => {
+                                const targetLabel = surfaceLabel(itemTarget);
+                                return <span><span class="l-en">{targetLabel.en}</span><span class="l-zh">{targetLabel.zh}</span></span>;
+                              })}</div>
+                              <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                              <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                              {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {!hasClientChangeContent(target.id) && (
+                    <div class="release-target-empty">
+                      {target.id === 'cli' && total === 0 ? (
+                        <><strong><span class="l-en">No CLI changes in this release.</span><span class="l-zh">本版本没有 CLI 相关改动。</span></strong><p><span class="l-en">CLI users may skip this version if preferred.</span><span class="l-zh">CLI 用户可按需跳过这个版本。</span></p></>
+                      ) : (
+                        <><strong><span class="l-en">No feature or fix entries in this section.</span><span class="l-zh">此板块没有功能或修复条目。</span></strong><p><span class="l-en">See the upgrade and risk notes below for relevant guidance.</span><span class="l-zh">相关说明请查看下方升级提醒和风险提示。</span></p></>
+                      )}
+                    </div>
+                  )}
+                </section>
               );
             })}
-          </div>
-        </section>
 
-        {(['new', 'improved', 'fixed'] as const).map((kind) => {
-          const items = release.changes[kind];
-          if (!items.length) return null;
-          const label = kindLabel(kind);
-          return (
-            <section id={kind} class="release-section release-change-section">
-              <div class="release-section__head"><span>{sectionNum.get(kind)}</span><h2><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></h2></div>
-              <div class="release-change-list">
-                {items.map((item: ReleaseItem) => (
-                  <article>
-                    <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
-                    <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
-                    {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
-                  </article>
-                ))}
+            {hasOtherChanges && (
+              <section id="other" class="release-section release-target-section" data-target="other">
+                <div class="release-section__head"><span>{sectionNum.get('other')}</span><h2><span class="l-en">Other project updates</span><span class="l-zh">其他项目更新</span></h2></div>
+                <p class="release-target-section__summary"><span class="l-en">Website and service changes that do not require a Desktop or CLI update.</span><span class="l-zh">不要求更新桌面端或 CLI 的网站与服务端变更。</span></p>
+                <div class="release-change-list">
+                  {[...otherHighlights, ...changeKinds.flatMap((kind) => otherChanges[kind])].map((item) => (
+                    <article>
+                      <div class="release-item-targets">{item.targets?.map((itemTarget) => {
+                        const label = surfaceLabel(itemTarget);
+                        return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
+                      })}</div>
+                      <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                      <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                      {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            <section id="highlights" class="release-section">
+              <div class="release-section__head"><span>{sectionNum.get('highlights')}</span><h2><span class="l-en">Highlights</span><span class="l-zh">重点内容</span></h2></div>
+              <div class="release-highlight-list">
+                {release.highlights.map((item, index) => {
+                  const kind = kindLabel(item.kind);
+                  return (
+                    <article class="release-highlight" data-kind={item.kind}>
+                      <div class="release-highlight__index">{String(index + 1).padStart(2, '0')}</div>
+                      <div>
+                        <div class="release-highlight__kind"><span class="l-en">{kind.en}</span><span class="l-zh">{kind.zh}</span></div>
+                        <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                        <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                        {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </section>
-          );
-        })}
+
+            {changeKinds.map((kind) => {
+              const items = release.changes[kind];
+              if (!items.length) return null;
+              const label = kindLabel(kind);
+              return (
+                <section id={kind} class="release-section release-change-section">
+                  <div class="release-section__head"><span>{sectionNum.get(kind)}</span><h2><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></h2></div>
+                  <div class="release-change-list">
+                    {items.map((item: ReleaseItem) => (
+                      <article>
+                        <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                        <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                        {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </>
+        )}
 
         {release.upgrade.length > 0 && (
           <section id="upgrade" class="release-section">
@@ -202,6 +339,10 @@ const description = release.summary.en;
                 <article class:list={["release-notice", `release-notice--${item.level}`]}>
                   <div class="release-notice__icon">{item.level === 'warning' ? '!' : 'i'}</div>
                   <div>
+                    {item.targets?.length && <div class="release-item-targets">{item.targets.map((itemTarget) => {
+                      const label = surfaceLabel(itemTarget);
+                      return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
+                    })}</div>}
                     <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
                     <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
                     {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
@@ -218,6 +359,10 @@ const description = release.summary.en;
             <div class="release-change-list">
               {release.risks.map((item) => (
                 <article>
+                  {item.targets?.length && <div class="release-item-targets">{item.targets.map((itemTarget) => {
+                    const label = surfaceLabel(itemTarget);
+                    return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
+                  })}</div>}
                   <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
                   <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
                   {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}

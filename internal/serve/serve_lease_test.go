@@ -92,7 +92,8 @@ func TestResumeMovesSessionLease(t *testing.T) {
 	saveServeTestSession(t, next)
 
 	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, bc)
+	ctrl := control.New(control.Options{Executor: exec, Sink: bc, SessionDir: dir, SessionPath: active})
 	server := New(ctrl, bc, config.ServeConfig{})
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
@@ -121,6 +122,9 @@ func TestResumeMovesSessionLease(t *testing.T) {
 	}
 	if got, wantHeld := leases.HeldPath(), agent.CanonicalSessionPath(want); got != wantHeld {
 		t.Fatalf("lease after resume = %q, want %q", got, wantHeld)
+	}
+	if got := ctrl.WriteAuthorityGeneration(); got == 0 {
+		t.Fatal("resumed controller session has no target write authority")
 	}
 	lease, err := agent.TryAcquireSessionLease(active)
 	if err != nil {

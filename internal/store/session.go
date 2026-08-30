@@ -24,6 +24,7 @@ func IsSessionTranscriptName(name string) bool {
 	name = strings.TrimSpace(name)
 	return strings.HasSuffix(name, ".jsonl") &&
 		!strings.HasSuffix(name, ".events.jsonl") &&
+		!strings.HasSuffix(name, ".turns.jsonl") &&
 		!strings.HasSuffix(name, ".conflicts.jsonl") &&
 		!strings.HasSuffix(name, ".guardian.jsonl")
 }
@@ -92,6 +93,25 @@ func SessionEventLogDamaged(sessionPath string) string {
 		return ""
 	}
 	return SessionEventLog(sessionPath) + ".damaged"
+}
+
+// SessionTurnEventLog is the append-only local runtime lifecycle ledger
+// (<id>.turns.jsonl). It is independent from the provider transcript so old
+// readers can continue to consume the primary session unchanged.
+func SessionTurnEventLog(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".turns.jsonl"
+}
+
+// SessionTurnEventLogDamaged preserves a corrupt/torn ledger tail before the
+// valid prefix is truncated back into service.
+func SessionTurnEventLogDamaged(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return SessionTurnEventLog(sessionPath) + ".damaged"
 }
 
 // SessionEventIndex is the listing/checkpoint index for the event log
@@ -203,6 +223,8 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionGoalState(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),
+		SessionTurnEventLog(sessionPath),
+		SessionTurnEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),
 		SessionDisplayIndex(sessionPath),
 		SessionConflictLog(sessionPath),

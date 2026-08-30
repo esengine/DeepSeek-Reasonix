@@ -11,7 +11,7 @@ import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
 import type { ComposerInvocation, StructuredInvocationSubmit } from "../lib/invocationDisplay";
-import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
+import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -108,7 +108,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     running: false,
     collaborationMode: "normal",
     toolApprovalMode: "ask" as ToolApprovalMode,
-    tokenMode: "full" as TokenMode,
+
     goal: "",
     cwd: "/repo",
     tabId: "tab-a",
@@ -118,9 +118,9 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
       calls.submit.push(submitText);
       calls.structured.push(structured);
     },
-    onCancel: () => {
+    onCancel: async () => {
       calls.cancel += 1;
-      return undefined;
+      return { discardedItemIds: [] };
     },
     onCycleMode: () => {},
     onSetMode: () => {},
@@ -132,7 +132,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     },
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: () => {},
+
     ready: true,
     ...props,
   };
@@ -1180,7 +1180,7 @@ console.log("\ncomposer goal toggle");
   });
   const dismissibleGuidanceItem = document.querySelector(".composer-guidance-item") as HTMLElement | null;
   if (!dismissibleGuidanceItem) throw new Error("dismissible guidance chip did not render");
-  const dismissButton = dismissibleGuidanceItem.querySelector(".composer-guidance-item__action") as HTMLButtonElement | null;
+  const dismissButton = Array.from(dismissibleGuidanceItem.querySelectorAll<HTMLButtonElement>(".composer-guidance-item__action")).at(-1) ?? null;
   if (!dismissButton) throw new Error("running guidance dismiss button did not render");
   await act(async () => {
     dismissButton.click();
@@ -1410,9 +1410,9 @@ console.log("\ncomposer goal toggle");
   });
   const { root, rerender } = await renderComposer({
     running: true,
-    onCancel: (itemIDs = []) => {
+    onCancel: async (itemIDs = []) => {
       cancelledItemIDs = itemIDs;
-      return undefined;
+      return { discardedItemIds: [...itemIDs] };
     },
   });
 

@@ -147,6 +147,8 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, never, ShellPowerShell, ""},
 		{"windows, nothing found", "windows", onPath(), nil, never, never, never, ShellBash, ""},
 		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, never, ShellBash, ""},
+		{"macOS, no bash → zsh", "darwin", onPath("zsh", "sh"), nil, never, always, never, ShellZsh, `C:\fake\zsh.exe`},
+		{"macOS, no bash or zsh → sh", "darwin", onPath("sh"), nil, never, always, never, ShellSh, `C:\fake\sh.exe`},
 		{"wsl bash on PATH skipped for git-bash", "windows", onPath("bash", "powershell"), gitBash, always, always, wslIsPathBash, ShellBash, `C:\fake\Git\bin\bash.exe`},
 		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
 	}
@@ -220,6 +222,27 @@ func TestResolveShellPrefer(t *testing.T) {
 	got = resolveShell("fish", "", nil, "windows", onPath("bash"), never, gitBash, nil, always, noWSL)
 	if got.Kind != ShellBash {
 		t.Errorf("unknown prefer should auto-detect, got %s", got.Kind)
+	}
+
+	// git-bash.exe is automatically rewritten to bin/bash.exe when present.
+	existsWithBash := func(p string) bool {
+		return strings.EqualFold(p, `C:\Git\bin\bash.exe`)
+	}
+	got = resolveShell("bash", `C:\Git\git-bash.exe`, nil, "windows", onPath(), existsWithBash, nil, nil, always, noWSL)
+	if got.Kind != ShellBash || got.Path != `C:\Git\bin\bash.exe` {
+		t.Errorf("git-bash.exe should redirect to bin/bash.exe, got %+v", got)
+	}
+}
+
+func TestSanitizeWindowsBashPath(t *testing.T) {
+	exists := func(p string) bool {
+		return strings.EqualFold(p, filepath.Join("C:", "Git", "bin", "bash.exe"))
+	}
+	raw := filepath.Join("C:", "Git", "git-bash.exe")
+	got := sanitizeWindowsBashPath(raw, exists)
+	want := filepath.Join("C:", "Git", "bin", "bash.exe")
+	if got != want {
+		t.Fatalf("sanitizeWindowsBashPath(%q) = %q, want %q", raw, got, want)
 	}
 }
 

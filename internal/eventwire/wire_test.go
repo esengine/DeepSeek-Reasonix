@@ -66,6 +66,21 @@ func TestToWireWorkspaceChangedKeepsBoundedEmptyArrays(t *testing.T) {
 	}
 }
 
+func TestToWireCompletionSummaryCarriesTurnTimeAttention(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.CompletionSummary, Completion: &event.CompletionSummaryInfo{
+		Verdict: "partial", ChecksSuppressed: 1, Floor: "delivery", Attention: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind":"completion_summary"`, `"floor":"delivery"`, `"attention":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("completion JSON = %s, missing %s", b, want)
+		}
+	}
+}
+
 func TestToWireContextMaintenanceJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: "applied", Action: "prune", SavedTokens: 4096, ProjectionVersion: 3, CacheBreak: true,
@@ -105,6 +120,21 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 	if strings.Contains(string(b), `"code"`) {
 		t.Fatalf("non-notice JSON = %s, must not carry a code", b)
+	}
+}
+
+func TestToWireWriteAccessApprovalKeepsNonNilArrays(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "a3", Tool: "bash", Subject: "install", Kind: event.ApprovalKindWriteAccess,
+		WriteAccess: event.NormalizeWriteAccessApproval(&event.WriteAccessApproval{}),
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	if !strings.Contains(body, `"write_access"`) || !strings.Contains(body, `"directories":[]`) {
+		t.Fatalf("write_access arrays must be [] not null: %s", body)
 	}
 }
 
@@ -152,7 +182,9 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
-		`outcome?: "final_readiness" | "recovery_paused";`,
+		"outcome?:",
+		`"completed" | "partial" | "blocked"`,
+		`"final_readiness" | "recovery_paused"`,
 		"checkpointTurn?: number;",
 		"retryAttempt?: number;",
 		"retryMax?: number;",

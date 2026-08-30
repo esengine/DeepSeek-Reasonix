@@ -1,9 +1,11 @@
 package control
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/sessioninbox"
 )
 
@@ -38,12 +40,64 @@ func (c *Controller) unlockInboxSteerAdmission(dispatch *bool) {
 	}
 }
 
+func inboxSteerLoader(st *sessioninbox.Store, itemID string) func() (string, error) {
+	return func() (string, error) {
+		_, env, err := st.ReadItem(itemID)
+		if err != nil {
+			if errors.Is(err, sessioninbox.ErrNotFound) {
+				return "", agent.ErrSteerWithdrawn
+			}
+			return "", err
+		}
+		text := strings.TrimSpace(env.SubmitText)
+		if text == "" {
+			text = strings.TrimSpace(env.DisplayText)
+		}
+		if text == "" {
+			return "", fmt.Errorf("inbox item %s has empty body", itemID)
+		}
+		materialized, images, block, materializeErr := applyInboxReferences(env)
+		if materializeErr != nil {
+			return "", materializeErr
+		}
+		if block != "" {
+			return "", fmt.Errorf("frozen reference unavailable: %s", block)
+		}
+		if len(images) > 0 {
+			return "", fmt.Errorf("image guidance requires a follow-up turn")
+		}
+		// This compare-and-transition is the durable hand-off boundary and
+		// closes the loader-vs-cancel gap after TrySteerInboxItem returns.
+		if err := st.MarkSteerConsumed(itemID); err != nil {
+			if errors.Is(err, sessioninbox.ErrNotFound) {
+				return "", agent.ErrSteerWithdrawn
+			}
+			return "", err
+		}
+		return firstNonEmptyStr(materialized, text), nil
+	}
+}
+
 // TrySteerInboxItem persists intent=steer (if needed) and attempts mid-turn
 // admission. Rejected steers stay queued as follow-up.
 //
 // The agent loader only captures the item ID and re-reads the blob on consume
 // so large steer bodies do not accumulate in the agent heap.
 func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, error) {
+	return c.trySteerInboxItem(id, "")
+}
+
+// TrySteerInboxItemForTurn applies an existing durable item only to the exact
+// active turn. A stale target falls back to queued-follow-up semantics.
+func (c *Controller) TrySteerInboxItemForTurn(turnID, id string) (sessioninbox.InboxReceipt, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return sessioninbox.InboxReceipt{}, fmt.Errorf("turnId is required")
+	}
+	return c.trySteerInboxItem(id, turnID)
+}
+
+func (c *Controller) trySteerInboxItem(id, expectedTurnID string) (sessioninbox.InboxReceipt, error) {
 	c.inbox.admissionMu.Lock()
 	dispatchAfterUnlock := false
 	defer c.unlockInboxSteerAdmission(&dispatchAfterUnlock)
@@ -92,32 +146,7 @@ func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, er
 		return sessioninbox.InboxReceipt{ItemID: id, Disposition: sessioninbox.DispositionRejectedRotating, Capacity: cap}, nil
 	}
 	// Capture only the store pointer + item id. Load body from disk at consume.
-	storeRef := st
-	itemID := id
-	loader := func() (string, error) {
-		_, env, err := storeRef.ReadItem(itemID)
-		if err != nil {
-			return "", err
-		}
-		text := strings.TrimSpace(env.SubmitText)
-		if text == "" {
-			text = strings.TrimSpace(env.DisplayText)
-		}
-		if text == "" {
-			return "", fmt.Errorf("inbox item %s has empty body", itemID)
-		}
-		materialized, images, block, materializeErr := applyInboxReferences(env)
-		if materializeErr != nil {
-			return "", materializeErr
-		}
-		if block != "" {
-			return "", fmt.Errorf("frozen reference unavailable: %s", block)
-		}
-		if len(images) > 0 {
-			return "", fmt.Errorf("image guidance requires a follow-up turn")
-		}
-		return firstNonEmptyStr(materialized, text), nil
-	}
+	loader := inboxSteerLoader(st, id)
 	// Persist the admission boundary before exposing the loader to the agent.
 	// Holding c.mu for the short in-memory enqueue serializes active tracking
 	// with finishGuardedTurn, so TurnDone cannot overtake an accepted steer.
@@ -129,7 +158,14 @@ func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, er
 		}
 	}
 	c.mu.Lock()
-	accepted := !c.closed && !c.rotating && c.running && c.executor != nil && len(env.FrozenImages) == 0 && c.executor.SteerItem(id, loader)
+	turnMatches := true
+	if expectedTurnID != "" {
+		turnMatches = false
+		if ledger := c.turnEventLedger(); ledger != nil {
+			turnMatches = ledger.ActiveTurnID() == expectedTurnID
+		}
+	}
+	accepted := turnMatches && !c.closed && !c.rotating && c.running && c.executor != nil && len(env.FrozenImages) == 0 && c.executor.SteerItem(id, loader)
 	if accepted {
 		c.inbox.mu.Lock()
 		c.inbox.trackActive(id)

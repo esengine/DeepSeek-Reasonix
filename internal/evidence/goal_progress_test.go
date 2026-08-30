@@ -28,3 +28,21 @@ func TestSuccessfulProgressSignaturesUseObservedReadResult(t *testing.T) {
 		t.Fatalf("ObserveOutput did not attest output: %+v", first)
 	}
 }
+
+func TestSuccessfulProgressFingerprintDeduplicatesReceipts(t *testing.T) {
+	ledger := NewLedger()
+	read := ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true)
+	read.ObserveOutput("package a")
+	ledger.Record(read)
+	first := ledger.SuccessfulProgressFingerprint()
+
+	ledger.Record(read)
+	if repeat := ledger.SuccessfulProgressFingerprint(); repeat != first {
+		t.Fatalf("exact repeat changed fingerprint: %q != %q", repeat, first)
+	}
+
+	ledger.Record(ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[]}`), true, true))
+	if cleared := ledger.SuccessfulProgressFingerprint(); cleared == first {
+		t.Fatal("explicit todo clear did not change fingerprint")
+	}
+}

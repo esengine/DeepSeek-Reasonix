@@ -64,9 +64,11 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 	assertFieldSet(t, "CapabilityGrant", CapabilityGrant{}, []string{
 		"ReadOnly", "AllowNoTools", "CallTools", "ProfileTools", "WritePaths",
 	})
-	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral"})
+	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{
+		"ContinueFrom", "ForkFrom", "Ephemeral", "Decisions", "EvidenceSummary", "FileAnchors", "OutputFormat",
+	})
 	assertFieldSet(t, "SchedulerPolicy", SchedulerPolicy{}, []string{
-		"MaxSteps", "RunInBackground", "BackgroundWriter", "Nested",
+		"MaxSteps", "MaxOutputTokens", "RunInBackground", "BackgroundWriter", "Nested",
 	})
 }
 

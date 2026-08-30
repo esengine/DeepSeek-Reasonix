@@ -168,6 +168,42 @@ func TestCloseDoesNotResurrectFinishingState(t *testing.T) {
 	}
 }
 
+func TestTurnFinishingDoneClosesAfterTurnDoneFanout(t *testing.T) {
+	turnDoneEntered := make(chan struct{}, 1)
+	releaseTurnDone := make(chan struct{})
+	c := New(Options{Sink: holdFinishingWindow(releaseTurnDone, turnDoneEntered, nil)})
+	t.Cleanup(c.Close)
+
+	c.runGuarded(func(context.Context) error { return nil })
+	select {
+	case <-turnDoneEntered:
+	case <-time.After(time.Second):
+		t.Fatal("TurnDone delivery did not enter the finishing window")
+	}
+
+	done, ok := c.TurnFinishingDone()
+	if !ok || done == nil {
+		close(releaseTurnDone)
+		t.Fatal("controller did not expose its active finishing boundary")
+	}
+	select {
+	case <-done:
+		close(releaseTurnDone)
+		t.Fatal("finishing boundary closed before TurnDone fan-out returned")
+	default:
+	}
+
+	close(releaseTurnDone)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("finishing boundary did not close after TurnDone fan-out")
+	}
+	if _, ok := c.TurnFinishingDone(); ok {
+		t.Fatal("controller retained a stale finishing boundary")
+	}
+}
+
 func assertCancelClearedPendingRuntimeStatus(t *testing.T, st RuntimeStatus) {
 	t.Helper()
 	if st.PendingPrompt {

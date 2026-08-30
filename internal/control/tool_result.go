@@ -12,6 +12,8 @@ type ToolResultData struct {
 	Args      string                  `json:"args"`
 	Output    string                  `json:"output"`
 	Execution *provider.ToolExecution `json:"execution,omitempty"`
+	// MCPApp is the optional Apps presentation for inline rendering.
+	MCPApp *provider.MCPAppPresentation `json:"mcpApp,omitempty"`
 }
 
 // ToolResult looks up a tool call by its ID in the session history and returns
@@ -39,6 +41,7 @@ func lookupToolResult(msgs []provider.Message, toolID string) *ToolResultData {
 			Args:      "",
 			Output:    msg.Content,
 			Execution: msg.ToolExecution,
+			MCPApp:    msg.MCPApp,
 		}
 		// Walk back to find the assistant turn that issued this call.
 		for j := i; j >= 0; j-- {

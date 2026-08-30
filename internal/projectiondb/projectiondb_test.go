@@ -112,6 +112,41 @@ func TestRebuildPublishesOnlyValidatedReplacement(t *testing.T) {
 	}
 }
 
+func TestRebuildCanRetainPreviousDatabaseForRollback(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "catalog.sqlite")
+	opts := OpenOptions{Path: path, MemoryName: "rebuild-retain", Migrations: testMigrations(), RetainBackup: true}
+	seed, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.DB.Exec(`INSERT INTO values_table(value) VALUES('old')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rebuild(context.Background(), opts, func(ctx context.Context, db *sql.DB) error {
+		_, err := db.ExecContext(ctx, `INSERT INTO values_table(value) VALUES('new')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	backups, err := filepath.Glob(path + ".replaced-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("retained backups = %v err=%v, want one backup", backups, err)
+	}
+	rollback, err := Open(context.Background(), OpenOptions{Path: backups[0], MemoryName: "rollback", Migrations: testMigrations()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollback.DB.Close()
+	var value string
+	if err := rollback.DB.QueryRow(`SELECT value FROM values_table`).Scan(&value); err != nil || value != "old" {
+		t.Fatalf("rollback value=%q err=%v, want old", value, err)
+	}
+}
+
 func TestDiskFileDSNUsesCrossPlatformURI(t *testing.T) {
 	t.Parallel()
 	dsn := diskFileDSN(filepath.Join(t.TempDir(), "catalog.sqlite"))
@@ -157,6 +192,34 @@ func TestMemoryOpenUsesOneConnectionDespiteRequestedPool(t *testing.T) {
 	t.Cleanup(func() { _ = handle.DB.Close() })
 	if got := handle.DB.Stats().MaxOpenConnections; got != 1 {
 		t.Fatalf("memory max open connections = %d, want 1 to avoid shared-cache table deadlocks", got)
+	}
+}
+
+func TestMemoryOpenIsolatesHandlesWithSameNameAndClock(t *testing.T) {
+	t.Parallel()
+	fixedNow := func() time.Time { return time.Unix(123, 456) }
+	opts := OpenOptions{
+		InMemory: true, MemoryName: "same-name", Migrations: testMigrations(), Now: fixedNow,
+	}
+	first, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.DB.Close() })
+	second, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.DB.Close() })
+	if _, err := first.DB.Exec(`INSERT INTO values_table(value) VALUES('first-only')`); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := second.DB.QueryRow(`SELECT COUNT(*) FROM values_table`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("second memory projection contains %d rows from first handle, want isolated database", count)
 	}
 }
 

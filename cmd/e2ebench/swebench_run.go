@@ -19,7 +19,6 @@ type swebenchOpts struct {
 	subset     string
 	namespace  string
 	model      string
-	profile    string
 	permission string
 	arm        ablation.Set
 	runID      string
@@ -58,7 +57,7 @@ func loadSwebenchSubset(path string) ([]swebenchInstance, error) {
 // the agent inside it against /testbed, and take whatever the working tree
 // became as the candidate patch. Grading happens later, in one batch.
 func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string) {
-	r := result{task: task{ID: inst.InstanceID}, Profile: o.profile}
+	r := result{task: task{ID: inst.InstanceID}, Profile: benchmarkProfileStandard}
 	r.Arm = o.arm.Arm()
 
 	image := swebenchImage(o.namespace, inst.InstanceID)
@@ -92,7 +91,7 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 	}
 
 	metricsPath := "/tmp/reasonix-metrics.json"
-	args := swebenchAgentArgs(metricsPath, o.model, o.profile, o.permission, o.arm, o.maxSteps, swebenchPrompt(inst))
+	args := swebenchAgentArgs(metricsPath, o.model, o.permission, o.arm, o.maxSteps, swebenchPrompt(inst))
 	agentCmd := append([]string{"exec", "-e", "REASONIX_HOME=/opt/rxhome", container},
 		testbedShell("/usr/local/bin/reasonix "+shellQuoteAll(args))...)
 

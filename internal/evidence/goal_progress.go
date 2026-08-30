@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -26,6 +27,25 @@ func (l *Ledger) SuccessfulProgressSignaturesSince(index int) []string {
 	return out
 }
 
+// SuccessfulProgressFingerprint returns a stable set fingerprint for successful
+// host-observed work in the current ledger. Repeating an identical call with an
+// identical result does not change it, while a novel read result, command
+// result, mutation, todo update, review, or sign-off does.
+func (l *Ledger) SuccessfulProgressFingerprint() string {
+	signatures := l.SuccessfulProgressSignaturesSince(0)
+	unique := make(map[string]struct{}, len(signatures))
+	for _, signature := range signatures {
+		unique[signature] = struct{}{}
+	}
+	signatures = signatures[:0]
+	for signature := range unique {
+		signatures = append(signatures, signature)
+	}
+	slices.Sort(signatures)
+	sum := sha256.Sum256([]byte(strings.Join(signatures, "\x00")))
+	return fmt.Sprintf("%x", sum)
+}
+
 func progressReceiptSignature(r Receipt) (string, bool) {
 	if !r.Success {
 		return "", false
@@ -36,7 +56,7 @@ func progressReceiptSignature(r Receipt) (string, bool) {
 		kind = "mutation"
 	case r.Command != "":
 		kind = "command"
-	case r.ToolName == "todo_write" && len(r.Todos) > 0:
+	case r.ToolName == "todo_write":
 		kind = "todo"
 	case r.ToolName == "complete_step" && r.StepProof:
 		kind = "signoff"

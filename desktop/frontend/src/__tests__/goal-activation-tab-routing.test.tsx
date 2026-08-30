@@ -10,7 +10,8 @@ import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { activateGoalAndSubmitOnTab } from "../lib/goalSubmit";
 import { useController } from "../lib/useController";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import { historySliceFromMessages } from "./mockHistorySlice";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -133,6 +134,8 @@ window.go = {
       JobsForTab: async () => jobs,
       CheckpointsForTab: async () => checkpoints,
       HistoryForTab: async (): Promise<HistoryMessage[]> => [],
+      HistorySliceForTab: async (tabId: string, request: HistorySliceRequest) =>
+        historySliceFromMessages(tabId, [], request),
       HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
@@ -201,23 +204,27 @@ await waitForActive("tab-a");
 eq(controller?.activeTabId, "tab-a", "harness starts on tab A");
 
 const sourceTabId = "tab-a";
-const pending = activateGoalAndSubmitOnTab({
-  tabId: sourceTabId,
-  displayText: "Cross-tab safe goal",
-  submitText: "/ui-ux-pro-max Cross-tab safe goal",
-  structured: {
-    display: "/ui-ux-pro-max Cross-tab safe goal",
-    input: "Cross-tab safe goal",
-    invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-  },
-  sendToTab: (tabId, goal, display, submit, structured) => {
-    if (!controller) throw new Error("controller missing");
-    return controller.sendToTab(tabId, display, submit, undefined, structured, {
-      goal,
-      collaborationMode: "normal",
-      toolApprovalMode: "ask",
-    });
-  },
+let pending!: Promise<void>;
+await act(async () => {
+  pending = activateGoalAndSubmitOnTab({
+    tabId: sourceTabId,
+    displayText: "Cross-tab safe goal",
+    submitText: "/ui-ux-pro-max Cross-tab safe goal",
+    structured: {
+      display: "/ui-ux-pro-max Cross-tab safe goal",
+      input: "Cross-tab safe goal",
+      invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
+    },
+    sendToTab: (tabId, goal, display, submit, structured) => {
+      if (!controller) throw new Error("controller missing");
+      return controller.sendToTab(tabId, display, submit, undefined, structured, {
+        goal,
+        collaborationMode: "normal",
+        toolApprovalMode: "ask",
+      });
+    },
+  });
+  await flushPromises();
 });
 
 // While the atomic bridge call for A is suspended, the UI switches to tab B.

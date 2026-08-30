@@ -50,7 +50,7 @@ func TestDependentSameBatchEditRefreshesPreviewBeforeExecution(t *testing.T) {
 	a := New(prov, reg, NewSession(""), Options{}, event.FuncSink(func(e event.Event) {
 		events = append(events, e)
 	}))
-	if err := a.Run(context.Background(), "advance status twice"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "advance status twice"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -133,7 +133,7 @@ func TestDependentMutationSkippedAfterFailedWriterInBatch(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "run dependent edit after a partial failure"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "run dependent edit after a partial failure"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)

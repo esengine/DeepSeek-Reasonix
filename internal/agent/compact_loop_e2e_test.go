@@ -200,10 +200,8 @@ func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
 	}
 }
 
-// TestSummaryKeepsToolHeavySessionBounded: automatic maintenance no longer
-// prunes mid-session tool bodies. Growth from large tool results crosses
-// compact_ratio once, installs one content-driven summary checkpoint, and must
-// not loop or trip the stuck guard. Prune projections must not reappear.
+// Tool-heavy growth is reclaimed by durable prune projections before paying
+// for a summary.
 func TestSummaryKeepsToolHeavySessionBounded(t *testing.T) {
 	perTurn, paused, prunes := compactionsPerTurn(t, 40000, strings.Repeat("file line. ", 1100), "", 20)
 
@@ -213,17 +211,14 @@ func TestSummaryKeepsToolHeavySessionBounded(t *testing.T) {
 	}
 	t.Logf("compactions per turn: %v (total %d), paused=%v, prunes=%d", perTurn, total, paused, prunes)
 
-	if total == 0 {
-		t.Errorf("expected at least one summary fold over a tool-heavy session past compact_ratio")
-	}
 	if total > 3 {
-		t.Errorf("compaction fired %d times; a single content-driven summary should leave breathing room", total)
+		t.Errorf("summary fired %d times; prune should reclaim most tool-heavy growth", total)
 	}
 	if paused {
 		t.Errorf("auto-compaction paused; successful summary should have prevented the stuck loop")
 	}
-	if prunes != 0 {
-		t.Errorf("prune projections must not be installed (got %d)", prunes)
+	if prunes == 0 {
+		t.Error("expected at least one durable prune projection")
 	}
 	if c := consecutiveCompactingTurns(perTurn); c > 1 {
 		t.Errorf("compaction fired on %d consecutive turns; content-driven summary should reclaim headroom", c)

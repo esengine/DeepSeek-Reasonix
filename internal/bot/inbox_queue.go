@@ -16,16 +16,17 @@ import (
 const botInboxMessageExtraKey = "reasonix.bot.inbound.v1"
 
 type durableBotMessage struct {
-	Platform     Platform `json:"platform"`
-	ConnectionID string   `json:"connectionId,omitempty"`
-	Domain       string   `json:"domain,omitempty"`
-	ChatType     ChatType `json:"chatType"`
-	ChatID       string   `json:"chatId"`
-	UserID       string   `json:"userId,omitempty"`
-	UserName     string   `json:"userName,omitempty"`
-	OperatorID   string   `json:"operatorId,omitempty"`
-	MessageID    string   `json:"messageId,omitempty"`
-	ThreadID     string   `json:"threadId,omitempty"`
+	Platform       Platform `json:"platform"`
+	ConnectionID   string   `json:"connectionId,omitempty"`
+	Domain         string   `json:"domain,omitempty"`
+	ChatType       ChatType `json:"chatType"`
+	ChatID         string   `json:"chatId"`
+	UserID         string   `json:"userId,omitempty"`
+	UserName       string   `json:"userName,omitempty"`
+	OperatorID     string   `json:"operatorId,omitempty"`
+	MessageID      string   `json:"messageId,omitempty"`
+	ThreadID       string   `json:"threadId,omitempty"`
+	SessionWebhook string   `json:"sessionWebhook,omitempty"`
 }
 
 func botInboxExtra(msg InboundMessage) map[string]string {
@@ -33,7 +34,7 @@ func botInboxExtra(msg InboundMessage) map[string]string {
 		Platform: msg.Platform, ConnectionID: msg.ConnectionID, Domain: msg.Domain,
 		ChatType: msg.ChatType, ChatID: msg.ChatID, UserID: msg.UserID,
 		UserName: msg.UserName, OperatorID: msg.OperatorID, MessageID: msg.MessageID,
-		ThreadID: msg.ThreadID,
+		ThreadID: msg.ThreadID, SessionWebhook: msg.SessionWebhook,
 	})
 	if err != nil {
 		return nil
@@ -56,6 +57,7 @@ func botMessageFromEnvelope(env sessioninbox.PromptEnvelope, fallback InboundMes
 			msg.OperatorID = stored.OperatorID
 			msg.MessageID = stored.MessageID
 			msg.ThreadID = stored.ThreadID
+			msg.SessionWebhook = stored.SessionWebhook
 		}
 	}
 	msg.Text = firstNonEmptyBotText(env.DisplayText, env.SubmitText, env.RawText)

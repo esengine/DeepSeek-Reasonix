@@ -1333,7 +1333,6 @@ func TestRebindTabToLoadedSessionPersistsAndRestoresSessionProfile(t *testing.T)
 		SessionPath:      currentPath,
 		Ctrl:             ctrl,
 		Ready:            true,
-		tokenMode:        boot.TokenModeEconomy,
 		mode:             "plan",
 		toolApprovalMode: control.ToolApprovalAuto,
 		sink:             &tabEventSink{tabID: "tab", app: app},
@@ -1351,9 +1350,10 @@ func TestRebindTabToLoadedSessionPersistsAndRestoresSessionProfile(t *testing.T)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta current ok=%v err=%v", ok, err)
 	}
-	if currentMeta.TokenMode != boot.TokenModeEconomy || currentMeta.Mode != "plan" || currentMeta.ToolApprovalMode != control.ToolApprovalAuto {
-		t.Fatalf("current session profile = token:%q mode:%q approval:%q, want economy/plan/auto",
-			currentMeta.TokenMode, currentMeta.Mode, currentMeta.ToolApprovalMode)
+	if currentMeta.TokenMode != boot.TokenModeFull || currentMeta.AgentPreset != "" ||
+		currentMeta.Mode != "plan" || currentMeta.ToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("current session profile = token:%q preset:%q mode:%q approval:%q, want full/empty/plan/auto",
+			currentMeta.TokenMode, currentMeta.AgentPreset, currentMeta.Mode, currentMeta.ToolApprovalMode)
 	}
 	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
 		t.Fatalf("rebound token mode = %q, want full", got)
@@ -1617,7 +1617,6 @@ func newAtomicRebindTestApp(t *testing.T) (*App, *WorkspaceTab, control.SessionA
 		Ctrl:             oldCtrl,
 		Ready:            true,
 		model:            "",
-		tokenMode:        boot.TokenModeEconomy,
 		mode:             "plan-yolo",
 		toolApprovalMode: control.ToolApprovalYolo,
 		sink:             &tabEventSink{tabID: "atomic-rebind", app: app, ctx: app.ctx},
@@ -1662,7 +1661,7 @@ func assertAtomicRebindFailurePreservedSource(
 		t.Fatalf("lease after failed rebind = %q, want source key %q", got, sessionRuntimeKey(sourcePath))
 	}
 	if !oldCtrl.PlanMode() || oldCtrl.ToolApprovalMode() != control.ToolApprovalYolo ||
-		currentTabTokenMode(tab) != boot.TokenModeEconomy {
+		currentTabTokenMode(tab) != boot.TokenModeFull {
 		t.Fatalf("source profile changed after failed rebind: plan=%v approval=%q token=%q",
 			oldCtrl.PlanMode(), oldCtrl.ToolApprovalMode(), currentTabTokenMode(tab))
 	}
@@ -1757,7 +1756,6 @@ func TestCloseTabPersistsSessionProfileBeforeRemovingVisibleTab(t *testing.T) {
 		SessionPath:      currentPath,
 		Ctrl:             ctrl,
 		Ready:            true,
-		tokenMode:        boot.TokenModeEconomy,
 		mode:             "plan",
 		toolApprovalMode: control.ToolApprovalAuto,
 		sink:             &tabEventSink{tabID: "profile", app: app},
@@ -1784,9 +1782,10 @@ func TestCloseTabPersistsSessionProfileBeforeRemovingVisibleTab(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta current ok=%v err=%v", ok, err)
 	}
-	if meta.TokenMode != boot.TokenModeEconomy || meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "finish the review" {
-		t.Fatalf("closed session profile = token:%q mode:%q approval:%q goal:%q, want economy/plan/auto/goal",
-			meta.TokenMode, meta.Mode, meta.ToolApprovalMode, meta.Goal)
+	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != "" ||
+		meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "finish the review" {
+		t.Fatalf("closed session profile = token:%q preset:%q mode:%q approval:%q goal:%q, want full/empty/plan/auto/goal",
+			meta.TokenMode, meta.AgentPreset, meta.Mode, meta.ToolApprovalMode, meta.Goal)
 	}
 }
 
@@ -1827,7 +1826,6 @@ func TestKeepOnlyVisibleTabPersistsRemovedSessionProfile(t *testing.T) {
 		SessionPath:      removedPath,
 		Ctrl:             removedCtrl,
 		Ready:            true,
-		tokenMode:        boot.TokenModeEconomy,
 		mode:             "plan",
 		toolApprovalMode: control.ToolApprovalAuto,
 		sink:             &tabEventSink{tabID: "removed", app: app},
@@ -1846,60 +1844,50 @@ func TestKeepOnlyVisibleTabPersistsRemovedSessionProfile(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta removed ok=%v err=%v", ok, err)
 	}
-	if meta.TokenMode != boot.TokenModeEconomy || meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "keep this profile" {
-		t.Fatalf("removed session profile = token:%q mode:%q approval:%q goal:%q, want economy/plan/auto/goal",
-			meta.TokenMode, meta.Mode, meta.ToolApprovalMode, meta.Goal)
+	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != "" ||
+		meta.Mode != "plan" || meta.ToolApprovalMode != control.ToolApprovalAuto || meta.Goal != "keep this profile" {
+		t.Fatalf("removed session profile = token:%q preset:%q mode:%q approval:%q goal:%q, want full/empty/plan/auto/goal",
+			meta.TokenMode, meta.AgentPreset, meta.Mode, meta.ToolApprovalMode, meta.Goal)
 	}
 }
 
 func TestLoadTabSessionProfileIgnoresTerminalGoalState(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	root := globalTabWorkspaceRoot()
-	dir := desktopSessionDir(root)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
+	sessionPath := filepath.Join(desktopSessionDir(globalTabWorkspaceRoot()), "terminal-goal.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	sessionPath := filepath.Join(dir, "terminal-goal.jsonl")
 	writeHistoryTestSession(t, sessionPath, "terminal prompt")
 	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{
-		TokenMode:        boot.TokenModeEconomy,
-		Mode:             "plan",
-		ToolApprovalMode: control.ToolApprovalAuto,
-		Goal:             "stale terminal goal",
+		TokenMode: "economy", Mode: "plan", ToolApprovalMode: control.ToolApprovalAuto, Goal: "stale terminal goal",
 	}); err != nil {
-		t.Fatalf("SaveBranchMetaPreserveUpdated: %v", err)
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(store.SessionGoalState(sessionPath), []byte(`{"goal":"stale terminal goal","status":"complete"}`), 0o644); err != nil {
-		t.Fatalf("write goal state: %v", err)
+		t.Fatal(err)
 	}
-
 	profile := loadTabSessionProfile(sessionPath)
-	if profile.goal != "" {
-		t.Fatalf("loaded profile goal = %q, want terminal goal ignored", profile.goal)
+	if profile.goal != "" || profile.tokenMode != "full" || profile.qualityFloor != control.QualityFloorStandard || profile.mode != "plan" || profile.toolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("profile=%+v", profile)
 	}
-	if profile.tokenMode != boot.TokenModeEconomy || profile.mode != "plan" || profile.toolApprovalMode != control.ToolApprovalAuto {
-		t.Fatalf("loaded profile = token:%q mode:%q approval:%q, want economy/plan/auto",
-			profile.tokenMode, profile.mode, profile.toolApprovalMode)
+	tab := &WorkspaceTab{}
+	applyTabSessionProfile(tab, profile)
+	if currentTabTokenMode(tab) != boot.TokenModeFull {
+		t.Fatal("legacy economy must fold to standard")
 	}
 }
 
 func TestLoadTabSessionProfileMissingApprovalDefaultsAsk(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	root := globalTabWorkspaceRoot()
-	dir := desktopSessionDir(root)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
+	sessionPath := filepath.Join(desktopSessionDir(globalTabWorkspaceRoot()), "legacy-missing-approval.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	sessionPath := filepath.Join(dir, "legacy-missing-approval.jsonl")
 	writeHistoryTestSession(t, sessionPath, "legacy prompt")
 	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, agent.BranchMeta{Mode: "normal"}); err != nil {
-		t.Fatalf("SaveBranchMetaPreserveUpdated: %v", err)
+		t.Fatal(err)
 	}
-
-	profile := loadTabSessionProfile(sessionPath)
-	if profile.toolApprovalMode != control.ToolApprovalAsk {
+	if profile := loadTabSessionProfile(sessionPath); profile.toolApprovalMode != control.ToolApprovalAsk {
 		t.Fatalf("legacy missing tool approval mode = %q, want ask", profile.toolApprovalMode)
 	}
 }

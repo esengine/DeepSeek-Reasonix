@@ -1,6 +1,7 @@
 package crashreport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,9 @@ func TestCapturePanicWritesBoundedSanitizedReport(t *testing.T) {
 	report := reports[0].Report
 	if report.Kind != "crash" || report.Source != "cli.go" || report.Label != "panic" || report.SchemaVersion != 2 {
 		t.Fatalf("report metadata = %+v", report)
+	}
+	if len(report.EventID) != 32 || len(report.DedupKey) != 64 {
+		t.Fatalf("report identity = event %q dedup %q", report.EventID, report.DedupKey)
 	}
 	if !strings.Contains(report.Stack, "reasonix/internal/agent.run(...)") || !strings.Contains(report.Stack, "<path>/run.go:42") {
 		t.Fatalf("sanitized stack = %q", report.Stack)
@@ -82,6 +86,36 @@ func TestCapturePanicWritesBoundedSanitizedReport(t *testing.T) {
 	reports, err = List(home)
 	if err != nil || len(reports) != maxReports {
 		t.Fatalf("bounded reports=%d err=%v", len(reports), err)
+	}
+}
+
+func TestListBackfillsStableIdentityForOldPendingReport(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, dirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "00000000000000000001-1-0000000000000001.json"
+	path := filepath.Join(dir, name)
+	body := `{"kind":"crash","version":"v1.20.0","os":"linux","arch":"amd64","message":"old","schemaVersion":2,"source":"cli.go","label":"panic"}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := List(home)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first List reports=%d err=%v", len(first), err)
+	}
+	second, err := List(home)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second List reports=%d err=%v", len(second), err)
+	}
+	if first[0].Report.EventID == "" || first[0].Report.DedupKey == "" ||
+		first[0].Report.EventID != second[0].Report.EventID || first[0].Report.DedupKey != second[0].Report.DedupKey {
+		t.Fatalf("identity was not stable: first=%+v second=%+v", first[0].Report, second[0].Report)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(stored, []byte(`"eventId"`)) || !bytes.Contains(stored, []byte(`"dedupKey"`)) {
+		t.Fatalf("backfilled identity was not persisted: body=%s err=%v", stored, err)
 	}
 }
 

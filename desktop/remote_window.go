@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -27,6 +26,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/internal/config"
+	"reasonix/internal/proc"
 )
 
 const (
@@ -316,13 +316,14 @@ type remoteWindowChild struct {
 // process's SSH connection keep running. A real main-process quit terminates
 // survivors.
 type remoteWindowRegistry struct {
-	mu       sync.Mutex
-	children map[string][]remoteWindowChild // per host, one live window plus transient handoffs
-	nextGen  uint64
+	mu         sync.Mutex
+	children   map[string][]remoteWindowChild // per host, one live window plus transient handoffs
+	workspaces map[string]string              // hostKey → workspace the window currently shows
+	nextGen    uint64
 }
 
 func newRemoteWindowRegistry() *remoteWindowRegistry {
-	return &remoteWindowRegistry{children: map[string][]remoteWindowChild{}}
+	return &remoteWindowRegistry{children: map[string][]remoteWindowChild{}, workspaces: map[string]string{}}
 }
 
 // record registers proc for hostKey and returns its generation. Each spawn is
@@ -348,10 +349,27 @@ func (r *remoteWindowRegistry) clearIf(hostKey string, gen uint64, pid int) {
 			r.children[hostKey] = append(entries[:i], entries[i+1:]...)
 			if len(r.children[hostKey]) == 0 {
 				delete(r.children, hostKey)
+				delete(r.workspaces, hostKey)
 			}
 			return
 		}
 	}
+}
+
+// setWorkspace records which workspace the host's window is showing, so a
+// reconnect refresh or a per-workspace stop can act on the right serve.
+func (r *remoteWindowRegistry) setWorkspace(hostKey, workspace string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.workspaces[hostKey] = workspace
+}
+
+// workspaceFor returns the workspace the host's window was last opened on
+// ("" when unknown).
+func (r *remoteWindowRegistry) workspaceFor(hostKey string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.workspaces[hostKey]
 }
 
 // close terminates every process registered for the host — the live window
@@ -361,6 +379,7 @@ func (r *remoteWindowRegistry) close(hostKey string) {
 	r.mu.Lock()
 	entries := r.children[hostKey]
 	delete(r.children, hostKey)
+	delete(r.workspaces, hostKey)
 	r.mu.Unlock()
 	for _, child := range entries {
 		if child.proc != nil {
@@ -419,7 +438,7 @@ func (a *App) spawnRemoteWindow(hostKey string, launch remoteWindowLaunch) error
 		_ = os.Remove(path)
 		return fmt.Errorf("remote window owner identity is unavailable")
 	}
-	cmd := exec.Command(
+	cmd := proc.VisibleCommand(
 		executable,
 		remoteWindowTicketArgPrefix+ticket,
 		remoteWindowHostArgPrefix+hostKey,
@@ -464,7 +483,10 @@ func (a *App) watchRemoteWindowOwner(ctx context.Context) {
 // delivered to the caller while the Serve stays ready for the target
 // workspace; the window can simply be opened again (the Serve is reused) and
 // any previous window is left in place until then.
-func (a *App) openRemoteWindowForHost(hostID, rawURL string) error {
+func (a *App) openRemoteWindowForHost(hostID, workspace, rawURL string) error {
+	if a.remoteWindows != nil {
+		a.remoteWindows.setWorkspace(remoteWindowHostKey(hostID), workspace)
+	}
 	launch := remoteWindowLaunch{
 		URL:     rawURL,
 		Title:   remoteWindowTitle(hostID),
@@ -474,6 +496,15 @@ func (a *App) openRemoteWindowForHost(hostID, rawURL string) error {
 		return a.remoteWindowOpener(launch)
 	}
 	return a.spawnRemoteWindow(launch.HostKey, launch)
+}
+
+// remoteWindowWorkspace reports which workspace the host's web window is
+// currently showing ("" when no window or pre-tracking open).
+func (a *App) remoteWindowWorkspace(hostID string) string {
+	if a.remoteWindows == nil {
+		return ""
+	}
+	return a.remoteWindows.workspaceFor(remoteWindowHostKey(hostID))
 }
 
 // closeRemoteWindowForHost terminates the host's web window. Called on explicit

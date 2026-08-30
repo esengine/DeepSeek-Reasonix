@@ -94,7 +94,7 @@ function installDom(language = "en-US", descriptionOverflows = true) {
 
 console.log("\ndecision surface");
 
-eq(Object.keys(DECISION_SURFACE_MOCK_TRIGGERS).length, 7, "QA stress scenes do not change the seven product decision surfaces");
+eq(Object.keys(DECISION_SURFACE_MOCK_TRIGGERS).length, 8, "all eight product decision surfaces have browser mocks");
 for (const [kind, trigger] of Object.entries(DECISION_SURFACE_MOCK_TRIGGERS)) {
   eq(decisionSurfaceMockFromInput(trigger), kind, `${kind} has a distinct canonical browser mock trigger`);
 }
@@ -102,7 +102,7 @@ eq(decisionSurfaceMockFromInput("mock 工作区冲突"), "workspace_conflict", "
 eq(decisionSurfaceMockFromInput("/approve-preview"), "tool_approval", "legacy approval preview trigger remains compatible");
 eq(isLongDecisionOptionsMockInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), true, "long-option QA has a canonical browser trigger");
 eq(isLongDecisionOptionsMockInput("mock 长文案选项"), true, "long-option QA has a convenient Chinese trigger");
-eq(decisionSurfaceMockFromInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), null, "long-option QA is not counted as an eighth product surface");
+eq(decisionSurfaceMockFromInput(LONG_DECISION_OPTIONS_MOCK_TRIGGER), null, "long-option QA is not counted as a ninth product surface");
 
 // Plan exposes start, revise, and leave-without-executing as direct buttons so
 // declining the current plan never traps the user in Plan mode.

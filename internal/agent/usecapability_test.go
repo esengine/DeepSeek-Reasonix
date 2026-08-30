@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+
 	"reasonix/internal/tool"
 )
 
@@ -357,7 +358,7 @@ func TestPlannerFirstOnDemandMCPCallPreservesImages(t *testing.T) {
 	if host.HasClient("image") {
 		t.Fatal("test requires the MCP server to start on first tool dispatch")
 	}
-	if err := planner.Run(ctx, "take a screenshot"); err != nil {
+	if err := planner.Run(withNoClosedLoop(ctx), "take a screenshot"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := toolCalls.Load(); got != 1 {
@@ -924,12 +925,12 @@ func TestCompletedProxyCallCountsOnAgentSkipExecutePath(t *testing.T) {
 		t.Fatalf("completed call audit = %d/%d, want 1/0", snap.MCPCall, snap.MCPCallFailures)
 	}
 }
-
 func TestCapabilityGateRecoveryIsAudited(t *testing.T) {
 	reg := tool.NewRegistry()
 	audit := &capability.Audit{}
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
+		Options{CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
+	a.turn = turnRuntime{deliveryScopeActive: true}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
@@ -1089,14 +1090,13 @@ func TestPlanModeBlocksAuthorizedDestructiveMCPThroughUseCapability(t *testing.T
 func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
+		Options{CapabilityLedger: capability.NewLedger()}, event.Discard)
+	a.turn = turnRuntime{deliveryScopeActive: true}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
-	// Only ordinary reads happened — no writer. The require gate must still hold.
 	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
-	check := a.finalReadinessCheckFor()
-	if !strings.Contains(check.reason, "required capabilities") {
+	if check := a.finalReadinessCheckFor(); !strings.Contains(check.reason, "required capabilities") {
 		t.Fatalf("read-only answer must not skip the require gate; reason = %q", check.reason)
 	}
 }
@@ -1349,25 +1349,18 @@ func TestPlannerBlocksDestructiveMCPWithExecutorHandoff(t *testing.T) {
 	}
 }
 
-func TestUseCapabilityCallsAreAlwaysSerialized(t *testing.T) {
+func TestUseCapabilityDiscoveryCallsAreParallel(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	reg.Add(fakeTool{name: "use_capability", readOnly: true})
+	reg.Add(NewUseCapabilityTool(t.Context(), nil, nil, reg, nil, nil, nil))
 	calls := []provider.ToolCall{
 		{ID: "1", Name: "use_capability", Arguments: `{"action":"list"}`},
 		{ID: "2", Name: "use_capability", Arguments: `{"action":"list"}`},
 		{ID: "3", Name: "read_file", Arguments: `{"path":"a.go"}`},
 	}
 	got := partitionToolCalls(reg, calls)
-	if len(got) != 3 {
-		t.Fatalf("partition = %+v, want 3 batches (uc, uc, read)", got)
-	}
-	if got[0].parallel || got[1].parallel {
-		t.Fatalf("use_capability batches must be serial for every agent: %+v", got)
-	}
-	// A lone read_file may still be marked parallelisable; it is a single-call batch.
-	if got[2].start != 2 || got[2].end != 3 {
-		t.Fatalf("trailing read batch = %+v", got[2])
+	if len(got) != 1 || !got[0].parallel || got[0].end != 3 {
+		t.Fatalf("list/read-only discovery should batch: %+v", got)
 	}
 }
 

@@ -20,6 +20,34 @@ func TestMetricsSinkForwardsEachEventOnce(t *testing.T) {
 	}
 }
 
+type metricsCapabilityProbe struct {
+	event.Sink
+	readiness, delegation, workspace, runBudget int
+}
+
+func (p *metricsCapabilityProbe) RecordReadinessAudit(evidence.ReadinessAudit) { p.readiness++ }
+func (p *metricsCapabilityProbe) RecordDelegationAudit(evidence.DelegationAudit) {
+	p.delegation++
+}
+func (p *metricsCapabilityProbe) RecordWorkspaceMutation(event.WorkspaceMutation) {
+	p.workspace++
+}
+func (p *metricsCapabilityProbe) RecordRunBudget(event.RunBudgetSample) { p.runBudget++ }
+
+func TestMetricsSinkForwardsObservedCapabilities(t *testing.T) {
+	inner := &metricsCapabilityProbe{Sink: event.Discard}
+	s := &metricsSink{inner: inner}
+
+	s.RecordReadinessAudit(evidence.ReadinessAudit{})
+	s.RecordDelegationAudit(evidence.DelegationAudit{})
+	event.RecordWorkspaceMutation(s, event.WorkspaceMutation{ToolName: "write_file"})
+	event.RecordRunBudget(s, event.RunBudgetSample{Currency: "USD"})
+
+	if inner.readiness != 1 || inner.delegation != 1 || inner.workspace != 1 || inner.runBudget != 1 {
+		t.Fatalf("observed capabilities not forwarded: %+v", inner)
+	}
+}
+
 func TestMetricsSinkUsesProviderCacheWriteCost(t *testing.T) {
 	s := &metricsSink{inner: event.Discard}
 	s.Emit(event.Event{
