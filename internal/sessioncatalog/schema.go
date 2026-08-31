@@ -140,6 +140,62 @@ CREATE TABLE IF NOT EXISTS catalog_folded_topics (
 );
 `
 
+// v9 separates filesystem identity from the original access spelling. The
+// production default moves to a fresh v6.sqlite generation together with this
+// migration, so old v5 writers never share the new identity columns. Explicit
+// legacy catalog paths are invalidated in place: filesystem-aware keys cannot
+// be backfilled safely in SQL, and every deleted row is a disposable projection
+// that the next authoritative directory reconciliation recreates.
+const migrationV9 = `
+ALTER TABLE catalog_directories ADD COLUMN path_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN path_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN directory_key TEXT NOT NULL DEFAULT '';
+
+DELETE FROM catalog_sessions;
+DELETE FROM catalog_directories;
+DELETE FROM catalog_topics;
+DELETE FROM catalog_folded_topics;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_directories_path_key
+ON catalog_directories(path_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_sessions_path_key
+ON catalog_sessions(path_key);
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_directory_key
+ON catalog_sessions(directory_key, seen_generation, missing_since);
+`
+
+// v10 extends filesystem identity to workspace roots. Access spellings remain
+// available for UI/file access, while every relationship and uniqueness rule
+// uses the filesystem-aware key. Existing v9 projections are disposable and
+// must be rebuilt because SQL cannot infer volume-specific case semantics.
+const migrationV10 = `
+ALTER TABLE catalog_projects ADD COLUMN workspace_root_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_topics ADD COLUMN workspace_root_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN workspace_root_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_folded_topics ADD COLUMN workspace_root_key TEXT NOT NULL DEFAULT '';
+
+DELETE FROM catalog_sessions;
+DELETE FROM catalog_directories;
+DELETE FROM catalog_projects;
+DELETE FROM catalog_topics;
+DELETE FROM catalog_folded_topics;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_projects_workspace_key
+ON catalog_projects(scope, workspace_root_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_topics_workspace_key
+ON catalog_topics(scope, workspace_root_key, topic_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_catalog_folded_topics_workspace_key
+ON catalog_folded_topics(scope, workspace_root_key, topic_id);
+CREATE INDEX IF NOT EXISTS idx_catalog_topics_workspace_page
+ON catalog_topics(scope, workspace_root_key, pinned DESC, last_activity_at DESC, topic_id ASC);
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_workspace_topic
+ON catalog_sessions(scope, workspace_root_key, topic_id, last_activity_at DESC, path ASC);
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_workspace_history
+ON catalog_sessions(scope, workspace_root_key, last_activity_at DESC, path ASC);
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_workspace_ordinary
+ON catalog_sessions(scope, workspace_root_key, ordinary_visible, last_activity_at DESC);
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -172,6 +228,14 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 8, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV8)
+			return err
+		}},
+		{Version: 9, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV9)
+			return err
+		}},
+		{Version: 10, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV10)
 			return err
 		}},
 	}

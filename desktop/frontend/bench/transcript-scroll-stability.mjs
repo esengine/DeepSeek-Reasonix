@@ -837,6 +837,15 @@ try {
         height: current.scrollHeight,
         occupied,
         anchorOffset: anchorRow ? anchorRow.getBoundingClientRect().top - rect.top : null,
+        readerLayoutLease: current.dataset.transcriptReaderLayoutLease,
+        visualGuard: current.dataset.transcriptReaderVisualGuard,
+        visualOffset: current.style.getPropertyValue("--transcript-reader-visual-offset"),
+        mountedRange: (() => {
+          const mounted = [...current.querySelectorAll(".transcript__row[data-index]")]
+            .map((row) => Number.parseInt(row.dataset.index ?? "", 10))
+            .filter(Number.isInteger);
+          return mounted.length === 0 ? null : [Math.min(...mounted), Math.max(...mounted)];
+        })(),
       });
       if (!window.__readerExtentProbe.done) requestAnimationFrame(sample);
     };
@@ -876,6 +885,7 @@ try {
       writes: window.__readerExtentProbe.writes,
       samples: window.__readerExtentProbe.samples,
       mode: element.dataset.scrollMode,
+      historyPrependPending: element.dataset.transcriptHistoryPrependPending,
     };
   }, beforeExtentReplay);
   const readerStabilityWrites = afterExtentReplay.writes.filter((write) => write.owner === "reader-stability");
@@ -891,7 +901,8 @@ try {
   const preservedDirection = maxVisualReverse <= 96;
   assert(preservedDirection, preservedDirection
     ? `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top})`
-    : `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
+    : `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; historyPrependPending=${afterExtentReplay.historyPrependPending}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
+  assert(afterExtentReplay.historyPrependPending === "false", "completed history prepend ownership does not leak into later reader gestures");
   const mountWrites = readerStabilityWrites.filter((write) => write.phase === "mount-anchor");
   const correctionWrites = readerStabilityWrites.filter((write) => write.phase === "correct-offset");
   assert(readerStabilityWrites.length <= 2
@@ -1279,6 +1290,10 @@ try {
   await page.waitForTimeout(100);
   await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual");
   await jumpBottom.waitFor({ state: "visible" });
+  await transcript.evaluate(() => {
+    window.__reasonixJumpTailWrites = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__reasonixJumpTailWrites.push(write);
+  });
   await jumpBottom.click();
   await page.waitForFunction(() => {
     const element = document.querySelector(".transcript");
@@ -1286,7 +1301,20 @@ try {
       && element.dataset.scrollMode === "tail-follow"
       && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
   });
-  await waitForStableTranscriptGeometry(page, { timeout: 30_000, frames: 8, requireTail: true });
+  try {
+    await waitForStableTranscriptGeometry(page, { timeout: 30_000, frames: 8, requireTail: true });
+  } catch (error) {
+    const jumpTailState = await transcript.evaluate((element) => ({
+      top: element.scrollTop,
+      height: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      mode: element.dataset.scrollMode,
+      writes: window.__reasonixJumpTailWrites ?? [],
+    }));
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; jumpTail=${JSON.stringify(jumpTailState)}`);
+  } finally {
+    await transcript.evaluate(() => { window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined; });
+  }
   await page.waitForFunction(() => Boolean(document.querySelector('.transcript [data-transcript-last-row="true"]')));
   await transcript.evaluate((element) => new Promise((resolve) => {
     const growthFrames = new Set([2, 7, 12]);
@@ -1575,10 +1603,16 @@ try {
   const stormApproach = await stormTranscript.evaluate((element) => ({
     writes: window.__stormProbe?.writes.length ?? null,
     mode: element.dataset.scrollMode,
+    readerIntent: element.dataset.transcriptReaderIntent,
+    historyPrependPending: element.dataset.transcriptHistoryPrependPending,
     top: Math.round(element.scrollTop),
     height: Math.round(element.scrollHeight),
     clientHeight: element.clientHeight,
     distance: Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+    lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    diagnostics: element.dataset.scrollMode === "tail-follow"
+      ? undefined
+      : window.__stormProbe?.diagnostics.slice(-24) ?? [],
   }));
   stormApproach.gestures = stormAttempts;
   assert(

@@ -41,9 +41,9 @@ export type TranscriptScrollDiagnosticSource =
   | "native-scrollbar-release";
 
 export type TranscriptTailWriteDiagnostic = {
-  source: TranscriptScrollDiagnosticSource;
+  source?: TranscriptScrollDiagnosticSource;
   phase: "initial" | "settle";
-  settle?: { frame: number; offBottomFrames: number; stagnantFrames: number };
+  settle?: { frame: number; offBottomFrames?: number; stagnantFrames?: number };
 };
 
 function sourceForEvent(event: TranscriptScrollEvent["type"]): TranscriptScrollDiagnosticSource {

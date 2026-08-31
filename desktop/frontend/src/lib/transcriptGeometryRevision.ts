@@ -1,6 +1,5 @@
 import type { RefObject } from "react";
 import { isTranscriptContentShrink, type TranscriptScrollEvent } from "./transcriptScrollArbiter";
-import { CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS } from "./transcriptScrollDiagnosticProbe";
 import { MIN_REVERSE_JUMP_PX } from "./transcriptReaderExtentStability";
 import { pinTranscriptTailAfterViewportShrink, type TranscriptFollowGeometry } from "./transcriptScrollGeometry";
 import { recordTranscriptScrollDiagnostic } from "./transcriptScrollProbe";
@@ -76,9 +75,7 @@ export function createTranscriptGeometryRevisionController({
       && pinTranscriptTailAfterViewportShrink(scrollRef.current, geometry, pinnedRef.current);
     if (frame === null) geometryRevisionRef.current += 1;
     if (pinnedTop !== null) {
-      tailSettle.scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS
-        ? { source: "viewport-resized", phase: "initial" }
-        : undefined);
+      tailSettle.scrollToTail("auto", { source: "viewport-resized", phase: "initial" });
     }
     if (frame !== null) return;
     const generation = generationRef.current;

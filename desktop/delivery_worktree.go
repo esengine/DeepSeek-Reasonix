@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	inspectDeliveryWorktree = worktree.Inspect
-	createDeliveryWorktree  = worktree.Create
+	inspectDeliveryWorktree  = worktree.Inspect
+	createDeliveryWorktree   = worktree.Create
+	rollbackDeliveryWorktree = worktree.RollbackCreate
 )
 
 // IsolatedWorktreeOpenResult is returned after an isolated Git workspace has

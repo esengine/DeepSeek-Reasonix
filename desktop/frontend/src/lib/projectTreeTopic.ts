@@ -38,15 +38,6 @@ export function isTopicNode(node: ProjectNode): boolean {
   return node.kind === "topic" || node.kind === "global_topic";
 }
 
-// projectTreeTopicRecoveryCopyCount is the folded recovery-copy badge count for
-// a topic row. Runtime session rows and non-positive/missing counts render no
-// badge; the copies themselves stay folded behind the canonical row (#8525).
-export function projectTreeTopicRecoveryCopyCount(node: ProjectNode): number {
-  if (!isTopicNode(node)) return 0;
-  const count = node.recoveryCopyCount ?? 0;
-  return count > 0 ? Math.floor(count) : 0;
-}
-
 export function projectTreeRevisionIsFresh(currentRevision: number, incomingRevision: number): boolean {
   return incomingRevision >= currentRevision;
 }

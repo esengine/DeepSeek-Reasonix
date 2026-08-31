@@ -14,7 +14,7 @@ const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTr
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
-const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
+const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8"), forkWorktreeSource = readFileSync(resolve(testDir, "../lib/forkWorktree.ts"), "utf8");
 const bridgeSource = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
 const workspacePanelSource = readFileSync(resolve(testDir, "../components/WorkspacePanel.tsx"), "utf8");
 const rewindCommitSource = readFileSync(resolve(testDir, "../lib/rewindCommit.ts"), "utf8");
@@ -483,7 +483,7 @@ ok(
     /app\.PreviewRewindForTab\(sourceTabId, turn, scope\)/.test(rewindCommitSource) &&
     /app\.CommitRewindForTab\(sourceTabId, remoteLegacy \? "" : \(plan\.planId \|\| ""\), turn, scope\)/.test(rewindCommitSource) &&
     /app\.UndoRewindForTab\(sourceTabId, transactionId\)/.test(rewindCommitSource) &&
-    /app\.ForkForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /bindings\.ForkForTab\(sourceTabId, turn\)[\s\S]*bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkWorktreeSource) &&
     /app\.SummarizeFromForTab\(sourceTabId, turn\)/.test(controllerSource) &&
     /NewSessionForTab\(tabID: string\)/.test(bridgeSource) &&
     /CompactForTab\(tabID: string\)/.test(bridgeSource) &&

@@ -54,7 +54,11 @@ func promoteCanonicalLeaves(records []SessionRecord) []SessionRecord {
 		}
 		rootIndex, hasRoot := groupRoot[groupID]
 		preferred := -1
-		for _, index := range idxs {
+		preferenceIndexes := append([]int{}, idxs...)
+		if hasRoot {
+			preferenceIndexes = append(preferenceIndexes, rootIndex)
+		}
+		for _, index := range preferenceIndexes {
 			if records[index].RecoveryPreferred {
 				if preferred >= 0 {
 					preferred = -2 // multiple stale preferences fail closed

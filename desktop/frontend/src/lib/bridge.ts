@@ -10,6 +10,7 @@ import { makeMockTaskCatalogBindings, type TaskCatalogBindings } from "./taskCat
 import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blankProjectBridge";
 import { makeMockQualityFloorBindings, type QualityFloorBindings } from "./deliveryFloorBridge";
 import { t } from "./i18n";
+import { makeMockForkBindings } from "./forkWorktree";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
@@ -334,6 +335,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   CommitWorkspaceFileRevertForTab(tabID: string, planID: string, resolution: string): Promise<import("./types").RewindResultView>;
   Fork(turn: number): Promise<TabMeta>;
   ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
+  ForkWorktreeForTab(tabID: string, turn: number): Promise<import("./forkWorktree").ForkWorktreeResultView>;
   SummarizeFrom(turn: number): Promise<void>;
   SummarizeFromForTab(tabID: string, turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
@@ -350,7 +352,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
-  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
+  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<RecoveryLineageView>;
   ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;
@@ -3266,23 +3268,11 @@ function makeMockApp(): AppBindings {
     async CommitWorkspaceFileRevertForTab() {
       return { ok: true, undoAvailable: true, transactionId: "mock-file-tx" };
     },
-    async Fork() {
-      const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
-      const tab: TabMeta = {
-        ...active,
-        id: "tab_fork_" + Date.now(),
-        topicId: "topic_fork_" + Date.now(),
-        topicTitle: `${active.topicTitle || t("rewind.fork")} · fork`,
-        active: true,
-        running: false,
-      };
-      mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
-      return { ...tab };
-    },
-    async ForkForTab(tabID, turn) {
-      mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
-      return this.Fork(turn);
-    },
+    ...makeMockForkBindings(
+      () => mockTabs,
+      (tabs) => { mockTabs = tabs; },
+      t("rewind.fork"),
+    ),
     async SummarizeFrom() {},
     async SummarizeFromForTab() {},
     async SummarizeUpTo() {},

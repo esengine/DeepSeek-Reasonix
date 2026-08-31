@@ -277,8 +277,10 @@ func TestCalibratedOutputBudgetIncludesReplayedReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveOutputBudget: %v", err)
 	}
-	if !clipped || budget > 20_000 {
-		t.Fatalf("replayed reasoning budget = %d clipped=%v, want a clipped budget <= 20000", budget, clipped)
+	adm := a.lastAdmission()
+	if !clipped || budget <= 0 || budget >= prov.budget ||
+		budget+adm.PromptTokens+adm.ReserveTokens > a.contextWindow {
+		t.Fatalf("replayed reasoning budget = %d clipped=%v admission=%+v, want a clipped request within the shared window", budget, clipped, adm)
 	}
 }
 

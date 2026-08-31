@@ -2,6 +2,610 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.35.0",
+      "date": "2026-08-31",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.35.0",
+        "zh": "Reasonix 1.35.0"
+      },
+      "summary": {
+        "en": "This release brings isolated Git worktree forks, chunked-summary recovery for over-length sessions, a simplified session recovery versions dialog, and numerous stability fixes for transcript scrolling, compaction, and session catalog identity.",
+        "zh": "此版本带来隔离 Git Worktree 分叉、超长会话的分块摘要恢复、简化的会话恢复版本对话框，以及针对转录滚动、压缩和会话目录身份的众多稳定性修复。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Session Ownership",
+            "zh": "会话所有权"
+          },
+          "body": {
+            "en": "Learn how isolated worktree forks and session ownership work.",
+            "zh": "了解隔离工作树分叉和会话所有权的工作原理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/SESSION_OWNERSHIP.md"
+        },
+        {
+          "title": {
+            "en": "Session Ownership (Chinese)",
+            "zh": "会话所有权（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for session ownership and isolated worktree forks.",
+            "zh": "会话所有权和隔离工作树分叉的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/SESSION_OWNERSHIP.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Session Catalog",
+            "zh": "会话目录"
+          },
+          "body": {
+            "en": "Understand session catalog identity and path handling.",
+            "zh": "了解会话目录身份和路径处理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/SESSION_CATALOG.md"
+        },
+        {
+          "title": {
+            "en": "Session Catalog (Chinese)",
+            "zh": "会话目录（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for session catalog identity and path handling.",
+            "zh": "会话目录身份和路径处理的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/SESSION_CATALOG.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Details on configuration paths and workspace-root identity.",
+            "zh": "配置路径和工作区根身份的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/CONFIG_PATHS.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths (Chinese)",
+            "zh": "配置路径（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for configuration paths and workspace-root identity.",
+            "zh": "配置路径和工作区根身份的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/CONFIG_PATHS.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Guide",
+            "zh": "指南"
+          },
+          "body": {
+            "en": "General usage guide including YOLO mode /clear behavior.",
+            "zh": "一般使用指南，包括 YOLO 模式 /clear 行为。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Guide (Chinese)",
+            "zh": "指南（中文）"
+          },
+          "body": {
+            "en": "Chinese general usage guide including YOLO mode /clear behavior.",
+            "zh": "中文一般使用指南，包括 YOLO 模式 /clear 行为。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Details on tool approval modes and YOLO /clear fast path.",
+            "zh": "工具审批模式和 YOLO /clear 快速路径的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/TOOL_APPROVAL_MODES.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes (Chinese)",
+            "zh": "工具审批模式（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for tool approval modes and YOLO /clear fast path.",
+            "zh": "工具审批模式和 YOLO /clear 快速路径的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/52953e023ec980b9481bbc9f3f518a1b9231b4af/docs/TOOL_APPROVAL_MODES.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Fork conversations into isolated Git worktrees",
+            "zh": "将会话分叉至隔离 Git Worktree"
+          },
+          "body": {
+            "en": "You can now fork a conversation from any message turn into a new tab backed by a dedicated Git worktree, keeping exploratory work separate from your source checkout. Shared-workspace forks remain available.",
+            "zh": "现在可以从任意消息轮次将会话分叉到由专用 Git 工作树支持的新标签页，使探索性工作与源检出保持分离。共享工作区分叉仍然可用。"
+          },
+          "refs": [
+            9645
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Recover over-length sessions with chunked summaries",
+            "zh": "使用分块摘要恢复超长会话"
+          },
+          "body": {
+            "en": "When a single summary request fails due to output truncation or window overflow, /compact now automatically falls back to chunked summaries with tree merging and installs a working compaction projection in the current session.",
+            "zh": "当单次摘要请求因输出截断或窗口溢出而失败时，/compact 现在会自动回退到分块摘要和树形归并，并在当前会话中安装可工作的压缩投影。"
+          },
+          "refs": [
+            9632
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Simplified session recovery versions",
+            "zh": "简化的会话恢复版本"
+          },
+          "body": {
+            "en": "Session recovery is now presented as a single lazy versions dialog. Covered recovery copies are hidden from ordinary history and grouped under a collapsed System recovery data section in Trash.",
+            "zh": "会话恢复现在以单一的延迟版本对话框呈现。被覆盖的恢复副本从普通历史中隐藏，并在回收站中归入折叠的“系统恢复数据”部分。"
+          },
+          "refs": [
+            9630
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Stabilized transcript scrolling and history rendering",
+            "zh": "稳定转录滚动和历史渲染"
+          },
+          "body": {
+            "en": "Multiple fixes prevent visible jumps during history prepends, ensure historical markdown renders without waiting for bottom scroll, and stabilize same-tab tail takeover.",
+            "zh": "多项修复防止历史预置期间出现可见跳动，确保历史 Markdown 无需等待滚动到底即可渲染，并稳定同标签页尾部接管。"
+          },
+          "refs": [
+            9643,
+            9653,
+            9655,
+            9584,
+            9585
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Improved compaction reliability",
+            "zh": "提高压缩可靠性"
+          },
+          "body": {
+            "en": "Automatic summary requests are now capped at the configured context window, manual compaction can escape over-ceiling deadlocks, and small shared windows remain admissible.",
+            "zh": "自动摘要请求现在按配置的上下文窗口封顶，手动压缩可以摆脱超顶死锁，小型共享窗口保持可接受。"
+          },
+          "refs": [
+            9582,
+            9474,
+            9669
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Unified session catalog path identity",
+            "zh": "统一会话目录路径身份"
+          },
+          "body": {
+            "en": "Session catalog now uses filesystem-aware identity keys, preventing duplicate entries on case-insensitive filesystems and preserving distinct paths on case-sensitive ones.",
+            "zh": "会话目录现在使用文件系统感知的身份键，防止在大小写不敏感的文件系统上出现重复条目，并在大小写敏感的文件系统上保留不同路径。"
+          },
+          "refs": [
+            9618
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Failed sessions can be archived",
+            "zh": "失败会话可归档"
+          },
+          "body": {
+            "en": "Terminally failed sessions no longer cause restart loops and can be archived through the regular TrashTopic path.",
+            "zh": "最终失败的会话不再导致重启循环，并可通过常规 TrashTopic 路径归档。"
+          },
+          "refs": [
+            9591
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Rewind picker shows user prompts",
+            "zh": "回滚选择器显示用户提示"
+          },
+          "body": {
+            "en": "The rewind picker now correctly strips interleaved compose prefixes and records raw prompts, so you can see your own words instead of injected notices.",
+            "zh": "回滚选择器现在正确剥离交错的组合前缀并记录原始提示，因此您可以看到自己的话语而不是注入的通知。"
+          },
+          "refs": [
+            9637
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "cli"
+          ],
+          "title": {
+            "en": "YOLO mode skips /clear confirmation",
+            "zh": "YOLO 模式跳过 /clear 确认"
+          },
+          "body": {
+            "en": "In YOLO mode, /clear now clears the session immediately without a confirmation overlay.",
+            "zh": "在 YOLO 模式下，/clear 现在立即清除会话，无需确认覆盖层。"
+          },
+          "refs": [
+            9488
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fork conversations into isolated Git worktrees",
+              "zh": "将会话分叉至隔离 Git Worktree"
+            },
+            "body": {
+              "en": "Fork from any message turn into a new tab backed by a dedicated Git worktree. Isolated forks create a reasonix/delivery-* branch and linked worktree from the committed HEAD. Shared forks keep the current directory and uncommitted changes. A dirty source checkout blocks isolated creation and asks to commit/stash or use a shared fork. When prerequisites are unavailable, the conversation falls back to shared workspace with a visible notice. Successfully referenced isolated worktrees are registered as projects and remain discoverable after closing a tab or restarting.",
+              "zh": "从任意消息轮次分叉到由专用 Git 工作树支持的新标签页。隔离分叉从已提交的 HEAD 创建 reasonix/delivery-* 分支和关联工作树。共享分叉保留当前目录和未提交的更改。源检出脏时阻止隔离创建，并要求提交/暂存或使用共享分叉。当先决条件不可用时，会话回退到共享工作区并显示可见通知。成功引用的隔离工作树注册为项目，关闭标签页或重启后仍可发现。"
+            },
+            "refs": [
+              9645
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Chunked-summary fallback for /compact",
+              "zh": "/compact 的分块摘要回退"
+            },
+            "body": {
+              "en": "When a single summary request fails, /compact automatically splits the fold into replay-safe, exponentially sized chunks with overlap, summarizes fragments, tree-reduces briefings, and installs the resulting CompactionModeChunked projection in the current session without a second command.",
+              "zh": "当单次摘要请求失败时，/compact 自动将折叠拆分为可重放、指数大小且带重叠的块，总结片段，树形归并简报，并在当前会话中安装生成的 CompactionModeChunked 投影，无需第二次命令。"
+            },
+            "refs": [
+              9632
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Simplified session recovery versions",
+              "zh": "简化的会话恢复版本"
+            },
+            "body": {
+              "en": "Recovery safety net remains, but physical recovery-copy concepts are removed from ordinary project-tree and history workflows. One non-blocking notification appears only after the catalog confirms a real divergent lineage, and both the notification and History route through the same lazy Session versions dialog. Covered copies are hidden from ordinary History and grouped under a collapsed System recovery data section in Trash. Opening a version does not change the default; choosing a default version does not delete, overwrite, merge, or make another divergent version cleanup-eligible.",
+              "zh": "恢复安全网保留，但物理恢复副本概念从普通项目树和历史工作流中移除。仅在目录确认真实分歧谱系后显示一个非阻塞通知，通知和历史都通过相同的延迟会话版本对话框。被覆盖的副本从普通历史中隐藏，并在回收站中归入折叠的“系统恢复数据”部分。打开版本不会更改默认值；选择默认版本不会删除、覆盖、合并或使另一个分歧版本符合清理条件。"
+            },
+            "refs": [
+              9630
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Capped automatic summary requests",
+              "zh": "自动摘要请求封顶"
+            },
+            "body": {
+              "en": "Automatic pressure/overflow summaries are capped for shared and unknown gateways. Unknown gateways honor the effective configured or learned window. Shared/unknown summaries scale their output cap as min(8192, max(window/4, 512)), while independent-window providers retain the full 8192-token cap. Summary execution uses the same dedicated protocol reserve as planning, and compaction.prepare replacements are revalidated against the final-request limit.",
+              "zh": "自动压力/溢出摘要对共享和未知网关进行封顶。未知网关遵循有效配置或学习到的窗口。共享/未知摘要的输出上限缩放为 min(8192, max(window/4, 512))，而独立窗口提供者保留完整的 8192 令牌上限。摘要执行使用与规划相同的专用协议储备，compaction.prepare 替换根据最终请求限制重新验证。"
+            },
+            "refs": [
+              9582
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Manual compaction escape from over-ceiling deadlock",
+              "zh": "手动压缩摆脱超顶死锁"
+            },
+            "body": {
+              "en": "Over the ceiling, a manual compact now prunes first, uses safe-prefix folding, and runs a rescue loop of up to 4 batches, each carrying the prior digest, until the view is under the ceiling or no balanced prefix remains. Below the ceiling, manual semantics are unchanged.",
+              "zh": "超过上限时，手动压缩现在先修剪，使用安全前缀折叠，并运行最多 4 个批次的救援循环，每个批次携带先前的摘要，直到视图低于上限或没有平衡前缀剩余。低于上限时，手动语义不变。"
+            },
+            "refs": [
+              9474
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Scaled shared-window admission cushion",
+              "zh": "缩放共享窗口准入缓冲"
+            },
+            "body": {
+              "en": "The ordinary shared-window admission cushion now scales with the effective context window: 1/128, with a 256-token floor and 8K cap. This keeps small shared windows admissible and prevents unnecessary overflow folds.",
+              "zh": "普通共享窗口准入缓冲现在随有效上下文窗口缩放：1/128，下限 256 令牌，上限 8K。这使小型共享窗口保持可接受，并防止不必要的溢出折叠。"
+            },
+            "refs": [
+              9669
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Unified filesystem path identity in session catalog",
+              "zh": "会话目录中统一的文件系统路径身份"
+            },
+            "body": {
+              "en": "Session catalog now separates original access spellings from filesystem-aware identity keys, used for Desktop and CLI targets, SQLite uniqueness, workspace relationships, scans, indexing, tombstones, repair ownership, and directory locks. Distinct /Foo and /foo entries are preserved on case-sensitive filesystems while equivalent spellings coalesce on case-insensitive ones. The disposable catalog moves to v6.sqlite with schema migration through v10.",
+              "zh": "会话目录现在将原始访问拼写与文件系统感知的身份键分离，用于桌面和 CLI 目标、SQLite 唯一性、工作区关系、扫描、索引、墓碑、修复所有权和目录锁。在大小写敏感的文件系统上保留不同的 /Foo 和 /foo 条目，而在大小写不敏感的文件系统上合并等效拼写。一次性目录移至 v6.sqlite，模式迁移至 v10。"
+            },
+            "refs": [
+              9618
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Failed sessions can be archived",
+              "zh": "失败会话可归档"
+            },
+            "body": {
+              "en": "Terminal session recovery failures no longer create restart loops. The filtered desktop-tabs.json snapshot is persisted immediately, and terminally failed sessions can be archived through the regular TrashTopic path without bypassing active-work protection.",
+              "zh": "最终会话恢复失败不再导致重启循环。过滤后的 desktop-tabs.json 快照立即持久化，最终失败的会话可通过常规 TrashTopic 路径归档，而不会绕过活动工作保护。"
+            },
+            "refs": [
+              9591
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Rewind picker shows user prompts",
+              "zh": "回滚选择器显示用户提示"
+            },
+            "body": {
+              "en": "The rewind picker now strips interleaved compose prefixes to a fixpoint and records raw prompts in the headless run path, so labels show the user's own words instead of injected notices.",
+              "zh": "回滚选择器现在将交错的组合前缀剥离到固定点，并在无头运行路径中记录原始提示，因此标签显示用户自己的话语而不是注入的通知。"
+            },
+            "refs": [
+              9637
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "YOLO mode skips /clear confirmation",
+              "zh": "YOLO 模式跳过 /clear 确认"
+            },
+            "body": {
+              "en": "In YOLO mode, /clear clears the session immediately without a confirmation overlay. Non-YOLO modes keep the existing confirmation.",
+              "zh": "在 YOLO 模式下，/clear 立即清除会话，无需确认覆盖层。非 YOLO 模式保留现有确认。"
+            },
+            "refs": [
+              9488
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Stabilized paged history prepends",
+              "zh": "稳定分页历史预置"
+            },
+            "body": {
+              "en": "Complex transcripts no longer visibly jump while older history is prepended. The fix captures the visible reader anchor by stable row key, holds contiguous pages under one generation-bound lease, fences reader correction until mounted coverage is stable, and routes the only physical correction through the existing generation-fenced scroll writer.",
+              "zh": "复杂转录在预置较旧历史时不再出现可见跳动。修复通过稳定行键捕获可见阅读器锚点，在一个代际绑定租约下持有连续页面，在挂载覆盖稳定之前隔离阅读器校正，并通过现有的代际隔离滚动写入器路由唯一的物理校正。"
+            },
+            "refs": [
+              9643
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Bounded transcript prepend commit",
+              "zh": "有界转录预置提交"
+            },
+            "body": {
+              "en": "History-prepend geometry commits now have a wall-clock bound independent from reader input settling, preventing repeated downward wheels from postponing a covered prepend forever and blocking reader-to-tail handoff.",
+              "zh": "历史预置几何提交现在具有独立于阅读器输入稳定的墙钟界限，防止重复向下滚动无限期推迟已覆盖的预置并阻止阅读器到尾部交接。"
+            },
+            "refs": [
+              9653
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Stabilized bounded transcript tail confirmation",
+              "zh": "稳定有界转录尾部确认"
+            },
+            "body": {
+              "en": "Tail-settle phase/frame metadata remains functional in Stable builds so bounded same-revision retries are not deduplicated. Repeat confirmation is required before treating a small WebView2 no-op residual as the reachable tail, while explicit jump-bottom still probes the theoretical physical extent.",
+              "zh": "尾部稳定阶段/帧元数据在稳定构建中保持功能，因此有界同修订重试不会被去重。在将小型 WebView2 无操作残差视为可达尾部之前需要重复确认，而显式跳到底部仍探测理论物理范围。"
+            },
+            "refs": [
+              9655
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Stabilized same-tab transcript tail takeover",
+              "zh": "稳定同标签页转录尾部接管"
+            },
+            "body": {
+              "en": "Same-tab model takeover and reconnect now converge through the generation-bound tail transaction that actually runs on this path. A reveal-generation change synchronously invalidates the old layout surface, the incoming first-items transaction owns the tail, and wheel intent cancels delayed confirmations so the reader is never yanked back.",
+              "zh": "同标签页模型接管和重连现在通过实际在此路径上运行的代际绑定尾部事务收敛。揭示代际更改同步使旧布局表面失效，传入的首项事务拥有尾部，滚轮意图取消延迟确认，因此阅读器永远不会被拉回。"
+            },
+            "refs": [
+              9584
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Historical markdown renders without waiting for bottom",
+              "zh": "历史 Markdown 无需等待底部即可渲染"
+            },
+            "body": {
+              "en": "Historical Markdown parsing can finish while the reader is above the transcript bottom. MarkdownHistory now classifies the actual Virtuoso row against the actual .transcript scroller: answers within the bounded tail window render immediately, mounted long rows outside the viewport render immediately, and long rows intersecting the reader viewport keep the complete fallback until the reader returns to the shared native reachable bottom.",
+              "zh": "历史 Markdown 解析可以在阅读器位于转录底部上方时完成。MarkdownHistory 现在根据实际的 .transcript 滚动器对实际的 Virtuoso 行进行分类：有界尾部窗口内的答案立即渲染，视口外已挂载的长行立即渲染，与阅读器视口相交的长行保留完整回退，直到阅读器返回共享的原生可达底部。"
+            },
+            "refs": [
+              9585
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Restored release bundle budget headroom",
+              "zh": "恢复发布包体预算余量"
+            },
+            "body": {
+              "en": "The merged isolated-worktree startup graph is measured at 2454.719 KiB, and 0.081 KiB of explicit headroom is retained with the existing one-decimal ratchet. All gzip, chunk, locale, and CSS budgets remain unchanged.",
+              "zh": "合并的隔离工作树启动图测量为 2454.719 KiB，并通过现有的一位小数棘轮保留 0.081 KiB 的显式余量。所有 gzip、块、区域设置和 CSS 预算保持不变。"
+            },
+            "refs": [
+              9668
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "kill_shell classified as host-state-only",
+              "zh": "kill_shell 归类为仅主机状态变更"
+            },
+            "body": {
+              "en": "kill_shell no longer enters workspace write coordination or waits for the target job's path lease, preventing a self-blocking lifecycle operation when terminating a background job.",
+              "zh": "kill_shell 不再进入工作区写协调或等待目标作业的路径租约，防止在终止后台作业时出现自阻塞生命周期操作。"
+            },
+            "refs": [
+              9587
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "mchenziyi",
+        "Linearl",
+        "XTLine",
+        "BuGlessRB",
+        "dependabot[bot]"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.35.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.34.0...desktop-v1.35.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.35.0",
+      "baseVersion": "1.35.0",
+      "status": "reviewed",
+      "previousRelease": "1.34.0",
+      "builds": {
+        "cli": "v1.35.0",
+        "desktop": "v1.35.0",
+        "npm": "1.35.0"
+      }
+    },
+    {
       "version": "1.34.0",
       "date": "2026-08-30",
       "channel": "stable",

@@ -306,7 +306,10 @@ export function useTranscriptQuestionJump({
     if (olderRequestInFlightRef.current !== layoutSurfaceKey) olderRequestInFlightRef.current = null;
   }, [layoutSurfaceKey, settlePendingQuestion]);
 
-  const handleEarlierHistoryReached = useCallback(() => void requestOlderHistory(undefined, false, "viewport-user"), [requestOlderHistory]);
+  const handleEarlierHistoryReached = useCallback(
+    () => requestOlderHistory(undefined, false, "viewport-user"),
+    [requestOlderHistory],
+  );
   const retryOlderHistory = useCallback(() => {
     const targetTurn = pendingQuestion?.surfaceKey === layoutSurfaceKey ? pendingQuestion.turn + 1 : undefined;
     if (pendingQuestion?.surfaceKey === layoutSurfaceKey && pendingQuestion.phase === "failed") {

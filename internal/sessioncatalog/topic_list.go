@@ -22,8 +22,9 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 	if cursor != nil && cursor.ManualOrder != req.ManualOrder {
 		return out, errCursorSortModeChanged
 	}
-	args := []any{req.Scope, req.WorkspaceRoot}
-	where := `scope=? AND workspace_root=?`
+	rootKey := c.workspaceRootKey(req.Scope, req.WorkspaceRoot)
+	args := []any{req.Scope, rootKey}
+	where := `scope=? AND workspace_root_key=?`
 	if query := strings.TrimSpace(req.Query); query != "" {
 		where += ` AND lower(title) LIKE ?`
 		args = append(args, "%"+strings.ToLower(query)+"%")
@@ -47,9 +48,9 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		rawCount := len(scanned)
 		overflow := false
 		for _, item := range scanned {
-			sessions, listErr := c.listTopicSessions(ctx, TopicKey{
+			sessions, listErr := c.listTopicSessionsByRootKey(ctx, TopicKey{
 				Scope: item.Scope, WorkspaceRoot: item.WorkspaceRoot, TopicID: item.TopicID,
-			})
+			}, rootKey)
 			if listErr != nil {
 				return TopicPage{Items: []TopicRecord{}, Revision: out.Revision}, listErr
 			}

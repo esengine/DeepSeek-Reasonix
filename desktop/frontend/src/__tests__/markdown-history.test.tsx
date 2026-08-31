@@ -12,6 +12,10 @@ import MarkdownHistory from "../components/MarkdownHistory";
 import { TranscriptScrollWriteProvider } from "../components/TranscriptLayoutIntentContext";
 import { parseMarkdown, markdownContentRevision } from "../lib/markdownPipeline";
 import {
+  nativeTranscriptDistanceFromBottom,
+  observeNativeTranscriptTailClamp,
+} from "../lib/transcriptScrollGeometry";
+import {
   disposeMarkdownWorkerClient,
   MarkdownWorkerClient,
   setMarkdownWorkerClientForTest,
@@ -208,6 +212,20 @@ console.log("\nmarkdown history rendering");
   rootEl.scrollTop = 400;
   Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_000 });
   Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
+  // The pending Virtuoso row sits inside the transcript viewport: the long answer
+  // keeps the stable fallback because the tail-window swap would remove the
+  // blocks being read (#9570 keeps that protection; short answers and
+  // off-screen rows commit immediately now).
+  const originalRectMidRead = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this.classList.contains("transcript")) {
+      return { top: 50, bottom: 350, left: 0, right: 800, width: 800, height: 300, x: 0, y: 50, toJSON: () => ({}) };
+    }
+    if (this.classList.contains("transcript__row")) {
+      return { top: 100, bottom: 400, left: 0, right: 0, width: 0, height: 300, x: 0, y: 100, toJSON: () => ({}) };
+    }
+    return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+  };
   (globalThis as { Worker?: unknown }).Worker = class {};
   let resolveParse: ((result: ReturnType<typeof parseMarkdown>) => void) | null = null;
   const deferred = new MarkdownWorkerClient({
@@ -227,7 +245,11 @@ console.log("\nmarkdown history rendering");
   const root5 = createRoot(rootEl);
   const text = Array.from({ length: 60 }, (_, index) => `# Anchor ${index + 1}\n\nBody ${index + 1}.`).join("\n\n");
   await act(async () => {
-    root5.render(<MarkdownHistory text={text} entryId="md-history-mid-read" fallback={<div className="md">{text}</div>} />);
+    root5.render(
+      <div className="transcript__row">
+        <MarkdownHistory text={text} entryId="md-history-mid-read" fallback={<div className="md">{text}</div>} />
+      </div>,
+    );
   });
   await act(async () => {
     resolveParse?.(parseMarkdown(text));
@@ -236,7 +258,10 @@ console.log("\nmarkdown history rendering");
   ok(!rootEl.querySelector(".md[data-markdown-blocks]"), "worker completion keeps the full fallback while the reader is away from bottom");
   ok(rootEl.textContent?.includes("Anchor 1"), "the reader's prefix remains mounted during the deferred handoff");
 
-  rootEl.scrollTop = 700;
+  rootEl.scrollTop = 692;
+  ok(!observeNativeTranscriptTailClamp(rootEl, 692), "the first native no-op tail write remains pending");
+  ok(observeNativeTranscriptTailClamp(rootEl, 692), "a repeated native no-op tail write confirms the reachable bottom");
+  eq(nativeTranscriptDistanceFromBottom(rootEl), 0, "the shared transcript geometry treats the native clamp as bottom");
   await act(async () => {
     rootEl.dispatchEvent(new dom.window.Event("scroll"));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -244,6 +269,66 @@ console.log("\nmarkdown history rendering");
   ok(rootEl.querySelector('.md[data-markdown-blocks="120"]'), "returning to bottom commits the cached parsed blocks");
   ok(rootEl.textContent?.includes("Anchor 60"), "the parsed tail is visible after the safe handoff");
   await act(async () => root5.unmount());
+  dom.window.HTMLElement.prototype.getBoundingClientRect = originalRectMidRead;
+  rootEl.className = "";
+  delete (globalThis as { Worker?: unknown }).Worker;
+  setMarkdownWorkerClientForTest(newSpyClient());
+}
+
+// ── a short visible answer renders even when the reader is not at bottom ──
+{
+  rootEl.className = "transcript";
+  rootEl.scrollTop = 400;
+  Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_000 });
+  Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
+  const root5a = createRoot(rootEl);
+  const text = "# Short answer\n\nThis **must render** without a trip to the bottom.";
+  await act(async () => {
+    root5a.render(
+      <div className="transcript__row">
+        <MarkdownHistory text={text} entryId="md-history-short-visible" fallback={<div className="md">{text}</div>} />
+      </div>,
+    );
+  });
+  await flush();
+  ok(rootEl.querySelector('.md[data-markdown-blocks="2"]'), "a short visible answer commits while the reader remains above the bottom");
+  ok(rootEl.querySelector(".md strong"), "the short answer exposes rendered markdown instead of the raw fallback");
+  await act(async () => root5a.unmount());
+  rootEl.className = "";
+}
+
+// ── an off-screen long answer commits without waiting for the reader ─────────
+{
+  rootEl.className = "transcript";
+  rootEl.scrollTop = 400;
+  Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 50_000 });
+  Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
+  const originalRectOffscreen = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    if (this.classList.contains("transcript")) {
+      return { top: 50, bottom: 350, left: 0, right: 800, width: 800, height: 300, x: 0, y: 50, toJSON: () => ({}) };
+    }
+    if (this.classList.contains("transcript__row")) {
+      return { top: 500, bottom: 800, left: 0, right: 800, width: 800, height: 300, x: 0, y: 500, toJSON: () => ({}) };
+    }
+    return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+  };
+  // A mounted overscan row outside the transcript viewport must render instead
+  // of waiting for a bottom scroll that may never come (#9570).
+  const root5b = createRoot(rootEl);
+  const text = Array.from({ length: 90 }, (_, index) => `# Away ${index + 1}\n\nBody ${index + 1}.`).join("\n\n");
+  await act(async () => {
+    root5b.render(
+      <div className="transcript__row">
+        <MarkdownHistory text={text} entryId="md-history-offscreen" fallback={<div className="md">{text}</div>} />
+      </div>,
+    );
+  });
+  await flush();
+  ok(rootEl.querySelector('.md[data-markdown-blocks="180"]'), "the off-screen long answer renders immediately");
+  ok(!rootEl.textContent?.includes("Away 1\n\nBody 1."), "the raw fallback is replaced by the bounded tail window");
+  await act(async () => root5b.unmount());
+  dom.window.HTMLElement.prototype.getBoundingClientRect = originalRectOffscreen;
   rootEl.className = "";
   delete (globalThis as { Worker?: unknown }).Worker;
   setMarkdownWorkerClientForTest(newSpyClient());
@@ -253,6 +338,8 @@ console.log("\nmarkdown history rendering");
 {
   rootEl.className = "transcript";
   rootEl.scrollTop = 1_000;
+  Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_300 });
+  Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
   const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
   dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
     const top = this.hasAttribute("data-markdown-older-sentinel")

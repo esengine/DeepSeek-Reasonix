@@ -1,6 +1,7 @@
 // Package worktree creates durable, Git-backed workspaces for parallel
-// Delivery sessions. Worktrees live under Reasonix-managed state, never inside
-// the source repository, and are never deleted automatically.
+// Delivery sessions. Attached worktrees live under Reasonix-managed state,
+// never inside the source repository, and are never deleted automatically;
+// an exact untouched allocation may be rolled back before it is attached.
 package worktree
 
 import (
@@ -21,8 +22,8 @@ import (
 )
 
 const (
-	gitProbeTimeout       = 15 * time.Second
-	gitWorktreeAddTimeout = 5 * time.Minute
+	gitProbeTimeout            = 15 * time.Second
+	gitWorktreeMutationTimeout = 5 * time.Minute
 )
 
 // Availability describes whether a project can be isolated with Git worktree.
@@ -32,6 +33,99 @@ type Availability struct {
 	RepoRoot    string `json:"repoRoot,omitempty"`
 	Branch      string `json:"branch,omitempty"`
 	SourceDirty bool   `json:"sourceDirty,omitempty"`
+}
+
+// RollbackCreate removes a worktree and its branch only while they still match
+// the exact clean result returned by Create. Any user or Git mutation makes the
+// rollback fail closed and leaves the workspace available for recovery.
+func RollbackCreate(ctx context.Context, result Result) error {
+	sourceRoot := strings.TrimSpace(result.SourceRoot)
+	worktreeRoot := strings.TrimSpace(result.WorktreeRoot)
+	branch := strings.TrimSpace(result.Branch)
+	head := strings.TrimSpace(result.Head)
+	if sourceRoot == "" || worktreeRoot == "" || branch == "" || head == "" {
+		return errors.New("rollback needs the complete created worktree identity")
+	}
+	if !strings.HasPrefix(branch, "reasonix/delivery-") {
+		return fmt.Errorf("refuse to roll back unmanaged branch %q", branch)
+	}
+	if _, _, err := runGit(ctx, sourceRoot, "check-ref-format", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("refuse to roll back invalid branch %q", branch)
+	}
+
+	sourceInfo, err := os.Stat(sourceRoot)
+	if err != nil {
+		return fmt.Errorf("inspect rollback source: %w", err)
+	}
+	if !sourceInfo.IsDir() {
+		return errors.New("rollback source is not a directory")
+	}
+	worktreeInfo, err := os.Stat(worktreeRoot)
+	if err != nil {
+		return fmt.Errorf("inspect rollback worktree: %w", err)
+	}
+	if !worktreeInfo.IsDir() {
+		return errors.New("rollback worktree is not a directory")
+	}
+	if os.SameFile(sourceInfo, worktreeInfo) {
+		return errors.New("refuse to remove the source worktree")
+	}
+	reportedRoot, _, err := runGit(ctx, worktreeRoot, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("verify rollback worktree root: %w", err)
+	}
+	reportedInfo, err := os.Stat(strings.TrimSpace(reportedRoot))
+	if err != nil || !os.SameFile(worktreeInfo, reportedInfo) {
+		return errors.New("rollback target is not the exact created worktree root")
+	}
+	if err := verifySameCommonDir(ctx, sourceRoot, worktreeRoot); err != nil {
+		return err
+	}
+	currentBranch, _, err := runGit(ctx, worktreeRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || strings.TrimSpace(currentBranch) != branch {
+		return fmt.Errorf("rollback worktree branch changed from %q", branch)
+	}
+	currentHead, _, err := runGit(ctx, worktreeRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil || strings.TrimSpace(currentHead) != head {
+		return errors.New("rollback worktree HEAD changed after creation")
+	}
+	status, _, err := runGit(ctx, worktreeRoot, "status", "--porcelain=v1", "--untracked-files=all", "--ignored")
+	if err != nil {
+		return fmt.Errorf("inspect rollback worktree changes: %w", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return errors.New("rollback worktree contains changes; it was preserved")
+	}
+	if _, stderr, err := runGit(ctx, sourceRoot, "worktree", "remove", worktreeRoot); err != nil {
+		return fmt.Errorf("remove unused worktree: %w%s", err, stderrSuffix(stderr))
+	}
+	if _, stderr, err := runGit(ctx, sourceRoot, "update-ref", "-d", "refs/heads/"+branch, head); err != nil {
+		return fmt.Errorf("remove unused worktree branch %q: %w%s", branch, err, stderrSuffix(stderr))
+	}
+	return nil
+}
+
+func verifySameCommonDir(ctx context.Context, sourceRoot, worktreeRoot string) error {
+	resolve := func(root string) (os.FileInfo, error) {
+		commonDir, _, err := runGit(ctx, root, "rev-parse", "--git-common-dir")
+		if err != nil {
+			return nil, err
+		}
+		commonDir = strings.TrimSpace(commonDir)
+		if !filepath.IsAbs(commonDir) {
+			commonDir = filepath.Join(root, commonDir)
+		}
+		return os.Stat(filepath.Clean(commonDir))
+	}
+	sourceInfo, err := resolve(sourceRoot)
+	if err != nil {
+		return fmt.Errorf("resolve rollback source repository: %w", err)
+	}
+	worktreeInfo, err := resolve(worktreeRoot)
+	if err != nil || !os.SameFile(sourceInfo, worktreeInfo) {
+		return errors.New("rollback source and worktree do not share a Git repository")
+	}
+	return nil
 }
 
 // Result identifies one newly created isolated Delivery workspace.
@@ -244,8 +338,8 @@ func runGit(parent context.Context, dir string, args ...string) (stdout, stderr 
 }
 
 func gitTimeout(args []string) time.Duration {
-	if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
-		return gitWorktreeAddTimeout
+	if len(args) >= 2 && args[0] == "worktree" && (args[1] == "add" || args[1] == "remove") {
+		return gitWorktreeMutationTimeout
 	}
 	return gitProbeTimeout
 }

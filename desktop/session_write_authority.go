@@ -73,10 +73,9 @@ func (a *App) commitStartupWriteAuthorityLocked(tab *WorkspaceTab, ctrl control.
 		return false
 	}
 	if err := bindTabWriteAuthority(tab, ctrl); err != nil {
-		setTabStartupError(tab, err)
-		tab.Ready = false
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
+		_, save := a.markTabStartupFailureLocked(tab, err, suppressStartupRestore)
 		a.mu.Unlock()
+		a.writeTabsSaveRequest(save)
 		a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
 		a.emitReady(wailsCtx, tab.ID)
 		return false

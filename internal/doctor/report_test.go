@@ -105,6 +105,49 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 	}
 }
 
+func TestCollectRecoveryLifecycleAggregatesWithoutLeakingSessionData(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "private-session.conflicts.jsonl")
+	body := strings.Join([]string{
+		`{"outcome":"forked_recovery_branch","occurrence":1,"topic_title":"secret title","path":"/private/user/session.jsonl"}`,
+		`{"outcome":"forked_file_lock_recovery","existing_recovery":true,"occurrence":2,"repeated_in_process":true,"preview":"secret message"}`,
+		`{"outcome":"adopted_newer_disk_transcript","occurrence":3,"repeated_in_process":true}`,
+		`{"outcome":"classified_covered"}`,
+		`{"outcome":"classified_adopted"}`,
+		`{"outcome":"classified_preferred"}`,
+		`{"outcome":"classified_diverged"}`,
+		`{"outcome":"cleanup_moved"}`,
+		`{"outcome":"cleanup_kept"}`,
+		`{"outcome":"cleanup_skipped_in_use"}`,
+		`{"outcome":"cleanup_revalidation_failed"}`,
+		`not-json`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := collectSessions(dir)
+	if report.Recovery.Events != 11 || report.Recovery.PhysicalVersionsCreated != 1 ||
+		report.Recovery.DiskAdoptions != 1 || report.Recovery.ShutdownRecoveries != 1 ||
+		report.Recovery.RepeatedEvents != 2 || report.Recovery.MaxTopicOccurrences != 3 ||
+		report.Recovery.ClassifiedCovered != 1 || report.Recovery.ClassifiedAdopted != 1 ||
+		report.Recovery.ClassifiedPreferred != 1 || report.Recovery.ClassifiedDiverged != 1 ||
+		report.Recovery.CleanupMoved != 1 || report.Recovery.CleanupKept != 1 ||
+		report.Recovery.CleanupSkippedInUse != 1 || report.Recovery.CleanupRevalidationFailed != 1 ||
+		report.Recovery.InvalidRecords != 1 {
+		t.Fatalf("recovery lifecycle = %+v", report.Recovery)
+	}
+	raw, err := json.Marshal(report.Recovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"secret title", "secret message", "/private/user", "private-session"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("aggregate recovery diagnostics leaked %q: %s", secret, raw)
+		}
+	}
+}
+
 func TestRenderTextSurfacesWarningsUpTop(t *testing.T) {
 	text := RenderText(Report{Warnings: []string{"config reasonix.toml: parse boom"}})
 	w := strings.Index(text, "parse boom")

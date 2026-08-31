@@ -373,8 +373,11 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 		SourceTokens:      sourceTokens,
 		ProviderRequestID: res.RequestID,
 		FoldTokens:        res.FoldTokens,
-		Spans:             1, // one application-layer summary request per transaction
+		Spans:             res.Spans,
 		SummaryInputMode:  res.InputMode,
+	}
+	if tele.Spans <= 0 {
+		tele.Spans = 1
 	}
 	usage := res.Usage
 	if usage == nil {
@@ -392,6 +395,30 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 	return tele
 }
 
+// foldSummaryWithChunkedFallback retries summary size failures through the
+// resilient fragment/tree-reduce path used for over-length sessions.
+func (a *Agent) foldSummaryWithChunkedFallback(ctx context.Context, trigger string, fold []provider.Message, instructions string, sourceTokens int, inputMode string) (foldSummary, CompactionTelemetry, error) {
+	res, tele, err := a.foldSummaryWithTelemetry(ctx, trigger, fold, instructions, sourceTokens, inputMode)
+	if err == nil || (!errors.Is(err, errSummaryOutputTruncated) && !errors.Is(err, ErrCompactionRequired)) {
+		return res, tele, err
+	}
+	chunked, chunkedErr := a.chunkedFoldSummary(ctx, fold, instructions, nil)
+	chunked.Usage = mergeSamplingUsage(res.Usage, chunked.Usage)
+	chunked.Spans += res.Spans
+	if chunked.FoldTokens <= 0 {
+		chunked.FoldTokens = res.FoldTokens
+	}
+	if chunked.RequestID == "" {
+		chunked.RequestID = res.RequestID
+	}
+	if chunkedErr != nil {
+		tele = compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, chunked)
+		tele.Error = fmt.Sprintf("%v (chunked fallback: %v)", err, chunkedErr)
+		return chunked, tele, chunkedErr
+	}
+	return chunked, compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, chunked), nil
+}
+
 // compact writes a context projection; trigger stays "auto"/"manual" for UI cards.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
 	_, err := a.compactToProjection(ctx, trigger, instructions, force, false)
@@ -402,7 +429,9 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // stable prefix + one structured digest + recent verbatim tail.
 // The canonical transcript is never rewritten. CompactionNoop means nothing
 // was foldable; callers at physical overflow must treat that as hard failure.
-// mustFree marks the fold the caller cannot proceed without.
+// mustFree marks the fold the caller cannot proceed without. Automatic and
+// over-ceiling manual rescue paths cap the summary input; ordinary manual
+// compaction keeps the uncapped user-requested range.
 func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force, mustFree bool) (CompactionOutcome, error) {
 	a.sess.compactionRunMu.Lock()
 	defer a.sess.compactionRunMu.Unlock()
@@ -441,7 +470,10 @@ func (a *Agent) compactToProjectionLocked(ctx context.Context, trigger, instruct
 			instructions += hookInstr
 		}
 	}
-	if mustFree {
+	// Cap every automatic summary input (#9572), including pressure folds after
+	// projection invalidation. mustFree also covers the over-ceiling manual rescue
+	// merged in #9474; ordinary manual compaction keeps its requested range.
+	if mustFree || trigger != CompactionTriggerManual {
 		start = a.maximumSafeSummaryPrefixEnd(msgs, head, start, instructions)
 		if start <= head {
 			a.emitCompactionAborted(trigger)
@@ -466,13 +498,19 @@ func (a *Agent) compactToProjectionLocked(ctx context.Context, trigger, instruct
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, nil
 	}
+	if mustFree || trigger != CompactionTriggerManual {
+		if err := a.validateSafeSummaryRequest(fold, instructions); err != nil {
+			a.emitCompactionAborted(trigger)
+			return CompactionNoop, err
+		}
+	}
 
 	sourceTokens := a.estimatedVisibleRequestTokens(msgs)
 	inputMode := SummaryInputCachePrefix
 	if providerVisibleFingerprint(modelInputMessages(fold)) != originalFoldHash {
 		inputMode = SummaryInputExtensionRewritten
 	}
-	res, tele, err := a.foldSummaryWithTelemetry(ctx, trigger, fold, instructions, sourceTokens, inputMode)
+	res, tele, err := a.foldSummaryWithChunkedFallback(ctx, trigger, fold, instructions, sourceTokens, inputMode)
 	if err != nil {
 		a.emitCompactionTelemetry(tele)
 		a.emitCompactionAborted(trigger)
@@ -587,22 +625,12 @@ func (a *Agent) planFoldRegion(msgs []provider.Message, force bool) (head, start
 // whose exact summary request leaves the collector's minimum output budget.
 // The remaining middle and tail stay verbatim in the projection.
 func (a *Agent) maximumSafeSummaryPrefixEnd(msgs []provider.Message, head, end int, instructions string) int {
-	window := a.effectiveContextWindow()
-	if window <= 0 || head < 0 || end <= head || end > len(msgs) {
+	if head < 0 || end <= head || end > len(msgs) {
 		return end
 	}
-	policy := contextBudgetPolicyOf(a.svc.prov)
-	if policy.WindowMode == provider.ContextWindowUnknown {
-		// A learned overflow makes an unknown gateway shared-window. Otherwise
-		// preserve the request because the configured window may be an estimate.
-		if a.lastAdmission().ObservedWindow <= 0 {
-			return end
-		}
-		policy.WindowMode = provider.ContextWindowShared
-	}
-	maxPromptTokens := a.hardInputCeiling()
-	if policy.WindowMode == provider.ContextWindowShared {
-		maxPromptTokens = window - outputBudgetReserve - 256
+	maxPromptTokens, enforce := a.safeSummaryPromptTokenLimit()
+	if !enforce {
+		return end
 	}
 	if maxPromptTokens <= 0 {
 		return head
@@ -632,6 +660,30 @@ func (a *Agent) maximumSafeSummaryPrefixEnd(msgs []provider.Message, head, end i
 		best--
 	}
 	return best
+}
+
+// safeSummaryPromptTokenLimit is shared by prefix planning and the final
+// post-extension guard. Unknown gateways conservatively honor the configured
+// or learned window; explicitly independent providers retain the full fold.
+func (a *Agent) safeSummaryPromptTokenLimit() (int, bool) {
+	window := a.effectiveContextWindow()
+	if window <= 0 || contextBudgetPolicyOf(a.svc.prov).WindowMode == provider.ContextWindowIndependent {
+		return 0, false
+	}
+	return window - a.summaryOutputBudget() - protocolReserveTokens, true
+}
+
+func (a *Agent) validateSafeSummaryRequest(fold []provider.Message, instructions string) error {
+	maxPromptTokens, enforce := a.safeSummaryPromptTokenLimit()
+	if !enforce {
+		return nil
+	}
+	requestTokens := a.estimatedRequestTokens(a.summaryRequest(fold, instructions))
+	if maxPromptTokens <= 0 || requestTokens > maxPromptTokens {
+		return fmt.Errorf("%w: prepared summary request (%d tokens) exceeds safe prompt budget (%d)",
+			errCheckpointRejected, requestTokens, maxPromptTokens)
+	}
+	return nil
 }
 
 type userTurnRetention struct {

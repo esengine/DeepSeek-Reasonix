@@ -42,7 +42,7 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
 | Global Desktop topic metadata | `<state root>/desktop/topic-state-v1.sqlite` |
 | Project Desktop topic metadata | `<state root>/projects/<workspace slug>/desktop/topic-state-v1.sqlite` |
-| Disposable session catalog | `<cache root>/session-catalog/v5.sqlite` |
+| Disposable session catalog | `<cache root>/session-catalog/v6.sqlite` |
 | Disposable history search catalog | `<cache root>/history-search/v1.sqlite` |
 | Disposable usage catalog | `<cache root>/usage-catalog/v1.sqlite` |
 | Disposable task catalog | `<cache root>/task-catalog/v1.sqlite` |

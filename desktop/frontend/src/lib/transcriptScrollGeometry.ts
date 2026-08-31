@@ -13,12 +13,14 @@ type NativeTranscriptGeometry = {
   scrollTop?: number;
 };
 
-const observedNativeTranscriptTailResiduals = new WeakMap<object, number>();
+// Negative means pending confirmation; positive means confirmed reachable tail.
+const nativeTranscriptTailResiduals = new WeakMap<object, number>();
 
-/** Remember a small, synchronous native clamp after an explicit tail write.
+/** Remember a small, synchronous native clamp after repeated tail writes.
  * WebView2 can expose a stable Virtuoso scrollHeight whose last few pixels are
- * not reachable through scrollTop. Large gaps are still treated as stale
- * virtual ranges and must go through the LAST-item recovery path. */
+ * not reachable through scrollTop. A single no-op can instead be Virtuoso
+ * restoring a stale range, so require the same residual on stable geometry
+ * before accepting it. Large gaps still use the LAST-item recovery path. */
 export function observeNativeTranscriptTailClamp(
   element: NativeTranscriptGeometry & { scrollTop: number },
   previousTop: number,
@@ -29,9 +31,17 @@ export function observeNativeTranscriptTailClamp(
     Math.abs(element.scrollTop - previousTop) > 0.5
     || residual <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX
     || residual > 64
-  ) return false;
-  observedNativeTranscriptTailResiduals.set(element, residual);
-  return true;
+  ) {
+    nativeTranscriptTailResiduals.delete(element);
+    return false;
+  }
+  const observed = nativeTranscriptTailResiduals.get(element);
+  if (observed != null && Math.abs(observed) === residual) {
+    nativeTranscriptTailResiduals.set(element, residual);
+    return true;
+  }
+  nativeTranscriptTailResiduals.set(element, -residual);
+  return false;
 }
 
 export function nativeTranscriptDistanceFromBottom(element: {
@@ -43,12 +53,19 @@ export function nativeTranscriptDistanceFromBottom(element: {
 }
 
 export function nativeTranscriptBottomTop(element: NativeTranscriptGeometry) {
-  const theoreticalTop = Math.max(0, element.scrollHeight - element.clientHeight);
-  const residual = observedNativeTranscriptTailResiduals.get(element) ?? 0;
+  const theoreticalTop = tailTop(element);
+  const residual = Math.max(0, nativeTranscriptTailResiduals.get(element) ?? 0);
   const observedTop = theoreticalTop - residual;
   if (element.scrollTop == null || element.scrollTop <= observedTop + TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) return observedTop;
-  observedNativeTranscriptTailResiduals.delete(element);
+  nativeTranscriptTailResiduals.delete(element);
   return theoreticalTop;
+}
+
+/** Explicit tail transactions always probe the theoretical native extent.
+ * A confirmed WebView2 clamp remains the logical bottom if that write is a
+ * no-op, but a browser that later accepts the last pixels clears the residual. */
+export function tailTop(element: NativeTranscriptGeometry) {
+  return Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
 export function hasTranscriptScrollableRange(

@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool/builtin"
 	"reasonix/internal/workspacelease"
 )
 
@@ -110,6 +114,60 @@ func TestFleetMetaToolDoesNotTakeOuterWorkspaceLease(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("fleet did not return after release")
+	}
+}
+
+func TestKillShellDoesNotWaitForBackgroundWriterLease(t *testing.T) {
+	root, locks := t.TempDir(), t.TempDir()
+	owner, err := workspacelease.New(root, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.BeginRun()
+	defer owner.EndRun()
+
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	leaseHeld := make(chan struct{})
+	job := manager.StartForSession("parent-session", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
+		release, err := owner.HoldWriteForPath(ctx, filepath.Join(root, "held.go"))
+		if err != nil {
+			return "", err
+		}
+		defer release()
+		close(leaseHeld)
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	select {
+	case <-leaseHeld:
+	case <-time.After(time.Second):
+		t.Fatal("background writer did not acquire its path lease")
+	}
+
+	tools := (builtin.Workspace{Dir: root}).Tools("kill_shell")
+	if len(tools) != 1 {
+		t.Fatalf("kill_shell tools = %d, want 1", len(tools))
+	}
+	a := deliveryLeaseTestAgent(t, owner, tools[0])
+	a.svc.jobs = manager
+	a.writeWorkspaceRoot = root
+
+	ctx := jobs.WithManager(context.Background(), manager)
+	ctx = jobs.WithSession(ctx, "parent-session")
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	args, err := json.Marshal(map[string]string{"job_id": job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := a.executeOne(ctx, &a.turn, provider.ToolCall{ID: "kill", Name: "kill_shell", Arguments: string(args)})
+	if out.blocked || out.errMsg != "" {
+		t.Fatalf("kill_shell waited for the background writer lease: %+v", out)
+	}
+	result := manager.WaitForSession(context.Background(), "parent-session", []string{job.ID}, 1)
+	if len(result) != 1 || result[0].Status != jobs.Killed {
+		t.Fatalf("background job after kill_shell = %+v, want killed", result)
 	}
 }
 

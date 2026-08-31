@@ -58,6 +58,23 @@ re-check existence, SHA-256, and mode before publish. A mismatch returns
 
 ## Worktree fallback
 
+Forking from a message offers two workspace policies. **Conversation only
+(shared)** keeps the source workspace, including its current uncommitted files.
+**Isolated worktree** creates a durable `reasonix/delivery-*` branch from the
+repository's committed `HEAD`, opens the fork as a registered project, and
+keeps the source checkout unchanged. Because Git worktrees do not copy local
+changes, Reasonix requires a clean source checkout for this combined fork. A
+dirty checkout is refused with guidance to commit/stash or use the shared fork.
+
+If the folder is not a Git project or worktree prerequisites are unavailable,
+Reasonix creates the conversation fork in the shared workspace and reports the
+fallback. If conversation creation or tab attachment fails after a worktree was
+created, automatic cleanup removes it only while its branch, `HEAD`, and status
+still match the untouched creation result. Any detected change preserves the
+worktree for recovery. A successfully attached worktree remains registered
+across tab close/restart and is never deleted automatically; remove its Git
+worktree and branch explicitly when finished.
+
 Delivery worktrees stay optional. Non-isolated directories use the workspace
 lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,
 shared hierarchy stripes through the concrete path, and an exclusive file

@@ -57,7 +57,11 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          node scripts/generate-release-notes.mjs --version "$VERSION"
+          # The review branch may already contain an older generated Notes
+          # commit. Generate strictly from the public release line so a local,
+          # not-yet-pushed merge commit and the Notes PR itself cannot enter
+          # the release range.
+          node scripts/generate-release-notes.mjs --version "$VERSION" --to origin/main-v2
           node scripts/release-notes.mjs validate
           node --test scripts/release-notes.test.mjs
           node scripts/release-notes.mjs render --version "$VERSION" --output /tmp/release-notes.md

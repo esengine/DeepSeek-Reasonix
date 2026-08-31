@@ -2716,30 +2716,13 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 // backend begins processing the request. The fork becomes active only while the
 // source tab still owns focus, so a later tab selection remains authoritative.
 func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
-	sourceTab, ctrl := a.tabAndCtrlByID(tabID)
-	if sourceTab == nil || ctrl == nil {
-		return TabMeta{}, nil
-	}
-	if a.tabIsReadOnly(sourceTab) {
-		return TabMeta{}, readOnlyChannelErr()
-	}
+	result, err := a.forkForTabWithOptions(tabID, turn, false)
+	return result.Tab, err
+}
 
-	if err := a.ensureTabControllerWorkspace(sourceTab); err != nil {
-		return TabMeta{}, err
-	}
-	a.mu.RLock()
-	if a.tabs[sourceTab.ID] != sourceTab || sourceTab.Ctrl == nil {
-		a.mu.RUnlock()
-		return TabMeta{}, nil
-	}
-	ctrl = sourceTab.Ctrl
-	a.mu.RUnlock()
-
-	newPath, err := ctrl.ForkSession(turn, "")
-	if err != nil {
-		return TabMeta{}, err
-	}
-	return a.openForkedSessionTab(sourceTab, newPath)
+// ForkWorktreeForTab forks the requested source tab into an isolated Git worktree.
+func (a *App) ForkWorktreeForTab(tabID string, turn int) (ForkWorktreeResultView, error) {
+	return a.forkForTabWithOptions(tabID, turn, true)
 }
 
 // SummarizeFrom / SummarizeUpTo compress model context after / before the start
@@ -3113,18 +3096,6 @@ func (a *App) deleteSession(path string) error {
 	a.emitProjectTreeChangedForSessionDirs(dir)
 	a.invalidatePromptHistoryCache()
 	return nil
-}
-
-type removedSessionRuntime struct {
-	tab           *WorkspaceTab
-	ctrl          control.SessionAPI
-	sink          *tabEventSink
-	sessionDir    string
-	sessionPath   string
-	scope         string
-	workspaceRoot string
-	topicID       string
-	readOnly      bool
 }
 
 type fallbackRuntimeTarget struct {
@@ -3599,7 +3570,15 @@ func (a *App) purgeTrashedSession(path string, requireRedundantRecovery bool) er
 // the branch meta sidecar, with the legacy .titles.json map kept as a
 // compatibility write-through for older desktop data paths.
 func (a *App) RenameSession(path, title string) error {
-	return a.renameSessionInDir(a.activeSessionDir(), path, title)
+	dir := a.activeSessionDir()
+	if _, _, err := validateSessionPath(dir, path); err != nil {
+		resolvedDir, _, resolveErr := a.sessionDirForPath(path)
+		if resolveErr != nil {
+			return errors.New("session version is unavailable")
+		}
+		dir = resolvedDir
+	}
+	return friendlySessionFileError(a.renameSessionInDir(dir, path, title))
 }
 
 func (a *App) renameSessionInDir(dir, path, title string) error {

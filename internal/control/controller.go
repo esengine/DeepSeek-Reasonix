@@ -2039,7 +2039,7 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	startMessages := c.messageCount()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
-	c.beginCheckpoint(ctx, input)
+	c.beginCheckpoint(ctx, rawInput)
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
 	}

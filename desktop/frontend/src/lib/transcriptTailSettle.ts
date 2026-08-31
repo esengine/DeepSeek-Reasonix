@@ -1,11 +1,10 @@
 import type { RefObject } from "react";
 import {
-  CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS,
   type TranscriptScrollDiagnosticSource,
   type TranscriptTailWriteDiagnostic,
 } from "./transcriptScrollDiagnosticProbe";
 import type { TranscriptScrollMode } from "./transcriptScrollArbiter";
-import { nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, observeNativeTranscriptTailClamp, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
+import { nativeTranscriptDistanceFromBottom, observeNativeTranscriptTailClamp, tailTop, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
 import type { TranscriptScrollWriter } from "./transcriptScrollWriter";
 import type { TranscriptGeometryChangeSource } from "./transcriptGeometryRevision";
 
@@ -124,7 +123,7 @@ export function createTranscriptTailSettle({
       && Math.abs(previousAttempt.clientHeight - element.clientHeight) <= 1
       && previousAttempt.top >= element.scrollHeight - element.clientHeight - TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX
     ) observeNativeTranscriptTailClamp(element, previousAttempt.previousTop);
-    const top = nativeTranscriptBottomTop(element);
+    const top = tailTop(element);
     const beforeTop = element.scrollTop;
     if (fallbackEpoch !== ownershipEpochRef.current) {
       fallbackEpoch = ownershipEpochRef.current;
@@ -228,9 +227,7 @@ export function createTranscriptTailSettle({
     if (!scrollRef.current || modeRef.current !== "tail-follow") return false;
     geometryRevisionRef.current += 1;
     noteLayoutTransient();
-    scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS
-      ? { source: "tail-content-changed", phase: "initial" }
-      : undefined);
+    scrollToTail("auto", { source: "tail-content-changed", phase: "initial" });
     schedule(false, "tail-content-changed");
     return true;
   };
@@ -255,16 +252,18 @@ export function createTranscriptTailSettle({
       const confirmJumpTail = (settleFrame: number, final: boolean) => {
         const element = scrollRef.current;
         if (element && element === transactionElement && modeRef.current === "tail-follow") {
-          const distance = nativeTranscriptDistanceFromBottom(element);
-          if (distance > TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) {
+          const physicalDistance = tailTop(element) - element.scrollTop;
+          if (physicalDistance > TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) {
             const geometryChanged = lastBottomHeight !== null && (
               Math.abs(element.scrollHeight - lastBottomHeight) > 1
               || (lastBottomViewport !== null && Math.abs(element.clientHeight - lastBottomViewport) > 1)
             );
             if (geometryChanged) geometryRevisionRef.current += 1;
-            scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && source
-              ? { source, phase: "settle", settle: { frame: settleFrame, offBottomFrames: 0, stagnantFrames: 0 } }
-              : undefined);
+            scrollToTail("auto", {
+              source,
+              phase: "settle",
+              settle: { frame: settleFrame },
+            });
           }
           if (!final) {
             jumpTailFollowupTimer = window.setTimeout(() => {
@@ -391,9 +390,11 @@ export function createTranscriptTailSettle({
       const stagnantFrames = previous && Math.abs(previous.distance - distance) <= 0.5
         ? previous.stagnantFrames + 1
         : 0;
-      scrollToTail("auto", CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && source
-        ? { source, phase: "settle", settle: { frame: offBottomFrames, offBottomFrames, stagnantFrames } }
-        : undefined);
+      scrollToTail("auto", {
+        source,
+        phase: "settle",
+        settle: { frame: offBottomFrames, offBottomFrames, stagnantFrames },
+      });
       tailSettleProgress = { distance, stagnantFrames, offBottomFrames, attempts };
       if (stagnantFrames < TAIL_STAGNANT_FRAME_LIMIT && !transcriptTailSettleBudgetExhausted(attempts)) tailSettleFrame = requestAnimationFrame(tick);
       else {

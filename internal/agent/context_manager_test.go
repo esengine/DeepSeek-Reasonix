@@ -27,6 +27,9 @@ type blockingSummaryProvider struct {
 }
 
 func (p *blockingSummaryProvider) Name() string { return "blocking-summary" }
+func (p *blockingSummaryProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
+	return provider.ContextBudgetPolicy{WindowMode: provider.ContextWindowIndependent}
+}
 func (p *blockingSummaryProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
 	p.calls.Add(1)
 	p.once.Do(func() { close(p.started) })
@@ -45,6 +48,10 @@ func (p *blockingSummaryProvider) Stream(ctx context.Context, _ provider.Request
 }
 
 func (p *failingSummaryProvider) Name() string { return "failing-summary" }
+
+func (p *failingSummaryProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
+	return provider.ContextBudgetPolicy{WindowMode: provider.ContextWindowIndependent}
+}
 
 func (p *failingSummaryProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
 	p.calls++

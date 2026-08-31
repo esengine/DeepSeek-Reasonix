@@ -384,9 +384,6 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		// preferred conflict forks. Open/running recovery is still not a
 		// second row — status is already aggregated above.
 		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
-			if session.Recovered || session.RecoveryCopy {
-				node.RecoveryCopyCount++
-			}
 			continue
 		}
 		visible = append(visible, session)
@@ -486,7 +483,7 @@ func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 	}
 	availability := a.catalogWorkspaceAvailability(catalog, req.Scope, req.WorkspaceRoot)
 	if !availability.usable {
-		// A freshly opened v5 cache is live but empty until the first directory
+		// A freshly opened v6 cache is live but empty until the first directory
 		// scan. Treat that the same as "catalog unavailable" so upgrade does
 		// not blank the sidebar that desktop-projects.json still knows about.
 		page := a.metadataTopicPage(req)

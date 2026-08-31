@@ -8,6 +8,8 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatInboxCancelError } from "./inboxError";
+import { settleForkConversationForTab } from "./forkWorktree";
+import type { MessageActionScope, MessageActionState } from "./messageActions";
 import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
 import { resolveActiveTurnId } from "./inboxSubmit";
@@ -231,8 +233,6 @@ export type ControllerLiveStore = {
   getSnapshot: (tabId: string | undefined) => LiveStream | undefined;
   getModelActiveAt?: (tabId: string | undefined) => number | undefined;
 };
-export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
-export type MessageActionState = { turn: number; scope: MessageActionScope };
 export type HistoryMutationKind = "replace" | "prepend" | "append" | "patch";
 export type HistoryMutation = { seq: number; kind: HistoryMutationKind };
 export type HistoryLoadTrigger = "viewport-user" | "question-jump" | "retry" | "auto-fill";
@@ -4496,19 +4496,16 @@ export function useController() {
     if (!sourceTabId) return { ok: false };
     const forkNavigationSeq = activeNavigationSeqRef.current;
     await waitForTabReady(sourceTabId);
-    const actionScope = (["fork", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
+    const actionScope = (["fork", "fork-worktree", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
     const { messageActionBusyText } = await import("./controllerSwitchNotices");
     dispatchTo(sourceTabId, { type: "message_action_start", action: { turn, scope: actionScope } });
     dispatchTo(sourceTabId, { type: "local_notice", level: "info", text: messageActionBusyText(actionScope) });
     try {
-      if (actionScope === "fork") {
-        const tab = await app.ForkForTab(sourceTabId, turn);
-        if (tab?.id) {
-          await adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork");
-        } else {
-          await syncActiveTabFromBackend(true);
-        }
-        return { ok: true, tabId: tab?.id, tab };
+      if (actionScope === "fork" || actionScope === "fork-worktree") {
+        return settleForkConversationForTab(app, sourceTabId, turn, actionScope === "fork-worktree",
+          (tabId, level, text) => dispatchTo(tabId, { type: "local_notice", level, text }),
+          tab => adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork"),
+          () => syncActiveTabFromBackend(true));
       }
 
       let outcome: RewindResultView & { ok: boolean } = { ok: true };
@@ -4532,6 +4529,9 @@ export function useController() {
         dispatchPartialRewindNotice(partialNotice, sourceTabId, outcome.tabId, (tabId, text) => dispatchTo(tabId, { type: "local_notice", level: "warn", text })));
       return outcome;
     } catch {
+      if (actionScope === "fork" || actionScope === "fork-worktree") {
+        dispatchTo(sourceTabId, { type: "local_notice", level: "warn", text: t("rewind.forkFailed") });
+      }
       return { ok: false };
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });

@@ -1,24 +1,14 @@
 // Run: tsx src/__tests__/history-recovery-copies.test.tsx
-//
-// Recovery-copy bulk actions in HistoryPanel: the history view sweeps idle
-// copies into the trash (skipping current/open ones), the trash view purges
-// them, and both flows keep normal sessions untouched.
 
 import { JSDOM } from "jsdom";
 import { registerHooks } from "node:module";
-import React from "react";
-import { act } from "react";
+import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { SessionMeta } from "../lib/types";
 
-// HistoryPanel transitively imports Welcome's SVG wordmark; tsx has no asset
-// loader, so redirect .svg specifiers to an empty-string module stub, the way
-// Vite would default-export a URL.
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier.endsWith(".svg")) {
-      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
-    }
+    if (specifier.endsWith(".svg")) return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
     return nextResolve(specifier, context);
   },
 });
@@ -37,19 +27,11 @@ function ok(value: boolean, label: string) {
 }
 
 function eq(actual: unknown, expected: unknown, label: string) {
-  if (JSON.stringify(actual) === JSON.stringify(expected)) ok(true, label);
-  else ok(false, `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-}
-
-function flushTimers(ms = 0): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  ok(JSON.stringify(actual) === JSON.stringify(expected), `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
 function installDom() {
-  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
-    pretendToBeVisual: true,
-    url: "http://localhost/",
-  });
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
@@ -87,9 +69,7 @@ function session(overrides: Partial<SessionMeta> & { path: string }): SessionMet
 async function renderPanel(props: Record<string, unknown>) {
   const { HistoryPanel } = await import("../components/HistoryPanel");
   const { LocaleProvider } = await import("../lib/i18n");
-  const rootEl = document.getElementById("root");
-  if (!rootEl) throw new Error("missing root");
-  const root = createRoot(rootEl);
+  const root = createRoot(document.getElementById("root")!);
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -100,122 +80,95 @@ async function renderPanel(props: Record<string, unknown>) {
           onDelete={() => {}}
           onRename={() => {}}
           onClose={() => {}}
+          sessions={[]}
           {...props}
         />
       </LocaleProvider>,
     );
-    await flushTimers(30);
+    await new Promise((resolve) => setTimeout(resolve, 30));
   });
   return root;
 }
 
 function findButton(text: string): HTMLButtonElement | undefined {
-  return Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === text) as
-    | HTMLButtonElement
-    | undefined;
+  return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === text) as HTMLButtonElement | undefined;
 }
 
 async function click(button: HTMLButtonElement) {
   await act(async () => {
     button.click();
-    await flushTimers(20);
+    await new Promise((resolve) => setTimeout(resolve, 20));
   });
 }
 
-console.log("\nhistory panel recovery-copy bulk actions");
+console.log("\nhistory recovery data visibility");
 
-// History view: the sweep button trashes idle recovery copies only.
-{
-  const dom = installDom();
-  const deleted: string[][] = [];
-  const purged: string[][] = [];
-  const root = await renderPanel({
-    kind: "history",
-    sessions: [
-      session({ path: "/s/normal.jsonl" }),
-      session({ path: "/s/continued-recovery-0123456789abcdef.jsonl", title: "continued recovery kept", recovered: true }),
-      session({ path: "/s/idle-recovery-0123456789abcdef.jsonl", recovered: true, recoveryCopy: true }),
-      session({ path: "/s/open-recovery-0123456789abcdef.jsonl", recovered: true, recoveryCopy: true, open: true }),
-      session({ path: "/s/current-recovery-0123456789abcdef.jsonl", recovered: true, recoveryCopy: true, current: true }),
-    ],
-    onDeleteMany: (paths: string[]) => deleted.push(paths),
-    onPurgeAll: (paths: string[]) => purged.push(paths),
-    onPurgeRecoveryCopies: (paths: string[]) => purged.push(paths),
-  });
-
-  const sweep = findButton("Trash recovery copies");
-  ok(Boolean(sweep), "history view shows the trash-recovery-copies button");
-  if (sweep) {
-    await click(sweep); // arm
-    const confirm = findButton("Confirm trash copies");
-    ok(Boolean(confirm), "sweep arms into a confirm step");
-    if (confirm) await click(confirm);
-  }
-  eq(deleted, [["/s/idle-recovery-0123456789abcdef.jsonl"]], "sweep trashes only idle recovery copies");
-  ok(document.body.textContent?.includes("continued recovery kept"), "continued recovery remains in normal history");
-  eq(purged, [], "history sweep never purges");
-
-  await act(async () => {
-    root.unmount();
-  });
-  dom.window.close();
-}
-
-// History view: no idle copies → no sweep button.
 {
   const dom = installDom();
   const root = await renderPanel({
     kind: "history",
     sessions: [
-      session({ path: "/s/normal.jsonl" }),
-      session({ path: "/s/current-recovery-0123456789abcdef.jsonl", recovered: true, recoveryCopy: true, current: true }),
+      session({ path: "/s/normal.jsonl", title: "normal session" }),
+      session({ path: "/s/continued.jsonl", title: "continued session", recovered: true }),
+      session({ path: "/s/covered.jsonl", title: "covered copy", recovered: true, recoveryCopy: true }),
     ],
-    onDeleteMany: () => {},
   });
-  ok(!findButton("Trash recovery copies"), "history view hides the sweep button when every copy is live");
-  await act(async () => {
-    root.unmount();
-  });
+
+  ok(document.body.textContent?.includes("normal session") === true, "ordinary history keeps normal sessions");
+  ok(document.body.textContent?.includes("continued session") === true, "unique recovered content remains ordinary history");
+  ok(document.body.textContent?.includes("covered copy") === false, "covered copies are hidden from ordinary history");
+  ok(!document.body.textContent?.includes("Recovery copies"), "ordinary history exposes no recovery-copy group");
+  ok(!findButton("Trash recovery copies"), "ordinary history exposes no copy cleanup action");
+  await act(async () => root.unmount());
   dom.window.close();
 }
 
-// Trash view: clear copies purges recovery copies, empty trash stays separate.
 {
   const dom = installDom();
-  const purged: string[][] = [];
   const emptied: string[][] = [];
+  const restored: string[] = [];
+  const purged: string[] = [];
   const root = await renderPanel({
     kind: "trash",
     sessions: [
-      session({ path: "/t/normal.jsonl", deletedAt: now }),
-      session({ path: "/t/continued-recovery-0123456789abcdef.jsonl", deletedAt: now, recovered: true }),
-      session({ path: "/t/a-recovery-0123456789abcdef.jsonl", deletedAt: now, recovered: true, recoveryCopy: true }),
-      session({ path: "/t/b-recovery-0123456789abcdef.jsonl", deletedAt: now, recovered: true, recoveryCopy: true }),
+      session({ path: "/t/normal.jsonl", title: "deleted session", deletedAt: now }),
+      session({ path: "/t/covered.jsonl", title: "system copy", deletedAt: now, recovered: true, recoveryCopy: true }),
     ],
-    onRestore: () => {},
-    onPurge: () => {},
+    onRestore: (path: string) => restored.push(path),
+    onPurge: (path: string) => purged.push(path),
     onPurgeAll: (paths: string[]) => emptied.push(paths),
-    onPurgeRecoveryCopies: (paths: string[]) => purged.push(paths),
   });
 
-  const clear = findButton("Clear copies");
-  ok(Boolean(clear), "trash view shows the clear-copies button");
+  ok(document.body.textContent?.includes("system copy") === false, "trash collapses system recovery data by default");
+  const disclosure = document.querySelector<HTMLButtonElement>(".history-system-recovery__toggle") ?? undefined;
+  ok(Boolean(disclosure), "trash provides a collapsed advanced recovery-data disclosure");
+  if (disclosure) await click(disclosure);
+  ok(document.body.textContent?.includes("system copy") === true, "advanced disclosure keeps recovery data restorable");
+  const systemCopy = Array.from(document.querySelectorAll<HTMLButtonElement>(".hist-item__main"))
+    .find((button) => button.textContent?.includes("system copy"));
+  if (systemCopy) await click(systemCopy);
+  const restore = findButton("Restore");
+  ok(Boolean(restore) && !restore?.disabled, "system recovery data retains its restore action");
+  if (restore) await click(restore);
+  eq(restored, ["/t/covered.jsonl"], "restore targets the selected system recovery item");
+  const purge = findButton("Delete permanently");
+  ok(Boolean(purge) && !purge?.disabled, "system recovery data retains permanent delete control");
+  if (purge) {
+    await click(purge);
+    const confirmPurge = findButton("Confirm permanent delete");
+    if (confirmPurge) await click(confirmPurge);
+  }
+  eq(purged, ["/t/covered.jsonl"], "permanent delete targets the selected system recovery item");
+
+  const clear = findButton("Empty trash");
+  ok(Boolean(clear), "ordinary trash still exposes its normal empty action");
   if (clear) {
-    await click(clear); // arm
-    const confirm = findButton("Confirm clear copies");
-    ok(Boolean(confirm), "clear copies arms into a confirm step");
+    await click(clear);
+    const confirm = findButton("Confirm empty trash");
     if (confirm) await click(confirm);
   }
-  eq(
-    purged,
-    [["/t/a-recovery-0123456789abcdef.jsonl", "/t/b-recovery-0123456789abcdef.jsonl"]],
-    "clear copies purges every trashed recovery copy and nothing else",
-  );
-  eq(emptied, [], "clear copies does not invoke the unguarded empty-trash action");
-
-  await act(async () => {
-    root.unmount();
-  });
+  eq(emptied, [["/t/normal.jsonl"]], "empty trash excludes protected system recovery data");
+  await act(async () => root.unmount());
   dom.window.close();
 }
 
