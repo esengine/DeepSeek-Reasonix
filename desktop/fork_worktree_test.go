@@ -241,6 +241,12 @@ func TestForkWorktreeForTabPreservesReferencedWorkspaceWhenSourceCloses(t *testi
 		started:                   make(chan struct{}),
 		release:                   make(chan struct{}),
 	}
+	if err := os.MkdirAll(filepath.Dir(ctrl.path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	close(ctrl.release)
 	app := NewApp()
 	app.setTestCtrl(ctrl, "")
@@ -286,5 +292,12 @@ func TestForkWorktreeForTabPreservesReferencedWorkspaceWhenSourceCloses(t *testi
 	}
 	if roots := loadWorkspaces(); len(roots) == 0 || !sameProjectRoot(roots[0], isolatedRoot) {
 		t.Fatalf("preserved workspace was not remembered: %v", roots)
+	}
+	reopened, err := app.OpenProjectTab(isolatedRoot, meta.TopicID)
+	if err != nil {
+		t.Fatalf("OpenProjectTab preserved fork: %v", err)
+	}
+	if !sameDesktopPath(reopened.SessionPath, ctrl.path) || !sameProjectRoot(reopened.WorkspaceRoot, isolatedRoot) {
+		t.Fatalf("reopened fork = %+v, want session %q in isolated project %q", reopened, ctrl.path, isolatedRoot)
 	}
 }

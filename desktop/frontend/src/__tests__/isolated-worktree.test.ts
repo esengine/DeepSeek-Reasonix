@@ -36,7 +36,7 @@ ok(/isolatedWorktree && <WorktreeBadge/.test(tabs), "tab strip identifies isolat
 ok(/activeTab\?\.isolatedWorktree && <WorktreeBadge/.test(app), "topic bar identifies isolated worktrees");
 ok(/node\.isolatedWorktree && <WorktreeBadge/.test(tree), "project tree identifies isolated worktrees");
 ok(/GitBranch/.test(badge) && /#6119/.test(badge), "shared badge preserves the credited #6119 design contribution");
-ok(/bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkAction), "isolated conversation fork uses the generated two-argument binding");
+ok(/bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkAction) && /makeMockForkBindings/.test(bridge) && !/async ForkWorktreeForTab\(tabID, turn\)/.test(bridge), "isolated conversation fork and browser mock use the extracted two-argument binding");
 ok(!/ForkForTab\(sourceTabId, turn, isolate/.test(forkAction), "shared fork never sends an extra Wails argument");
 ok(/result\.sourceDirty[\s\S]*forkWorktreeDirtySource/.test(forkAction), "dirty sources are refused with actionable guidance");
 ok(/result\.fallbackToShared[\s\S]*forkWorktreeFallbackNotice/.test(forkAction), "backend fallback state reaches the user");

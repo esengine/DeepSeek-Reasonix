@@ -17,6 +17,44 @@ export interface ForkBindings {
   ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
   ForkWorktreeForTab(tabID: string, turn: number): Promise<ForkWorktreeResultView>;
 }
+
+interface MockForkBindings extends ForkBindings {
+  Fork(turn: number): Promise<TabMeta>;
+}
+
+export function makeMockForkBindings(
+  getTabs: () => TabMeta[],
+  setTabs: (tabs: TabMeta[]) => void,
+  defaultTitle: string,
+): MockForkBindings {
+  const fork = async (_turn: number): Promise<TabMeta> => {
+    const tabs = getTabs();
+    const active = tabs.find((tab) => tab.active) ?? tabs[0];
+    const stamp = Date.now();
+    const tab: TabMeta = {
+      ...active,
+      id: `tab_fork_${stamp}`,
+      topicId: `topic_fork_${stamp}`,
+      topicTitle: `${active.topicTitle || defaultTitle} · fork`,
+      active: true,
+      running: false,
+    };
+    setTabs([...tabs.map((item) => ({ ...item, active: false })), tab]);
+    return { ...tab };
+  };
+  const forkForTab = async (tabID: string, turn: number): Promise<TabMeta> => {
+    setTabs(getTabs().map((tab) => ({ ...tab, active: tab.id === tabID })));
+    return fork(turn);
+  };
+  return {
+    Fork: fork,
+    ForkForTab: forkForTab,
+    async ForkWorktreeForTab(tabID, turn) {
+      return mockForkWorktree(await forkForTab(tabID, turn));
+    },
+  };
+}
+
 type Notice = (tabId: string, level: "info" | "warn", text: string) => void;
 
 export async function forkConversationForTab(bindings: ForkBindings, sourceTabId: string, turn: number, isolated: boolean, notice: Notice): Promise<TabMeta | undefined> {

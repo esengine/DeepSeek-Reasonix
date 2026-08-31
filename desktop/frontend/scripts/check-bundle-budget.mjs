@@ -163,10 +163,11 @@ console.log("\nbundle budgets");
 // The generation-bound history-prepend lease adds stable-key reader anchoring,
 // full mounted coverage, and one final arbiter-owned correction. The measured
 // path is 457.406 KiB after extracting the lease owner to satisfy repolint.
-// Latest-base transcript settle ownership measures 457.523 KiB with this UX;
-// isolated conversation forks bring the combined tree to 458.073 KiB. Retain
-// 0.027 KiB with the smallest one-decimal ratchet.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.1 : 458.1;
+// Latest-base transcript settle ownership measures 457.518 KiB with this UX;
+// isolated conversation forks and their extracted browser mock adapter bring
+// the combined tree to 458.158 KiB. Retain 0.042 KiB with the smallest
+// one-decimal ratchet.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.2 : 458.2;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -289,8 +290,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // 2452.7 KiB together; the recovery coordinator and dialog remain lazy. Retain
 // the smallest one-decimal headroom without widening unrelated chunk ceilings.
 // Latest-base transcript settle ownership brings the measured path to
-// 2452.821 KiB; isolated conversation forks bring the combined tree to
-// 2454.618 KiB. Retain 0.082 KiB with the smallest one-decimal ratchet.
+// 2452.773 KiB; isolated conversation forks bring the combined tree to
+// 2454.679 KiB. Retain 0.021 KiB with the smallest one-decimal ratchet.
 const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_454.7 : 2_454.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

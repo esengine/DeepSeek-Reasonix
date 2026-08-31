@@ -10,7 +10,7 @@ import { makeMockTaskCatalogBindings, type TaskCatalogBindings } from "./taskCat
 import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blankProjectBridge";
 import { makeMockQualityFloorBindings, type QualityFloorBindings } from "./deliveryFloorBridge";
 import { t } from "./i18n";
-import { mockForkWorktree } from "./forkWorktree";
+import { makeMockForkBindings } from "./forkWorktree";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
@@ -3268,21 +3268,11 @@ function makeMockApp(): AppBindings {
     async CommitWorkspaceFileRevertForTab() {
       return { ok: true, undoAvailable: true, transactionId: "mock-file-tx" };
     },
-    async Fork() {
-      const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
-      const tab: TabMeta = {
-        ...active,
-        id: "tab_fork_" + Date.now(),
-        topicId: "topic_fork_" + Date.now(),
-        topicTitle: `${active.topicTitle || t("rewind.fork")} · fork`,
-        active: true,
-        running: false,
-      };
-      mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
-      return { ...tab };
-    },
-    async ForkForTab(tabID, turn) { mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID })); return this.Fork(turn); },
-    async ForkWorktreeForTab(tabID, turn) { return mockForkWorktree(await this.ForkForTab(tabID, turn)); },
+    ...makeMockForkBindings(
+      () => mockTabs,
+      (tabs) => { mockTabs = tabs; },
+      t("rewind.fork"),
+    ),
     async SummarizeFrom() {},
     async SummarizeFromForTab() {},
     async SummarizeUpTo() {},
