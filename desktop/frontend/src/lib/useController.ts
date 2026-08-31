@@ -4503,8 +4503,16 @@ export function useController() {
     try {
       if (actionScope === "fork" || actionScope === "fork-worktree") {
         const isolate = actionScope === "fork-worktree";
+        const sourceTab = listedSessionIdentityByTabRef.current.get(sourceTabId);
         const tab = await app.ForkForTab(sourceTabId, turn, isolate);
         if (tab?.id) {
+          if (isolate && sourceTab?.workspaceRoot && tab.workspaceRoot === sourceTab.workspaceRoot) {
+            dispatchTo(tab.id, {
+              type: "local_notice",
+              level: "info",
+              text: t("rewind.forkWorktreeFallbackNotice"),
+            });
+          }
           await adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork");
         } else {
           await syncActiveTabFromBackend(true);

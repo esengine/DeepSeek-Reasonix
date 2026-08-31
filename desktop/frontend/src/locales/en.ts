@@ -3191,6 +3191,7 @@ export const en = {
   "rewind.forkWorktree": "Fork into Worktree (Isolated)",
   "rewind.forkConversation": "Fork Conversation Only (Shared)",
   "rewind.confirmForkWorktree": "Confirm Fork into Isolated Worktree",
+  "rewind.forkWorktreeFallbackNotice": "Git environment or valid repository not detected; fell back to shared workspace fork (install Git in Settings to enable isolated worktrees).",
   "rewind.summFrom": "Compress model context after this",
   "rewind.summUpto": "Compress model context before this",
   "rewind.confirmFork": "Confirm fork conversation",

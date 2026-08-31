@@ -3194,6 +3194,7 @@ export const zh: Record<DictKey, string> = {
   "rewind.forkWorktree": "分叉并隔离代码 (Worktree)",
   "rewind.forkConversation": "仅分叉对话 (共享工作区)",
   "rewind.confirmForkWorktree": "确认分叉并创建独立工作树",
+  "rewind.forkWorktreeFallbackNotice": "未检测到 Git 环境或有效 Git 仓库，已自动降级为共享工作区分叉（可在「设置」中安装 Git 以开启独立工作区支持）。",
   "rewind.summFrom": "压缩此处之后的模型上下文",
   "rewind.summUpto": "压缩此处之前的模型上下文",
   "rewind.confirmFork": "确认分叉会话",
