@@ -3281,13 +3281,8 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
-    async ForkForTab(tabID, turn) {
-      mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
-      return this.Fork(turn);
-    },
-    async ForkWorktreeForTab(tabID, turn) {
-      return mockForkWorktree(await this.ForkForTab(tabID, turn));
-    },
+    async ForkForTab(tabID, turn) { mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID })); return this.Fork(turn); },
+    async ForkWorktreeForTab(tabID, turn) { return mockForkWorktree(await this.ForkForTab(tabID, turn)); },
     async SummarizeFrom() {},
     async SummarizeFromForTab() {},
     async SummarizeUpTo() {},

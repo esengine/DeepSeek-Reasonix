@@ -8,7 +8,8 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatInboxCancelError } from "./inboxError";
-import { forkConversationForTab } from "./forkWorktree";
+import { settleForkConversationForTab } from "./forkWorktree";
+import type { MessageActionScope, MessageActionState } from "./messageActions";
 import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
 import { resolveActiveTurnId } from "./inboxSubmit";
@@ -232,8 +233,6 @@ export type ControllerLiveStore = {
   getSnapshot: (tabId: string | undefined) => LiveStream | undefined;
   getModelActiveAt?: (tabId: string | undefined) => number | undefined;
 };
-export type MessageActionScope = "fork" | "fork-worktree" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
-export type MessageActionState = { turn: number; scope: MessageActionScope };
 export type HistoryMutationKind = "replace" | "prepend" | "append" | "patch";
 export type HistoryMutation = { seq: number; kind: HistoryMutationKind };
 export type HistoryLoadTrigger = "viewport-user" | "question-jump" | "retry" | "auto-fill";
@@ -4503,16 +4502,10 @@ export function useController() {
     dispatchTo(sourceTabId, { type: "local_notice", level: "info", text: messageActionBusyText(actionScope) });
     try {
       if (actionScope === "fork" || actionScope === "fork-worktree") {
-        const isolate = actionScope === "fork-worktree";
-        const tab = await forkConversationForTab(app, sourceTabId, turn, isolate,
-          (tabId, level, text) => dispatchTo(tabId, { type: "local_notice", level, text }));
-        if (tab?.id) {
-          await adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork");
-        } else {
-          await syncActiveTabFromBackend(true);
-          return { ok: false };
-        }
-        return { ok: true, tabId: tab?.id, tab };
+        return settleForkConversationForTab(app, sourceTabId, turn, actionScope === "fork-worktree",
+          (tabId, level, text) => dispatchTo(tabId, { type: "local_notice", level, text }),
+          tab => adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork"),
+          () => syncActiveTabFromBackend(true));
       }
 
       let outcome: RewindResultView & { ok: boolean } = { ok: true };

@@ -307,6 +307,55 @@ func TestRollbackCreatePreservesChangedWorktree(t *testing.T) {
 	}
 }
 
+func TestRollbackCreatePreservesIgnoredContent(t *testing.T) {
+	requireGit(t)
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "file", path: "ignored.txt"},
+		{name: "directory", path: filepath.Join("cache", "artifact.bin")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initRepo(t)
+			if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("ignored.txt\ncache/\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git := exec.Command("git", "-C", repo, "add", ".gitignore")
+			if out, err := git.CombinedOutput(); err != nil {
+				t.Fatalf("git add .gitignore: %v %s", err, out)
+			}
+			git = exec.Command("git", "-C", repo, "-c", "user.name=Reasonix Test", "-c", "user.email=reasonix@example.invalid", "commit", "-m", "ignore generated files")
+			if out, err := git.CombinedOutput(); err != nil {
+				t.Fatalf("git commit .gitignore: %v %s", err, out)
+			}
+
+			result, err := Create(context.Background(), repo, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ignoredPath := filepath.Join(result.WorktreeRoot, tc.path)
+			if err := os.MkdirAll(filepath.Dir(ignoredPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ignoredPath, []byte("preserve me\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := RollbackCreate(context.Background(), result); err == nil || !strings.Contains(err.Error(), "contains changes") {
+				t.Fatalf("RollbackCreate error = %v, want ignored-content refusal", err)
+			}
+			if got, err := os.ReadFile(ignoredPath); err != nil || string(got) != "preserve me\n" {
+				t.Fatalf("ignored content was not preserved: data=%q err=%v", got, err)
+			}
+			git = exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+result.Branch)
+			if err := git.Run(); err != nil {
+				t.Fatalf("ignored-content branch was removed: %v", err)
+			}
+		})
+	}
+}
+
 func TestCreateSupportsPathsWithSpaces(t *testing.T) {
 	requireGit(t)
 	parent := t.TempDir()

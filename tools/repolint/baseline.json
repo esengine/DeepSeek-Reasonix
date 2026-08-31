@@ -4,7 +4,7 @@
     "commented-code": 0,
     "complexity": 1966,
     "essay": 1936,
-    "file-size": 107983,
+    "file-size": 107914,
     "function-size": 8532,
     "layering": 1,
     "marker": 0,
@@ -25,7 +25,7 @@
     "desktop/app.go": {
       "complexity": 57,
       "essay": 64,
-      "file-size": 11137,
+      "file-size": 11113,
       "function-size": 346,
       "struct-state": 15
     },
@@ -114,7 +114,7 @@
       "file-size": 1088
     },
     "desktop/frontend/src/components/Message.tsx": {
-      "file-size": 63
+      "file-size": 43
     },
     "desktop/frontend/src/components/ProjectTree.tsx": {
       "file-size": 1468
@@ -147,7 +147,7 @@
       "file-size": 180
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4936
+      "file-size": 4920
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -159,7 +159,7 @@
       "file-size": 1544
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 4215
+      "file-size": 4206
     },
     "desktop/heartbeat.go": {
       "essay": 7

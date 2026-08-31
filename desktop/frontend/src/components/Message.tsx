@@ -14,7 +14,8 @@ import { Tooltip } from "./Tooltip";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
-import type { Item, MessageActionScope } from "../lib/useController";
+import { messageActionLabelKey, type MessageActionScope } from "../lib/messageActions";
+import type { Item } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
@@ -599,7 +600,7 @@ export function TurnActions({
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
-    if ((scope === "fork" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
+    if ((scope === "fork" || scope === "fork-worktree" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
       return t("rewind.disabledNoBoundary");
     }
     if (scope === "summ-from" && isLastTurn) {
@@ -616,42 +617,7 @@ export function TurnActions({
     }
     return "";
   };
-  const actionLabel = (scope: MessageActionScope): string => {
-    if (confirmScope !== scope) {
-      switch (scope) {
-        case "fork-worktree":
-          return t("rewind.forkWorktree");
-        case "fork":
-          return t("rewind.forkConversation");
-        case "summ-from":
-          return t("rewind.summFrom");
-        case "summ-upto":
-          return t("rewind.summUpto");
-        case "conversation":
-          return t("rewind.conversation");
-        case "code":
-          return t("rewind.code");
-        default:
-          return t("rewind.both");
-      }
-    }
-    switch (scope) {
-      case "fork-worktree":
-        return t("rewind.confirmForkWorktree");
-      case "fork":
-        return t("rewind.confirmFork");
-      case "summ-from":
-        return t("rewind.confirmSummFrom");
-      case "summ-upto":
-        return t("rewind.confirmSummUpto");
-      case "conversation":
-        return t("rewind.confirmConversation");
-      case "code":
-        return t("rewind.confirmCode");
-      default:
-        return t("rewind.confirmBoth");
-    }
-  };
+  const actionLabel = (scope: MessageActionScope): string => t(messageActionLabelKey(scope, confirmScope === scope));
   const actionMeta = (scope: MessageActionScope): string => {
     const total = checkpoint?.fileCount ?? checkpoint?.files?.length ?? 0;
     if ((scope === "code" || scope === "both") && total > 0) {

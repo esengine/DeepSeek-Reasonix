@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
@@ -12,6 +13,14 @@ import (
 )
 
 const rewindForkAttachError = "conversation fork was created but could not be opened; open the recovery branch from session history"
+
+// forkTabBeforePublishHookForTest forces the persistence-to-publish interleaving.
+var forkTabBeforePublishHookForTest atomic.Pointer[func()]
+
+type forkedSessionTabOpen struct {
+	tab                 TabMeta
+	workspaceReferenced bool
+}
 
 // ForkWorktreeResultView distinguishes a real isolated fork from a safe shared
 // fallback and from a dirty-source refusal. The ordinary ForkForTab contract is
@@ -83,11 +92,18 @@ func (a *App) forkForTabWithOptions(tabID string, turn int, isolateWorkspace boo
 	if err != nil {
 		return ForkWorktreeResultView{}, a.rollbackUnusedForkWorktree(created, err)
 	}
-	result.Tab, err = a.openForkedSessionTabWithWorkspace(sourceTab, newPath, created.WorkspaceRoot)
+	opened, err := a.openForkedSessionTabWithWorkspace(sourceTab, newPath, created.WorkspaceRoot)
+	result.Tab = opened.tab
 	if err != nil {
+		if opened.workspaceReferenced {
+			return result, err
+		}
 		return ForkWorktreeResultView{}, a.rollbackUnusedForkWorktree(created, err)
 	}
 	if result.Tab.ID == "" {
+		if opened.workspaceReferenced {
+			return result, errors.New(rewindForkAttachError)
+		}
 		return ForkWorktreeResultView{}, a.rollbackUnusedForkWorktree(created, errors.New(rewindForkAttachError))
 	}
 	return result, nil
@@ -107,19 +123,20 @@ func (a *App) rollbackUnusedForkWorktree(created worktree.Result, cause error) e
 // The source tab keeps its controller and transcript. The fork becomes active
 // only while the source tab still owns focus.
 func (a *App) openForkedSessionTab(sourceTab *WorkspaceTab, newPath string) (TabMeta, error) {
-	return a.openForkedSessionTabWithWorkspace(sourceTab, newPath, "")
+	opened, err := a.openForkedSessionTabWithWorkspace(sourceTab, newPath, "")
+	return opened.tab, err
 }
 
 // openForkedSessionTabWithWorkspace attaches an already-written fork session to a new tab,
 // optionally overriding the workspace root (e.g. for isolated Git worktrees).
-func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath string, workspaceRootOverride string) (TabMeta, error) {
+func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath string, workspaceRootOverride string) (forkedSessionTabOpen, error) {
 	if sourceTab == nil || strings.TrimSpace(newPath) == "" {
-		return TabMeta{}, fmt.Errorf("fork tab needs a source tab and session path")
+		return forkedSessionTabOpen{}, fmt.Errorf("fork tab needs a source tab and session path")
 	}
 	a.mu.RLock()
 	if a.tabs[sourceTab.ID] != sourceTab {
 		a.mu.RUnlock()
-		return TabMeta{}, nil
+		return forkedSessionTabOpen{}, nil
 	}
 	scope := sourceTab.Scope
 	workspaceRoot := sourceTab.WorkspaceRoot
@@ -142,7 +159,7 @@ func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath
 		titleRoot = ""
 	}
 	if err := setTopicTitle(titleRoot, topicID, topicTitle); err != nil {
-		return TabMeta{}, err
+		return forkedSessionTabOpen{}, err
 	}
 	m, _ := agent.EnsureBranchMeta(newPath)
 	m.Scope = scope
@@ -150,14 +167,26 @@ func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath
 	m.TopicID = topicID
 	m.TopicTitle = topicTitle
 	if err := agent.SaveBranchMeta(newPath, m); err != nil {
-		return TabMeta{}, err
+		return forkedSessionTabOpen{}, err
 	}
 	invalidateTopicSessionIndexForPath(newPath)
+	opened := forkedSessionTabOpen{workspaceReferenced: strings.TrimSpace(workspaceRootOverride) != ""}
+
+	if opened.workspaceReferenced && scope == "project" {
+		rememberWorkspace(workspaceRoot)
+		if err := prependTopicInProjectsFile(workspaceRoot, topicID, true); err != nil {
+			slog.Warn("desktop: persist isolated fork topic", "workspace", workspaceRoot, "topic", topicID, "err", err)
+		}
+		a.registerProjectRoot(workspaceRoot)
+	}
+	if hook := forkTabBeforePublishHookForTest.Load(); hook != nil {
+		(*hook)()
+	}
 
 	a.mu.Lock()
 	if a.tabs[sourceTab.ID] != sourceTab {
 		a.mu.Unlock()
-		return TabMeta{}, nil
+		return opened, nil
 	}
 	newTabID := a.newUniqueTabIDLocked()
 	tab := &WorkspaceTab{
@@ -186,19 +215,15 @@ func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath
 	meta := a.tabMeta(tab, activateFork)
 	a.mu.Unlock()
 
-	if strings.TrimSpace(workspaceRootOverride) != "" && scope == "project" {
-		rememberWorkspace(workspaceRoot)
+	if opened.workspaceReferenced && scope == "project" {
 		if activateFork {
 			saveWorkspace(workspaceRoot)
-		}
-		a.registerProjectRoot(workspaceRoot)
-		if err := prependTopicInProjectsFile(workspaceRoot, topicID, true); err != nil {
-			slog.Warn("desktop: persist isolated fork topic", "workspace", workspaceRoot, "topic", topicID, "err", err)
 		}
 	}
 	a.emitProjectTreeChangedForSessionDirs(sessionDirectoryForPath(newPath))
 	a.startTabControllerBuild(tab)
-	return meta, nil
+	opened.tab = meta
+	return opened, nil
 }
 
 // attachForkedRewindTab fails closed when the durable branch cannot be attached

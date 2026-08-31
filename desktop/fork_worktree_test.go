@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/worktree"
 )
@@ -196,5 +197,94 @@ func TestForkWorktreeForTabRollsBackUnusedCreation(t *testing.T) {
 	}
 	if rollbackCalls != 1 {
 		t.Fatalf("rollback calls = %d, want 1", rollbackCalls)
+	}
+}
+
+func TestForkWorktreeForTabPreservesReferencedWorkspaceWhenSourceCloses(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	origInspect := inspectDeliveryWorktree
+	origCreate := createDeliveryWorktree
+	origRollback := rollbackDeliveryWorktree
+	t.Cleanup(func() {
+		inspectDeliveryWorktree = origInspect
+		createDeliveryWorktree = origCreate
+		rollbackDeliveryWorktree = origRollback
+		forkTabBeforePublishHookForTest.Store(nil)
+	})
+	inspectDeliveryWorktree = func(_ context.Context, root string) worktree.Availability {
+		return worktree.Availability{Available: true, RepoRoot: root}
+	}
+	worktreeRoot := filepath.Join(t.TempDir(), "worktree")
+	isolatedRoot := filepath.Join(worktreeRoot, "project")
+	if err := os.MkdirAll(isolatedRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	created := worktree.Result{
+		WorkspaceRoot: isolatedRoot,
+		WorktreeRoot:  worktreeRoot,
+		SourceRoot:    t.TempDir(),
+		Branch:        "reasonix/delivery-preserved",
+		Head:          "deadbeef",
+	}
+	createDeliveryWorktree = func(context.Context, string, string) (worktree.Result, error) {
+		return created, nil
+	}
+	rollbackCalls := 0
+	rollbackDeliveryWorktree = func(context.Context, worktree.Result) error {
+		rollbackCalls++
+		return nil
+	}
+
+	ctrl := &blockingForkTabController{
+		tabScopedActionController: newTabScopedActionController(),
+		path:                      filepath.Join(config.SessionDir(), "preserved-fork.jsonl"),
+		started:                   make(chan struct{}),
+		release:                   make(chan struct{}),
+	}
+	close(ctrl.release)
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	app.tabs["test"].Scope = "project"
+	app.tabs["test"].WorkspaceRoot = t.TempDir()
+	app.tabs["test"].TopicTitle = "Source topic"
+	hook := func() {
+		app.mu.Lock()
+		delete(app.tabs, "test")
+		app.removeTabOrderLocked("test")
+		if app.activeTabID == "test" {
+			app.activeTabID = ""
+		}
+		app.mu.Unlock()
+	}
+	forkTabBeforePublishHookForTest.Store(&hook)
+
+	result, err := app.ForkWorktreeForTab("test", 1)
+	if err == nil || result.Tab.ID != "" {
+		t.Fatalf("ForkWorktreeForTab result=%+v err=%v, want preserved attach failure", result, err)
+	}
+	if rollbackCalls != 0 {
+		t.Fatalf("rollback calls = %d, want 0 after BranchMeta references the worktree", rollbackCalls)
+	}
+	if _, err := os.Stat(worktreeRoot); err != nil {
+		t.Fatalf("referenced worktree was not preserved: %v", err)
+	}
+	meta, ok, err := agent.LoadBranchMeta(ctrl.path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
+	}
+	if meta.WorkspaceRoot != isolatedRoot || meta.TopicID == "" {
+		t.Fatalf("fork metadata = %+v, want isolated root and topic", meta)
+	}
+	foundTopic := false
+	for _, project := range loadProjectsFile().Projects {
+		if sameProjectRoot(project.Root, isolatedRoot) {
+			foundTopic = containsDesktopString(project.Topics, meta.TopicID)
+		}
+	}
+	if !foundTopic {
+		t.Fatalf("preserved fork is not recoverable from Projects: %+v", loadProjectsFile().Projects)
+	}
+	if roots := loadWorkspaces(); len(roots) == 0 || !sameProjectRoot(roots[0], isolatedRoot) {
+		t.Fatalf("preserved workspace was not remembered: %v", roots)
 	}
 }

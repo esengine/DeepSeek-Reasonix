@@ -89,7 +89,7 @@ func RollbackCreate(ctx context.Context, result Result) error {
 	if err != nil || strings.TrimSpace(currentHead) != head {
 		return errors.New("rollback worktree HEAD changed after creation")
 	}
-	status, _, err := runGit(ctx, worktreeRoot, "status", "--porcelain=v1", "--untracked-files=normal")
+	status, _, err := runGit(ctx, worktreeRoot, "status", "--porcelain=v1", "--untracked-files=all", "--ignored")
 	if err != nil {
 		return fmt.Errorf("inspect rollback worktree changes: %w", err)
 	}

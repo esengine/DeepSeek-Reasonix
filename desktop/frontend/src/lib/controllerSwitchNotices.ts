@@ -1,6 +1,6 @@
 import { t, type DictKey } from "./i18n";
 import { errorMessage } from "./controllerNotices";
-import type { MessageActionScope } from "./useController";
+import type { MessageActionScope } from "./messageActions";
 import { app } from "./bridge";
 import type { TabMeta } from "./types";
 
