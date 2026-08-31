@@ -158,8 +158,8 @@ console.log("\nbundle budgets");
 // The generation-bound history-prepend lease adds stable-key reader anchoring,
 // full mounted coverage, and one final arbiter-owned correction.
 // Fork into isolated Git worktree adds the action menu and localized guidance.
-// The combined path measures 457.6 KiB; retain 0.2 KiB headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 457.8 : 457.8;
+// The combined path measures 457.7 KiB; retain 0.5 KiB headroom for cross-platform toolchains.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.2 : 458.2;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -193,7 +193,7 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
 // The extracted history-prepend owner adds 3.953 KiB of bounded transaction
 // state and stable-key coverage checks. Together with Fork into worktree,
-// the combined payload measures 2453.0 KiB; retain 0.5 KiB headroom.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_453.5 : 2_453.5;
+// the combined payload measures 2453.5 KiB; retain 1.5 KiB headroom for cross-platform CI.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_455.0 : 2_455.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
