@@ -2,12 +2,173 @@ package sessioncatalog
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 )
+
+func TestRepairFailureBacksOffSubsequentEnqueue(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	catalog := &Catalog{
+		opts:         Options{Now: func() time.Time { return now }},
+		pathIdentity: func(path string) string { return path },
+		repairCh:     make(chan string, 1),
+		stop:         make(chan struct{}),
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+
+	catalog.recordRepairFailure(path)
+	if catalog.enqueueRepair(path) {
+		t.Fatal("failed repair was immediately requeued")
+	}
+	now = now.Add(29 * time.Second)
+	if catalog.enqueueRepair(path) {
+		t.Fatal("failed repair was requeued before the first backoff elapsed")
+	}
+	now = now.Add(time.Second)
+	if !catalog.enqueueRepair(path) {
+		t.Fatal("failed repair was not requeued after the first backoff elapsed")
+	}
+	<-catalog.repairCh
+	catalog.repairQueued.Delete(catalog.pathKey(path))
+
+	catalog.recordRepairFailure(path)
+	now = now.Add(59 * time.Second)
+	if catalog.enqueueRepair(path) {
+		t.Fatal("second repair failure was requeued before exponential backoff elapsed")
+	}
+	now = now.Add(time.Second)
+	if !catalog.enqueueRepair(path) {
+		t.Fatal("second repair failure was not requeued after exponential backoff elapsed")
+	}
+	<-catalog.repairCh
+	catalog.repairQueued.Delete(catalog.pathKey(path))
+
+	catalog.clearRepairFailure(path)
+	if !catalog.enqueueRepair(path) {
+		t.Fatal("successful repair did not clear the retry backoff")
+	}
+}
+
+func TestRepairBackoffIsCapped(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	catalog := &Catalog{
+		opts:         Options{Now: func() time.Time { return now }},
+		pathIdentity: func(path string) string { return path },
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	for range 10 {
+		catalog.recordRepairFailure(path)
+	}
+	now = now.Add(repairRetryMaximum - time.Second)
+	if catalog.repairReadyKey(catalog.pathKey(path)) {
+		t.Fatal("repair retry became eligible before the maximum backoff elapsed")
+	}
+	now = now.Add(time.Second)
+	if !catalog.repairReadyKey(catalog.pathKey(path)) {
+		t.Fatal("repair retry remained blocked beyond the maximum backoff")
+	}
+}
+
+func TestRepairBackoffResetsAfterStaleFailureGeneration(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	catalog := &Catalog{
+		opts:         Options{Now: func() time.Time { return now }},
+		pathIdentity: func(path string) string { return path },
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	for range 6 {
+		catalog.recordRepairFailure(path)
+	}
+
+	now = now.Add(repairRetryReset + time.Second)
+	catalog.recordRepairFailure(path)
+	value, ok := catalog.repairRetry.Load(catalog.pathKey(path))
+	if !ok {
+		t.Fatal("stale repair failure generation was not replaced")
+	}
+	state := value.(repairRetryState)
+	if state.failures != 1 {
+		t.Fatalf("stale repair failure generation retained %d failures, want 1", state.failures)
+	}
+	if want := now.Add(repairRetryInitial); !state.retryAt.Equal(want) {
+		t.Fatalf("retryAt = %v, want reset initial retry %v", state.retryAt, want)
+	}
+}
+
+func TestRepairBackoffClearsWhenSourceGenerationChanges(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	catalog := &Catalog{
+		opts:         Options{Now: func() time.Time { return now }},
+		pathIdentity: func(path string) string { return path },
+		repairCh:     make(chan string, 1),
+		stop:         make(chan struct{}),
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("first generation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog.recordRepairFailure(path)
+	if catalog.enqueueRepair(path) {
+		t.Fatal("unchanged failed source was immediately requeued")
+	}
+
+	if err := os.WriteFile(path, []byte("second generation with a different size"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !catalog.enqueueRepair(path) {
+		t.Fatal("changed source generation retained stale repair backoff")
+	}
+}
+
+func TestDrainUnknownRepairsScansPastBackedOffRows(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	catalog, err := Open(ctx, Options{
+		InMemory:      true,
+		DisableRepair: true,
+		QueueCapacity: 1,
+		Now:           func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	catalog.opts.DisableRepair = false
+
+	dir := t.TempDir()
+	delayed := filepath.Join(dir, "delayed.jsonl")
+	ready := filepath.Join(dir, "ready.jsonl")
+	for _, row := range []struct {
+		path     string
+		activity int64
+	}{
+		{path: delayed, activity: 2},
+		{path: ready, activity: 1},
+	} {
+		_, err := catalog.db.ExecContext(ctx, `INSERT INTO catalog_sessions(
+			path,path_key,directory,directory_key,scope,last_activity_at,turns_state
+		) VALUES(?,?,?,?,?,?,?)`, row.path, catalog.pathKey(row.path), dir, catalog.pathKey(dir), "global", row.activity, TurnsUnknown)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	catalog.recordRepairFailure(delayed)
+	catalog.drainUnknownRepairs(ctx, 1)
+	select {
+	case got := <-catalog.repairCh:
+		if got != ready {
+			t.Fatalf("drain queued %q, want eligible path %q", got, ready)
+		}
+	default:
+		t.Fatal("backed-off row exhausted the drain limit and starved an eligible row")
+	}
+}
 
 func TestRepairResultPreservesDirectoryProjectionUntilReconcile(t *testing.T) {
 	ctx := context.Background()

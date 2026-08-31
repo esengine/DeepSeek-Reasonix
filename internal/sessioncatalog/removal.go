@@ -35,6 +35,7 @@ func (c *Catalog) RemoveSession(ctx context.Context, path, reason string) error 
 	}
 	c.pathQueueMu.Unlock()
 	c.repairQueued.Delete(pathKey)
+	c.repairRetry.Delete(pathKey)
 	// Wake listeners without SQLite. Equal revision identifies an overlay change;
 	// empty roots refresh every expanded folder without querying the busy DB for
 	// workspace_root.
