@@ -1619,10 +1619,11 @@ export function ProjectTree({
           busy={remoteBusy} error={remoteError} ready={remoteServers[node.remote.hostId]?.[node.remote.workspace]?.state === "ready"}
           isExpanded={isExpanded} depth={depth} classicTopics={classicTopics} t={t} onEnsure={() => ensureRemoteGroupSessions(node.remote!.hostId, node.remote!.workspace)}
         />;
-        // While the first topic page is still loading (cold start, catalog
-        // reconcile in flight), show a skeleton instead of a blank folder or
-        // a premature "no topics" placeholder.
-        if (backendPage?.loading) {
+        // Classic has an explicit empty-state row, so keep its loading skeleton
+        // until the catalog can distinguish loading from "no topics". Workbench
+        // and creation render no empty row; painting a transient skeleton there
+        // makes a genuinely empty project flash every time it is expanded.
+        if (backendPage?.loading && classicTopics) {
           return (
             <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
               <div className="project-tree__children-inner">

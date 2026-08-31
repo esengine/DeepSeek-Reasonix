@@ -67,9 +67,9 @@ eq(
   "commitRenameTopic paints the new label optimistically before the refresh round-trip",
 );
 eq(
-  projectTreeSource.includes("project-tree__skeleton"),
+  projectTreeSource.includes("if (backendPage?.loading && classicTopics)"),
   true,
-  "an expanded folder with a loading first topic page renders skeleton rows",
+  "only classic folders render first-page skeletons, so empty workbench projects do not flash",
 );
 eq(
   /projectTreeRevisionIsFresh\(latestRevisionRef\.current, event\.revision\)\) \{\s*void refresh\(\)/.test(projectTreeSource),
