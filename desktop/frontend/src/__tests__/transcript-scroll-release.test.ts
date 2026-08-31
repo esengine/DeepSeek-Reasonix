@@ -11,6 +11,7 @@ import {
 import {
   nativeTranscriptBottomTop,
   nativeTranscriptDistanceFromBottom,
+  tailTop,
   observeNativeTranscriptTailClamp,
   pinTranscriptTailAfterViewportShrink,
 } from "../lib/transcriptScrollGeometry";
@@ -285,11 +286,17 @@ check(!isSubstantialTranscriptDisplacement(4), "bottom-adjacent jitter is not su
 const webView2Scroller = { scrollHeight: 21_442, scrollTop: 20_827, clientHeight: 578 };
 check(nativeTranscriptBottomTop(webView2Scroller) === 20_864, "unobserved WebView2 geometry retains the theoretical tail");
 check(
+  !observeNativeTranscriptTailClamp(webView2Scroller, 20_827),
+  "one small no-op tail write remains an unconfirmed virtualizer rollback",
+);
+check(nativeTranscriptBottomTop(webView2Scroller) === 20_864, "an unconfirmed residual cannot redefine the native tail");
+check(
   observeNativeTranscriptTailClamp(webView2Scroller, 20_827),
-  "a small no-op WebView2 tail write records the reachable native clamp",
+  "a repeated no-op on stable geometry confirms the reachable WebView2 clamp",
 );
 check(nativeTranscriptBottomTop(webView2Scroller) === 20_827, "the observed WebView2 tail target stays physically reachable");
 check(nativeTranscriptDistanceFromBottom(webView2Scroller) === 0, "the observed reachable tail is classified at bottom");
+check(tailTop(webView2Scroller) === 20_864, "an explicit tail transaction still probes the theoretical native extent");
 webView2Scroller.scrollHeight += 40;
 check(nativeTranscriptBottomTop(webView2Scroller) === 20_867, "content growth preserves the observed terminal residual");
 check(nativeTranscriptDistanceFromBottom(webView2Scroller) === 40, "content growth still re-arms tail convergence");

@@ -233,13 +233,11 @@ export function useTranscriptScrollArbiter({
         tailSettle.schedule(false, source);
         return;
       case "SCROLL_TO_LAST":
-        tailSettle.scrollToTail(command.behavior, CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS && source
-          ? { source, phase: "initial" }
-          : undefined);
+        tailSettle.scrollToTail(command.behavior, { source: "jump-bottom", phase: "initial" });
         // Re-aim across a bounded number of frames: the first LAST request
         // can use Virtuoso's pre-measurement size tree, and late tail-row
         // measurements would otherwise park the view above the real bottom.
-        tailSettle.schedule(true, source);
+        tailSettle.schedule(true, "jump-bottom");
         return;
       case "SCROLL_TO_INDEX":
         writer.write({ owner: "jump", operation: "scrollToIndex", index: command.index, behavior: command.behavior, reason: writeSource, phase: "mount-anchor", expectedSurfaceGeneration: generationRef.current, expectedOwnershipEpoch: ownershipEpochRef.current, expectedGeometryRevision: geometryRevisionRef.current });

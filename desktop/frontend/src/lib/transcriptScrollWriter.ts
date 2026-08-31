@@ -66,8 +66,7 @@ export function createTranscriptScrollWriter({
     else if (request.expectedOwnershipEpoch !== epoch) rejectedReason = "stale-ownership-epoch";
     else if (request.expectedGeometryRevision !== revision) rejectedReason = "stale-geometry-revision";
     else if (request.operation === "scrollToIndex" ? request.index === undefined : request.top === undefined) rejectedReason = "invalid-target";
-    const phase = request.phase ?? request.operation;
-    const acceptanceKey = `${request.owner}:${epoch}:${revision}:${phase}`;
+    const acceptanceKey = `${request.owner}:${epoch}:${revision}:${request.settleFrame ?? request.phase ?? request.operation}`;
     if (!rejectedReason && accepted.has(acceptanceKey)) rejectedReason = "duplicate-revision-phase";
 
     sequence += 1;

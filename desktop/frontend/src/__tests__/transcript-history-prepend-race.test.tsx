@@ -162,6 +162,43 @@ const prependWrites = scrollWrites.filter((write) => write.owner === "reader-sta
 check(arbiter?.historyPrependLease.pendingRef.current === false, "full stable coverage releases within the wall-clock budget");
 check(prependWrites.length === 1 && prependWrites[0].kind === "scrollBy", "the stable key gets exactly one final correction");
 
+// Continuous reader input may keep extending the reader transaction, but it
+// cannot extend a covered prepend's independent wall-clock commit bound. The
+// old shared deadline left physical-bottom readers permanently manual: every
+// wheel postponed the geometry commit that tail handoff was waiting for.
+await act(async () => arbiter?.reset());
+scrollExtent = 46_235;
+scrollElement.scrollTop = 45_000;
+rowElement.getBoundingClientRect = () => rectAt(0);
+rowElement.dataset.transcriptLastRow = "true";
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.setMode("manual", "test-continuous-reader-prepend"));
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false, deltaX: 0, deltaY: 640, target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+const continuousGeneration = arbiter!.historyPrependLease.begin(2);
+await act(async () => root.render(
+  <Probe rows={pageTwo} deliveredCount={pageTwo.length} historyMutation={{ seq: 3, kind: "prepend" }} />,
+));
+for (let gesture = 0; gesture < 10; gesture += 1) {
+  await advanceClock(120);
+  await act(async () => arbiter?.onWheelIntent({
+    ctrlKey: false, deltaX: 0, deltaY: 640, target: scrollElement,
+  } as React.WheelEvent<HTMLElement>));
+  scrollElement.scrollTop = Math.min(scrollExtent - scrollElement.clientHeight, scrollElement.scrollTop + 120);
+  await act(async () => arbiter?.deliverScroll());
+}
+check(arbiter?.historyPrependLease.pendingRef.current, "continuous wheels retain the prepend until a stable reader interval");
+await advanceClock(181);
+for (let frame = 0; frame < 10; frame += 1) await flushFrames();
+check(arbiter?.historyPrependLease.pendingRef.current === false,
+  "continuous wheels cannot postpone a covered prepend past its wall-clock bound");
+check(arbiter?.historyPrependLease.generationRef.current === continuousGeneration,
+  "the bounded commit completes the same prepend generation");
+check(String(arbiter?.modeRef.current) === "tail-follow",
+  "the physical-bottom reader hands ownership to the tail after the bounded commit");
+delete rowElement.dataset.transcriptLastRow;
+
 const competingOwners: [string, () => void][] = [
   ["selection", () => arbiter!.setMode("selection")],
   ["user resize", () => arbiter!.setMode("user-resize")],

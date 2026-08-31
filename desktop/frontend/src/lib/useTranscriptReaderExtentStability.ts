@@ -48,6 +48,9 @@ type ActiveReaderTransaction = TranscriptReaderTransaction & {
   transient: boolean;
   visualOffset: number;
   postCorrectionSettleDeadline: number;
+  /** Wall-clock bound for a history-prepend geometry commit. Reader input may
+   *  extend its own settle window, but must not postpone the prepend forever. */
+  commitAt: number;
   /** Last tick's native height: a rebound correction spends its budget only
    *  after one unchanged-height interval with mounted viewport coverage. */
   correctionHeightSample: number;
@@ -511,7 +514,7 @@ export function useTranscriptReaderExtentStability({
 
       if (transaction.stableFrames >= STABLE_FRAMES_REQUIRED) {
         if (geometryCommitBlockedRef.current) {
-          if (now >= transaction.settleDeadline && !geometryCommitReadyRef.current) {
+          if (now >= transaction.commitAt && !geometryCommitReadyRef.current) {
             geometryCommitReadyRef.current = true;
             callbacksRef.current.onGeometryCommitReady();
           }
@@ -547,7 +550,7 @@ export function useTranscriptReaderExtentStability({
       }
       if (now >= transaction.settleDeadline) {
         if (geometryCommitBlockedRef.current) {
-          if (now >= transaction.settleDeadline + 620 && !geometryCommitReadyRef.current) {
+          if (now >= transaction.commitAt + 620 && !geometryCommitReadyRef.current) {
             geometryCommitReadyRef.current = true;
             callbacksRef.current.onGeometryCommitReady();
           }
@@ -579,6 +582,10 @@ export function useTranscriptReaderExtentStability({
     if (captureAnchor) transaction.anchor = captureLogicalAnchor(transaction.element) ?? transaction.anchor;
     transaction.settleDeadline = Math.max(
       transaction.settleDeadline,
+      now + TRANSCRIPT_READER_IDLE_MS + TRANSCRIPT_READER_SETTLE_MS,
+    );
+    transaction.commitAt = Math.max(
+      transaction.commitAt,
       now + TRANSCRIPT_READER_IDLE_MS + TRANSCRIPT_READER_SETTLE_MS,
     );
     transaction.stableFrames = 0;
@@ -668,6 +675,7 @@ export function useTranscriptReaderExtentStability({
       transient: inheritedCollapse,
       visualOffset: 0,
       postCorrectionSettleDeadline: 0,
+      commitAt: now + TRANSCRIPT_READER_IDLE_MS + TRANSCRIPT_READER_SETTLE_MS,
       correctionHeightSample: element.scrollHeight,
       prepaint: false,
     };

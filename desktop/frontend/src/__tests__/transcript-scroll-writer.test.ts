@@ -134,5 +134,39 @@ equal(writer.write({
 equal(calls[calls.length - 1], "nativeScrollTo", "pinTail bypasses Virtuoso's stale size-tree lane");
 equal(element.scrollTop, 1_500, "the physical tail write lands synchronously");
 
+equal(writer.write({
+  owner: "tail-follow",
+  operation: "pinTail",
+  top: 1_508,
+  reason: "jump-bottom",
+  phase: "settle",
+  settleFrame: 1,
+  expectedSurfaceGeneration: 4,
+  expectedOwnershipEpoch: 7,
+  expectedGeometryRevision: 11,
+}), true, "the first bounded tail settle step may write within the same geometry revision");
+equal(writer.write({
+  owner: "tail-follow",
+  operation: "pinTail",
+  top: 1_508,
+  reason: "jump-bottom",
+  phase: "settle",
+  settleFrame: 1,
+  expectedSurfaceGeneration: 4,
+  expectedOwnershipEpoch: 7,
+  expectedGeometryRevision: 11,
+}), false, "a duplicate bounded tail settle step remains fenced");
+equal(writer.write({
+  owner: "tail-follow",
+  operation: "pinTail",
+  top: 1_516,
+  reason: "jump-bottom",
+  phase: "settle",
+  settleFrame: 2,
+  expectedSurfaceGeneration: 4,
+  expectedOwnershipEpoch: 7,
+  expectedGeometryRevision: 11,
+}), true, "the final bounded tail settle step has a distinct writer fence");
+
 dom.window.close();
 console.log("\ntranscript scroll writer tests passed");
