@@ -10191,7 +10191,7 @@ type WorkspaceChangeDetailView struct {
 }
 
 const filePreviewLimit = 2 * 1024 * 1024 // 2 MiB — full file preview for the workspace panel
-const fileRefSearchLimit = 20
+const fileRefSearchLimit = 500
 
 var previewMediaMIMEs = map[string]string{
 	".bmp":  "image/bmp",

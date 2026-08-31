@@ -57,7 +57,7 @@ var skipDirPaths = map[string]bool{
 
 const (
 	minQueryLen    = 2
-	maxWalkEntries = 10000
+	maxWalkEntries = 500000
 )
 
 // SearchResult is a single entry returned by Search. It carries the relative
@@ -80,11 +80,18 @@ func Search(root, query string, limit int) []SearchResult {
 		return nil
 	}
 
-	showHidden := strings.HasPrefix(query, ".")
 	var basenameHits []SearchResult
 	var segmentHits []SearchResult
 	var dirHits []SearchResult
 	visited := 0
+	// Worktree copies are full repo checkouts of other branches. They must
+	// stay searchable (not excluded), but if they walk unrestricted they eat
+	// the whole budget before the main repo's own dot-prefixed dirs (.zkge,
+	// alphabetically last) are reached. Cap each copy at a shallow quota so
+	// the main workspace walks completely and copies still surface their root
+	// files/dirs.
+	const worktreeCopyQuota = 30
+	worktreeCopyVisited := make(map[string]int)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
@@ -107,8 +114,21 @@ func Search(root, query string, limit int) []SearchResult {
 				return filepath.SkipDir
 			}
 			rel = filepath.ToSlash(rel)
-			if SkipEntry(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
+			// Hidden entries (dot-prefixed) are NOT filtered: search results
+			// should surface them too (e.g. .vscode, .config). Only the
+			// explicit generated/vendor blacklist below is skipped.
+			if SkipEntry(rel, name, true) {
 				return filepath.SkipDir
+			}
+			if isWorktreeCopyPath(rel) {
+				parts := strings.Split(rel, "/")
+				if len(parts) >= 2 {
+					wtKey := parts[0] + "/" + parts[1]
+					worktreeCopyVisited[wtKey]++
+					if worktreeCopyVisited[wtKey] > worktreeCopyQuota {
+						return filepath.SkipDir
+					}
+				}
 			}
 			// Allow matching directory names so the user can select a
 			// folder directly from the @-menu instead of only its contents.
@@ -118,9 +138,6 @@ func Search(root, query string, limit int) []SearchResult {
 			return nil
 		}
 		if skipEntryNames[name] {
-			return nil
-		}
-		if !showHidden && strings.HasPrefix(name, ".") {
 			return nil
 		}
 		if info, err := d.Info(); err != nil || !info.Mode().IsRegular() {
@@ -140,9 +157,20 @@ func Search(root, query string, limit int) []SearchResult {
 		}
 		return nil
 	})
-	sort.Slice(basenameHits, func(i, j int) bool { return basenameHits[i].Path < basenameHits[j].Path })
-	sort.Slice(segmentHits, func(i, j int) bool { return segmentHits[i].Path < segmentHits[j].Path })
-	sort.Slice(dirHits, func(i, j int) bool { return dirHits[i].Path < dirHits[j].Path })
+	// The current workspace's own paths sort before git-worktree copies, so a
+	// bounded result limit never lets 40+ duplicate checkouts crowd out the
+	// repo's real files (e.g. sdk/go/examples/.../README.md). Worktree copies
+	// still rank by path among themselves.
+	worktreeSort := func(a, b string) bool {
+		wa, wb := isWorktreeCopyPath(a), isWorktreeCopyPath(b)
+		if wa != wb {
+			return !wa
+		}
+		return a < b
+	}
+	sort.Slice(basenameHits, func(i, j int) bool { return worktreeSort(basenameHits[i].Path, basenameHits[j].Path) })
+	sort.Slice(segmentHits, func(i, j int) bool { return worktreeSort(segmentHits[i].Path, segmentHits[j].Path) })
+	sort.Slice(dirHits, func(i, j int) bool { return worktreeSort(dirHits[i].Path, dirHits[j].Path) })
 	// Directories first so the user can navigate into them; then basename
 	// hits (most relevant file matches); then path-segment hits. We reserve
 	// up to dirQuota slots for directories so they are never fully crowded
@@ -166,6 +194,14 @@ func Search(root, query string, limit int) []SearchResult {
 		out = append(out, segmentHits...)
 	}
 	return out
+}
+
+// isWorktreeCopyPath reports whether a result path lives under a git worktree
+// checkout dir (full repo copies of other branches). They are still searched
+// (not excluded) but sort after the current workspace's own paths.
+func isWorktreeCopyPath(p string) bool {
+	return strings.HasPrefix(p, ".cindy-worktrees/") || strings.HasPrefix(p, ".worktrees/") ||
+		strings.HasPrefix(p, ".codex/") || strings.HasPrefix(p, ".qoder/") || strings.HasPrefix(p, ".reasonix/")
 }
 
 // pathSegmentContains reports whether query appears in any slash-separated

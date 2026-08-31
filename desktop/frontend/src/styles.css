@@ -10,6 +10,12 @@
  *    title bar); interactive children opt out with --wails-draggable: no-drag.
  */
 
+@property --label-fade-end {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 @font-face {
   font-family: "Reasonix Seti";
   src: url("./assets/file-icons/seti/seti.woff") format("woff");
@@ -2148,10 +2154,12 @@ a[href] {
 .app--creation .layout.layout--workspace-open.layout--sidebar-collapsed {
   transition: grid-template-columns 0s, min-width 0s;
 }
+.layout--workspace-open.layout--workspace-maximized,
 .layout--workspace-maximized {
   min-width: 0;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
+.layout--workspace-open.layout--workspace-maximized.layout--sidebar-collapsed,
 .layout--workspace-maximized.layout--sidebar-collapsed {
   grid-template-columns: 0px minmax(0, 1fr);
 }
@@ -2359,7 +2367,7 @@ a[href] {
   padding-left: 96px;
 }
 
-.app--darwin .layout--workbench-chrome-hidden.layout--workspace-maximized .workbench-dock__tools {
+.app--darwin .layout--workbench-chrome-hidden.layout--sidebar-collapsed.layout--workspace-maximized .workbench-dock__tools {
   padding-left: 96px;
 }
 
@@ -10420,17 +10428,6 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   height: 100%;
 }
-.workspace-current-file__icon {
-  flex: 0 0 auto;
-  color: var(--fg-faint);
-}
-.workspace-current-file__icon.workspace-file-icon,
-.workspace-current-file__icon .workspace-file-icon {
-  width: 18px;
-  height: 20px;
-  flex: 0 0 18px;
-  font-size: 20px;
-}
 .workspace-current-file__text {
   flex: 1 1 auto;
   min-width: 0;
@@ -10454,22 +10451,33 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.15;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  scrollbar-width: none;
+}
+.workspace-current-file__path::-webkit-scrollbar {
+  display: none;
 }
 .workspace-current-file__crumb {
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
   white-space: nowrap;
   line-height: 1.15;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+.workspace-current-file__crumb:hover {
+  color: var(--fg);
+}
+.workspace-current-file__crumb:last-child {
+  color: var(--fg);
+  font-weight: 620;
 }
 .workspace-current-file__crumb-sep {
   display: inline-flex;
@@ -10480,27 +10488,11 @@ body > .mermaid-diagram--fullscreen {
   font-size: 16px;
   line-height: 0;
 }
-.workspace-current-file__recent {
-  --wails-draggable: no-drag;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-faint);
-}
-.workspace-current-file__recent:hover,
+/* The recent-files toggle shares .workspace-iconbtn for size, hover, and
+   transition; this class only keeps the opened (menu showing) highlight. */
 .workspace-current-file__recent--open {
-  border-color: var(--border-soft);
-  background: var(--bg-soft);
   color: var(--fg);
-}
-.workspace-current-file__recent--open svg {
-  transform: rotate(180deg);
+  background: var(--bg-soft);
 }
 .workspace-preview__window-actions {
   flex: 0 0 auto;
@@ -10651,11 +10643,26 @@ body > .mermaid-diagram--fullscreen {
   border: 0;
   border-radius: 0;
   overflow: auto;
+  /* Code preview wraps by default instead of horizontal scrolling. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 /* line-numbered code fills the preview body */
 .workspace-preview__body--code .code--lines {
   padding: 0;
   border-radius: 0;
+}
+/* Line-numbered rows: wrap long lines by default so the preview never grows
+   a horizontal scrollbar. The global .code-line-text keeps white-space:pre
+   (chat and other surfaces); only the workspace preview opts into wrapping.
+   min-width:0 lets the flex item shrink below its min-content width, which
+   white-space:pre-wrap alone cannot do on a flex row. */
+.workspace-preview__body--code .code-line-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .workspace-preview__body--code .code-block__wrap {
   display: flex;
@@ -10690,6 +10697,17 @@ body > .mermaid-diagram--fullscreen {
 }
 .workspace-preview__body .code {
   min-width: 0;
+}
+/* Markdown documents rendered in the file-detail preview: wrap their code
+   blocks by default (same behavior as the code-mode viewer) and break long
+   words so wide documents never grow a horizontal scrollbar. */
+.workspace-preview__body .md {
+  overflow-wrap: anywhere;
+}
+.workspace-preview__body .md .code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .workspace-media {
   box-sizing: border-box;
@@ -11029,11 +11047,11 @@ body > .mermaid-diagram--fullscreen {
   align-items: center;
   gap: 7px;
   margin: 4px 10px 8px;
-  padding: 0 9px;
-  height: 32px;
+  padding: 0 12px;
+  height: 28px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  border-radius: 999px;
+  background: transparent;
   color: var(--fg-faint);
 }
 .workspace-search input {
@@ -11102,6 +11120,12 @@ body > .mermaid-diagram--fullscreen {
   min-height: 0;
   overflow: auto;
   padding: 0 6px 12px;
+  /* Hide the scrollbar (the tree scrolls on wheel/trackpad, matching the
+     hidden-scrollbar convention used by the breadcrumb and dock tabs). */
+  scrollbar-width: none;
+}
+.workspace-tree::-webkit-scrollbar {
+  display: none;
 }
 .workspace-tree__row {
   --wails-draggable: no-drag;
@@ -11148,16 +11172,6 @@ body > .mermaid-diagram--fullscreen {
 .workspace-tree__row--active {
   background: var(--tree-row-current-bg);
   color: var(--tree-row-current-fg);
-}
-.workspace-tree__row--active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 5px;
-  bottom: 5px;
-  width: 2px;
-  border-radius: 999px;
-  background: var(--tree-row-marker);
 }
 .workspace-tree__row--search {
   height: auto;
@@ -25681,6 +25695,14 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
+.context-menu__item > .context-menu__chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 .context-menu__item:hover .context-menu__shortcut,
 .context-menu__item:focus-visible .context-menu__shortcut {
   color: var(--fg);
@@ -25900,6 +25922,7 @@ body > .mermaid-diagram--fullscreen {
   height: 100%;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   /* Unify the dock surface with the chat pane; inner panels inherit this. */
   --workspace-files-bg: var(--chat-bg);
   --workspace-preview-bg: var(--chat-bg);
@@ -25927,13 +25950,14 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock__tools {
+  position: relative;
   flex: 0 0 auto;
   height: 42px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 7px 10px 3px;
+  padding: 7px 44px 3px 10px;
   border-bottom: 1px solid transparent;
   --wails-draggable: drag;
 }
@@ -25971,6 +25995,7 @@ body > .mermaid-diagram--fullscreen {
 
 .workbench-dock__tabs {
   --wails-draggable: no-drag;
+  position: relative;
   flex: 0 1 auto;
   width: max-content;
   max-width: 100%;
@@ -25983,10 +26008,41 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
+  /* Tabs may shrink to their min-width, but the strip must never overflow
+     into the add button or the dock-toggle: clip, and fade the right edge so
+     a squeezed-out tab dissolves instead of being cut off mid-glyph. The fade
+     is a painted overlay (::after) rather than a mask-image — masks force
+     per-frame compositor repaints of the whole strip while the FLIP slide
+     animates transforms during a drag, which reads as jank. The add button
+     lives outside this container, so it stays fully opaque. */
+  overflow: hidden;
+}
+
+.workbench-dock__tabs::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  background: linear-gradient(to right, transparent, var(--bg));
+  pointer-events: none;
+  /* Only shown while the strip actually overflows (see
+     .workbench-dock__tabs--overflow, driven by a ResizeObserver): when the
+     strip has room the overlay must not fade the last tab. */
+  display: none;
+}
+
+.workbench-dock__tabs--overflow::after {
+  display: block;
 }
 
 .workbench-dock__tab {
   --wails-draggable: no-drag;
+  /* Fade-end color for the label overlay: the resting tab is transparent
+     over the strip's --bg surface. */
+  --label-fade-end: var(--bg);
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -25995,7 +26051,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 30px;
   max-width: 118px;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 6px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -26010,10 +26066,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock__tab-label {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  /* ellipsis replaced by a ::after right-edge fade (see below) */
 }
 
 .workbench-dock__tab:hover {
@@ -26021,6 +26078,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .workbench-dock__tab--active {
+  /* Label fade matches the selected fill. */
+  --label-fade-end: var(--bg-elev);
   background: var(--bg-elev);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
@@ -26032,8 +26091,9 @@ body > .mermaid-diagram--fullscreen {
   }
 
   .workbench-dock__tab {
-    flex: 1 1 0;
-    max-width: none;
+    flex: 0 1 155px;
+    min-width: 85px;
+    max-width: 155px;
   }
 }
 
@@ -26045,6 +26105,7 @@ body > .mermaid-diagram--fullscreen {
   .workbench-dock__tab {
     flex: 0 0 30px;
     width: 30px;
+    min-width: 0;
     padding: 0;
     gap: 0;
   }
@@ -26067,6 +26128,357 @@ body > .mermaid-diagram--fullscreen {
 
 .workbench-dock__body > .workspace-panel {
   border-left: none;
+}
+
+/* --- Dock launcher: floating menu over the transcript while the dock is
+   collapsed (the panel replaces it once expanded). --- */
+.dock-launcher {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 8px;
+  right: 0;
+  z-index: var(--z-local-popover);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 8px 0 0 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-right: 0;
+}
+
+.dock-launcher__entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.dock-launcher__entry:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+  color: var(--fg);
+}
+
+.dock-launcher__entry svg {
+  color: var(--fg-faint);
+  flex: 0 0 auto;
+}
+
+/* --- Tab container (right dock redesign) --- */
+
+.workbench-dock__panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tab-container {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* The dock header keeps the upstream workbench-dock chrome (tools strip +
+   rounded tab capsule); per-tab close and the + add button are the only
+   additions. The tools strip itself is defined upstream (42px, draggable);
+   these rules cover the added close/add buttons inside the capsule. */
+.workbench-dock__tab {
+  cursor: pointer;
+  min-width: 85px;
+  max-width: 155px;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    --label-fade-end 120ms ease;
+}
+
+/* While a tab is dragged it leaves the strip and floats above it, and its
+   original slot shows a dashed outline that slides left/right to preview
+   where the tab will land on release. The floating layer reuses the base
+   tab styles (font, padding, icon sizing) so the dragged copy looks exactly
+   like the original; --floating only overrides positioning and elevation. */
+.workbench-dock__tab--floating {
+  --wails-draggable: no-drag;
+  position: fixed;
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  cursor: grabbing;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  z-index: var(--z-floating-menu);
+}
+
+.workbench-dock__tab-slot {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  transition: transform 120ms ease;
+  pointer-events: none;
+}
+
+.workbench-dock__tab-slot .workbench-dock__tab-label {
+  visibility: hidden;
+}
+
+.workbench-dock__tab-label {
+  flex: 1 1 auto;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  /* ellipsis replaced by a ::after right-edge fade (see below) */
+}
+
+/* Long tab titles fade out at the label's right edge instead of getting an
+   ellipsis. The overlay sits inside the label, so it only covers the strip
+   of text that overflow:hidden would otherwise cut — a short title never
+   reaches it, no overflow detection needed. The fade end color tracks the
+   tab's own background via --label-fade-end (set on .workbench-dock__tab
+   for base/hover/active states), so the fade never clashes with the tab's
+   hover or selected fill. */
+.workbench-dock__tab-label::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  background: linear-gradient(to right, transparent, var(--label-fade-end, var(--bg)));
+  pointer-events: none;
+}
+
+.workbench-dock__tab-close {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 1px;
+  /* Hidden until the tab is hovered (or the drag ghost shows it): the
+     resting tab stays clean. It keeps its box (opacity, not display) so the
+     label width never jumps when the button appears. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast, 120ms);
+}
+
+.workbench-dock__tab:hover .workbench-dock__tab-close,
+.workbench-dock__tab--active .workbench-dock__tab-close,
+.workbench-dock__tab--floating .workbench-dock__tab-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workbench-dock__tab-close:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+  color: var(--fg);
+}
+
+.workbench-dock__tab-add {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+  /* Hug the tab strip: the tools row's 8px gap is cancelled down to a 4px
+     breathing room. Never shrinks, so when the strip compresses the button
+     stays visible and ends up pinned to the right edge. */
+  margin-left: -4px;
+}
+
+.workbench-dock__tab-add:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.tab-container__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-container__empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.tab-container__content > .context-panel,
+.tab-container__content > .workspace-panel,
+.tab-container__content > .terminal-panel,
+.tab-container__content > .browser-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.tab-add-menu {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 46px;
+  left: 10px;
+  right: auto;
+  z-index: var(--z-dock);
+  min-width: 170px;
+  max-width: calc(100% - 20px);
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tab-add-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.tab-add-menu__item:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+
+.tab-add-menu__item svg {
+  color: var(--fg-faint);
+}
+
+/* Browser panel */
+.browser-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--chat-bg);
+}
+
+.browser-panel__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.browser-panel__nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 0;
+}
+
+.browser-panel__nav:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.browser-panel__nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.browser-panel__address {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.browser-panel__address input {
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.browser-panel__address input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.browser-panel__frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browser-panel__frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
 }
 
 .layout--workspace-maximized .context-inspector,
@@ -27952,14 +28364,34 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 
+/* The strip above is a translucent --bg wash over the dock surface, so the
+   right-edge fade overlays must land on the wash's composited color, not the
+   raw --bg. A raw --bg endpoint is darker than the surface the wash actually
+   paints, which leaves a visible (lighter/darker) band at the strip's right
+   edge and on clipped tab titles. Use the same 72% wash composited over the
+   dock surface (--chat-bg). */
+.workbench-dock__tabs::after {
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--bg) 72%, var(--chat-bg)));
+}
+
 .workbench-dock__tab {
-  flex: 1 1 0;
-  max-width: none;
+  /* Title right-edge fade endpoint follows the translucent strip wash. */
+  --label-fade-end: color-mix(in srgb, var(--bg) 72%, var(--chat-bg));
+}
+
+.workbench-dock__tab {
+  flex: 0 1 155px;
+  max-width: 155px;
   height: 28px;
   border-radius: 7px;
 }
 
 .workbench-dock__tab--active {
+  /* Keep the label right-edge fade on the selected fill: the base
+     .workbench-dock__tab--active rule sets --label-fade-end to --bg-elev, but
+     this skin recolors the selected background to --bg-elev-2, so an
+     unsynced fade-end leaves a pale block at the title's right edge. */
+  --label-fade-end: var(--bg-elev-2);
   background: var(--bg-elev-2);
 }
 
@@ -29824,33 +30256,57 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .workbench-dock__tools {
   height: 45px;
-  padding: 0 12px;
+  /* Right padding clears the fixed dock-toggle (30px + 12px offset = 42px),
+     so the + add button never lands under it when the strip is compressed.
+     Must be re-declared here: the base rule's padding-right is overridden by
+     this theme rule's shorthand. */
+  padding: 0 44px 0 12px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 :root[data-theme-style] .workbench-dock__tabs {
   position: relative;
-  width: auto;
+  width: max-content;
   height: 100%;
-  flex: 0 0 auto;
+  /* Content width, not stretched: the + add button (a sibling in the tools
+     row) hugs the last tab. When the row is too narrow the strip shrinks
+     and the button ends up pinned to the right edge instead. */
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 8px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+  overflow: hidden;
+}
+
+:root[data-theme-style] .workbench-dock__tabs::after {
+  /* The theme strip is transparent, so the fade overlay must blend into the
+     dock surface (--chat-bg) rather than the non-theme --bg. */
+  background: linear-gradient(to right, transparent, var(--chat-bg));
 }
 
 :root[data-theme-style] .workbench-dock__tab {
+  /* Fade-end color for the label overlay: the resting tab is transparent
+     over the dock surface. Hover/active override it with their fills. */
+  --label-fade-end: var(--chat-bg);
   position: relative;
-  flex: 0 0 auto;
-  min-width: auto;
-  max-width: none;
+  flex: 0 1 auto;
+  min-width: 85px;
+  max-width: 155px;
   height: 27px;
-  width: auto;
-  padding: 0 11px;
+  /* Width, not flex-basis, carries the 155px target: the strip is
+     width:max-content, and max-content sizing reads each item's width —
+     a flex-basis would be ignored there and the tab would collapse to its
+     min-width (the reason the old flex-basis variant squeezed every tab to
+     85px). flex: 0 1 auto still lets the strip shrink tabs toward 85px. */
+  width: 155px;
+  padding: 0 6px;
   border: 0;
   border-radius: 7px;
   justify-content: flex-start;
@@ -29859,7 +30315,15 @@ body > .mermaid-diagram--fullscreen {
   font-size: 12.5px;
   font-weight: 600;
   background: transparent;
-  transition: color var(--dur-fast), background var(--dur-fast);
+  transition: color var(--dur-fast), background var(--dur-fast), transform 120ms ease, --label-fade-end var(--dur-fast);
+}
+
+:root[data-theme-style] .workbench-dock__tab--floating {
+  /* The theme-style .workbench-dock__tab rule above (higher specificity)
+     resets position to relative; the portal-rendered drag ghost must stay
+     viewport-fixed so it follows the pointer. Declared after that rule so
+     the fixed value wins the cascade. */
+  position: fixed;
 }
 
 :root[data-theme-style] .workbench-dock__tab svg {
@@ -29868,23 +30332,36 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .workbench-dock__tab-label {
+  flex: 1 1 auto;
   display: inline;
-  min-width: auto;
-  overflow: visible;
-  text-overflow: clip;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  /* ellipsis replaced by a ::after right-edge fade (see below) */
+}
+
+:root[data-theme-style] .workbench-dock__tab-label::after {
+  /* The fade end tracks the tab's own background (--label-fade-end), which
+     hover/active override with their color-mix fills. */
+  background: linear-gradient(to right, transparent, var(--label-fade-end, var(--chat-bg)));
 }
 
 :root[data-theme-style] .workbench-dock__tab--active {
   color: var(--fg);
-  /* Simple flat selected fill — a touch darker than the dock background,
-     no shadow, like a focused browser tab. */
-  background: color-mix(in srgb, var(--fg) 8%, var(--chat-bg));
+  /* One shared fill for both hover and selected states — the two states are
+     told apart by text color (--fg vs --fg-dim) instead of a second, darker
+     background. */
+  --label-fade-end: color-mix(in srgb, var(--fg) 5%, var(--chat-bg));
+  background: color-mix(in srgb, var(--fg) 5%, var(--chat-bg));
   box-shadow: none;
 }
 
 :root[data-theme-style] .workbench-dock__tab:hover {
   color: var(--fg-dim);
-  background: color-mix(in srgb, var(--fg) 4%, var(--chat-bg));
+  /* Same fill as the selected state (see above). */
+  --label-fade-end: color-mix(in srgb, var(--fg) 5%, var(--chat-bg));
+  background: color-mix(in srgb, var(--fg) 5%, var(--chat-bg));
 }
 
 :root[data-theme-style] .workbench-dock__tab--active::after {
@@ -29921,6 +30398,27 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* The user wants the weak divider back under the theme skin too — but ONLY
+   between two inactive tabs. An active tab's neighbors get no hairline, so
+   the active one reads as a solid raised browser tab. Both sides of the
+   adjacent pair must be :not(.workbench-dock__tab--active). This selector
+   also outranks the display:none rule above ((0,6,1) > (0,5,1)) and is
+   declared after it anyway. */
+:root[data-theme-style] .app--classic .workbench-dock__tab:not(.workbench-dock__tab--active) + .workbench-dock__tab:not(.workbench-dock__tab--active)::before,
+:root[data-theme-style] .app--workbench .workbench-dock__tab:not(.workbench-dock__tab--active) + .workbench-dock__tab:not(.workbench-dock__tab--active)::before {
+  content: "";
+  position: absolute;
+  left: -4px;     /* centered in the 8px flex gap */
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  height: auto;   /* reset the non-theme rule's height:16px so top/bottom size it */
+  background: color-mix(in srgb, var(--fg) 17.5%, transparent); /* half the previous 35% */
+  pointer-events: none;
+  transform: none; /* reset the non-theme rule's translateY(-50%), which pushed it 8px up */
+  display: block; /* explicitly override the display:none above */
+}
+
 :root[data-theme-style] .workspace-panel,
 :root[data-theme-style] .workspace-files,
 :root[data-theme-style] .workspace-preview,
@@ -29945,19 +30443,12 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .workspace-search {
-  height: 34px;
+  height: 30px;
   margin: 10px 12px 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: transparent;
   color: var(--fg-faint);
-  transition: border-color var(--dur-fast), background var(--dur-fast);
-}
-
-:root[data-theme-style] .workspace-search:hover,
-:root[data-theme-style] .workspace-search:focus-within {
-  border-color: var(--app-graphite-hairline-strong);
-  background: color-mix(in srgb, var(--bg-soft) 72%, var(--bg-elev));
 }
 
 :root[data-theme-style] .workspace-files__scope {
@@ -30108,10 +30599,6 @@ body > .mermaid-diagram--fullscreen {
   background: var(--chat-bg);
 }
 
-:root[data-theme-style] .workspace-current-file__icon {
-  color: var(--accent);
-}
-
 :root[data-theme-style] .workspace-current-file__name {
   font-size: 13px;
   font-weight: 650;
@@ -30121,11 +30608,13 @@ body > .mermaid-diagram--fullscreen {
   font-family: var(--mono);
 }
 
-:root[data-theme-style] .workspace-iconbtn:hover,
-:root[data-theme-style] .workspace-current-file__recent:hover,
+:root[data-theme-style] .workspace-iconbtn:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+
 :root[data-theme-style] .workspace-current-file__recent--open {
   color: var(--fg);
-  border-color: var(--border);
   background: var(--bg-soft);
 }
 
@@ -34938,7 +35427,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   max-width: none;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: flex-start;
   gap: 0;
   padding: 0;
@@ -34950,14 +35439,16 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock__tab,
 :root[data-theme-style] .app--creation .workbench-dock__tab {
-  /* Equal columns: 文件 / 改动 each center in their half as dock width changes. */
+  /* Equal columns: 文件 / 改动 each center in their half as dock width changes.
+     Height matches the workbench/classic pill so the selected background reads
+     as the same compact capsule rather than a full-height strip. */
   flex: 1 1 0;
   width: auto;
   min-width: 0;
   max-width: none;
-  height: 40px;
+  height: 28px;
   /* Compact icon+label so default Creation dock (~252) shows text on Windows */
-  padding: 0 4px 1px;
+  padding: 0 4px;
   gap: 4px;
   justify-content: center;
   color: color-mix(in srgb, var(--fg-dim) 72%, transparent);
@@ -34967,6 +35458,19 @@ body > .mermaid-diagram--fullscreen {
   border: 0;
   border-radius: 0;
   background: transparent;
+  transition: background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease, --label-fade-end var(--dur-fast, 120ms) ease;
+}
+
+/* Creation hover gets the same wash as the selected tab so the pointer and
+   the selection read alike (the active tab is told apart by its stronger
+   text + underline, not by a different background). Exclude the active tab so
+   its stronger text/weight is never overridden by the hover text. */
+.app--creation .workbench-dock__tab:not(.workbench-dock__tab--active):hover,
+:root[data-theme-style] .app--creation .workbench-dock__tab:not(.workbench-dock__tab--active):hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  --label-fade-end: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-radius: 8px;
+  color: var(--fg-dim);
 }
 
 /* Emergency only: when the dock is forced below the Creation default (viewport
@@ -34994,11 +35498,20 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .workbench-dock__tab--active {
   color: var(--fg);
   font-weight: 620;
+  /* Creation strips are backgroundless (transparent tabs over the dock
+     surface), so selection needs a subtle wash to read as "selected" — paired
+     with the underline below. Keep it a faint foreground tint so it stays on
+     the Creation family's low-chroma language. */
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  --label-fade-end: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-radius: 8px;
 }
 
 .app--creation .workbench-dock__tab--active::after,
 :root[data-theme-style] .app--creation .workbench-dock__tab--active::after {
   /* Center a short underline under the icon+label cluster, not the full half. */
+  content: "";
+  background: var(--accent);
   left: 50%;
   right: auto;
   width: 36px;
@@ -35243,6 +35756,15 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
 }
 
+/* The recent-files toggle's opened highlight matches Creation's translucent
+   icon hover instead of the default opaque --bg-soft (the dock surface here
+   is a translucent sidebar blend). */
+.app--creation .workbench-dock .workspace-current-file__recent--open,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-current-file__recent--open {
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  color: var(--fg);
+}
+
 /* Creation "Changes" overview: keep the first-line path context, drop the
 /* Creation "Changes" overview: keep the first-line path context, drop the
    second-line breadcrumb meta (duplicate path). Only when no file selected
@@ -35258,11 +35780,6 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file {
   gap: 7px;
-}
-
-.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__icon,
-:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__icon {
-  color: color-mix(in srgb, var(--accent) 78%, var(--fg-faint));
 }
 
 .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__text,
@@ -35282,7 +35799,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__path,
 :root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__path {
   color: color-mix(in srgb, var(--fg-faint) 80%, transparent);
-  font-size: calc(11px * var(--font-scale));
+  font-size: calc(12px * var(--font-scale));
 }
 
 /* Recent-files dropdown is not useful on Changes overview. */
@@ -35870,7 +36387,10 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tools {
   position: relative;
   height: calc(40px + var(--windows-window-controls-height));
-  padding: var(--windows-window-controls-height) 12px 0;
+  /* Windows: reserve the caption strip (min/max/close) plus the dock-toggle
+     that upstream shifts left of it, so the + add button never sits under
+     either when tabs fill the row. */
+  padding: var(--windows-window-controls-height) calc(var(--windows-window-controls-safe) + 48px) 0;
 }
 
 .app--windows-frameless.app--workbench .workbench-dock__tools::before,

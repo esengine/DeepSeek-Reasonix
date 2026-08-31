@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   CSSProperties,
+  ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -14,6 +15,7 @@ import {
   FolderTree,
   FolderX,
   GitBranch,
+  History,
   Maximize2,
   MessageSquarePlus,
   Minimize2,
@@ -54,12 +56,7 @@ import {
   touchWorkspaceTreeVisit,
   workspaceTreeVisitId,
 } from "../lib/workspaceTreeMemory";
-import { loadLayoutSize, loadOptionalLayoutSize } from "../lib/layoutPreferences";
-import {
-  RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH,
-  defaultCreationRightDockTreeWidth,
-  defaultRightDockTreeWidth,
-} from "../store/layout";
+import { loadOptionalLayoutSize } from "../lib/layoutPreferences";
 import type {
   DirEntry,
   FilePreview,
@@ -95,7 +92,14 @@ import {
 } from "../lib/workspacePanelFormat";
 
 const WORKSPACE_TREE_MIN_WIDTH = 140;
-const WORKSPACE_TREE_DEFAULT_WIDTH = 300;
+const WORKSPACE_TREE_DEFAULT_WIDTH = 200;
+// Below this available preview width the empty detail pane is pointless on a
+// narrow panel — better to show the file tree alone until a file is picked.
+const WORKSPACE_PREVIEW_COMFORT_WIDTH = 300;
+// The tree/preview split width is shared across every file tab: one global
+// cached width, so switching tabs or opening a new one never changes the
+// proportions (openDirs/scrollTop stay per-tab, only the width is global).
+const GLOBAL_TREE_WIDTH_KEY = "__global_tree_width__";
 const WORKSPACE_PREVIEW_MIN_WIDTH = 140;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
@@ -122,6 +126,7 @@ export function WorkspacePanel({
   open,
   tabId,
   cwd,
+  tabReady = false,
   maximized,
   panelWidth,
   onClose,
@@ -143,17 +148,20 @@ export function WorkspacePanel({
   workspaceScopeKey: workspaceScopeKeyProp,
   workspaceMemoryKey: workspaceMemoryKeyProp,
   workspaceMemoryVisitId: workspaceMemoryVisitIdProp,
-  dockTreeWidth,
-  dockPreviewWidth,
-  onRestoreDockWidths,
   creationMode = false,
   completionSummary,
   turnStartAt = 0,
   qualityFloor,
+  onOpenFilesChange,
 }: {
   open: boolean;
   tabId?: string;
   cwd?: string;
+  /** Whether the backend session for the current tab has finished booting
+   * (WorkspaceTab.Ready). When false, ListDirForTab returns an empty list for
+   * the tab even though the workspace is not actually empty; the file tree must
+   * wait for readiness instead of rendering a blank panel. */
+  tabReady?: boolean;
   maximized: boolean;
   panelWidth?: number;
   onClose: () => void;
@@ -175,13 +183,13 @@ export function WorkspacePanel({
   workspaceScopeKey?: string;
   workspaceMemoryKey?: string;
   workspaceMemoryVisitId?: number;
-  dockTreeWidth?: number;
-  dockPreviewWidth?: number;
-  onRestoreDockWidths?: (treeWidth: number, previewWidth: number) => void;
   creationMode?: boolean;
   completionSummary?: WireCompletionSummary;
   turnStartAt?: number;
   qualityFloor?: "standard" | "delivery";
+  /** Reports the current set of open preview files (paths, oldest→newest) and
+   *  the active one so the dock can mirror the preview as a single tab. */
+  onOpenFilesChange?: (openTabs: string[], activePath: string | null) => void;
 }) {
   const t = useT();
   const workspaceTabId = tabId ?? "";
@@ -199,6 +207,20 @@ export function WorkspacePanel({
   const legacyTreeWidth = loadOptionalLayoutSize("workspaceTreeWidth");
   const panelRef = useRef<HTMLElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
+  // Live panel width from ResizeObserver: during a panel drag the width is
+  // driven by a CSS variable (no React re-render per frame), so the split /
+  // tree-hidden decisions must react to the element's real width — otherwise
+  // the tree only disappears after the pointer is released.
+  const [livePanelWidth, setLivePanelWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const update = () => setLivePanelWidth(el.getBoundingClientRect().width);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const onWorkspaceTreeScroll = useWorkspaceTreeScrollPersistence({ memoryKey: workspaceMemoryKey, open, scrollRef: treeRef });
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -206,6 +228,9 @@ export function WorkspacePanel({
   const [openDirs, setOpenDirs] = useState<Set<string>>(
     () => new Set(initialWorkspaceMemory?.openDirs ?? [""]),
   );
+  // Search-mode directories start expanded; clicking a folder toggles it here
+  // (separate from openDirs so filtering never mutates the normal tree state).
+  const [collapsedSearchDirs, setCollapsedSearchDirs] = useState<Set<string>>(() => new Set());
   const [revealedRootPaths, setRevealedRootPaths] = useState<Set<string> | null>(
     () => initialWorkspaceMemory && initialWorkspaceMemory.visitId !== workspaceMemoryVisitId ? new Set() : null,
   );
@@ -241,13 +266,20 @@ export function WorkspacePanel({
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
+  // Leaving search (clearing the filter) resets the collapse state, so the
+  // next search starts fully expanded instead of remembering which folders
+  // were folded during the previous one.
+  useEffect(() => {
+    if (!filter.trim()) setCollapsedSearchDirs(new Set());
+  }, [filter]);
   const [searchResults, setSearchResults] = useState<DirEntry[] | null>(null);
   const [scopedFilePaths, setScopedFilePaths] = useState<string[] | null>(null);
   const [scopedChangeRows, setScopedChangeRows] = useState<WorkspaceChangeListEntry[] | null>(null);
   const [treeVisible, setTreeVisible] = useState(true);
-  const [treeWidth, setTreeWidth] = useState(initialWorkspaceMemory?.treeWidth ?? legacyTreeWidth ?? WORKSPACE_TREE_DEFAULT_WIDTH);
+  const globalTreeWidthMemory = readWorkspaceTreeMemory(GLOBAL_TREE_WIDTH_KEY);
+  const [treeWidth, setTreeWidth] = useState(globalTreeWidthMemory?.treeWidth ?? legacyTreeWidth ?? WORKSPACE_TREE_DEFAULT_WIDTH);
   const [treeWidthMode, setTreeWidthMode] = useState<WorkspaceSplitTreeWidthMode>(
-    initialWorkspaceMemory?.treeWidthMode ?? "manual",
+    globalTreeWidthMemory?.treeWidthMode ?? "manual",
   );
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
@@ -334,25 +366,19 @@ export function WorkspacePanel({
     setRevealedRootPaths(remembered && remembered.visitId !== workspaceMemoryVisitId ? new Set() : null);
     if (remembered) touchWorkspaceTreeVisit(workspaceMemoryKey, workspaceMemoryVisitId);
     else rememberWorkspaceTreeOpenDirs(workspaceMemoryKey, nextOpenDirs, workspaceMemoryVisitId);
-    onRestoreDockWidths?.(
-      remembered?.dockTreeWidth ?? loadLayoutSize(
-        "rightDockTreeWidth",
-        creationMode ? defaultCreationRightDockTreeWidth() : defaultRightDockTreeWidth(),
-      ),
-      remembered?.dockPreviewWidth ?? loadLayoutSize("rightDockPreviewWidth", RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH),
-    );
     if (lastRestoredMemoryKeyRef.current !== workspaceMemoryKey) {
       lastRestoredMemoryKeyRef.current = workspaceMemoryKey;
       setSelectedFilePath(remembered?.selectedFilePath ?? null);
       setSelectedChangePath(remembered?.selectedChangePath ?? null);
-      setTreeWidth(remembered?.treeWidth ?? legacyTreeWidth ?? WORKSPACE_TREE_DEFAULT_WIDTH);
-      setTreeWidthMode(remembered?.treeWidthMode ?? "manual");
+      const globalWidth = readWorkspaceTreeMemory(GLOBAL_TREE_WIDTH_KEY);
+      setTreeWidth(globalWidth?.treeWidth ?? legacyTreeWidth ?? WORKSPACE_TREE_DEFAULT_WIDTH);
+      setTreeWidthMode(globalWidth?.treeWidthMode ?? "manual");
       requestAnimationFrame(() => {
         const tree = treeRef.current;
         if (tree) tree.scrollTop = remembered?.scrollTop ?? 0;
       });
     }
-  }, [creationMode, legacyTreeWidth, onRestoreDockWidths, workspaceMemoryKey, workspaceMemoryVisitId]);
+  }, [creationMode, legacyTreeWidth, workspaceMemoryKey, workspaceMemoryVisitId]);
 
   useEffect(() => {
     if (memoryRestorePendingRef.current) return;
@@ -361,18 +387,13 @@ export function WorkspacePanel({
 
   useEffect(() => {
     if (memoryRestorePendingRef.current) return;
-    rememberWorkspaceTreeState(workspaceMemoryKey, { treeWidth, treeWidthMode });
-  }, [treeWidth, treeWidthMode, workspaceMemoryKey]);
+    rememberWorkspaceTreeState(GLOBAL_TREE_WIDTH_KEY, { treeWidth, treeWidthMode });
+  }, [treeWidth, treeWidthMode]);
 
   useEffect(() => {
     if (memoryRestorePendingRef.current) return;
     rememberWorkspaceTreeState(workspaceMemoryKey, { recentPaths });
   }, [recentPaths, workspaceMemoryKey]);
-
-  useEffect(() => {
-    if (memoryRestorePendingRef.current || dockTreeWidth == null || dockPreviewWidth == null) return;
-    rememberWorkspaceTreeState(workspaceMemoryKey, { dockTreeWidth, dockPreviewWidth });
-  }, [dockPreviewWidth, dockTreeWidth, workspaceMemoryKey]);
 
   useEffect(() => {
     memoryRestorePendingRef.current = false;
@@ -490,15 +511,15 @@ export function WorkspacePanel({
       if (initializeSplit) {
         setTreeWidth(initialWorkspaceSplitTreeWidth({
           panelWidth,
-          // Preserve a user-resized (manual) tree width: only first-time
-          // splits (no saved width yet) default to an even 50/50 division.
-          // Reopening a file after closing its preview must keep the
-          // remembered width, not snap back to the initial split.
-          savedTreeWidth: treeWidthMode === "manual" ? treeWidth : null,
+          // The tree keeps its width (default 200) instead of an even 50/50
+          // split, so the preview pane gets the extra room when a file opens.
+          // Reopening a file after closing its preview keeps the remembered
+          // width, not snap back to an initial split.
+          savedTreeWidth: treeWidth,
           treeMinWidth: WORKSPACE_TREE_MIN_WIDTH,
           previewMinWidth: WORKSPACE_PREVIEW_MIN_WIDTH,
         }));
-        setTreeWidthMode("even");
+        setTreeWidthMode("manual");
       }
       pendingTreeRevealPathRef.current = path;
       if (targetMode === "changed") setSelectedChangePath(path);
@@ -511,7 +532,8 @@ export function WorkspacePanel({
         if (current) dismissedChangeListRequestIdRef.current = lastChangeListRequestIdRef.current;
         return null;
       });
-      setFilter("");
+      // Keep the active search: clicking a result opens its preview but must
+      // not leave the search tree, so the user can keep browsing hits.
       setOpenTabs((tabs) => [...tabs.filter((tab) => tab !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
       setRecentPaths((paths) => [...paths.filter((p) => p !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
       const dirs = parentDirs(path);
@@ -520,6 +542,13 @@ export function WorkspacePanel({
     },
     [loadDir, openTabs.length, panelWidth, selectedPath, treeVisible, updateOpenDirs, viewMode],
   );
+
+  // Report the open preview files upward so the dock keeps its file tab in
+  // sync (single mirror tab whose label follows the active preview).
+  useEffect(() => {
+    onOpenFilesChange?.(openTabs, viewMode === "changed" ? selectedChangePath : selectedFilePath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onOpenFilesChange, openTabs, selectedChangePath, selectedFilePath, viewMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -542,6 +571,25 @@ export function WorkspacePanel({
     setTreeVisible(true);
     void loadDir("");
   }, [cwd, loadDir, open]);
+
+  // The backend session for the active tab may not have finished booting when
+  // the panel first mounts (or when the tab is re-activated after a switch):
+  // ListDirForTab then returns an empty list even though the workspace is not
+  // actually empty, and the file tree renders blank. Re-load the tree once the
+  // tab reports ready, so the root + any expanded directories populate — this
+  // is what a manual refresh was doing before the retry. Track the previous
+  // readiness so a tab that was already ready on mount (a normal session) does
+  // not double-load, while a tab that becomes ready after mount (a cold start
+  // or a re-activation race) repopulates the tree.
+  const previousTabReadyRef = useRef(tabReady);
+  useEffect(() => {
+    if (!open || !tabReady) return;
+    if (previousTabReadyRef.current === tabReady) return;
+    previousTabReadyRef.current = tabReady;
+    const pendingDirs = [""];
+    openDirsRef.current.forEach((dir) => pendingDirs.push(dir));
+    pendingDirs.forEach((dir) => void loadDir(dir));
+  }, [open, tabReady, loadDir]);
 
   useEffect(() => {
     if (!open) return;
@@ -996,10 +1044,22 @@ export function WorkspacePanel({
   // Changed overview shows just the project name (matching the file-preview
   // breadcrumb); hovering reveals the full absolute workspace root.
   const previewSubtitleCrumbs = changedMode && !selectedChangePath && !scopedChangeRows
-    ? (cwd ? [{ label: basename(cwd), full: cwd }] : [])
+    ? (cwd ? [{ label: basename(cwd), full: cwd, relative: basename(cwd) }] : [])
     : [];
   const previewFullPath = activeSelectedPath || "";
   const previewCrumbs = buildWorkspacePathBreadcrumbs(cwd, previewFullPath);
+  // The current-file header shows the directory breadcrumbs (the file name
+  // lives in the dock/top tab), but selecting the breadcrumbs should copy the
+  // full project-relative path with the file name, joined by "/" — the "›"
+  // separators shown on screen are display-only.
+  const copyCurrentFileRelativePath = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selectedPath || !cwd) return;
+    const container = event.currentTarget;
+    if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", `${basename(cwd)}/${selectedPath.replace(/^[/\\]+/, "")}`);
+  }, [cwd, selectedPath]);
   const recentFiles = useMemo(() => [...recentPaths].reverse(), [recentPaths]);
 
   const workspaceSearchFallbackSequence = workspaceRefreshFallbackSequence(workspaceRefresh);
@@ -1041,14 +1101,84 @@ export function WorkspacePanel({
 
   const treeRows = useMemo<WorkspaceTreeRowData[]>(() => {
     if (flattened) {
-      return flattened.map(({ path, entry }) => ({
-        key: path,
-        path,
-        depth: 0,
-        entry,
-        active: selectedPath === path,
-        isSearch: true,
-      }));
+      // Search results render as a directory tree: each hit hangs under its
+      // folder chain, so it is obvious which directory tree a file lives in.
+      // Directories default to expanded and can be collapsed.
+      const fileRows = new Map<string, WorkspaceTreeRowData>();
+      const dirPaths = new Set<string>();
+      for (const row of flattened) {
+        if (row.entry.isDir) {
+          // Directory keys are slash-free so they match the parentPath keys
+          // used by file rows (a/ vs a would otherwise split the buckets and
+          // drop every file from the tree).
+          dirPaths.add(row.path.replace(/\/$/, ""));
+        } else {
+          fileRows.set(row.path, { ...row, depth: 0, key: `f:${row.path}`, active: false });
+        }
+        let dir = parentPath(row.path);
+        while (dir) {
+          dirPaths.add(dir);
+          dir = parentPath(dir);
+        }
+      }
+      const children = new Map<string, { dirs: string[]; files: string[] }>();
+      const ensure = (dir: string) => {
+        let bucket = children.get(dir);
+        if (!bucket) {
+          bucket = { dirs: [], files: [] };
+          children.set(dir, bucket);
+        }
+        return bucket;
+      };
+      for (const dir of dirPaths) ensure(parentPath(dir)).dirs.push(dir);
+      for (const file of fileRows.keys()) ensure(parentPath(file)).files.push(file);
+      for (const bucket of children.values()) {
+        bucket.dirs.sort((a, b) => a.localeCompare(b));
+        bucket.files.sort((a, b) => a.localeCompare(b));
+      }
+      const acc: WorkspaceTreeRowData[] = [];
+      const buildSearchDir = (dir: string, depth: number) => {
+        // Collapse single-child directory chains (dir → dir → … with no
+        // matching files in between) into one row "a / b / c", so deep
+        // workdir-style paths don't eat vertical space. The chain head is the
+        // collapse key; expanding reveals the chain's tail children.
+        const compactNames = [basename(dir)];
+        const chainHead = dir;
+        let bucket = children.get(dir) ?? { dirs: [], files: [] };
+        while (bucket.dirs.length === 1 && bucket.files.length === 0) {
+          const sub = bucket.dirs[0];
+          compactNames.push(basename(sub));
+          bucket = children.get(sub) ?? { dirs: [], files: [] };
+        }
+        const hasChildren = bucket.dirs.length > 0 || bucket.files.length > 0;
+        // A directory that only matched by name (no matching descendants)
+        // renders as a leaf: isOpen undefined hides the chevron, so it cannot
+        // expand into an empty folder.
+        const isOpen = hasChildren ? !collapsedSearchDirs.has(chainHead) : undefined;
+        acc.push({
+          key: `d:${chainHead}`,
+          path: chainHead,
+          depth,
+          entry: { name: compactNames.join(" / "), isDir: true },
+          active: false,
+          isOpen,
+        });
+        if (!hasChildren || !isOpen) return;
+        for (const sub of bucket.dirs) buildSearchDir(sub, depth + 1);
+        for (const file of bucket.files) {
+          const row = fileRows.get(file);
+          if (!row) continue;
+          acc.push({ ...row, depth: depth + 1, active: selectedPath === file, key: `f:${file}` });
+        }
+      };
+      const rootBucket = children.get("") ?? { dirs: [], files: [] };
+      for (const dir of rootBucket.dirs) buildSearchDir(dir, 0);
+      for (const file of rootBucket.files) {
+        const row = fileRows.get(file);
+        if (!row) continue;
+        acc.push({ ...row, depth: 0, active: selectedPath === file, key: `f:${file}` });
+      }
+      return acc;
     }
     const acc: WorkspaceTreeRowData[] = [];
     const build = (dir: string, depth: number) => {
@@ -1099,7 +1229,7 @@ export function WorkspacePanel({
     };
     build("", 0);
     return acc;
-  }, [flattened, entriesByDir, openDirs, revealedRootPaths, selectedPath]);
+  }, [flattened, entriesByDir, openDirs, revealedRootPaths, selectedPath, collapsedSearchDirs]);
   const getTreeRowKey = useCallback((index: number) => treeRows[index]?.key ?? index, [treeRows]);
 
   const virtualizer = useVirtualizer({
@@ -1149,10 +1279,12 @@ export function WorkspacePanel({
   }, [open, treeRows.length, virtualizer.getTotalSize(), virtualizer.scrollRect?.height, workspaceMemoryKey, virtualizer]);
 
   const virtualTreeItems = virtualizer.getVirtualItems();
-  const compactProbePaths = virtualTreeItems
-    .map((item) => treeRows[item.index])
-    .filter((row): row is WorkspaceTreeRowData => Boolean(row?.entry.isDir && entriesByDir[row.path] === undefined))
-    .map((row) => row.path);
+  const compactProbePaths = flattened
+    ? []
+    : virtualTreeItems
+      .map((item) => treeRows[item.index])
+      .filter((row): row is WorkspaceTreeRowData => Boolean(row?.entry.isDir && entriesByDir[row.path] === undefined))
+      .map((row) => row.path);
   const compactProbeKey = compactProbePaths.join("\u0000");
 
   useEffect(() => {
@@ -1166,20 +1298,12 @@ export function WorkspacePanel({
 
   const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
 
-  const filePreviewActive = openTabs.length > 0 || selectedPath !== null;
-  const changeDetailActive = changedMode && expandedCommit !== null;
-  const previewVisible = changedMode || filePreviewActive;
-  const splitPanesFit = useMemo(
-    () =>
-      workspaceSplitCanFit({
-        panelWidth,
-        treeMinWidth: WORKSPACE_TREE_MIN_WIDTH,
-        previewMinWidth: WORKSPACE_PREVIEW_MIN_WIDTH,
-      }),
-    [panelWidth],
-  );
-  const actualTreeVisible = changedMode ? false : treeVisible && (!previewVisible || splitPanesFit);
-  const previewModeActive = open && (filePreviewActive || changeDetailActive);
+  // The files view keeps its two-column layout when the panel is wide enough:
+  // tree on the right, file-detail pane on the left — empty ("no file
+  // selected") until a file is picked, which is how a freshly added file tab
+  // looks. When the panel is too narrow for both panes, fall back to showing
+  // the tree alone until a file is actually selected (otherwise a narrow
+  // panel with no selection would be blank).
   const embeddedDockMode = !showViewTabs;
   const showFileTools = true;
   const effectiveTreeWidth = useMemo(
@@ -1193,6 +1317,36 @@ export function WorkspacePanel({
       }),
     [panelWidth, treeWidth, treeWidthMode],
   );
+  // Fit is judged against the tree's ACTUAL width and a comfortable preview
+  // minimum (300, not the 140 absolute floor): with a file selected, dragging
+  // the panel narrow enough that the preview would drop below ~300px hides
+  // the tree and lets the preview take the full panel — a sliver of preview
+  // beside a wide tree is pointless. Uses the ResizeObserver-measured width
+  // so the tree hides live while the panel is being dragged.
+  const effectivePanelWidth = livePanelWidth ?? panelWidth;
+  const splitPanesFit = useMemo(
+    () =>
+      workspaceSplitCanFit({
+        panelWidth: effectivePanelWidth,
+        treeMinWidth: effectiveTreeWidth,
+        previewMinWidth: WORKSPACE_PREVIEW_COMFORT_WIDTH,
+      }),
+    [effectivePanelWidth, effectiveTreeWidth],
+  );
+  // Files view: once a file is selected the preview must show (two columns
+  // when both fit, full-panel preview otherwise). With no selection the
+  // detail pane is empty, so only keep the two columns when the panel leaves
+  // a comfortable width for it — a narrow panel shows the tree alone, which
+  // is the expected fresh-file-tab look.
+  const filePreviewActive = viewMode === "changed"
+    ? false
+    : selectedPath !== null
+      ? true
+      : (effectivePanelWidth ?? 0) - effectiveTreeWidth >= WORKSPACE_PREVIEW_COMFORT_WIDTH;
+  const changeDetailActive = changedMode && expandedCommit !== null;
+  const previewVisible = changedMode || filePreviewActive;
+  const actualTreeVisible = changedMode ? false : treeVisible && (!previewVisible || splitPanesFit);
+  const previewModeActive = open && (filePreviewActive || changeDetailActive);
   const maxTreeWidthForPanel = useMemo(
     () => Math.max(WORKSPACE_TREE_MIN_WIDTH, (panelWidth ?? WORKSPACE_DUAL_PANEL_TARGET_WIDTH) - WORKSPACE_PREVIEW_MIN_WIDTH),
     [panelWidth],
@@ -1239,15 +1393,13 @@ export function WorkspacePanel({
   }, [onClose, previewVisible]);
 
   const showTreeEvenSplit = useCallback(() => {
-    setTreeWidth(initialWorkspaceSplitTreeWidth({
-      panelWidth,
-      savedTreeWidth: null,
-      treeMinWidth: WORKSPACE_TREE_MIN_WIDTH,
-      previewMinWidth: WORKSPACE_PREVIEW_MIN_WIDTH,
-    }));
-    setTreeWidthMode("even");
+    // Reopening the hidden tree keeps the previous width (the user's last
+    // resize / remembered global width) instead of resetting to a 50/50
+    // split — treeWidth is untouched and the mode goes manual so the
+    // persisted width applies.
+    setTreeWidthMode("manual");
     setTreeVisible(true);
-  }, [panelWidth]);
+  }, []);
 
   const toggleTreeRail = useCallback(() => {
     if (actualTreeVisible) {
@@ -1456,8 +1608,20 @@ export function WorkspacePanel({
 
   const activateTreeRow = (row: WorkspaceTreeRowData) => {
     if (row.entry.isDir) {
+      if (flattened) {
+        // Search tree: clicking a folder collapses/expands its hits.
+        setCollapsedSearchDirs((current) => {
+          const next = new Set(current);
+          if (next.has(row.path)) next.delete(row.path);
+          else next.add(row.path);
+          return next;
+        });
+        return;
+      }
       toggleDir(row.path, row.compactPaths ?? [row.path]);
     } else if (selectedPath === row.path) {
+      // Deselect: the detail pane goes back to "no file selected" (empty);
+      // the two-column layout stays (files view always shows tree + detail).
       setSelectedFilePath(null);
     } else {
       selectFile(row.path);
@@ -1524,28 +1688,23 @@ export function WorkspacePanel({
       {previewVisible && <section className="workspace-preview">
         <header className="workspace-preview__head">
           <div className="workspace-current-file" aria-label={t("workspace.currentFile")}>
-            {changedMode && !selectedPath ? (
-              <GitBranch size={15} className="workspace-current-file__icon" />
-            ) : (
-              <FileText size={15} className="workspace-current-file__icon" />
-            )}
-            <div className="workspace-current-file__text">
-              <Tooltip label={selectedPath ?? undefined}>
+            <div className="workspace-current-file__text" onCopy={copyCurrentFileRelativePath}>
+              {!selectedPath && (
                 <span className="workspace-current-file__name">{previewTitle}</span>
-              </Tooltip>
+              )}
               <WorkspacePathBreadcrumbs crumbs={previewSubtitleCrumbs} />
               <WorkspacePathBreadcrumbs crumbs={previewCrumbs} />
             </div>
             <Tooltip label={t("workspace.recentFiles")}>
               <button
                 ref={recentAnchorRef}
-                className={`workspace-current-file__recent${recentOpen ? " workspace-current-file__recent--open" : ""}`}
+                className={`workspace-iconbtn workspace-current-file__recent${recentOpen ? " workspace-current-file__recent--open" : ""}`}
                 type="button"
                 aria-label={t("workspace.recentFiles")}
                 aria-expanded={recentOpen}
                 onClick={() => setRecentOpen((open) => !open)}
               >
-                <ChevronDown size={13} />
+                <History size={15} />
               </button>
             </Tooltip>
           </div>
@@ -2118,7 +2277,11 @@ export function WorkspacePanel({
                 );
               })}
             </div>
-          ) : null}
+          ) : tabReady ? (
+            <div className="workspace-empty">{t("workspace.emptyTree")}</div>
+          ) : (
+            <div className="workspace-empty" role="status">{t("workspace.loading")}</div>
+          )}
         </div>
       </section>
       {treeMenu && (

@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { ChevronRight, Folder } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { DirEntry } from "../lib/types";
 import { workspaceBasename as basename, workspaceParentPath as parentPath } from "../lib/workspacePanelFormat";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
@@ -39,11 +39,7 @@ export function WorkspaceTreeRow({
         onClick={() => onActivate(row)}
         onContextMenu={(event) => onContextMenu(event, path, entry.isDir)}
       >
-        {entry.isDir ? (
-          <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-        ) : (
-          <WorkspaceFileIcon fileName={entry.name} />
-        )}
+        {!entry.isDir && <WorkspaceFileIcon fileName={entry.name} />}
         <span className="workspace-tree__result">
           <span className="workspace-tree__result-name">{basename(path)}</span>
           {dir && <span className="workspace-tree__result-dir">{dir}</span>}
@@ -73,7 +69,7 @@ export function WorkspaceTreeRow({
           ))}
         </span>
       )}
-      {entry.isDir ? (
+      {entry.isDir && isOpen !== undefined && (
         <ChevronRight
           size={13}
           className={`workspace-tree__chev ${isOpen ? "workspace-tree__chev--open" : ""}`}
@@ -82,14 +78,8 @@ export function WorkspaceTreeRow({
             transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
           }}
         />
-      ) : (
-        <span className="workspace-tree__chev" />
       )}
-      {entry.isDir ? (
-        <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-      ) : (
-        <WorkspaceFileIcon fileName={entry.name} />
-      )}
+      {!entry.isDir && <WorkspaceFileIcon fileName={entry.name} />}
       <span className="workspace-tree__name">{displayName}</span>
     </button>
   );

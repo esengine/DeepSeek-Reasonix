@@ -160,6 +160,9 @@ console.log("\nbundle budgets");
 // then absorbs a second post-quiet extent without an unbounded write loop.
 // The combined path measures 456.316 KiB; retain 0.084 KiB with the smallest
 // one-decimal ratchet.
+// The right-sidebar branch's dock surface (tab container, launcher, context
+// menus) plus the rebase-merged App.tsx additions sit on top of this baseline,
+// so keep the ratchet at the larger upstream value.
 const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 456.4 : 456.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
@@ -179,7 +182,9 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
+// The dock close-button reveal rule and shared 3% hover/selected fill push
+// the shell to 116.0 KiB; keep 0.2 KiB of headroom.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.2 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }

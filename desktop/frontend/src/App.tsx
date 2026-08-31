@@ -11,8 +11,6 @@ import {
   SquarePen,
   PanelLeft,
   PanelRight,
-  FileText,
-  GitBranch,
   MessageSquare,
   Settings as SettingsIcon,
   RotateCw,
@@ -42,6 +40,8 @@ import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-musi
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
+import { ACTIVITY_BAR_ENTRIES } from "./components/ActivityBar/activityBarConfig";
+import { useActivityBarStore } from "./store/activityBar";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
@@ -212,6 +212,10 @@ function noticePreviewMockEnabled(): boolean {
   const value = browserMockScenarioParam();
   return value === "notice" || value === "notices" || value === "notice-preview";
 }
+/** Base name of a workspace file path, used as the dock file-tab label. */
+function fileLabel(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
 function noticePreviewItems(): Item[] {
   const notice = (index: number, level: "info" | "warn", text: string, detail: string, code?: string): Item => ({
     kind: "notice",
@@ -288,6 +292,10 @@ const HeartbeatView = lazy(() => import("./custom/features/heartbeat/HeartbeatPa
 const SettingsPanel = lazy(() => import("./components/SettingsPanelEntry").then((module) => ({ default: module.SettingsPanel })));
 const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
+const BrowserPanel = lazy(() => import("./components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })));
+const InstructionPanel = lazy(() => import("./components/InstructionPanel").then((module) => ({ default: module.InstructionPanel })));
+const DockLauncher = lazy(() => import("./components/DockLauncher").then((module) => ({ default: module.DockLauncher })));
+const TabContainer = lazy(() => import("./components/TabContainer/TabContainer").then((module) => ({ default: module.TabContainer })));
 const TaskMonitorPanel = lazy(() => import("./components/TaskMonitorPanel").then((module) => ({ default: module.TaskMonitorPanel })));
 const WorkspacePanel = lazy(async () => {
   const [module] = await Promise.all([
@@ -326,7 +334,6 @@ function normalizeDesktopLayoutStyle(style: string | undefined): DesktopLayoutSt
   if (style === "creation") return "creation";
   return "classic";
 }
-const SHOW_CONTEXT_DOCK = true;
 const DISMISSED_TODO_STORAGE_KEY = "todoPanel:dismissedKeys";
 const MAX_DISMISSED_TODO_KEYS = 160;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
@@ -1127,7 +1134,6 @@ export default function App() {
   const setWorkspacePanelOpen = useLayoutStore((s) => s.setWorkspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
-  const rightDockPreviewWidth = useLayoutStore((s) => s.rightDockPreviewWidth);
   const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const setWorkspacePreviewActive = useLayoutStore((s) => s.setWorkspacePreviewActive);
   const attentionChimeEvents = useRef(new Set<string>());
@@ -1196,7 +1202,25 @@ export default function App() {
   const setWorkspacePanelMaximized = useLayoutStore((s) => s.setWorkspacePanelMaximized);
   const rightDockMode = useLayoutStore((s) => s.rightDockMode);
   const setRightDockMode = useLayoutStore((s) => s.setRightDockMode);
+  const dockTabs = useActivityBarStore((s) => s.tabs);
+  const dockActivityBarOpen = useActivityBarStore((s) => s.activityBarOpen);
+  const dockOpenEntry = useActivityBarStore((s) => s.openEntry);
+  const dockCloseTab = useActivityBarStore((s) => s.closeTab);
+  const dockSetActivityBarOpen = useActivityBarStore((s) => s.setActivityBarOpen);
   const terminalPanelOpen = useLayoutStore((s) => s.terminalPanelOpen);
+  // The dock mirrors the workspace panel's current preview as a single "file"
+  // tab: switching files in the list updates that tab's label and path instead
+  // of opening one tab per file. The report only comes from the panel of the
+  // currently active dock tab, so a non-file view (changed/context) mounting
+  // or changing its preview must never rewrite the already-open file tabs —
+  // its report carries that view's selection (often null), not a file.
+  const handleOpenFilesChange = useCallback((_openTabs: string[], activePath: string | null) => {
+    const store = useActivityBarStore.getState();
+    const activeTab = store.tabs.find((tab) => tab.id === store.activeTabId);
+    if (activeTab?.type !== "file") return;
+    // With no selection the tab shows the file-list label and drops its path.
+    store.updateTab(activeTab.id, activePath ? fileLabel(activePath) : t("workspace.filesTab"), activePath ? { path: activePath } : {});
+  }, [t]);
   const setTerminalPanelOpen = useLayoutStore((s) => s.setTerminalPanelOpen);
   const { mounted: terminalContentVisible, fitEnabled: terminalFitEnabled, prefetch: prefetchTerminalPanel } = useWarmTerminalPanel(terminalPanelOpen, terminalResizing);
   const terminalHeight = useLayoutStore((s) => s.terminalHeight);
@@ -1550,8 +1574,6 @@ export default function App() {
     // The automation page fills the main content area; the workbench dock must
     // not overlay it. main-v2 keeps automation as a popup so its placement
     // helper has no view concept — apply the exclusion here on top.
-    renderable: workspacePanelRenderable,
-    gridOpen: workspacePanelGridOpen,
   } = resolveWorkspacePanelPlacement({
     viewportWidth, sidebarCollapsed, sidebarWidth, chatMinWidth: chatReservedWidth,
     resizerWidth: WORKSPACE_RESIZER_WIDTH, open: workspacePanelOpen,
@@ -1560,8 +1582,12 @@ export default function App() {
     liveWidth: liveWorkspacePanelRenderWidth,
   });
   const automationView = mainView === "automation";
-  const effectiveWorkspacePanelRenderable = automationView ? false : workspacePanelRenderable;
-  const effectiveWorkspacePanelGridOpen = automationView ? false : workspacePanelGridOpen;
+  // The dock is a full panel that only exists while expanded; when collapsed
+  // the chat pane is full-width and a floating menu over the transcript's
+  // top-right corner opens it. Only the automation page (a full content
+  // view) hides the panel entirely.
+  const effectiveWorkspacePanelRenderable = automationView ? false : workspacePanelOpen;
+  const effectiveWorkspacePanelGridOpen = automationView ? false : workspacePanelOpen;
   const resolveLiveWorkspacePanelRenderWidth = useCallback(
     (preferredWidth: number, nextSidebarWidth = sidebarWidth) =>
       resolveLiveWorkspacePanelWidth({
@@ -1635,12 +1661,8 @@ export default function App() {
     activeTab?.scope ?? "",
     activeTab?.workspaceRoot ?? state.meta?.cwd ?? "",
   ].join("\u0000");
-  const restoreWorkspaceDockWidths = useCallback((treeWidth: number, _previewWidth: number) => {
-    // Single-width dock: only the tree width is meaningful; clamp it to the
-    // dynamic available width (chat keeps its 400px floor), never a fixed
-    // 560 ceiling, so the user's remembered width is preserved when reopened.
-    setRightDockTreeWidth(rightDockTreeWidthClamp(treeWidth, workspacePanelAvailableWidth));
-  }, [rightDockTreeWidthClamp, workspacePanelAvailableWidth]);
+  // Tab activation must never resize the dock: WorkspacePanel does not
+  // restore per-tab dock widths on mount, so switching tabs keeps the width.
   const sidebarImDetailConnection = useMemo(
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
@@ -2633,16 +2655,19 @@ export default function App() {
       closeTransientOverlays();
       setSidebarResizing(true);
       let nextWidth = sidebarWidth;
+      // The updater writes the CSS variables directly, so the layout tracks
+      // the pointer at 60fps without React. Do NOT pass onApply setState
+      // here: re-rendering the whole App per frame is what makes the resize
+      // drag janky (App is large after the main-v2 rebase). The final width
+      // is committed to state in onDone.
       const liveResize = createRafResizeUpdater({
         target: layout,
         separator: event.currentTarget,
         cssVar: "--sidebar-expanded-width",
-        onApply: setLiveSidebarWidth,
       });
       const dockLiveResize = createRafResizeUpdater({
         target: layout,
         cssVar: "--workspace-width",
-        onApply: setLiveWorkspacePanelRenderWidth,
       });
       const onMove = (moveEvent: PointerEvent) => {
         nextWidth = sidebarWidthClamp(moveEvent.clientX);
@@ -2712,7 +2737,7 @@ export default function App() {
 
   const startWorkspacePanelResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0 || !workspacePanelOpen) return;
+      if (event.button !== 0 || !dockActivityBarOpen) return;
       const layout = layoutRef.current;
       if (!layout) return;
       event.preventDefault();
@@ -2728,7 +2753,6 @@ export default function App() {
         target: layout,
         separator,
         cssVar: "--workspace-width",
-        onApply: setLiveWorkspacePanelRenderWidth,
       });
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
@@ -2843,6 +2867,20 @@ export default function App() {
 
   const activeWorkspaceRoot = activeTab?.workspaceRoot ?? state.meta?.cwd ?? "";
 
+  // The dock's open tabs are project-scoped: switching projects (or starting
+  // up in one) loads that project's own persisted tab list.
+  useEffect(() => {
+    useActivityBarStore.getState().setWorkspaceRoot(activeWorkspaceRoot);
+  }, [activeWorkspaceRoot]);
+
+  // Map a dock activity-bar entry to its default tab type and open it in the
+  // tab container. The dock itself stays open; opening an entry either
+  // switches to an existing tab of that type or appends a new one.
+  const dockEntryLabel = useCallback((defaultTab: string): string => {
+    const entry = ACTIVITY_BAR_ENTRIES.find((candidate) => candidate.defaultTab === defaultTab);
+    return entry ? t(entry.labelKey as never) : defaultTab;
+  }, [t]);
+
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
@@ -2869,17 +2907,6 @@ export default function App() {
     [activeWorkspaceRoot, closeTransientOverlays, rightDockMode, workspacePanelMaximized, workspacePanelOpen],
   );
 
-  const closeWorkspacePanel = useCallback(() => {
-    closeTransientOverlays();
-    if (!workspacePanelOpen) {
-      return;
-    }
-    setLiveWorkspacePanelRenderWidth(null);
-    setWorkspacePanelMaximized(false);
-    setWorkspacePanelOpen(false);
-    saveWorkspacePanelOpen(false, activeWorkspaceRoot);
-  }, [activeWorkspaceRoot, closeTransientOverlays, workspacePanelOpen]);
-
   // Restore the right dock's open/closed state per project: switching to a
   // different workspace root (or a global session) restores that scope's own
   // preference instead of carrying the previous project's state over.
@@ -2889,27 +2916,67 @@ export default function App() {
   }, [activeWorkspaceRoot]);
 
   const toggleWorkspacePanel = useCallback(() => {
-    if (effectiveWorkspacePanelRenderable) {
-      closeWorkspacePanel();
+    if (dockActivityBarOpen) {
+      // Collapse the dock back to the floating launcher; keep the tabs so
+      // re-expanding restores them.
+      dockSetActivityBarOpen(false);
+      setWorkspacePanelOpen(false);
+      saveWorkspacePanelOpen(false, activeWorkspaceRoot);
       return;
     }
-    // Creation hides the overview tab; never reopen into the invisible "context"
-    // mode or neither 文件/改动 will show an active selection.
-    if (desktopLayoutStyle === "creation") {
-      openWorkspacePanel(rightDockMode === "changed" ? "changed" : "files");
-      return;
+    // Expand: if nothing is open yet, open the previously active view so the
+    // panel is never empty (matches the legacy open-dock behavior).
+    if (dockTabs.length === 0) {
+      const tabType = rightDockMode === "context" ? "context" : rightDockMode === "changed" ? "changed" : rightDockMode === "remote" ? "remote" : "file";
+      dockOpenEntry(tabType, dockEntryLabel(tabType));
+    } else {
+      dockSetActivityBarOpen(true);
     }
-    // Reopen with the previously active tab (rightDockMode is kept in the
-    // store across close/open) instead of forcing "context".
-    openWorkspacePanel();
-  }, [closeWorkspacePanel, desktopLayoutStyle, effectiveWorkspacePanelRenderable, openWorkspacePanel, rightDockMode]);
+    setWorkspacePanelOpen(true);
+    saveWorkspacePanelOpen(true, activeWorkspaceRoot);
+  }, [activeWorkspaceRoot, dockActivityBarOpen, dockEntryLabel, dockOpenEntry, dockSetActivityBarOpen, dockTabs.length, rightDockMode, saveWorkspacePanelOpen, setWorkspacePanelOpen]);
+
+  // Closing the last tab collapses the tab container; keep the dock column in
+  // sync so the floating launcher reappears over the transcript.
+  useEffect(() => {
+    if (!dockActivityBarOpen && workspacePanelOpen) {
+      setWorkspacePanelOpen(false);
+      saveWorkspacePanelOpen(false, activeWorkspaceRoot);
+    }
+  }, [activeWorkspaceRoot, dockActivityBarOpen, saveWorkspacePanelOpen, setWorkspacePanelOpen, workspacePanelOpen]);
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
       openWorkspacePanel(mode);
+      // Keep the tab container in sync: callers like openTurnVerification
+      // expect the dock to show the requested view immediately.
+      const tabType = mode === "context" ? "context" : mode === "changed" ? "changed" : mode === "remote" ? "remote" : "file";
+      const label = dockEntryLabel(tabType);
+      dockOpenEntry(tabType, label);
     },
-    [openWorkspacePanel],
+    [dockEntryLabel, dockOpenEntry, openWorkspacePanel],
   );
+
+  const handleActivitySelect = useCallback((entryId: string) => {
+    const entry = ACTIVITY_BAR_ENTRIES.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    const mode = entryId === "files" ? "files" : entryId === "changed" ? "changed" : entryId === "remote" ? "remote" : entryId === "context" ? "context" : null;
+    // Keep the legacy rightDockMode in sync for callers that read it (width
+    // handling, remote host restore, verification reveal), then open the tab.
+    if (mode) setRightDockMode(mode);
+    openWorkspacePanel();
+    if (entryId === "remote" && remoteHosts.length > 0) {
+      const fallback = remoteHosts.find((host) => {
+        const state = useRemoteStore.getState().statuses[host.id]?.state;
+        return state === "connected" || state === "degraded";
+      }) ?? remoteHosts[0];
+      const hostId = remoteExplorerHostId && remoteHosts.some((host) => host.id === remoteExplorerHostId)
+        ? remoteExplorerHostId
+        : fallback?.id;
+      if (hostId) requestRemoteExplorer(hostId);
+    }
+    dockOpenEntry(entry.defaultTab, dockEntryLabel(entry.defaultTab));
+  }, [dockEntryLabel, dockOpenEntry, openWorkspacePanel, remoteExplorerHostId, remoteHosts, requestRemoteExplorer, setRightDockMode]);
 
   const verificationRevealSequenceRef = useRef(0);
   const [verificationRevealRequest, setVerificationRevealRequest] = useState<WorkspaceVerificationRevealRequest | null>(null);
@@ -2964,17 +3031,6 @@ export default function App() {
     if (remoteHosts.length > 0 || rightDockMode !== "remote") return;
     setRightDockMode("files");
   }, [remoteHosts.length, rightDockMode, setRightDockMode]);
-
-  const openRemoteDock = useCallback(() => {
-    const fallback = remoteHosts.find((host) => {
-      const state = useRemoteStore.getState().statuses[host.id]?.state;
-      return state === "connected" || state === "degraded";
-    }) ?? remoteHosts[0];
-    const hostId = remoteExplorerHostId && remoteHosts.some((host) => host.id === remoteExplorerHostId)
-      ? remoteExplorerHostId
-      : fallback?.id;
-    if (hostId) requestRemoteExplorer(hostId);
-  }, [remoteExplorerHostId, remoteHosts, requestRemoteExplorer]);
 
   const remoteWorkspaceLaunchGate = useRef(new RemoteWorkspaceLaunchGate());
   const launchRemoteWorkspace = useCallback(async (host: RemoteHostView, requestSeq: number) => {
@@ -3046,20 +3102,13 @@ export default function App() {
       ({
         "--sidebar-expanded-width": `${sidebarRenderWidth}px`,
         "--chat-min-width": `${chatReservedWidth}px`,
-        "--workspace-width": `${workspacePanelRenderWidth}px`,
+        "--workspace-width": `${effectiveWorkspacePanelGridOpen ? workspacePanelRenderWidth : 0}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
         "--terminal-height": `${terminalSurfaceOpen ? liveTerminalHeight ?? terminalRenderHeight : 0}px`,
       }) as CSSProperties,
-    [chatReservedWidth, liveTerminalHeight, sidebarRenderWidth, terminalRenderHeight, terminalSurfaceOpen, workspacePanelRenderWidth],
-  );
+    [chatReservedWidth, effectiveWorkspacePanelGridOpen, liveTerminalHeight, sidebarRenderWidth, terminalPanelOpen, terminalRenderHeight, workspacePanelRenderWidth, terminalSurfaceOpen],
 
-  const setWorkspacePanel = useCallback((open: boolean) => {
-    if (open) {
-      openWorkspacePanel();
-    } else {
-      closeWorkspacePanel();
-    }
-  }, [closeWorkspacePanel, openWorkspacePanel]);
+  );
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     if (activeTabId && workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
@@ -4821,6 +4870,11 @@ export default function App() {
             ) : (
               <>
                 <div className="transcript-navigation-surface" aria-busy={runtimeTransitioning}>
+                  {!effectiveWorkspacePanelGridOpen && !automationView && (
+                    <Suspense fallback={null}>
+                      <DockLauncher onSelect={handleActivitySelect} />
+                    </Suspense>
+                  )}
                   <div
                     className="transcript-navigation-content"
                     aria-hidden={runtimeTransitioning || undefined}
@@ -4891,6 +4945,7 @@ export default function App() {
                 running={visibleRuntimeState.running}
                 pendingPrompt={visibleRuntimeState.pendingPrompt}
                 onContinue={activeTabId && !activeTab?.readOnly && (remoteSurfaceActive ? remoteComposerReady : controllerReady) ? handleTodoContinue : undefined}
+
                 onDismiss={dismissTodos}
               />
             )}
@@ -5184,62 +5239,18 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__tools">
-              <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
-                {SHOW_CONTEXT_DOCK && desktopLayoutStyle !== "creation" && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={rightDockMode === "context"}
-                    className={`workbench-dock__tab${rightDockMode === "context" ? " workbench-dock__tab--active" : ""}`}
-                    onClick={() => openRightDockMode("context")}
-                  >
-                    <Activity size={13} />
-                    <span className="workbench-dock__tab-label">{t("rightDock.overview")}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "files"}
-                  className={`workbench-dock__tab${rightDockMode === "files" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("files")}
-                >
-                  <FileText size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.filesTab")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "changed"}
-                  className={`workbench-dock__tab${rightDockMode === "changed" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("changed")}
-                >
-                  <GitBranch size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
-                </button>
-                {remoteHosts.length > 0 && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={rightDockMode === "remote"}
-                    className={`workbench-dock__tab${rightDockMode === "remote" ? " workbench-dock__tab--active" : ""}`}
-                    onClick={openRemoteDock}
-                  >
-                    <Server size={13} />
-                    <span className="workbench-dock__tab-label">{t("rightDock.remote")}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="workbench-dock__body">
-              {rightDockMode === "remote" ? (
-                <Suspense fallback={null}>
-                  <RemotePanel onClose={() => setWorkspacePanel(false)} />
-                </Suspense>
-              ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
-                <Suspense fallback={null}>
-                  <ContextPanel
+            <div className="workbench-dock__panel">
+              <Suspense fallback={null}>
+                <TabContainer
+                  workspaceTabId={activeTabId}
+                  renderTab={(tab) => (
+                    tab.type === "remote" ? (
+                  <Suspense fallback={null}>
+                    <RemotePanel onClose={() => dockCloseTab(tab.id)} />
+                  </Suspense>
+                ) : tab.type === "context" && desktopLayoutStyle !== "creation" ? (
+                  <Suspense fallback={null}>
+                    <ContextPanel
                     tabId={remoteSurfaceActive ? undefined : activeTabId}
                     items={exportItems}
                     context={visibleRuntimeState.context}
@@ -5255,44 +5266,67 @@ export default function App() {
                     sessionGen={visibleRuntimeState.sessionGen}
                     refreshKey={dockRefreshKey + visibleRuntimeState.contextPanelSeq}
                     usageSeq={visibleRuntimeState.usageSeq}
-                  />
+/>
+                  </Suspense>
+                ) : tab.type === "terminal" ? (
+                  <Suspense fallback={null}>
+                    <TerminalPanel
+                      tabId={activeTabId ?? ""}
+                      cwd={state.meta?.cwd}
+                      readOnly={Boolean(activeTab?.readOnly)}
+                      open={tab.type === "terminal"}
+                      onClose={() => dockCloseTab(tab.id)}
+                      onAddOutput={(sessionId) => void addTerminalOutputToComposer(sessionId)}
+                      onAddToChat={addTerminalSelectionToComposer}
+                    />
+                  </Suspense>
+                ) : tab.type === "browser" ? (
+                  <Suspense fallback={null}>
+                    <BrowserPanel />
+                  </Suspense>
+                ) : tab.type === "instructions" ? (
+                  <Suspense fallback={null}>
+                    <InstructionPanel onPrompt={handleTranscriptPrompt} />
+                  </Suspense>
+                ) : (
+                  <Suspense fallback={null}>
+                    <WorkspacePanel
+                      key={`${workspaceTreeMemoryKey}\u0000${tab.id}`}
+                      open={surfaceWorkspacePanelRenderable}
+                      tabId={activeTabId}
+                      cwd={state.meta?.cwd}
+                      tabReady={activeTab?.ready ?? false}
+                      workspaceScopeKey={workspaceScopeKey}
+                      workspaceMemoryKey={`${workspaceTreeMemoryKey}\u0000${tab.id}`}
+                      maximized={workspacePanelMaximized}
+                      panelWidth={workspacePanelRenderWidth}
+                      onClose={() => dockCloseTab(tab.id)}
+                      onToggleMaximized={() => {
+                        closeTransientOverlays();
+                        setWorkspacePanelMaximized((value) => !value);
+                      }}
+                      onPreviewModeChange={handleWorkspacePreviewModeChange}
+                      onAddToChat={addWorkspaceTextToComposer}
+                      onAddCodeToChat={addWorkspaceCodeToComposer}
+                      onRequestPanelWidth={ensureWorkspacePanelWidth}
+                      onFileTreeRefresh={refreshComposerFileRefs}
+                      onSessionRevertCommitted={handleSessionRevertCommitted}
+                      onOpenInTerminal={remoteSurfaceActive ? undefined : openTerminalForPath}
+                      initialViewMode={tab.type === "changed" ? "changed" : "files"}
+                      completionSummary={state.completionSummary}
+                      turnStartAt={state.turnStartAt}
+                      verificationRevealRequest={verificationRevealRequest}
+                      qualityFloor={composerProfile.qualityFloor}
+                      showViewTabs={false}
+                      creationMode={sidebarCreation}
+                      onOpenFilesChange={handleOpenFilesChange}
+                    />
+                  </Suspense>
+                )
+                  )}
+                />
+
                 </Suspense>
-              ) : (
-                <Suspense fallback={null}>
-                  <WorkspacePanel
-                    key={workspaceTreeMemoryKey}
-                    open={surfaceWorkspacePanelRenderable}
-                    tabId={activeTabId}
-                    cwd={state.meta?.cwd}
-                    workspaceScopeKey={workspaceScopeKey}
-                    workspaceMemoryKey={workspaceTreeMemoryKey}
-                    dockTreeWidth={rightDockTreeWidth}
-                    dockPreviewWidth={rightDockPreviewWidth}
-                    onRestoreDockWidths={restoreWorkspaceDockWidths}
-                    maximized={workspacePanelMaximized}
-                    panelWidth={workspacePanelRenderWidth}
-                    onClose={() => setWorkspacePanel(false)}
-                    onToggleMaximized={() => {
-                      closeTransientOverlays();
-                      setWorkspacePanelMaximized((value) => !value);
-                    }}
-                    onPreviewModeChange={handleWorkspacePreviewModeChange}
-                    onAddToChat={addWorkspaceTextToComposer}
-                    onAddCodeToChat={addWorkspaceCodeToComposer}
-                    onRequestPanelWidth={ensureWorkspacePanelWidth}
-                    onFileTreeRefresh={refreshComposerFileRefs}
-                    onSessionRevertCommitted={handleSessionRevertCommitted}
-                    onOpenInTerminal={remoteSurfaceActive ? undefined : openTerminalForPath}
-                    initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                    completionSummary={state.completionSummary}
-                    turnStartAt={state.turnStartAt}
-                    verificationRevealRequest={verificationRevealRequest}
-                    qualityFloor={composerProfile.qualityFloor}
-                    showViewTabs={false}
-                    creationMode={sidebarCreation}
-                  />
-                </Suspense>
-              )}
             </div>
           </aside>
         )}

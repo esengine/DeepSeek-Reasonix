@@ -679,8 +679,12 @@ ok(
 );
 
 ok(
-  finalDeclaration(".app--darwin .layout--workbench-chrome-hidden.layout--workspace-maximized .workbench-dock__tools", "padding-left") === "96px",
-  "macOS maximized workbench dock leaves safe space for inset window controls",
+  finalDeclaration(".app--darwin .layout--workbench-chrome-hidden.layout--sidebar-collapsed.layout--workspace-maximized .workbench-dock__tools", "padding-left") === "96px",
+  "macOS maximized workbench dock reserves traffic-light space when the sidebar is collapsed",
+);
+ok(
+  !/^\.app--darwin \.layout--workbench-chrome-hidden\.layout--workspace-maximized \.workbench-dock__tools\s*\{[\s\S]*?padding-left:\s*96px;/m.test(stylesSource),
+  "macOS maximized workbench dock does not reserve traffic-light space when the sidebar is expanded",
 );
 
 ok(
