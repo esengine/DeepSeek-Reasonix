@@ -1075,6 +1075,16 @@ export default function App() {
   const { configLoadWarnings, applySnapshot: applyConfigWarningSnapshot, reload: reloadConfigWarnings, dismiss: dismissConfigWarnings } = useConfigLoadWarnings();
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
+  const historyViewOpenRef = useRef(false);
+  historyViewOpenRef.current = histView?.kind === "history";
+  const refreshHistoryView = useCallback(async () => {
+    if (!historyViewOpenRef.current) return;
+    const sessions = await listSessions().catch(() => null);
+    if (!sessions) return;
+    setHistView((cur) => cur === null || cur.kind !== "history" ? cur : cur.source === "scope"
+      ? { ...cur, sessions: sessionsForScope(sessions, cur.filter) }
+      : { ...cur, sessions });
+  }, [listSessions]);
   const paletteOpen = useOverlayStore((s) => s.paletteOpen);
   const setPaletteOpen = useOverlayStore((s) => s.setPaletteOpen);
   const paletteExtensionActions = useOverlayStore((s) => s.paletteExtensionActions);
@@ -2467,13 +2477,14 @@ export default function App() {
     const stopProjectTree = onProjectTreeChanged(() => {
       setProjectRevision((value) => value + 1);
       void refreshTabMetas(undefined, { afterMutation: true });
+      void refreshHistoryView();
     });
     return () => {
       live = false;
       stopProjectTree();
       void ready.then((stop) => stop?.());
     };
-  }, [activeTabId, refreshTabMetas, workspaceScopeKey]);
+  }, [activeTabId, refreshHistoryView, refreshTabMetas, workspaceScopeKey]);
 
   // Bridge remote:* events into the remote store once, app-wide, so the
   // StatusBar chip, host manager, and explorer all see the same live state.
@@ -3639,18 +3650,6 @@ export default function App() {
     closeTransientOverlays();
     setHistView(null);
   }, [closeTransientOverlays]);
-  const refreshHistoryView = useCallback(async () => {
-    const sessions = await listSessions().catch(() => null);
-    if (!sessions) return;
-    setHistView((cur) =>
-      cur === null || cur.kind !== "history"
-        ? cur
-        : cur.source === "scope"
-          ? { ...cur, sessions: sessionsForScope(sessions, cur.filter) }
-          : { ...cur, sessions },
-    );
-  }, [listSessions]);
-
   const navigationSeqRef = useRef(0);
   const navigationRunningRef = useRef(false);
   const navigationPendingRef = useRef<PendingDesktopNavigationRequest | null>(null);
