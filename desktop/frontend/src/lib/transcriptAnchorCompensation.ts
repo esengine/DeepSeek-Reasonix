@@ -8,7 +8,7 @@ import {
   captureVisibleTranscriptLayoutAnchor,
   type TranscriptLayoutAnchor,
 } from "./transcriptVirtuosoRecovery";
-import { MIN_REVERSE_JUMP_PX } from "./transcriptReaderExtentStability";
+import { MIN_REVERSE_JUMP_PX, TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS, transcriptViewportCorrectionIsSafe } from "./transcriptReaderExtentStability";
 
 // Fractional row metrics can shift by 1-2px while Virtuoso's estimate tree is
 // converging during ordinary traversal. Treat that as layout noise so a
@@ -123,6 +123,7 @@ export function createTranscriptAnchorCompensation({
   };
 
   const schedule = () => {
+    if (!TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS) return;
     const element = scrollRef.current;
     if (!element) return;
     if (modeRef.current !== "manual") return;
@@ -181,9 +182,20 @@ export function createTranscriptAnchorCompensation({
         return;
       }
       if (Math.abs(correction) > ANCHOR_COMPENSATION_TOLERANCE_PX) {
+        if (!transcriptViewportCorrectionIsSafe(correction, current.clientHeight)) {
+          clearVisualGuard(compensation);
+          active = null;
+          anchor = captureVisibleTranscriptLayoutAnchor(current) ?? null;
+          return;
+        }
         compensation.stableFrames = 0;
         dispatch({ type: "SCROLL_TO_OFFSET", owner: "anchor-compensation", top: current.scrollTop + correction, behavior: "auto" });
         clearVisualGuard(compensation);
+        // One geometry transaction receives one physical correction. A later
+        // scroll delivery or geometry revision must establish a fresh anchor
+        // before another transaction can write.
+        active = null;
+        return;
       } else {
         clearVisualGuard(compensation);
         compensation.stableFrames += 1;
@@ -203,10 +215,12 @@ export function createTranscriptAnchorCompensation({
       schedule();
       return;
     }
-    if (event.type === "SCROLL_DELIVERED") {
+    if (event.type === "SCROLL_DELIVERED" || event.type === "NATIVE_SCROLLBAR_END") {
       const element = scrollRef.current;
       // Scroll deliveries caused by a geometry commit must not replace the
-      // reader transaction's last accepted logical anchor.
+      // reader transaction's last accepted logical anchor. Native-thumb
+      // deliveries cannot sample in native-thumb mode, so its end event
+      // rebases the anchor after the reducer publishes manual mode.
       if (element && !readerExtentIsActive()) sample(element);
       return;
     }

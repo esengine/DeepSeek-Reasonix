@@ -167,7 +167,9 @@ console.log("\nbundle budgets");
 // isolated conversation forks and their extracted browser mock adapter bring
 // the combined tree to 458.158 KiB. Retain 0.042 KiB with the smallest
 // one-decimal ratchet.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.2 : 458.2;
+// Stable-window transcript mounting and bounded correction guards bring the
+// measured path to 458.4 KiB; retain the next one-decimal ratchet.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.5 : 458.5;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -293,6 +295,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // 2452.773 KiB; isolated conversation forks bring the combined tree to
 // 2454.719 KiB on the release toolchain. Retain 0.081 KiB with the smallest
 // one-decimal ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_454.8 : 2_454.8;
+// Stable-window transcript mounting and bounded correction guards measure
+// 2456.2 KiB raw; retain the next one-decimal ratchet.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_456.3 : 2_456.3;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -65,6 +65,9 @@ import { useTranscriptQuestionJump, useTranscriptQuestions } from "../lib/useTra
 import { useTranscriptHistoryAutoFill, useTranscriptPagingAuthorization, useTranscriptSurfaceCommit } from "../lib/useTranscriptNavigationSurface";
 import { useTranscriptGeometryLifecycle } from "../lib/useTranscriptGeometryLifecycle";
 import {
+  TRANSCRIPT_STATIC_WINDOW_ROW_LIMIT,
+} from "../lib/transcriptReaderMountPolicy";
+import {
   LiveAssistantMessage,
   SHOW_SCROLL_DIAGNOSTICS,
   TRANSCRIPT_VIRTUOSO_COMPONENTS,
@@ -856,6 +859,7 @@ export function Transcript({
   const readerMountCorridorRows = readerTransactionActive && virtualRows.length <= TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT
     ? Math.max(READER_MOUNT_CORRIDOR_ROWS, virtualRows.length)
     : READER_MOUNT_CORRIDOR_ROWS;
+  const staticWindow = virtualRows.length <= TRANSCRIPT_STATIC_WINDOW_ROW_LIMIT;
   const { handleItemsRendered, handleTotalListHeightChanged } = useTranscriptGeometryLifecycle({
     virtualRowCount: virtualRows.length, hydrating, readerTransactionActive, historyMutation, historyPrependLease, scrollModeRef,
     followGrowingTail, revalidateTail,
@@ -956,6 +960,7 @@ export function Transcript({
             className={`transcript${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
             data-transcript-hydrating={hydrating ? "true" : "false"}
             data-transcript-reader-layout-lease={readerTransactionActive ? "true" : "false"}
+            data-transcript-static-window={staticWindow ? "true" : undefined}
             data-transcript-row-count={virtualRows.length}
             data-transcript-estimated-total={estimatedTotalHeight}
             data-transcript-reset-key={virtuosoResetKey}
@@ -980,10 +985,14 @@ export function Transcript({
             atBottomStateChange={atBottomStateChange}
             heightEstimates={heightEstimates}
             itemSize={itemSize}
-            minOverscanItemCount={layoutSafeMode || readerTransactionActive
+            minOverscanItemCount={staticWindow
+              ? { top: virtualRows.length, bottom: virtualRows.length }
+              : layoutSafeMode || readerTransactionActive
               ? { top: readerMountCorridorRows, bottom: readerMountCorridorRows }
               : { top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
-            increaseViewportBy={layoutSafeMode || readerTransactionActive
+            increaseViewportBy={staticWindow
+              ? { top: estimatedTotalHeight, bottom: estimatedTotalHeight }
+              : layoutSafeMode || readerTransactionActive
               ? {
                   top: (scrollElement?.clientHeight ?? 0) * READER_MOUNT_CORRIDOR_VIEWPORTS,
                   bottom: (scrollElement?.clientHeight ?? 0) * READER_MOUNT_CORRIDOR_VIEWPORTS,

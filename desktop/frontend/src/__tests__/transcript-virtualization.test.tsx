@@ -1,8 +1,8 @@
 // Run: tsx src/__tests__/transcript-virtualization.test.tsx
 //
-// Block-level DOM virtualization of the transcript:
-// - a small viewport mounts only the visible rows + overscan (offscreen rows
-//   create no Markdown/ToolCard subtrees),
+// Stable-window and block-level DOM virtualization of the transcript:
+// - moderate transcripts stay fully mounted to prevent range-replacement
+//   scroll jitter; sessions beyond the policy cutoff retain virtualization,
 // - prepending an older-history page keeps the reading position (key-anchored
 //   compensation),
 // - the active turn streams in the pinned live region outside the list:
@@ -104,8 +104,9 @@ function firstTextNode(root: Node): Text | null {
     const container = harness.container;
     const mountedRows = container.querySelectorAll(".transcript__row").length;
     const mountedAnswers = container.querySelectorAll(".msg--assistant").length;
-    ok(mountedRows > 0 && mountedRows <= 24, `small viewport mounts only a window of rows (mounted ${mountedRows} of 90)`);
-    ok(mountedAnswers > 0 && mountedAnswers < 30, `offscreen answers mount no Markdown subtree (mounted ${mountedAnswers} of 30)`);
+    ok(harness.scrollElement().dataset.transcriptStaticWindow === "true", "moderate transcripts opt into the stable mounted window");
+    ok(mountedRows === 90, `stable window mounts every transcript row (mounted ${mountedRows} of 90)`);
+    ok(mountedAnswers === 30, `stable window keeps every answer subtree mounted (mounted ${mountedAnswers} of 30)`);
     ok(harness.scrollElement().scrollHeight > 2000, "Virtuoso exposes the full virtual height to the transcript scrollbar");
   } finally {
     await harness.unmount();
@@ -409,13 +410,13 @@ function firstTextNode(root: Node): Text | null {
       document.dispatchEvent(new Event("selectionchange"));
       await harness.flush();
       const storeModule = await harness.loadModule<typeof import("../lib/transcriptSelectionStore")>("/src/lib/transcriptSelectionStore.ts");
-      ok(storeModule.transcriptSelectionStore.getSnapshot().mode === "logical-dragging", "cross-row selection promotes before virtualization can unmount its anchor");
+      ok(storeModule.transcriptSelectionStore.getSnapshot().mode === "logical-dragging", "cross-row selection promotes before the viewport moves away from its anchor");
 
       el.scrollTop = 6000;
       dispatchScroll(el);
       await harness.flush();
-      ok(harness.container.querySelectorAll(".transcript__row").length <= 30, "logical selection keeps the transcript windowed across virtual pages");
-      ok(storeModule.transcriptSelectionStore.getSnapshot().mode === "logical-dragging", "logical selection survives its native anchor row unmounting");
+      ok(harness.container.querySelectorAll(".transcript__row").length === 90, "logical selection keeps the moderate transcript in its stable window");
+      ok(storeModule.transcriptSelectionStore.getSnapshot().mode === "logical-dragging", "logical selection survives scrolling its native anchor row offscreen");
 
       document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
       await harness.flush();
