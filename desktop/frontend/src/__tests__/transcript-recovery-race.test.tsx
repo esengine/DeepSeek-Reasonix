@@ -6,6 +6,9 @@ import type { StateSnapshot, VirtuosoHandle } from "react-virtuoso";
 import { useTranscriptScrollArbiter, type TranscriptRecoveryTerminal } from "../lib/useTranscriptScrollArbiter";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import { createTranscriptMeasuredSizes } from "../lib/transcriptMeasuredSizes";
+import {
+  TRANSCRIPT_STATIC_WINDOW_ROW_LIMIT,
+} from "../lib/transcriptReaderMountPolicy";
 import type { TranscriptScrollWriteRecord } from "../lib/transcriptScrollProbe";
 import { buildTranscriptRows, buildTurnModels, EMPTY_FOLDS, transcriptRowMeasurementVersion, type TranscriptRow } from "../lib/transcriptRows";
 import type { Item } from "../lib/useController";
@@ -26,6 +29,15 @@ function check(condition: unknown, label: string) {
 }
 
 console.log("\ntranscript recovery races");
+
+check(
+  TRANSCRIPT_STATIC_WINDOW_ROW_LIMIT >= 653,
+  "the field-reproduced 653-row transcript remains in the stable mounted window",
+);
+check(
+  TRANSCRIPT_STATIC_WINDOW_ROW_LIMIT === 1_000,
+  "larger transcripts retain a bounded virtualization cutoff",
+);
 
 const { dom, flushFrames } = installTranscriptRecoveryRaceDom();
 

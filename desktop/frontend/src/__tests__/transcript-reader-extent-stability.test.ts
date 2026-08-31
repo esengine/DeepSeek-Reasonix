@@ -11,6 +11,7 @@ import {
   transcriptReaderIdleDeadlineReached,
   transcriptReaderTransactionCanReuse,
   transcriptReaderExtentCanCorrect,
+  transcriptViewportCorrectionIsSafe,
 } from "../lib/transcriptReaderExtentStability";
 
 console.log("\ntranscript reader extent stability");
@@ -20,6 +21,10 @@ assert.equal(transcriptReaderIdleDeadlineReached(1_000, 1_180), true, "180ms ent
 assert.equal(transcriptReaderIdleDeadlineReached(1_000, 1_181), true, "181ms remains past the idle boundary");
 assert.equal(transcriptReaderTransactionCanReuse(1, 12), true, "same-direction wheel input reuses one transaction");
 assert.equal(transcriptReaderTransactionCanReuse(1, -1), false, "direction changes create a new ownership transaction");
+assert.equal(transcriptViewportCorrectionIsSafe(-1_400, 363), true,
+  "a bounded correction inside four viewports remains eligible");
+assert.equal(transcriptViewportCorrectionIsSafe(-5_554, 363), false,
+  "a many-viewport field correction rebases instead of jumping backwards");
 
 const reported = createTranscriptReaderExtentGuard(
   { scrollTop: 14_567.47, scrollHeight: 15_829, clientHeight: 725 },

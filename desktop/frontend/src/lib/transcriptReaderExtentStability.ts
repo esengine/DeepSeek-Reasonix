@@ -7,6 +7,15 @@ import type { TranscriptScrollEvent } from "./transcriptScrollArbiter";
 export const MIN_REVERSE_JUMP_PX = 96;
 export const TRANSCRIPT_READER_IDLE_MS = 180;
 export const TRANSCRIPT_READER_SETTLE_MS = 1_000;
+export const TRANSCRIPT_VIEWPORT_CORRECTION_LIMIT = 4;
+export const TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS = typeof __BUILD_COMMIT__ === "undefined"
+  || !__BUILD_COMMIT__.includes("native-scroll-ab");
+
+export function transcriptViewportCorrectionIsSafe(correction: number, clientHeight: number): boolean {
+  return Number.isFinite(correction)
+    && clientHeight > 0
+    && Math.abs(correction) <= clientHeight * TRANSCRIPT_VIEWPORT_CORRECTION_LIMIT;
+}
 
 export function transcriptReaderIdleDeadlineReached(startedAt: number, now: number): boolean {
   return now - startedAt >= TRANSCRIPT_READER_IDLE_MS;

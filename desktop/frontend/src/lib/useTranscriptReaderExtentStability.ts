@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { TranscriptScrollMode } from "./transcriptScrollArbiter";
-import { MIN_REVERSE_JUMP_PX, TRANSCRIPT_READER_IDLE_MS, TRANSCRIPT_READER_SETTLE_MS, transcriptReaderDirection } from "./transcriptReaderExtentStability";
+import { MIN_REVERSE_JUMP_PX, TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS, TRANSCRIPT_READER_IDLE_MS, TRANSCRIPT_READER_SETTLE_MS, transcriptReaderDirection, transcriptViewportCorrectionIsSafe } from "./transcriptReaderExtentStability";
 import { nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
 import { recordTranscriptScrollDiagnostic, type TranscriptScrollWriteRecord } from "./transcriptScrollProbe";
 import { transcriptElementViewportIsBlank } from "./transcriptVirtuosoRecovery";
@@ -40,6 +40,11 @@ type ActiveReaderTransaction = TranscriptReaderTransaction & {
    *  proof that the reader genuinely navigated this range; a collapse clamp
    *  or in-place wheel at a fabricated bottom adds nothing. */
   directionalTravelPx: number;
+  /** A downward gesture with real native travel reached the physical tail
+   *  while Virtuoso was publishing a collapsed extent. Preserve that proof
+   *  across the later size-tree rebound so the existing tail owner can finish
+   *  the navigation without restoring arbitrary reader corrections. */
+  reachedCollapsedTailWithForwardProgress: boolean;
   anchorDisplacementObserved: boolean;
   transientCandidateHeight: number;
   transientStableFrames: number;
@@ -241,6 +246,25 @@ export function useTranscriptReaderExtentStability({
     const rejected = (extentCollapsed && reverse >= threshold) || anchorDisplaced;
     const remainsCollapsed = extentCollapsed
       && element.scrollHeight < transaction.baselineHeight - Math.max(8, element.clientHeight * 0.5);
+    if (
+      !transaction.reachedCollapsedTailWithForwardProgress
+      &&
+      transaction.direction > 0
+      && transaction.canClaimTail
+      && transaction.directionalTravelPx >= MIN_REVERSE_JUMP_PX
+      && extentCollapsed
+      && nativeTranscriptDistanceFromBottom(element) <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX
+      && tailNodesMounted(element)
+    ) {
+      transaction.reachedCollapsedTailWithForwardProgress = true;
+      recordTranscriptScrollDiagnostic("reader-transaction", {
+        transactionId: transaction.id,
+        ownershipEpoch: transaction.ownershipEpoch,
+        direction: transaction.direction,
+        phase: transaction.phase,
+        result: "collapsed-tail-reached",
+      });
+    }
     if (remainsCollapsed) {
       if (Math.abs(element.scrollHeight - transaction.transientCandidateHeight) <= GEOMETRY_EPSILON_PX) {
         transaction.transientStableFrames += 1;
@@ -263,11 +287,13 @@ export function useTranscriptReaderExtentStability({
           Date.now() + POST_CORRECTION_SETTLE_MS,
         );
       }
-      if (anchorRow && transaction.anchor) {
-        // DOM geometry includes the transform already applied by a previous
-        // observation. Subtract it before deriving the next absolute guard so
-        // repeated scroll events cannot compound the visual compensation.
-        transaction.visualOffset = -physicalAnchorDrift;
+      if (TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS && anchorRow && transaction.anchor) {
+        // Freeze the first pre-paint guard until it is committed or cleared.
+        // WebView2 can deliver several geometry observations before the list
+        // transform reaches getBoundingClientRect(); recomputing in that gap
+        // subtracts the unapplied guard repeatedly and amplifies one drift on
+        // every callback.
+        transaction.visualOffset ||= -physicalAnchorDrift;
         element.dataset.transcriptReaderVisualGuard = "true";
         element.style.setProperty("--transcript-reader-visual-offset", `${transaction.visualOffset}px`);
       }
@@ -283,7 +309,8 @@ export function useTranscriptReaderExtentStability({
       // the single correction budget synchronously before paint; the tick's
       // prepaint lane shares the same budget as the covered-frame fallback.
       if (
-        !transaction.correctionWritten
+        TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS
+        && !transaction.correctionWritten
         && transaction.collapseObserved
         && !transaction.transient
         && reverse >= threshold
@@ -407,7 +434,8 @@ export function useTranscriptReaderExtentStability({
       // A recovered extent or a row-only displacement remains immediately
       // correctable, so ordinary measurement drift does not linger onscreen.
       if (
-        !geometryCommitBlockedRef.current
+        TRANSCRIPT_MANUAL_STABILITY_CORRECTIONS
+        && !geometryCommitBlockedRef.current
         && !transaction.correctionWritten
         && correctionReady
         && (!extentStillCollapsed || !beforeIdleDeadline)
@@ -455,7 +483,19 @@ export function useTranscriptReaderExtentStability({
           ? element.scrollTop + anchorRow.getBoundingClientRect().top - transaction.visualOffset - viewportTop - transaction.anchor.offset
           : transaction.expectedTop;
         const correction = Math.max(0, Math.min(nativeTranscriptBottomTop(element), targetTop)) - element.scrollTop;
-        if ((transaction.mountAnchorWritten ? Math.abs(correction) : transaction.direction * correction) > 1) {
+        if (!stableAnchorRequiredRef.current && !transcriptViewportCorrectionIsSafe(correction, element.clientHeight)) {
+          // A many-viewport correction is a replaced virtual range, not a
+          // trustworthy continuation of the old screen anchor. Rebase on the
+          // content the reader can actually see instead of jumping backwards.
+          transaction.correctionWritten = true;
+          transaction.anchor = captureLogicalAnchor(element) ?? transaction.anchor;
+          transaction.lastAcceptedTop = element.scrollTop;
+          transaction.baselineHeight = element.scrollHeight;
+          transaction.minimumHeight = element.scrollHeight;
+          transaction.collapseObserved = false;
+          transaction.anchorDisplacementObserved = false;
+          clearVisualGuard(transaction);
+        } else if ((transaction.mountAnchorWritten ? Math.abs(correction) : transaction.direction * correction) > 1) {
           correctionWrittenThisFrame = writeCorrection({
             owner: "reader-stability",
             kind: "scrollBy",
@@ -505,8 +545,11 @@ export function useTranscriptReaderExtentStability({
         && !transaction.transient
         && (!transaction.collapseObserved
           || element.scrollHeight >= transaction.baselineHeight - collapseThreshold(element))
-        && bottomDistance <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX
-        && tailNodesMounted(element);
+        && ((bottomDistance <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX && tailNodesMounted(element))
+          // The collapsed sample already proved that the real tail nodes were
+          // mounted. Virtuoso may unmount them during the rebound itself; the
+          // dedicated tail owner is responsible for mounting LAST again.
+          || transaction.reachedCollapsedTailWithForwardProgress);
       callbacksRef.current.onStabilitySample(transaction, stable, tailEligible);
       transaction.lastGeometryRevision = revision;
       transaction.lastHeight = element.scrollHeight;
@@ -662,6 +705,9 @@ export function useTranscriptReaderExtentStability({
       // A follow-up epoch of one continuous same-direction gesture keeps the
       // travel proof the gesture already earned; a fresh gesture starts at 0.
       directionalTravelPx: inheritsGesture ? current.directionalTravelPx : 0,
+      reachedCollapsedTailWithForwardProgress: inheritsGesture
+        ? current.reachedCollapsedTailWithForwardProgress
+        : false,
       anchorDisplacementObserved: false,
       transientCandidateHeight: element.scrollHeight,
       transientStableFrames: 0,

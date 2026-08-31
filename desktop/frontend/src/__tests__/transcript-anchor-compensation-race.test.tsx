@@ -114,6 +114,7 @@ scrollElement.getBoundingClientRect = () => rectAt(0);
 rowElement.getBoundingClientRect = () => rectAt(200);
 Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 100 });
 let scrollExtent = 500;
+let ignoreOffsetWrites = false;
 Object.defineProperty(scrollElement, "scrollHeight", { configurable: true, get: () => scrollExtent });
 Object.defineProperty(scrollElement, "scrollTop", { configurable: true, writable: true, value: 0 });
 Object.defineProperty(scrollElement, "offsetWidth", { configurable: true, value: 800 });
@@ -125,6 +126,7 @@ const virtuosoHandle = {
   scrollToIndex: () => {},
   // Browser semantics: an offset write clamps against the current extent.
   scrollTo: (options?: { top?: number }) => {
+    if (ignoreOffsetWrites) return;
     const top = options?.top ?? 0;
     scrollElement.scrollTop = Math.max(0, Math.min(scrollExtent - scrollElement.clientHeight, top));
   },
@@ -230,6 +232,33 @@ await flushFrames();
 check(scrollElement.scrollTop === 800, "post-release remeasurement reconverges the claimed native bottom");
 scrollExtent = 500;
 
+// A native-thumb drag changes the visible anchor while the arbiter is in
+// native-thumb mode, where SCROLL_DELIVERED is intentionally observational.
+// Rebase on release so the next geometry notification cannot compensate from
+// the pre-drag row offset and pull the viewport back toward its old position.
+await act(async () => arbiter?.reset());
+scrollElement.appendChild(rowElement);
+scrollElement.scrollTop = 100;
+rowElement.getBoundingClientRect = () => rectAt(10);
+await act(async () => arbiter?.setMode("manual", "test-native-thumb-anchor"));
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.onPointerDownIntent({
+  button: 0,
+  nativeEvent: { button: 0, clientX: 795 },
+} as React.PointerEvent<HTMLElement>));
+scrollElement.scrollTop = 300;
+rowElement.getBoundingClientRect = () => rectAt(50);
+await act(async () => arbiter?.deliverScroll());
+await act(async () => window.dispatchEvent(new dom.window.Event("pointerup")));
+check(arbiter?.modeRef.current === "manual", "native thumb release away from bottom resumes manual mode");
+scrollWrites.length = 0;
+await act(async () => arbiter?.followGrowingTail());
+for (let i = 0; i < 4; i += 1) await flushFrames();
+check(
+  scrollWrites.filter((write) => write.owner === "anchor-compensation").length === 0,
+  "native thumb release rebases the anchor before the next geometry notification",
+);
+
 // ── Manual-mode viewport anchor compensation (#8438/#8488/#8897): an
 // above-viewport height change (fold auto-collapse, history patch) must not
 // push the reading position. The drift is measured against the anchor sampled
@@ -261,6 +290,21 @@ check(scrollElement.dataset.transcriptReaderVisualGuard === undefined,
   "the idle-manual visual guard clears after the writer commits the physical offset");
 check(arbiter?.modeRef.current === "manual", "anchor compensation preserves manual reading ownership");
 check(rowElement.getBoundingClientRect().top === 50, "the anchor row is physically back at its pre-change offset");
+
+// An ineffective browser write must end this geometry transaction instead of
+// submitting every animation frame until the one-second budget expires.
+await act(async () => arbiter?.deliverScroll());
+scrollWrites.length = 0;
+ignoreOffsetWrites = true;
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(550 - scrollElement.scrollTop));
+await act(async () => arbiter?.followGrowingTail());
+for (let frame = 0; frame < 12; frame += 1) await flushFrames();
+check(
+  scrollWrites.filter((write) => write.owner === "anchor-compensation").length === 1,
+  "one geometry transaction submits at most one anchor correction",
+);
+ignoreOffsetWrites = false;
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(350 - scrollElement.scrollTop));
 
 // Growth below the viewport (streaming tail) leaves the anchor row put:
 // zero measured drift, zero writes.

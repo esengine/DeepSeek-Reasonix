@@ -3646,6 +3646,15 @@ a[href] {
   height: max(0px, calc(var(--transcript-row-estimate) - 32px));
   overflow: hidden;
 }
+/* The static-window architecture baseline keeps the actual row mounted, so a
+   virtual size-tree placeholder only creates a visible blank band while the
+   Markdown worker catches up. Let its readable plain-text fallback own the
+   natural height; the production virtual path keeps the estimate above. */
+.transcript[data-transcript-static-window="true"]
+  .transcript__row .msg--assistant .msg__body > .md[data-transcript-geometry-pending] {
+  height: auto;
+  overflow: visible;
+}
 /* Offscreen rows are unmounted by the virtualizer, so content-visibility
 /* Offscreen rows are unmounted by the virtualizer, so content-visibility
    culling is redundant inside rows — and skipping it keeps offsetHeight

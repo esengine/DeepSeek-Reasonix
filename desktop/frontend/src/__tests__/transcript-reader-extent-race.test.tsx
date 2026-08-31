@@ -111,6 +111,24 @@ await act(async () => {
   arbiter!.scrollerRef(scrollElement);
 });
 
+// A redundant downward wheel at an already-owned physical tail must not enter
+// the browser/Virtuoso native range-replacement lane. Upward input remains the
+// normal way to release tail ownership for manual reading.
+scrollExtent = 2_000;
+scrollElement.scrollTop = 1_275;
+let tailWheelPrevented = 0;
+await act(async () => arbiter?.deliverScroll());
+const tailWheelAccepted = arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaMode: 0,
+  deltaX: 0,
+  deltaY: 120,
+  target: scrollElement,
+  preventDefault: () => { tailWheelPrevented += 1; },
+} as unknown as React.WheelEvent<HTMLElement>);
+check(tailWheelAccepted === false && tailWheelPrevented === 1,
+  "downward wheel at an owned physical tail is suppressed before native range replacement");
+
 // Composer wrap shrinks the in-flow viewport. Tail-follow must pin the native
 // tail synchronously so jump-bottom cannot flash before the coalesced frame.
 await act(async () => arbiter?.reset());
@@ -210,6 +228,41 @@ check(
   "the post-growth collapse receives one reader-owned anchor correction",
 );
 Date.now = growthRaceRealNow;
+
+// WebView2 may deliver several observers before the newly assigned list
+// transform is reflected by getBoundingClientRect. The first guard must stay
+// absolute: repeated callbacks cannot multiply one 2,537px displacement into
+// 5,074px, 7,611px, and beyond (frontend diagnostic db21a6c0).
+await act(async () => arbiter?.reset());
+scrollExtent = 23_806;
+scrollElement.scrollTop = 20_000;
+rowElement.getBoundingClientRect = () => rectAt(12);
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.releaseTailFollow());
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaMode: 0,
+  deltaX: 0,
+  deltaY: 24,
+  target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+scrollByCalls = 0;
+scrollWrites.length = 0;
+scrollExtent += 2_537;
+// Intentionally omit the CSS variable from this rect, matching the delayed
+// WebView2 transform observation captured in the field trace.
+rowElement.getBoundingClientRect = () => rectAt(2_549);
+for (let sample = 0; sample < 4; sample += 1) {
+  await act(async () => arbiter?.deliverScroll());
+}
+check(
+  scrollElement.style.getPropertyValue("--transcript-reader-visual-offset") === "-2537px",
+  "repeated pre-paint observers freeze one absolute visual guard",
+);
+rowElement.getBoundingClientRect = () => rectAt(12);
+await flushFrames();
+check(scrollByCalls === 1 && Math.abs(lastScrollByTop - 2_537) <= 1,
+  `the frozen guard commits one bounded correction (${lastScrollByTop}px)`);
 
 // WKWebView can replace estimates above the viewport without moving native
 // scrollTop. The logical rows still jump backwards on screen, so the reader
@@ -694,6 +747,54 @@ check(String(arbiter?.modeRef.current) === "manual",
 Date.now = realDateNow;
 delete rowElement.dataset.transcriptLastRow;
 setTranscriptScrollDiagnosticSink(() => {});
+
+// Field race: a downward reader reaches a collapsed physical bottom, then
+// Virtuoso restores 1,446px of extent without moving scrollTop. The collapsed
+// sample is genuine only after prior forward travel; preserve that proof until
+// stable geometry can hand the range to the dedicated tail owner.
+await act(async () => arbiter?.reset());
+Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 363 });
+scrollExtent = 27_975;
+scrollElement.scrollTop = 25_000;
+rowElement.dataset.transcriptLastRow = "true";
+rowElement.getBoundingClientRect = () => rectAt(20);
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.setMode("manual", "test-collapsed-tail-rebound"));
+let collapsedTailNow = realDateNow();
+Date.now = () => collapsedTailNow;
+scrollWrites.length = 0;
+scrollByCalls = 0;
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaMode: 0,
+  deltaX: 0,
+  deltaY: 120,
+  target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+scrollElement.scrollTop = 25_804.67;
+scrollExtent = 26_168;
+await act(async () => arbiter?.deliverScroll());
+// The first collapsed delivery accepts the 804px native travel; the second
+// records that this moving gesture reached the temporary physical tail.
+await act(async () => arbiter?.deliverScroll());
+scrollExtent = 27_976;
+delete rowElement.dataset.transcriptLastRow;
+await act(async () => arbiter?.followGrowingTail("items-rendered"));
+collapsedTailNow += 181;
+for (let frame = 0; frame < 4; frame += 1) await flushFrames();
+check(String(arbiter?.modeRef.current) === "tail-follow",
+  "a proven collapsed-tail sample survives the 1,446px extent rebound");
+check(
+  scrollWrites.filter((write) => write.owner === "reader-stability" || write.owner === "anchor-compensation").length === 0
+    && scrollByCalls === 0,
+  "collapsed-tail handoff does not restore arbitrary reader or anchor corrections",
+);
+await act(async () => arbiter?.followGrowingTail("data-change"));
+for (let frame = 0; frame < 4; frame += 1) await flushFrames();
+check(Math.abs(scrollElement.scrollTop - (scrollExtent - scrollElement.clientHeight)) <= 1,
+  "the existing tail owner converges on the restored physical bottom");
+Date.now = realDateNow;
+Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 725 });
 
 // A large extent contraction is transient for its first painted sample and is
 // accepted only after two consecutive stable frames.

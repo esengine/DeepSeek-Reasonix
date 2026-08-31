@@ -108,6 +108,10 @@ ok(
   "virtual transcript rows do not measure markdown through 72px placeholders",
 );
 ok(
+  /\.transcript\[data-transcript-static-window="true"\][^{]*data-transcript-geometry-pending\][^{]*\{[^}]*height:\s*auto;[^}]*overflow:\s*visible;/.test(styles),
+  "static transcript baseline uses the pending Markdown fallback's natural height",
+);
+ok(
   hasDeclaration(".transcript__row .msg", "content-visibility", "visible") &&
     hasDeclaration(".transcript__row .turn-collapse", "content-visibility", "visible"),
   "virtual transcript cards stay measurable after the markdown override",

@@ -717,6 +717,14 @@ export function useTranscriptScrollArbiter({
       releaseTailFollow(delta.y > 0, delta.y);
       return true;
     }
+    // Once the reader has explicitly handed ownership to the physical tail,
+    // another downward wheel has nowhere meaningful to navigate. Letting the
+    // browser consume it makes Virtuoso replace its measured tail range with
+    // transient estimates (field trace: 41k -> 35k -> 57k -> 41k), producing
+    // a large native clamp/rebound even though no application writer ran.
+    // Keep tail ownership and suppress that redundant native input; upward
+    // input still takes manual ownership through the branch above.
+    event.preventDefault();
     return false;
   }, [releaseTailFollow, restoreTailIfNotScrollable]);
 
