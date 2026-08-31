@@ -629,6 +629,34 @@ export interface DeliveryWorktreeOpenResult {
   tab: TabMeta;
 }
 
+export interface WorktreeMergeInspection {
+  available: boolean;
+  reason?: string;
+  worktreeRoot?: string;
+  sourceRoot?: string;
+  worktreeBranch?: string;
+  targetBranch?: string;
+  aheadCount: number;
+  behindCount: number;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  changedFiles?: string[];
+  hasConflicts: boolean;
+  conflictFiles?: string[];
+  worktreeDirty: boolean;
+  sourceDirty: boolean;
+}
+
+export interface WorktreeMergeResult {
+  merged: boolean;
+  targetBranch: string;
+  mergedCommit?: string;
+  worktreeRemoved: boolean;
+  branchDeleted: boolean;
+  error?: string;
+}
+
 export type ProjectTopicStatus = "thinking" | "streaming" | "waiting_confirmation" | "background_job" | "paused" | "awaiting_delivery" | "error" | "diverged_recovery";
 
 export interface TopicMeta {

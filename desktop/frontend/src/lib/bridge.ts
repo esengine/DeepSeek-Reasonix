@@ -57,6 +57,8 @@ import type {
   DesktopStartupSettingsView,
   DeliveryWorktreeAvailability,
   DeliveryWorktreeOpenResult,
+  WorktreeMergeInspection,
+  WorktreeMergeResult,
   DroppedItem,
   EffortInfo,
   ExtensionActionView,
@@ -634,6 +636,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   IsolatedWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateIsolatedWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
+  InspectWorktreeMerge(tabID: string): Promise<WorktreeMergeInspection>;
+  MergeWorktreeBack(tabID: string, autoCommitDirty: boolean, removeWorktree: boolean, deleteBranch: boolean): Promise<WorktreeMergeResult>;
   // Deprecated one-version aliases kept bound for older desktop clients.
   DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
@@ -1084,7 +1088,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -5206,6 +5210,42 @@ function makeMockApp(): AppBindings {
     },
     async CreateDeliveryWorktree(workspaceRoot: string) {
       return this.CreateIsolatedWorktree(workspaceRoot);
+    },
+    async InspectWorktreeMerge(tabID: string) {
+      const tab = mockTabs.find((candidate) => candidate.id === tabID) ?? mockTabs.find((candidate) => candidate.active);
+      return {
+        available: true,
+        worktreeRoot: tab?.workspaceRoot || "/mock/worktree",
+        sourceRoot: "/mock/source",
+        worktreeBranch: tab?.gitBranch || "reasonix/fork-mock",
+        targetBranch: "main",
+        aheadCount: 2,
+        behindCount: 0,
+        filesChanged: 1,
+        insertions: 15,
+        deletions: 3,
+        changedFiles: ["feature.ts"],
+        hasConflicts: false,
+        conflictFiles: [],
+        worktreeDirty: false,
+        sourceDirty: false,
+      };
+    },
+    async MergeWorktreeBack(tabID: string, _autoCommitDirty: boolean, removeWorktree: boolean, _deleteBranch: boolean) {
+      const tab = mockTabs.find((candidate) => candidate.id === tabID) ?? mockTabs.find((candidate) => candidate.active);
+      if (removeWorktree && tab) {
+        mockTabs = mockTabs.filter((candidate) => candidate.id !== tab.id);
+        if (mockTabs.length > 0) {
+          mockTabs[0].active = true;
+        }
+      }
+      return {
+        merged: true,
+        targetBranch: "main",
+        mergedCommit: "mock-commit-hash",
+        worktreeRemoved: removeWorktree,
+        branchDeleted: _deleteBranch,
+      };
     },
     async OpenGlobalTab(_topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);

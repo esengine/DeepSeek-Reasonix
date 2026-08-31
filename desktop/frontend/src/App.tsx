@@ -53,6 +53,7 @@ const ProjectTree = lazy(() => import("./components/ProjectTree").then((module) 
 const RemoteSessionSurface = lazy(() => import("./components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
 const ExtensionFormDialog = lazy(() => import("./components/ExtensionFormDialog").then((module) => ({ default: module.ExtensionFormDialog })));
 const MCPInteractionCard = lazy(() => import("./components/MCPInteractionCard").then((module) => ({ default: module.MCPInteractionCard })));
+const WorktreeMergeModal = lazy(() => import("./components/WorktreeMergeModal").then((module) => ({ default: module.WorktreeMergeModal })));
 /** Footer decision surface kinds. Runtime blockers are explicit recovery choices. */
 type DecisionSurfaceKind = MockDecisionSurfaceKind | "extension_form";
 import { StatusBar } from "./components/StatusBar";
@@ -1254,6 +1255,7 @@ export default function App() {
   const [backgroundRuntimes, setBackgroundRuntimes] = useState<BackgroundRuntimeView[]>([]);
   const [workspaceConflict, setWorkspaceConflict] = useState<WorkspaceConflictView | null>(null);
   const [pendingClose, setPendingClose] = useState<{ tabId: string; work: ActiveWorkView; stopping: boolean } | null>(null);
+  const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
   const topicRenameSkipCommitRef = useRef(false);
   const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
@@ -4670,6 +4672,17 @@ export default function App() {
               {topicbarSubtitleVisible && (
                 <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
                   {activeTab?.isolatedWorktree && <WorktreeBadge size={11} />}
+                  {activeTab?.isolatedWorktree && (
+                    <button
+                      type="button"
+                      className="topicbar__worktree-btn"
+                      onClick={() => setWorktreeMergeTabId(activeTab.id)}
+                      title={t("worktree.mergeButtonTooltip")}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit" }}
+                    >
+                      <span style={{ fontSize: "11px", opacity: 0.9, textDecoration: "underline", textDecorationStyle: "dotted" }}>{t("worktree.mergeAction")}</span>
+                    </button>
+                  )}
                   {topicbarImSourcePlatform && (
                     <span className={`topicbar__source-chip topicbar__source-chip--${topicbarImSourcePlatform}`}>
                       {topicbarImSourceLabel}
@@ -5461,6 +5474,22 @@ export default function App() {
           onAddToChat={addSelectedTextToComposer}
         />
       </Suspense>
+      {worktreeMergeTabId && (
+        <Suspense fallback={null}>
+          <WorktreeMergeModal
+            tabId={worktreeMergeTabId}
+            isOpen={Boolean(worktreeMergeTabId)}
+            onClose={() => setWorktreeMergeTabId(null)}
+            onMerged={async (res) => {
+              const tabToClose = worktreeMergeTabId;
+              setWorktreeMergeTabId(null);
+              if (res.worktreeRemoved && tabToClose) {
+                await finishTabClose(tabToClose, "stop_and_close");
+              }
+            }}
+          />
+        </Suspense>
+      )}
       {windowsFramelessChrome && (
         <WindowsWindowControls
           maximised={mainWindowMaximised}

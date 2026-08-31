@@ -77,3 +77,56 @@ func (a *App) DeliveryWorktreeAvailability(workspaceRoot string) worktree.Availa
 func (a *App) CreateDeliveryWorktree(workspaceRoot string) (DeliveryWorktreeOpenResult, error) {
 	return a.CreateIsolatedWorktree(workspaceRoot)
 }
+
+var (
+	inspectWorktreeMerge = worktree.InspectMerge
+	mergeWorktreeBack   = worktree.MergeBack
+)
+
+// InspectWorktreeMerge inspects the diff and merge status for the given tab's
+// isolated worktree against its base repository branch.
+func (a *App) InspectWorktreeMerge(tabID string) (worktree.MergeInspection, error) {
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return worktree.MergeInspection{Available: false, Reason: "tab not found"}, a.workspaceNotReadyErr(nil)
+	}
+	a.mu.RLock()
+	wsRoot := tab.WorkspaceRoot
+	a.mu.RUnlock()
+	return inspectWorktreeMerge(a.bootContext(), wsRoot)
+}
+
+// MergeWorktreeBack merges the changes from the tab's isolated worktree back
+// into the primary repository branch.
+func (a *App) MergeWorktreeBack(tabID string, autoCommitDirty, removeWorktree, deleteBranch bool) (worktree.MergeResult, error) {
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return worktree.MergeResult{Merged: false, Error: "tab not found"}, a.workspaceNotReadyErr(nil)
+	}
+	a.mu.RLock()
+	wsRoot := tab.WorkspaceRoot
+	targetTabID := tab.ID
+	a.mu.RUnlock()
+
+	opts := worktree.MergeOptions{
+		AutoCommitDirty: autoCommitDirty,
+		RemoveWorktree:  removeWorktree,
+		DeleteBranch:    deleteBranch,
+	}
+
+	result, err := mergeWorktreeBack(a.bootContext(), wsRoot, opts)
+	if err != nil {
+		return result, err
+	}
+
+	if result.Merged && removeWorktree {
+		a.mu.Lock()
+		if current := a.tabs[targetTabID]; current != nil {
+			current.ActivityStatus = ""
+		}
+		a.mu.Unlock()
+		a.emitProjectTreeChanged()
+	}
+
+	return result, nil
+}
