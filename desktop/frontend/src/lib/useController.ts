@@ -231,7 +231,7 @@ export type ControllerLiveStore = {
   getSnapshot: (tabId: string | undefined) => LiveStream | undefined;
   getModelActiveAt?: (tabId: string | undefined) => number | undefined;
 };
-export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
+export type MessageActionScope = "fork" | "fork-worktree" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 export type HistoryMutationKind = "replace" | "prepend" | "append" | "patch";
 export type HistoryMutation = { seq: number; kind: HistoryMutationKind };
@@ -4496,13 +4496,14 @@ export function useController() {
     if (!sourceTabId) return { ok: false };
     const forkNavigationSeq = activeNavigationSeqRef.current;
     await waitForTabReady(sourceTabId);
-    const actionScope = (["fork", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
+    const actionScope = (["fork", "fork-worktree", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
     const { messageActionBusyText } = await import("./controllerSwitchNotices");
     dispatchTo(sourceTabId, { type: "message_action_start", action: { turn, scope: actionScope } });
     dispatchTo(sourceTabId, { type: "local_notice", level: "info", text: messageActionBusyText(actionScope) });
     try {
-      if (actionScope === "fork") {
-        const tab = await app.ForkForTab(sourceTabId, turn);
+      if (actionScope === "fork" || actionScope === "fork-worktree") {
+        const isolate = actionScope === "fork-worktree";
+        const tab = await app.ForkForTab(sourceTabId, turn, isolate);
         if (tab?.id) {
           await adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork");
         } else {

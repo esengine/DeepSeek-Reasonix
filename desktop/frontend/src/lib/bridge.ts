@@ -333,7 +333,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   PreviewWorkspaceFileRevertForTab(tabID: string, path: string): Promise<import("./types").RewindPlanView>;
   CommitWorkspaceFileRevertForTab(tabID: string, planID: string, resolution: string): Promise<import("./types").RewindResultView>;
   Fork(turn: number): Promise<TabMeta>;
-  ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
+  ForkForTab(tabID: string, turn: number, isolateWorkspace?: boolean): Promise<TabMeta>;
+  ForkWorktreeForTab?(tabID: string, turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
   SummarizeFromForTab(tabID: string, turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
@@ -3279,9 +3280,24 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
-    async ForkForTab(tabID, turn) {
+    async ForkForTab(tabID, _turn, isolateWorkspace?: boolean) {
       mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
-      return this.Fork(turn);
+      const active = mockTabs.find((item) => item.active) ?? mockTabs[0];
+      const wsRoot = isolateWorkspace && active?.workspaceRoot ? `${active.workspaceRoot}-worktree` : active?.workspaceRoot;
+      const tab: TabMeta = {
+        ...active,
+        id: "tab_fork_" + Date.now(),
+        topicId: "topic_fork_" + Date.now(),
+        topicTitle: `${active?.topicTitle || t("rewind.fork")} · fork`,
+        workspaceRoot: wsRoot || cwd,
+        active: true,
+        running: false,
+      };
+      mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
+      return { ...tab };
+    },
+    async ForkWorktreeForTab(tabID, turn) {
+      return this.ForkForTab(tabID, turn, true);
     },
     async SummarizeFrom() {},
     async SummarizeFromForTab() {},

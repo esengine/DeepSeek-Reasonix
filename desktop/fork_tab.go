@@ -14,6 +14,12 @@ const rewindForkAttachError = "conversation fork was created but could not be op
 // The source tab keeps its controller and transcript. The fork becomes active
 // only while the source tab still owns focus.
 func (a *App) openForkedSessionTab(sourceTab *WorkspaceTab, newPath string) (TabMeta, error) {
+	return a.openForkedSessionTabWithWorkspace(sourceTab, newPath, "")
+}
+
+// openForkedSessionTabWithWorkspace attaches an already-written fork session to a new tab,
+// optionally overriding the workspace root (e.g. for isolated Git worktrees).
+func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath string, workspaceRootOverride string) (TabMeta, error) {
 	if sourceTab == nil || strings.TrimSpace(newPath) == "" {
 		return TabMeta{}, fmt.Errorf("fork tab needs a source tab and session path")
 	}
@@ -24,6 +30,9 @@ func (a *App) openForkedSessionTab(sourceTab *WorkspaceTab, newPath string) (Tab
 	}
 	scope := sourceTab.Scope
 	workspaceRoot := sourceTab.WorkspaceRoot
+	if strings.TrimSpace(workspaceRootOverride) != "" {
+		workspaceRoot = workspaceRootOverride
+	}
 	sourceTitle := sourceTab.TopicTitle
 	model := sourceTab.model
 	effort := cloneStringPtr(sourceTab.effort)

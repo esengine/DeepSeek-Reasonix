@@ -23,7 +23,7 @@ import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSele
 const AssistantReasoningPanel = lazy(() => import("./AssistantReasoningPanel").then((module) => ({ default: module.AssistantReasoningPanel })));
 const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
 const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
-export type TurnActionMenu = "summary" | "rewind";
+export type TurnActionMenu = "summary" | "rewind" | "fork";
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
   provider: string;
@@ -619,8 +619,10 @@ export function TurnActions({
   const actionLabel = (scope: MessageActionScope): string => {
     if (confirmScope !== scope) {
       switch (scope) {
+        case "fork-worktree":
+          return t("rewind.forkWorktree");
         case "fork":
-          return t("rewind.fork");
+          return t("rewind.forkConversation");
         case "summ-from":
           return t("rewind.summFrom");
         case "summ-upto":
@@ -634,6 +636,8 @@ export function TurnActions({
       }
     }
     switch (scope) {
+      case "fork-worktree":
+        return t("rewind.confirmForkWorktree");
       case "fork":
         return t("rewind.confirmFork");
       case "summ-from":
@@ -727,16 +731,32 @@ export function TurnActions({
       {text.trim() && <CopyButton text={text} label={t("msg.copy")} />}
       {canAct && (
         <>
-          <button
-            className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
-            type="button"
-            disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || t("rewind.forkTooltip")}
-            onClick={() => selectRewind("fork")}
+          <div
+            className={`turn-actions__group${openMenu === "fork" ? " turn-actions__group--open" : ""}`}
+            onMouseEnter={() => openHoverMenu("fork")}
           >
-            <GitBranch size={13} />
-            <span className="turn-actions__label-inline">{actionLabel("fork")}</span>
-          </button>
+            <button
+              className={`turn-actions__btn${confirmScope === "fork" || confirmScope === "fork-worktree" ? " turn-actions__btn--confirm" : ""}`}
+              type="button"
+              disabled={Boolean(forkDisabledReason)}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === "fork"}
+              title={forkDisabledReason || t("rewind.forkTooltip")}
+              onClick={() => toggleMenu("fork")}
+            >
+              <GitBranch size={13} />
+              <span className="turn-actions__label-inline">
+                <span>{confirmScope === "fork-worktree" ? actionLabel("fork-worktree") : (confirmScope === "fork" ? actionLabel("fork") : t("rewind.fork"))}</span>
+                <ChevronDown size={12} />
+              </span>
+            </button>
+            {openMenu === "fork" && (
+              <div className="rewind__menu turn-actions__menu" role="menu">
+                {renderAction("fork-worktree")}
+                {renderAction("fork")}
+              </div>
+            )}
+          </div>
           <div
             className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
             onMouseEnter={() => openHoverMenu("summary")}

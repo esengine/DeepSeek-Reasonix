@@ -2716,6 +2716,18 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 // backend begins processing the request. The fork becomes active only while the
 // source tab still owns focus, so a later tab selection remains authoritative.
 func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
+	return a.ForkForTabWithOptions(tabID, turn, false)
+}
+
+// ForkWorktreeForTab forks the requested source tab into an isolated Git worktree.
+func (a *App) ForkWorktreeForTab(tabID string, turn int) (TabMeta, error) {
+	return a.ForkForTabWithOptions(tabID, turn, true)
+}
+
+// ForkForTabWithOptions forks the requested source tab, optionally creating an
+// isolated Git worktree for the new tab so changes in the fork do not mutate the
+// source workspace.
+func (a *App) ForkForTabWithOptions(tabID string, turn int, isolateWorkspace bool) (TabMeta, error) {
 	sourceTab, ctrl := a.tabAndCtrlByID(tabID)
 	if sourceTab == nil || ctrl == nil {
 		return TabMeta{}, nil
@@ -2733,13 +2745,25 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		return TabMeta{}, nil
 	}
 	ctrl = sourceTab.Ctrl
+	srcRoot := sourceTab.WorkspaceRoot
 	a.mu.RUnlock()
+
+	var worktreeRoot string
+	if isolateWorkspace && strings.TrimSpace(srcRoot) != "" {
+		if avail := inspectDeliveryWorktree(a.bootContext(), srcRoot); avail.Available {
+			created, err := createDeliveryWorktree(a.bootContext(), srcRoot, config.DeliveryWorktreeDir())
+			if err != nil {
+				return TabMeta{}, fmt.Errorf("create isolated fork worktree: %w", err)
+			}
+			worktreeRoot = created.WorkspaceRoot
+		}
+	}
 
 	newPath, err := ctrl.ForkSession(turn, "")
 	if err != nil {
 		return TabMeta{}, err
 	}
-	return a.openForkedSessionTab(sourceTab, newPath)
+	return a.openForkedSessionTabWithWorkspace(sourceTab, newPath, worktreeRoot)
 }
 
 // SummarizeFrom / SummarizeUpTo compress model context after / before the start

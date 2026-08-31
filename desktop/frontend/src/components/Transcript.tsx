@@ -73,7 +73,7 @@ import {
 
 // NoticeCard lives with the other row cards; keep the historical export path.
 export { NoticeCard } from "./TranscriptCards";
-type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
+type OpenTurnAction = { turn: number; menu: "summary" | "rewind" | "fork" };
 const QUESTION_NAV_MIN_COUNT = 2;
 const EMPTY_CHECKPOINTS: CheckpointMeta[] = [];
 const EMPTY_INVOCATION_METADATA: InvocationMetadataMap = {};

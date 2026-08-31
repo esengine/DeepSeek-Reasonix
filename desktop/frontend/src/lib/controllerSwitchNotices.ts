@@ -24,7 +24,8 @@ export async function restoreNavigationBackend(sourceTabId: string, targetTabId:
 
 export function messageActionBusyText(scope: MessageActionScope): string {
   switch (scope) {
-    case "fork": return t("rewind.busyFork");
+    case "fork":
+    case "fork-worktree": return t("rewind.busyFork");
     case "summ-from": return t("rewind.busySummFrom");
     case "summ-upto": return t("rewind.busySummUpto");
     case "conversation": return t("rewind.busyConversation");
