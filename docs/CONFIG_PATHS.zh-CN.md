@@ -35,7 +35,7 @@ Legacy 迁移、OS home 约定目录扫描以及其他 fallback 路径都会跳�
 | 记忆 | `<state root>/memory/` 与 `<state root>/projects/` |
 | 全局 Desktop Topic 元数据 | `<state root>/desktop/topic-state-v1.sqlite` |
 | 项目 Desktop Topic 元数据 | `<state root>/projects/<workspace slug>/desktop/topic-state-v1.sqlite` |
-| 可丢弃的会话 Catalog | `<cache root>/session-catalog/v5.sqlite` |
+| 可丢弃的会话 Catalog | `<cache root>/session-catalog/v6.sqlite` |
 | 可丢弃的 Task Catalog | `<cache root>/task-catalog/v1.sqlite` |
 
 `<state root>` 默认等于 `<Reasonix home>`；只有设置 `REASONIX_STATE_HOME`

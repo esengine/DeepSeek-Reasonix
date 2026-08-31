@@ -3139,18 +3139,6 @@ func (a *App) deleteSession(path string) error {
 	return nil
 }
 
-type removedSessionRuntime struct {
-	tab           *WorkspaceTab
-	ctrl          control.SessionAPI
-	sink          *tabEventSink
-	sessionDir    string
-	sessionPath   string
-	scope         string
-	workspaceRoot string
-	topicID       string
-	readOnly      bool
-}
-
 type fallbackRuntimeTarget struct {
 	needs         bool
 	scope         string

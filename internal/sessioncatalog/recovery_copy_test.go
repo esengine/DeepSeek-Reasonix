@@ -12,15 +12,15 @@ import (
 	"reasonix/internal/provider"
 )
 
-func TestDefaultPathUsesV5CacheFile(t *testing.T) {
+func TestDefaultPathUsesV6CacheFile(t *testing.T) {
 	t.Parallel()
 	path := DefaultPath()
 	if path == "" {
 		// CacheDir unavailable in this environment; empty is still valid.
 		return
 	}
-	if !strings.HasSuffix(filepath.ToSlash(path), "session-catalog/v5.sqlite") {
-		t.Fatalf("DefaultPath = %q, want .../session-catalog/v5.sqlite", path)
+	if !strings.HasSuffix(filepath.ToSlash(path), "session-catalog/v6.sqlite") {
+		t.Fatalf("DefaultPath = %q, want .../session-catalog/v6.sqlite", path)
 	}
 	if strings.Contains(path, "v1.sqlite") {
 		t.Fatalf("DefaultPath must not reuse the 1.24.0 v1 cache: %q", path)

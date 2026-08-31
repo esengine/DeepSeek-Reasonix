@@ -155,10 +155,11 @@ console.log("\nbundle budgets");
 // terminal-notice dedupe flag, while provider no_proxy copy now states the
 // custom-proxy precedence. The merged path measures 455.9 KiB; retain 0.1 KiB
 // of bounded build/toolchain headroom.
-// Exhausted tail repair now releases ownership so jump-bottom remains usable
-// after a stranded native WebView extent. The WebView2 reachable-tail clamp
-// The combined path measures 456.5 KiB; retain 0.3 KiB headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 456.8 : 456.8;
+// The generation-bound history-prepend lease adds stable-key reader anchoring,
+// full mounted coverage, and one final arbiter-owned correction.
+// Fork into isolated Git worktree adds the action menu and localized guidance.
+// The combined path measures 457.6 KiB; retain 0.2 KiB headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 457.8 : 457.8;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -190,6 +191,9 @@ for (const path of localeChunks) {
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_450.0 : 2_450.0;
+// The extracted history-prepend owner adds 3.953 KiB of bounded transaction
+// state and stable-key coverage checks. Together with Fork into worktree,
+// the combined payload measures 2453.0 KiB; retain 0.5 KiB headroom.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_453.5 : 2_453.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

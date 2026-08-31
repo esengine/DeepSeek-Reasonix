@@ -876,6 +876,7 @@ try {
       writes: window.__readerExtentProbe.writes,
       samples: window.__readerExtentProbe.samples,
       mode: element.dataset.scrollMode,
+      historyPrependPending: element.dataset.transcriptHistoryPrependPending,
     };
   }, beforeExtentReplay);
   const readerStabilityWrites = afterExtentReplay.writes.filter((write) => write.owner === "reader-stability");
@@ -891,7 +892,8 @@ try {
   const preservedDirection = maxVisualReverse <= 96;
   assert(preservedDirection, preservedDirection
     ? `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top})`
-    : `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
+    : `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; historyPrependPending=${afterExtentReplay.historyPrependPending}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
+  assert(afterExtentReplay.historyPrependPending === "false", "completed history prepend ownership does not leak into later reader gestures");
   const mountWrites = readerStabilityWrites.filter((write) => write.phase === "mount-anchor");
   const correctionWrites = readerStabilityWrites.filter((write) => write.phase === "correct-offset");
   assert(readerStabilityWrites.length <= 2

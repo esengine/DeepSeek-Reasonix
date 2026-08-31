@@ -63,16 +63,11 @@ func (a *App) handleTabControllerBootError(
 		a.abandonSupersededBuild(tab, nil, rootKey, "")
 		return true
 	}
-	leaseHeld := setTabStartupError(tab, err)
-	tab.Ready = false
-	if leaseHeld {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-	} else {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-	}
+	leaseHeld, save := a.markTabStartupFailureLocked(tab, err, keepStartupRestore)
 	hostKey := takeTabSharedHostKey(tab)
 	tab.releaseSessionLease()
 	a.mu.Unlock()
+	a.writeTabsSaveRequest(save)
 	if hostKey != "" {
 		a.releaseSharedHost(hostKey)
 	}

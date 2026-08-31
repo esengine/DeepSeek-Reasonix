@@ -32,8 +32,8 @@ func (c *Catalog) PreferredOrdinarySessionPaths(ctx context.Context, scope, work
 		SELECT path, recovered, parent_id, recovery_copy, recovery_group_id,
 		       recovery_role, recovery_canonical, turns, last_activity_at
 		FROM catalog_sessions
-		WHERE scope=? AND workspace_root=? AND missing_since=0 AND health<>'missing'`,
-		scope, workspaceRoot)
+		WHERE scope=? AND workspace_root_key=? AND missing_since=0 AND health<>'missing'`,
+		scope, c.workspaceRootKey(scope, workspaceRoot))
 	if err != nil {
 		return out, err
 	}

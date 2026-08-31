@@ -55,6 +55,7 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
 import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptScrollArbiter } from "../lib/useTranscriptScrollArbiter";
+import { TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT } from "../lib/transcriptHistoryPrependLease";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import { TranscriptLayoutIntentProvider, TranscriptScrollWriteProvider } from "./TranscriptLayoutIntentContext";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
@@ -92,8 +93,6 @@ const READER_MOUNT_CORRIDOR_ROWS = 112;
 const READER_MOUNT_CORRIDOR_VIEWPORTS = 7;
 // Keep paged history measured during manual reading so WKWebView cannot replace
 // non-overlapping ranges without an anchor; large sessions keep a bounded corridor.
-const READER_FULL_MOUNT_ROW_LIMIT = 1_000;
-
 export function Transcript({
   items,
   live: liveProp,
@@ -254,8 +253,7 @@ export function Transcript({
     finishProgrammaticScroll,
     submitRecoveryRequest,
     retryRecoveryRequest,
-    lastGoodAnchorRef,
-    layoutTransientRef,
+    lastGoodAnchorRef, layoutTransientRef, historyPrependLease,
   } = useTranscriptScrollArbiter({
     onRecoveryTerminal: noteTranscriptRecoveryTerminal,
     onItemMeasured: recordMeasuredGeometry,
@@ -613,8 +611,11 @@ export function Transcript({
   });
   const handleViewportEarlierHistoryReached = useCallback(() => {
     if (hydrating || !pagingAuthorization.consume()) return;
-    void Promise.resolve(handleEarlierHistoryReached()).finally(pagingAuthorization.complete);
-  }, [handleEarlierHistoryReached, hydrating, pagingAuthorization]);
+    const generation = historyPrependLease.begin(historyMutation?.seq ?? 0);
+    void Promise.resolve(handleEarlierHistoryReached())
+      .then((loaded) => { if (!loaded) historyPrependLease.cancel(generation); }, () => { historyPrependLease.cancel(generation); })
+      .finally(pagingAuthorization.complete);
+  }, [handleEarlierHistoryReached, historyMutation?.seq, historyPrependLease, hydrating, pagingAuthorization]);
   useTranscriptHistoryAutoFill({
     readySurfaceKey: surfacePaintReadySurfaceKey, layoutSurfaceKey, hydrating, hasOlderHistory, loadingOlderHistory,
     olderHistoryError, running, historyStartTurn, virtualRowCount: virtualRows.length, scrollRef, virtuosoReadyRef,
@@ -852,12 +853,11 @@ export function Transcript({
   }, [contentRevision, holdingLiveRegion, scrollRef, virtualRows.length]);
   const heldLiveRows = heldSurfaceRef.current === layoutSurfaceKey ? heldLiveRowsRef.current : NO_HELD_ROWS;
   const showLiveRegion = liveSplit.liveActive || (holdingLiveRegion && heldLiveRows.length > 0);
-  const readerMountCorridorRows = readerTransactionActive && virtualRows.length <= READER_FULL_MOUNT_ROW_LIMIT
+  const readerMountCorridorRows = readerTransactionActive && virtualRows.length <= TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT
     ? Math.max(READER_MOUNT_CORRIDOR_ROWS, virtualRows.length)
     : READER_MOUNT_CORRIDOR_ROWS;
-
   const { handleItemsRendered, handleTotalListHeightChanged } = useTranscriptGeometryLifecycle({
-    virtualRowCount: virtualRows.length, hydrating, readerTransactionActive, historyMutation, scrollModeRef,
+    virtualRowCount: virtualRows.length, hydrating, readerTransactionActive, historyMutation, historyPrependLease, scrollModeRef,
     followGrowingTail, revalidateTail,
     reconcileLogicalFocus: selectionRetention.reconcileLogicalFocus,
     handleRecoveryItemsRendered, scheduleActiveQuestionSync, markSurfaceItemsRendered,

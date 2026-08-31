@@ -330,7 +330,7 @@ func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 		}
 		versions = append(versions, version)
 	}
-	if fmt.Sprint(versions) != "[1 2 3 4 5 6 7 8]" {
+	if fmt.Sprint(versions) != "[1 2 3 4 5 6 7 8 9 10]" {
 		t.Fatalf("schema migration ledger = %v", versions)
 	}
 }

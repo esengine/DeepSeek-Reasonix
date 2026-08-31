@@ -16,7 +16,7 @@ import {
   type TranscriptScrollOwner,
   type TranscriptScrollState,
 } from "./transcriptScrollArbiter";
-import { noteTranscriptRowMeasurement, recordTranscriptScrollDiagnostic, type TranscriptScrollWriteRecord } from "./transcriptScrollProbe";
+import { noteTranscriptRowMeasurement, recordTranscriptScrollDiagnostic } from "./transcriptScrollProbe";
 import {
   CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS,
   recordTranscriptScrollTransition,
@@ -36,16 +36,16 @@ import { useTranscriptNativeScrollbarOwnership } from "./useTranscriptNativeScro
 import { createTranscriptScrollWriter } from "./transcriptScrollWriter";
 import { createTranscriptQuestionJumpOwnership } from "./transcriptQuestionJumpOwnership";
 import { createTranscriptGeometryRevisionController, type TranscriptGeometryChangeSource, type TranscriptGeometryRevisionController } from "./transcriptGeometryRevision";
+import { createTranscriptHistoryPrependCoordinator, type TranscriptHistoryPrependCoordinator } from "./transcriptHistoryPrependLease";
+import { createTranscriptReaderCorrectionWriter, type TranscriptReaderCorrectionWriter } from "./transcriptReaderCorrection";
 export type { TranscriptRecoveryRequestSpec, TranscriptRecoveryTerminal, TranscriptScrollArbiterRecoveryApi } from "./transcriptScrollRecovery";
 export { hasTranscriptScrollableRange, nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX };
 
-// Slow WebView2 rows need a wall-clock mount budget. Expiry suspends without
-// an intermediate scrollBy, then retries after a bounded quiet window.
+// Slow WebView2 rows use a wall-clock mount budget, then retry after a bounded quiet window.
 const ANCHOR_RESTORE_BUDGET_MS = 1_000;
 const RECOVERY_MAX_RETRIES = 2;
 const RECOVERY_CORRECTION_TOLERANCE_PX = 1;
 const RECOVERY_STABLE_FRAMES = 2;
-
 /** Single Virtuoso writer for tail-follow, jumps, selection, and recovery.
  * The reducer arbitrates selection > user > programmatic > recovery > tail. */
 export function useTranscriptScrollArbiter({
@@ -85,6 +85,9 @@ export function useTranscriptScrollArbiter({
   // logical row must not be treated as the current row's geometry contract.
   const measuredRowKeyRef = useRef(new WeakMap<HTMLElement, string>());
   const layoutTransientRef = useRef(false);
+  const historyPrependCoordinatorRef = useRef<TranscriptHistoryPrependCoordinator | null>(null);
+  historyPrependCoordinatorRef.current ??= createTranscriptHistoryPrependCoordinator();
+  const historyPrependCoordinator = historyPrependCoordinatorRef.current;
   const resizeSettleFrameRef = useRef<number | null>(null);
   const recoveryRef = useRef<ActiveTranscriptRecovery | null>(null);
   const nextRecoveryIdRef = useRef(0);
@@ -107,41 +110,28 @@ export function useTranscriptScrollArbiter({
     virtuosoRef, scrollRef, modeRef, generationRef, ownershipEpochRef, geometryRevisionRef,
   });
   const writer = writerRef.current;
-  const writeReaderCorrection = useCallback((write: TranscriptScrollWriteRecord) => {
-    if (write.kind === "scrollToIndex" ? write.index === undefined : write.top === undefined) return false;
-    return writer.write({
-      owner: write.owner,
-      operation: write.kind === "pinTail" ? "pinTail" : write.kind === "scrollToIndex" ? "scrollToIndex" : "scrollBy",
-      top: write.top,
-      index: write.index,
-      align: write.kind === "scrollToIndex" ? "start" : undefined,
-      behavior: "auto",
-      reason: write.source ?? "reader-stability",
-      expectedSurfaceGeneration: generationRef.current,
-      expectedOwnershipEpoch: ownershipEpochRef.current,
-      expectedGeometryRevision: geometryRevisionRef.current,
-      transactionId: write.transactionId,
-      phase: write.phase,
-    });
-  }, [writer]);
+  const writeReaderCorrectionRef = useRef<TranscriptReaderCorrectionWriter | null>(null);
+  writeReaderCorrectionRef.current ??= createTranscriptReaderCorrectionWriter({ writer, generationRef, ownershipEpochRef, geometryRevisionRef });
   const {
     arm: armReaderTransaction,
     cancel: cancelReaderTransaction,
     observe: observeReaderTransaction,
+    holdGeometryCommit: holdReaderGeometryCommit,
+    anchorIsMounted: readerAnchorIsMounted,
     isActive: readerTransactionIsActive,
     active: readerTransactionActive,
   } = useTranscriptReaderExtentStability({
-    generationRef,
-    ownershipEpochRef,
-    geometryRevisionRef,
-    modeRef,
-    scrollRef,
-    writeCorrection: writeReaderCorrection,
+    generationRef, ownershipEpochRef, geometryRevisionRef, modeRef, scrollRef,
+    geometryCommitBlockedRef: historyPrependCoordinator.pendingRef, geometryCommitReadyRef: historyPrependCoordinator.commitReadyRef,
+    stableAnchorRequiredRef: historyPrependCoordinator.stableAnchorRef,
+    writeCorrection: writeReaderCorrectionRef.current,
     onStart: (transaction) => dispatchRef.current({ type: "USER_SCROLL_INTENT", canClaimTail: transaction.canClaimTail }),
     onIdleDeadline: () => dispatchRef.current({ type: "READER_IDLE_DEADLINE" }),
     onStabilitySample: (_transaction, stable, tailEligible) => dispatchRef.current({ type: "READER_STABILITY_SAMPLE", stable, tailEligible }),
     onTailHandoff: () => dispatchRef.current({ type: "READER_TAIL_HANDOFF" }),
-    onEnd: (transaction) => {
+    onGeometryCommitReady: historyPrependCoordinator.noteGeometryCommitReady,
+    onEnd: (transaction, reason) => {
+      historyPrependCoordinator.noteReaderTerminal(reason === "cancelled");
       const anchor = transaction.anchor;
       const element = scrollRef.current;
       const nearPhysicalTail = transaction.direction > 0
@@ -177,12 +167,20 @@ export function useTranscriptScrollArbiter({
     scheduleAnchor: () => anchorCompensationRef.current?.schedule(),
   });
   const geometryController = geometryControllerRef.current;
+  historyPrependCoordinator.bind({
+    layoutTransientRef,
+    publishPending: (pending) => { if (scrollRef.current) scrollRef.current.dataset.transcriptHistoryPrependPending = String(pending); },
+    holdReaderGeometryCommit, readerAnchorIsMounted, readerTransactionIsActive,
+    commitGeometry: () => geometryController.note("items-rendered"),
+  });
+  const historyPrependLease = historyPrependCoordinator.lease;
 
   const invalidateAsyncFrames = useCallback(() => {
     // Generations may advance without replacing the scroller; end the old
     // browser-owned transaction before its frozen geometry can leak across.
     nativeScrollbarOwnershipRef.current?.cancel();
     generationRef.current += 1;
+    historyPrependCoordinator.invalidate();
     ownershipEpochRef.current += 1;
     geometryRevisionRef.current = 0;
     geometryController.cancel();
@@ -191,7 +189,7 @@ export function useTranscriptScrollArbiter({
     tailSettle.cancel();
     anchorCompensationRef.current?.reset();
     cancelReaderTransaction(false);
-  }, [cancelReaderTransaction, geometryController, tailSettle]);
+  }, [cancelReaderTransaction, geometryController, historyPrependCoordinator, tailSettle]);
 
   // Executes the reducer's CANCEL_RECOVERY command. The cancelling event
   // already cleared recoveryId in the published state, so no RECOVERY_END
@@ -281,7 +279,7 @@ export function useTranscriptScrollArbiter({
     if (
       transcriptScrollEventCancelsReaderExtentGuard(event.type)
       && !(event.type === "SCROLL_TO_OFFSET" && (event.owner === "anchor-compensation" || event.owner === "block-window-prepend"))
-    ) cancelReaderTransaction(false);
+    ) { historyPrependCoordinator.noteReaderTerminal(true); cancelReaderTransaction(false); }
     if (event.type === "RESET") lastGoodAnchorRef.current = null;
     if (event.type === "USER_SCROLL_INTENT") {
       const element = scrollRef.current;
@@ -303,7 +301,7 @@ export function useTranscriptScrollArbiter({
     // the new state.
     anchorCompensationRef.current?.noteEvent(event);
     return result;
-  }, [cancelReaderTransaction, publishState, runCommand, tailSettle]);
+  }, [cancelReaderTransaction, historyPrependCoordinator, publishState, runCommand, tailSettle]);
   dispatchRef.current = dispatch;
 
   // All controller inputs are stable refs plus dispatch (itself stable: every
@@ -784,7 +782,7 @@ export function useTranscriptScrollArbiter({
   }, [tailSettle]);
 
   return {
-    virtuosoRef, scrollRef, scrollElement, layoutTransientRef,
+    virtuosoRef, scrollRef, scrollElement, layoutTransientRef, historyPrependLease,
     itemSize, nativeScrollbarDragging, readerTransactionActive, pinnedRef, isAtBottom, modeRef,
     scrollerRef, setMode, reset, writeOffset,
     scrollToBottom, pinLiveTailBeforePaint, followGrowingTail, revalidateTail, scrollToDataIndex,

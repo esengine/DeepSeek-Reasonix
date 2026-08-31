@@ -666,3 +666,76 @@ func writeEmptyNamedSession(t *testing.T, dir, name, topicID, topicTitle, worksp
 	}
 	return path
 }
+
+func TestTrashTopicArchivesFailedRuntimeWithStaleWriteAuthority(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_failed_authority"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Failed authority"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "failed-authority.jsonl", topicID, "Failed authority", projectRoot)
+	ctrl := controllerWithContent(t, sessionPath)
+	defer ctrl.Close()
+	lease, err := agent.TryAcquireSessionLease(sessionPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	if err := ctrl.BindSessionWriteAuthority(lease); err != nil {
+		lease.Release()
+		t.Fatalf("BindSessionWriteAuthority: %v", err)
+	}
+	lease.Release()
+	if err := ctrl.Snapshot(); !errors.Is(err, agent.ErrSessionWriteAuthorityStale) {
+		t.Fatalf("Snapshot error = %v, want %v", err, agent.ErrSessionWriteAuthorityStale)
+	}
+
+	failed := &WorkspaceTab{ID: "failed", Scope: "project", WorkspaceRoot: projectRoot, TopicID: topicID,
+		TopicTitle: "Failed authority", SessionPath: sessionPath, Ctrl: ctrl, disabledMCP: map[string]ServerView{}}
+	keep := &WorkspaceTab{ID: "keep", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "keep", Ready: true}
+	app := &App{tabs: map[string]*WorkspaceTab{failed.ID: failed, keep.ID: keep}, tabOrder: []string{failed.ID, keep.ID}, activeTabID: failed.ID}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(failed, sessionRuntimeKey(sessionPath))
+	_, save := app.markTabStartupFailureLocked(failed, agent.ErrSessionWriteAuthorityStale, suppressStartupRestore)
+	app.mu.Unlock()
+	app.writeTabsSaveRequest(save)
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("archived session still exists, err=%v", err)
+	}
+	if app.tabs[keep.ID] != keep || app.tabs[failed.ID] != nil {
+		t.Fatalf("runtime bindings after archive = %#v", app.tabs)
+	}
+}
+
+func TestTopicArchiveRejectsFailedRuntimeThatStartedRetrying(t *testing.T) {
+	topicID := "topic_retrying_failure"
+	tab := &WorkspaceTab{ID: "failed", Scope: "global", TopicID: topicID, SessionPath: "retrying.jsonl"}
+	app := &App{tabs: map[string]*WorkspaceTab{tab.ID: tab}, tabOrder: []string{tab.ID}, activeTabID: tab.ID}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(tab, sessionRuntimeKey(tab.SessionPath))
+	app.markTabStartupFailureLocked(tab, errors.New("restore failed"), suppressStartupRestore)
+	app.mu.Unlock()
+	captured := app.captureTopicRuntimeBindings(topicID)
+
+	app.mu.Lock()
+	app.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
+	app.mu.Unlock()
+	if _, unchanged := app.removeTopicRuntimeBindingsIfUnchanged(topicID, captured); unchanged {
+		t.Fatal("archive detached a failed runtime after its retry changed generation state")
+	}
+	if app.tabs[tab.ID] != tab || tab.removed {
+		t.Fatal("rejected stale archive changed the retrying tab")
+	}
+}

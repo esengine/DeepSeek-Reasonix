@@ -3763,21 +3763,15 @@ func clearTabStartupError(tab *WorkspaceTab) {
 }
 
 func (a *App) recordTabStartupFailure(tab *WorkspaceTab, buildGeneration uint64, wailsCtx context.Context, err error) {
-	leaseHeld := false
 	a.mu.Lock()
 	if a.tabBuildSupersededLocked(tab, buildGeneration) {
 		a.mu.Unlock()
 		return
 	}
-	leaseHeld = setTabStartupError(tab, err)
-	tab.Ready = false
-	if leaseHeld {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-	} else {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-	}
+	leaseHeld, save := a.markTabStartupFailureLocked(tab, err, keepStartupRestore)
 	tab.releaseSessionLease()
 	a.mu.Unlock()
+	a.writeTabsSaveRequest(save)
 	if leaseHeld {
 		a.scheduleDeferredStartupBuild(tab.ID)
 	}
@@ -4051,23 +4045,17 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		}
 		if resumeLoadErr != nil {
 			resumeLoadErr = friendlySessionLoadError(resumeLoadErr)
-			leaseHeld := false
 			a.mu.Lock()
 			if a.tabBuildSupersededLocked(tab, buildGeneration) {
 				a.mu.Unlock()
 				a.abandonSupersededBuild(tab, ctrl, rootKey, "")
 				return
 			}
-			leaseHeld = setTabStartupError(tab, resumeLoadErr)
-			tab.Ready = false
-			if leaseHeld {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, resumeLoadErr)
-			} else {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, resumeLoadErr)
-			}
+			leaseHeld, save := a.markTabStartupFailureLocked(tab, resumeLoadErr, suppressStartupRestore)
 			hostKey := takeTabSharedHostKey(tab)
 			tab.releaseSessionLease()
 			a.mu.Unlock()
+			a.writeTabsSaveRequest(save)
 			ctrl.Close()
 			if hostKey != "" {
 				a.releaseSharedHost(hostKey)
@@ -4091,26 +4079,20 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			}
 			preLeaseKey := tab.sessionLeaseRuntimeKey()
 			if err := a.ensureTabSessionLeaseForRebuild(tab, path, ""); err != nil {
-				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
 					a.mu.Unlock()
 					a.abandonSupersededBuild(tab, ctrl, rootKey, "")
 					return
 				}
-				leaseHeld = setTabStartupError(tab, err)
-				tab.Ready = false
-				if leaseHeld {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-				} else {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-				}
+				leaseHeld, save := a.markTabStartupFailureLocked(tab, err, suppressStartupRestore)
 				hostKey := takeTabSharedHostKey(tab)
 				// Release only a lease bound to THIS build's session: a failed
 				// ensure leaves any prior lease untouched, and that lease may
 				// belong to a runtime a concurrent switch just installed.
 				tab.releaseSessionLeaseForKey(sessionRuntimeKey(path))
 				a.mu.Unlock()
+				a.writeTabsSaveRequest(save)
 				ctrl.Close()
 				if hostKey != "" {
 					a.releaseSharedHost(hostKey)
@@ -4141,23 +4123,17 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			var restoreErr error
 			restoredRuntime, restoreErr = resumeControllerRuntimeWithSession(ctrl, resumeSession, path, buildRuntime)
 			if restoreErr != nil {
-				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
 					a.mu.Unlock()
 					a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
 					return
 				}
-				leaseHeld = setTabStartupError(tab, restoreErr)
-				tab.Ready = false
-				if leaseHeld {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, restoreErr)
-				} else {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, restoreErr)
-				}
+				leaseHeld, save := a.markTabStartupFailureLocked(tab, restoreErr, suppressStartupRestore)
 				hostKey := takeTabSharedHostKey(tab)
 				tab.releaseSessionLeaseForKey(sessionRuntimeKey(path))
 				a.mu.Unlock()
+				a.writeTabsSaveRequest(save)
 				ctrl.Close()
 				if hostKey != "" {
 					a.releaseSharedHost(hostKey)
@@ -5017,6 +4993,9 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 	var entries []desktopTabEntry
 	for _, id := range a.orderedTabIDsLocked() {
 		if tab := a.tabs[id]; tab != nil {
+			if a.suppressTabStartupRestoreLocked(tab) {
+				continue
+			}
 			entries = append(entries, desktopTabEntry{
 				ID:               tab.ID,
 				Scope:            tab.Scope,
@@ -5036,7 +5015,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 		}
 	}
 	a.tabsSaveVersion++
-	return dir, entries, a.activeTabID, a.tabsSaveVersion
+	return dir, entries, persistedActiveTabID(entries, a.activeTabID), a.tabsSaveVersion
 }
 
 // saveTabsWrite writes the tab-snapshot to disk. It does not require a.mu, but

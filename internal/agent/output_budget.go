@@ -479,8 +479,24 @@ func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
 }
 
 func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error) {
+	return a.admitOutputBudgetWithReserve(req, outputBudgetReserve, false)
+}
+
+// admitSummaryOutputBudget uses the summary request's dedicated protocol
+// reserve instead of the ordinary-turn reserve. Unknown gateways are treated
+// as shared when an effective window exists: summary planning already makes
+// that conservative assumption, so execution must enforce the same contract.
+func (a *Agent) admitSummaryOutputBudget(req provider.Request) (contextAdmission, error) {
+	return a.admitOutputBudgetWithReserve(req, protocolReserveTokens, true)
+}
+
+func shouldUseSharedWindowForAdmission(mode provider.ContextWindowMode, observedWindow int, conservativeUnknown bool) bool {
+	return mode == provider.ContextWindowUnknown && (observedWindow > 0 || conservativeUnknown)
+}
+
+func (a *Agent) admitOutputBudgetWithReserve(req provider.Request, reserveTokens int, conservativeUnknown bool) (contextAdmission, error) {
 	adm := contextAdmission{
-		ReserveTokens: outputBudgetReserve,
+		ReserveTokens: reserveTokens,
 		LastRecovery:  a.lastAdmission().LastRecovery,
 		Source:        provider.ContextBudgetSourceUnknown,
 	}
@@ -495,7 +511,7 @@ func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error
 		adm.ObservedCompletion = learned.completionBudget
 	}
 	policy := contextBudgetPolicyOf(a.svc.prov)
-	if policy.WindowMode == provider.ContextWindowUnknown && adm.ObservedWindow > 0 {
+	if shouldUseSharedWindowForAdmission(policy.WindowMode, adm.ObservedWindow, conservativeUnknown) {
 		policy.WindowMode = provider.ContextWindowShared
 	}
 	if policy.AutoOutputTokens <= 0 && a.learnedCompletionBudget() > 0 {
@@ -523,7 +539,7 @@ func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error
 	}
 	est := a.estimatedRequestTokens(req)
 	adm.PromptTokens = est
-	physical := window - est - outputBudgetReserve
+	physical := window - est - reserveTokens
 	adm.PhysicalRemaining = physical
 	shared := policy.WindowMode == provider.ContextWindowShared
 	if !shared {
@@ -582,6 +598,20 @@ func (a *Agent) applyAdmissionToRequest(req *provider.Request) error {
 		return nil
 	}
 	adm, err := a.admitOutputBudget(*req)
+	if err != nil {
+		return err
+	}
+	if adm.ApplyMaxTokens && adm.EffectiveOutputTokens > 0 {
+		req.MaxTokens = adm.EffectiveOutputTokens
+	}
+	return nil
+}
+
+func (a *Agent) applySummaryAdmissionToRequest(req *provider.Request) error {
+	if a == nil || req == nil {
+		return nil
+	}
+	adm, err := a.admitSummaryOutputBudget(*req)
 	if err != nil {
 		return err
 	}

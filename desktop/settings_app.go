@@ -1931,16 +1931,10 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 	ctrl, restoredRuntime, path, err := a.buildSettingReplacementController(tab, snap, runtime, model, prevPath, setting, oldCtrl, carried, reload)
 	if err != nil {
 		if oldCtrl == nil {
-			leaseHeld := false
 			a.mu.Lock()
-			leaseHeld = setTabStartupError(tab, err)
-			tab.Ready = false
-			if leaseHeld {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-			} else {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-			}
+			leaseHeld, save := a.markTabStartupFailureLocked(tab, err, keepStartupRestore)
 			a.mu.Unlock()
+			a.writeTabsSaveRequest(save)
 			if leaseHeld {
 				a.scheduleDeferredStartupBuild(tab.ID)
 			}

@@ -20,14 +20,16 @@ import (
 const defaultMissingGrace = 30 * time.Second
 
 type Catalog struct {
-	db          *sql.DB
-	opts        Options
-	revision    atomic.Uint64
-	statusMu    sync.RWMutex
-	status      Status
-	writeCh     chan string
-	writeMu     sync.Mutex
-	writeQueued map[string]SessionRecord
+	db           *sql.DB
+	opts         Options
+	pathIdentity func(string) string
+	mutationSeq  atomic.Uint64
+	revision     atomic.Uint64
+	statusMu     sync.RWMutex
+	status       Status
+	writeCh      chan string
+	writeMu      sync.Mutex
+	writeQueued  map[string]SessionRecord
 	// mutationMu is the process-local SQLite single-writer boundary. WAL permits
 	// concurrent readers, but repair, metadata, and reconcile mutations must not
 	// race into avoidable SQLITE_BUSY failures.
@@ -40,6 +42,7 @@ type Catalog struct {
 	reconcileDirtyMu sync.Mutex
 	reconcileDirty   map[string]DirectoryTarget
 	pathCh           chan sessionPathRequest
+	pathQueueMu      sync.Mutex
 	pathQueued       sync.Map
 	directoryLocksMu sync.Mutex
 	directoryLocks   map[string]*sync.Mutex
@@ -56,11 +59,16 @@ type Catalog struct {
 	// testRepairLockHook reports before and after repair acquires the directory
 	// lock. Production catalogs leave it nil.
 	testRepairLockHook func(acquired bool)
+	// testPathMutationLoadedHook pauses after reading a removal generation.
+	// Production catalogs leave it nil.
+	testPathMutationLoadedHook func(string)
 }
 
 type sessionPathRequest struct {
-	target DirectoryTarget
-	path   string
+	target   DirectoryTarget
+	path     string
+	queueKey string
+	sequence uint64
 }
 
 type pageCursor struct {
@@ -98,6 +106,7 @@ func Open(ctx context.Context, opts Options) (*Catalog, error) {
 
 	c := &Catalog{
 		opts:           opts,
+		pathIdentity:   PathIdentityKey,
 		writeCh:        make(chan string, opts.QueueCapacity),
 		writeQueued:    map[string]SessionRecord{},
 		repairCh:       make(chan string, opts.QueueCapacity),
@@ -235,11 +244,11 @@ func normalizeScope(scope, root string) (string, string) {
 }
 
 func normalizeSessionRecord(record SessionRecord) SessionRecord {
-	record.Path = filepath.Clean(record.Path)
+	record.Path = cleanCatalogAccessPath(record.Path)
 	if record.Directory == "" {
 		record.Directory = filepath.Dir(record.Path)
 	}
-	record.Directory = filepath.Clean(record.Directory)
+	record.Directory = cleanCatalogAccessPath(record.Directory)
 	record.Scope, record.WorkspaceRoot = normalizeScope(record.Scope, record.WorkspaceRoot)
 	if record.TurnsState == "" {
 		record.TurnsState = TurnsUnknown
@@ -250,29 +259,55 @@ func normalizeSessionRecord(record SessionRecord) SessionRecord {
 	return record
 }
 
+func (c *Catalog) pathKey(path string) string {
+	if c != nil && c.pathIdentity != nil {
+		return c.pathIdentity(path)
+	}
+	return PathIdentityKey(path)
+}
+
+func (c *Catalog) workspaceRootKey(scope, root string) string {
+	scope, root = normalizeScope(scope, root)
+	if scope != "project" || root == "" {
+		return ""
+	}
+	return c.pathKey(root)
+}
+
+// queuePathKey is intentionally lexical. Save observers call the enqueue APIs
+// synchronously, so filesystem probes (EvalSymlinks/platform case detection)
+// belong to background workers and the SQLite uniqueness boundary.
+func queuePathKey(path string) string {
+	return cleanCatalogAccessPath(path)
+}
+
 func (c *Catalog) EnqueueSession(record SessionRecord) bool {
 	if c == nil {
 		return false
 	}
 	record = normalizeSessionRecord(record)
-	c.removedPaths.Delete(record.Path)
+	record.enqueueSequence = c.mutationSeq.Add(1)
+	key := queuePathKey(record.Path)
+	if key == "" {
+		return false
+	}
 	c.writeMu.Lock()
-	if _, loaded := c.writeQueued[record.Path]; loaded {
-		c.writeQueued[record.Path] = record
+	if _, loaded := c.writeQueued[key]; loaded {
+		c.writeQueued[key] = record
 		c.writeMu.Unlock()
 		return true
 	}
-	c.writeQueued[record.Path] = record
+	c.writeQueued[key] = record
 	select {
 	case <-c.stop:
-		delete(c.writeQueued, record.Path)
+		delete(c.writeQueued, key)
 		c.writeMu.Unlock()
 		return false
-	case c.writeCh <- record.Path:
+	case c.writeCh <- key:
 		c.writeMu.Unlock()
 		return true
 	default:
-		delete(c.writeQueued, record.Path)
+		delete(c.writeQueued, key)
 		c.writeMu.Unlock()
 		return false
 	}
@@ -333,26 +368,34 @@ func (c *Catalog) writerLoop() {
 	}
 }
 
-func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
+func (c *Catalog) recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
+	key.Scope, key.WorkspaceRoot = normalizeScope(key.Scope, key.WorkspaceRoot)
+	rootKey := key.workspaceKey
+	if key.Scope == "project" && rootKey == "" {
+		rootKey = c.workspaceRootKey(key.Scope, key.WorkspaceRoot)
+	}
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?`, key.Scope, key.WorkspaceRoot, key.TopicID).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE scope=? AND workspace_root_key=? AND topic_id=?`, key.Scope, rootKey, key.TopicID).Scan(&count); err != nil {
 		return err
 	}
 	if count == 0 {
-		_, err := tx.ExecContext(ctx, `DELETE FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`, key.Scope, key.WorkspaceRoot, key.TopicID)
+		_, err := tx.ExecContext(ctx, `DELETE FROM catalog_topics WHERE scope=? AND workspace_root_key=? AND topic_id=?`, key.Scope, rootKey, key.TopicID)
+		return err
+	}
+	if err := removeRemappedTopicIdentity(ctx, tx, key, rootKey); err != nil {
 		return err
 	}
 	// Covered copies skip turn/health totals but still update recency. Adopted
 	// branches are alternate continuations, so preserve the pre-catalog contract:
 	// max(sum(normal turns), max(adopted recovery turns)).
 	_, err := tx.ExecContext(ctx, `INSERT INTO catalog_topics(
-        scope,workspace_root,topic_id,title,turns,turns_state,created_at,
-        last_activity_at,recovery_state,recovery_branch_count,
-        recovery_unresolved_count,recovery_cleanup_eligible_count,health
-    ) SELECT ?,?,?,
-        COALESCE(NULLIF((SELECT COALESCE(NULLIF(custom_title,''), NULLIF(topic_title,''), preview, '')
-            FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
-            ORDER BY recovery_copy ASC, last_activity_at DESC, path ASC LIMIT 1),''), ?),
+		scope,workspace_root,workspace_root_key,topic_id,title,turns,turns_state,created_at,
+		last_activity_at,recovery_state,recovery_branch_count,
+		recovery_unresolved_count,recovery_cleanup_eligible_count,health
+	) SELECT ?,?,?,?,
+		COALESCE(NULLIF((SELECT COALESCE(NULLIF(custom_title,''), NULLIF(topic_title,''), preview, '')
+			FROM catalog_sessions WHERE scope=? AND workspace_root_key=? AND topic_id=?
+			ORDER BY recovery_copy ASC, last_activity_at DESC, path ASC LIMIT 1),''), ?),
 		MAX(
 			COALESCE(SUM(CASE WHEN recovery_copy=0 AND recovered=0 AND turns_state='valid' THEN turns ELSE 0 END),0),
 			COALESCE(MAX(CASE WHEN recovery_copy=0 AND recovered=1 AND turns_state='valid' THEN turns ELSE 0 END),0)
@@ -373,18 +416,18 @@ func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
         CASE WHEN SUM(CASE WHEN recovery_copy=0 AND health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
              WHEN SUM(CASE WHEN recovery_copy=0 AND health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
              ELSE 'ok' END
-      FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
-    ON CONFLICT(scope,workspace_root,topic_id) DO UPDATE SET
-        title=excluded.title, turns=excluded.turns, turns_state=excluded.turns_state,
+	  FROM catalog_sessions WHERE scope=? AND workspace_root_key=? AND topic_id=?
+	ON CONFLICT(scope,workspace_root_key,topic_id) DO UPDATE SET
+		title=excluded.title, turns=excluded.turns, turns_state=excluded.turns_state,
         created_at=excluded.created_at, last_activity_at=excluded.last_activity_at,
         recovery_state=excluded.recovery_state,
         recovery_branch_count=excluded.recovery_branch_count,
         recovery_unresolved_count=excluded.recovery_unresolved_count,
         recovery_cleanup_eligible_count=excluded.recovery_cleanup_eligible_count,
         health=excluded.health`,
-		key.Scope, key.WorkspaceRoot, key.TopicID,
-		key.Scope, key.WorkspaceRoot, key.TopicID, key.TopicID,
-		key.Scope, key.WorkspaceRoot, key.TopicID)
+		key.Scope, key.WorkspaceRoot, rootKey, key.TopicID,
+		key.Scope, rootKey, key.TopicID, key.TopicID,
+		key.Scope, rootKey, key.TopicID)
 	return err
 }
 
@@ -409,8 +452,31 @@ func bumpRevision(ctx context.Context, tx *sql.Tx) (uint64, error) {
 func (c *Catalog) publishRevision(revision uint64, roots []string, reason string) {
 	c.rememberRevision(revision)
 	if c.opts.OnRevision != nil {
-		c.opts.OnRevision(revision, roots, reason)
+		c.opts.OnRevision(revision, c.registeredRevisionRoots(roots), reason)
 	}
+}
+
+func (c *Catalog) registeredRevisionRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		_, root = normalizeScope("project", root)
+		rootKey := c.workspaceRootKey("project", root)
+		if _, ok := seen[rootKey]; ok {
+			continue
+		}
+		seen[rootKey] = struct{}{}
+		registered := root
+		if rootKey != "" && c.db != nil {
+			var candidate string
+			if err := c.db.QueryRowContext(context.Background(), `SELECT workspace_root FROM catalog_projects
+				WHERE scope='project' AND workspace_root_key=?`, rootKey).Scan(&candidate); err == nil && candidate != "" {
+				registered = candidate
+			}
+		}
+		out = append(out, registered)
+	}
+	return out
 }
 
 func (c *Catalog) rememberRevision(revision uint64) {
@@ -427,12 +493,13 @@ func mapKeys(values map[string]struct{}) []string {
 	}
 	return out
 }
-func (c *Catalog) listTopicSessions(ctx context.Context, key TopicKey) ([]SessionRecord, error) {
+
+func (c *Catalog) listTopicSessionsByRootKey(ctx context.Context, key TopicKey, rootKey string) ([]SessionRecord, error) {
 	out := []SessionRecord{}
 	var cursor *sessionPageCursor
 	for len(out) < MaxLimit {
-		where := `scope=? AND workspace_root=? AND topic_id=?`
-		args := []any{key.Scope, key.WorkspaceRoot, key.TopicID}
+		where := `scope=? AND workspace_root_key=? AND topic_id=?`
+		args := []any{key.Scope, rootKey, key.TopicID}
 		if cursor != nil {
 			where += ` AND (last_activity_at<? OR (last_activity_at=? AND path>?))`
 			args = append(args, cursor.Activity, cursor.Activity, cursor.Path)
@@ -453,7 +520,7 @@ func (c *Catalog) listTopicSessions(ctx context.Context, key TopicKey) ([]Sessio
 			}
 			rawCount++
 			lastScanned = record
-			if c.pathRemoved(record.Path) {
+			if c.pathRemovedKey(record.pathKey, record.Path) {
 				continue
 			}
 			out = append(out, record)
@@ -477,13 +544,14 @@ func (c *Catalog) listTopicSessions(ctx context.Context, key TopicKey) ([]Sessio
 func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool, error) {
 	key.Scope, key.WorkspaceRoot = normalizeScope(key.Scope, key.WorkspaceRoot)
 	key.TopicID = strings.TrimSpace(key.TopicID)
+	rootKey := c.workspaceRootKey(key.Scope, key.WorkspaceRoot)
 	item := TopicRecord{Sessions: []SessionRecord{}}
 	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,
 		CASE WHEN metadata_present=1 THEN sort_order ELSE -1 END,
-        turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
-        recovery_unresolved_count,recovery_cleanup_eligible_count,health
-        FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`,
-		key.Scope, key.WorkspaceRoot, key.TopicID).Scan(
+		turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
+		recovery_unresolved_count,recovery_cleanup_eligible_count,health
+		FROM catalog_topics WHERE scope=? AND workspace_root_key=? AND topic_id=?`,
+		key.Scope, rootKey, key.TopicID).Scan(
 		&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title, &item.TitleSource,
 		&item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
 		&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.RecoveryBranchCount,
@@ -494,7 +562,7 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 	if err != nil {
 		return item, false, err
 	}
-	item.Sessions, err = c.listTopicSessions(ctx, key)
+	item.Sessions, err = c.listTopicSessionsByRootKey(ctx, key, rootKey)
 	if err != nil {
 		return TopicRecord{Sessions: []SessionRecord{}}, false, err
 	}

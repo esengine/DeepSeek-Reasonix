@@ -134,7 +134,9 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		return prepared, nil
 	}
 
-	if policy.Trigger == CompactionTriggerPressure || policy.Trigger == CompactionTriggerOverflow {
+	// A manual compact over the hard ceiling is a rescue, not a convenience:
+	// prune first so the never-folded recent tail can shrink too.
+	if shouldPruneBeforeFold(policy.Trigger, est >= hard) {
 		applied, err := a.pruneToolResultsToProjectionLocked(policy.Trigger)
 		if err != nil {
 			return PreparedContext{}, err
@@ -153,15 +155,35 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 	return m.foldContext(ctx, prepared, policy, inputHash, est, fold, hard, forceFold)
 }
 
+func shouldPruneBeforeFold(trigger string, overHardCeiling bool) bool {
+	switch trigger {
+	case CompactionTriggerPressure, CompactionTriggerOverflow:
+		return true
+	case CompactionTriggerManual:
+		return overHardCeiling
+	default:
+		return false
+	}
+}
+
+// manualRecoverySummaries bounds the rescue loop for a manual compact that
+// starts at or above the hard input ceiling. Each batch folds the largest
+// admissible prefix, so a handful of batches recovers even a view several
+// times the window while capping summarizer spend on pathological input.
+const manualRecoverySummaries = 4
+
 func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContext, policy ContextPreparePolicy, inputHash string, est, fold, hard int, forceFold bool) (PreparedContext, error) {
 	a := m.agent
 	maxSummaries := 1
 	if policy.Trigger == CompactionTriggerPressure {
 		maxSummaries = 2
 	}
+	if policy.Trigger == CompactionTriggerManual && est >= hard {
+		maxSummaries = manualRecoverySummaries
+	}
 	result := prepared
 	for range maxSummaries {
-		mustFree := policy.Trigger != CompactionTriggerManual && (policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard)
+		mustFree := policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard
 		outcome, err := a.compactToProjectionLocked(ctx, policy.Trigger, policy.Instructions, forceFold, mustFree)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -201,7 +223,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 		}
 
 		result = m.currentPrepared()
-		if policy.Trigger == CompactionTriggerManual || result.InputTokens < fold ||
+		if (policy.Trigger == CompactionTriggerManual && result.InputTokens < hard) || result.InputTokens < fold ||
 			(policy.Trigger == CompactionTriggerOverflow && result.InputTokens < hard) {
 			a.sess.compaction.stuck = false
 			a.sess.compaction.stuckInputHash = ""

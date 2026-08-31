@@ -153,7 +153,7 @@ jobs:
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sessioncatalog/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the

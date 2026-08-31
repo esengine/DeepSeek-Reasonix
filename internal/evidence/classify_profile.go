@@ -23,7 +23,7 @@ func ClassifyEffect(in EffectInput) EffectProfile {
 	switch name {
 	case "ask", "todo_write", "complete_step", "bash_output", "wait":
 		return readOnlyProfile(nil, ReasonReadOnly)
-	case "remember", "forget", "set_session_title":
+	case "remember", "forget", "set_session_title", "kill_shell":
 		return EffectProfile{Known: true, HostState: true, Reason: ReasonHostState}
 	}
 	profile := writerProfile(in)

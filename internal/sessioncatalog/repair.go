@@ -15,17 +15,18 @@ func (c *Catalog) enqueueRepair(path string) {
 	if c == nil || c.opts.DisableRepair || strings.TrimSpace(path) == "" {
 		return
 	}
-	if _, loaded := c.repairQueued.LoadOrStore(path, struct{}{}); loaded {
+	key := c.pathKey(path)
+	if _, loaded := c.repairQueued.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
 	select {
 	case c.repairCh <- path:
 	case <-c.stop:
-		c.repairQueued.Delete(path)
+		c.repairQueued.Delete(key)
 	default:
 		// Channel pressure must never permanently drop unknown rows. Leave them
 		// in the DB and clear the in-memory marker so the drain ticker requeues.
-		c.repairQueued.Delete(path)
+		c.repairQueued.Delete(key)
 	}
 }
 
@@ -65,7 +66,7 @@ func (c *Catalog) repairLoop() {
 		select {
 		case path := <-c.repairCh:
 			c.repairSession(c.workerCtx, path)
-			c.repairQueued.Delete(path)
+			c.repairQueued.Delete(c.pathKey(path))
 			c.drainUnknownRepairs(c.workerCtx, 32)
 			runtime.Gosched()
 		case <-ticker.C:
@@ -127,7 +128,8 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 		return err
 	}
 	var target DirectoryTarget
-	if err := tx.QueryRowContext(ctx, `SELECT directory,scope,workspace_root FROM catalog_sessions WHERE path=?`, path).
+	pathKey := c.pathKey(path)
+	if err := tx.QueryRowContext(ctx, `SELECT directory,scope,workspace_root FROM catalog_sessions WHERE path_key=?`, pathKey).
 		Scan(&target.Path, &target.Scope, &target.WorkspaceRoot); err != nil {
 		_ = tx.Rollback()
 		if err == sql.ErrNoRows {
@@ -137,10 +139,10 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 	}
 	if valid {
 		_, err = tx.ExecContext(ctx, `UPDATE catalog_sessions SET preview=?,turns=?,turns_state='valid',
-            health='ok',meta_fingerprint=? WHERE path=?`,
-			preview, turns, fileFingerprint(agent.BranchMetaPath(path)), path)
+			health='ok',meta_fingerprint=? WHERE path_key=?`,
+			preview, turns, fileFingerprint(agent.BranchMetaPath(path)), pathKey)
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt' WHERE path=?`, path)
+		_, err = tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt' WHERE path_key=?`, pathKey)
 	}
 	if err != nil {
 		_ = tx.Rollback()
@@ -178,7 +180,7 @@ func (c *Catalog) preserveKnownSourceStates(ctx context.Context, directory strin
 		return records, nil
 	}
 	rows, err := c.db.QueryContext(ctx, `SELECT path,preview,turns,turns_state,health,content_fingerprint
-		FROM catalog_sessions WHERE directory=? AND missing_since=0 AND turns_state<>'unknown'`, directory)
+		FROM catalog_sessions WHERE directory_key=? AND missing_since=0 AND turns_state<>'unknown'`, c.pathKey(directory))
 	if err != nil {
 		return nil, err
 	}
@@ -190,13 +192,13 @@ func (c *Catalog) preserveKnownSourceStates(ctx context.Context, directory strin
 		if err := rows.Scan(&path, &state.preview, &state.turns, &state.turnsState, &state.health, &state.contentFingerprint); err != nil {
 			return nil, err
 		}
-		known[path] = state
+		known[c.pathKey(path)] = state
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	for i := range records {
-		state, ok := known[records[i].Path]
+		state, ok := known[c.pathKey(records[i].Path)]
 		if !ok || records[i].TurnsState != TurnsUnknown || records[i].ContentFingerprint != state.contentFingerprint {
 			continue
 		}

@@ -380,7 +380,7 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 	return provider.Request{
 		Messages:    messages,
 		Tools:       schemas,
-		MaxTokens:   summaryOutputMaxTokens,
+		MaxTokens:   a.summaryOutputBudget(),
 		Temperature: provider.OptionalTemperature(a.temperature),
 	}
 }
@@ -400,11 +400,11 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
 	req := a.summaryRequest(region, instructions)
-	if err := a.applyAdmissionToRequest(&req); err != nil {
+	if err := a.applySummaryAdmissionToRequest(&req); err != nil {
 		return "", usage, err
 	}
-	if req.MaxTokens > summaryOutputMaxTokens {
-		req.MaxTokens = summaryOutputMaxTokens
+	if budget := a.summaryOutputBudget(); req.MaxTokens > budget {
+		req.MaxTokens = budget
 	}
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)

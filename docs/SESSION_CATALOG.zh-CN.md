@@ -2,17 +2,21 @@
 
 Reasonix 始终以会话 transcript、event log、metadata sidecar 和
 `desktop-projects.json` 作为唯一权威数据。桌面项目树读取位于
-`<缓存根目录>/session-catalog/v5.sqlite` 的一次性 SQLite 查询投影；删除该数据库
-不会删除或修改任何会话。早期的 `v1.sqlite` 至 `v4.sqlite` 缓存会保留，避免与仍在
-运行或降级后的旧版本进程交叉写同一投影。v5 是修复版本使用的独立索引代际，
-首次启动会从权威文件重新建立；旧 v4 文件保留用于回滚，不会被新版本写入。
-同一 v5 索引的手动重建也会留下带时间戳的 `.replaced-*` 旧文件。
+`<缓存根目录>/session-catalog/v6.sqlite` 的一次性 SQLite 查询投影；删除该数据库
+不会删除或修改任何会话。早期的 `v1.sqlite` 至 `v5.sqlite` 缓存会保留，避免与仍在
+运行或降级后的旧版本进程交叉写同一投影。v6 引入文件系统感知的路径身份，首次启动
+会从权威文件重新建立；旧 v5 文件保留用于回滚，不会被新版本写入。同一 v6 索引的
+手动重建也会留下带时间戳的 `.replaced-*` 旧文件。
 
 ## 不变量
 
 - 启动和项目树请求不会解码 transcript JSONL、执行旧版迁移或等待目录扫描。
-- transcript 成功落盘后才更新 catalog。非阻塞单写者队列按 session path 合并更新；
-  后台对账会修复队列拥塞时丢弃的更新。
+- transcript 成功落盘后才更新 catalog。保存观察器只做词法队列入队，不执行文件系统
+  探测；后台 worker 解析文件系统身份，SQLite 唯一约束作为最终去重边界，目录对账
+  会修复队列拥塞时丢弃的更新。
+- session 和 workspace root 的原始路径拼写继续用于文件访问和展示；独立的 identity
+  key 会解析别名，并且只在所属文件系统目录不区分大小写时折叠大小写。大小写敏感
+  卷上的不同文件和项目不会合并。
 - 缺少旧版计数时使用 `unknown` 状态。会话会立即可见，随后由单个 repair worker
   在后台解码修复。
 - 文件首次缺失时只标记为 degraded；只有连续第二次扫描仍缺失且超过宽限期后，
@@ -38,9 +42,10 @@ transcript 重建。隔离和重建都不会删除权威文件。
 catalog 只保存查询投影：
 
 - 目录签名、扫描代次、检查点和错误；
-- 项目排序、标题、颜色和置顶状态；
-- topic 排序、聚合计数、活动时间、恢复和健康状态；
-- session path、preview、计数、指纹、恢复和健康状态。
+- 项目排序、标题、颜色、置顶状态及 workspace root identity key；
+- topic 排序、聚合计数、活动时间、恢复、健康状态及 workspace root identity key；
+- session 访问路径及路径、目录和 workspace root identity key、preview、计数、指纹、
+  恢复和健康状态。
 
 topic 分页使用 `(pinned, last_activity_at, topic_id)` keyset cursor。默认每页
 50 条，最多 200 条。目录对账每批最多提交 64 个 sidecar，并在让出调度前持久化

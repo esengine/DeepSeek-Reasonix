@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -15,18 +14,27 @@ func (c *Catalog) RemoveSession(ctx context.Context, path, reason string) error 
 	if c == nil || c.db == nil {
 		return nil
 	}
-	path = filepath.Clean(strings.TrimSpace(path))
-	if path == "." || path == "" {
+	path = cleanCatalogAccessPath(path)
+	if path == "" {
 		return nil
 	}
+	pathKey := c.pathKey(path)
 	// Immediate query overlay: ListTopics/ListSessions/GetSession filter this
 	// map even when the durable DELETE has not committed yet.
-	c.removedPaths.Store(path, struct{}{})
+	removalSequence := c.mutationSeq.Add(1)
+	c.removedPaths.Store(pathKey, removalSequence)
 	c.writeMu.Lock()
-	delete(c.writeQueued, path)
+	queueKey := queuePathKey(path)
+	if queued, ok := c.writeQueued[queueKey]; ok && queued.enqueueSequence <= removalSequence {
+		delete(c.writeQueued, queueKey)
+	}
 	c.writeMu.Unlock()
-	c.pathQueued.Delete(path)
-	c.repairQueued.Delete(path)
+	c.pathQueueMu.Lock()
+	if queued, ok := c.pathQueued.Load(queueKey); ok && queued.(sessionPathRequest).sequence <= removalSequence {
+		c.pathQueued.CompareAndDelete(queueKey, queued)
+	}
+	c.pathQueueMu.Unlock()
+	c.repairQueued.Delete(pathKey)
 	// Wake listeners without SQLite. Equal revision identifies an overlay change;
 	// empty roots refresh every expanded folder without querying the busy DB for
 	// workspace_root.
@@ -66,7 +74,7 @@ func (c *Catalog) scheduleSessionRemovalRetry(path, reason string) {
 		ctx, cancel := context.WithTimeout(c.workerCtx, 5*time.Second)
 		defer cancel()
 		// Re-check tombstone: a recreate may have cleared it.
-		if _, removed := c.removedPaths.Load(path); !removed {
+		if _, removed := c.removedPaths.Load(c.pathKey(path)); !removed {
 			return
 		}
 		// Blocking apply is fine on the background worker.
@@ -117,18 +125,19 @@ func (c *Catalog) applySessionRemovalLocked(ctx context.Context, path, reason st
 		return err
 	}
 	var key TopicKey
-	err = tx.QueryRowContext(sqlCtx, `SELECT scope,workspace_root,topic_id FROM catalog_sessions WHERE path=?`, path).
-		Scan(&key.Scope, &key.WorkspaceRoot, &key.TopicID)
+	pathKey := c.pathKey(path)
+	err = tx.QueryRowContext(sqlCtx, `SELECT scope,workspace_root,workspace_root_key,topic_id FROM catalog_sessions WHERE path_key=?`, pathKey).
+		Scan(&key.Scope, &key.WorkspaceRoot, &key.workspaceKey, &key.TopicID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.ExecContext(sqlCtx, `DELETE FROM catalog_sessions WHERE path=?`, path); err != nil {
+	if _, err := tx.ExecContext(sqlCtx, `DELETE FROM catalog_sessions WHERE path_key=?`, pathKey); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	if key.TopicID != "" {
-		if err := recomputeTopic(sqlCtx, tx, key); err != nil {
+		if err := c.recomputeTopic(sqlCtx, tx, key); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -147,9 +156,16 @@ func (c *Catalog) applySessionRemovalLocked(ctx context.Context, path, reason st
 }
 
 func (c *Catalog) pathRemoved(path string) bool {
+	return c.pathRemovedKey("", path)
+}
+
+func (c *Catalog) pathRemovedKey(key, path string) bool {
 	if c == nil {
 		return false
 	}
-	_, removed := c.removedPaths.Load(filepath.Clean(path))
+	if key == "" {
+		key = c.pathKey(path)
+	}
+	_, removed := c.removedPaths.Load(key)
 	return removed
 }
