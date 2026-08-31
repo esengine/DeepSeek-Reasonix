@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/session-title-contract.test.ts
 
 import {
+  historySearchHitDisplayTitle,
   historySessionDisplayTitle,
   paletteSessionDisplayTitle,
   paletteSessionHint,
@@ -54,6 +55,24 @@ function session(overrides: Partial<SessionMeta> = {}): SessionMeta {
 console.log("\nsession title contracts");
 
 {
+  const hit = {
+    sessionPath: "/sessions/version.jsonl",
+    sessionTitle: "Private version note",
+    topicTitle: "Shared topic",
+  };
+  eq(
+    historySearchHitDisplayTitle(hit),
+    "Shared topic",
+    "History content search keeps physical-version notes out of the logical title",
+  );
+  eq(
+    historySearchHitDisplayTitle({ ...hit, topicTitle: "" }),
+    "Private version note",
+    "Legacy search hits without a topic title retain the session-title fallback",
+  );
+}
+
+{
   const item = session();
   eq(
     paletteSessionDisplayTitle(item, "Untitled"),
@@ -62,13 +81,13 @@ console.log("\nsession title contracts");
   );
   deepEq(
     paletteSessionKeywords(item),
-    ["Renamed saved session", "first saved prompt preview"],
-    "Cmd+K still searches the session rename and preview text",
+    ["first saved prompt preview"],
+    "Cmd+K keeps per-version notes out of the logical session search contract",
   );
   eq(
     paletteSessionHint(item),
-    "Renamed saved session · /work/project-alpha",
-    "Cmd+K shows the session rename in the hint so hidden search hits are visible",
+    "first saved prompt preview · /work/project-alpha",
+    "Cmd+K uses the content preview rather than a physical-version note",
   );
 }
 
@@ -76,8 +95,8 @@ console.log("\nsession title contracts");
   const item = session();
   eq(
     historySessionDisplayTitle(item, "Untitled"),
-    "Renamed saved session",
-    "History displays an explicit session rename before the topic title",
+    "Shared topic",
+    "History displays the logical topic title instead of a physical-version note",
   );
 }
 

@@ -98,60 +98,6 @@ func SessionContentCovers(coveringPath, coveredPath string) bool {
 	return ok && covering.Covers(covered)
 }
 
-// SetRecoveryPreferred records exactly one explicit preferred leaf. It clears
-// old choices first, so interruption can only fall back to an unresolved group;
-// it can never leave two canonical choices.
-func SetRecoveryPreferred(paths []string, chosenPath string) error {
-	chosenPath = canonicalSessionSavePath(chosenPath)
-	if chosenPath == "" {
-		return fmt.Errorf("empty preferred recovery path")
-	}
-	unique := map[string]struct{}{}
-	for _, path := range paths {
-		path = canonicalSessionSavePath(path)
-		if path != "" {
-			unique[path] = struct{}{}
-		}
-	}
-	if _, ok := unique[chosenPath]; !ok {
-		return fmt.Errorf("preferred recovery path is outside the lineage")
-	}
-	ordered := make([]string, 0, len(unique))
-	for path := range unique {
-		meta, ok, err := LoadBranchMeta(path)
-		if err != nil || !ok || !meta.Recovered {
-			return fmt.Errorf("invalid recovery lineage member")
-		}
-		ordered = append(ordered, path)
-	}
-	sort.Strings(ordered)
-	for _, path := range ordered {
-		if err := UpdateBranchMeta(path, false, func(meta *BranchMeta) error {
-			meta.RecoveryPreferred = false
-			meta.RecoveryPreferredDigest = ""
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	chosen, err := LoadSession(chosenPath)
-	if err != nil || chosen == nil || chosen.normalizedDirty || chosen.eventLogDamaged {
-		return fmt.Errorf("could not fingerprint preferred recovery branch")
-	}
-	digest, err := digestSessionMessages(chosen.Snapshot())
-	if err != nil {
-		return err
-	}
-	return UpdateBranchMeta(chosenPath, false, func(meta *BranchMeta) error {
-		if !meta.Recovered {
-			return fmt.Errorf("preferred session is not a recovery branch")
-		}
-		meta.RecoveryPreferred = true
-		meta.RecoveryPreferredDigest = digestString(digest)
-		return nil
-	})
-}
-
 // RecoveryPreferenceCurrent proves that the branch still has the exact content
 // the user selected. Continued or externally edited branches fall back to an
 // unresolved lineage until the user chooses again.

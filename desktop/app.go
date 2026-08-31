@@ -3570,7 +3570,15 @@ func (a *App) purgeTrashedSession(path string, requireRedundantRecovery bool) er
 // the branch meta sidecar, with the legacy .titles.json map kept as a
 // compatibility write-through for older desktop data paths.
 func (a *App) RenameSession(path, title string) error {
-	return a.renameSessionInDir(a.activeSessionDir(), path, title)
+	dir := a.activeSessionDir()
+	if _, _, err := validateSessionPath(dir, path); err != nil {
+		resolvedDir, _, resolveErr := a.sessionDirForPath(path)
+		if resolveErr != nil {
+			return errors.New("session version is unavailable")
+		}
+		dir = resolvedDir
+	}
+	return friendlySessionFileError(a.renameSessionInDir(dir, path, title))
 }
 
 func (a *App) renameSessionInDir(dir, path, title string) error {

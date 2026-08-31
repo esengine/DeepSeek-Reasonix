@@ -575,29 +575,13 @@ export interface ProjectNode extends RemoteProjectNodeFields {
   recoveryBranchCount?: number;
   recoveryUnresolvedCount?: number;
   recoveryCleanupEligibleCount?: number;
-  recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
+  recoveryCopyCount?: number; // Deprecated: ordinary trees hide physical copies.
   isolatedWorktree?: boolean;
   runtimeOnly?: boolean;
   children?: ProjectNode[];
 }
 
-export interface RecoveryLineageMember {
-  path: string;
-  role: "normal" | "covered_copy" | "adopted" | "preferred" | "diverged" | string;
-  canonical: boolean;
-  turns: number;
-  open: boolean;
-  running: boolean;
-}
-
-export interface RecoveryLineageView {
-  groupId: string;
-  state: string;
-  branchCount: number;
-  unresolved: number;
-  cleanupEligible: number;
-  members: RecoveryLineageMember[];
-}
+export type { RecoveryLineageMember, RecoveryLineageView } from "./sessionRecoveryTypes";
 
 export interface RecoveryCleanupRequest {
   scope: string;

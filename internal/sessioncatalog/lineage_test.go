@@ -145,6 +145,22 @@ func TestOrdinaryContinuePathFollowsParentOnly(t *testing.T) {
 	}
 }
 
+func TestPromoteCanonicalLeavesHonorsPreferredOriginalMember(t *testing.T) {
+	root := "/s/root.jsonl"
+	branch := "/s/branch.jsonl"
+	records := []SessionRecord{
+		{Path: root, RecoveryRole: RecoveryRoleNormal, RecoveryPreferred: true, TurnsState: TurnsValid},
+		{Path: branch, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, TurnsState: TurnsValid},
+	}
+	got := promoteCanonicalLeaves(records)
+	if got[0].RecoveryRole != RecoveryRolePreferred || !got[0].RecoveryCanonical {
+		t.Fatalf("preferred original = %+v, want preferred canonical", got[0])
+	}
+	if got[1].RecoveryCanonical {
+		t.Fatalf("recovery leaf stayed canonical after choosing original: %+v", got[1])
+	}
+}
+
 func TestOrdinaryContinuePathFollowsUniqueLinearCompactedLeaf(t *testing.T) {
 	root := filepath.Join("/s", "root.jsonl")
 	parentID := "root"

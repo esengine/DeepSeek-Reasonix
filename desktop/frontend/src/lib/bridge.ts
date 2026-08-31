@@ -352,7 +352,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
-  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
+  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<RecoveryLineageView>;
   ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;

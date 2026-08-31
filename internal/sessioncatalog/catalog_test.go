@@ -264,51 +264,6 @@ func TestSyncMetadataRemovesOnlyMetadataOnlyTopics(t *testing.T) {
 	}
 }
 
-func TestSyncMetadataPreservesRepresentativeSessionCustomTitle(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	catalog, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "catalog.sqlite"), DisableRepair: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
-	record := SessionRecord{
-		Path: "/sessions/titled.jsonl", Directory: "/sessions", Scope: "global",
-		TopicID: "titled", TopicTitle: "Original topic", CustomTitle: "Explicit session title",
-		LastActivityAt: 2, Turns: 1, TurnsState: TurnsValid, Health: HealthOK,
-	}
-	if err := catalog.UpsertSession(ctx, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
-		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
-	if err != nil || !ok || topic.Title != "Explicit session title" || topic.TitleSource != "manual" {
-		t.Fatalf("custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
-	}
-	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 10})
-	if err != nil || len(page.Items) != 1 || page.Items[0].TitleSource != "manual" {
-		t.Fatalf("listed custom title source = %+v, err=%v", page.Items, err)
-	}
-	record.CustomTitle = ""
-	record.TopicTitle = "Changed topic"
-	if err := catalog.UpsertSession(ctx, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
-		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	topic, ok, err = catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
-	if err != nil || !ok || topic.Title != "Changed topic" || topic.TitleSource != "auto" {
-		t.Fatalf("cleared custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
-	}
-}
-
 func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -384,9 +384,6 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		// preferred conflict forks. Open/running recovery is still not a
 		// second row — status is already aggregated above.
 		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
-			if session.Recovered || session.RecoveryCopy {
-				node.RecoveryCopyCount++
-			}
 			continue
 		}
 		visible = append(visible, session)
