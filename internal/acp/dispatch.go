@@ -353,6 +353,7 @@ func (s *updateSink) replay(msgs []provider.Message) {
 			} else {
 				text = agent.UserMessageText(m)
 			}
+			text = agent.StripTransientUserBlocks(text)
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
 			}
