@@ -95,6 +95,7 @@ import type {
   PluginView,
   ProjectNode,
   ProjectTreeOrganizationBindings,
+  ConsolidationReport,
   RecoveryLineageView,
   RecoveryCleanupRequest,
   RecoveryCleanupResult,
@@ -350,6 +351,10 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
+  ConsolidateSessionRecoveryCopies(path: string): Promise<ConsolidationReport>;
+  ForceConsolidateSessionRecoveryCopies(path: string): Promise<ConsolidationReport>;
+  ConsolidateTopicRecoveryCopies(scope: string, workspaceRoot: string, topicID: string): Promise<ConsolidationReport>;
+  ForceConsolidateTopicRecoveryCopies(scope: string, workspaceRoot: string, topicID: string): Promise<ConsolidationReport>;
   GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
   ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
@@ -3439,6 +3444,31 @@ function makeMockApp(): AppBindings {
     },
     async PurgeRecoveryCopy(path: string) {
       return this.PurgeTrashedSession(path);
+    },
+    async ConsolidateSessionRecoveryCopies(path: string): Promise<ConsolidationReport> {
+      // The browser mock keeps no recovery lineage, so consolidation is a
+      // well-formed no-op that reports "nothing to merge".
+      return {
+        mainPath: path,
+        winnerPath: "",
+        promoted: false,
+        blockedByDivergence: false,
+        normalizedMain: false,
+        mainMessageCount: 0,
+        winnerMessageCount: 0,
+        trashed: [],
+        skippedNotCovered: [],
+        skippedUnloadable: [],
+      };
+    },
+    async ForceConsolidateSessionRecoveryCopies(path: string): Promise<ConsolidationReport> {
+      return this.ConsolidateSessionRecoveryCopies(path);
+    },
+    async ConsolidateTopicRecoveryCopies(_scope: string, _workspaceRoot: string, topicID: string): Promise<ConsolidationReport> {
+      return this.ConsolidateSessionRecoveryCopies(`mock://topics/${topicID}`);
+    },
+    async ForceConsolidateTopicRecoveryCopies(_scope: string, _workspaceRoot: string, topicID: string): Promise<ConsolidationReport> {
+      return this.ForceConsolidateSessionRecoveryCopies(`mock://topics/${topicID}`);
     },
     async RenameSession(path: string, title: string) {
       const s = sessions.find((x) => x.path === path);
