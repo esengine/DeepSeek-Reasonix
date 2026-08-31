@@ -1255,6 +1255,7 @@ export interface SkillView {
   body?: string;
   configuredModel?: string;
   configuredEffort?: string;
+  configuredMaxSteps?: number;
 }
 export interface SkillRootSkillView {
   name: string;

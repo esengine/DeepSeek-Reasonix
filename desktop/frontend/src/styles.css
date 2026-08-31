@@ -15150,7 +15150,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .subagents-builtin-overrides {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) 152px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 152px;
   align-items: end;
   gap: 8px;
   margin: 8px 0 0 33px;
@@ -15167,8 +15167,15 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.3;
 }
 .subagents-builtin-overrides__field .settings-model-picker,
-.subagents-builtin-overrides__field .mem-select {
+.subagents-builtin-overrides__field .mem-select,
+.subagents-builtin-overrides__field .mem-input {
   width: 100%;
+  min-width: 0;
+}
+.subagents-builtin-overrides__effective {
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.3;
 }
 .subagents-builtin-overrides__status {
   min-height: 34px;

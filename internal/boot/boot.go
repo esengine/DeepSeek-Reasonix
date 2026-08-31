@@ -1227,6 +1227,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		steps := sk.MaxSteps
 		if steps <= 0 {
+			// Built-in profiles have no frontmatter to carry a `max-steps:`
+			// line, so a per-name config override (subagent_max_steps) is the
+			// desktop UI's way to cap their steps. Custom frontmatter above
+			// already took precedence.
+			steps = subagentMaxSteps(cfg, sk)
+		}
+		if steps <= 0 {
 			// No per-skill cap: inherit the engine default budget (half the
 			// parent's step allowance, minimum 5) as before.
 			steps = maxSteps
@@ -1355,6 +1362,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		defer run.Release()
 		steps := sk.MaxSteps
+		if steps <= 0 {
+			// Built-in profiles have no frontmatter to carry a `max-steps:`
+			// line, so a per-name config override (subagent_max_steps) is the
+			// desktop UI's way to cap their steps. Custom frontmatter above
+			// already took precedence.
+			steps = subagentMaxSteps(cfg, sk)
+		}
 		if steps <= 0 {
 			// No per-skill cap: inherit the engine default budget (half the
 			// parent's step allowance, minimum 5) as before.
@@ -2266,6 +2280,24 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+}
+
+// subagentMaxSteps returns the per-name step-cap override for a subagent skill,
+// if one is configured (config.toml [agent] subagent_max_steps). Built-in
+// profiles have no frontmatter file to carry a `max-steps:` line, so this map
+// is how the desktop UI caps their steps; it is intentionally lower priority
+// than a custom profile's own frontmatter max-steps, which the callers check
+// before falling back here.
+func subagentMaxSteps(cfg *config.Config, sk skill.Skill) int {
+	if cfg == nil {
+		return 0
+	}
+	for _, key := range SubagentModelKeys(sk.Name) {
+		if n := cfg.Agent.SubagentMaxSteps[key]; n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map

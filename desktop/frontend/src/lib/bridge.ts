@@ -456,6 +456,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   DeleteSubagentProfile(name: string, scope: string): Promise<void>;
   SetSubagentProfileModel(name: string, ref: string): Promise<void>;
   SetSubagentProfileEffort(name: string, level: string): Promise<void>;
+  SetSubagentProfileMaxSteps(name: string, n: number): Promise<void>;
   TrySubagentProfile(input: SubagentProfileInput, task: string): Promise<string>;
   CancelTrySubagentProfile(): Promise<void>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
@@ -1096,7 +1097,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(CheckUpdate|ApplyUpdateRequest|OpenDownloadPage|OpenUserConfigPath|ReloadUserConfig)/.test(method)) return `update ${method}`;
   if (/^(AddMCPServer|InstallMCPServer|UpdateMCPServer|RemoveMCPServer|AuthorizeAndConnectMCPServer|AuthenticateMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
     return `mcp ${method}`;
-  if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
+  if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|SetSubagentProfileMaxSteps|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
   if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|RegisterNavigationIntent|CloseMergedWorktreeTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
@@ -4023,6 +4024,10 @@ function makeMockApp(): AppBindings {
     async SetSubagentProfileEffort(name: string, level: string) {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.configuredEffort = level || undefined;
+    },
+    async SetSubagentProfileMaxSteps(name: string, n: number) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.configuredMaxSteps = n > 0 ? n : undefined;
     },
     async CancelTrySubagentProfile() {},
     async TrySubagentProfile(input: SubagentProfileInput, task: string) {
