@@ -86,6 +86,62 @@ func TestSubagentProfileCLIManageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSubagentProfileCLIMaxStepsRoundTrip(t *testing.T) {
+	isolateCLIConfigHome(t)
+	project := t.TempDir()
+	original, _ := os.Getwd()
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
+
+	if rc := subagentCommand([]string{
+		"create", "digger", "--description", "deep dig", "--prompt", "go deep",
+		"--max-steps", "32",
+	}); rc != 0 {
+		t.Fatalf("create rc = %d", rc)
+	}
+	store := newCLISubagentStore()
+	sk, ok := store.Read("digger")
+	if !ok {
+		t.Fatal("created profile was not discovered")
+	}
+	if sk.MaxSteps != 32 {
+		t.Fatalf("created MaxSteps = %d, want 32", sk.MaxSteps)
+	}
+
+	if rc := subagentCommand([]string{"edit", "digger", "--max-steps", "16"}); rc != 0 {
+		t.Fatalf("edit rc = %d", rc)
+	}
+	sk, _ = store.Read("digger")
+	if sk.MaxSteps != 16 {
+		t.Fatalf("edited MaxSteps = %d, want 16", sk.MaxSteps)
+	}
+
+	// An explicit empty value clears the cap back to the engine default.
+	if rc := subagentCommand([]string{"edit", "digger", "--max-steps="}); rc != 0 {
+		t.Fatalf("clear rc = %d", rc)
+	}
+	sk, _ = store.Read("digger")
+	if sk.MaxSteps != 0 {
+		t.Fatalf("cleared MaxSteps = %d, want 0 (unset)", sk.MaxSteps)
+	}
+}
+
+func TestParseCLIMaxSteps(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int
+	}{
+		{"", 0}, {"0", 0}, {"-3", 0}, {"abc", 0}, {"1", 1}, {" 20 ", 20}, {"999", 999},
+	}
+	for _, tc := range cases {
+		if got := parseCLIMaxSteps(tc.raw); got != tc.want {
+			t.Errorf("parseCLIMaxSteps(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
 func TestSubagentListIncludesQualifiedPluginAgents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)

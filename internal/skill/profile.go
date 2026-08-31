@@ -46,6 +46,7 @@ func ValidateSubagentProfileName(name string, occupied []string) error {
 var subagentProfileManagedKeys = map[string]bool{
 	"name": true, "description": true, "color": true, "invocation": true,
 	"runas": true, "model": true, "effort": true, "read-only": true, "allowed-tools": true,
+	"max-steps": true,
 }
 
 // ValidateEditableSubagentProfile verifies that a loaded skill is a manual

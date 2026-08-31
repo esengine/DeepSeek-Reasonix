@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -25,8 +26,8 @@ var setupSubagentCommand = func(ctx context.Context, modelName string, maxStepsO
 
 const subagentUsageText = `usage:
   reasonix subagent list [--dir PATH]
-  reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH) [--scope project|global] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--dir PATH]
-  reasonix subagent edit <name> [--description TEXT] [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--dir PATH]
+  reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH) [--scope project|global] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
+  reasonix subagent edit <name> [--description TEXT] [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
   reasonix subagent delete <name> --yes [--dir PATH]
   reasonix subagent try <name> [--model REF] [--max-steps N] [--dir PATH] <task>
   reasonix subagent run <name> [--model REF] [--max-steps N] [--dir PATH] <task>
@@ -129,6 +130,7 @@ type subagentProfileFlags struct {
 	effort      optionalString
 	tools       optionalString
 	color       optionalString
+	maxSteps    optionalString
 	dir         string
 }
 
@@ -140,6 +142,7 @@ func addSubagentProfileFlags(fs *flag.FlagSet, values *subagentProfileFlags) {
 	fs.Var(&values.effort, "effort", "per-profile reasoning effort (empty clears on edit)")
 	fs.Var(&values.tools, "tools", "comma-separated allowed tools (empty means all tools)")
 	fs.Var(&values.color, "color", "profile color tag (empty clears on edit)")
+	fs.Var(&values.maxSteps, "max-steps", "per-profile subagent step cap (0/empty = engine default)")
 	fs.StringVar(&values.dir, "dir", "", "project root")
 }
 
@@ -200,7 +203,7 @@ func subagentCreateCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
 		return 1
 	}
-	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, false)
+	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, false, parseCLIMaxSteps(values.maxSteps.value))
 	path, err := store.CreateWithContent(name, scope, content)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
@@ -261,6 +264,7 @@ func subagentEditCommand(args []string) int {
 	description, body := sk.Description, sk.Body
 	model, effort, color := sk.Model, sk.Effort, sk.Color
 	tools := append([]string(nil), sk.AllowedTools...)
+	maxSteps := sk.MaxSteps
 	if values.description.set {
 		description = values.description.value
 	}
@@ -279,11 +283,14 @@ func subagentEditCommand(args []string) int {
 	if values.color.set {
 		color = values.color.value
 	}
+	if values.maxSteps.set {
+		maxSteps = parseCLIMaxSteps(values.maxSteps.value)
+	}
 	if strings.TrimSpace(description) == "" || strings.TrimSpace(body) == "" {
 		fmt.Fprintln(os.Stderr, "subagent edit: description and prompt cannot be empty")
 		return 2
 	}
-	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color, sk.ReadOnly)
+	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color, sk.ReadOnly, maxSteps)
 	if err := store.UpdateContent(sk.Name, sk.Scope, content); err != nil {
 		fmt.Fprintln(os.Stderr, "subagent edit:", err)
 		return 1
@@ -458,7 +465,7 @@ func refuseSubagentNameCollision(skills []skill.Skill, name string) error {
 }
 
 func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) error {
-	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set {
+	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set || values.maxSteps.set {
 		return fmt.Errorf("built-in profile %q only supports --model and --effort overrides", sk.Name)
 	}
 	unlock := config.LockUserConfigEdits()
@@ -552,7 +559,18 @@ func resolveSubagentPrompt(prompt, promptFile optionalString) (string, bool, err
 
 func profileFlagsChanged(values subagentProfileFlags) bool {
 	return values.description.set || values.prompt.set || values.promptFile.set || values.model.set ||
-		values.effort.set || values.tools.set || values.color.set
+		values.effort.set || values.tools.set || values.color.set || values.maxSteps.set
+}
+
+// parseCLIMaxSteps maps a --max-steps flag value to a step cap. Empty, invalid,
+// or <= 0 resolve to 0 ("unset" — inherit the engine default), so an explicit
+// `--max-steps=` clears a previously set cap on edit.
+func parseCLIMaxSteps(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 func parseToolList(raw string) []string {
@@ -569,7 +587,7 @@ func parseToolList(raw string) []string {
 	return tools
 }
 
-func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string, readOnly bool) string {
+func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string, readOnly bool, maxSteps int) string {
 	return skill.RenderSkillFile(skill.SkillFileOptions{
 		Name:         strings.TrimSpace(name),
 		Description:  strings.TrimSpace(description),
@@ -578,6 +596,7 @@ func renderCLIProfile(name, description, prompt, model, effort string, tools []s
 		Model:        strings.TrimSpace(model),
 		Effort:       strings.TrimSpace(effort),
 		AllowedTools: tools,
+		MaxSteps:     maxSteps,
 		ReadOnly:     readOnly,
 		Color:        strings.TrimSpace(color),
 		Invocation:   "manual",

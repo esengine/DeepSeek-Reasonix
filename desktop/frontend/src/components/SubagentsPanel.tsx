@@ -16,6 +16,11 @@ import { Tooltip } from "./Tooltip";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
+// Step caps above this threshold trigger an inline (non-blocking) warning that
+// the subagent may spin without progress and burn tokens; the value is still
+// accepted so advanced users keep full control.
+const MAX_STEPS_WARNING_THRESHOLD = 50;
+
 function subagentScopeLabel(scope: string, t: ReturnType<typeof useT>): string {
   switch (scope) {
     case "builtin":
@@ -456,6 +461,7 @@ function CustomSubagentRow({
             <span className="cap-skill-card__badges">
               <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{subagentScopeLabel(skill.scope, t)}</span>
               {skill.model && <span className="cap-skill-badge">{skill.model}</span>}
+              {skill.maxSteps ? <span className="cap-skill-badge">{t("subagents.maxStepsBadge", { n: skill.maxSteps })}</span> : null}
               <Tooltip label={(skill.allowedTools ?? []).join(", ") || t("subagents.allTools")}>
                 <span className="cap-skill-badge">{toolsLabel}</span>
               </Tooltip>
@@ -582,6 +588,7 @@ function SubagentProfileForm({
   const [color, setColor] = useState<ProjectColorKey>((editingSkill?.color as ProjectColorKey) ?? "");
   const [model, setModel] = useState(editingSkill?.model ?? "");
   const [effort, setEffort] = useState(editingSkill?.effort ?? "");
+  const [maxSteps, setMaxSteps] = useState(editingSkill?.maxSteps ?? 0);
   const [toolMode, setToolMode] = useState<"all" | "custom">(
     editingSkill?.allowedTools && editingSkill.allowedTools.length > 0 ? "custom" : "all",
   );
@@ -616,6 +623,7 @@ function SubagentProfileForm({
     model,
     effort,
     allowedTools: toolMode === "custom" ? Array.from(selectedTools) : [],
+    maxSteps,
     readOnly,
     scope,
   });
@@ -677,6 +685,37 @@ function SubagentProfileForm({
           </option>
         ))}
       </select>
+
+      <label className="set-label">{t("subagents.maxSteps")}</label>
+      <input
+        className="mem-input"
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        placeholder={t("subagents.maxStepsPlaceholder")}
+        value={maxSteps === 0 ? "" : String(maxSteps)}
+        disabled={busy}
+        onChange={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === "") {
+            setMaxSteps(0);
+            return;
+          }
+          const n = Number(raw);
+          if (Number.isInteger(n) && n >= 0) setMaxSteps(n);
+        }}
+      />
+      <div className="set-hint">{t("subagents.maxStepsHint")}</div>
+      {maxSteps > MAX_STEPS_WARNING_THRESHOLD && (
+        <div
+          className="subagents-field-error subagents-maxsteps-warning"
+          role="note"
+          style={{ color: "#B45309", background: "rgba(250,173,20,0.12)", border: "1px solid rgba(250,173,20,0.45)", borderRadius: "8px", padding: "8px 10px", marginTop: "6px" }}
+        >
+          {t("subagents.maxStepsWarning", { n: maxSteps })}
+        </div>
+      )}
 
       <label className="set-label">{t("subagents.description")}</label>
       <input

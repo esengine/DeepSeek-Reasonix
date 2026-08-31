@@ -575,7 +575,8 @@ func (*installSkillTool) Schema() json.RawMessage {
   "runAs":{"type":"string","enum":["inline","subagent"],"description":"inline (default) folds the body into the parent turn; subagent spawns an isolated child loop returning only its final answer (use for context-heavy work)."},
   "model":{"type":"string","description":"Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise."},
   "effort":{"type":"string","description":"Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise."},
-  "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."}
+  "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."},
+  "maxSteps":{"type":"integer","minimum":1,"description":"Optional step cap for runAs=subagent — how many tool-execution steps the child may take before being asked to wrap up. Omitted/0 inherits the engine's default budget. Ignored for inline."}
 },
 "required":["name","description","body"]
 }`)
@@ -591,6 +592,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		Model        string   `json:"model"`
 		Effort       string   `json:"effort"`
 		AllowedTools []string `json:"allowedTools"`
+		MaxSteps     int      `json:"maxSteps"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -635,6 +637,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		Model:        strings.TrimSpace(p.Model),
 		Effort:       strings.TrimSpace(p.Effort),
 		AllowedTools: p.AllowedTools,
+		MaxSteps:     p.MaxSteps,
 	})
 	path, err := t.store.CreateWithContent(name, scope, content)
 	if err != nil {
@@ -666,6 +669,10 @@ type SkillFileOptions struct {
 	Model        string // subagent-only; ignored when RunAs != RunSubagent
 	Effort       string // subagent-only; ignored when RunAs != RunSubagent
 	AllowedTools []string
+	// MaxSteps caps a subagent child's tool-execution steps (frontmatter
+	// `max-steps:`). Subagent-only; <= 0 omits it so the engine default budget
+	// applies.
+	MaxSteps int
 	// ReadOnly, when true, emits frontmatter read-only: true so the profile
 	// runs against the read-only registry. Omitted/false keeps the legacy
 	// writable default for older profiles.
@@ -691,6 +698,7 @@ type skillFileFrontmatter struct {
 	RunAs        string   `yaml:"runAs,omitempty"`
 	Model        string   `yaml:"model,omitempty"`
 	Effort       string   `yaml:"effort,omitempty"`
+	MaxSteps     int      `yaml:"max-steps,omitempty"`
 	ReadOnly     *bool    `yaml:"read-only,omitempty"`
 	AllowedTools []string `yaml:"allowed-tools,omitempty,flow"`
 }
@@ -711,6 +719,9 @@ func RenderSkillFile(opts SkillFileOptions) string {
 		fm.RunAs = string(RunSubagent)
 		fm.Model = strings.TrimSpace(opts.Model)
 		fm.Effort = strings.TrimSpace(opts.Effort)
+		if opts.MaxSteps > 0 {
+			fm.MaxSteps = opts.MaxSteps
+		}
 		if opts.ReadOnly {
 			v := true
 			fm.ReadOnly = &v

@@ -38,6 +38,9 @@ type SubagentProfileInput struct {
 	Model        string   `json:"model"`
 	Effort       string   `json:"effort"`
 	AllowedTools []string `json:"allowedTools"`
+	// MaxSteps caps the profile's subagent child at this many tool-execution
+	// steps (frontmatter `max-steps:`). 0/omitted inherits the engine default.
+	MaxSteps int `json:"maxSteps"`
 	// ReadOnly, when true, writes frontmatter read-only: true. Omitted/false
 	// keeps the legacy writable default for older profiles.
 	ReadOnly bool `json:"readOnly"`
@@ -121,6 +124,7 @@ func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) 
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		MaxSteps:     input.MaxSteps,
 		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
@@ -200,6 +204,7 @@ func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInp
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		MaxSteps:     input.MaxSteps,
 		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
@@ -294,7 +299,13 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 
 	// One try run at a time, cancellable from the settings page and aborted
 	// with the app context on shutdown — a runaway model loop must not burn
-	// through all 12 steps with no way to stop it.
+	// through its whole step budget with no way to stop it. A try run is a
+	// settings-page preview, not a real session, so it defaults to a modest
+	// 12-step cap unless the profile itself configures a max-steps.
+	maxSteps := 12
+	if input.MaxSteps > 0 {
+		maxSteps = input.MaxSteps
+	}
 	base := a.ctx
 	if base == nil {
 		base = context.Background()
@@ -365,7 +376,7 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		WithAllowDynamicBashFallback(cfg.Permissions.AllowDynamicBash)
 
 	result, err := agent.RunReadOnlySubAgentWithSession(runCtx, prov, reg, agent.NewSession(prompt), task, agent.Options{
-		MaxSteps:      12,
+		MaxSteps:      maxSteps,
 		Temperature:   cfg.Agent.Temperature,
 		Pricing:       me.Price,
 		ContextWindow: me.ContextWindow,

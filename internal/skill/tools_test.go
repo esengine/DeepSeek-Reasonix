@@ -662,6 +662,55 @@ func TestRenderSkillFileOmitsColorAndInvocationByDefault(t *testing.T) {
 	}
 }
 
+func TestRenderSkillFileEmitsMaxSteps(t *testing.T) {
+	// A positive cap on a subagent renders as max-steps and round-trips.
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "capped",
+		Description: "capped subagent",
+		Body:        "be thorough",
+		RunAs:       RunSubagent,
+		MaxSteps:    32,
+	})
+	if !strings.Contains(content, "max-steps: 32\n") {
+		t.Fatalf("rendered content missing max-steps: 32:\n%s", content)
+	}
+	if _, err := st.CreateWithContent("capped", ScopeGlobal, content); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	sk, ok := st.Read("capped")
+	if !ok {
+		t.Fatal("skill not readable after CreateWithContent")
+	}
+	if sk.MaxSteps != 32 {
+		t.Errorf("round-trip MaxSteps = %d, want 32", sk.MaxSteps)
+	}
+
+	// Zero/unset omits the key entirely so the engine default applies.
+	plain := RenderSkillFile(SkillFileOptions{
+		Name:        "plain",
+		Description: "no cap",
+		Body:        "b",
+		RunAs:       RunSubagent,
+	})
+	if strings.Contains(plain, "max-steps:") {
+		t.Errorf("rendered content should omit max-steps when unset:\n%s", plain)
+	}
+
+	// Inline skills ignore MaxSteps.
+	inline := RenderSkillFile(SkillFileOptions{
+		Name:        "inline",
+		Description: "inline",
+		Body:        "b",
+		RunAs:       RunInline,
+		MaxSteps:    10,
+	})
+	if strings.Contains(inline, "max-steps:") {
+		t.Errorf("inline render should not emit max-steps:\n%s", inline)
+	}
+}
+
 func TestReadSkillLoadsInlineAndIsReadOnly(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")

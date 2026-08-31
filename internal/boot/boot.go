@@ -1225,10 +1225,15 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		case "review", "security-review", "security_review":
 			agent.AttachReviewReportTool(subReg)
 		}
-		steps := maxSteps
-		if steps > 0 {
-			if steps /= 2; steps < 5 {
-				steps = 5
+		steps := sk.MaxSteps
+		if steps <= 0 {
+			// No per-skill cap: inherit the engine default budget (half the
+			// parent's step allowance, minimum 5) as before.
+			steps = maxSteps
+			if steps > 0 {
+				if steps /= 2; steps < 5 {
+					steps = 5
+				}
 			}
 		}
 		// Custom and named built-in profiles fully control their system prompt
@@ -1349,10 +1354,15 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			}
 		}
 		defer run.Release()
-		steps := maxSteps
-		if steps > 0 {
-			if steps /= 2; steps < 5 {
-				steps = 5
+		steps := sk.MaxSteps
+		if steps <= 0 {
+			// No per-skill cap: inherit the engine default budget (half the
+			// parent's step allowance, minimum 5) as before.
+			steps = maxSteps
+			if steps > 0 {
+				if steps /= 2; steps < 5 {
+					steps = 5
+				}
 			}
 		}
 		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, subagentSkillOptions)

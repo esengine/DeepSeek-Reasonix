@@ -7107,6 +7107,10 @@ type SkillView struct {
 	Model        string   `json:"model,omitempty"`
 	Effort       string   `json:"effort,omitempty"`
 	AllowedTools []string `json:"allowedTools,omitempty"`
+	// MaxSteps mirrors frontmatter max-steps for runAs=subagent skills (0 =
+	// unset, inherits the engine default). The subagent profile editor reads it
+	// back so an existing cap survives an edit.
+	MaxSteps int `json:"maxSteps,omitempty"`
 	// ReadOnly mirrors frontmatter read-only; omitted/false keeps the legacy
 	// writable default for older profiles.
 	ReadOnly bool   `json:"readOnly,omitempty"`
@@ -7584,6 +7588,7 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 			Model:            s.Model,
 			Effort:           s.Effort,
 			AllowedTools:     append([]string{}, s.AllowedTools...),
+			MaxSteps:         s.MaxSteps,
 			ReadOnly:         s.ReadOnly,
 			Color:            s.Color,
 			Invocation:       "/" + s.SlashName(),

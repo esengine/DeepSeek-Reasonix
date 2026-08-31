@@ -77,6 +77,49 @@ func TestCreateSubagentProfileRejectsBuiltinNameCollision(t *testing.T) {
 	}
 }
 
+func TestSubagentProfileMaxStepsRoundTrip(t *testing.T) {
+	a := newTestSubagentApp(t)
+	if _, err := a.CreateSubagentProfile(SubagentProfileInput{
+		Name: "digger", Description: "deep dig", SystemPrompt: "go deep",
+		Scope: "global", MaxSteps: 24,
+	}); err != nil {
+		t.Fatalf("CreateSubagentProfile: %v", err)
+	}
+	if got := subagentSkillMaxSteps(t, a, "digger"); got != 24 {
+		t.Fatalf("after create MaxSteps = %d, want 24", got)
+	}
+
+	if err := a.UpdateSubagentProfile("digger", "global", SubagentProfileInput{
+		Description: "deep dig", SystemPrompt: "go deep", MaxSteps: 8,
+	}); err != nil {
+		t.Fatalf("UpdateSubagentProfile: %v", err)
+	}
+	if got := subagentSkillMaxSteps(t, a, "digger"); got != 8 {
+		t.Fatalf("after update MaxSteps = %d, want 8", got)
+	}
+
+	// Clearing back to 0 removes the cap so the engine default applies.
+	if err := a.UpdateSubagentProfile("digger", "global", SubagentProfileInput{
+		Description: "deep dig", SystemPrompt: "go deep", MaxSteps: 0,
+	}); err != nil {
+		t.Fatalf("UpdateSubagentProfile clear: %v", err)
+	}
+	if got := subagentSkillMaxSteps(t, a, "digger"); got != 0 {
+		t.Fatalf("after clear MaxSteps = %d, want 0 (unset)", got)
+	}
+}
+
+func subagentSkillMaxSteps(t *testing.T, a *App, name string) int {
+	t.Helper()
+	for _, sk := range a.SkillsSettings().Skills {
+		if sk.Name == name {
+			return sk.MaxSteps
+		}
+	}
+	t.Fatalf("profile %q not found in SkillsSettings", name)
+	return 0
+}
+
 func TestCreateSubagentProfileRejectsReservedSlashNames(t *testing.T) {
 	for _, name := range []string{"clear", "mcp__server__prompt"} {
 		t.Run(name, func(t *testing.T) {
