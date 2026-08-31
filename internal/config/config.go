@@ -1307,6 +1307,11 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// ReasoningByteLimit bounds one stream's hidden reasoning bytes. Zero
+	// keeps the default client guard; a negative value disables it. The
+	// REASONIX_REASONING_BYTE_LIMIT environment variable overrides the file
+	// value per run (same semantics).
+	ReasoningByteLimit int `toml:"reasoning_byte_limit"`
 	// TaskCostBudget lands a task on one summary once it spends this much.
 	TaskCostBudget float64 `toml:"task_cost_budget"`
 	// TaskTimeBudgetMinutes is the same gate on wall clock. Both ship off.

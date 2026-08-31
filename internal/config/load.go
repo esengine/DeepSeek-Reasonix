@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -236,6 +237,7 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
 	cfg.ignoredLegacyStepLimits = normalizeLegacyAgentStepLimits(cfg)
+	applyReasoningByteLimitEnv(cfg)
 	normalizeRetiredAutoPlan(cfg)
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyStepFunBaseURLs(cfg)
@@ -967,6 +969,22 @@ func normalizeLegacyMCPTiers(c *Config) {
 // normalizeLegacyAgentStepLimits keeps old TOML readable without allowing a
 // stale hidden value to override the adaptive progress policy. The fields stay
 // in AgentConfig for decoder and cross-version desktop compatibility only.
+// applyReasoningByteLimitEnv lets REASONIX_REASONING_BYTE_LIMIT override the
+// [agent].reasoning_byte_limit file value for one run. Same semantics as the
+// TOML key: zero/unset keeps the default guard, negative disables it, positive
+// bounds one stream's hidden reasoning bytes.
+func applyReasoningByteLimitEnv(c *Config) {
+	raw := strings.TrimSpace(os.Getenv("REASONIX_REASONING_BYTE_LIMIT"))
+	if raw == "" {
+		return
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return
+	}
+	c.Agent.ReasoningByteLimit = v
+}
+
 func normalizeLegacyAgentStepLimits(c *Config) bool {
 	if c == nil {
 		return false
