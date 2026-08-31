@@ -8,6 +8,7 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatInboxCancelError } from "./inboxError";
+import { forkConversationForTab } from "./forkWorktree";
 import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
 import { resolveActiveTurnId } from "./inboxSubmit";
@@ -4503,19 +4504,13 @@ export function useController() {
     try {
       if (actionScope === "fork" || actionScope === "fork-worktree") {
         const isolate = actionScope === "fork-worktree";
-        const sourceTab = listedSessionIdentityByTabRef.current.get(sourceTabId);
-        const tab = await app.ForkForTab(sourceTabId, turn, isolate);
+        const tab = await forkConversationForTab(app, sourceTabId, turn, isolate,
+          (tabId, level, text) => dispatchTo(tabId, { type: "local_notice", level, text }));
         if (tab?.id) {
-          if (isolate && sourceTab?.workspaceRoot && tab.workspaceRoot === sourceTab.workspaceRoot) {
-            dispatchTo(tab.id, {
-              type: "local_notice",
-              level: "info",
-              text: t("rewind.forkWorktreeFallbackNotice"),
-            });
-          }
           await adoptReturnedTab(tab, sourceTabId, forkNavigationSeq, "tab.fork");
         } else {
           await syncActiveTabFromBackend(true);
+          return { ok: false };
         }
         return { ok: true, tabId: tab?.id, tab };
       }
@@ -4541,6 +4536,9 @@ export function useController() {
         dispatchPartialRewindNotice(partialNotice, sourceTabId, outcome.tabId, (tabId, text) => dispatchTo(tabId, { type: "local_notice", level: "warn", text })));
       return outcome;
     } catch {
+      if (actionScope === "fork" || actionScope === "fork-worktree") {
+        dispatchTo(sourceTabId, { type: "local_notice", level: "warn", text: t("rewind.forkFailed") });
+      }
       return { ok: false };
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });

@@ -10,6 +10,7 @@ import { makeMockTaskCatalogBindings, type TaskCatalogBindings } from "./taskCat
 import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blankProjectBridge";
 import { makeMockQualityFloorBindings, type QualityFloorBindings } from "./deliveryFloorBridge";
 import { t } from "./i18n";
+import { mockForkWorktree } from "./forkWorktree";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
@@ -333,8 +334,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   PreviewWorkspaceFileRevertForTab(tabID: string, path: string): Promise<import("./types").RewindPlanView>;
   CommitWorkspaceFileRevertForTab(tabID: string, planID: string, resolution: string): Promise<import("./types").RewindResultView>;
   Fork(turn: number): Promise<TabMeta>;
-  ForkForTab(tabID: string, turn: number, isolateWorkspace?: boolean): Promise<TabMeta>;
-  ForkWorktreeForTab?(tabID: string, turn: number): Promise<TabMeta>;
+  ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
+  ForkWorktreeForTab(tabID: string, turn: number): Promise<import("./forkWorktree").ForkWorktreeResultView>;
   SummarizeFrom(turn: number): Promise<void>;
   SummarizeFromForTab(tabID: string, turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
@@ -3280,24 +3281,12 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
-    async ForkForTab(tabID, _turn, isolateWorkspace?: boolean) {
+    async ForkForTab(tabID, turn) {
       mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
-      const active = mockTabs.find((item) => item.active) ?? mockTabs[0];
-      const wsRoot = isolateWorkspace && active?.workspaceRoot ? `${active.workspaceRoot}-worktree` : active?.workspaceRoot;
-      const tab: TabMeta = {
-        ...active,
-        id: "tab_fork_" + Date.now(),
-        topicId: "topic_fork_" + Date.now(),
-        topicTitle: `${active?.topicTitle || t("rewind.fork")} · fork`,
-        workspaceRoot: wsRoot || cwd,
-        active: true,
-        running: false,
-      };
-      mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
-      return { ...tab };
+      return this.Fork(turn);
     },
     async ForkWorktreeForTab(tabID, turn) {
-      return this.ForkForTab(tabID, turn, true);
+      return mockForkWorktree(await this.ForkForTab(tabID, turn));
     },
     async SummarizeFrom() {},
     async SummarizeFromForTab() {},

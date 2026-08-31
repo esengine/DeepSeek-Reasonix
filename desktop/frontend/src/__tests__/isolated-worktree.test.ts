@@ -10,6 +10,8 @@ const tree = source("../components/ProjectTree.tsx");
 const tabs = source("../components/TabBar.tsx");
 const app = source("../App.tsx");
 const badge = source("../components/WorktreeBadge.tsx");
+const controller = source("../lib/useController.ts");
+const forkAction = source("../lib/forkWorktree.ts");
 
 let failed = 0;
 function ok(value: unknown, label: string) {
@@ -32,6 +34,10 @@ ok(/isolatedWorktree && <WorktreeBadge/.test(tabs), "tab strip identifies isolat
 ok(/activeTab\?\.isolatedWorktree && <WorktreeBadge/.test(app), "topic bar identifies isolated worktrees");
 ok(/node\.isolatedWorktree && <WorktreeBadge/.test(tree), "project tree identifies isolated worktrees");
 ok(/GitBranch/.test(badge) && /#6119/.test(badge), "shared badge preserves the credited #6119 design contribution");
+ok(/bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkAction), "isolated conversation fork uses the generated two-argument binding");
+ok(!/ForkForTab\(sourceTabId, turn, isolate/.test(forkAction), "shared fork never sends an extra Wails argument");
+ok(/result\.sourceDirty[\s\S]*forkWorktreeDirtySource/.test(forkAction), "dirty sources are refused with actionable guidance");
+ok(/result\.fallbackToShared[\s\S]*forkWorktreeFallbackNotice/.test(forkAction), "backend fallback state reaches the user");
 
 if (failed) process.exit(1);
 console.log("isolated worktree tests passed");

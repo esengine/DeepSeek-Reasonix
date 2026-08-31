@@ -50,6 +50,19 @@ v2 兼容 marker 同时也是 v3 turn 的存活标记。旧版本截断 `turn-N.
 
 ## Worktree 回退
 
+从消息分叉时可以选择两种工作区策略。**仅分叉对话（共享工作区）**继续使用源工作区，
+因此会保留并继续看到当前未提交文件。**隔离 worktree** 则从仓库已提交的 `HEAD`
+创建持久的 `reasonix/delivery-*` 分支，把新分叉注册为独立项目，并保持源 checkout
+不变。Git worktree 不会复制本地改动，所以组合分叉要求源 checkout 干净；检测到
+未提交或未跟踪文件时，Reasonix 会拒绝创建，并提示先 commit/stash，或改用共享分叉。
+
+如果当前目录不是 Git 项目，或环境不满足 worktree 前提，Reasonix 会在共享工作区中
+完成会话分叉并明确提示已回退。如果 worktree 创建后，会话创建或标签页挂载失败，
+自动清理只会删除分支、`HEAD` 和状态仍与创建结果完全一致的未使用 worktree；一旦
+检测到任何变化，就会保留现场以便恢复。成功挂载的 worktree 会作为项目持久注册，
+关闭标签页或重启后仍可发现，并且不会被自动删除；使用完毕后需要显式清理 Git
+worktree 和对应分支。
+
 Delivery worktree 仍是可选能力。非隔离目录使用 workspace lease（`filelock`）。
 路径型写入对祖先兼容锁和目标路径层级分片加 shared 锁、对具体文件分片加
 exclusive 锁，且只在该次 tool 期间持有。整区写入会独占精确根锁和对应层级分片，

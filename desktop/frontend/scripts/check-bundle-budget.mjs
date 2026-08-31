@@ -155,11 +155,17 @@ console.log("\nbundle budgets");
 // terminal-notice dedupe flag, while provider no_proxy copy now states the
 // custom-proxy precedence. The merged path measures 455.9 KiB; retain 0.1 KiB
 // of bounded build/toolchain headroom.
+// Exhausted tail repair now releases ownership so jump-bottom remains usable
+// after a stranded native WebView extent. The WebView2 reachable-tail clamp
+// then absorbs a second post-quiet extent without an unbounded write loop.
+// The combined path measures 456.316 KiB; retain 0.084 KiB with the smallest
+// one-decimal ratchet.
 // The generation-bound history-prepend lease adds stable-key reader anchoring,
-// full mounted coverage, and one final arbiter-owned correction.
-// Fork into isolated Git worktree adds the action menu and localized guidance.
-// The combined path measures 457.7 KiB; retain 0.5 KiB headroom for cross-platform toolchains.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.2 : 458.2;
+// full mounted coverage, and one final arbiter-owned correction. The measured
+// path is 457.406 KiB after extracting the lease owner to satisfy repolint.
+// Fork into isolated Git worktree then raises the measured path to 457.933 KiB;
+// retain 0.067 KiB with the smallest one-decimal ratchet.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.0 : 458.0;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -177,23 +183,111 @@ if (initialCSS.length > 0) {
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
-// transitions add 0.5 KiB.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116 * 1024);
+// states bring the merged shell to roughly 115.7 KiB gzip.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
 for (const path of localeChunks) {
   const name = basename(path);
-  // Fork into isolated Git worktree guidance adds localized copy across dialects.
-  const budget = name.startsWith("zh-TW-") ? 61.8 * 1024 : 60.8 * 1024;
+  // Task Monitor, billing, indexed history, Task Center, Extension UI, and
+  // runtime controls plus execution-setting receipts add localized copy. The
+  // write-access approval card adds four scoped actions and a home-risk
+  // warning (~0.15 KiB gzip, +0.27% over the old 54.75 gate). Context
+  // compaction settings add 40 bytes gzip of policy guidance to simplified
+  // Chinese, while scheduled billing adds compact rate-band labels/tooltips.
+  // The three StepFun presets add localized names/descriptions (~0.1 KiB
+  // gzip); the two pay-as-you-go presets add the same again. The delivery
+  // floor segmented control adds two labels plus one explanatory tooltip,
+  // measured at 23 B gzip for zh and 8 B for zh-TW. Completion receipts add
+  // six short status labels in each locale, requiring another 0.2 KiB per
+  // language. DingTalk setup and mention guidance add at most 0.2 KiB more
+  // (0.36%); retain the complete security and group-chat copy instead of
+  // abbreviating user-facing instructions to fit the old locale ratchet.
+  // Recovery-copy and catalog-only sidebar labels can move the simplified
+  // Chinese chunk across the rounded 55.9 KiB boundary on CI's Node/zlib;
+  // retain a narrow 0.1 KiB headroom rather than making gzip output a
+  // platform-dependent gate. The OpenCode one-key setup adds product-level
+  // connection, fallback, and legacy-state copy while removing protocol
+  // choices from the primary UI; keep that complete guidance with a bounded
+  // 0.4–0.5 KiB locale-only ratchet.
+  // Git-Bash installation guidance adds localized copy across dialects.
+  // MCP elicitation adds fourteen short labels per locale (~40 B gzip).
+  // Generic schema validation adds complete field-error, privacy, and safe-
+  // fallback copy. Measured chunks are 58.574 KiB zh and 59.368 KiB zh-TW;
+  // retain roughly 0.13 KiB of platform headroom for each.
+  // Stream-failure diagnostics add five strings per dialect. Together with the
+  // reachable-tail recovery copy, the merged chunks measure 58.923 KiB zh and
+  // 59.710 KiB zh-TW. The isolated-fork guidance brings the measured chunks
+  // to 59.1 KiB zh and 59.9 KiB zh-TW; retain a narrow one-decimal ratchet.
+  const budget = name.startsWith("zh-TW-") ? 60.0 * 1024 : 59.2 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
+// The maintained Virtuoso engine adds 49.1 KiB raw (2.2%) over the previous
+// 2268.7 KiB gate. Navigation remains inside the 2341 KiB production ceiling;
+// its combined diagnostic wiring adds 2.2 KiB (0.094%) to the test channel.
+// DingTalk startup wiring moves current-base production from 2341.0 to 2343.6
+// KiB and test from 2346.2 to 2348.8 KiB; the pinned heading adds 0.5 KiB raw
+// (0.021%). The workspace panel rework (change-row hover/revert, status badges,
+// More menu, completion summary) makes the latest-base merge 2353.1 KiB in
+// production and test channels both measure 2357.92 KiB after project-group
+// wiring. Exact-turn routing, checkpoint resets, and failure-atomic navigation
+// bring the current main-v2 path to 2379.22 KiB. The remote approval
+// fences, extracted ownership modules, and remote status-bar isolation bring
+// the measured initial payload to 2380.9 KiB; retain 0.1 KiB of bounded
+// raw/toolchain headroom. Scoped remote approvals, status reconciliation, and
+// runtime command dispatch bring the measured payload to 2382.9 KiB. The
+// remaining review fences measure 2383.2 KiB; retain 0.1 KiB of headroom.
+// Final remote-runtime parity measures 2384.4 KiB raw. The current main-v2
+// runtime additions bring the combined path to 2404.364 KiB. The final merged
+// restored-shell activation and disconnected-state revival path measures
+// 2404.898 KiB; retain 0.102 KiB of bounded headroom alongside the gzip
+// ratchet above.
+// Runtime-aware Todo status and exact-tab continuation then add to the same
+// initial path. The combined payload measures 2406.2 KiB; retain 0.1 KiB of
+// raw/toolchain headroom for both owners.
+// The same transcript transaction measures 2413.012 KiB raw (+0.28%) against
+// the 2406.204 KiB baseline. Retain 0.188 KiB of bounded headroom.
+// The notification-volume control adds one persisted master gain, per-source
+// loudness trims, and its accessible Settings surface. Current main-v2 moves
+// from 2413.183 to 2414.879 KiB raw (+1.696 KiB); retain 0.121 KiB of bounded
+// headroom.
+// Owner-lifecycle reasoning disclosure, pre-paint tail pinning, and the live
+// footer growth floor then add 2.390 KiB after extracting ownership modules
+// below repolint's source ceilings. Lifecycle fencing adds 0.258 KiB; the
+// combined path measures 2417.526 KiB. Retain 0.074 KiB while preventing
+// phase-boundary reverse flashes and cross-surface floor leaks.
+// The same shell-support surface moves the merged path from 2417.526 to
+// 2422.371 KiB raw (+4.845 KiB). Retain 0.129 KiB of bounded headroom without
+// widening unrelated chunk ceilings.
+// The WebView2 extent rebound prepaint handoff adds 0.204 KiB raw so a native
+// scroll delivery can restore mounted coverage before the next visible frame.
+// Retain 0.096 KiB of headroom without widening gzip or chunk ceilings.
+// The reader transaction contract then adds a measured 15.317 KiB raw on the
+// merged main-v2 baseline (including its own prepaint port). MCP elicitation
+// and Apps add their bounded payload on the shared graph; the combined path
+// measures 2442.6 KiB. Retain 0.4 KiB of bounded build/toolchain headroom.
+// The browser MCP interaction preview adds 0.6 KiB of route wiring while its
+// 0.75 KiB form fixture and lifecycle remain lazy. The combined path measures
+// 2443.2 KiB; retain 0.1 KiB of bounded build/toolchain headroom.
+// Generic field copy adds 1.134 KiB raw to the startup dictionary; all schema
+// parsing, rendering, and CSS remain lazy. The measured path is 2444.334 KiB;
+// retain 0.166 KiB of bounded build/toolchain headroom.
+// The off-flow composer measurement mirror adds 0.472 KiB raw while removing
+// live-textarea layout mutation. The merged path measures 2444.806 KiB; retain
+// 0.194 KiB of bounded toolchain headroom without widening gzip/chunk gates.
+// Stream-failure visibility and corrected proxy guidance bring the merged path
+// to 2446.6 KiB; retain the smallest existing decimal ratchet.
+// The stranded-tail recovery transition plus the WebView2 reachable-tail clamp
+// bring the measured initial payload to 2447.953 KiB. Retain 0.047 KiB with
+// the smallest one-decimal ratchet.
 // The extracted history-prepend owner adds 3.953 KiB of bounded transaction
-// state and stable-key coverage checks. Together with Fork into worktree,
-// the combined payload measures 2453.5 KiB; retain 1.5 KiB headroom for cross-platform CI.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_455.0 : 2_455.0;
+// state and stable-key coverage checks. The measured path is 2451.906 KiB.
+// Fork into isolated Git worktree brings the combined path to 2453.861 KiB;
+// retain 0.139 KiB with the smallest one-decimal ratchet.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_454.0 : 2_454.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
