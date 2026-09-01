@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func worktreeStateToken(ctx context.Context, root string) (string, error) {
 		return "", err
 	}
 	hash := sha256.New()
-	_, _ = io.WriteString(hash, "reasonix-worktree-state-v2\x00status\x00")
+	_, _ = io.WriteString(hash, "reasonix-worktree-state-v3\x00status\x00")
 	_, _ = io.WriteString(hash, status)
 	_, _ = io.WriteString(hash, "\x00index\x00")
 	_, _ = io.WriteString(hash, index)
@@ -93,38 +94,31 @@ func validateStatePath(path string) error {
 	return nil
 }
 
-func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string) error {
-	_, _ = io.WriteString(hash, "path\x00"+relative+"\x00")
+func hashWorktreePath(ctx context.Context, stateHash hash.Hash, root, relative string) error {
+	_, _ = io.WriteString(stateHash, "path\x00"+relative+"\x00")
 	path := filepath.Join(root, filepath.FromSlash(relative))
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		_, _ = io.WriteString(hash, "deleted\x00")
+		_, _ = io.WriteString(stateHash, "deleted\x00")
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("inspect changed path %q: %w", relative, err)
 	}
-	_, _ = io.WriteString(hash, info.Mode().String()+"\x00")
+	_, _ = io.WriteString(stateHash, info.Mode().String()+"\x00")
 	switch {
 	case info.Mode().IsRegular():
-		file, err := os.Open(path)
+		digest, err := digestWorktreeStateFile(ctx, path)
 		if err != nil {
-			return fmt.Errorf("open changed path %q: %w", relative, err)
+			return fmt.Errorf("digest changed path %q: %w", relative, err)
 		}
-		copyErr := copyWithContext(ctx, hash, file)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return fmt.Errorf("read changed path %q: %w", relative, copyErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("close changed path %q: %w", relative, closeErr)
-		}
+		_, _ = io.WriteString(stateHash, digest)
 	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(path)
 		if err != nil {
 			return fmt.Errorf("read changed symlink %q: %w", relative, err)
 		}
-		_, _ = io.WriteString(hash, target)
+		_, _ = io.WriteString(stateHash, target)
 	case info.IsDir():
 		head, stderr, err := gitValue(ctx, path, "rev-parse", "--verify", "HEAD")
 		if err != nil {
@@ -134,31 +128,38 @@ func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string
 		if err != nil {
 			return fmt.Errorf("inspect changed Git directory status %q: %w%s", relative, err, stderrSuffix(stderr))
 		}
-		_, _ = io.WriteString(hash, head+"\x00"+status)
+		_, _ = io.WriteString(stateHash, head+"\x00"+status)
 	default:
 		return fmt.Errorf("changed path %q has unsupported file type %s", relative, info.Mode().Type())
 	}
-	_, _ = io.WriteString(hash, "\x00")
+	_, _ = io.WriteString(stateHash, "\x00")
 	return nil
 }
 
-func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) error {
+func digestWorktreeStateFile(ctx context.Context, path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	digest := sha256.New()
 	buffer := make([]byte, 128*1024)
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return "", err
 		}
-		count, readErr := source.Read(buffer)
+		count, readErr := file.Read(buffer)
 		if count > 0 {
-			if _, err := destination.Write(buffer[:count]); err != nil {
-				return err
+			if _, err := digest.Write(buffer[:count]); err != nil {
+				return "", err
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
-			return nil
+			return hex.EncodeToString(digest.Sum(nil)), nil
 		}
 		if readErr != nil {
-			return readErr
+			return "", readErr
 		}
 	}
 }

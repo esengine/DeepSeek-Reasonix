@@ -176,7 +176,9 @@ console.log("\nbundle budgets");
 // orchestration. Failure-atomic completion extends the shared navigation-intent
 // fence to every local and remote switch path. The latest-base production build
 // measures within the exact 461.1 KiB ceil(actualKiB * 10) / 10 ratchet.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 461.1 : 461.1;
+// Registered recovery retention and its copyable receipt measure 461.337 KiB;
+// retain the exact 461.4 KiB decimal ceiling and leave test-channel unchanged.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 461.1 : 461.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -233,7 +235,9 @@ for (const path of localeChunks) {
   // to 59.1 KiB zh and 59.9 KiB zh-TW; retain a narrow one-decimal ratchet.
   // Merge-Back lifecycle and recovery guidance measure 59.819 KiB zh and
   // 60.612 KiB zh-TW; retain only the next one-decimal ceiling for each.
-  const budget = name.startsWith("zh-TW-") ? 60.7 * 1024 : 59.9 * 1024;
+  // The retained-recovery receipt and copy action move zh to 59.911 KiB;
+  // ratchet only that dialect to its exact one-decimal ceiling.
+  const budget = name.startsWith("zh-TW-") ? 60.7 * 1024 : 60.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -310,8 +314,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Ask turn fencing, rejection reconciliation, and the localized submit-failure
 // notice measure 2456.044 KiB raw; retain 0.056 KiB of one-decimal headroom.
 // Merge-Back's startup ownership and failure-atomic navigation fence add the
-// remaining bounded payload. The latest-base production build measures within
-// the exact 2464.5 KiB ceil(actualKiB * 10) / 10 ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_464.5 : 2_464.5;
+// remaining bounded payload. The retained recovery receipt makes the stable
+// path 2465.105 KiB raw; retain its exact decimal ceiling without changing the
+// test-channel budget.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_464.5 : 2_465.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

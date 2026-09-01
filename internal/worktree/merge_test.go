@@ -71,11 +71,14 @@ func TestMergeBackRequiresExplicitDirtyCommitAndFinalizesSeparately(t *testing.T
 	if err != nil {
 		t.Fatalf("FinalizeMerge: %v (%+v)", err, cleanup)
 	}
-	if !cleanup.Completed || !cleanup.WorktreeRemoved || !cleanup.BranchDeleted {
+	if cleanup.Completed || cleanup.WorktreeRemoved || cleanup.BranchDeleted || !cleanup.RecoveryRetained || !cleanup.RecoveryWorktreeRegistered || !cleanup.BranchRetained {
 		t.Fatalf("cleanup result = %+v", cleanup)
 	}
 	if _, err := os.Stat(created.WorktreeRoot); !os.IsNotExist(err) {
-		t.Fatalf("worktree remains after finalize: %v", err)
+		t.Fatalf("former worktree path remains after finalize: %v", err)
+	}
+	if _, err := os.Stat(cleanup.RecoveryRoot); err != nil {
+		t.Fatalf("retained recovery worktree is missing: %v", err)
 	}
 }
 
@@ -352,7 +355,7 @@ func TestFinalizeMergePreservesIgnoredContentAndSupportsRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup, err = FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
-	if err != nil || !cleanup.Completed {
+	if err != nil || !cleanup.RecoveryRetained || !cleanup.RecoveryWorktreeRegistered || !cleanup.BranchRetained {
 		t.Fatalf("cleanup retry = %+v, %v", cleanup, err)
 	}
 }

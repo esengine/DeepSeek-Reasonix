@@ -80,6 +80,10 @@ export interface WorktreeCleanupResult {
   completed: boolean;
   worktreeRemoved: boolean;
   branchDeleted: boolean;
+  recoveryRetained?: boolean;
+  recoveryRoot?: string;
+  recoveryWorktreeRegistered?: boolean;
+  branchRetained?: boolean;
   blockers: WorktreeMergeBlocker[];
   error?: string;
 }

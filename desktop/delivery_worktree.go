@@ -99,6 +99,7 @@ var (
 	inspectWorktreeMerge  = worktree.InspectMerge
 	mergeWorktreeBack     = worktree.MergeBack
 	finalizeWorktreeMerge = worktree.FinalizeMerge
+	removeWorktreeProject = removeProject
 )
 
 // MergeWorktreeBackRequest binds a merge to the exact inspection the user
@@ -213,10 +214,32 @@ func (a *App) FinalizeWorktreeMerge(request worktree.CleanupRequest) (worktree.C
 		return worktree.CleanupResult{Blockers: []worktree.MergeBlocker{{Code: "runtime_reference", Message: err.Error(), Paths: []string{}}}, Error: err.Error()}, err
 	}
 	result, err := finalizeWorktreeMerge(a.bootContext(), config.DeliveryWorktreeDir(), request)
-	if result.Completed {
-		a.emitProjectTreeChanged()
+	if err != nil && !result.RecoveryRetained {
+		return result, err
 	}
-	return result, err
+	if result.Completed || result.RecoveryRetained {
+		if err := a.forgetFinalizedWorktreeProject(request); err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+func (a *App) forgetFinalizedWorktreeProject(request worktree.CleanupRequest) error {
+	if err := removeWorktreeProject(request.WorktreeRoot); err != nil {
+		return fmt.Errorf("recovery worktree was retained, but the former project registration could not be removed: %w", err)
+	}
+	forgetWorkspace(request.WorktreeRoot)
+	a.catalogRegisteredProjectRoots.Delete(projectRootKey(normalizeProjectRoot(request.WorktreeRoot)))
+	if sameProjectRoot(loadWorkspace(), request.WorktreeRoot) {
+		saveWorkspace(request.SourceRoot)
+	}
+	if a.workspaceHub != nil {
+		a.workspaceHub.reconcileRoots()
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 // CloseMergedWorktreeTab closes only the exact idle worktree view after the

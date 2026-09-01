@@ -85,16 +85,11 @@ func readMergeMetadata(worktreeRoot, managedRoot string) (mergeMetadata, string,
 }
 
 func readMergeMetadataForCleanup(worktreeRoot, managedRoot string) (mergeMetadata, string, bool, error) {
-	if _, err := os.Stat(worktreeRoot); err == nil {
-		metadata, path, readErr := readMergeMetadata(worktreeRoot, managedRoot)
-		return metadata, path, true, readErr
+	rootExists := false
+	if _, err := os.Lstat(worktreeRoot); err == nil {
+		rootExists = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return mergeMetadata{}, "", false, fmt.Errorf("inspect cleanup worktree: %w", err)
-	}
-	if _, err := os.Lstat(worktreeRoot); err == nil {
-		return mergeMetadata{}, "", false, errors.New("cleanup worktree path is a dangling or unreachable link")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return mergeMetadata{}, "", false, fmt.Errorf("inspect missing cleanup worktree: %w", err)
 	}
 	absManaged, err := filepath.Abs(strings.TrimSpace(managedRoot))
 	if err != nil {
@@ -139,7 +134,7 @@ func readMergeMetadataForCleanup(worktreeRoot, managedRoot string) (mergeMetadat
 	metadata.TargetBranch = strings.TrimSpace(metadata.TargetBranch)
 	metadata.CreatedHead = strings.TrimSpace(metadata.CreatedHead)
 	metadata.WorktreeBranch = strings.TrimSpace(metadata.WorktreeBranch)
-	return metadata, path, false, nil
+	return metadata, path, rootExists, nil
 }
 
 func resolveMissingCleanupPath(path string) (string, error) {

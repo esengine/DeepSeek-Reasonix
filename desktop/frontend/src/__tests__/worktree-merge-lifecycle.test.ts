@@ -78,12 +78,28 @@ async function stableLifecycleClosesBeforeFinalize() {
     seedSource: () => { calls.push("seed"); },
     listTabs: async () => { calls.push("list"); return [sourceTab, worktreeTab]; },
     closeWorktree: async () => { calls.push("close"); return { closed: true, idempotent: false }; },
-    finalize: async () => { calls.push("finalize"); return { completed: true, worktreeRemoved: true, branchDeleted: true, blockers: [] }; },
+    finalize: async () => {
+      calls.push("finalize");
+      return {
+        completed: false,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        recoveryRetained: true,
+        recoveryRoot: "/recovery",
+        recoveryWorktreeRegistered: true,
+        branchRetained: true,
+        blockers: [],
+      };
+    },
     onNavigationPreserved: () => undefined,
     onCloseBlocked: () => undefined,
   });
   assert.equal(result.phase, "finalized");
   assert.deepEqual(calls, ["ensure", "seed", "list", "close", "finalize"]);
+  if (result.phase === "finalized") {
+    assert.equal(result.cleanup.recoveryRetained, true);
+    assert.equal(result.cleanup.completed, false);
+  }
 }
 
 async function singleSurfaceStillUsesIdempotentCloseProof() {

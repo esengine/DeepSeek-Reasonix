@@ -103,23 +103,26 @@ CAS 后漂移或无法证明恢复成功的状态返回 recovery-required，同�
 点都必须仍持有该 token。因此更新导航会停止关闭和清理并保留资源；稳定时后端也只会在
 精确 source Tab 仍 active、精确 worktree Tab 仍 idle 时关闭页面和终端。
 
-独立、可重试的清理会 reservation 包含原 canonical worktree 与固定 quarantine 子树的整个
+独立、可重试的 finalization 会 reservation 包含原 canonical worktree 与固定 recovery 子树的整个
 allocation，并扫描可见及 detached runtime；项目 runtime 创建、恢复、删除/归档 fallback
 和重定向都经过同一 admission gate。symlink 与子目录受保护，allocation 外的 prefix
 sibling 和其他 allocation 不受影响。只有临时提交已包含在目标分支、身份一致且包含 ignored 文件的
-完整 status 为空时，checkout 才会原子移动到 reservation 覆盖的随机 quarantine 路径。
-Reasonix 会两次复核仓库、branch、`HEAD`、完整 status 与 NUL-safe 文件清单，并以 `0600`
-原子写入 v1 `cleanup-state.json`，记录 registered path、第二个随机 detached path、阶段和
-manifest。旧版本会忽略该旁路文件且无法访问 detached 内容；未知 journal 版本失败关闭。
+完整 status 为空时，Reasonix 才会先以 `0600` 原子写入 v2 `cleanup-state.json`，记录原路径、
+allocation 内随机 recovery 路径、branch、`HEAD` 和 `planned` 阶段。随后使用普通
+`git worktree move`，再次验证 common-dir、symbolic branch、branch ref、`HEAD`、Git operation、
+完整 status 和注册路径，再把 journal 推进到 `retained`。任一阶段崩溃都按 journal 与 Git
+worktree 注册表的精确身份重试；多候选或未知状态失败关闭。
 
-验证完成后，checkout 被原子改名到 detached path，再对已经不存在的 registered path 执行普通
-`git worktree remove`，因此 Git 只注销 worktree，不遍历用户文件。随后只删除类型、mode、
-内容或 symlink target 仍与 manifest 完全一致的叶子，目录仅在为空时使用普通 `os.Remove`；
-已缺失叶子让重试保持幂等。任何新增、修改、ignored、untracked 或晚到内容都会保留在 detached
-恢复目录并报告，写入原公开路径的内容也始终位于清理目标之外。最后使用单个 ref transaction
-同时验证当前 target ref 仍包含 merge/worktree commits，并按预期 `HEAD` 删除临时分支；target
-漂移不会导致 recovery ref 被部分删除。全流程不使用强制 worktree/branch 删除或递归文件系统
-删除；任何无法证明安全的分支和文件都会保留以便恢复。
+recovery checkout 会继续保持 registered，并继续检出其 `reasonix/delivery-*` 分支。Reasonix
+不会注销 worktree、删除临时分支、逐文件 unlink 或递归删除任何路径。因此移动前已经打开的文件
+描述符会跟随 checkout，晚到写入仍可恢复；原公开路径重新出现的内容也会原样保留并报告。恢复回执
+持久化后，Desktop 只移除原 managed worktree 的陈旧项目注册，保持 source project active，且
+不会把隐藏 recovery 路径加入侧栏；注册表写入失败可以借助 journal 重试。
+
+新版本只以保留方式读取 v1 journal：仍注册的 legacy checkout 只有在精确身份和 manifest 均可
+证明时才转换为 v2；已经 detached 或身份不明确的 legacy 路径只报告人工恢复，不删除也不自动
+重新注册。未知 journal 版本失败关闭。metadata 继续使用 v1；旧 cleanup reader 会拒绝未知的
+v2 journal，从而保留 recovery checkout。
 
 Delivery worktree 仍是可选能力。非隔离目录使用 workspace lease（`filelock`）。
 路径型写入对祖先兼容锁和目标路径层级分片加 shared 锁、对具体文件分片加

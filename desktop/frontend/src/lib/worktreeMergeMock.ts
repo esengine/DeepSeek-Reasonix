@@ -64,7 +64,17 @@ export function makeMockWorktreeMergeBindings(
       const tabs = readTabs().filter((candidate) => candidate.workspaceRoot !== request.worktreeRoot);
       if (tabs.length > 0) tabs[0].active = true;
       writeTabs(tabs);
-      return { completed: true, worktreeRemoved: true, branchDeleted: true, blockers: [] };
+      const allocationRoot = request.worktreeRoot.replace(/[\\/][^\\/]+$/, "");
+      return {
+        completed: false,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        recoveryRetained: true,
+        recoveryRoot: `${allocationRoot}/.reasonix-cleanup/recovery-mock`,
+        recoveryWorktreeRegistered: true,
+        branchRetained: true,
+        blockers: [],
+      };
     },
   };
 }

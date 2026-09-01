@@ -72,6 +72,47 @@ func TestFinalizeReservationRejectsConcurrentFallbackPublication(t *testing.T) {
 	}
 }
 
+func TestFinalizeReservationCoversRetainedProjectRegistryUpdate(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sourceRoot := t.TempDir()
+	allocationRoot := t.TempDir()
+	worktreeRoot := filepath.Join(allocationRoot, "repository")
+	recoveryRoot := filepath.Join(allocationRoot, ".reasonix-cleanup", "recovery-test")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalFinalize, originalRemove := finalizeWorktreeMerge, removeWorktreeProject
+	t.Cleanup(func() { finalizeWorktreeMerge, removeWorktreeProject = originalFinalize, originalRemove })
+	finalizeWorktreeMerge = func(_ context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
+		return worktree.CleanupResult{
+			RecoveryRetained: true, RecoveryRoot: recoveryRoot, RecoveryWorktreeRegistered: true,
+			BranchRetained: true, Blockers: []worktree.MergeBlocker{},
+		}, nil
+	}
+	registryEntered := make(chan struct{})
+	releaseRegistry := make(chan struct{})
+	removeWorktreeProject = func(string) error {
+		close(registryEntered)
+		<-releaseRegistry
+		return nil
+	}
+	app := NewApp()
+	result := make(chan error, 1)
+	go func() {
+		_, err := app.FinalizeWorktreeMerge(worktree.CleanupRequest{SourceRoot: sourceRoot, WorktreeRoot: worktreeRoot})
+		result <- err
+	}()
+	<-registryEntered
+	if err := app.openTransientBlankRuntime("project", recoveryRoot); err == nil || !strings.Contains(err.Error(), "cleanup is in progress") {
+		close(releaseRegistry)
+		t.Fatalf("recovery runtime entered during registry update: %v", err)
+	}
+	close(releaseRegistry)
+	if err := <-result; err != nil {
+		t.Fatalf("finalize = %v", err)
+	}
+}
+
 func TestCleanupReservationRejectsDeletedRootDescendants(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	allocationsRoot := t.TempDir()

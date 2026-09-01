@@ -132,34 +132,39 @@ removal linearization point. A newer intent therefore stops close and cleanup
 while preserving resources. Otherwise Desktop closes only the exact idle
 worktree tab while the exact source tab is still active. Cleanup is then a
 separate, retryable step. It reserves the complete allocation containing both
-the canonical worktree and its fixed quarantine subtree while checking visible
+the canonical worktree and its fixed recovery subtree while checking visible
 and detached runtimes; every project-runtime creation, restoration,
 delete/archive fallback, and redirect uses the same gate. Symlink and contained
 paths are covered. Prefix siblings outside the allocation and other allocations
 remain independent.
 
-Cleanup runs only when the temporary commit is contained by the target,
+Finalization runs only when the temporary commit is contained by the target,
 identities still match, and the full status including ignored files is empty.
-The checkout is atomically moved to an unguessable path under the reserved
-quarantine, then its repository, branch, `HEAD`, status, and NUL-safe filesystem
-manifest are verified twice. A mode-0600 v1 `cleanup-state.json` journal records
-the registered path, a second random detached path, stage, and manifest. Older
-versions ignore this sidecar and cannot reach the detached files; unknown journal
-versions fail closed.
+Before moving anything, Reasonix writes a mode-0600 v2 `cleanup-state.json`
+journal with the original root, an unguessable recovery root under the reserved
+allocation, branch, `HEAD`, and a `planned` stage. It then uses ordinary
+`git worktree move` and rechecks the common Git directory, symbolic branch,
+branch ref, `HEAD`, operation state, full status, and registered path before
+advancing the journal to `retained`. A crash in either stage is retried from the
+Git worktree registry and the exact journal identity; multiple or unknown
+candidates fail closed.
 
-Reasonix atomically renames the verified checkout to the detached path and runs
-ordinary `git worktree remove` against the now-missing registered path, so Git
-unregisters the checkout without traversing user files. It then removes only
-manifest leaves whose type, mode, bytes, or symlink target still match, and
-removes directories only when empty. Missing leaves make retries idempotent;
-unknown, changed, ignored, or late content stays in the detached recovery root
-and is reported. A writer targeting the former public path also remains outside
-the cleanup target. Finally, one ref transaction verifies the current target ref
-still contains the merge and worktree commits while deleting the temporary
-branch at its expected `HEAD`; target drift cannot partially delete the recovery
-ref. Reasonix never uses forced worktree/branch removal or recursive filesystem
-deletion. The merge remains successful while any unproven branch or file stays
-available for recovery.
+The recovery checkout deliberately stays registered and keeps its
+`reasonix/delivery-*` branch checked out. Reasonix does not unregister the
+worktree, delete its branch, unlink manifest entries, or recursively delete any
+path. An already-open file descriptor therefore follows the moved checkout and
+late writes remain recoverable; content recreated at the former public path is
+also left untouched and reported. Desktop removes only the stale managed-project
+registration after the recovery receipt is durable, keeps the source project
+active, and does not add the hidden recovery path to the sidebar. Registration
+failure is retryable while the recovery root and journal remain available.
+
+New readers accept v1 cleanup journals only for preservation. A still-registered
+legacy checkout can be converted to v2 after its exact identity and manifest are
+proved; a detached or ambiguous legacy root is reported for manual recovery and
+is never deleted or automatically re-registered. Unknown journal versions fail
+closed. Metadata remains v1; older cleanup readers reject the unknown v2
+journal and therefore preserve the recovery checkout.
 
 Delivery worktrees stay optional. Non-isolated directories use the workspace
 lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,

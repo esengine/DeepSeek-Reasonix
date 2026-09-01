@@ -113,6 +113,7 @@ import {
   type WorkspaceConflictView,
 } from "./lib/types";
 import { runWorktreeMergeLifecycle } from "./lib/worktreeMergeLifecycle";
+import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
@@ -5506,14 +5507,7 @@ export default function App() {
                   onCloseBlocked: () => showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 }),
                 });
                 if (lifecycle.phase !== "finalized") return;
-                const preservedLateContent = lifecycle.cleanup.blockers.find((blocker) => blocker.code === "late_content_preserved");
-                if (preservedLateContent) {
-                  showToast(preservedLateContent.message, "error", { durationMs: 9000 });
-                } else if (lifecycle.cleanup.completed) {
-                  showToast(t("worktree.mergeAndCleanupDone"), "info");
-                } else {
-                  showToast(lifecycle.cleanup.error || t("worktree.cleanupPreserved"), "error", { durationMs: 9000 });
-                }
+                showWorktreeCleanupNotice(lifecycle.cleanup, t, showToast);
               } catch (caught: unknown) {
                 showToast(`${t("worktree.mergeDoneCleanupFailed")} ${caught instanceof Error ? caught.message : String(caught)}`, "error", { durationMs: 9000 });
               }

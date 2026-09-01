@@ -2,13 +2,32 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/control"
 	"reasonix/internal/worktree"
 )
+
+func TestWorktreeCleanupResultJSONKeepsArraysAndOptionalRecoveryReceipt(t *testing.T) {
+	payload, err := json.Marshal(worktree.CleanupResult{
+		RecoveryRetained: true, RecoveryRoot: "/recovery", RecoveryWorktreeRegistered: true,
+		BranchRetained: true, Blockers: []worktree.MergeBlocker{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(payload)
+	for _, want := range []string{`"blockers":[]`, `"recoveryRetained":true`, `"recoveryRoot":"/recovery"`, `"recoveryWorktreeRegistered":true`, `"branchRetained":true`} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("cleanup result JSON %s does not contain %s", wire, want)
+		}
+	}
+}
 
 func TestAppInspectAndMergeWorktreeBackUsesRequestIdentity(t *testing.T) {
 	isolateDesktopUserDirs(t)
@@ -218,7 +237,10 @@ func TestAppFinalizeWorktreeMergeRequiresNoRuntimeReference(t *testing.T) {
 	called := false
 	finalizeWorktreeMerge = func(_ context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
 		called = true
-		return worktree.CleanupResult{Completed: true, WorktreeRemoved: true, BranchDeleted: true, Blockers: []worktree.MergeBlocker{}}, nil
+		return worktree.CleanupResult{
+			RecoveryRetained: true, RecoveryRoot: filepath.Join(filepath.Dir(worktreeRoot), ".reasonix-cleanup", "recovery-test"),
+			RecoveryWorktreeRegistered: true, BranchRetained: true, Blockers: []worktree.MergeBlocker{},
+		}, nil
 	}
 	app := NewApp()
 	tab := &WorkspaceTab{ID: "visible", Scope: "project", WorkspaceRoot: filepath.Join(worktreeRoot, "subdir")}
@@ -232,8 +254,89 @@ func TestAppFinalizeWorktreeMergeRequiresNoRuntimeReference(t *testing.T) {
 	delete(app.tabs, tab.ID)
 	app.mu.Unlock()
 	result, err = app.FinalizeWorktreeMerge(request)
-	if err != nil || !result.Completed || !called {
+	if err != nil || !result.RecoveryRetained || result.Completed || !called {
 		t.Fatalf("unreferenced cleanup = %+v, %v, called=%v", result, err, called)
+	}
+}
+
+func TestAppFinalizeRetainedWorktreeRemovesOnlyFormerProjectRegistration(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sourceRoot := t.TempDir()
+	allocationRoot := t.TempDir()
+	worktreeRoot := filepath.Join(allocationRoot, "repository")
+	recoveryRoot := filepath.Join(allocationRoot, ".reasonix-cleanup", "recovery-test")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(sourceRoot, "Source"); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(worktreeRoot, "Managed worktree"); err != nil {
+		t.Fatal(err)
+	}
+	saveWorkspace(worktreeRoot)
+	rememberWorkspace(worktreeRoot)
+
+	origFinalize := finalizeWorktreeMerge
+	t.Cleanup(func() { finalizeWorktreeMerge = origFinalize })
+	finalizeWorktreeMerge = func(_ context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
+		return worktree.CleanupResult{
+			RecoveryRetained: true, RecoveryRoot: recoveryRoot, RecoveryWorktreeRegistered: true,
+			BranchRetained: true,
+			Blockers:       []worktree.MergeBlocker{{Code: "late_content_preserved", Message: "late content was preserved", Paths: []string{"."}}},
+			Error:          "cleanup_state_changed: late content was preserved",
+		}, errors.New("cleanup_state_changed: late content was preserved")
+	}
+	app := NewApp()
+	app.catalogRegisteredProjectRoots.Store(projectRootKey(normalizeProjectRoot(worktreeRoot)), struct{}{})
+	result, err := app.FinalizeWorktreeMerge(worktree.CleanupRequest{WorktreeRoot: worktreeRoot, SourceRoot: sourceRoot})
+	if err != nil || !result.RecoveryRetained {
+		t.Fatalf("FinalizeWorktreeMerge = %+v, %v", result, err)
+	}
+	projects := loadProjectsFile().Projects
+	if projectIndexByRoot(projects, sourceRoot) < 0 || projectIndexByRoot(projects, worktreeRoot) >= 0 || projectIndexByRoot(projects, recoveryRoot) >= 0 {
+		t.Fatalf("projects after retained finalize = %+v", projects)
+	}
+	if !sameProjectRoot(loadWorkspace(), sourceRoot) {
+		t.Fatalf("active workspace = %q, want source %q", loadWorkspace(), sourceRoot)
+	}
+	if _, ok := app.catalogRegisteredProjectRoots.Load(projectRootKey(normalizeProjectRoot(worktreeRoot))); ok {
+		t.Fatal("former worktree catalog registration was retained")
+	}
+}
+
+func TestAppFinalizeRetainedWorktreeRetriesProjectRegistryFailure(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sourceRoot := t.TempDir()
+	worktreeRoot := t.TempDir()
+	if err := addProject(worktreeRoot, "Managed worktree"); err != nil {
+		t.Fatal(err)
+	}
+	origFinalize, origRemove := finalizeWorktreeMerge, removeWorktreeProject
+	t.Cleanup(func() { finalizeWorktreeMerge, removeWorktreeProject = origFinalize, origRemove })
+	finalizeWorktreeMerge = func(_ context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
+		return worktree.CleanupResult{
+			RecoveryRetained: true, RecoveryRoot: filepath.Join(filepath.Dir(worktreeRoot), "recovery"),
+			RecoveryWorktreeRegistered: true, BranchRetained: true, Blockers: []worktree.MergeBlocker{},
+		}, nil
+	}
+	fail := true
+	removeWorktreeProject = func(root string) error {
+		if fail {
+			return errors.New("registry busy")
+		}
+		return origRemove(root)
+	}
+	app := NewApp()
+	request := worktree.CleanupRequest{WorktreeRoot: worktreeRoot, SourceRoot: sourceRoot}
+	result, err := app.FinalizeWorktreeMerge(request)
+	if err != nil || !result.RecoveryRetained || result.Error == "" || projectIndexByRoot(loadProjectsFile().Projects, worktreeRoot) < 0 {
+		t.Fatalf("failed registry cleanup = %+v, %v", result, err)
+	}
+	fail = false
+	result, err = app.FinalizeWorktreeMerge(request)
+	if err != nil || !result.RecoveryRetained || projectIndexByRoot(loadProjectsFile().Projects, worktreeRoot) >= 0 {
+		t.Fatalf("retried registry cleanup = %+v, %v", result, err)
 	}
 }
 

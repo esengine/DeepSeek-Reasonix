@@ -18,11 +18,15 @@ import (
 )
 
 const (
-	cleanupStateVersion = 1
-	cleanupStateName    = "cleanup-state.json"
+	cleanupStateVersion       = 2
+	legacyCleanupStateVersion = 1
+	cleanupStateName          = "cleanup-state.json"
 
-	cleanupStagePrepared     = "prepared"
-	cleanupStageUnregistered = "unregistered"
+	cleanupStagePlanned  = "planned"
+	cleanupStageRetained = "retained"
+
+	legacyCleanupStagePrepared     = "prepared"
+	legacyCleanupStageUnregistered = "unregistered"
 )
 
 type cleanupManifestEntry struct {
@@ -31,7 +35,20 @@ type cleanupManifestEntry struct {
 	Digest string `json:"digest,omitempty"`
 }
 
+// cleanupState v2 records a retained, registered recovery checkout. It never
+// describes deletion work: old and unknown writers can only preserve it.
 type cleanupState struct {
+	Version        int    `json:"version"`
+	OriginalRoot   string `json:"originalRoot"`
+	RecoveryRoot   string `json:"recoveryRoot"`
+	WorktreeBranch string `json:"worktreeBranch"`
+	WorktreeHead   string `json:"worktreeHead"`
+	Stage          string `json:"stage"`
+}
+
+// legacyCleanupState is read-only compatibility for v1 journals that may
+// have stopped between checkout detachment and physical deletion.
+type legacyCleanupState struct {
 	Version        int                    `json:"version"`
 	OriginalRoot   string                 `json:"originalRoot"`
 	RegisteredRoot string                 `json:"registeredRoot"`
@@ -40,6 +57,11 @@ type cleanupState struct {
 	WorktreeHead   string                 `json:"worktreeHead"`
 	Stage          string                 `json:"stage"`
 	Manifest       []cleanupManifestEntry `json:"manifest"`
+}
+
+type cleanupJournal struct {
+	Current *cleanupState
+	Legacy  *legacyCleanupState
 }
 
 func cleanupJournalPath(metadata mergeMetadata) string {
@@ -73,64 +95,102 @@ func encodeCleanupState(state cleanupState) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode cleanup state: %w", err)
 	}
-	body = append(body, '\n')
-	return body, nil
+	return append(body, '\n'), nil
 }
 
-func readCleanupState(metadata mergeMetadata, expectedHead string) (cleanupState, bool, error) {
+func readCleanupState(metadata mergeMetadata, expectedHead string) (cleanupJournal, bool, error) {
 	path := cleanupJournalPath(metadata)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return cleanupState{}, false, nil
+		return cleanupJournal{}, false, nil
 	}
 	if err != nil {
-		return cleanupState{}, false, fmt.Errorf("inspect cleanup state: %w", err)
+		return cleanupJournal{}, false, fmt.Errorf("inspect cleanup state: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return cleanupState{}, false, errors.New("cleanup state is not a regular file")
+		return cleanupJournal{}, false, errors.New("cleanup state is not a regular file")
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return cleanupState{}, false, errors.New("cleanup state permissions are too broad")
+		return cleanupJournal{}, false, errors.New("cleanup state permissions are too broad")
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return cleanupState{}, false, fmt.Errorf("read cleanup state: %w", err)
+		return cleanupJournal{}, false, fmt.Errorf("read cleanup state: %w", err)
 	}
-	var state cleanupState
+	var envelope struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return cleanupJournal{}, false, fmt.Errorf("decode cleanup state version: %w", err)
+	}
+	switch envelope.Version {
+	case cleanupStateVersion:
+		var state cleanupState
+		if err := decodeCleanupJSON(body, &state); err != nil {
+			return cleanupJournal{}, false, err
+		}
+		if err := validateCleanupState(metadata, expectedHead, state); err != nil {
+			return cleanupJournal{}, false, err
+		}
+		return cleanupJournal{Current: &state}, true, nil
+	case legacyCleanupStateVersion:
+		var state legacyCleanupState
+		if err := decodeCleanupJSON(body, &state); err != nil {
+			return cleanupJournal{}, false, err
+		}
+		if err := validateLegacyCleanupState(metadata, expectedHead, state); err != nil {
+			return cleanupJournal{}, false, err
+		}
+		return cleanupJournal{Legacy: &state}, true, nil
+	default:
+		return cleanupJournal{}, false, fmt.Errorf("unsupported cleanup state version %d", envelope.Version)
+	}
+}
+
+func decodeCleanupJSON(body []byte, destination any) error {
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&state); err != nil {
-		return cleanupState{}, false, fmt.Errorf("decode cleanup state: %w", err)
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("decode cleanup state: %w", err)
 	}
-	if err := validateCleanupState(metadata, expectedHead, state); err != nil {
-		return cleanupState{}, false, err
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("decode cleanup state: trailing JSON content")
 	}
-	return state, true, nil
+	return nil
 }
 
 func validateCleanupState(metadata mergeMetadata, expectedHead string, state cleanupState) error {
 	if state.Version != cleanupStateVersion {
 		return fmt.Errorf("unsupported cleanup state version %d", state.Version)
 	}
-	if filepath.Clean(state.OriginalRoot) != filepath.Clean(metadata.WorktreeRoot) ||
+	if !sameCleanupPath(state.OriginalRoot, metadata.WorktreeRoot) ||
 		state.WorktreeBranch != metadata.WorktreeBranch || state.WorktreeHead != expectedHead {
 		return errors.New("cleanup state identity does not match the merge receipt")
 	}
-	if state.Stage != cleanupStagePrepared && state.Stage != cleanupStageUnregistered {
+	if state.Stage != cleanupStagePlanned && state.Stage != cleanupStageRetained {
 		return fmt.Errorf("unsupported cleanup stage %q", state.Stage)
 	}
-	cleanupDir := filepath.Join(filepath.Dir(metadata.WorktreeRoot), ".reasonix-cleanup")
-	cleanupInfo, err := os.Lstat(cleanupDir)
-	if err != nil || !cleanupInfo.IsDir() || cleanupInfo.Mode()&os.ModeSymlink != 0 {
-		return errors.New("cleanup quarantine is not a real directory")
+	return validateCleanupRecoveryPath(metadata, state.RecoveryRoot)
+}
+
+func validateLegacyCleanupState(metadata mergeMetadata, expectedHead string, state legacyCleanupState) error {
+	if state.Version != legacyCleanupStateVersion {
+		return fmt.Errorf("unsupported cleanup state version %d", state.Version)
 	}
-	for _, path := range []string{state.RegisteredRoot, state.DetachedRoot} {
-		rel, err := filepath.Rel(cleanupDir, filepath.Clean(path))
-		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.Contains(rel, string(filepath.Separator)) {
-			return errors.New("cleanup state path escapes the allocation quarantine")
-		}
+	if !sameCleanupPath(state.OriginalRoot, metadata.WorktreeRoot) ||
+		state.WorktreeBranch != metadata.WorktreeBranch || state.WorktreeHead != expectedHead {
+		return errors.New("cleanup state identity does not match the merge receipt")
 	}
-	if filepath.Clean(state.RegisteredRoot) == filepath.Clean(state.DetachedRoot) {
+	if state.Stage != legacyCleanupStagePrepared && state.Stage != legacyCleanupStageUnregistered {
+		return fmt.Errorf("unsupported cleanup stage %q", state.Stage)
+	}
+	if err := validateCleanupRecoveryPath(metadata, state.RegisteredRoot); err != nil {
+		return err
+	}
+	if err := validateCleanupRecoveryPath(metadata, state.DetachedRoot); err != nil {
+		return err
+	}
+	if sameCleanupPath(state.RegisteredRoot, state.DetachedRoot) {
 		return errors.New("cleanup state paths are not distinct")
 	}
 	if state.Manifest == nil {
@@ -145,6 +205,27 @@ func validateCleanupState(metadata mergeMetadata, expectedHead string, state cle
 			return fmt.Errorf("duplicate cleanup manifest path %q", entry.Path)
 		}
 		seen[entry.Path] = struct{}{}
+	}
+	return nil
+}
+
+func validateCleanupRecoveryPath(metadata mergeMetadata, path string) error {
+	cleanupDir := filepath.Join(filepath.Dir(metadata.WorktreeRoot), ".reasonix-cleanup")
+	cleanupInfo, err := os.Lstat(cleanupDir)
+	if err != nil || !cleanupInfo.IsDir() || cleanupInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("cleanup recovery directory is not a real directory")
+	}
+	realCleanupDir, err := filepath.EvalSymlinks(cleanupDir)
+	if err != nil {
+		return errors.New("cleanup recovery directory cannot be resolved")
+	}
+	realPath, err := resolveMissingCleanupPath(path)
+	if err != nil {
+		return errors.New("cleanup recovery path cannot be resolved")
+	}
+	rel, err := filepath.Rel(filepath.Clean(realCleanupDir), filepath.Clean(realPath))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.Contains(rel, string(filepath.Separator)) {
+		return errors.New("cleanup state path escapes the allocation recovery directory")
 	}
 	return nil
 }
@@ -184,20 +265,19 @@ func captureCleanupManifest(ctx context.Context, root string) ([]cleanupManifest
 		switch {
 		case info.IsDir():
 		case info.Mode().IsRegular():
-			digest, err := digestCleanupFile(ctx, path)
-			if err != nil {
-				return err
-			}
-			item.Digest = digest
+			item.Digest, err = digestCleanupFile(ctx, path)
 		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(path)
-			if err != nil {
-				return err
+			var target string
+			target, err = os.Readlink(path)
+			if err == nil {
+				digest := sha256.Sum256([]byte(target))
+				item.Digest = hex.EncodeToString(digest[:])
 			}
-			digest := sha256.Sum256([]byte(target))
-			item.Digest = hex.EncodeToString(digest[:])
 		default:
-			return fmt.Errorf("cleanup path %q has unsupported type %s", relative, info.Mode().Type())
+			err = fmt.Errorf("cleanup path %q has unsupported type %s", relative, info.Mode().Type())
+		}
+		if err != nil {
+			return err
 		}
 		manifest = append(manifest, item)
 		return nil
@@ -228,13 +308,12 @@ func digestCleanupFile(ctx context.Context, path string) (string, error) {
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
-			break
+			return hex.EncodeToString(hash.Sum(nil)), nil
 		}
 		if readErr != nil {
 			return "", readErr
 		}
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func manifestsEqual(expected, actual []cleanupManifestEntry) bool {
@@ -247,149 +326,4 @@ func manifestsEqual(expected, actual []cleanupManifestEntry) bool {
 		}
 	}
 	return true
-}
-
-func unexpectedCleanupPaths(expected, actual []cleanupManifestEntry) ([]string, error) {
-	want := make(map[string]cleanupManifestEntry, len(expected))
-	for _, entry := range expected {
-		want[entry.Path] = entry
-	}
-	paths := []string{}
-	for _, entry := range actual {
-		expectedEntry, ok := want[entry.Path]
-		if !ok || expectedEntry != entry {
-			paths = append(paths, entry.Path)
-		}
-	}
-	sort.Strings(paths)
-	return paths, nil
-}
-
-func safeRemoveDetachedCheckout(ctx context.Context, state cleanupState) ([]MergeBlocker, error) {
-	actual, err := captureCleanupManifest(ctx, state.DetachedRoot)
-	if err != nil {
-		return nil, err
-	}
-	if paths, _ := unexpectedCleanupPaths(state.Manifest, actual); len(paths) > 0 {
-		return []MergeBlocker{{Code: "late_content_preserved", Message: "content changed after checkout detachment and was preserved", Paths: paths}}, errors.New("cleanup_state_changed: detached checkout contains content that must be preserved")
-	}
-	noteMergeStep("before_cleanup_detached_remove")
-	actual, err = captureCleanupManifest(ctx, state.DetachedRoot)
-	if err != nil {
-		return nil, err
-	}
-	if paths, _ := unexpectedCleanupPaths(state.Manifest, actual); len(paths) > 0 {
-		return []MergeBlocker{{Code: "late_content_preserved", Message: "content changed during checkout cleanup and was preserved", Paths: paths}}, errors.New("cleanup_state_changed: detached checkout contains late content")
-	}
-
-	entries := append([]cleanupManifestEntry(nil), state.Manifest...)
-	sort.Slice(entries, func(left, right int) bool {
-		leftDepth := strings.Count(entries[left].Path, "/")
-		rightDepth := strings.Count(entries[right].Path, "/")
-		if leftDepth != rightDepth {
-			return leftDepth > rightDepth
-		}
-		return entries[left].Path > entries[right].Path
-	})
-	for _, entry := range entries {
-		if os.FileMode(entry.Mode).IsDir() {
-			continue
-		}
-		if err := removeExactManifestEntry(ctx, state.DetachedRoot, entry); err != nil {
-			return []MergeBlocker{{Code: "late_content_preserved", Message: "changed checkout content was preserved", Paths: []string{entry.Path}}}, fmt.Errorf("cleanup_state_changed: %w", err)
-		}
-	}
-	for _, entry := range entries {
-		if !os.FileMode(entry.Mode).IsDir() {
-			continue
-		}
-		if err := removeExactManifestEntry(ctx, state.DetachedRoot, entry); err != nil {
-			return []MergeBlocker{{Code: "late_content_preserved", Message: "late checkout content was preserved", Paths: []string{entry.Path}}}, fmt.Errorf("cleanup_state_changed: %w", err)
-		}
-	}
-	if err := os.Remove(state.DetachedRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
-		remaining, inspectErr := captureCleanupManifest(ctx, state.DetachedRoot)
-		paths := []string{"."}
-		if inspectErr == nil {
-			paths = paths[:0]
-			for _, entry := range remaining {
-				paths = append(paths, entry.Path)
-			}
-			if len(paths) == 0 {
-				paths = []string{"."}
-			}
-		}
-		return []MergeBlocker{{Code: "late_content_preserved", Message: "the detached checkout was not empty and was preserved", Paths: paths}}, fmt.Errorf("cleanup_state_changed: remove empty detached checkout: %w", err)
-	}
-	return []MergeBlocker{}, nil
-}
-
-func removeExactManifestEntry(ctx context.Context, root string, entry cleanupManifestEntry) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	path, err := manifestPath(root, entry.Path)
-	if err != nil {
-		return err
-	}
-	actual, err := inspectManifestEntry(ctx, root, entry.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if actual != entry {
-		return fmt.Errorf("path %q no longer matches the cleanup manifest", entry.Path)
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove exact cleanup path %q: %w", entry.Path, err)
-	}
-	return nil
-}
-
-func inspectManifestEntry(ctx context.Context, root, relative string) (cleanupManifestEntry, error) {
-	path, err := manifestPath(root, relative)
-	if err != nil {
-		return cleanupManifestEntry{}, err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return cleanupManifestEntry{}, err
-	}
-	item := cleanupManifestEntry{Path: relative, Mode: uint32(info.Mode())}
-	switch {
-	case info.IsDir():
-	case info.Mode().IsRegular():
-		item.Digest, err = digestCleanupFile(ctx, path)
-	case info.Mode()&os.ModeSymlink != 0:
-		var target string
-		target, err = os.Readlink(path)
-		if err == nil {
-			digest := sha256.Sum256([]byte(target))
-			item.Digest = hex.EncodeToString(digest[:])
-		}
-	default:
-		err = fmt.Errorf("path %q has unsupported type %s", relative, info.Mode().Type())
-	}
-	return item, err
-}
-
-func manifestPath(root, relative string) (string, error) {
-	if err := validateStatePath(relative); err != nil {
-		return "", err
-	}
-	parts := strings.Split(filepath.FromSlash(relative), string(filepath.Separator))
-	current := root
-	for _, part := range parts[:len(parts)-1] {
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if err != nil {
-			return "", err
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("cleanup manifest ancestor %q is not a real directory", current)
-		}
-	}
-	return filepath.Join(root, filepath.FromSlash(relative)), nil
 }

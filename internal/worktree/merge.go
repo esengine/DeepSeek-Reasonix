@@ -89,11 +89,15 @@ type CleanupRequest struct {
 
 // CleanupResult reports partial success without hiding recoverable resources.
 type CleanupResult struct {
-	Completed       bool           `json:"completed"`
-	WorktreeRemoved bool           `json:"worktreeRemoved"`
-	BranchDeleted   bool           `json:"branchDeleted"`
-	Blockers        []MergeBlocker `json:"blockers"`
-	Error           string         `json:"error,omitempty"`
+	Completed                  bool           `json:"completed"`
+	WorktreeRemoved            bool           `json:"worktreeRemoved"`
+	BranchDeleted              bool           `json:"branchDeleted"`
+	RecoveryRetained           bool           `json:"recoveryRetained,omitempty"`
+	RecoveryRoot               string         `json:"recoveryRoot,omitempty"`
+	RecoveryWorktreeRegistered bool           `json:"recoveryWorktreeRegistered,omitempty"`
+	BranchRetained             bool           `json:"branchRetained,omitempty"`
+	Blockers                   []MergeBlocker `json:"blockers"`
+	Error                      string         `json:"error,omitempty"`
 }
 
 // mergeStepHook is test-only. Tests install it before starting a merge and do
@@ -319,9 +323,9 @@ func MergeBack(ctx context.Context, managedRoot string, request MergeRequest) (M
 	return mergeReceipt(inspection, mergedHead, false), nil
 }
 
-// FinalizeMerge removes only an exact, clean, fully merged worktree, then uses
-// normal branch deletion. Callers must separately prove there are no runtime
-// or visible-tab references before invoking it.
+// FinalizeMerge moves an exact, clean, fully merged worktree to a registered
+// recovery location and retains its branch. Callers must separately prove
+// there are no runtime or visible-tab references before invoking it.
 func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupRequest) (CleanupResult, error) {
 	result := CleanupResult{Blockers: []MergeBlocker{}}
 	metadata, metadataFile, rootExists, err := readMergeMetadataForCleanup(request.WorktreeRoot, managedRoot)
@@ -349,49 +353,26 @@ func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupReque
 		return cleanupFailure(result, errors.New("worktree HEAD is not contained in the target branch"))
 	}
 
-	blockers, worktreeRemoved, err := finalizeCleanupWorktree(ctx, metadata, request.WorktreeHead, rootExists)
-	result.Blockers = append(result.Blockers, blockers...)
-	result.WorktreeRemoved = worktreeRemoved
+	retention, err := finalizeCleanupWorktree(ctx, metadata, request.WorktreeHead, rootExists)
+	result.Blockers = append(result.Blockers, retention.Blockers...)
+	result.RecoveryRetained = retention.RecoveryRetained
+	result.RecoveryRoot = retention.RecoveryRoot
+	result.RecoveryWorktreeRegistered = retention.RecoveryWorktreeRegistered
+	result.BranchRetained = retention.BranchRetained
 	if err != nil {
 		return cleanupFailure(result, err)
 	}
-
-	_, stderr, err = runGit(ctx, metadata.SourceRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+metadata.WorktreeBranch)
-	if err == nil {
-		branchHead, branchStderr, branchErr := gitValue(ctx, metadata.SourceRoot, "rev-parse", "--verify", "refs/heads/"+metadata.WorktreeBranch)
-		if branchErr != nil {
-			return cleanupFailure(result, fmt.Errorf("inspect temporary branch HEAD: %w%s", branchErr, stderrSuffix(branchStderr)))
+	if retention.LegacyCompleted {
+		if err := os.Remove(cleanupJournalPath(metadata)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return cleanupFailure(result, fmt.Errorf("remove completed legacy cleanup state: %w", err))
 		}
-		if branchHead != request.WorktreeHead {
-			return cleanupFailure(result, errors.New("temporary branch moved after merge; it was preserved"))
+		if err := os.Remove(metadataFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return cleanupFailure(result, fmt.Errorf("remove completed merge metadata: %w", err))
 		}
-		verifiedTargetHead, targetStderr, targetErr := gitValue(ctx, metadata.SourceRoot, "rev-parse", "--verify", "refs/heads/"+metadata.TargetBranch)
-		if targetErr != nil {
-			return cleanupFailure(result, fmt.Errorf("inspect target branch before temporary branch deletion: %w%s", targetErr, stderrSuffix(targetStderr)))
-		}
-		if ok, ancestorErr := isAncestor(ctx, metadata.SourceRoot, request.MergedCommit, verifiedTargetHead); ancestorErr != nil || !ok {
-			return cleanupFailure(result, errors.New("the target branch changed before temporary branch deletion; the branch was preserved"))
-		}
-		if ok, ancestorErr := isAncestor(ctx, metadata.SourceRoot, request.WorktreeHead, verifiedTargetHead); ancestorErr != nil || !ok {
-			return cleanupFailure(result, errors.New("the target branch no longer contains the worktree commit; the branch was preserved"))
-		}
-		noteMergeStep("before_cleanup_branch_delete")
-		targetRef := "refs/heads/" + metadata.TargetBranch
-		worktreeRef := "refs/heads/" + metadata.WorktreeBranch
-		input := fmt.Sprintf("verify %s %s\ndelete %s %s\n", targetRef, verifiedTargetHead, worktreeRef, request.WorktreeHead)
-		if _, stderr, err := runGitInput(ctx, metadata.SourceRoot, input, "update-ref", "--stdin"); err != nil {
-			return cleanupFailure(result, fmt.Errorf("delete merged temporary branch with atomic target verification: %w%s", err, stderrSuffix(stderr)))
-		}
+		result.Completed = true
+		result.WorktreeRemoved = true
 		result.BranchDeleted = true
-	} else if exitCode(err) == 1 {
-		result.BranchDeleted = true
-	} else {
-		return cleanupFailure(result, fmt.Errorf("inspect temporary branch: %w%s", err, stderrSuffix(stderr)))
 	}
-	if err := os.Remove(metadataFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return cleanupFailure(result, fmt.Errorf("remove completed merge metadata: %w", err))
-	}
-	result.Completed = true
 	return result, nil
 }
 

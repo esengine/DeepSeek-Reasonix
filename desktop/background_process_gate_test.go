@@ -45,7 +45,7 @@ func TestWindowsDesktopCommandsUseProcConstructors(t *testing.T) {
 			}
 			if entry.IsDir() {
 				name := entry.Name()
-				if name == "third_party" || name == "frontend" || name == "build" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".bak") || strings.HasSuffix(name, ".old") || strings.HasSuffix(name, ".root_bak") {
+				if name == "third_party" || name == "frontend" || name == "build" || strings.HasPrefix(name, ".") {
 					return filepath.SkipDir
 				}
 				return nil
