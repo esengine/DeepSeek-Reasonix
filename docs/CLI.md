@@ -457,7 +457,7 @@ the displayed list matches the commands the TUI accepts.
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
 | `/currency [auto\|CNY\|USD]` | View or change the user-global fee display currency and refresh the runtime. |
 | `/paste-image` | Read a clipboard image and insert an editable attachment token. |
-| `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling. |
+| `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling; SSH sessions start with capture off so the terminal's native selection works. |
 | `/effort` | View or change reasoning effort. |
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |

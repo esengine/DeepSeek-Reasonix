@@ -392,7 +392,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
 | `/currency [auto\|CNY\|USD]` | 查看或切换用户全局费用展示币种，并刷新当前运行时。 |
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
-| `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理。 |
+| `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理；SSH 会话默认关闭接管，保证终端原生选区可用。 |
 | `/effort` | 查看或切换 reasoning effort。 |
 | `/output-style` | 选择回答风格。 |
 | `/verbose` | 切换详细 reasoning 显示。 |

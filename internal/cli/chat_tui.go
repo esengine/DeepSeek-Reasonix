@@ -694,15 +694,6 @@ func transcriptContentWidth(termW int, nativeScrollback bool) int {
 	return max(termW, 1)
 }
 
-// mouseCaptureOffByDefault lets a user opt out of in-app mouse capture for
-// every run (e.g. a terminal/multiplexer combo where the native right-click
-// menu and click-drag selection matter more than the scrollbar and
-// wheel-scroll) without having to type "/mouse" each session.
-func mouseCaptureOffByDefault() bool {
-	v := strings.TrimSpace(os.Getenv("REASONIX_DISABLE_MOUSE"))
-	return v != "" && v != "0"
-}
-
 func configureChatTextarea(ti *textarea.Model) {
 	// Keep a stable two-cell input affordance, matching the prompt treatment in
 	// other coding TUIs. Continuation rows receive two spaces so text and the
@@ -920,9 +911,8 @@ func (m *chatTUI) prompts() []plugin.Prompt {
 
 func (m chatTUI) Init() tea.Cmd {
 	return tea.Batch(
-		textarea.Blink,
-		waitForAgentEvent(m.eventCh),
-		fetchBalance(m.ctrl),
+		textarea.Blink, forceSyncOutputCmd(),
+		waitForAgentEvent(m.eventCh), fetchBalance(m.ctrl),
 		m.runStatusline(), // nil (no-op) unless a custom status line is configured
 		m.refreshGitStatus(),
 	)
