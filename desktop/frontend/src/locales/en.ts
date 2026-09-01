@@ -3097,6 +3097,7 @@ export const en = {
   "notice.remoteTurnInterrupted": "The remote connection dropped mid-turn; the session will re-sync from the server after reconnecting.",
   "notice.remoteProviderUnreachable": "The credential channel (desktop key proxy) is unreachable, retrying: {detail}",
   "notice.warning": "Warning",
+  "notice.askSubmitFailed": "Unable to submit answer: {error}",
   "notice.details": "Details",
   "notice.decisionReceiptTitle": "Decision recorded",
   "notice.decisionReceiptTool": "Tool approval",

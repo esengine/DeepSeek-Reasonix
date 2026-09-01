@@ -2158,6 +2158,7 @@ export const zhTW: Record<DictKey, string> = {
   "notice.remoteTurnInterrupted": "遠端連線已中斷，本輪對話的狀態暫不可知；重連後會話將從伺服器恢復。",
   "notice.remoteProviderUnreachable": "憑證通道（桌面金鑰代理）不可達，正在重試：{detail}",
   "notice.warning": "警告",
+  "notice.askSubmitFailed": "提交回答失敗：{error}",
   "notice.details": "詳情",
   "notice.decisionReceiptTitle": "已記錄決策",
   "notice.decisionReceiptTool": "工具核准",

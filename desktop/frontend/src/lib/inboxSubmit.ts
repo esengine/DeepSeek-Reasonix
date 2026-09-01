@@ -1,6 +1,7 @@
 import type { AppBindings } from "./bridge";
 import type { StructuredInvocationSubmit } from "./invocationDisplay";
 import { asArray } from "./array";
+import type { QuestionAnswer } from "./types";
 
 type InboxEnqueueBindings = Pick<AppBindings, "EnqueueInboxFollowup" | "EnqueueInboxFollowupWithInvocations" | "EnqueueInboxSteer" | "EnqueueInboxSteerForTurn">;
 type ActiveTurnBindings = Pick<AppBindings, "ListTabs" | "SteerInboxItem" | "SteerInboxItemForTurn">;
@@ -8,6 +9,38 @@ type ActiveTurnBindings = Pick<AppBindings, "ListTabs" | "SteerInboxItem" | "Ste
 export async function resolveActiveTurnId(binding: Pick<AppBindings, "ListTabs">, tabId: string, known?: string): Promise<string | undefined> {
   if (known) return known;
   return asArray(await binding.ListTabs()).find((tab) => tab.id === tabId)?.turnId;
+}
+
+type AskAnswerBindings = Pick<AppBindings, "ListTabs" | "AnswerQuestionForTab" | "AnswerPromptForTab">;
+
+// Final frontend boundary before optimistic transcript state is created.
+export function normalizeTurnSubmit(displayText: string, submitText: string) {
+  const display = displayText.trim();
+  const submit = submitText.trim();
+  if (!submit) throw new Error("Message cannot be empty.");
+  return { display, submit };
+}
+
+// Host-only commands do not create an agent turn or receive a turn id.
+export function isLocalRuntimeCommand(input: string): boolean {
+  const trimmed = input.trim();
+  return trimmed === "/reload" || trimmed === "/effort" || trimmed.startsWith("/effort ");
+}
+
+export async function answerPromptForActiveTurn(
+  binding: AskAnswerBindings,
+  tabId: string,
+  promptId: string,
+  answers: QuestionAnswer[],
+  knownTurnId?: string,
+): Promise<void> {
+  if (typeof binding.AnswerPromptForTab !== "function") {
+    await binding.AnswerQuestionForTab(tabId, promptId, answers);
+    return;
+  }
+  const turnId = await resolveActiveTurnId(binding, tabId, knownTurnId);
+  if (!turnId) throw new Error("active turn id is unavailable");
+  await binding.AnswerPromptForTab(tabId, turnId, promptId, answers);
 }
 
 export async function steerInboxItemForActiveTurn(binding: ActiveTurnBindings, tabId: string, itemId: string, knownTurnId?: string) {

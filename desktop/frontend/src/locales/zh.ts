@@ -3100,6 +3100,7 @@ export const zh: Record<DictKey, string> = {
   "notice.remoteTurnInterrupted": "远程连接已中断，本轮对话的状态暂不可知；重连后会话将从服务端恢复。",
   "notice.remoteProviderUnreachable": "凭证通道（桌面密钥代理）不可达，正在重试：{detail}",
   "notice.warning": "警告",
+  "notice.askSubmitFailed": "提交回答失败：{error}",
   "notice.details": "详情",
   "notice.decisionReceiptTitle": "已记录决策",
   "notice.decisionReceiptTool": "工具审批",

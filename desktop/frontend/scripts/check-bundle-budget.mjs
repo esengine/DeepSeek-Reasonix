@@ -169,13 +169,14 @@ console.log("\nbundle budgets");
 // one-decimal ratchet. Completion uncertainty adds a terminal outcome and
 // notice without exposing evaluator audits to the frontend; the final merged
 // build measures 458.287 KiB gzip.
-// Merge-Back adds identity-bound inspection, navigation, and cleanup orchestration
-// to the startup path. The current merged production tree measures 460.033 KiB;
-// retain 0.067 KiB with the smallest one-decimal ratchet.
-// Failure-atomic merge completion adds the shared navigation-intent fence to
-// every local and remote switch path. The final production build measures
-// 460.7 KiB gzip; ceil(actualKiB * 10) / 10 yields the narrow 460.8 KiB gate.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 460.8 : 460.8;
+// Transactional Ask resolution and authoritative rejected-submit recovery add
+// 0.3 KiB gzip to the initial controller path. Retain the exact turn fence,
+// bounded ListTabs retry, and stale-prompt guard with a 0.1 KiB headroom.
+// Merge-Back then adds identity-bound inspection, navigation, and cleanup
+// orchestration. Failure-atomic completion extends the shared navigation-intent
+// fence to every local and remote switch path. The latest-base production build
+// measures within the exact 461.1 KiB ceil(actualKiB * 10) / 10 ratchet.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 461.1 : 461.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -306,10 +307,11 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // 2454.719 KiB on the release toolchain. Completion uncertainty brings the
 // final merged payload to 2455.154 KiB; retain the smallest one-decimal
 // ratchet.
-// Merge-Back's startup ownership path brings the exact merged payload to
-// 2461.480 KiB; retain 0.020 KiB with the smallest one-decimal ratchet.
-// The failure-atomic navigation fence brings the final raw payload to the
-// rounded 2463.5 KiB measurement; ceil(actualKiB * 10) / 10 is 2463.6 KiB.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_463.6 : 2_463.6;
+// Ask turn fencing, rejection reconciliation, and the localized submit-failure
+// notice measure 2456.044 KiB raw; retain 0.056 KiB of one-decimal headroom.
+// Merge-Back's startup ownership and failure-atomic navigation fence add the
+// remaining bounded payload. The latest-base production build measures within
+// the exact 2464.5 KiB ceil(actualKiB * 10) / 10 ratchet.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_464.5 : 2_464.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -19,8 +19,8 @@ export function AskCard({
   onStop,
 }: {
   ask: WireAsk;
-  onAnswer: (id: string, answers: QuestionAnswer[]) => void;
-  onDismiss: () => void;
+  onAnswer: (id: string, answers: QuestionAnswer[]) => void | Promise<void>;
+  onDismiss: () => void | Promise<void>;
   onStop: () => void;
 }) {
   const t = useT();
@@ -100,11 +100,18 @@ export function AskCard({
 
   const currentAnswered = q ? answered(q) : false;
 
+  const submitAction = (action: () => void | Promise<void>) => {
+    if (submitting) return;
+    setSubmitting(true);
+    void Promise.resolve()
+      .then(action)
+      .catch(() => setSubmitting(false));
+  };
+
   const finishOrAdvance = (nextSel = sel, nextCustom = custom) => {
     if (submitting) return;
     if (isLast) {
-      setSubmitting(true);
-      onAnswer(ask.id, answersFrom(nextSel, nextCustom));
+      submitAction(() => onAnswer(ask.id, answersFrom(nextSel, nextCustom)));
       return;
     }
     setActive((i) => Math.min(i + 1, questions.length - 1));
@@ -359,9 +366,7 @@ export function AskCard({
           onConfirm={confirmSelected}
           secondaryLabel={t("ask.justChat")}
           onSecondary={() => {
-            if (submitting) return;
-            setSubmitting(true);
-            onDismiss();
+            submitAction(onDismiss);
           }}
           disabled={submitting}
           confirmDisabled={!canConfirm()}

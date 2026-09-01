@@ -169,6 +169,64 @@ eq(notice.kind === "notice" && notice.level, "warn", "the notice is a warning");
 eq(failedState.running, false, "send_failed stops the running indicator");
 eq(failedState.pendingUser, undefined, "send_failed clears the pending marker");
 
+const waitingAsk = reducer({ ...initialState }, {
+  type: "event",
+  e: {
+    kind: "ask_request",
+    turnId: "turn-existing",
+    ask: { id: "ask-existing", questions: [{ id: "q1", prompt: "Choose", options: [{ label: "A" }] }] },
+  } as WireEvent,
+});
+const collidingSubmit = reducer(waitingAsk, { type: "user", text: "continue", seq: waitingAsk.seq, submissionId: "send-collision" });
+const rejectedCollision = reducer(collidingSubmit, {
+  type: "turn_submit_rejected",
+  submissionId: "send-collision",
+  error: "Send failed: turn already running",
+});
+eq(rejectedCollision.items.some((item) => item.kind === "user" && item.failed), true, "rejected admission marks the exact optimistic bubble failed");
+eq(rejectedCollision.running, true, "rejected admission stays conservatively running until reconciliation");
+eq(rejectedCollision.pendingPrompt, true, "rejected admission restores the visible Ask gate");
+eq(rejectedCollision.ask?.id, "ask-existing", "rejected admission preserves the pending Ask");
+
+const reconciledCollision = reducer(rejectedCollision, {
+  type: "backend_status",
+  running: true,
+  pendingPrompt: true,
+  backgroundJobs: 0,
+  cancelRequested: false,
+  cancellable: true,
+  turnId: "turn-existing",
+});
+eq(reconciledCollision.activeTurnId, "turn-existing", "authoritative active snapshot restores the existing turn id");
+eq(reconciledCollision.running, true, "authoritative active snapshot keeps the composer blocked");
+
+const reconciledIdle = reducer(rejectedCollision, {
+  type: "backend_status",
+  running: false,
+  pendingPrompt: false,
+  backgroundJobs: 0,
+  cancelRequested: false,
+  cancellable: false,
+});
+eq(reconciledIdle.running, false, "authoritative idle snapshot releases the rejected submit gate");
+eq(reconciledIdle.ask, undefined, "authoritative idle snapshot clears a stale Ask");
+
+const answeredAsk = reducer(waitingAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: waitingAsk.promptEpoch });
+eq(answeredAsk.ask, undefined, "successful Ask submission clears the matching prompt");
+eq(answeredAsk.resolvedPromptId, "ask-existing", "successful Ask submission tombstones the matching prompt id");
+const nextAsk = reducer(waitingAsk, {
+  type: "event",
+  e: { kind: "ask_request", turnId: "turn-existing", ask: { id: "ask-next", questions: [] } } as WireEvent,
+});
+const lateAskSuccess = reducer(nextAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: nextAsk.promptEpoch });
+eq(lateAskSuccess.ask?.id, "ask-next", "late Ask success cannot clear a newer prompt");
+const rebuiltAsk = reducer(reducer(waitingAsk, { type: "controller_rebuilt" }), {
+  type: "event",
+  e: { kind: "ask_request", turnId: "turn-new", ask: { id: "ask-existing", questions: [] } } as WireEvent,
+});
+const oldEpochSuccess = reducer(rebuiltAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: waitingAsk.promptEpoch });
+eq(oldEpochSuccess.ask?.id, "ask-existing", "old prompt epoch cannot clear an id reused by a rebuilt controller");
+
 const readinessStarted = reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent });
 const readinessState = reducer(readinessStarted, {
   type: "event",
