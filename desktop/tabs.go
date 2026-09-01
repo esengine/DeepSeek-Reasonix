@@ -7369,6 +7369,31 @@ func currentTabToolApprovalMode(tab *WorkspaceTab) string {
 	return normalizeToolApprovalMode(tab.toolApprovalMode)
 }
 
+// currentTabSubagentPolicy returns the tab's effective sub-agent delegation
+// tier: prefer the live controller value (which persists to the session's
+// BranchMeta), falling back to the tab field. A controller that was created
+// before its per-session tier was set reports "" for a fresh session, so it
+// must not shadow a tab-level default (the config default assigned at new-
+// session construction). Normalize and fall back in that case.
+func currentTabSubagentPolicy(tab *WorkspaceTab) string {
+	if tab == nil {
+		return "light"
+	}
+	if tab.Ctrl != nil {
+		if p, err := agent.NormalizeSubagentPolicy(tab.Ctrl.SubagentPolicy()); err == nil && p != "" {
+			return string(p)
+		}
+	}
+	p := tab.subagentPolicy
+	if p == "" {
+		return "light"
+	}
+	if norm, err := agent.NormalizeSubagentPolicy(p); err == nil && norm != "" {
+		return string(norm)
+	}
+	return "light"
+}
+
 // tabRuntimeSnapshot is a consistent under-a.mu copy of the per-tab fields
 // that bound methods and rebuild paths need after releasing the lock. The
 // build/rebuild goroutines write these fields under a.mu, so lock-free reads
@@ -7392,6 +7417,7 @@ type tabRuntimeSnapshot struct {
 	effort                        *string
 	tokenMode, qualityFloor, mode string
 	goal, toolApprovalMode        string
+	subagentPolicy                string
 }
 
 // normalizedTabRuntime is the internal, orthogonal runtime profile restored
@@ -7428,6 +7454,7 @@ func snapshotTabRuntimeLocked(tab *WorkspaceTab) tabRuntimeSnapshot {
 		mode:             tab.mode,
 		goal:             tab.goal,
 		toolApprovalMode: tab.toolApprovalMode,
+		subagentPolicy:   currentTabSubagentPolicy(tab),
 	}
 }
 

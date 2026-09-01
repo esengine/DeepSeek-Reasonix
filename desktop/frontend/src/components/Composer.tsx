@@ -4655,6 +4655,11 @@ export function Composer({
                 </Tooltip>
               </div>
             )}
+            {!heroMode && onSetSubagentPolicy && (
+              <div className="composer-meta__control composer-meta__control--subagent">
+                <SubagentPolicySwitcher policy={subagentPolicy} disabled={running} onPick={onSetSubagentPolicy} />
+              </div>
+            )}
             {!heroMode && (
               <div className="composer-meta__control composer-meta__control--approval">
                 {/* A pending tool approval disables the composer, but the approval

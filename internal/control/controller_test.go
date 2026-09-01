@@ -5415,3 +5415,30 @@ func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
 		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
 	}
 }
+
+
+// TestComposeSubagentPolicyInjection pins the #9004 transient injection: the
+// tier rides the user turn ahead of the plan-mode marker content, and the
+// light tier (default) leaves the composed text byte-identical.
+func TestComposeSubagentPolicyInjection(t *testing.T) {
+	ctrl := &Controller{memory: memoryManager{}}
+	if err := ctrl.SetSubagentPolicy("balanced"); err != nil {
+		t.Fatalf("SetSubagentPolicy: %v", err)
+	}
+	text := ctrl.composeWithGoal("do the thing", "user", false, "", "")
+	if !strings.Contains(text, "<subagent-policy>balanced") {
+		t.Fatalf("composed text must carry the transient block: %q", text)
+	}
+	if !strings.Contains(text, "do the thing") {
+		t.Fatalf("user text must survive: %q", text)
+	}
+	// 非法档位拒绝
+	if err := ctrl.SetSubagentPolicy("turbo"); err == nil {
+		t.Fatal("invalid tier must be rejected")
+	}
+	// 默认 light：不注入
+	ctrl2 := &Controller{memory: memoryManager{}}
+	if got := ctrl2.composeWithGoal("do the thing", "user", false, "", ""); strings.Contains(got, "subagent-policy") {
+		t.Fatalf("default must not inject: %q", got)
+	}
+}

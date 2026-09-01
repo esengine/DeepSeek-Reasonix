@@ -148,6 +148,9 @@ type Controller struct {
 	cleanup                func()
 	responseLanguage       string
 	reasoningLanguage      string
+	// subagentPolicy is the transient sub-agent delegation tier for
+	// subsequent turns (#9004); light (no guidance) is the default.
+	subagentPolicy agent.SubagentPolicy
 	disableColdResumePrune bool // legacy; rewrite elision removed, still gates cold notice
 	// testCacheColdAfter overrides cacheColdAfter() in tests. Zero uses the
 	// vendor-aware resolution from config.
@@ -2730,6 +2733,21 @@ func (c *Controller) applyPlanMode(v bool) {
 	if c.executor != nil {
 		c.executor.SetPlanMode(v)
 	}
+}
+
+// SetSubagentPolicy switches the sub-agent delegation tier for subsequent
+// turns (#9004). In-memory only (like SetPlanMode): no rebuild, no
+// persistence; the tier rides each user turn as a transient block that is
+// stripped from stored history, so the prompt cache is unaffected.
+func (c *Controller) SetSubagentPolicy(v string) error {
+	p, err := agent.NormalizeSubagentPolicy(v)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.subagentPolicy = p
+	c.mu.Unlock()
+	return nil
 }
 
 // SetResponseLanguage updates the final-answer language preference for

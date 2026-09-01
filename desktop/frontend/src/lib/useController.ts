@@ -689,6 +689,7 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.bypass === b.bypass &&
     a.collaborationMode === b.collaborationMode &&
     a.toolApprovalMode === b.toolApprovalMode &&
+    a.subagentPolicy === b.subagentPolicy &&
 
     a.tokenMode === b.tokenMode &&
     a.agentPreset === b.agentPreset &&

@@ -268,6 +268,10 @@ type Settings interface {
 	SetReasoningLanguage(lang string)
 	SetDisplayRecorder(fn func(content, display string))
 	ApplyComposerProfile(plan bool, toolApprovalMode, goal string) ([]string, error)
+	// SetSubagentPolicy switches the sub-agent delegation tier for
+	// subsequent turns (#9004). It is a transient, in-memory setting:
+	// no controller rebuild, no persistence, no prompt-cache impact.
+	SetSubagentPolicy(v string) error
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port. A

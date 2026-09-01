@@ -257,6 +257,8 @@ type Messages struct {
 	CmdModel            string // /model
 	CmdStatus           string // /status
 	CmdWorkMode         string // /work-mode
+	CmdSubagentPolicy    string // /subagent-policy
+	SubagentPolicySet    string // {policy} applied to subsequent turns
 	CmdDocs             string // /docs
 	CmdMemory           string // /memory
 	CmdMigrate          string // /migrate

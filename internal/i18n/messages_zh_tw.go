@@ -261,6 +261,8 @@ var ChineseTraditional = Messages{
 	CmdModel:            "切換模型",
 	CmdStatus:           "顯示工作階段狀態",
 	CmdWorkMode:         "已棄用：自適應標準執行",
+	CmdSubagentPolicy:    "子代理委派檔位：/subagent-policy <light|balanced|aggressive>（瞬態，按輪生效）",
+	SubagentPolicySet:    "子代理檔位：%s（對後續回合生效，不持久化）",
 	CmdDocs:             "搜尋與目前版本匹配的內建文件",
 	CmdMemory:           "檢視指令、記憶與復原狀態",
 	CmdMigrate:          "重試舊資料遷移",

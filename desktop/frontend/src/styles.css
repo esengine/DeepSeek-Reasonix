@@ -8883,6 +8883,18 @@ body > .mermaid-diagram--fullscreen {
 .effortsw__trigger--explicit {
   color: var(--accent);
 }
+.subagentpolicysw__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+.subagentpolicysw__trigger--explicit {
+  color: var(--accent);
+}
+.subagentpolicysw__menu {
+  min-width: 112px;
+  max-width: 160px;
+}
 .effortsw__menu {
   min-width: 112px;
   max-width: 160px;

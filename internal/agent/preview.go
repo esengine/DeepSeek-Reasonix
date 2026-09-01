@@ -27,6 +27,7 @@ var TransientUserBlockTags = []string{
 	"capability-route",
 	"interrupted-turn-recovery",
 	"execution-policy",
+	"subagent-policy",
 }
 
 // reTrailingExecutionPolicy matches the host-appended execution-policy block at

@@ -272,6 +272,8 @@ var English = Messages{
 	CmdModel:            "switch model",
 	CmdStatus:           "show session status",
 	CmdWorkMode:         "deprecated: adaptive standard execution",
+	CmdSubagentPolicy:    "sub-agent delegation tier: /subagent-policy <light|balanced|aggressive> (transient, per-turn)",
+	SubagentPolicySet:    "sub-agent policy: %s (applies to subsequent turns, not persisted)",
 	CmdDocs:             "search version-matched embedded documentation",
 	CmdMemory:           "inspect instructions, memory, and recovery",
 	CmdMigrate:          "retry legacy data migration",

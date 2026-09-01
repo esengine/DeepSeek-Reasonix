@@ -4747,6 +4747,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/preset", "/work-mode", "/profile":
 		m.echoLocalCommand(input)
 		return m.runPresetCommand(input)
+	case "/subagent-policy":
+		m.echoLocalCommand(input)
+		return m.runSubagentPolicyCommand(input)
 	case "/reasoning-language":
 		m.echoLocalCommand(input)
 		m.runReasoningLanguageCommand(input)

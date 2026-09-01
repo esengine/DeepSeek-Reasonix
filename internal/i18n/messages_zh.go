@@ -273,6 +273,8 @@ var Chinese = Messages{
 	CmdModel:            "切换模型",
 	CmdStatus:           "显示会话状态",
 	CmdWorkMode:         "已弃用：自适应标准执行",
+	CmdSubagentPolicy:    "子代理委派档位：/subagent-policy <light|balanced|aggressive>（瞬态，按轮生效）",
+	SubagentPolicySet:    "子代理档位：%s（对后续回合生效，不持久化）",
 	CmdDocs:             "搜索与当前版本匹配的内置文档",
 	CmdMemory:           "查看指令、记忆与恢复状态",
 	CmdMigrate:          "重试旧数据迁移",
