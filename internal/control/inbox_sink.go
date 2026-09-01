@@ -164,3 +164,10 @@ func (s *inboxEventSink) RecordRunBudget(sample event.RunBudgetSample) {
 	}
 	event.RecordRunBudget(s.inner, sample)
 }
+
+func (s *inboxEventSink) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	if s == nil {
+		return
+	}
+	event.RecordCompletionValidation(s.inner, info)
+}

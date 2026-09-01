@@ -256,3 +256,7 @@ func (s *frontendEventSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
 func (s *frontendEventSink) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(s.inner, sample)
 }
+
+func (s *frontendEventSink) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	event.RecordCompletionValidation(s.inner, info)
+}

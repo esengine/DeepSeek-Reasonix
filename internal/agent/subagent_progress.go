@@ -599,6 +599,15 @@ type subagentProgressTracker struct {
 	done       bool
 }
 
+// subagentProgressSink retains all host-only audit capabilities while the
+// visible event stream is reduced to progress, tool, and usage events.
+type subagentProgressSink struct {
+	event.AuditForwarder
+	tracker *subagentProgressTracker
+}
+
+var _ event.OptionalSinkCapabilities = (*subagentProgressSink)(nil)
+
 // newSubagentProgressTracker creates (or joins) the group merger and returns a
 // tracker for one child run. wrapSink is the sink the child's real tool events
 // already flow through; the tracker's own preview events are emitted through
@@ -675,41 +684,47 @@ func (t *subagentProgressTracker) setPhaseLocked(p subagentProgressPhase) {
 // unchanged (the child's Message and anything else stay dropped, as before).
 // Events arriving after the terminal are ignored.
 func (t *subagentProgressTracker) wrap() event.Sink {
-	return event.FuncSink(func(e event.Event) {
-		t.mu.Lock()
-		if t.done {
-			t.mu.Unlock()
-			return
-		}
-		switch e.Kind {
-		case event.Reasoning:
-			t.setPhaseLocked(subagentPhaseReasoning)
-			t.merger.deltaEvent(t.childID, subagentProgressChanReasoning, e.Text)
-		case event.Text:
-			t.setPhaseLocked(subagentPhaseResponding)
-			t.merger.deltaEvent(t.childID, subagentProgressChanText, e.Text)
-		case event.Notice:
-			text := e.Text
-			if text == "" {
-				text = e.Detail
-			}
-			t.merger.deltaEvent(t.childID, subagentProgressChanNotice, text)
-		case event.Retrying:
-			t.setPhaseLocked(subagentPhaseRetrying)
-		case event.ToolDispatch, event.ToolResult, event.ToolProgress:
-			t.setPhaseLocked(subagentPhaseTool)
-		}
+	return &subagentProgressSink{
+		AuditForwarder: event.AuditForwarder{Inner: t.sink},
+		tracker:        t,
+	}
+}
+
+func (s *subagentProgressSink) Emit(e event.Event) {
+	t := s.tracker
+	t.mu.Lock()
+	if t.done {
 		t.mu.Unlock()
-		switch e.Kind {
-		case event.ToolDispatch, event.ToolResult, event.ToolProgress:
-			t.sink.Emit(e)
-		case event.Usage:
-			if e.UsageSource == "" {
-				e.UsageSource = event.UsageSourceSubagent
-			}
-			t.sink.Emit(e)
+		return
+	}
+	switch e.Kind {
+	case event.Reasoning:
+		t.setPhaseLocked(subagentPhaseReasoning)
+		t.merger.deltaEvent(t.childID, subagentProgressChanReasoning, e.Text)
+	case event.Text:
+		t.setPhaseLocked(subagentPhaseResponding)
+		t.merger.deltaEvent(t.childID, subagentProgressChanText, e.Text)
+	case event.Notice:
+		text := e.Text
+		if text == "" {
+			text = e.Detail
 		}
-	})
+		t.merger.deltaEvent(t.childID, subagentProgressChanNotice, text)
+	case event.Retrying:
+		t.setPhaseLocked(subagentPhaseRetrying)
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+		t.setPhaseLocked(subagentPhaseTool)
+	}
+	t.mu.Unlock()
+	switch e.Kind {
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+		t.sink.Emit(e)
+	case event.Usage:
+		if e.UsageSource == "" {
+			e.UsageSource = event.UsageSourceSubagent
+		}
+		t.sink.Emit(e)
+	}
 }
 
 // finish flushes pending previews, emits the single terminal status, and — if

@@ -552,6 +552,10 @@ func (s *metricsSink) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(s.inner, sample)
 }
 
+func (s *metricsSink) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	event.RecordCompletionValidation(s.inner, info)
+}
+
 // MergeCapabilityAudit copies a capability audit snapshot plus process-local
 // MCP tools/list stats into RunMetrics.
 func (m *RunMetrics) MergeCapabilityAudit(snap *capability.Audit) {

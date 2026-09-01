@@ -1963,6 +1963,8 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
           title: t("notice.recoveryPausedTitle"),
           text: t("notice.recoveryPausedBody"),
         }];
+      } else if (e.outcome === "completion_uncertain") {
+        items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "info", title: t("notice.completionUncertainTitle"), text: t("notice.completionUncertainBody") }];
       } else if (e.status === "interrupted") {
         const interruptItems: Item[] = [{
           kind: "notice",

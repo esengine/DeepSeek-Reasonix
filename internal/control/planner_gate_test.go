@@ -74,6 +74,13 @@ func TestDecidePlannerRouteExplicitOnly(t *testing.T) {
 			reason: plannerReasonSynthetic,
 		},
 		{
+			name:   "user text matching a legacy host prefix stays user authored",
+			input:  agent.CompletionValidationContinuationPrefix + " give me a plan only",
+			meta:   plannerTurnMetadata{UserText: agent.CompletionValidationContinuationPrefix + " give me a plan only"},
+			route:  agent.PlannerRoutePlanOnly,
+			reason: plannerReasonUserPlanOnly,
+		},
+		{
 			name:   "user asks for plan only",
 			input:  "先规划这个认证迁移，不要执行",
 			route:  agent.PlannerRoutePlanOnly,

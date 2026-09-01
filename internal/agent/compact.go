@@ -372,7 +372,7 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 		}
 	}
 	messages := a.normalizeModelRequestMessages(prefix)
-	messages = append(messages, provider.Message{Role: provider.RoleUser, Content: compactionInstructionWithFocus(instructions)})
+	messages = append(messages, HostGeneratedUserMessage(compactionInstructionWithFocus(instructions)))
 	var schemas []provider.ToolSchema
 	if a.svc.tools != nil {
 		schemas = a.providerToolSchemas()

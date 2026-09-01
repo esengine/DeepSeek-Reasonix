@@ -138,17 +138,16 @@ func classifyDisplayIndexMessage(m provider.Message, index int, offset, length i
 		ToolResult:   m.Role == provider.RoleTool,
 	}
 	if m.Role == provider.RoleUser {
-		content := UserMessageText(m)
 		switch {
-		case IsUserAuthoredTurn(content):
+		case IsUserAuthoredTurnMessage(m):
 			turn++
 			entry.AuthoredTurn = turn
 			entry.StartsTurn = true
+		case IsHostGeneratedUserMessage(m):
+			entry.Synthetic = true
 		default:
-			if _, isSteer := SteerText(content); isSteer {
+			if _, isSteer := SteerText(m.Content); isSteer {
 				entry.Steer = true
-			} else if IsSyntheticUserText(content) {
-				entry.Synthetic = true
 			}
 		}
 	}

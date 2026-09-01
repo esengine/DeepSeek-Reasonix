@@ -482,7 +482,7 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 		rawContent = rawInput
 	}
 	c.executor.sess.conversation.Add(provider.Message{
-		Role: provider.RoleUser, Content: providerContent, RawContent: rawContent,
+		Role: provider.RoleUser, Origin: provider.MessageOriginUser, Content: providerContent, RawContent: rawContent,
 		Images: userImages(ctx), CreatedAt: time.Now().UnixMilli(),
 	})
 	c.executor.sess.conversation.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
@@ -529,7 +529,7 @@ func (c *Coordinator) planFromStream(ctx context.Context, input string) (string,
 	if input != rawInput {
 		rawContent = rawInput
 	}
-	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: input, RawContent: rawContent})
+	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginUser, Content: input, RawContent: rawContent})
 	ctx = provider.WithRequestAttemptCounter(ctx)
 	var usage *provider.Usage
 	streamCompleted := false
@@ -633,17 +633,26 @@ func plannerSink(sink event.Sink) event.Sink {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
-	return event.FuncSink(func(e event.Event) {
-		switch e.Kind {
-		case event.TurnStarted, event.TurnDone:
-			return
-		default:
-			if e.Source == "" {
-				e.Source = event.UsageSourcePlanner
-			}
-			sink.Emit(e)
+	return &plannerEventSink{AuditForwarder: event.AuditForwarder{Inner: sink}, inner: sink}
+}
+
+type plannerEventSink struct {
+	event.AuditForwarder
+	inner event.Sink
+}
+
+var _ event.OptionalSinkCapabilities = (*plannerEventSink)(nil)
+
+func (s *plannerEventSink) Emit(e event.Event) {
+	switch e.Kind {
+	case event.TurnStarted, event.TurnDone:
+		return
+	default:
+		if e.Source == "" {
+			e.Source = event.UsageSourcePlanner
 		}
-	})
+		s.inner.Emit(e)
+	}
 }
 
 func plannerTurnInput(input string, decision PlannerDecision) string {

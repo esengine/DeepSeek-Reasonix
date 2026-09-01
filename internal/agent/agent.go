@@ -1047,6 +1047,10 @@ type Options struct {
 	// delete_range to the pre-fingerprint full-file fresh-read requirement.
 	// It never enters provider-visible prompts or tool schemas.
 	LegacyAnchorSafetyGate bool
+
+	CompletionEvaluator        CompletionEvaluator
+	CompletionEvaluatorFactory CompletionEvaluatorFactory
+	CompletionValidation       string
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -1120,6 +1124,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			recentKeep:             opts.RecentKeep,
 			archiveDir:             opts.ArchiveDir,
 			legacyAnchorSafetyGate: opts.LegacyAnchorSafetyGate,
+			completionAgentConfig:  newCompletionAgentConfig(opts, sink),
 		},
 		sess: sessionRuntime{
 			conversation: session,

@@ -4635,13 +4635,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.noteWatchdogIdle()
 		m.queueEditCursor, m.queueEditDraft = -1, ""
 		m.clearSubmittedPastes()
-		if e.Outcome == event.TurnOutcomeRecoveryPaused {
-			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
-		} else if e.Outcome == event.TurnOutcomeFinalReadiness {
-			m.commitLine(wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, m.width, activeCLITheme.info))
-		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
-		}
+		m.commitTurnPauseNotice(e)
 		m.commitReceipt(e.Receipt)
 		// Long turns on Windows ConPTY often drop mouse tracking; re-arm on
 		// the next frame so wheel keeps scrolling the transcript (#7583).

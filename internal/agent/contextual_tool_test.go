@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -74,8 +75,9 @@ func TestRepeatedMixedContextualBatchStopsAllCalls(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	err := a.Run(context.Background(), "inspect the file")
-	if err == nil || !strings.Contains(err.Error(), "context-unavailable tools") {
-		t.Fatalf("repeated contextual batch error = %v", err)
+	var pause *CompletionUncertainError
+	if err == nil || !errors.As(err, &pause) || pause.Cause != CompletionUncertainContextTool {
+		t.Fatalf("repeated contextual batch error = %v, want completion pause", err)
 	}
 	if got := atomic.LoadInt32(&executions); got != 1 {
 		t.Fatalf("available tool was re-executed after repair: %d", got)
@@ -83,20 +85,32 @@ func TestRepeatedMixedContextualBatchStopsAllCalls(t *testing.T) {
 	if got := lastToolResult(a.Session(), "read_file"); !strings.Contains(got, "called again") {
 		t.Fatalf("second legal call was not paired with stop result: %q", got)
 	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want no third round after the repeat", prov.call)
+	}
 }
 
-func TestRepeatedPureContextualCallWithVisibleAnswerFinishes(t *testing.T) {
+// Same-turn answer text streams before the host tool error, so it cannot show
+// the model understood which tools the phase allows — a second violation must
+// pause even with a co-streamed answer. The placeholder text is deliberately
+// non-semantic: no keyword in any language may influence the outcome.
+func TestRepeatedPureContextualCallWithAnswerStillPauses(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(unavailableTool{fakeTool: fakeTool{name: "phase_tool", readOnly: true}})
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{toolCallChunk("phase-1", "phase_tool", `{}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "visible answer"}, toolCallChunk("phase-2", "phase_tool", `{}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "占位 Lorem 占位 ipsum — the request is fully handled."}, toolCallChunk("phase-2", "phase_tool", `{}`), {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "answer normally"); err != nil {
-		t.Fatalf("visible answer after repeated contextual call failed: %v", err)
+	err := a.Run(context.Background(), "answer normally")
+	var pause *CompletionUncertainError
+	if err == nil || !errors.As(err, &pause) || pause.Cause != CompletionUncertainContextTool {
+		t.Fatalf("repeated contextual call with answer error = %v, want completion pause", err)
 	}
-	if got := lastAssistantContent(a.Session()); got != "visible answer" {
-		t.Fatalf("final answer = %q", got)
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want no third round", prov.call)
+	}
+	if got := lastToolResult(a.Session(), "phase_tool"); !strings.Contains(got, "called again") {
+		t.Fatalf("second unavailable call was not paired with the stop result: %q", got)
 	}
 }

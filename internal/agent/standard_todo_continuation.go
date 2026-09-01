@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"reasonix/internal/evidence"
-	"reasonix/internal/provider"
 	"reasonix/internal/taskcontract"
 )
 
@@ -55,10 +54,7 @@ func (a *Agent) continueStandardTodo(ctx context.Context, state *turnRuntime) bo
 	}
 	state.standardTodoContinuations++
 	state.standardTodoProgress = progress
-	a.sess.conversation.Add(provider.Message{
-		Role:    provider.RoleUser,
-		Content: a.withTurnPreferences(standardTodoContinuationMessage()),
-	})
+	a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(standardTodoContinuationMessage())))
 	return true
 }
 

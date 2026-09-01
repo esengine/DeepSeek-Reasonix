@@ -4616,8 +4616,11 @@ func collectEventLogUserPrompts(path string, info os.FileInfo, resolveUserConten
 	fallbackAt := promptHistoryFallbackMillis(path, info)
 	turn := 0
 	for _, user := range users {
-		text := strings.TrimSpace(resolveUserContent(strings.TrimSpace(user.Text)))
-		if text == "" || control.IsSyntheticUserMessage(text) {
+		if !agent.IsUserAuthoredTurnMessage(user.Message) {
+			continue
+		}
+		text := sessionUserPromptText(user.Message, resolveUserContent)
+		if text == "" {
 			continue
 		}
 		at := fallbackAt
@@ -4658,23 +4661,25 @@ func collectJSONLUserPrompts(path string, info os.FileInfo, resolveUserContent f
 		// 1) Legacy event format: {"kind":"user.message","text":"..."}
 		// 2) Early event format:   {"type":"user.message","text":"..."}
 		// 3) Current provider.Message format: {"role":"user","content":"..."}
-		text := ""
+		var message provider.Message
 		kindOrType := strings.TrimSpace(rec.Kind)
 		if kindOrType == "" {
 			kindOrType = strings.TrimSpace(rec.Type)
 		}
 		if kindOrType == "user.message" {
-			text = strings.TrimSpace(rec.Text)
+			message = provider.Message{Role: provider.RoleUser, Content: strings.TrimSpace(rec.Text)}
 		} else if strings.TrimSpace(rec.Role) == "user" {
-			text = strings.TrimSpace(rec.Content)
+			message = provider.Message{
+				Role: provider.RoleUser, Origin: rec.Origin,
+				Content: strings.TrimSpace(rec.Content), RawContent: strings.TrimSpace(rec.RawContent),
+			}
 		}
-		if text != "" {
-			text = resolveUserContent(text)
-			text = strings.TrimSpace(text)
-			if text == "" {
+		if message.Content != "" {
+			if !agent.IsUserAuthoredTurnMessage(message) {
 				continue
 			}
-			if control.IsSyntheticUserMessage(text) {
+			text := sessionUserPromptText(message, resolveUserContent)
+			if text == "" {
 				continue
 			}
 			at := fallbackAt
@@ -4692,6 +4697,13 @@ func collectJSONLUserPrompts(path string, info os.FileInfo, resolveUserContent f
 		}
 	}
 	return nil
+}
+
+func sessionUserPromptText(message provider.Message, resolveUserContent func(string) string) string {
+	if strings.TrimSpace(message.RawContent) != "" {
+		return strings.TrimSpace(agent.UserMessageText(message))
+	}
+	return strings.TrimSpace(resolveUserContent(strings.TrimSpace(message.Content)))
 }
 
 func promptHistoryFallbackMillis(path string, info os.FileInfo) int64 {
@@ -5191,7 +5203,7 @@ func historyProviderMessagesWithPersistedTimes(msgs []provider.Message, sessionP
 	}
 	needsPersistedTime := false
 	for _, msg := range msgs {
-		if msg.Role == provider.RoleUser && msg.CreatedAt <= 0 && agent.IsUserAuthoredTurn(agent.UserMessageText(msg)) {
+		if msg.CreatedAt <= 0 && agent.IsUserAuthoredTurnMessage(msg) {
 			needsPersistedTime = true
 			break
 		}
@@ -5466,15 +5478,7 @@ func historyUserDisplayContent(msg provider.Message, resolveUserContent func(str
 func historyCheckpointTurns(msgs []provider.Message, resolveUserContent func(string) string, checkpointTurns map[int]int) []int {
 	out := make([]int, 0)
 	for index, msg := range msgs {
-		if msg.Role != provider.RoleUser {
-			continue
-		}
-		content := agent.UserMessageText(msg)
-		if _, isSteer := agent.SteerText(content); isSteer {
-			continue
-		}
-		content = historyUserDisplayContent(msg, resolveUserContent)
-		if control.IsSyntheticUserMessage(content) {
+		if !agent.IsUserAuthoredTurnMessage(msg) {
 			continue
 		}
 		turn, ok := checkpointTurns[index]
@@ -5551,7 +5555,7 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		return append(out, rows...)
 	}
 	if state.suppressCanonicalTurn {
-		if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
+		if !agent.IsUserAuthoredTurnMessage(m) {
 			return out
 		}
 		state.suppressCanonicalTurn = false
@@ -5565,11 +5569,11 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		// regular user bubble or being filtered as synthetic (#4044).
 		// Check against the raw m.Content: resolveUserContent applies
 		// StripComposePrefixes which trims trailing whitespace.
-		if rows, handled := historySteerRows(agent.UserMessageText(m), false); handled {
+		if rows, handled := historySteerRows(m.Content, false); handled {
 			return append(out, rows...)
 		}
 		content = historyUserDisplayContent(m, resolveUserContent)
-		if control.IsSyntheticUserMessage(content) {
+		if agent.IsHostGeneratedUserMessage(m) {
 			return out
 		}
 		if turn, ok := checkpointTurns[index]; ok {
@@ -5664,12 +5668,12 @@ func (state *historyMessageConvertState) consumeHistoryPlannerState(m provider.M
 		return
 	}
 	if m.LocalOnly {
-		if _, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
+		if _, isSteer := agent.SteerText(m.Content); isSteer {
 			return
 		}
 	}
 	if state.suppressCanonicalTurn {
-		if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
+		if !agent.IsUserAuthoredTurnMessage(m) {
 			return
 		}
 		state.suppressCanonicalTurn = false
@@ -5677,7 +5681,7 @@ func (state *historyMessageConvertState) consumeHistoryPlannerState(m provider.M
 	if m.Role != provider.RoleUser {
 		return
 	}
-	if control.IsSyntheticUserMessage(historyUserDisplayContent(m, resolveUserContent)) {
+	if agent.IsHostGeneratedUserMessage(m) {
 		return
 	}
 	key := messageDisplayKey(agent.UserMessageText(m))
@@ -5750,15 +5754,7 @@ func visibleHistoryUserTurns(msgs []provider.Message, resolveUserContent func(st
 }
 
 func isVisibleHistoryUser(msg provider.Message, resolveUserContent func(string) string) bool {
-	if msg.Role != provider.RoleUser {
-		return false
-	}
-	content := agent.UserMessageText(msg)
-	if _, isSteer := agent.SteerText(content); isSteer {
-		return false
-	}
-	content = historyUserDisplayContent(msg, resolveUserContent)
-	return !control.IsSyntheticUserMessage(content)
+	return agent.IsUserAuthoredTurnMessage(msg)
 }
 
 func providerMessagesForVisibleTurnRange(msgs []provider.Message, resolveUserContent func(string) string, startTurn, endTurn int) ([]provider.Message, []int) {
@@ -6170,6 +6166,7 @@ type previewEventRecord struct {
 	Kind             string                    `json:"kind"`
 	Type             string                    `json:"type"`
 	Role             string                    `json:"role"`
+	Origin           provider.MessageOrigin    `json:"origin"`
 	TS               json.RawMessage           `json:"ts"`
 	Time             json.RawMessage           `json:"time"`
 	Timestamp        json.RawMessage           `json:"timestamp"`
@@ -6181,6 +6178,7 @@ type previewEventRecord struct {
 	Detail           string                    `json:"detail"`
 	Code             string                    `json:"code"`
 	Content          string                    `json:"content"`
+	RawContent       string                    `json:"raw_content"`
 	Reasoning        string                    `json:"reasoning"`
 	ReasoningContent string                    `json:"reasoningContent"`
 	MemoryCitations  []provider.MemoryCitation `json:"memoryCitations"`

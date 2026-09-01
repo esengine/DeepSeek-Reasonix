@@ -217,7 +217,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		rawContent = a.turn.turnInput
 	}
 	a.sess.conversation.Add(provider.Message{
-		Role: provider.RoleUser, Content: input, RawContent: rawContent,
+		Role: provider.RoleUser, Origin: inputMessageOrigin(ctx), Content: input, RawContent: rawContent,
 		Images: userImages(ctx), VisionSummary: VisionSummaryFromContext(ctx), CreatedAt: userCreatedAt,
 	})
 
@@ -253,7 +253,10 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) (runErr err
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
 		if text, itemID, ok := a.consumeSteer(); ok {
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
+			a.sess.conversation.Add(provider.Message{
+				Role: provider.RoleUser, Origin: provider.MessageOriginUser,
+				Content: a.withTurnPreferences(midTurnSteerMessage(text)), RawContent: text,
+			})
 			a.svc.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
 		} else if itemID != "" {
 			// Loader failed after dequeue: durable entry stays for inspection
@@ -582,21 +585,21 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		// "still thinking after the task is done" symptom), so honour the
 		// stop when reasoning carried the substance of the answer and treat
 		// the turn as a final answer instead of retrying.
-		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) {
-			state.emptyFinalBlocks++
-			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
-				return false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
+		if a.requireVisibleFinal || a.completionEnforced() || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) { // enforce: recover visible text first
+			state.terminal.emptyFinalBlocks++
+			if state.terminal.emptyFinalBlocks >= maxEmptyFinalBlocks {
+				return false, fmt.Errorf("model finished without a visible final answer %d times", state.terminal.emptyFinalBlocks)
 			}
 			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
+			a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(emptyFinalRetryMessage())))
 			a.contextManager().ObserveUsage(usage)
 			return true, nil
 		}
 	}
-	if state.executorHandoff && !state.usedAnyTool && state.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
-		state.handoffNudges++
+	if state.executorHandoff && !state.usedAnyTool && state.terminal.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
+		state.terminal.handoffNudges++
 		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
+		a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(executorHandoffRetryMessage())))
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
@@ -611,6 +614,16 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
+	// Host repairs are done. The validator now judges the already-streamed
+	// answer; only this decision gates TurnDone.
+	switch decision, pause := a.validateCandidateCompletion(ctx, state, text); decision {
+	case completionResume:
+		a.contextManager().ObserveUsage(usage)
+		return true, nil
+	case completionStop:
+		a.contextManager().ObserveUsage(usage)
+		return false, pause
+	}
 	// A final-answer turn otherwise skips compaction, so a large context
 	// carries into the next turn un-folded and can overflow the model window.
 	// No-op below the trigger, so normal turns keep their warm cache.
@@ -623,21 +636,19 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
 func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
-	state.emptyFinalBlocks = 0
+	state.terminal.emptyFinalBlocks = 0
 	state.usedAnyTool = true
 	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
-	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
+	if len(unavailableContextTools) > 0 && state.terminal.contextToolRepairs > 0 {
+		// Second violation ends the batch: every call is paired, none executes,
+		// and same-turn answer text cannot bypass — it predates the host error.
 		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
-		for _, call := range calls {
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+		a.pairUnexecutedGraceCalls(calls, msg)
+		a.contextManager().ObserveUsage(usage)
+		return false, &CompletionUncertainError{
+			Cause:  CompletionUncertainContextTool,
+			Detail: strings.Join(unavailableContextTools, ", "),
 		}
-		if hasVisibleFinalAnswer(text) {
-			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
-		}
-		if len(unavailableContextTools) == 1 && unavailableContextTools[0] == "update_goal" {
-			return false, fmt.Errorf("model repeatedly called update_goal outside Goal mode without a visible answer")
-		}
-		return false, fmt.Errorf("model repeatedly called context-unavailable tools without a visible answer: %s", strings.Join(unavailableContextTools, ", "))
 	}
 
 	boundaryFinalizer := a.allowsBoundaryTurnFinalizer(ctx, state, calls)
@@ -695,14 +706,11 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		return false, a.gracePause(state)
 	}
 	if len(unavailableContextTools) > 0 {
-		if hasVisibleFinalAnswer(text) {
-			// Keep the assistant tool call and host error paired in the transcript,
-			// but accept a co-streamed answer without another repair request.
-			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
-		}
-		state.contextToolRepairs++
+		// First violation: legal tools already ran once. Co-streamed answer
+		// text cannot skip repair; only a later clean round may validate.
+		state.terminal.contextToolRepairs++
 		nudge := fmt.Sprintf("The following tools are unavailable in the current workflow phase: %s. Do not call them again. Respond to the user's request with visible answer text now; call a different tool only if it is still needed to complete the request.", strings.Join(unavailableContextTools, ", "))
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+		a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(nudge)))
 	}
 	a.trackTodoProgress(ctx, state, receiptMark)
 
@@ -719,7 +727,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 			ctrl.MarkFinalizationOffered(a.recovery.taskID)
 		}
 		nudge := "Auto recovery has reached its limit for this turn. Do not call any more tools. Summarize what was completed, what failed, and what the user should do next. The user can continue in the next message."
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+		a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(nudge)))
 		return true, nil
 	}
 

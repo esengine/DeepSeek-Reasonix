@@ -159,7 +159,7 @@
       "file-size": 1599
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 4206
+      "file-size": 4208
     },
     "desktop/heartbeat.go": {
       "essay": 7
@@ -377,7 +377,7 @@
     "internal/agent/agent.go": {
       "complexity": 31,
       "essay": 25,
-      "file-size": 2064,
+      "file-size": 2069,
       "function-size": 104,
       "struct-state": 2
     },
@@ -535,7 +535,7 @@
     "internal/agent/task.go": {
       "complexity": 19,
       "essay": 12,
-      "file-size": 1211,
+      "file-size": 1215,
       "function-size": 99
     },
     "internal/agent/task_test.go": {
@@ -808,7 +808,7 @@
     },
     "internal/config/config.go": {
       "essay": 24,
-      "file-size": 1547,
+      "file-size": 1549,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1222,7 +1222,7 @@
     },
     "internal/provider/provider.go": {
       "essay": 7,
-      "file-size": 308
+      "file-size": 311
     },
     "internal/provider/provider_test.go": {
       "test-file-size": 12

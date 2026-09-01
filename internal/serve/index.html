@@ -627,6 +627,7 @@ const __T = {
     'thinking': 'Thinking...',
     'retrying_status': 'Retrying ({attempt}/{max})...',
     'recovery_paused': 'Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.',
+    'completion_uncertain': 'Completion could not be confirmed. The current result and completed work are kept. Send "continue" to resume, or restate what should change.',
     'final_readiness_title': 'Task completion checks are not complete',
     'final_readiness_body': 'The response was generated, but this task still requires verification or review.',
     'final_readiness_missing': 'Still needed: ',
@@ -778,6 +779,7 @@ const __T = {
     'thinking': '思考中...',
     'retrying_status': '正在重试 ({attempt}/{max})...',
     'recovery_paused': '已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。',
+    'completion_uncertain': '完成状态未确认。当前结果和已完成工作均已保留。发送“继续”可接着完成，也可以补充说明需要调整的内容。',
     'final_readiness_title': '任务收尾检查尚未完成',
     'final_readiness_body': '内容已经生成，但这项任务要求的验证或复审步骤尚未完成。',
     'final_readiness_missing': '仍需完成：',
@@ -1622,7 +1624,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
     case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
-    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.outcome==='final_readiness'){showFinalReadinessPause(e.readiness);}else if(e.outcome==='recovery_paused'){showNotice('⏸ '+__('recovery_paused'));}else if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
+    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.outcome==='final_readiness'){showFinalReadinessPause(e.readiness);}else if(e.outcome==='recovery_paused'){showNotice('⏸ '+__('recovery_paused'));}else if(e.outcome==='completion_uncertain'){showNotice('⏸ '+__('completion_uncertain'));}else if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
   }
 };
 es.onerror=()=>{

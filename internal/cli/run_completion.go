@@ -57,6 +57,15 @@ func classifyRunCompletion(err error) runCompletion {
 			exitCode: 0,
 		}
 	}
+	var completionErr *agent.CompletionUncertainError
+	if errors.As(err, &completionErr) {
+		return runCompletion{
+			outcome:  event.TurnOutcomeCompletionUncertain,
+			subtype:  event.TurnOutcomeCompletionUncertain,
+			class:    event.TurnOutcomeCompletionUncertain,
+			exitCode: 1,
+		}
+	}
 	return runCompletion{
 		subtype:  "error_during_execution",
 		class:    runFailureClass(err),

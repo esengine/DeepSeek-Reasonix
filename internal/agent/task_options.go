@@ -41,6 +41,10 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		DisableWriteAccessExpand: true,
 		WriteWorkspaceRoot:       t.workspaceRoot,
 	}
+	if t.completion.factory != nil {
+		opts.CompletionEvaluatorFactory = t.completion.factory
+	}
+	opts.CompletionValidation = t.completion.mode
 	// Writer children inherit the parent turn's frozen risk and closure floors.
 	// The parent publishes its policy into the run context; a child that never
 	// received it (direct unit construction) keeps its own derived policy.

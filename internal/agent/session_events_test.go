@@ -705,7 +705,7 @@ func TestLoadSessionUserMessagesSeesEventLogTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSessionUserMessages: %v", err)
 	}
-	if len(users) != 2 || users[0].Text != "first prompt" || users[1].Text != "second prompt" {
+	if len(users) != 2 || users[0].Message.Content != "first prompt" || users[1].Message.Content != "second prompt" {
 		t.Fatalf("user messages = %+v, want both prompts", users)
 	}
 	if users[1].At.IsZero() {

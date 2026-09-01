@@ -77,6 +77,25 @@ type CompletionSummary struct {
 	Attention          bool     `json:"attention"`
 }
 
+func toWireCompletionSummary(c *event.CompletionSummaryInfo) *CompletionSummary {
+	if c == nil {
+		return nil
+	}
+	return &CompletionSummary{
+		Preset:             c.Preset,
+		Verdict:            c.Verdict,
+		Mutations:          c.Mutations,
+		ChecksPassed:       c.ChecksPassed,
+		ChecksFailed:       c.ChecksFailed,
+		ChecksSuppressed:   c.ChecksSuppressed,
+		Review:             c.Review,
+		GapKinds:           append([]string(nil), c.GapKinds...),
+		ConstraintDegraded: c.ConstraintDegraded,
+		Floor:              c.Floor,
+		Attention:          c.Attention,
+	}
+}
+
 type WorkspaceChanged struct {
 	Revisions  WorkspaceRevision     `json:"revisions"`
 	Changes    []WorkspacePathChange `json:"changes"`
@@ -207,21 +226,7 @@ func ToWire(e event.Event) Event {
 			w.Phase = e.Text
 		}
 	case event.CompletionSummary:
-		if c := e.Completion; c != nil {
-			w.Completion = &CompletionSummary{
-				Preset:             c.Preset,
-				Verdict:            c.Verdict,
-				Mutations:          c.Mutations,
-				ChecksPassed:       c.ChecksPassed,
-				ChecksFailed:       c.ChecksFailed,
-				ChecksSuppressed:   c.ChecksSuppressed,
-				Review:             c.Review,
-				GapKinds:           append([]string(nil), c.GapKinds...),
-				ConstraintDegraded: c.ConstraintDegraded,
-				Floor:              c.Floor,
-				Attention:          c.Attention,
-			}
-		}
+		w.Completion = toWireCompletionSummary(e.Completion)
 	}
 	return w
 }

@@ -208,3 +208,33 @@ func TestIsHostRecoveryGuidance(t *testing.T) {
 		t.Fatalf("VisibleSteerText host recovery = %q, want hidden", text)
 	}
 }
+
+func TestMessageOriginIsAuthoritativeWithLegacyFallback(t *testing.T) {
+	hostText := completionContinueTailMessage()
+	for _, tc := range []struct {
+		name string
+		msg  provider.Message
+		want bool
+	}{
+		{name: "new host without keyword", msg: provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginHost, Content: "continue normally", RawContent: "user-looking raw text"}, want: true},
+		{name: "new user quoting host text", msg: provider.Message{Role: provider.RoleUser, Origin: provider.MessageOriginUser, Content: hostText}, want: false},
+		{name: "legacy host text", msg: provider.Message{Role: provider.RoleUser, Content: hostText}, want: true},
+		{name: "legacy ordinary user", msg: provider.Message{Role: provider.RoleUser, Content: "continue normally"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsHostGeneratedUserMessage(tc.msg); got != tc.want {
+				t.Fatalf("IsHostGeneratedUserMessage(%+v) = %v, want %v", tc.msg, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRawSteerRemainsGuidanceNotAUserTurn(t *testing.T) {
+	msg := provider.Message{
+		Role: provider.RoleUser, Origin: provider.MessageOriginUser,
+		Content: midTurnSteerMessage("use the smaller patch"), RawContent: "use the smaller patch",
+	}
+	if IsUserAuthoredTurnMessage(msg) {
+		t.Fatal("a real steer with RawContent must not start a new user turn")
+	}
+}

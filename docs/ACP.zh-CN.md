@@ -160,6 +160,12 @@ agent 会发送带 `[warning]` 的消息 chunk 并返回 `end_turn`；厂商状�
 的 runner 没有返回 error。显式模型轮数上限（`max_steps`）会发送 `[warning]`、返回
 `max_turn_requests`，并记录 paused 厂商状态；host 的任务时间、token 或成本预算也会发送
 `[warning]` 并记录 paused 状态，但因 ACP v1 没有任务预算专用停止原因而返回 `end_turn`。
+当完成校验器无法确认候选结果（`completion_validation = "enforce"`，未配置时的默认值）时，Reasonix 会发送
+信息级消息、返回 `end_turn`，并记录厂商 phase `completion_uncertain`；回答与已完成工作
+都会保留，下一条普通 prompt 即可继续任务。
+独立校验器会为每个候选最终回答增加一次模型请求，最长等待 30 秒。可将
+`completion_validation` 显式设为 `"shadow"` 同步观测（仍有相同调用费用与延迟），或设为 `"off"` 关闭；
+`REASONIX_COMPLETION_VALIDATION_MODE` 可对单个进程覆盖配置值。
 其他 provider、工具或运行时失败会返回 JSON-RPC
 `-32603 InternalError`，消息携带长度受限且已脱敏的原因；不会再用协议外的
 `stopReason` 构造成功结果。

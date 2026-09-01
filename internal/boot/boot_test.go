@@ -413,7 +413,7 @@ func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
 	if err := ctrl.Run(context.Background(), "capture request prefix"); err != nil {
 		t.Fatalf("Run(%q): %v", tokenMode, err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
 	}
@@ -438,7 +438,7 @@ func captureTokenProfileSurface(t *testing.T, tokenMode string) (provider.Reques
 	if err := ctrl.Run(context.Background(), "capture contract"); err != nil {
 		t.Fatalf("Run(%q): %v", tokenMode, err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
 	}
@@ -917,9 +917,9 @@ func TestBuildRunSkillSubagentRegistryHonorsReadOnlyFlag(t *testing.T) {
 	setBootTokenProfileTestProvider(t, prov)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
-
 [agent]
 system_prompt = "BASE"
+completion_validation = "off"
 
 [[providers]]
 name = "test-model"
@@ -2327,7 +2327,7 @@ command = "reasonix-missing-mockmcp"
 	if err := ctrl.Run(context.Background(), "use the lean surface"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	reqs := prov.Requests()
+	reqs := mainConversationRequests(prov.Requests())
 	if len(reqs) != 1 {
 		t.Fatalf("requests = %d, want 1", len(reqs))
 	}
@@ -2420,7 +2420,7 @@ model = "x"
 			if err := ctrl.Run(context.Background(), "use optional tool"); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			for _, req := range prov.Requests() {
+			for _, req := range mainConversationRequests(prov.Requests()) {
 				if requestHasTool(req, "connect_tool_source") {
 					t.Fatalf("connect_tool_source must not appear: %v", toolSchemaNames(req.Tools))
 				}
@@ -4245,7 +4245,7 @@ model = "x"
 			t.Fatalf("Run: %v", err)
 		}
 		ctrl.Close()
-		reqs := prov.Requests()
+		reqs := mainConversationRequests(prov.Requests())
 		if len(reqs) != 1 {
 			t.Fatalf("requests = %d, want 1", len(reqs))
 		}

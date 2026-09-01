@@ -116,7 +116,7 @@ func (s *Session) ConsumeFinalReadinessRecovery() bool {
 			s.version++
 			return true
 		}
-		if message.Role == provider.RoleUser && IsUserAuthoredTurn(message.Content) {
+		if IsUserAuthoredTurnMessage(*message) {
 			return false
 		}
 	}

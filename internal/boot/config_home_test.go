@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/config"
 	"reasonix/internal/history"
 	"reasonix/internal/historycatalog"
 )
@@ -25,6 +26,7 @@ func isolateConfigHome(t *testing.T) string {
 	t.Setenv("AppData", filepath.Join(dir, "AppData"))
 	t.Setenv("LocalAppData", filepath.Join(dir, "LocalAppData"))
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	t.Setenv(config.CompletionValidationModeEnv, config.CompletionValidationOff)
 	t.Cleanup(func() { closeBootTestHistoryCatalog(t) })
 	return dir
 }

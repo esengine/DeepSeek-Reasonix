@@ -3121,6 +3121,8 @@ export const zh: Record<DictKey, string> = {
   "notice.deliveryIncompleteTitle": "交付检查尚未完成",
   "notice.recoveryPausedTitle": "已暂停自动重试",
   "notice.recoveryPausedBody": "Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。",
+  "notice.completionUncertainTitle": "完成状态未确认",
+  "notice.completionUncertainBody": "当前结果未能确认已完成。当前回答和所有已完成的工作均已保留。发送“继续”可接着完成，也可以补充说明需要调整的内容。",
   "notice.deliveryIncompleteBody": "内容已经生成，但验证和复审步骤尚未完成。",
   "notice.deliveryIncompleteContinue": "继续检查",
   "notice.deliveryIncompleteAccept": "接受验收",

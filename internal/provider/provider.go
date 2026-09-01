@@ -43,6 +43,9 @@ const (
 // Message is a single conversation message.
 type Message struct {
 	Role Role `json:"role"`
+	// Origin distinguishes real user input from host-generated user-role protocol
+	// messages. omitempty keeps legacy sessions readable by previous releases.
+	Origin MessageOrigin `json:"origin,omitempty"`
 	// Content is the provider-visible conversation content.
 	// Keepingthislegacyfieldprovider-visiblepreservesreplay for older CLI/Desktop releases.
 	Content string `json:"content,omitempty"`

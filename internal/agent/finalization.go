@@ -127,7 +127,7 @@ func (a *Agent) armFinalizationRound(ctx context.Context, state *turnRuntime, ca
 	state.graceRound = true
 	state.landCause = cause
 	_, canSubmitPlan := planSubmissionFromContext(ctx)
-	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(cause.nudge(state, canSubmitPlan))})
+	a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(cause.nudge(state, canSubmitPlan))))
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget,
 		Text: cause.noticeText(), Detail: cause.detail})
 }

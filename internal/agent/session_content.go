@@ -55,12 +55,14 @@ func SessionsShareContent(pathA, pathB string) (bool, error) {
 	return bytes.Equal(digestA[:], digestB[:]), nil
 }
 
-// SessionUserMessage is one user-role message with the best-known wall-clock
-// time. Messages restored from a replace event (compaction, rewind) lose their
-// per-turn times and report zero; callers apply their own fallback.
+// SessionUserMessage is one complete user-role message with the best-known
+// wall-clock time. Keeping the provider.Message preserves durable origin and
+// RawContent so current display/history consumers never fall back to text
+// prefixes. Messages restored from a replace event (compaction, rewind) lose
+// their per-turn times and report zero; callers apply their own fallback.
 type SessionUserMessage struct {
-	Text string
-	At   time.Time
+	Message provider.Message
+	At      time.Time
 }
 
 // LoadSessionUserMessages returns the session's user-role messages in
@@ -97,7 +99,7 @@ func loadSessionUserMessagesWithLimits(path string, limits sessionReplayLimits) 
 				if m.CreatedAt > 0 {
 					at = time.UnixMilli(m.CreatedAt)
 				}
-				out = append(out, SessionUserMessage{Text: m.Content, At: at})
+				out = append(out, SessionUserMessage{Message: m, At: at})
 			}
 			return out, nil
 		}
@@ -115,7 +117,7 @@ func loadSessionUserMessagesWithLimits(path string, limits sessionReplayLimits) 
 		if m.CreatedAt > 0 {
 			at = time.UnixMilli(m.CreatedAt)
 		}
-		out = append(out, SessionUserMessage{Text: m.Content, At: at})
+		out = append(out, SessionUserMessage{Message: m, At: at})
 	}
 	return out, nil
 }

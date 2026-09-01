@@ -14,6 +14,7 @@ var English = Messages{
 	FinalReadinessRecovery: "Task work or completion checks are paused. Run /continue-checks to preserve completed evidence and finish the remaining work.",
 	ReadinessContinuing:    "Reasonix is finishing the remaining task work or checks automatically.",
 	RecoveryPaused:         "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
+	CompletionUncertain:    "Completion could not be confirmed. The current result and completed work are kept. Send \"continue\" to resume, or restate what should change.",
 	ReceiptVerified:        "nothing left unverified",
 	ReceiptGapsHeader:      "not verified:",
 	ReceiptRisksHeader:     "declared risks:",

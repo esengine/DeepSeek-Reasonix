@@ -237,6 +237,14 @@ Execution failures use `subtype: "error_during_execution"` and
 `is_error: true`. Structured modes keep runtime errors in JSON instead of also
 printing a duplicate human-readable error.
 
+Completion validation defaults to `enforce`. If it still cannot confirm a
+self-contained result after the single automatic continuation, one-shot
+`reasonix run` / `-p` exits with status `1`; JSON retains
+`subtype: "completion_uncertain"` and `is_error: false` because the answer,
+completed work, and resumable session are preserved. Each candidate final adds
+one evaluator request and up to 30 seconds. `shadow` observes synchronously and
+has the same request cost and latency; use `off` to disable the call.
+
 ### Redacted machine interfaces
 
 Use the dedicated event flag when an automation needs lifecycle telemetry but

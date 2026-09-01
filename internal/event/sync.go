@@ -121,3 +121,9 @@ func (s *syncSink) RecordRunBudget(sample RunBudgetSample) {
 	defer s.mu.Unlock()
 	RecordRunBudget(s.inner, sample)
 }
+
+func (s *syncSink) RecordCompletionValidation(info CompletionValidationInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	RecordCompletionValidation(s.inner, info)
+}

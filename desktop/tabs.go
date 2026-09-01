@@ -1710,15 +1710,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 		}
 		if m := app.metrics.Load(); m != nil {
 			m.observe(e)
-			if e.Kind == event.TurnDone {
-				// Display persistence and its projection acknowledgement run first,
-				// so successful compaction is included in this content-free snapshot.
-				if tab := app.tabByID(tabID); tab != nil && tab.Ctrl != nil {
-					observeControllerRecoveryMetrics(m, tab.Ctrl)
-					observeControllerTurnEventMetrics(m, tab.Ctrl)
-				}
-				m.persist()
-			}
+			persistMetricsEvent(app, m, tabID, e)
 		}
 	}
 	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt))
@@ -4876,14 +4868,14 @@ func topicTitleUserTurnsFromSession(path string) []string {
 		// mid-turn steers are persisted as role "user" but are not user-authored:
 		// counting them inflated userTurns past the stage-3 threshold and let
 		// "Host final-answer readiness check failed…" become a topic title.
-		if !agent.IsUserAuthoredTurn(msg.Text) {
+		if !agent.IsUserAuthoredTurnMessage(msg.Message) {
 			continue
 		}
 		// UserPreviewText is the canonical user-authored view: it unwraps
 		// memory-compiler execution contracts and strips transient blocks
 		// (and runs HandoffTask), so internal wrappers can never become a
 		// title basis (#5666).
-		content := control.StripComposePrefixes(agent.UserPreviewText(msg.Text))
+		content := control.StripComposePrefixes(agent.UserPreviewText(agent.UserMessageText(msg.Message)))
 		content = control.StripReferencedContextPrefix(content)
 		if strings.TrimSpace(content) != "" {
 			users = append(users, content)

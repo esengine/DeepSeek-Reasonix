@@ -1,13 +1,17 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/provider"
+)
 
 func TestReasoningLanguageDirectiveIsNotUserAuthored(t *testing.T) {
 	for _, injected := range []string{
 		"<reasoning-language>\nUse Simplified Chinese",
 		"<reasoning-language>\nUse Simplified Chinese\n</reasoning-language>",
 	} {
-		if IsUserAuthoredTurn(injected) {
+		if IsUserAuthoredTurnMessage(provider.Message{Role: provider.RoleUser, Content: injected}) {
 			t.Fatalf("reasoning-language directive %q must not count as user-authored", injected)
 		}
 	}

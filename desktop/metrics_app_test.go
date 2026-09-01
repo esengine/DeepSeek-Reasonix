@@ -32,6 +32,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 	feed := []event.Event{
 		{Kind: event.Usage, Usage: &provider.Usage{FinishReason: "stop", CacheHitTokens: 99, CacheMissTokens: 1}},
 		{Kind: event.Usage, Usage: &provider.Usage{FinishReason: "tool_calls", CacheHitTokens: 60, CacheMissTokens: 40}},
+		{Kind: event.Usage, UsageSource: event.UsageSourceCompletionEvaluator, Usage: &provider.Usage{FinishReason: "stop", CacheHitTokens: 90, CacheMissTokens: 10}},
 		{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}},
 		{Kind: event.CompactionDone},
 		{Kind: event.Notice, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
@@ -42,15 +43,22 @@ func TestObserveClassifiesEvents(t *testing.T) {
 	for _, e := range feed {
 		m.observe(e)
 	}
+	m.observeCompletionValidation(event.CompletionValidationInfo{Mode: "enforce", Outcome: "error", Attempt: 2, DurationMs: 5_200, ErrorClass: "timeout"})
 
 	want := map[string]map[string]int{
-		"finish_reason":  {"stop": 1, "tool_calls": 1},
-		"cache_hit":      {"99_100": 1, "50_80": 1},
-		"tool_error":     {"permission": 1},
-		"compaction":     {"total": 1},
-		"empty_final":    {"total": 1},
-		"provider_error": {"http_429": 1},
-		"turns":          {"total": 3},
+		"finish_reason":                      {"stop": 1, "tool_calls": 1},
+		"cache_hit":                          {"99_100": 1, "50_80": 1},
+		"completion_evaluator_finish_reason": {"stop": 1},
+		"completion_evaluator_cache_hit":     {"90_100": 1},
+		"completion_validation_outcome":      {"enforce_error": 1},
+		"completion_validation_latency":      {"s_5_15": 1},
+		"completion_validation_attempt":      {"repair": 1},
+		"completion_validation_error":        {"timeout": 1},
+		"tool_error":                         {"permission": 1},
+		"compaction":                         {"total": 1},
+		"empty_final":                        {"total": 1},
+		"provider_error":                     {"http_429": 1},
+		"turns":                              {"total": 3},
 	}
 	for sig, buckets := range want {
 		for b, n := range buckets {
@@ -58,6 +66,33 @@ func TestObserveClassifiesEvents(t *testing.T) {
 				t.Errorf("%s/%s = %d, want %d", sig, b, got, n)
 			}
 		}
+	}
+}
+
+func TestCompletionValidationMetricsPersistWithoutRootTurnDone(t *testing.T) {
+	for _, e := range []event.Event{
+		{Kind: event.Usage, UsageSource: event.UsageSourceCompletionEvaluator},
+		{Kind: event.TurnDone},
+	} {
+		if !metricsEventRequiresPersist(e) {
+			t.Fatalf("event %v should persist metrics immediately", e.Kind)
+		}
+	}
+	if metricsEventRequiresPersist(event.Event{Kind: event.Usage}) {
+		t.Fatal("ordinary usage should retain turn-batched persistence")
+	}
+
+	configDir := t.TempDir()
+	metrics := newMetricsAggregator(configDir)
+	app := &App{}
+	app.metrics.Store(metrics)
+	sink := &tabEventSink{app: app}
+	event.RecordCompletionValidation(sink, event.CompletionValidationInfo{
+		Mode: "enforce", Outcome: "continue", Attempt: 1,
+	})
+	got := readCounters(metrics.path)
+	if got["completion_validation_outcome"]["enforce_continue"] != 1 {
+		t.Fatalf("persisted completion validation metrics = %+v", got)
 	}
 }
 

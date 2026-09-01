@@ -3119,6 +3119,8 @@ export const en = {
   "notice.deliveryIncompleteBody": "The response was generated, but verification and review still need to be completed.",
   "notice.recoveryPausedTitle": "Automatic retries paused",
   "notice.recoveryPausedBody": "Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
+  "notice.completionUncertainTitle": "Completion not confirmed",
+  "notice.completionUncertainBody": "The result could not be confirmed as complete. The current answer and all completed work are kept. Send “继续 / continue” to resume, or restate what should change.",
   "notice.deliveryIncompleteContinue": "Continue checks",
   "notice.deliveryIncompleteAccept": "Accept as done",
   "notice.deliveryIncompleteContinuePrompt": "Continue and complete the remaining task checks.",

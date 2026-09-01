@@ -246,6 +246,27 @@ const recoveryUser = recoveryPaused.items.find((it) => it.kind === "user");
 eq(recoveryUser?.kind === "user" && Boolean(recoveryUser.failed), false, "recovery_paused does not mark the user message as failed");
 eq(recoveryPaused.running, false, "recovery_paused frees the composer");
 
+const completionUncertain = reducer(readinessStarted, {
+  type: "event",
+  e: {
+    kind: "turn_done",
+    submissionId: "send-0",
+    outcome: "completion_uncertain",
+    err: "Completion could not be confirmed. Reasonix kept the current result and all completed work.",
+  } as WireEvent,
+});
+const uncertainNotice = completionUncertain.items[completionUncertain.items.length - 1];
+eq(uncertainNotice.kind === "notice" && uncertainNotice.level, "info", "completion_uncertain uses informational severity, not a send failure");
+eq(uncertainNotice.kind === "notice" && Boolean(uncertainNotice.title), true, "completion_uncertain shows a product title");
+eq(
+  uncertainNotice.kind === "notice" && uncertainNotice.text,
+  "The result could not be confirmed as complete. The current answer and all completed work are kept. Send “继续 / continue” to resume, or restate what should change.",
+  "completion_uncertain uses the localized product copy",
+);
+const uncertainUser = completionUncertain.items.find((it) => it.kind === "user");
+eq(uncertainUser?.kind === "user" && Boolean(uncertainUser.failed), false, "completion_uncertain does not mark the user message as failed");
+eq(completionUncertain.running, false, "completion_uncertain frees the composer");
+
 const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0, submissionId: "shell-0" });
 const shellFailed = reducer(shellSent, { type: "send_failed", submissionId: "shell-0", error: "Command failed: workspace is still starting" });
 const shellNotice = shellFailed.items[shellFailed.items.length - 1];

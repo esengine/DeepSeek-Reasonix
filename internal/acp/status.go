@@ -358,6 +358,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 		default:
 			var readinessErr *agent.FinalReadinessError
 			var recoveryPause *agent.RecoveryPauseError
+			var completionPause *agent.CompletionUncertainError
 			_, runPause := agent.InspectRunPause(runErr)
 			switch {
 			case errors.As(runErr, &readinessErr):
@@ -368,6 +369,10 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 			case errors.As(runErr, &recoveryPause):
 				t.phase = "recovery_paused"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(recoveryPause.Error(), 2_048)}
+				eventName = "pause"
+			case errors.As(runErr, &completionPause):
+				t.phase = "completion_uncertain"
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(completionPause.Error(), 2_048)}
 				eventName = "pause"
 			case runPause:
 				t.phase = "paused"

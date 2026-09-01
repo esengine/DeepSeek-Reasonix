@@ -1051,7 +1051,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		return ""
 	}
-	bashSandboxEnforced := bashSpec.Enforce
+	bashSandboxEnforced, completionEval := bashSpec.Enforce, newCompletionEval(cfg, effectiveResolver, proxySpec)
 	taskToolAdded := false
 	readOnlyTaskToolAdded := false
 	var taskTool *agent.TaskTool
@@ -1059,7 +1059,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// so task tools created later still receive the session-shared substrate.
 	var capRuntime *agent.MCPCapabilityRuntime
 	newTaskTool := func() *agent.TaskTool {
-		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
+		return agent.NewTaskToolWithOptions(completionEval.taskOptions(agent.TaskToolOptions{
 			Provider:            execProv,
 			Pricing:             entry.Price,
 			QuoteContext:        quoteCtx,
@@ -1080,7 +1080,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			SubagentModel:       taskModel,
 			SubagentEffort:      taskEffort,
 			ResolveProvider:     resolveSubagentProvider,
-		}).
+		})).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
 			WithMaxSubagentDepth(maxSubagentDepth).
@@ -1194,7 +1194,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// read_only_task, so they cannot write, install, mutate memory, resume/fork
 	// transcripts, or delegate further.
 	//
-	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, quoteCtx, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet)
+	subagentSkillOptions := newSubagentSkillOptionsFactory(cfg.Agent, quoteCtx, headlessGate, keepPolicy, maxSubagentDepth, opts.Ablation, workspaceLease, writeRootSet, completionEval)
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
@@ -1617,7 +1617,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	})
 
 	execSess := newObservedSession(sysPrompt)
-	executor := agent.New(execProv, reg, execSess, agent.Options{
+	executor := agent.New(execProv, reg, execSess, completionEval.options(agent.Options{
 		MaxSteps:     maxSteps,
 		MaxStepsKey:  opts.MaxStepsKey,
 		Temperature:  cfg.Agent.Temperature,
@@ -1657,7 +1657,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		SubagentDepth:                0,
 		MaxSubagentDepth:             maxSubagentDepth,
 		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
-	}, sink)
+	}), sink)
 	reg.Add(sessiontool.NewSetSessionTitleTool(sessionDir, executor.SessionPath, opts.OnSessionTitleChanged))
 
 	var runner agent.Runner = executor
@@ -1696,7 +1696,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				}
 				plannerTools.Add(capRuntime.NewFrontend(plannerLedger, plannerAudit))
 			}
-			plannerOpts := agent.Options{
+			plannerOpts := completionEval.options(agent.Options{
 				MaxSteps:                     0,
 				Gate:                         headlessGate,
 				ModelRef:                     modelRefFromEntry(pe),
@@ -1718,7 +1718,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				WriteRoots:                   writeRootSet,
 				HomeDir:                      userHomeDir(),
 				StateRoot:                    config.MemoryUserDir(),
-			}
+			})
 			runner = agent.NewCoordinatorWithPlannerPolicy(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, cfg.Agent.Temperature, sink, control.NewPlannerPolicy())
 			label = entry.Model + " + planner " + pe.Model
 		}

@@ -120,6 +120,7 @@ func splitLegacyCoalescedSummary(msg provider.Message) (provider.Message, provid
 		return provider.Message{}, provider.Message{}, false
 	}
 	summary := msg
+	summary.Origin = provider.MessageOriginHost
 	summary.Content = msg.Content[:i+len(summaryTagClose)]
 	summary.RawContent = ""
 	summary.Images = nil
@@ -128,6 +129,10 @@ func splitLegacyCoalescedSummary(msg provider.Message) (provider.Message, provid
 	summary.ServerSearch = nil
 	summary.CreatedAt = 0
 	user := msg
+	// The legacy coalesced record did not retain the following turn's
+	// provenance. Empty keeps old-session fallback available instead of
+	// asserting that an old host continuation was user-authored.
+	user.Origin = ""
 	user.Content = msg.Content[i+len(separator):]
 	user.RawContent = ""
 	return summary, user, true
@@ -137,7 +142,7 @@ func compressAnchorCandidate(msg provider.Message) bool {
 	if msg.Role != provider.RoleUser || msg.LocalOnly || isCompactionSummary(msg) {
 		return false
 	}
-	return IsUserAuthoredTurn(UserMessageText(msg))
+	return IsUserAuthoredTurnMessage(msg)
 }
 
 func anchorPreview(text string) string {

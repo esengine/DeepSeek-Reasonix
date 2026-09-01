@@ -15,6 +15,7 @@ var Chinese = Messages{
 	FinalReadinessRecovery: "剩余任务或收尾检查已暂停。运行 /continue-checks 可保留已完成证据并继续剩余工作。",
 	ReadinessContinuing:    "Reasonix 正在自动完成剩余任务或检查。",
 	RecoveryPaused:         "已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。",
+	CompletionUncertain:    "完成状态未确认。当前结果和已完成工作均已保留。发送“继续”可接着完成，也可以补充说明需要调整的内容。",
 	ReceiptVerified:        "没有未经验证的部分",
 	ReceiptGapsHeader:      "未验证:",
 	ReceiptRisksHeader:     "已申报的风险:",

@@ -15,6 +15,7 @@ var ChineseTraditional = Messages{
 	FinalReadinessRecovery: "剩餘任務或收尾檢查已暫停。執行 /continue-checks 可保留已完成證據並繼續剩餘工作。",
 	ReadinessContinuing:    "Reasonix 正在自動完成剩餘任務或檢查。",
 	RecoveryPaused:         "已暫停自動重試。Reasonix 已停止重複嘗試，並保留已完成的工作。傳送「繼續」即可開始新一輪，也可以補充要求來調整方向。",
+	CompletionUncertain:    "完成狀態未確認。目前結果與已完成工作均已保留。傳送「繼續」可接著完成，也可以補充說明需要調整的內容。",
 	ReceiptVerified:        "沒有未經驗證的部分",
 	ReceiptGapsHeader:      "未驗證:",
 	ReceiptRisksHeader:     "已申報的風險:",

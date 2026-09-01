@@ -210,6 +210,12 @@ reasonix run "运行测试" --output-format stream-json
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
 
+完成校验默认使用 `enforce`。如果经过最多一次自动续跑后仍无法确认回答完整，一次性
+`reasonix run` / `-p` 会以退出码 `1` 结束；JSON 仍保留
+`subtype: "completion_uncertain"` 与 `is_error: false`，因为当前回答、已完成工作和可恢复
+session 都会保留。每个候选最终回答会增加一次 evaluator 请求和最多 30 秒延迟；
+`shadow` 只是同步观测，仍有相同调用费用与延迟，`off` 才会关闭该调用。
+
 ### 脱敏机器接口
 
 自动化只需要生命周期遥测、不能接收 prompt、reasoning、工具参数/输出或审批文本时，

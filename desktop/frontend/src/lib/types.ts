@@ -384,7 +384,7 @@ export interface WireEvent {
   err?: string;
   checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
-  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused";
+  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused" | "completion_uncertain";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
