@@ -97,7 +97,7 @@ func runSessionCommand(args []string, out io.Writer) int {
 	operation := args[0]
 	command = "session." + operation
 	if operation != "list" && operation != "show" && operation != "status" && operation != "recovery" {
-		return writeMachineError(out, command, "unknown_command", "unknown session operation")
+		return writeMachineError(out, command, "unknown_command", fmt.Sprintf("unknown session operation %q; expected list, show, status or recovery", operation))
 	}
 	options, code, message := parseSessionMachineOptions(args[1:], operation)
 	if code != "" {

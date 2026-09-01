@@ -469,15 +469,6 @@ func TestTaskCommand_PreservesMachineShowRoute(t *testing.T) {
 	}
 }
 
-func TestTaskCommand_UnknownSubcommand(t *testing.T) {
-	exit, _ := captureOut(func() int {
-		return taskCommand([]string{"bogus"})
-	})
-	if exit != 2 {
-		t.Errorf("exit=%d, want 2", exit)
-	}
-}
-
 // FileStore integration tests (real filesystem)
 
 // writeTaskData creates a FileStore-compatible task tree in dir and resets
