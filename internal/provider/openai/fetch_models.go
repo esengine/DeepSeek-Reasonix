@@ -68,7 +68,7 @@ func FetchModelsWithOptions(ctx context.Context, baseURL, apiKey string, opts Fe
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: network: %w", err)
 	}
-	cli := &http.Client{Timeout: 10 * time.Second, Transport: transport}
+	cli := &http.Client{Timeout: 10 * time.Second, Transport: netclient.NewUserAgentRoundTripper(transport)}
 	url := strings.TrimRight(baseURL, "/")
 	if !strings.HasSuffix(url, "/models") {
 		url += "/models"
