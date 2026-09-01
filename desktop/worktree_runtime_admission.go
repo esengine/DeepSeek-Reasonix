@@ -46,7 +46,7 @@ func (a *App) workspaceRuntimeAdmissionErr(tab *WorkspaceTab, ctrl control.Sessi
 	if tab != nil && tab.Scope == "project" {
 		if key := canonicalRuntimeRoot(tab.WorkspaceRoot); key == "" {
 			return fmt.Errorf("workspace identity is unavailable")
-		} else if _, reserved := a.worktreeCleanupReservations[key]; reserved {
+		} else if a.workspaceCleanupReservedLocked(key) {
 			return fmt.Errorf("workspace cleanup is in progress")
 		}
 	}

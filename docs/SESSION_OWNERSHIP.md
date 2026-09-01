@@ -90,21 +90,28 @@ the token survived `git add -A`, no unstaged or untracked content remains, and
 the resulting commit has the exact staged tree and original worktree `HEAD` as
 its only parent; conflict preflight then runs again. A target branch, `HEAD`, or
 content-token change refreshes the confirmation instead of continuing. The
-source merge uses `git merge --no-ff --no-commit`, validates the target branch,
-original `HEAD`, and exact `MERGE_HEAD`, and only then commits. On a preparation
-or commit failure Reasonix aborts and verifies the original branch, ref, clean
-state, and absence of an operation. If recovery cannot be proven, the result is
-marked recovery-required and every worktree resource is preserved.
+source merge uses `git merge --no-ff --no-commit` and binds the real index tree
+to a freshly computed merge tree. Only while the target branch, original
+`HEAD`, exact `MERGE_HEAD`, and prepared tree still match does Reasonix create a
+hook-free `commit-tree` object with fixed parents and tree, then compare-and-swap
+the target ref against the original target `HEAD`. Post-commit verification
+checks the commit tree, real index tree, parents, ref, clean state, and Git
+operation. Preparation failures before the CAS are aborted; ref drift or any
+state whose recovery cannot be proven is marked recovery-required while every
+worktree resource and external state is preserved.
 
 A successful merge first navigates to the recorded source checkout. A newer UI
 navigation intent stops the remaining close/cleanup sequence and preserves the
 resources. Otherwise Desktop closes only the exact idle worktree tab while the
 exact source tab is still active. Cleanup is then a separate, retryable step.
 It atomically reserves the canonical worktree identity while checking visible
-and detached runtimes; every project-runtime admission uses the same gate, so a
-symlink, subdirectory, restored tab, or late redirect cannot enter after that
-check. Cleanup runs only when the temporary commit is contained by the target,
-identities still match, and `git status --ignored` is completely empty.
+and detached runtimes; every project-runtime creation, restoration,
+delete/archive fallback, and redirect uses the same gate. Reservations match
+any path contained by the managed worktree rather than only the exact root, so
+a saved symlink, subdirectory, or late runtime remains blocked even after Git
+has removed the worktree root. Cleanup runs only when the temporary commit is
+contained by the target, identities still match, and `git status --ignored` is
+completely empty.
 Reasonix uses ordinary `git worktree remove` and `git branch -d`; it never uses
 forced removal. Tracked, untracked, or ignored files therefore block cleanup
 and are listed for the user. The merge remains successful while the worktree,

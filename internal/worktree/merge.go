@@ -246,7 +246,7 @@ func inspectMergeDivergence(ctx context.Context, metadata mergeMetadata, worktre
 	if inspection.AlreadyMerged {
 		return nil
 	}
-	inspection.HasConflicts, inspection.ConflictFiles, err = mergeConflicts(ctx, metadata.SourceRoot, inspection.TargetHead, inspection.WorktreeHead)
+	_, inspection.HasConflicts, inspection.ConflictFiles, err = mergeTree(ctx, metadata.SourceRoot, inspection.TargetHead, inspection.WorktreeHead)
 	if err != nil {
 		return err
 	}
@@ -328,39 +328,9 @@ func MergeBack(ctx context.Context, managedRoot string, request MergeRequest) (M
 		return mergeReceipt(inspection, inspection.TargetHead, true), nil
 	}
 
-	originalHead := inspection.TargetHead
-	message := fmt.Sprintf("Merge worktree branch '%s' into %s", inspection.WorktreeBranch, inspection.TargetBranch)
-	noteMergeStep("before_merge_prepare")
-	if err := verifySourceIdentity(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, false); err != nil {
-		return mergeFailure(inspection, false, fmt.Errorf("source changed before merge preparation: %w", err))
-	}
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "merge", "--no-ff", "--no-commit", inspection.WorktreeHead); err != nil {
-		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
-		if !recovered {
-			reason := fmt.Errorf("merge failed: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr)
-			return mergeFailure(inspection, true, reason)
-		}
-		return mergeFailure(inspection, false, fmt.Errorf("merge failed and was aborted: %w%s", err, stderrSuffix(stderr)))
-	}
-	noteMergeStep("after_merge_prepare")
-	if err := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead); err != nil {
-		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
-		if !recovered {
-			return mergeFailure(inspection, true, fmt.Errorf("merge preparation identity changed: %w; automatic recovery failed: %v", err, recoveryErr))
-		}
-		return mergeFailure(inspection, false, fmt.Errorf("merge preparation identity changed and was aborted: %w", err))
-	}
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "commit", "-m", message); err != nil {
-		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
-		if !recovered {
-			return mergeFailure(inspection, true, fmt.Errorf("merge commit failed: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr))
-		}
-		return mergeFailure(inspection, false, fmt.Errorf("merge commit failed and was aborted: %w%s", err, stderrSuffix(stderr)))
-	}
-	noteMergeStep("after_merge_commit")
-	mergedHead, err := verifySuccessfulMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead)
+	mergedHead, recoveryRequired, err := mergeSourceCheckout(ctx, inspection)
 	if err != nil {
-		return mergeFailure(inspection, true, fmt.Errorf("merge succeeded but the source checkout requires recovery: %w", err))
+		return mergeFailure(inspection, recoveryRequired, err)
 	}
 	return mergeReceipt(inspection, mergedHead, false), nil
 }
@@ -566,38 +536,6 @@ func isAncestor(ctx context.Context, root, ancestor, descendant string) (bool, e
 	return false, fmt.Errorf("git merge-base --is-ancestor: %w%s", err, stderrSuffix(stderr))
 }
 
-func mergeConflicts(ctx context.Context, root, targetHead, worktreeHead string) (bool, []string, error) {
-	out, stderr, err := runGit(ctx, root, "merge-tree", "--write-tree", "--name-only", targetHead, worktreeHead)
-	if err == nil {
-		return false, []string{}, nil
-	}
-	if exitCode(err) != 1 {
-		return false, []string{}, fmt.Errorf("preflight merge conflicts: %w%s", err, stderrSuffix(stderr))
-	}
-	paths := []string{}
-	for index, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if index == 0 || line == "" || strings.Contains(line, " ") || isHexObject(line) {
-			continue
-		}
-		paths = append(paths, line)
-	}
-	sort.Strings(paths)
-	return true, paths, nil
-}
-
-func isHexObject(value string) bool {
-	if len(value) != 40 && len(value) != 64 {
-		return false
-	}
-	for _, char := range value {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
-			return false
-		}
-	}
-	return true
-}
-
 func hasBlockingMergeIssue(blockers []MergeBlocker) bool {
 	return len(blockers) > 0
 }
@@ -618,130 +556,6 @@ func blockerMessages(blockers []MergeBlocker) string {
 		items = append(items, item.Message)
 	}
 	return strings.Join(items, "; ")
-}
-
-func verifySourceIdentity(ctx context.Context, sourceRoot, targetBranch, originalHead string, expectMerge bool) error {
-	branch, stderr, err := gitValue(ctx, sourceRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != targetBranch {
-		return fmt.Errorf("source branch is %q, expected %q%s", branch, targetBranch, stderrSuffix(stderr))
-	}
-	head, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "HEAD")
-	if err != nil || head != originalHead {
-		return fmt.Errorf("source HEAD changed from %s to %s%s", originalHead, head, stderrSuffix(stderr))
-	}
-	operation, err := gitOperation(ctx, sourceRoot)
-	if err != nil {
-		return err
-	}
-	if expectMerge && operation != "merge" {
-		return fmt.Errorf("prepared merge operation is missing (found %q)", operation)
-	}
-	if !expectMerge && operation != "" {
-		return fmt.Errorf("source Git %s operation is already in progress", operation)
-	}
-	if !expectMerge {
-		status, stderr, err := runGit(ctx, sourceRoot, "status", "--porcelain=v1", "--untracked-files=all")
-		if err != nil {
-			return fmt.Errorf("inspect source status: %w%s", err, stderrSuffix(stderr))
-		}
-		if strings.TrimSpace(status) != "" {
-			return errors.New("source checkout is no longer clean")
-		}
-	}
-	return nil
-}
-
-func verifyPreparedMerge(ctx context.Context, sourceRoot, targetBranch, originalHead, worktreeHead string) error {
-	if err := verifySourceIdentity(ctx, sourceRoot, targetBranch, originalHead, true); err != nil {
-		return err
-	}
-	mergeHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "MERGE_HEAD")
-	if err != nil {
-		return fmt.Errorf("read prepared MERGE_HEAD: %w%s", err, stderrSuffix(stderr))
-	}
-	if mergeHead != worktreeHead {
-		return fmt.Errorf("prepared MERGE_HEAD is %s, expected %s", mergeHead, worktreeHead)
-	}
-	return nil
-}
-
-func abortAndVerifyMerge(ctx context.Context, sourceRoot, targetBranch, originalHead string) (bool, error) {
-	operation, operationErr := gitOperation(ctx, sourceRoot)
-	if operationErr != nil {
-		return false, operationErr
-	}
-	if operation == "merge" {
-		if _, stderr, err := runGit(ctx, sourceRoot, "merge", "--abort"); err != nil {
-			return false, fmt.Errorf("git merge --abort: %w%s", err, stderrSuffix(stderr))
-		}
-	}
-	if err := verifySourceIdentity(ctx, sourceRoot, targetBranch, originalHead, false); err != nil {
-		return false, err
-	}
-	branchRef, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "refs/heads/"+targetBranch)
-	if err != nil || branchRef != originalHead {
-		return false, fmt.Errorf("target branch ref was not restored%s", stderrSuffix(stderr))
-	}
-	status, stderr, err := runGit(ctx, sourceRoot, "status", "--porcelain=v1", "--untracked-files=all")
-	if err != nil || strings.TrimSpace(status) != "" {
-		return false, fmt.Errorf("source checkout was not restored clean%s", stderrSuffix(stderr))
-	}
-	operation, err = gitOperation(ctx, sourceRoot)
-	if err != nil || operation != "" {
-		return false, fmt.Errorf("source Git operation remains after abort: %s", operation)
-	}
-	return true, nil
-}
-
-func verifySuccessfulMerge(ctx context.Context, sourceRoot, targetBranch, originalHead, worktreeHead string) (string, error) {
-	branch, stderr, err := gitValue(ctx, sourceRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != targetBranch {
-		return "", fmt.Errorf("source branch changed after merge; found %q, expected %q%s", branch, targetBranch, stderrSuffix(stderr))
-	}
-	mergedHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("read merged target HEAD: %w%s", err, stderrSuffix(stderr))
-	}
-	branchHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "refs/heads/"+targetBranch)
-	if err != nil || branchHead != mergedHead {
-		return "", fmt.Errorf("target branch ref does not identify the merge commit%s", stderrSuffix(stderr))
-	}
-	parents, stderr, err := gitValue(ctx, sourceRoot, "rev-list", "--parents", "-n", "1", mergedHead)
-	if err != nil {
-		return "", fmt.Errorf("read merge commit parents: %w%s", err, stderrSuffix(stderr))
-	}
-	fields := strings.Fields(parents)
-	if len(fields) != 3 || fields[0] != mergedHead || fields[1] != originalHead || fields[2] != worktreeHead {
-		return "", errors.New("merge commit does not have the exact prepared parents")
-	}
-	ancestors := []struct{ label, head string }{
-		{label: "original target", head: originalHead},
-		{label: "worktree", head: worktreeHead},
-	}
-	for _, ancestor := range ancestors {
-		contained, ancestorErr := isAncestor(ctx, sourceRoot, ancestor.head, mergedHead)
-		if ancestorErr != nil {
-			return "", fmt.Errorf("verify %s ancestry: %w", ancestor.label, ancestorErr)
-		}
-		if !contained {
-			return "", fmt.Errorf("%s HEAD is not contained in merged target", ancestor.label)
-		}
-	}
-	status, stderr, err := runGit(ctx, sourceRoot, "status", "--porcelain=v1", "--untracked-files=all")
-	if err != nil {
-		return "", fmt.Errorf("verify merged source status: %w%s", err, stderrSuffix(stderr))
-	}
-	if strings.TrimSpace(status) != "" {
-		return "", errors.New("merged source checkout is not clean")
-	}
-	operation, err := gitOperation(ctx, sourceRoot)
-	if err != nil {
-		return "", err
-	}
-	if operation != "" {
-		return "", fmt.Errorf("source Git %s operation remains after merge", operation)
-	}
-	return mergedHead, nil
 }
 
 func mergeReceipt(inspection MergeInspection, mergedHead string, alreadyMerged bool) MergeResult {

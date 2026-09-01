@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -403,8 +404,10 @@ func canonicalRuntimeRootErr(root string) (string, error) {
 	}
 	probe := filepath.Clean(abs)
 	suffix := []string{}
+	var probeInfo os.FileInfo
 	for {
-		if _, statErr := os.Lstat(probe); statErr == nil {
+		if info, statErr := os.Lstat(probe); statErr == nil {
+			probeInfo = info
 			break
 		} else if !os.IsNotExist(statErr) {
 			return "", statErr
@@ -418,6 +421,18 @@ func canonicalRuntimeRootErr(root string) (string, error) {
 	}
 	if resolved, resolveErr := filepath.EvalSymlinks(probe); resolveErr == nil {
 		probe = resolved
+	} else if errors.Is(resolveErr, os.ErrNotExist) && probeInfo != nil && probeInfo.Mode()&os.ModeSymlink != 0 {
+		target, readErr := os.Readlink(probe)
+		if readErr != nil {
+			return "", readErr
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(probe), target)
+		}
+		probe, readErr = canonicalRuntimeRootErr(filepath.Clean(target))
+		if readErr != nil {
+			return "", readErr
+		}
 	} else if !os.IsNotExist(resolveErr) {
 		return "", resolveErr
 	}
@@ -450,6 +465,24 @@ func pathWithinCanonicalWorktree(pathKey, worktreeKey string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+func (a *App) workspaceCleanupReservedLocked(workspaceKey string) bool {
+	for reservedRoot := range a.worktreeCleanupReservations {
+		if pathWithinCanonicalWorktree(workspaceKey, reservedRoot) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) cleanupReservationOverlapsLocked(worktreeKey string) bool {
+	for reservedRoot := range a.worktreeCleanupReservations {
+		if pathWithinCanonicalWorktree(worktreeKey, reservedRoot) || pathWithinCanonicalWorktree(reservedRoot, worktreeKey) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) reserveWorktreeCleanup(worktreeRoot string) (func(), error) {
 	key, err := canonicalRuntimeRootErr(worktreeRoot)
 	if err != nil {
@@ -459,7 +492,7 @@ func (a *App) reserveWorktreeCleanup(worktreeRoot string) (func(), error) {
 	if a.worktreeCleanupReservations == nil {
 		a.worktreeCleanupReservations = map[string]struct{}{}
 	}
-	if _, exists := a.worktreeCleanupReservations[key]; exists {
+	if a.cleanupReservationOverlapsLocked(key) {
 		a.worktreeCleanupMu.Unlock()
 		return nil, fmt.Errorf("worktree cleanup is already in progress")
 	}
@@ -489,7 +522,7 @@ func (a *App) beginWorkspaceRuntimeAdmission(workspaceRoot string) (func(), erro
 		return nil, fmt.Errorf("resolve runtime workspace identity: %w", err)
 	}
 	a.worktreeCleanupMu.Lock()
-	if _, reserved := a.worktreeCleanupReservations[key]; reserved {
+	if a.workspaceCleanupReservedLocked(key) {
 		a.worktreeCleanupMu.Unlock()
 		return nil, fmt.Errorf("workspace cleanup is in progress; retry after cleanup completes")
 	}

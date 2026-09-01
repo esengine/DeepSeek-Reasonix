@@ -169,7 +169,10 @@ console.log("\nbundle budgets");
 // one-decimal ratchet. Completion uncertainty adds a terminal outcome and
 // notice without exposing evaluator audits to the frontend; the final merged
 // build measures 458.287 KiB gzip.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.3 : 458.3;
+// Merge-Back adds identity-bound inspection, navigation, and cleanup orchestration
+// to the startup path. The current merged production tree measures 460.033 KiB;
+// retain 0.067 KiB with the smallest one-decimal ratchet.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 460.1 : 460.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -224,7 +227,9 @@ for (const path of localeChunks) {
   // reachable-tail recovery copy, the merged chunks measure 58.923 KiB zh and
   // 59.710 KiB zh-TW. The isolated-fork guidance brings the measured chunks
   // to 59.1 KiB zh and 59.9 KiB zh-TW; retain a narrow one-decimal ratchet.
-  const budget = name.startsWith("zh-TW-") ? 60.0 * 1024 : 59.2 * 1024;
+  // Merge-Back lifecycle and recovery guidance measure 59.819 KiB zh and
+  // 60.612 KiB zh-TW; retain only the next one-decimal ceiling for each.
+  const budget = name.startsWith("zh-TW-") ? 60.7 * 1024 : 59.9 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -298,6 +303,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // 2454.719 KiB on the release toolchain. Completion uncertainty brings the
 // final merged payload to 2455.154 KiB; retain the smallest one-decimal
 // ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_455.2 : 2_455.2;
+// Merge-Back's startup ownership path brings the exact merged payload to
+// 2461.480 KiB; retain 0.020 KiB with the smallest one-decimal ratchet.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_461.5 : 2_461.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

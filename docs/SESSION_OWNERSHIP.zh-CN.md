@@ -73,18 +73,23 @@ ahead/behind、diff 和冲突。worktree 有未提交改动时默认禁止合并
 发生漂移时只刷新确认面板，不会继续执行。确认还会绑定瞬态、NUL-safe 的内容 token，
 覆盖每个脏路径的类型、mode、文件内容或 symlink 目标。`git add -A` 后必须证明 token
 未变、没有残留的 unstaged/untracked 内容，且自动提交只有原 worktree `HEAD` 这一个父
-提交并包含刚记录的 staged tree。source 合并使用 `git merge --no-ff --no-commit`；只有
-目标分支、原始 `HEAD` 和精确 `MERGE_HEAD` 都仍一致时才提交。准备或提交失败后会执行
-abort，并复核原分支/ref、干净状态和 Git operation；无法证明恢复成功时返回
-recovery-required，同时保留所有 worktree 资源。
+提交并包含刚记录的 staged tree。source 合并使用 `git merge --no-ff --no-commit`，并把
+实际 index tree 与重新计算的 merge-tree 精确绑定；只有目标分支、原始 `HEAD`、精确
+`MERGE_HEAD` 和 prepared tree 都仍一致时，才通过无 hook 的 `commit-tree` 创建固定
+parents/tree 的提交，并用原目标 `HEAD` 对目标 ref 做 compare-and-swap。提交后还会复核
+commit tree、真实 index tree、parents、ref、干净状态和 Git operation。CAS 前的准备失败
+会执行 abort；任何 ref 漂移或无法证明恢复成功的状态返回 recovery-required，同时保留
+所有 worktree 资源和外部状态。
 
 合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout；
 若此时出现更新的前端导航意图，后续关闭和清理会停止并保留资源。否则后端只会在精确
 source Tab 仍 active、精确 worktree Tab 仍 idle 时关闭页面和终端。独立、可重试的清理
 阶段会在同一临界区内登记 canonical worktree reservation 并扫描可见及 detached
-runtime；所有项目 runtime 的创建、恢复和重定向都经过同一 admission gate，因此
-symlink、子目录或晚到的 runtime 不能在检查后插入。之后还必须证明临时提交已包含在
-目标分支、身份仍一致且 `git status --ignored` 完全为空。
+runtime；所有项目 runtime 的创建、恢复、删除/归档 fallback 和重定向都经过同一
+admission gate。reservation 按“路径位于受管 worktree 内”匹配，而不是只比较根路径，
+因此即使 Git worktree 根已被移除，保存的 symlink、子目录或晚到 runtime 仍不能在检查
+后插入。之后还必须证明临时提交已包含在目标分支、身份仍一致且
+`git status --ignored` 完全为空。
 清理仅使用普通 `git worktree remove` 和 `git branch -d`，绝不强制删除。tracked、
 untracked 或 ignored 文件都会阻止清理并向用户列出；合并结果仍然保留，worktree、
 分支和文件可供恢复或之后重试清理。

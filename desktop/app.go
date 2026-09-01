@@ -3356,14 +3356,21 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		if workspaceRoot == "" {
 			return fmt.Errorf("workspaceRoot is required")
 		}
-		saveWorkspace(workspaceRoot)
-		a.registerProjectRoot(workspaceRoot)
 		actualRoot = workspaceRoot
 	} else {
 		actualRoot = globalWorkspaceRoot()
 		if err := os.MkdirAll(actualRoot, 0o755); err != nil {
 			return fmt.Errorf("create global workspace: %w", err)
 		}
+	}
+	releaseAdmission, err := a.beginProjectRuntimeAdmission(scope, actualRoot)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+	if scope == "project" {
+		saveWorkspace(workspaceRoot)
+		a.registerProjectRoot(workspaceRoot)
 	}
 
 	model, toolApprovalMode := desktopNewSessionDefaults(scope, actualRoot)
