@@ -80,7 +80,7 @@ func (a *App) CreateDeliveryWorktree(workspaceRoot string) (DeliveryWorktreeOpen
 
 var (
 	inspectWorktreeMerge = worktree.InspectMerge
-	mergeWorktreeBack   = worktree.MergeBack
+	mergeWorktreeBack    = worktree.MergeBack
 )
 
 // InspectWorktreeMerge inspects the diff and merge status for the given tab's

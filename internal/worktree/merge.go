@@ -155,7 +155,7 @@ func calculateDiffStats(ctx context.Context, worktreeRoot, targetBranch string, 
 	seen := make(map[string]bool)
 
 	if out, _, err := runGit(ctx, worktreeRoot, "diff", "--name-only", targetBranch+"...HEAD"); err == nil {
-		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 			if trimmed := strings.TrimSpace(line); trimmed != "" && !seen[trimmed] {
 				changedFiles = append(changedFiles, trimmed)
 				seen[trimmed] = true
@@ -164,7 +164,7 @@ func calculateDiffStats(ctx context.Context, worktreeRoot, targetBranch string, 
 	}
 
 	if worktreeDirty {
-		for _, line := range strings.Split(wtStatus, "\n") {
+		for line := range strings.SplitSeq(wtStatus, "\n") {
 			line = strings.TrimRight(line, "\r")
 			if len(line) > 3 {
 				filePath := strings.TrimSpace(line[3:])
@@ -181,8 +181,7 @@ func calculateDiffStats(ctx context.Context, worktreeRoot, targetBranch string, 
 	}
 
 	if out, _, err := runGit(ctx, worktreeRoot, "diff", "--shortstat", targetBranch+"...HEAD"); err == nil {
-		parts := strings.Split(out, ",")
-		for _, p := range parts {
+		for p := range strings.SplitSeq(out, ",") {
 			p = strings.TrimSpace(p)
 			if strings.Contains(p, "insertion") {
 				fields := strings.Fields(p)
@@ -210,7 +209,7 @@ func checkMergeConflicts(ctx context.Context, worktreeRoot, targetBranch string)
 	mtOut, _, _ := runGit(ctx, worktreeRoot, "merge-tree", mergeBase, targetBranch, "HEAD")
 	if strings.Contains(mtOut, "changed in both") || strings.Contains(mtOut, "<<<<<<<") || strings.Contains(mtOut, "CONFLICT") {
 		hasConflicts = true
-		for _, line := range strings.Split(mtOut, "\n") {
+		for line := range strings.SplitSeq(mtOut, "\n") {
 			if strings.Contains(line, "changed in both") {
 				parts := strings.Fields(line)
 				if len(parts) > 0 {
@@ -250,7 +249,7 @@ func MergeBack(ctx context.Context, workspaceRoot string, opts MergeOptions) (Me
 			}, errors.New("worktree has uncommitted changes")
 		}
 		_, _, _ = runGit(ctx, insp.WorktreeRoot, "add", "-A")
-		_, stderr, commitErr := runGit(ctx, insp.WorktreeRoot, "commit", "-m", "worktree: save changes before merge back")
+		_, stderr, commitErr := runGit(ctx, insp.WorktreeRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "commit", "-m", "worktree: save changes before merge back")
 		if commitErr != nil {
 			return MergeResult{
 				Merged:       false,
@@ -261,7 +260,7 @@ func MergeBack(ctx context.Context, workspaceRoot string, opts MergeOptions) (Me
 	}
 
 	mergeMsg := fmt.Sprintf("Merge worktree branch '%s' into %s", insp.WorktreeBranch, insp.TargetBranch)
-	_, stderr, mergeErr := runGit(ctx, insp.SourceRoot, "merge", "--no-ff", "-m", mergeMsg, insp.WorktreeBranch)
+	_, stderr, mergeErr := runGit(ctx, insp.SourceRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "merge", "--no-ff", "-m", mergeMsg, insp.WorktreeBranch)
 	if mergeErr != nil {
 		return MergeResult{
 			Merged:       false,
