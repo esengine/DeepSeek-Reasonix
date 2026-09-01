@@ -4678,9 +4678,8 @@ export default function App() {
                       className="topicbar__worktree-btn"
                       onClick={() => setWorktreeMergeTabId(activeTab.id)}
                       title={t("worktree.mergeButtonTooltip")}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit" }}
                     >
-                      <span style={{ fontSize: "11px", opacity: 0.9, textDecoration: "underline", textDecorationStyle: "dotted" }}>{t("worktree.mergeAction")}</span>
+                      <span>{t("worktree.mergeAction")}</span>
                     </button>
                   )}
                   {topicbarImSourcePlatform && (
@@ -5482,9 +5481,38 @@ export default function App() {
             onClose={() => setWorktreeMergeTabId(null)}
             onMerged={async (res) => {
               const tabToClose = worktreeMergeTabId;
-              setWorktreeMergeTabId(null);
-              if (res.worktreeRemoved && tabToClose) {
-                await finishTabClose(tabToClose, "stop_and_close");
+              if (!tabToClose || !res.sourceRoot || !res.worktreeRoot || !res.targetBranch || !res.mergedCommit || !res.worktreeBranch || !res.worktreeHead) {
+                throw new Error(res.error || t("worktree.mergeReceiptInvalid"));
+              }
+              const navigationIntentSeq = noteNavigationIntent();
+              const sourceTab = singleSurfaceLayout
+                ? await ensureBlankSurface("project", res.sourceRoot, navigationIntentSeq)
+                : await ensureBlankTab("project", res.sourceRoot, navigationIntentSeq);
+              seedActiveTabMeta(sourceTab);
+              const visibleTabs = await app.ListTabs();
+              if (visibleTabs.some((tab) => tab.id === tabToClose)) {
+                const closed = await finishTabClose(tabToClose, "stop_and_close");
+                if (!closed) {
+                  showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 });
+                  return;
+                }
+              }
+              try {
+                const cleanup = await app.FinalizeWorktreeMerge({
+                  worktreeRoot: res.worktreeRoot,
+                  sourceRoot: res.sourceRoot,
+                  targetBranch: res.targetBranch,
+                  mergedCommit: res.mergedCommit,
+                  worktreeBranch: res.worktreeBranch,
+                  worktreeHead: res.worktreeHead,
+                });
+                if (cleanup.completed) {
+                  showToast(t("worktree.mergeAndCleanupDone"), "info");
+                } else {
+                  showToast(cleanup.error || t("worktree.cleanupPreserved"), "error", { durationMs: 9000 });
+                }
+              } catch (caught: unknown) {
+                showToast(`${t("worktree.mergeDoneCleanupFailed")} ${caught instanceof Error ? caught.message : String(caught)}`, "error", { durationMs: 9000 });
               }
             }}
           />

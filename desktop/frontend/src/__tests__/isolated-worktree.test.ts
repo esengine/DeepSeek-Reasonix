@@ -11,9 +11,10 @@ const tree = source("../components/ProjectTree.tsx");
 const tabs = source("../components/TabBar.tsx");
 const app = source("../App.tsx");
 const badge = source("../components/WorktreeBadge.tsx");
-const controller = source("../lib/useController.ts");
 const forkAction = source("../lib/forkWorktree.ts");
 const message = source("../components/Message.tsx");
+const mergeModal = source("../components/WorktreeMergeModal.tsx");
+const mergeStyles = source("../components/WorktreeMergeModal.css");
 
 let failed = 0;
 function ok(value: unknown, label: string) {
@@ -43,6 +44,13 @@ ok(/result\.fallbackToShared[\s\S]*forkWorktreeFallbackNotice/.test(forkAction),
 ok(/scope === "fork" \|\| scope === "fork-worktree"/.test(message), "both fork modes require a conversation boundary");
 ok(messageActionLabelKey("fork-worktree", false) === "rewind.forkWorktree", "isolated fork keeps its menu label after extraction");
 ok(messageActionLabelKey("fork-worktree", true) === "rewind.confirmForkWorktree", "isolated fork keeps its confirmation label after extraction");
+ok(/useState\(false\)/.test(mergeModal) && /autoCommitDirty/.test(mergeModal), "dirty auto-commit is opt-in by default");
+ok(/InspectWorktreeMerge\(tabId\)[\s\S]*inspectionIdentity\(refreshed\)[\s\S]*MergeWorktreeBack\(\{/.test(mergeModal), "confirm re-inspects before sending one identity-bound merge request");
+ok(/stateChanged/.test(mergeModal) && /setInspection\(refreshed\)/.test(mergeModal), "state drift refreshes the panel instead of continuing");
+ok(/aria-modal="true"/.test(mergeModal) && /event\.key === "Escape"/.test(mergeModal) && /event\.key !== "Tab"/.test(mergeModal), "merge dialog exposes modal, escape, and focus-loop semantics");
+ok(/WorktreeMergeModal\.css/.test(mergeModal) && mergeStyles.includes(".worktree-merge__body") && !/style=\{\{/.test(mergeModal), "lazy merge UI keeps layout rules out of inline styles");
+ok(/ensureBlankSurface\("project", res\.sourceRoot[\s\S]*ensureBlankTab\("project", res\.sourceRoot[\s\S]*finishTabClose\(tabToClose[\s\S]*FinalizeWorktreeMerge/.test(app), "merged flow navigates to source, closes the worktree view, then finalizes cleanup");
+ok(/FinalizeWorktreeMerge\(request: WorktreeCleanupRequest\)/.test(bridge), "cleanup is a separate request-object Wails call");
 
 if (failed) process.exit(1);
 console.log("isolated worktree tests passed");

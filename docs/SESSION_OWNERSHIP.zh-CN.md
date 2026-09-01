@@ -60,8 +60,26 @@ v2 兼容 marker 同时也是 v3 turn 的存活标记。旧版本截断 `turn-N.
 完成会话分叉并明确提示已回退。如果 worktree 创建后，会话创建或标签页挂载失败，
 自动清理只会删除分支、`HEAD` 和状态仍与创建结果完全一致的未使用 worktree；一旦
 检测到任何变化，就会保留现场以便恢复。成功挂载的 worktree 会作为项目持久注册，
-关闭标签页或重启后仍可发现，并且不会被自动删除；使用完毕后需要显式清理 Git
-worktree 和对应分支。
+关闭标签页或重启后仍可发现。新建 allocation 还会在 checkout 旁以 `0600` 权限写入
+v1 `metadata.json`，绑定原始 source checkout、目标分支、创建时 `HEAD`、受管
+worktree 根和临时分支。旧版本创建且没有该元数据的 worktree 无法使用 Merge-Back，
+因为 Reasonix 不会猜测目标分支；界面会保留现场并给出手动合并指引。未知元数据版本
+同样按失败关闭处理。
+
+Merge-Back 是“合并、清理分离”的失败原子流程。预检会验证受管路径和仓库身份、精确
+分支与 `HEAD`、source 干净且没有进行中的 Git 操作、Desktop 活动任务、工作区写租约、
+ahead/behind、diff 和冲突。worktree 有未提交改动时默认禁止合并；只有用户显式开启
+自动提交才会依次执行暂存和提交，并在新提交上重新做冲突预检。目标分支或 `HEAD`
+发生漂移时只刷新确认面板，不会继续执行。实际 merge 失败后，Reasonix 会运行
+`git merge --abort`，并验证 source 已恢复到原始干净 `HEAD`；无法证明恢复成功时返回
+recovery-required，同时保留所有 worktree 资源。
+
+合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout，
+再关闭 worktree 页面和终端。独立、可重试的清理阶段只会在没有可见或后台 runtime
+引用、临时提交已包含在目标分支、身份仍一致且 `git status --ignored` 完全为空时运行。
+清理仅使用普通 `git worktree remove` 和 `git branch -d`，绝不强制删除。tracked、
+untracked 或 ignored 文件都会阻止清理并向用户列出；合并结果仍然保留，worktree、
+分支和文件可供恢复或之后重试清理。
 
 Delivery worktree 仍是可选能力。非隔离目录使用 workspace lease（`filelock`）。
 路径型写入对祖先兼容锁和目标路径层级分片加 shared 锁、对具体文件分片加

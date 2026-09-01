@@ -96,11 +96,18 @@ func RollbackCreate(ctx context.Context, result Result) error {
 	if strings.TrimSpace(status) != "" {
 		return errors.New("rollback worktree contains changes; it was preserved")
 	}
+	metadataFile, err := verifyRollbackMetadata(sourceRoot, worktreeRoot, branch, head)
+	if err != nil {
+		return err
+	}
 	if _, stderr, err := runGit(ctx, sourceRoot, "worktree", "remove", worktreeRoot); err != nil {
 		return fmt.Errorf("remove unused worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	if _, stderr, err := runGit(ctx, sourceRoot, "update-ref", "-d", "refs/heads/"+branch, head); err != nil {
 		return fmt.Errorf("remove unused worktree branch %q: %w%s", branch, err, stderrSuffix(stderr))
+	}
+	if err := os.Remove(metadataFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove unused worktree metadata: %w", err)
 	}
 	return nil
 }
@@ -214,14 +221,22 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 				return Result{}, fmt.Errorf("created worktree is missing selected project subdirectory %q", prefix)
 			}
 		}
-		return Result{
+		result := Result{
 			WorkspaceRoot: selectedRoot,
 			WorktreeRoot:  worktreeRoot,
 			SourceRoot:    info.RepoRoot,
 			Branch:        branch,
 			Head:          info.head,
 			SourceDirty:   info.SourceDirty,
-		}, nil
+		}
+		if err := writeMergeMetadata(result, info.Branch); err != nil {
+			rollbackErr := RollbackCreate(ctx, result)
+			if rollbackErr != nil {
+				return Result{}, fmt.Errorf("%w; exact-clean rollback failed and the worktree was preserved: %v", err, rollbackErr)
+			}
+			return Result{}, err
+		}
+		return result, nil
 	}
 	return Result{}, errors.New("could not allocate a unique Delivery worktree")
 }

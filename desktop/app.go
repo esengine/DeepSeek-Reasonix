@@ -224,6 +224,11 @@ type App struct {
 	// another navigation is still activating.
 	singleSurfaceMu sync.Mutex
 
+	// worktreeMergeMu serializes the inspect-confirm-merge/finalize mutation
+	// boundary. Git identities are still revalidated after workspace leases are
+	// acquired; this mutex only prevents duplicate in-process Wails calls.
+	worktreeMergeMu sync.Mutex
+
 	// sessionRemovalMu serializes operations that remove visible or detached
 	// session bindings. Those operations may snapshot controllers before
 	// deletion; keep that snapshot outside a.mu, but do not let DeleteSession or

@@ -72,8 +72,33 @@ fallback. If conversation creation or tab attachment fails after a worktree was
 created, automatic cleanup removes it only while its branch, `HEAD`, and status
 still match the untouched creation result. Any detected change preserves the
 worktree for recovery. A successfully attached worktree remains registered
-across tab close/restart and is never deleted automatically; remove its Git
-worktree and branch explicitly when finished.
+across tab close/restart. New allocations also store a mode-0600 v1
+`metadata.json` beside the checkout. It binds the original source checkout,
+target branch, creation `HEAD`, managed worktree root, and temporary branch.
+Older allocations without this metadata cannot use Merge-Back because Reasonix
+will not guess a destination; the UI leaves them intact and shows manual merge
+guidance. Unknown metadata versions also fail closed.
+
+Merge-Back is a two-phase, failure-atomic operation. Preflight verifies the
+managed path and repository identity, exact branches and `HEAD`s, clean source,
+absence of an in-progress Git operation, active Desktop work, workspace write
+leases, divergence, diff, and conflicts. Uncommitted worktree changes block the
+merge unless the user explicitly opts into an automatic commit; that option is
+off by default, and conflict preflight runs again after the commit. A target
+branch or `HEAD` change refreshes the confirmation instead of continuing. If
+the real merge fails, Reasonix runs `git merge --abort` and verifies that the
+source returned to its original clean `HEAD`. If recovery cannot be proven, the
+result is marked recovery-required and every worktree resource is preserved.
+
+A successful merge first navigates to the recorded source checkout and closes
+the worktree view and terminal through the normal Desktop lifecycle. Cleanup is
+then a separate, retryable step. It runs only when no visible or background
+runtime references the worktree, the temporary commit is contained by the
+target, identities still match, and `git status --ignored` is completely empty.
+Reasonix uses ordinary `git worktree remove` and `git branch -d`; it never uses
+forced removal. Tracked, untracked, or ignored files therefore block cleanup
+and are listed for the user. The merge remains successful while the worktree,
+branch, and files stay available for recovery or a later cleanup retry.
 
 Delivery worktrees stay optional. Non-isolated directories use the workspace
 lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,
