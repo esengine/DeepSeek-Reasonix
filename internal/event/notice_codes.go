@@ -29,5 +29,13 @@ const (
 	NoticeCodeSessionRecoveryDepthCap                           = "session_recovery_depth_cap"
 	NoticeCodeSessionShutdownRecoveryForked                     = "session_shutdown_recovery_forked"
 	NoticeCodeCompletionUncertain                               = "completion_uncertain"
+	NoticeCodeIncompleteReadDetected                            = "incomplete_read_detected"
+	NoticeCodeReadContinuationRequired                          = "continuation_required"
+	NoticeCodeReadCompleted                                     = "read_completed"
+	NoticeCodeReadOversizeRejected                              = "oversize_rejected"
+	NoticeCodeReadStrategyRequired                              = "read_strategy_required"
+	NoticeCodeReadStrategyProgress                              = "read_strategy_progress"
+	NoticeCodeReadStrategyResolved                              = "read_strategy_resolved"
+	NoticeCodeReadLocalSafetyPaged                              = "read_local_safety_paged"
 	NoticeCodeDecisionReceipt, NoticeCodeContextEditingFallback = "decision_receipt", "context_editing_fallback"
 )

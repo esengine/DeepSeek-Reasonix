@@ -40,6 +40,10 @@ type toolCallPlan struct {
 	hooksMayMutateWorkspace                                bool
 	perCallWriteRoots                                      []string
 	skipOrdinaryGate                                       bool
+	// incompleteReadRoot binds an exact host-requested source/result page to
+	// the read chain it advances. Empty means an independent tool call.
+	incompleteReadRoot   string
+	incompleteReadAction incompleteReadAction
 }
 
 func (p *toolCallPlan) classifyEffects() {

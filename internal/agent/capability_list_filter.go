@@ -14,6 +14,12 @@ func (t *restrictedCapabilityProxy) bindToolResultSession(session func() *Sessio
 	}
 }
 
+func (t *restrictedCapabilityProxy) bindReadStrategyState(state func() *incompleteReadState) {
+	if binder, ok := t.Tool.(readStrategyStateBinder); ok {
+		binder.bindReadStrategyState(state)
+	}
+}
+
 func (t *restrictedCapabilityProxy) bindMCPListObserver(observer func(mcpListObservation)) {
 	if binder, ok := t.Tool.(mcpListObserverBinder); ok {
 		binder.bindMCPListObserver(observer)
@@ -129,7 +135,7 @@ func filterCapabilityListResult(raw string, servers map[string]bool) string {
 		var entry struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(raw, &entry) == nil && strings.TrimSpace(entry.ID) == sessionToolResultCapabilityID {
+		if json.Unmarshal(raw, &entry) == nil && (strings.TrimSpace(entry.ID) == sessionToolResultCapabilityID || strings.TrimSpace(entry.ID) == sessionReadStrategyReceiptCapabilityID) {
 			filteredCapabilities = append(filteredCapabilities, raw)
 		}
 	}

@@ -61,6 +61,16 @@ func (t *UseCapabilityTool) resolveDiscovery(ctx context.Context, p useCapabilit
 			base.ReadOnly = true
 			return base, nil
 		}
+		if id == sessionReadStrategyReceiptCapabilityID {
+			out, err := t.inspectSessionReadStrategyReceipt()
+			if err != nil {
+				return tool.ResolvedCall{}, err
+			}
+			base.SkipExecute = true
+			base.Result = out
+			base.ReadOnly = true
+			return base, nil
+		}
 		out, err := t.inspect(ctx, id)
 		if err != nil {
 			if t.audit != nil {

@@ -39,6 +39,12 @@ func (t *UseCapabilityTool) listCapabilities() (string, error) {
 			Description: "Read one bounded page from a complete tool result retained in this agent's current session.",
 		})
 	}
+	if target := t.currentReadStrategyReceiptTarget(); target != nil {
+		caps = append(caps, capInfo{
+			ID: sessionReadStrategyReceiptCapabilityID, Kind: "session", Name: "read_strategy_receipt", Status: "ready", ReadOnly: true,
+			Description: target.Description(),
+		})
+	}
 	if t.catalog != nil {
 		for _, e := range t.catalog().Entries {
 			// Servers already have a compact representation below. Keep concrete

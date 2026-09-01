@@ -54,7 +54,35 @@ func PauseClass(err error) string {
 	if errors.As(err, &completion) {
 		return "completion_uncertain"
 	}
+	var incompleteRead *IncompleteReadError
+	if errors.As(err, &incompleteRead) {
+		return "incomplete_read"
+	}
 	return ""
+}
+
+// IncompleteReadError is a recoverable run boundary: a read_file result was
+// only partially visible and the host refused to let the model silently treat
+// it as complete. It carries only routing/size metadata, never file contents.
+type IncompleteReadError struct {
+	Reason        string
+	Path          string
+	ToolCallID    string
+	ResultRef     string
+	NextOffset    int
+	ConsumedBytes int
+	TotalBytes    int
+}
+
+func (e *IncompleteReadError) Error() string {
+	if e == nil {
+		return "read_file did not complete"
+	}
+	detail := strings.TrimSpace(e.Reason)
+	if detail == "" {
+		detail = "the retained result still has unread content"
+	}
+	return "read_file did not complete safely: " + detail
 }
 
 // RunPauseInfo is the stable host-facing description of a deliberate Run
@@ -77,6 +105,10 @@ func InspectRunPause(err error) (RunPauseInfo, bool) {
 	var budget *taskBudgetPause
 	if errors.As(err, &budget) {
 		return RunPauseInfo{Kind: "task_budget", Key: budget.axis, HostOwned: true, Reason: budget.detail}, true
+	}
+	var incompleteRead *IncompleteReadError
+	if errors.As(err, &incompleteRead) {
+		return RunPauseInfo{Kind: "incomplete_read", HostOwned: true, Reason: incompleteRead.Reason}, true
 	}
 	return RunPauseInfo{}, false
 }

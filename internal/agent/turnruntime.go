@@ -97,6 +97,11 @@ type turnRuntime struct {
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
 
+	// incompleteReads tracks unread read_file results within one Agent.Run; a
+	// fresh user turn may choose a different strategy, but this run cannot write
+	// or finish from a silent partial read.
+	incompleteReads incompleteReadState
+
 	phase phaseClock
 }
 

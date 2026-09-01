@@ -72,6 +72,7 @@ type toolOutcome struct {
 	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
 	recoveryStopTurn   bool
 	recoveryStopReason string
+	incompleteRead     *incompleteReadDeferred
 }
 
 // batchExecution is the result of one provider tool-call batch.
@@ -158,10 +159,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		results[i] = outcomes[i].output
 	}
 	finalize := func(i int) {
-		if calls[i].ResolvedReadOnly != nil {
-			a.sess.conversation.UpdateToolCallResolution(calls[i])
-			a.emitResolvedToolDispatch(calls[i])
-		}
+		a.finalizeIncompleteReadOutcome(outcomes[i].incompleteRead, &outcomes[i])
+		results[i] = outcomes[i].output
+		a.commitBatchCallResolution(calls[i])
 		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
 			earlierWriterRan = true
 		}
@@ -378,6 +378,14 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}
+}
+
+func (a *Agent) commitBatchCallResolution(call provider.ToolCall) {
+	if call.ResolvedReadOnly == nil {
+		return
+	}
+	a.sess.conversation.UpdateToolCallResolution(call)
+	a.emitResolvedToolDispatch(call)
 }
 
 // batchCallMutationFailureCause returns a sanitized effect description when a

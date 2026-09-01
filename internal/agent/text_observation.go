@@ -34,23 +34,10 @@ func observationBoundary(ctx context.Context, fallback uint64) uint64 {
 	return fallback
 }
 
-// recordModelTextObservation records only the line hashes returned by an
-// optional reader capability. It runs after host recovery guidance has been
-// applied but before compatibility truncation, matching the canonical result
-// promoted through RawContent on the next provider request.
-func (a *Agent) recordModelTextObservation(plan *toolCallPlan, output string) {
-	if a == nil || plan == nil || a.task.ledger == nil || output == "" {
-		return
-	}
-	observer, ok := plan.runTool.(tool.ModelTextObserver)
-	if !ok {
-		observer, ok = plan.execTool.(tool.ModelTextObserver)
-	}
-	if !ok {
-		return
-	}
-	observed, ok := observer.ObserveModelText(json.RawMessage(plan.runArgs), output)
-	if !ok {
+// recordModelTextObservationValue records only a fully model-visible window.
+// Incomplete read_file results reach this helper only after exact recovery.
+func (a *Agent) recordModelTextObservationValue(observed tool.ModelTextObservation) {
+	if a == nil || a.task.ledger == nil || observed.Path == "" || len(observed.LineHashes) == 0 {
 		return
 	}
 	a.task.ledger.RecordTextObservation(evidence.TextObservation{

@@ -496,11 +496,11 @@ type UseCapabilityTool struct {
 	ledger   *capability.Ledger
 	audit    *capability.Audit
 	catalog  func() capability.Catalog
-	// toolResultSession is bound by Agent.New to that frontend's own session.
-	// CloneForAgent intentionally leaves it empty so parent transcripts cannot
+	// toolResultSession is bound by Agent.New; clones leave it empty so parent transcripts cannot
 	// leak into planner or child frontends before their Agent binds them.
 	toolResultMu      sync.RWMutex
 	toolResultSession func() *Session
+	readStrategyState func() *incompleteReadState
 	mcpListMu         sync.RWMutex
 	mcpListObserver   func(mcpListObservation)
 	// state is session-shared connection observation when built via
@@ -690,8 +690,8 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		if id == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=call")
 		}
-		if id == sessionToolResultCapabilityID {
-			return t.resolveSessionToolResult(p.Arguments, base)
+		if id == sessionToolResultCapabilityID || id == sessionReadStrategyReceiptCapabilityID {
+			return t.resolveSessionCapability(id, p.Arguments, base)
 		}
 		return t.resolveCall(ctx, id, p.Arguments, base)
 	default:

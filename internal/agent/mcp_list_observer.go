@@ -26,6 +26,7 @@ type mcpListObserverActivator interface {
 
 func (a *Agent) bindCapabilityObservers() {
 	a.bindToolResultSessionCapability()
+	a.bindReadStrategyCapability()
 	a.bindMCPListObserverCapability()
 }
 

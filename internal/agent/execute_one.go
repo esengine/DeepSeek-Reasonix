@@ -167,6 +167,9 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *
 	if blocked, early := a.applyExecutionPreflight(turn, plan); early {
 		return blocked, true
 	}
+	if msg, blocked := turn.incompleteReads.gate(plan); blocked {
+		return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}, true
+	}
 	if blocked, early := a.applyDeliveryPolicyGates(turn, plan); early {
 		return blocked, true
 	}
@@ -692,9 +695,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// partialwritesandhooksideeffectscanchangethepreviewedpathevenwhentheconcrete tool returned an error.
 	a.finalizeObservedToolReceipts(plan, result, execution, err)
 	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
-	if err == nil && readOnly {
-		a.recordModelTextObservation(plan, result)
-	}
 	if err != nil {
 		detail := result
 		// Malformed-args failures are a transient model JSON glitch (e.g. optionswritten as ["a":"b"] →
@@ -725,7 +725,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
 		a.svc.hooks.SubagentStop(ctx, result)
 	}
-	body, truncMsg, original := a.boundProviderVisibleResult(result, call.Name, call.ID)
+	body, truncMsg, original, readObserver := a.boundIncompleteReadAwareResult(plan, result)
 	out := toolOutcome{
 		output: body, images: images, truncated: truncMsg != "" || original != "", truncMsg: truncMsg,
 		execution: execution, mcpApp: toProviderMCPApp(plan.mcpApp), recoveryGeneration: recoveryGen,
@@ -733,11 +733,11 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if original != "" {
 		out.rawOutput = original
 	}
+	out.incompleteRead = deferredIncompleteReadOutcome(plan, result, readObserver, original == "" && truncMsg == "")
 	return out
 }
 
-// observeBeforeMutation captures preimages for Previewable writers and recordsexplicit coverage gaps forbash
-// / opaque MCP tools. Host-internal only.
+// observeBeforeMutation captures writer preimages and opaque-tool coverage gaps.
 func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if a == nil || plan == nil {
 		return

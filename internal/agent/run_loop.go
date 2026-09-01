@@ -247,7 +247,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) (runErr err
 		releaseMCPListObserver()
 	}()
 	ctx = a.withAgentContext(ctx)
-	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
+	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound || state.incompleteReads.hasPending(); step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -532,6 +532,22 @@ func sleepStreamRetryBackoff(ctx context.Context, attempt int) bool {
 // and final compaction. cont=true continues the tool loop; cont=false returns
 // err from Run (err may be nil for a clean final answer).
 func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
+	// A partial read is a host-owned protocol state, not advisory prose. Refuse
+	// a candidate final before every ordinary readiness/validator path so a
+	// model cannot silently answer from the visible prefix alone.
+	if instruction, pause := state.incompleteReads.blockFinal(); pause != nil {
+		a.contextManager().ObserveUsage(usage)
+		return false, pause
+	} else if instruction != "" {
+		a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(instruction)))
+		a.emitIncompleteReadNotice(
+			event.NoticeCodeReadContinuationRequired,
+			"Reasonix refused to finish because a file read still has unread content.",
+			"final answer blocked pending read continuation",
+		)
+		a.contextManager().ObserveUsage(usage)
+		return true, nil
+	}
 	// Recovery finalization produced a summary. Keep it in the session,
 	// but still pause so Goal auto-continue cannot open another Run with
 	// a fresh finalization round. turn_done reports recovery_paused.
@@ -685,11 +701,8 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		}
 		a.sess.conversation.Add(msg)
 	}
-	// If the context was cancelled during tool execution, return after storing
-	// the batch results so the session keeps paired tool-call history.
-	if ctx.Err() != nil {
-		a.recordInterruptedDisplay("", "", nil, true, state.workDurationMs())
-		return false, ctx.Err()
+	if cont, boundaryErr, handled := a.resolveIncompleteReadToolRoundBoundary(ctx, state, usage); handled {
+		return cont, boundaryErr
 	}
 	if a.successfulTurnFinalizer(ctx, calls, batch) {
 		// submit_plan is the planner's data-bearing final answer. Its paired tool
@@ -734,7 +747,15 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 	// Spend is checked before rounds: it is the axis a runaway is actually
 	// reported in, so on the turns both would catch it should be the one named.
 	if axis, detail := a.task.budget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
+		if state.incompleteReads.hasPending() {
+			return false, &IncompleteReadError{Reason: fmt.Sprintf("the %s budget ended while a required read_file continuation was still pending: %s", axis, detail)}
+		}
 		a.armFinalizationRound(ctx, state, landCause{kind: "task_budget", axis: axis, detail: detail})
+		return true, nil
+	}
+	// A bounded read-recovery sequence is a correctness repair, so it may use
+	// extra tool rounds beyond max_steps. Hard spend budgets above still win.
+	if state.incompleteReads.hasPending() {
 		return true, nil
 	}
 	if state.runMaxSteps > 0 && step+1 >= state.runMaxSteps {
