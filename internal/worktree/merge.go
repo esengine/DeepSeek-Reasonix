@@ -24,39 +24,41 @@ type MergeBlocker struct {
 // MergeInspection describes the exact identities used by a later merge
 // request. Every mutable identity must be sent back by the caller.
 type MergeInspection struct {
-	Available       bool           `json:"available"`
-	Reason          string         `json:"reason,omitempty"`
-	CanMerge        bool           `json:"canMerge"`
-	AlreadyMerged   bool           `json:"alreadyMerged"`
-	WorktreeRoot    string         `json:"worktreeRoot,omitempty"`
-	SourceRoot      string         `json:"sourceRoot,omitempty"`
-	WorktreeBranch  string         `json:"worktreeBranch,omitempty"`
-	TargetBranch    string         `json:"targetBranch,omitempty"`
-	CreatedHead     string         `json:"createdHead,omitempty"`
-	WorktreeHead    string         `json:"worktreeHead,omitempty"`
-	TargetHead      string         `json:"targetHead,omitempty"`
-	AheadCount      int            `json:"aheadCount"`
-	BehindCount     int            `json:"behindCount"`
-	FilesChanged    int            `json:"filesChanged"`
-	Insertions      int            `json:"insertions"`
-	Deletions       int            `json:"deletions"`
-	ChangedFiles    []string       `json:"changedFiles"`
-	HasConflicts    bool           `json:"hasConflicts"`
-	ConflictFiles   []string       `json:"conflictFiles"`
-	WorktreeDirty   bool           `json:"worktreeDirty"`
-	SourceDirty     bool           `json:"sourceDirty"`
-	Blockers        []MergeBlocker `json:"blockers"`
-	CleanupBlockers []MergeBlocker `json:"cleanupBlockers"`
+	Available          bool           `json:"available"`
+	Reason             string         `json:"reason,omitempty"`
+	CanMerge           bool           `json:"canMerge"`
+	AlreadyMerged      bool           `json:"alreadyMerged"`
+	WorktreeRoot       string         `json:"worktreeRoot,omitempty"`
+	SourceRoot         string         `json:"sourceRoot,omitempty"`
+	WorktreeBranch     string         `json:"worktreeBranch,omitempty"`
+	TargetBranch       string         `json:"targetBranch,omitempty"`
+	CreatedHead        string         `json:"createdHead,omitempty"`
+	WorktreeHead       string         `json:"worktreeHead,omitempty"`
+	WorktreeStateToken string         `json:"worktreeStateToken,omitempty"`
+	TargetHead         string         `json:"targetHead,omitempty"`
+	AheadCount         int            `json:"aheadCount"`
+	BehindCount        int            `json:"behindCount"`
+	FilesChanged       int            `json:"filesChanged"`
+	Insertions         int            `json:"insertions"`
+	Deletions          int            `json:"deletions"`
+	ChangedFiles       []string       `json:"changedFiles"`
+	HasConflicts       bool           `json:"hasConflicts"`
+	ConflictFiles      []string       `json:"conflictFiles"`
+	WorktreeDirty      bool           `json:"worktreeDirty"`
+	SourceDirty        bool           `json:"sourceDirty"`
+	Blockers           []MergeBlocker `json:"blockers"`
+	CleanupBlockers    []MergeBlocker `json:"cleanupBlockers"`
 }
 
 // MergeRequest proves that the user confirmed a specific inspection. A target
 // branch or HEAD drift never silently turns into a different merge.
 type MergeRequest struct {
-	WorkspaceRoot        string `json:"workspaceRoot"`
-	ExpectedTargetBranch string `json:"expectedTargetBranch"`
-	ExpectedTargetHead   string `json:"expectedTargetHead"`
-	ExpectedWorktreeHead string `json:"expectedWorktreeHead"`
-	AutoCommitDirty      bool   `json:"autoCommitDirty"`
+	WorkspaceRoot              string `json:"workspaceRoot"`
+	ExpectedTargetBranch       string `json:"expectedTargetBranch"`
+	ExpectedTargetHead         string `json:"expectedTargetHead"`
+	ExpectedWorktreeHead       string `json:"expectedWorktreeHead"`
+	ExpectedWorktreeStateToken string `json:"expectedWorktreeStateToken"`
+	AutoCommitDirty            bool   `json:"autoCommitDirty"`
 }
 
 // MergeResult is a merge receipt and cleanup identity. MergeBack never removes
@@ -92,6 +94,17 @@ type CleanupResult struct {
 	BranchDeleted   bool           `json:"branchDeleted"`
 	Blockers        []MergeBlocker `json:"blockers"`
 	Error           string         `json:"error,omitempty"`
+}
+
+// mergeStepHook is test-only. Tests install it before starting a merge and do
+// not mutate it concurrently; it makes otherwise sub-millisecond identity
+// windows deterministic without weakening production checks.
+var mergeStepHook func(string)
+
+func noteMergeStep(step string) {
+	if mergeStepHook != nil {
+		mergeStepHook(step)
+	}
 }
 
 // InspectMerge performs a failure-closed inspection using creation metadata.
@@ -181,6 +194,10 @@ func inspectCheckoutStates(ctx context.Context, metadata mergeMetadata, inspecti
 		return "", fmt.Errorf("inspect worktree changes: %w%s", err, stderrSuffix(stderr))
 	}
 	inspection.WorktreeDirty = strings.TrimSpace(worktreeStatus) != ""
+	inspection.WorktreeStateToken, err = worktreeStateToken(ctx, metadata.WorktreeRoot)
+	if err != nil {
+		return "", fmt.Errorf("snapshot worktree changes: %w", err)
+	}
 	if inspection.WorktreeDirty {
 		inspection.Blockers = append(inspection.Blockers, blocker("worktree_dirty", "worktree has uncommitted changes"))
 	}
@@ -267,17 +284,39 @@ func MergeBack(ctx context.Context, managedRoot string, request MergeRequest) (M
 		if !request.AutoCommitDirty {
 			return mergeFailure(inspection, false, errors.New("worktree has uncommitted changes; explicit auto-commit is required"))
 		}
+		confirmedToken, tokenErr := worktreeStateToken(ctx, inspection.WorktreeRoot)
+		if tokenErr != nil {
+			return mergeFailure(inspection, false, fmt.Errorf("verify confirmed worktree changes: %w", tokenErr))
+		}
+		if confirmedToken != request.ExpectedWorktreeStateToken {
+			return mergeFailure(inspection, false, errors.New("worktree contents changed after confirmation; inspect and confirm again"))
+		}
+		originalWorktreeHead := inspection.WorktreeHead
 		if _, stderr, err := runGit(ctx, inspection.WorktreeRoot, "add", "-A"); err != nil {
 			return mergeFailure(inspection, false, fmt.Errorf("stage worktree changes: %w%s", err, stderrSuffix(stderr)))
 		}
+		noteMergeStep("after_worktree_add")
+		stagedTree, err := verifyStagedWorktree(ctx, inspection.WorktreeRoot, confirmedToken)
+		if err != nil {
+			return mergeFailure(inspection, false, fmt.Errorf("worktree changed while staging; staged changes were preserved: %w", err))
+		}
 		if _, stderr, err := runGit(ctx, inspection.WorktreeRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "commit", "-m", "worktree: save changes before merge back"); err != nil {
 			return mergeFailure(inspection, false, fmt.Errorf("commit worktree changes: %w%s", err, stderrSuffix(stderr)))
+		}
+		noteMergeStep("after_worktree_commit")
+		committedHead, err := verifyAutoCommit(ctx, inspection.WorktreeRoot, originalWorktreeHead, stagedTree)
+		if err != nil {
+			return mergeFailure(inspection, false, fmt.Errorf("auto-commit identity changed; worktree and commits were preserved: %w", err))
 		}
 		inspection, err = InspectMerge(ctx, request.WorkspaceRoot, managedRoot)
 		if err != nil {
 			return mergeFailure(inspection, false, fmt.Errorf("re-inspect after auto-commit: %w", err))
 		}
-		request.ExpectedWorktreeHead = inspection.WorktreeHead
+		if inspection.WorktreeHead != committedHead {
+			return mergeFailure(inspection, false, errors.New("worktree HEAD changed after Reasonix auto-commit; inspect again"))
+		}
+		request.ExpectedWorktreeHead = committedHead
+		request.ExpectedWorktreeStateToken = inspection.WorktreeStateToken
 		if err := verifyExpectedInspection(inspection, request); err != nil {
 			return mergeFailure(inspection, false, err)
 		}
@@ -291,15 +330,35 @@ func MergeBack(ctx context.Context, managedRoot string, request MergeRequest) (M
 
 	originalHead := inspection.TargetHead
 	message := fmt.Sprintf("Merge worktree branch '%s' into %s", inspection.WorktreeBranch, inspection.TargetBranch)
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "merge", "--no-ff", "-m", message, inspection.WorktreeHead); err != nil {
-		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, originalHead)
+	noteMergeStep("before_merge_prepare")
+	if err := verifySourceIdentity(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, false); err != nil {
+		return mergeFailure(inspection, false, fmt.Errorf("source changed before merge preparation: %w", err))
+	}
+	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "merge", "--no-ff", "--no-commit", inspection.WorktreeHead); err != nil {
+		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
 		if !recovered {
 			reason := fmt.Errorf("merge failed: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr)
 			return mergeFailure(inspection, true, reason)
 		}
 		return mergeFailure(inspection, false, fmt.Errorf("merge failed and was aborted: %w%s", err, stderrSuffix(stderr)))
 	}
-	mergedHead, err := verifySuccessfulMerge(ctx, inspection.SourceRoot, originalHead, inspection.WorktreeHead)
+	noteMergeStep("after_merge_prepare")
+	if err := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead); err != nil {
+		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
+		if !recovered {
+			return mergeFailure(inspection, true, fmt.Errorf("merge preparation identity changed: %w; automatic recovery failed: %v", err, recoveryErr))
+		}
+		return mergeFailure(inspection, false, fmt.Errorf("merge preparation identity changed and was aborted: %w", err))
+	}
+	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "commit", "-m", message); err != nil {
+		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
+		if !recovered {
+			return mergeFailure(inspection, true, fmt.Errorf("merge commit failed: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr))
+		}
+		return mergeFailure(inspection, false, fmt.Errorf("merge commit failed and was aborted: %w%s", err, stderrSuffix(stderr)))
+	}
+	noteMergeStep("after_merge_commit")
+	mergedHead, err := verifySuccessfulMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead)
 	if err != nil {
 		return mergeFailure(inspection, true, fmt.Errorf("merge succeeded but the source checkout requires recovery: %w", err))
 	}
@@ -496,28 +555,6 @@ func statusPaths(status string) []string {
 	return paths
 }
 
-func gitOperation(ctx context.Context, root string) (string, error) {
-	operations := []struct{ name, marker string }{
-		{"merge", "MERGE_HEAD"}, {"rebase", "rebase-merge"}, {"rebase", "rebase-apply"},
-		{"cherry-pick", "CHERRY_PICK_HEAD"}, {"revert", "REVERT_HEAD"}, {"bisect", "BISECT_LOG"},
-	}
-	for _, operation := range operations {
-		path, stderr, err := gitValue(ctx, root, "rev-parse", "--git-path", operation.marker)
-		if err != nil {
-			return "", fmt.Errorf("inspect Git operation %s: %w%s", operation.name, err, stderrSuffix(stderr))
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(root, path)
-		}
-		if _, err := os.Stat(path); err == nil {
-			return operation.name, nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("inspect Git operation %s: %w", operation.name, err)
-		}
-	}
-	return "", nil
-}
-
 func isAncestor(ctx context.Context, root, ancestor, descendant string) (bool, error) {
 	_, stderr, err := runGit(ctx, root, "merge-base", "--is-ancestor", ancestor, descendant)
 	if err == nil {
@@ -566,10 +603,10 @@ func hasBlockingMergeIssue(blockers []MergeBlocker) bool {
 }
 
 func verifyExpectedInspection(inspection MergeInspection, request MergeRequest) error {
-	if request.ExpectedTargetBranch == "" || request.ExpectedTargetHead == "" || request.ExpectedWorktreeHead == "" {
+	if request.ExpectedTargetBranch == "" || request.ExpectedTargetHead == "" || request.ExpectedWorktreeHead == "" || request.ExpectedWorktreeStateToken == "" {
 		return errors.New("merge confirmation identity is incomplete; inspect again")
 	}
-	if inspection.TargetBranch != request.ExpectedTargetBranch || inspection.TargetHead != request.ExpectedTargetHead || inspection.WorktreeHead != request.ExpectedWorktreeHead {
+	if inspection.TargetBranch != request.ExpectedTargetBranch || inspection.TargetHead != request.ExpectedTargetHead || inspection.WorktreeHead != request.ExpectedWorktreeHead || inspection.WorktreeStateToken != request.ExpectedWorktreeStateToken {
 		return errors.New("merge identity changed after inspection; inspect and confirm again")
 	}
 	return nil
@@ -583,7 +620,52 @@ func blockerMessages(blockers []MergeBlocker) string {
 	return strings.Join(items, "; ")
 }
 
-func abortAndVerifyMerge(ctx context.Context, sourceRoot, originalHead string) (bool, error) {
+func verifySourceIdentity(ctx context.Context, sourceRoot, targetBranch, originalHead string, expectMerge bool) error {
+	branch, stderr, err := gitValue(ctx, sourceRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch != targetBranch {
+		return fmt.Errorf("source branch is %q, expected %q%s", branch, targetBranch, stderrSuffix(stderr))
+	}
+	head, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil || head != originalHead {
+		return fmt.Errorf("source HEAD changed from %s to %s%s", originalHead, head, stderrSuffix(stderr))
+	}
+	operation, err := gitOperation(ctx, sourceRoot)
+	if err != nil {
+		return err
+	}
+	if expectMerge && operation != "merge" {
+		return fmt.Errorf("prepared merge operation is missing (found %q)", operation)
+	}
+	if !expectMerge && operation != "" {
+		return fmt.Errorf("source Git %s operation is already in progress", operation)
+	}
+	if !expectMerge {
+		status, stderr, err := runGit(ctx, sourceRoot, "status", "--porcelain=v1", "--untracked-files=all")
+		if err != nil {
+			return fmt.Errorf("inspect source status: %w%s", err, stderrSuffix(stderr))
+		}
+		if strings.TrimSpace(status) != "" {
+			return errors.New("source checkout is no longer clean")
+		}
+	}
+	return nil
+}
+
+func verifyPreparedMerge(ctx context.Context, sourceRoot, targetBranch, originalHead, worktreeHead string) error {
+	if err := verifySourceIdentity(ctx, sourceRoot, targetBranch, originalHead, true); err != nil {
+		return err
+	}
+	mergeHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "MERGE_HEAD")
+	if err != nil {
+		return fmt.Errorf("read prepared MERGE_HEAD: %w%s", err, stderrSuffix(stderr))
+	}
+	if mergeHead != worktreeHead {
+		return fmt.Errorf("prepared MERGE_HEAD is %s, expected %s", mergeHead, worktreeHead)
+	}
+	return nil
+}
+
+func abortAndVerifyMerge(ctx context.Context, sourceRoot, targetBranch, originalHead string) (bool, error) {
 	operation, operationErr := gitOperation(ctx, sourceRoot)
 	if operationErr != nil {
 		return false, operationErr
@@ -593,9 +675,12 @@ func abortAndVerifyMerge(ctx context.Context, sourceRoot, originalHead string) (
 			return false, fmt.Errorf("git merge --abort: %w%s", err, stderrSuffix(stderr))
 		}
 	}
-	head, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "HEAD")
-	if err != nil || head != originalHead {
-		return false, fmt.Errorf("source HEAD was not restored%s", stderrSuffix(stderr))
+	if err := verifySourceIdentity(ctx, sourceRoot, targetBranch, originalHead, false); err != nil {
+		return false, err
+	}
+	branchRef, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "refs/heads/"+targetBranch)
+	if err != nil || branchRef != originalHead {
+		return false, fmt.Errorf("target branch ref was not restored%s", stderrSuffix(stderr))
 	}
 	status, stderr, err := runGit(ctx, sourceRoot, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil || strings.TrimSpace(status) != "" {
@@ -608,10 +693,26 @@ func abortAndVerifyMerge(ctx context.Context, sourceRoot, originalHead string) (
 	return true, nil
 }
 
-func verifySuccessfulMerge(ctx context.Context, sourceRoot, originalHead, worktreeHead string) (string, error) {
+func verifySuccessfulMerge(ctx context.Context, sourceRoot, targetBranch, originalHead, worktreeHead string) (string, error) {
+	branch, stderr, err := gitValue(ctx, sourceRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch != targetBranch {
+		return "", fmt.Errorf("source branch changed after merge; found %q, expected %q%s", branch, targetBranch, stderrSuffix(stderr))
+	}
 	mergedHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("read merged target HEAD: %w%s", err, stderrSuffix(stderr))
+	}
+	branchHead, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--verify", "refs/heads/"+targetBranch)
+	if err != nil || branchHead != mergedHead {
+		return "", fmt.Errorf("target branch ref does not identify the merge commit%s", stderrSuffix(stderr))
+	}
+	parents, stderr, err := gitValue(ctx, sourceRoot, "rev-list", "--parents", "-n", "1", mergedHead)
+	if err != nil {
+		return "", fmt.Errorf("read merge commit parents: %w%s", err, stderrSuffix(stderr))
+	}
+	fields := strings.Fields(parents)
+	if len(fields) != 3 || fields[0] != mergedHead || fields[1] != originalHead || fields[2] != worktreeHead {
+		return "", errors.New("merge commit does not have the exact prepared parents")
 	}
 	ancestors := []struct{ label, head string }{
 		{label: "original target", head: originalHead},

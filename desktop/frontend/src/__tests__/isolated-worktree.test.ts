@@ -49,7 +49,10 @@ ok(/InspectWorktreeMerge\(tabId\)[\s\S]*inspectionIdentity\(refreshed\)[\s\S]*Me
 ok(/stateChanged/.test(mergeModal) && /setInspection\(refreshed\)/.test(mergeModal), "state drift refreshes the panel instead of continuing");
 ok(/aria-modal="true"/.test(mergeModal) && /event\.key === "Escape"/.test(mergeModal) && /event\.key !== "Tab"/.test(mergeModal), "merge dialog exposes modal, escape, and focus-loop semantics");
 ok(/WorktreeMergeModal\.css/.test(mergeModal) && mergeStyles.includes(".worktree-merge__body") && !/style=\{\{/.test(mergeModal), "lazy merge UI keeps layout rules out of inline styles");
-ok(/ensureBlankSurface\("project", res\.sourceRoot[\s\S]*ensureBlankTab\("project", res\.sourceRoot[\s\S]*finishTabClose\(tabToClose[\s\S]*FinalizeWorktreeMerge/.test(app), "merged flow navigates to source, closes the worktree view, then finalizes cleanup");
+ok(/runWorktreeMergeLifecycle\(res, tabToClose[\s\S]*CloseMergedWorktreeTab[\s\S]*FinalizeWorktreeMerge/.test(app), "merged flow delegates guarded source navigation, exact close, then cleanup");
+ok(/worktreeStateToken/.test(mergeModal) && /expectedWorktreeStateToken/.test(mergeModal), "merge confirmation binds the exact dirty worktree content token");
+ok(!/ModalCloseButton autoFocus/.test(mergeModal), "merge modal captures its trigger before moving focus so close restores the trigger");
+ok(/CloseMergedWorktreeTab\(request: CloseMergedWorktreeTabRequest\)/.test(bridge), "worktree close is a request-object Wails call");
 ok(/FinalizeWorktreeMerge\(request: WorktreeCleanupRequest\)/.test(bridge), "cleanup is a separate request-object Wails call");
 
 if (failed) process.exit(1);

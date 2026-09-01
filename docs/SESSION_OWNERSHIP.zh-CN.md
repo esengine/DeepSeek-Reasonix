@@ -70,13 +70,21 @@ Merge-Back 是“合并、清理分离”的失败原子流程。预检会验证
 分支与 `HEAD`、source 干净且没有进行中的 Git 操作、Desktop 活动任务、工作区写租约、
 ahead/behind、diff 和冲突。worktree 有未提交改动时默认禁止合并；只有用户显式开启
 自动提交才会依次执行暂存和提交，并在新提交上重新做冲突预检。目标分支或 `HEAD`
-发生漂移时只刷新确认面板，不会继续执行。实际 merge 失败后，Reasonix 会运行
-`git merge --abort`，并验证 source 已恢复到原始干净 `HEAD`；无法证明恢复成功时返回
+发生漂移时只刷新确认面板，不会继续执行。确认还会绑定瞬态、NUL-safe 的内容 token，
+覆盖每个脏路径的类型、mode、文件内容或 symlink 目标。`git add -A` 后必须证明 token
+未变、没有残留的 unstaged/untracked 内容，且自动提交只有原 worktree `HEAD` 这一个父
+提交并包含刚记录的 staged tree。source 合并使用 `git merge --no-ff --no-commit`；只有
+目标分支、原始 `HEAD` 和精确 `MERGE_HEAD` 都仍一致时才提交。准备或提交失败后会执行
+abort，并复核原分支/ref、干净状态和 Git operation；无法证明恢复成功时返回
 recovery-required，同时保留所有 worktree 资源。
 
-合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout，
-再关闭 worktree 页面和终端。独立、可重试的清理阶段只会在没有可见或后台 runtime
-引用、临时提交已包含在目标分支、身份仍一致且 `git status --ignored` 完全为空时运行。
+合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout；
+若此时出现更新的前端导航意图，后续关闭和清理会停止并保留资源。否则后端只会在精确
+source Tab 仍 active、精确 worktree Tab 仍 idle 时关闭页面和终端。独立、可重试的清理
+阶段会在同一临界区内登记 canonical worktree reservation 并扫描可见及 detached
+runtime；所有项目 runtime 的创建、恢复和重定向都经过同一 admission gate，因此
+symlink、子目录或晚到的 runtime 不能在检查后插入。之后还必须证明临时提交已包含在
+目标分支、身份仍一致且 `git status --ignored` 完全为空。
 清理仅使用普通 `git worktree remove` 和 `git branch -d`，绝不强制删除。tracked、
 untracked 或 ignored 文件都会阻止清理并向用户列出；合并结果仍然保留，worktree、
 分支和文件可供恢复或之后重试清理。

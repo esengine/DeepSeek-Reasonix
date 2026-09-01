@@ -20,6 +20,7 @@ function inspectionIdentity(inspection: WorktreeMergeInspection): string {
     worktreeBranch: inspection.worktreeBranch,
     targetBranch: inspection.targetBranch,
     worktreeHead: inspection.worktreeHead,
+    worktreeStateToken: inspection.worktreeStateToken,
     targetHead: inspection.targetHead,
     worktreeDirty: inspection.worktreeDirty,
     sourceDirty: inspection.sourceDirty,
@@ -139,7 +140,7 @@ export function WorktreeMergeModal({ tabId, isOpen, onClose, onMerged }: Worktre
         setError(t("worktree.stateChanged"));
         return;
       }
-      if (!refreshed.targetBranch || !refreshed.targetHead || !refreshed.worktreeHead) {
+      if (!refreshed.targetBranch || !refreshed.targetHead || !refreshed.worktreeHead || !refreshed.worktreeStateToken) {
         setInspection(refreshed);
         setError(refreshed.reason || t("worktree.mergeUnavailable"));
         return;
@@ -149,6 +150,7 @@ export function WorktreeMergeModal({ tabId, isOpen, onClose, onMerged }: Worktre
         expectedTargetBranch: refreshed.targetBranch,
         expectedTargetHead: refreshed.targetHead,
         expectedWorktreeHead: refreshed.worktreeHead,
+        expectedWorktreeStateToken: refreshed.worktreeStateToken,
         autoCommitDirty,
       });
       if (generation !== requestGeneration.current) return;
@@ -176,7 +178,7 @@ export function WorktreeMergeModal({ tabId, isOpen, onClose, onMerged }: Worktre
             <div id="worktree-merge-title" className="management-modal__title worktree-merge__title"><GitMerge size={16} aria-hidden="true" />{t("worktree.mergeTitle")}</div>
             <div id="worktree-merge-summary" className="management-modal__summary">{t("worktree.mergeSubtitle")}</div>
           </div>
-          <div className="management-modal__actions"><ModalCloseButton autoFocus label={t("common.close")} onClick={onClose} disabled={merging} /></div>
+          <div className="management-modal__actions"><ModalCloseButton label={t("common.close")} onClick={onClose} disabled={merging} /></div>
         </header>
 
         <div className="worktree-merge__body">

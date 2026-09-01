@@ -1352,6 +1352,7 @@ export const zh: Record<DictKey, string> = {
   "worktree.stateChanged": "确认期间分支或工作区状态已变化。请检查刷新后的结果并重新确认。",
   "worktree.mergeReceiptInvalid": "合并已完成，但缺少完整清理凭据。工作区已保留。",
   "worktree.cleanupViewBlocked": "合并已完成，但无法安全关闭工作区页面。工作区和分支均已保留。",
+  "worktree.navigationChangedPreserved": "合并已完成，但检测到更新的导航操作。工作区和分支均已保留。",
   "worktree.mergeAndCleanupDone": "变更已合并，干净的临时工作区已清理。",
   "worktree.cleanupPreserved": "变更已合并。清理被阻止，工作区和分支均已保留。",
   "worktree.mergeDoneCleanupFailed": "变更已合并，但清理未完成。可恢复工作区已保留：",

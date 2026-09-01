@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -92,11 +93,26 @@ var (
 // MergeWorktreeBackRequest binds a merge to the exact inspection the user
 // confirmed. WorkspaceRoot is always resolved from TabID by the backend.
 type MergeWorktreeBackRequest struct {
-	TabID                string `json:"tabId"`
-	ExpectedTargetBranch string `json:"expectedTargetBranch"`
-	ExpectedTargetHead   string `json:"expectedTargetHead"`
-	ExpectedWorktreeHead string `json:"expectedWorktreeHead"`
-	AutoCommitDirty      bool   `json:"autoCommitDirty"`
+	TabID                      string `json:"tabId"`
+	ExpectedTargetBranch       string `json:"expectedTargetBranch"`
+	ExpectedTargetHead         string `json:"expectedTargetHead"`
+	ExpectedWorktreeHead       string `json:"expectedWorktreeHead"`
+	ExpectedWorktreeStateToken string `json:"expectedWorktreeStateToken"`
+	AutoCommitDirty            bool   `json:"autoCommitDirty"`
+}
+
+// CloseMergedWorktreeTabRequest binds the lifecycle handoff to both the source
+// and worktree identities observed by the frontend after navigation.
+type CloseMergedWorktreeTabRequest struct {
+	TabID        string `json:"tabId"`
+	WorktreeRoot string `json:"worktreeRoot"`
+	SourceTabID  string `json:"sourceTabId"`
+	SourceRoot   string `json:"sourceRoot"`
+}
+
+type CloseMergedWorktreeTabResult struct {
+	Closed     bool `json:"closed"`
+	Idempotent bool `json:"idempotent"`
 }
 
 // InspectWorktreeMerge inspects the diff and merge status for the given tab's
@@ -154,7 +170,8 @@ func (a *App) MergeWorktreeBack(request MergeWorktreeBackRequest) (worktree.Merg
 	return mergeWorktreeBack(a.bootContext(), config.DeliveryWorktreeDir(), worktree.MergeRequest{
 		WorkspaceRoot: wsRoot, ExpectedTargetBranch: request.ExpectedTargetBranch,
 		ExpectedTargetHead: request.ExpectedTargetHead, ExpectedWorktreeHead: request.ExpectedWorktreeHead,
-		AutoCommitDirty: request.AutoCommitDirty,
+		ExpectedWorktreeStateToken: request.ExpectedWorktreeStateToken,
+		AutoCommitDirty:            request.AutoCommitDirty,
 	})
 }
 
@@ -164,17 +181,18 @@ func (a *App) MergeWorktreeBack(request MergeWorktreeBackRequest) (worktree.Merg
 func (a *App) FinalizeWorktreeMerge(request worktree.CleanupRequest) (worktree.CleanupResult, error) {
 	a.worktreeMergeMu.Lock()
 	defer a.worktreeMergeMu.Unlock()
-	if a.worktreeRuntimeReferenced(request.WorktreeRoot) {
-		err := fmt.Errorf("a visible or background runtime still references the worktree; it was preserved")
+	releaseReservation, err := a.reserveWorktreeCleanup(request.WorktreeRoot)
+	if err != nil {
 		return worktree.CleanupResult{Blockers: []worktree.MergeBlocker{{Code: "runtime_reference", Message: err.Error(), Paths: []string{}}}, Error: err.Error()}, err
 	}
+	defer releaseReservation()
 	release, err := holdWorktreeMergeLeases(a.bootContext(), request.SourceRoot, request.WorktreeRoot)
 	if err != nil {
 		return worktree.CleanupResult{Blockers: []worktree.MergeBlocker{}, Error: err.Error()}, err
 	}
 	defer release()
 	if a.worktreeRuntimeReferenced(request.WorktreeRoot) {
-		err := fmt.Errorf("a runtime started referencing the worktree while cleanup waited; it was preserved")
+		err := fmt.Errorf("a runtime still references the reserved worktree; it was preserved")
 		return worktree.CleanupResult{Blockers: []worktree.MergeBlocker{{Code: "runtime_reference", Message: err.Error(), Paths: []string{}}}, Error: err.Error()}, err
 	}
 	result, err := finalizeWorktreeMerge(a.bootContext(), config.DeliveryWorktreeDir(), request)
@@ -182,6 +200,92 @@ func (a *App) FinalizeWorktreeMerge(request worktree.CleanupRequest) (worktree.C
 		a.emitProjectTreeChanged()
 	}
 	return result, err
+}
+
+// CloseMergedWorktreeTab closes only the exact idle worktree view after the
+// exact source tab is active. It rechecks the predicate under App.mu at the
+// removal point; an already-pruned single-surface worktree is idempotent only
+// when no detached runtime references it.
+func (a *App) CloseMergedWorktreeTab(request CloseMergedWorktreeTabRequest) (CloseMergedWorktreeTabResult, error) {
+	worktreeKey, err := workspacelease.CanonicalWorkspace(request.WorktreeRoot)
+	if err != nil {
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("resolve worktree identity: %w", err)
+	}
+	sourceKey, err := workspacelease.CanonicalWorkspace(request.SourceRoot)
+	if err != nil {
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("resolve source identity: %w", err)
+	}
+	defer a.lockRuntimeMutation("close-merged-worktree-tab")()
+	a.sessionRemovalMu.Lock()
+	defer a.sessionRemovalMu.Unlock()
+
+	a.mu.Lock()
+	tab, err := a.validateMergedWorktreeCloseLocked(request, worktreeKey, sourceKey)
+	if err != nil {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{}, err
+	}
+	if tab == nil {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{Closed: true, Idempotent: true}, nil
+	}
+	a.mu.Unlock()
+	if err := a.snapshotTab(tab); err != nil {
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("save worktree session before closing: %w", err)
+	}
+	if err := a.saveTabSessionMetaForCurrentSession(tab); err != nil {
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("save worktree session metadata before closing: %w", err)
+	}
+
+	a.mu.Lock()
+	current, err := a.validateMergedWorktreeCloseLocked(request, worktreeKey, sourceKey)
+	if err != nil {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{}, err
+	}
+	if current != tab {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("worktree tab changed before close; resources were preserved")
+	}
+	a.markTabRemovedLocked(tab)
+	delete(a.tabs, tab.ID)
+	a.removeTabOrderLocked(tab.ID)
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	if a.terminals != nil {
+		a.terminals.closeForTab(tab.ID)
+	}
+	a.closeTabRuntimeAdmissionHeld(tab)
+	if a.workspaceHub != nil {
+		a.workspaceHub.reconcileRoots()
+	}
+	a.emitProjectTreeRuntimeChangedWithLegacy()
+	return CloseMergedWorktreeTabResult{Closed: true}, nil
+}
+
+func (a *App) validateMergedWorktreeCloseLocked(request CloseMergedWorktreeTabRequest, worktreeKey, sourceKey string) (*WorkspaceTab, error) {
+	if request.TabID == "" || request.SourceTabID == "" || request.TabID == request.SourceTabID {
+		return nil, fmt.Errorf("merged worktree close identity is incomplete")
+	}
+	source := a.tabs[request.SourceTabID]
+	if source == nil || a.activeTabID != source.ID || canonicalRuntimeRoot(source.WorkspaceRoot) != sourceKey {
+		return nil, fmt.Errorf("source tab is no longer the active recorded workspace; resources were preserved")
+	}
+	tab := a.tabs[request.TabID]
+	if tab == nil {
+		if a.runtimeReferencesCanonicalLocked(worktreeKey) {
+			return nil, fmt.Errorf("a detached runtime still references the worktree; resources were preserved")
+		}
+		return nil, nil
+	}
+	if canonicalRuntimeRoot(tab.WorkspaceRoot) != worktreeKey {
+		return nil, fmt.Errorf("worktree tab identity changed; resources were preserved")
+	}
+	if tab.hasActiveRuntimeWork() || mergeActivityActive(tab.ActivityStatus) {
+		return nil, fmt.Errorf("worktree tab is no longer idle; resources were preserved")
+	}
+	return tab, nil
 }
 
 func (a *App) mergeableWorktreeTab(tabID string) (*WorkspaceTab, string, error) {
@@ -261,25 +365,133 @@ func runReleasesReverse(releases []func()) {
 }
 
 func (a *App) worktreeRuntimeReferenced(worktreeRoot string) bool {
+	key, err := workspacelease.CanonicalWorkspace(worktreeRoot)
+	if err != nil {
+		return true
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	return a.runtimeReferencesCanonicalLocked(key)
+}
+
+func pathWithinWorktree(path, worktreeRoot string) bool {
+	pathKey := canonicalRuntimeRoot(path)
+	rootKey := canonicalRuntimeRoot(worktreeRoot)
+	if pathKey == "" || rootKey == "" {
+		return false
+	}
+	if pathKey == rootKey {
+		return true
+	}
+	rel, err := filepath.Rel(rootKey, pathKey)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func canonicalRuntimeRoot(root string) string {
+	canonical, _ := canonicalRuntimeRootErr(root)
+	return canonical
+}
+
+func canonicalRuntimeRootErr(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("workspace root is empty")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	probe := filepath.Clean(abs)
+	suffix := []string{}
+	for {
+		if _, statErr := os.Lstat(probe); statErr == nil {
+			break
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			break
+		}
+		suffix = append(suffix, filepath.Base(probe))
+		probe = parent
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(probe); resolveErr == nil {
+		probe = resolved
+	} else if !os.IsNotExist(resolveErr) {
+		return "", resolveErr
+	}
+	for index := len(suffix) - 1; index >= 0; index-- {
+		probe = filepath.Join(probe, suffix[index])
+	}
+	return workspacelease.CanonicalWorkspace(probe)
+}
+
+func (a *App) runtimeReferencesCanonicalLocked(worktreeKey string) bool {
+	if worktreeKey == "" {
+		return true
+	}
 	for _, tab := range a.runtimeTabsLocked() {
-		if tab != nil && pathWithinWorktree(tab.WorkspaceRoot, worktreeRoot) {
+		if tab != nil && pathWithinCanonicalWorktree(canonicalRuntimeRoot(tab.WorkspaceRoot), worktreeKey) {
 			return true
 		}
 	}
 	return false
 }
 
-func pathWithinWorktree(path, worktreeRoot string) bool {
-	path = normalizeProjectRoot(path)
-	worktreeRoot = normalizeProjectRoot(worktreeRoot)
-	if path == "" || worktreeRoot == "" {
+func pathWithinCanonicalWorktree(pathKey, worktreeKey string) bool {
+	if pathKey == "" || worktreeKey == "" {
 		return false
 	}
-	if sameProjectRoot(path, worktreeRoot) {
+	if pathKey == worktreeKey {
 		return true
 	}
-	rel, err := filepath.Rel(worktreeRoot, path)
+	rel, err := filepath.Rel(worktreeKey, pathKey)
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (a *App) reserveWorktreeCleanup(worktreeRoot string) (func(), error) {
+	key, err := canonicalRuntimeRootErr(worktreeRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve cleanup worktree identity: %w", err)
+	}
+	a.worktreeCleanupMu.Lock()
+	if a.worktreeCleanupReservations == nil {
+		a.worktreeCleanupReservations = map[string]struct{}{}
+	}
+	if _, exists := a.worktreeCleanupReservations[key]; exists {
+		a.worktreeCleanupMu.Unlock()
+		return nil, fmt.Errorf("worktree cleanup is already in progress")
+	}
+	a.mu.RLock()
+	referenced := a.runtimeReferencesCanonicalLocked(key)
+	if !referenced {
+		a.worktreeCleanupReservations[key] = struct{}{}
+	}
+	a.mu.RUnlock()
+	a.worktreeCleanupMu.Unlock()
+	if referenced {
+		return nil, fmt.Errorf("a visible or background runtime still references the worktree; it was preserved")
+	}
+	return func() {
+		a.worktreeCleanupMu.Lock()
+		delete(a.worktreeCleanupReservations, key)
+		a.worktreeCleanupMu.Unlock()
+	}, nil
+}
+
+// beginWorkspaceRuntimeAdmission holds the cleanup-reservation gate through a
+// runtime owner's final App.mu publication. Callers must invoke it before
+// acquiring App.mu and defer the returned release.
+func (a *App) beginWorkspaceRuntimeAdmission(workspaceRoot string) (func(), error) {
+	key, err := canonicalRuntimeRootErr(workspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve runtime workspace identity: %w", err)
+	}
+	a.worktreeCleanupMu.Lock()
+	if _, reserved := a.worktreeCleanupReservations[key]; reserved {
+		a.worktreeCleanupMu.Unlock()
+		return nil, fmt.Errorf("workspace cleanup is in progress; retry after cleanup completes")
+	}
+	return a.worktreeCleanupMu.Unlock, nil
 }

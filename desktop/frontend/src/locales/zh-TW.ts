@@ -1110,6 +1110,7 @@ export const zhTW: Record<DictKey, string> = {
   "worktree.stateChanged": "確認期間分支或工作區狀態已變更。請檢查重新整理後的結果並再次確認。",
   "worktree.mergeReceiptInvalid": "合併已完成，但缺少完整清理憑據。工作區已保留。",
   "worktree.cleanupViewBlocked": "合併已完成，但無法安全關閉工作區頁面。工作區和分支均已保留。",
+  "worktree.navigationChangedPreserved": "合併已完成，但偵測到較新的導覽操作。工作區和分支均已保留。",
   "worktree.mergeAndCleanupDone": "變更已合併，乾淨的臨時工作區已清理。",
   "worktree.cleanupPreserved": "變更已合併。清理被阻止，工作區和分支均已保留。",
   "worktree.mergeDoneCleanupFailed": "變更已合併，但清理未完成。可恢復工作區已保留：",

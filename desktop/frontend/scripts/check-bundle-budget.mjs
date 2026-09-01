@@ -169,8 +169,10 @@ console.log("\nbundle budgets");
 // one-decimal ratchet.
 // Safe Merge-Back adds only its request/receipt routing to the initial graph;
 // the dialog and its CSS remain lazy. The measured path is 459.6 KiB; retain
-// the smallest one-decimal toolchain headroom.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 459.7 : 459.7;
+// the smallest one-decimal toolchain headroom. Exact close ownership and the
+// stale-navigation lifecycle fence move the measured path to 459.9 KiB; keep
+// only the same one-decimal toolchain headroom.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 460.0 : 460.0;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -300,7 +302,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // one-decimal ratchet.
 // Merge-Back request/receipt routing, source-navigation ownership, and its
 // accessible topic-bar trigger bring the measured initial path to 2459.8 KiB;
-// the modal implementation and styles stay in lazy chunks.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_459.9 : 2_459.9;
+// the modal implementation and styles stay in lazy chunks. Exact close
+// identities, dirty-state tokens, and stale-navigation fencing move the raw
+// startup path to 2461.0 KiB; retain only one decimal place of headroom.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_461.1 : 2_461.1;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

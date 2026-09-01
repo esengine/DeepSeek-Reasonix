@@ -2509,6 +2509,11 @@ func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
 
 func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
 	actualRoot, sessionPath := a.resolveOpenTopicSessionPath(scope, workspaceRoot, sessionPath)
+	releaseAdmission, err := a.beginProjectRuntimeAdmission(scope, actualRoot)
+	if err != nil {
+		return TabMeta{}, err
+	}
+	defer releaseAdmission()
 	targetKey := sessionRuntimeKey(sessionPath)
 
 	a.mu.Lock()
@@ -2756,6 +2761,11 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	if scope == "global" {
 		actualRoot = globalRoot
 	}
+	releaseAdmission, err := a.beginProjectRuntimeAdmission(scope, actualRoot)
+	if err != nil {
+		return TabMeta{}, err
+	}
+	defer releaseAdmission()
 	defaultModel, defaultToolApprovalMode := desktopNewSessionDefaults(scope, actualRoot)
 
 	a.mu.Lock()
@@ -4279,6 +4289,11 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 		if workspaceRoot == "" {
 			return
 		}
+		releaseAdmission, err := a.beginChangedProjectRuntimeAdmission(tab, scope, workspaceRoot)
+		if err != nil {
+			return
+		}
+		defer releaseAdmission()
 		a.registerProjectRoot(workspaceRoot)
 	} else {
 		scope = "global"

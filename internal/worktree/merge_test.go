@@ -100,6 +100,137 @@ func TestMergeBackRejectsTargetHeadDrift(t *testing.T) {
 	}
 }
 
+func TestMergeBackRejectsConfirmedWorktreeContentDrift(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(created.WorktreeRoot, "feature.txt")
+	if err := os.WriteFile(path, []byte("confirmed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	request := requestFromInspection(inspection)
+	request.AutoCommitDirty = true
+	if err := os.WriteFile(path, []byte("changed later\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := MergeBack(context.Background(), managed, request)
+	if err == nil || result.Merged || !strings.Contains(result.Error, "identity changed") {
+		t.Fatalf("content drift = %+v, %v", result, err)
+	}
+	if got := gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD"); got != inspection.WorktreeHead {
+		t.Fatalf("content drift created a commit: %s", got)
+	}
+}
+
+func TestMergeBackPreservesStagingWhenContentChangesDuringAdd(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(created.WorktreeRoot, "feature.txt")
+	if err := os.WriteFile(path, []byte("confirmed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	request := requestFromInspection(inspection)
+	request.AutoCommitDirty = true
+	mergeStepHook = func(step string) {
+		if step == "after_worktree_add" {
+			if err := os.WriteFile(path, []byte("changed during add\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+	result, err := MergeBack(context.Background(), managed, request)
+	if err == nil || result.Merged || !strings.Contains(result.Error, "staged changes were preserved") {
+		t.Fatalf("add drift = %+v, %v", result, err)
+	}
+	status := gitTest(t, created.WorktreeRoot, "status", "--porcelain=v1")
+	if !strings.Contains(status, "AM feature.txt") {
+		t.Fatalf("staged and later worktree contents were not preserved: %q", status)
+	}
+}
+
+func TestMergeBackRejectsExtraCommitAfterAutoCommit(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(created.WorktreeRoot, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	request := requestFromInspection(inspection)
+	request.AutoCommitDirty = true
+	mergeStepHook = func(step string) {
+		if step == "after_worktree_commit" {
+			gitCommitFile(t, created.WorktreeRoot, "extra.txt", "extra\n", "external extra")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+	result, err := MergeBack(context.Background(), managed, request)
+	if err == nil || result.Merged || !strings.Contains(result.Error, "unique parent") {
+		t.Fatalf("extra auto-commit = %+v, %v", result, err)
+	}
+}
+
+func TestMergeBackStopsWhenSourceBranchChangesBeforePrepare(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	mergeStepHook = func(step string) {
+		if step == "before_merge_prepare" {
+			gitTest(t, repo, "switch", "-c", "source-drift")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || result.RecoveryRequired || !strings.Contains(result.Error, "source changed before merge preparation") {
+		t.Fatalf("source branch drift = %+v, %v", result, err)
+	}
+}
+
+func TestMergeBackReportsRecoveryRequiredWhenPreparedSourceDrifts(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	mergeStepHook = func(step string) {
+		if step == "after_merge_prepare" {
+			gitTest(t, repo, "merge", "--abort")
+			gitTest(t, repo, "switch", "-c", "prepared-drift")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || !result.RecoveryRequired {
+		t.Fatalf("prepared source drift = %+v, %v", result, err)
+	}
+}
+
 func TestMergeBackRechecksConflictAfterDirtyCommit(t *testing.T) {
 	requireGit(t)
 	repo := initRepo(t)
@@ -248,6 +379,7 @@ func requestFromInspection(inspection MergeInspection) MergeRequest {
 	return MergeRequest{
 		WorkspaceRoot: inspection.WorktreeRoot, ExpectedTargetBranch: inspection.TargetBranch,
 		ExpectedTargetHead: inspection.TargetHead, ExpectedWorktreeHead: inspection.WorktreeHead,
+		ExpectedWorktreeStateToken: inspection.WorktreeStateToken,
 	}
 }
 

@@ -1351,6 +1351,7 @@ export const en = {
   "worktree.stateChanged": "The branch or workspace changed during confirmation. Review the refreshed inspection and confirm again.",
   "worktree.mergeReceiptInvalid": "The merge completed without a complete cleanup receipt. The worktree was preserved.",
   "worktree.cleanupViewBlocked": "The merge completed, but the worktree view could not be closed. The worktree and branch were preserved.",
+  "worktree.navigationChangedPreserved": "The merge completed, but a newer navigation took priority. The worktree and branch were preserved.",
   "worktree.mergeAndCleanupDone": "Changes merged and the clean temporary worktree was removed.",
   "worktree.cleanupPreserved": "Changes merged. Cleanup was blocked, so the worktree and branch were preserved.",
   "worktree.mergeDoneCleanupFailed": "Changes merged, but cleanup was not completed. The recoverable worktree was preserved:",

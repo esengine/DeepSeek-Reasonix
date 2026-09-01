@@ -111,6 +111,7 @@ import {
   type WireCompletionSummary,
   type WorkspaceConflictView,
 } from "./lib/types";
+import { runWorktreeMergeLifecycle } from "./lib/worktreeMergeLifecycle";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
@@ -5485,31 +5486,24 @@ export default function App() {
                 throw new Error(res.error || t("worktree.mergeReceiptInvalid"));
               }
               const navigationIntentSeq = noteNavigationIntent();
-              const sourceTab = singleSurfaceLayout
-                ? await ensureBlankSurface("project", res.sourceRoot, navigationIntentSeq)
-                : await ensureBlankTab("project", res.sourceRoot, navigationIntentSeq);
-              seedActiveTabMeta(sourceTab);
-              const visibleTabs = await app.ListTabs();
-              if (visibleTabs.some((tab) => tab.id === tabToClose)) {
-                const closed = await finishTabClose(tabToClose, "stop_and_close");
-                if (!closed) {
-                  showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 });
-                  return;
-                }
-              }
               try {
-                const cleanup = await app.FinalizeWorktreeMerge({
-                  worktreeRoot: res.worktreeRoot,
-                  sourceRoot: res.sourceRoot,
-                  targetBranch: res.targetBranch,
-                  mergedCommit: res.mergedCommit,
-                  worktreeBranch: res.worktreeBranch,
-                  worktreeHead: res.worktreeHead,
+                const lifecycle = await runWorktreeMergeLifecycle(res, tabToClose, {
+                  ensureSource: (sourceRoot) => singleSurfaceLayout
+                    ? ensureBlankSurface("project", sourceRoot, navigationIntentSeq)
+                    : ensureBlankTab("project", sourceRoot, navigationIntentSeq),
+                  isNavigationCurrent: () => isNavigationIntentCurrent(navigationIntentSeq),
+                  seedSource: seedActiveTabMeta,
+                  listTabs: () => app.ListTabs(),
+                  closeWorktree: (request) => app.CloseMergedWorktreeTab(request),
+                  finalize: (request) => app.FinalizeWorktreeMerge(request),
+                  onNavigationPreserved: () => showToast(t("worktree.navigationChangedPreserved"), "error", { durationMs: 9000 }),
+                  onCloseBlocked: () => showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 }),
                 });
-                if (cleanup.completed) {
+                if (lifecycle.phase !== "finalized") return;
+                if (lifecycle.cleanup.completed) {
                   showToast(t("worktree.mergeAndCleanupDone"), "info");
                 } else {
-                  showToast(cleanup.error || t("worktree.cleanupPreserved"), "error", { durationMs: 9000 });
+                  showToast(lifecycle.cleanup.error || t("worktree.cleanupPreserved"), "error", { durationMs: 9000 });
                 }
               } catch (caught: unknown) {
                 showToast(`${t("worktree.mergeDoneCleanupFailed")} ${caught instanceof Error ? caught.message : String(caught)}`, "error", { durationMs: 9000 });

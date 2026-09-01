@@ -21,7 +21,7 @@ func TestAppInspectAndMergeWorktreeBackUsesRequestIdentity(t *testing.T) {
 		return worktree.MergeInspection{
 			Available: true, CanMerge: true, WorktreeRoot: worktreeRoot, SourceRoot: sourceRoot,
 			WorktreeBranch: "reasonix/delivery-test", TargetBranch: "main", WorktreeHead: "worktree-head",
-			TargetHead: "target-head", AheadCount: 2, FilesChanged: 1, ChangedFiles: []string{"feature.go"},
+			WorktreeStateToken: "state-token", TargetHead: "target-head", AheadCount: 2, FilesChanged: 1, ChangedFiles: []string{"feature.go"},
 			ConflictFiles: []string{}, Blockers: []worktree.MergeBlocker{}, CleanupBlockers: []worktree.MergeBlocker{},
 		}, nil
 	}
@@ -47,13 +47,99 @@ func TestAppInspectAndMergeWorktreeBackUsesRequestIdentity(t *testing.T) {
 	}
 	result, err := app.MergeWorktreeBack(MergeWorktreeBackRequest{
 		TabID: "worktree-tab", ExpectedTargetBranch: "main", ExpectedTargetHead: "target-head",
-		ExpectedWorktreeHead: "worktree-head", AutoCommitDirty: true,
+		ExpectedWorktreeHead: "worktree-head", ExpectedWorktreeStateToken: "state-token", AutoCommitDirty: true,
 	})
 	if err != nil || !result.Merged {
 		t.Fatalf("MergeWorktreeBack = %+v, %v", result, err)
 	}
-	if merged.WorkspaceRoot != worktreeRoot || !merged.AutoCommitDirty || merged.ExpectedTargetHead != "target-head" {
+	if merged.WorkspaceRoot != worktreeRoot || !merged.AutoCommitDirty || merged.ExpectedTargetHead != "target-head" || merged.ExpectedWorktreeStateToken != "state-token" {
 		t.Fatalf("backend merge request = %+v", merged)
+	}
+}
+
+func TestCleanupReservationSerializesRuntimeAdmission(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	app := NewApp()
+	releaseAdmission, err := app.beginWorkspaceRuntimeAdmission(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		release, reserveErr := app.reserveWorktreeCleanup(root)
+		if release != nil {
+			release()
+		}
+		result <- reserveErr
+	}()
+	app.mu.Lock()
+	app.tabs["late"] = &WorkspaceTab{ID: "late", Scope: "project", WorkspaceRoot: root}
+	app.mu.Unlock()
+	releaseAdmission()
+	if err := <-result; err == nil {
+		t.Fatal("cleanup reservation ignored the runtime published by an admitted owner")
+	}
+	app.mu.Lock()
+	delete(app.tabs, "late")
+	app.mu.Unlock()
+	release, err := app.reserveWorktreeCleanup(root)
+	if err != nil {
+		t.Fatalf("reserve after runtime removal: %v", err)
+	}
+	if _, err := app.beginWorkspaceRuntimeAdmission(root); err == nil {
+		t.Fatal("runtime admission entered a reserved cleanup workspace")
+	}
+	release()
+}
+
+func TestCloseMergedWorktreeTabRechecksSourceAndSupportsIdempotence(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sourceRoot := t.TempDir()
+	worktreeRoot := t.TempDir()
+	app := NewApp()
+	source := &WorkspaceTab{ID: "source", Scope: "project", WorkspaceRoot: sourceRoot}
+	worktreeTab := &WorkspaceTab{ID: "worktree", Scope: "project", WorkspaceRoot: worktreeRoot}
+	app.tabs[source.ID] = source
+	app.tabs[worktreeTab.ID] = worktreeTab
+	app.tabOrder = []string{source.ID, worktreeTab.ID}
+	app.activeTabID = worktreeTab.ID
+	request := CloseMergedWorktreeTabRequest{TabID: worktreeTab.ID, WorktreeRoot: worktreeRoot, SourceTabID: source.ID, SourceRoot: sourceRoot}
+	if result, err := app.CloseMergedWorktreeTab(request); err == nil || result.Closed {
+		t.Fatalf("close with worktree reselected = %+v, %v", result, err)
+	}
+	app.activeTabID = source.ID
+	result, err := app.CloseMergedWorktreeTab(request)
+	if err != nil || !result.Closed || result.Idempotent {
+		t.Fatalf("exact close = %+v, %v", result, err)
+	}
+	result, err = app.CloseMergedWorktreeTab(request)
+	if err != nil || !result.Closed || !result.Idempotent {
+		t.Fatalf("idempotent close = %+v, %v", result, err)
+	}
+	app.mu.Lock()
+	app.detachedSessions["detached"] = &WorkspaceTab{ID: "detached", Scope: "project", WorkspaceRoot: worktreeRoot}
+	app.mu.Unlock()
+	if result, err := app.CloseMergedWorktreeTab(request); err == nil || result.Closed {
+		t.Fatalf("detached close = %+v, %v", result, err)
+	}
+}
+
+func TestRuntimeReferenceCanonicalizesSymlinkAndSubdirectory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	worktreeRoot := t.TempDir()
+	nested := filepath.Join(worktreeRoot, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(worktreeRoot, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	app := NewApp()
+	app.tabs["alias"] = &WorkspaceTab{ID: "alias", Scope: "project", WorkspaceRoot: filepath.Join(alias, "nested")}
+	if !app.worktreeRuntimeReferenced(worktreeRoot) {
+		t.Fatal("symlinked subdirectory runtime did not block cleanup")
 	}
 }
 

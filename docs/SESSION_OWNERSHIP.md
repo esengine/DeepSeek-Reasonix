@@ -84,17 +84,27 @@ managed path and repository identity, exact branches and `HEAD`s, clean source,
 absence of an in-progress Git operation, active Desktop work, workspace write
 leases, divergence, diff, and conflicts. Uncommitted worktree changes block the
 merge unless the user explicitly opts into an automatic commit; that option is
-off by default, and conflict preflight runs again after the commit. A target
-branch or `HEAD` change refreshes the confirmation instead of continuing. If
-the real merge fails, Reasonix runs `git merge --abort` and verifies that the
-source returned to its original clean `HEAD`. If recovery cannot be proven, the
-result is marked recovery-required and every worktree resource is preserved.
+off by default. Confirmation binds a transient, NUL-safe token of every dirty
+path's type, mode, bytes, or symlink target. Before committing, Reasonix proves
+the token survived `git add -A`, no unstaged or untracked content remains, and
+the resulting commit has the exact staged tree and original worktree `HEAD` as
+its only parent; conflict preflight then runs again. A target branch, `HEAD`, or
+content-token change refreshes the confirmation instead of continuing. The
+source merge uses `git merge --no-ff --no-commit`, validates the target branch,
+original `HEAD`, and exact `MERGE_HEAD`, and only then commits. On a preparation
+or commit failure Reasonix aborts and verifies the original branch, ref, clean
+state, and absence of an operation. If recovery cannot be proven, the result is
+marked recovery-required and every worktree resource is preserved.
 
-A successful merge first navigates to the recorded source checkout and closes
-the worktree view and terminal through the normal Desktop lifecycle. Cleanup is
-then a separate, retryable step. It runs only when no visible or background
-runtime references the worktree, the temporary commit is contained by the
-target, identities still match, and `git status --ignored` is completely empty.
+A successful merge first navigates to the recorded source checkout. A newer UI
+navigation intent stops the remaining close/cleanup sequence and preserves the
+resources. Otherwise Desktop closes only the exact idle worktree tab while the
+exact source tab is still active. Cleanup is then a separate, retryable step.
+It atomically reserves the canonical worktree identity while checking visible
+and detached runtimes; every project-runtime admission uses the same gate, so a
+symlink, subdirectory, restored tab, or late redirect cannot enter after that
+check. Cleanup runs only when the temporary commit is contained by the target,
+identities still match, and `git status --ignored` is completely empty.
 Reasonix uses ordinary `git worktree remove` and `git branch -d`; it never uses
 forced removal. Tracked, untracked, or ignored files therefore block cleanup
 and are listed for the user. The merge remains successful while the worktree,

@@ -151,6 +151,13 @@ func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath
 	disabledMCP := cloneServerViewMap(sourceTab.disabledMCP)
 	mcpOrder := append([]string(nil), sourceTab.mcpOrder...)
 	a.mu.RUnlock()
+	if scope == "project" {
+		releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(workspaceRoot)
+		if err != nil {
+			return forkedSessionTabOpen{}, err
+		}
+		defer releaseAdmission()
+	}
 
 	topicID := newTopicID()
 	topicTitle := a.forkTopicTitle(sourceTitle)

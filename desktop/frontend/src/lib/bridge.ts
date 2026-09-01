@@ -11,6 +11,7 @@ import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blank
 import { makeMockQualityFloorBindings, type QualityFloorBindings } from "./deliveryFloorBridge";
 import { t } from "./i18n";
 import { makeMockForkBindings } from "./forkWorktree";
+import { makeMockWorktreeMergeBindings } from "./worktreeMergeMock";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
@@ -62,6 +63,8 @@ import type {
   WorktreeMergeResult,
   WorktreeCleanupRequest,
   WorktreeCleanupResult,
+  CloseMergedWorktreeTabRequest,
+  CloseMergedWorktreeTabResult,
   DroppedItem,
   EffortInfo,
   ExtensionActionView,
@@ -641,6 +644,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   CreateIsolatedWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
   InspectWorktreeMerge(tabID: string): Promise<WorktreeMergeInspection>;
   MergeWorktreeBack(request: WorktreeMergeRequest): Promise<WorktreeMergeResult>;
+  CloseMergedWorktreeTab(request: CloseMergedWorktreeTabRequest): Promise<CloseMergedWorktreeTabResult>;
   FinalizeWorktreeMerge(request: WorktreeCleanupRequest): Promise<WorktreeCleanupResult>;
   // Deprecated one-version aliases kept bound for older desktop clients.
   DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
@@ -1092,7 +1096,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|CloseMergedWorktreeTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -5215,53 +5219,7 @@ function makeMockApp(): AppBindings {
     async CreateDeliveryWorktree(workspaceRoot: string) {
       return this.CreateIsolatedWorktree(workspaceRoot);
     },
-    async InspectWorktreeMerge(tabID: string) {
-      const tab = mockTabs.find((candidate) => candidate.id === tabID) ?? mockTabs.find((candidate) => candidate.active);
-      return {
-        available: true,
-        canMerge: true,
-        alreadyMerged: false,
-        worktreeRoot: tab?.workspaceRoot || "/mock/worktree",
-        sourceRoot: "/mock/source",
-        worktreeBranch: tab?.gitBranch || "reasonix/fork-mock",
-        targetBranch: "main",
-        createdHead: "mock-created-head",
-        worktreeHead: "mock-worktree-head",
-        targetHead: "mock-target-head",
-        aheadCount: 2,
-        behindCount: 0,
-        filesChanged: 1,
-        insertions: 15,
-        deletions: 3,
-        changedFiles: ["feature.ts"],
-        hasConflicts: false,
-        conflictFiles: [],
-        worktreeDirty: false,
-        sourceDirty: false,
-        blockers: [],
-        cleanupBlockers: [{ code: "not_merged", message: "Worktree is not merged yet", paths: [] }],
-      };
-    },
-    async MergeWorktreeBack(request: WorktreeMergeRequest) {
-      const tab = mockTabs.find((candidate) => candidate.id === request.tabId) ?? mockTabs.find((candidate) => candidate.active);
-      return {
-        merged: true,
-        alreadyMerged: false,
-        recoveryRequired: false,
-        sourceRoot: "/mock/source",
-        targetBranch: "main",
-        targetHead: "mock-commit-hash",
-        mergedCommit: "mock-commit-hash",
-        worktreeRoot: tab?.workspaceRoot || "/mock/worktree",
-        worktreeBranch: tab?.gitBranch || "reasonix/delivery-mock",
-        worktreeHead: "mock-worktree-head",
-      };
-    },
-    async FinalizeWorktreeMerge(request: WorktreeCleanupRequest) {
-      mockTabs = mockTabs.filter((candidate) => candidate.workspaceRoot !== request.worktreeRoot);
-      if (mockTabs.length > 0) mockTabs[0].active = true;
-      return { completed: true, worktreeRemoved: true, branchDeleted: true, blockers: [] };
-    },
+    ...makeMockWorktreeMergeBindings(() => mockTabs, (next) => { mockTabs = next; }),
     async OpenGlobalTab(_topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);
       if (existing) {
