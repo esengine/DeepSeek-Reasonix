@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -563,8 +564,8 @@ func holdWorktreeMergeLeases(parent context.Context, roots ...string) (func(), e
 }
 
 func runReleasesReverse(releases []func()) {
-	for index := len(releases) - 1; index >= 0; index-- {
-		releases[index]()
+	for _, release := range slices.Backward(releases) {
+		release()
 	}
 }
 
@@ -639,8 +640,8 @@ func canonicalRuntimeRootErr(root string) (string, error) {
 	} else if !os.IsNotExist(resolveErr) {
 		return "", resolveErr
 	}
-	for index := len(suffix) - 1; index >= 0; index-- {
-		probe = filepath.Join(probe, suffix[index])
+	for _, component := range slices.Backward(suffix) {
+		probe = filepath.Join(probe, component)
 	}
 	return workspacelease.CanonicalWorkspace(probe)
 }

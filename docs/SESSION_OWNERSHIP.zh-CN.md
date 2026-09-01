@@ -81,16 +81,22 @@ staged/index-only 内容，Reasonix 会停止，真实 index 和两个版本都�
 hook、单父提交的 `commit-tree` 创建精确提交，对确认的 worktree branch 做 compare-and-swap，
 并仅在真实 index 字节仍一致时通过独占 `index.lock` 安装准备好的 index。branch CAS 后的
 任何失败都返回 recovery-required；目标分支、`HEAD`、index 或内容发生漂移时不会继续。
-source 合并使用 `git merge --no-ff --no-commit`，并把
-实际 index tree 与重新计算的 merge-tree 精确绑定；准备前及安装 ref 前都会重新验证
+source 合并使用带 Reasonix 命令级提交身份的
+`git merge --no-ff --no-commit --no-verify`，不依赖用户 Git identity，也不运行 commit hook，
+并把实际 index tree 与重新计算的 merge-tree 精确绑定；准备前及安装 ref 前都会重新验证
 worktree root、Git common-dir、symbolic branch、branch ref、`HEAD`、Git operation 和内容
 token。只有这些身份、目标分支、原始 `HEAD`、精确 `MERGE_HEAD` 和 prepared tree 都仍
-一致时，才通过无 hook 的 `commit-tree` 创建固定 parents/tree 的提交。单个
+一致时，才通过无 hook 的 `commit-tree` 创建固定 parents/tree 的提交。短生命周期 source
+mutation fence 会持有真实 index、`HEAD` 和 `MERGE_HEAD` lockfile，并比较三者准确快照。
+这些 checkout 局部锁保持期间，Git 通过指向同一 common ref store 的 detached 管理视图
+只取得 branch ref 锁。单个
 `update-ref --stdin` transaction 会同时验证 worktree branch ref，并用原目标 `HEAD` 对
 target ref 做 compare-and-swap，避免任一 ref 检查部分生效。提交后还会复核两个 checkout、
-commit tree、真实 index tree、parents、refs、干净状态和 Git operations。CAS 前仍由
-Reasonix 拥有的准备失败会执行 abort；target ref 漂移、CAS 后 worktree 漂移或无法证明
-恢复成功的状态返回 recovery-required，同时保留所有 worktree 资源和外部状态。
+commit tree、真实 index tree、parents、refs、干净状态和 Git operations。安装后使用
+`git merge --quit` 只清理辅助 merge state，不直接更新 `MERGE_HEAD` pseudoref，也不 reset
+prepared index。CAS 前只有仍能证明 prepared state 完整的失败才会 abort；target ref 漂移、
+CAS 后漂移或无法证明恢复成功的状态返回 recovery-required，同时保留所有 worktree 资源和
+外部状态。
 
 合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout。每次
 前端导航都会向后端登记 opaque intent token；关闭请求在快照前和实际移除 Tab 的线性化
@@ -102,12 +108,18 @@ allocation，并扫描可见及 detached runtime；项目 runtime 创建、恢�
 和重定向都经过同一 admission gate。symlink 与子目录受保护，allocation 外的 prefix
 sibling 和其他 allocation 不受影响。只有临时提交已包含在目标分支、身份一致且包含 ignored 文件的
 完整 status 为空时，checkout 才会原子移动到 reservation 覆盖的随机 quarantine 路径。
-Reasonix 在普通 `git worktree remove` 前会两次复核仓库、branch、`HEAD` 和完整 status。
-晚到写入若落在原公开路径，就位于删除目标之外并被保留和报告；quarantine 内检测到内容
-则停止清理，并在原路径空闲时恢复 checkout；若 checkout 已登记在其他路径，清理也会停止并
-保留其分支。临时分支使用预期 `HEAD` 的 CAS 删除。
-全流程不使用强制 worktree/branch 删除或递归文件系统删除；任何无法证明安全的 worktree、
-分支和文件都会保留以便恢复。
+Reasonix 会两次复核仓库、branch、`HEAD`、完整 status 与 NUL-safe 文件清单，并以 `0600`
+原子写入 v1 `cleanup-state.json`，记录 registered path、第二个随机 detached path、阶段和
+manifest。旧版本会忽略该旁路文件且无法访问 detached 内容；未知 journal 版本失败关闭。
+
+验证完成后，checkout 被原子改名到 detached path，再对已经不存在的 registered path 执行普通
+`git worktree remove`，因此 Git 只注销 worktree，不遍历用户文件。随后只删除类型、mode、
+内容或 symlink target 仍与 manifest 完全一致的叶子，目录仅在为空时使用普通 `os.Remove`；
+已缺失叶子让重试保持幂等。任何新增、修改、ignored、untracked 或晚到内容都会保留在 detached
+恢复目录并报告，写入原公开路径的内容也始终位于清理目标之外。最后使用单个 ref transaction
+同时验证当前 target ref 仍包含 merge/worktree commits，并按预期 `HEAD` 删除临时分支；target
+漂移不会导致 recovery ref 被部分删除。全流程不使用强制 worktree/branch 删除或递归文件系统
+删除；任何无法证明安全的分支和文件都会保留以便恢复。
 
 Delivery worktree 仍是可选能力。非隔离目录使用 workspace lease（`filelock`）。
 路径型写入对祖先兼容锁和目标路径层级分片加 shared 锁、对具体文件分片加

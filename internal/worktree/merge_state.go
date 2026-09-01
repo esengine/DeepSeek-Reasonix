@@ -111,7 +111,7 @@ func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string
 		if err != nil {
 			return fmt.Errorf("open changed path %q: %w", relative, err)
 		}
-		_, copyErr := io.Copy(hash, file)
+		copyErr := copyWithContext(ctx, hash, file)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return fmt.Errorf("read changed path %q: %w", relative, copyErr)
@@ -140,6 +140,27 @@ func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string
 	}
 	_, _ = io.WriteString(hash, "\x00")
 	return nil
+}
+
+func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) error {
+	buffer := make([]byte, 128*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		count, readErr := source.Read(buffer)
+		if count > 0 {
+			if _, err := destination.Write(buffer[:count]); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
 }
 
 func gitOperation(ctx context.Context, root string) (string, error) {

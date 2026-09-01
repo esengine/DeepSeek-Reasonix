@@ -101,21 +101,29 @@ installs the prepared index through Git's exclusive `index.lock` protocol only
 if the real index bytes still match. Any failure after the branch CAS is marked
 recovery-required; conflict preflight runs again on the exact new commit. A
 target branch, `HEAD`, index, or content-token change refreshes the confirmation
-instead of continuing. The
-source merge uses `git merge --no-ff --no-commit` and binds the real index tree
-to a freshly computed merge tree. The worktree root, common repository,
+instead of continuing. The source merge uses
+`git merge --no-ff --no-commit --no-verify` with a Reasonix-scoped committer
+identity, so it neither depends on user Git identity nor invokes commit hooks.
+It binds the real index tree to a freshly computed merge tree. The worktree root, common repository,
 symbolic branch, branch ref, `HEAD`, Git operation, and content token are
 revalidated before preparation and before ref installation. Only while those
 identities, the target branch, original `HEAD`, exact `MERGE_HEAD`, and prepared
 tree still match does Reasonix create a hook-free `commit-tree` object with
-fixed parents and tree. One `update-ref --stdin` transaction verifies the
+fixed parents and tree. A short source mutation fence holds the real index,
+`HEAD`, and `MERGE_HEAD` lockfiles and compares their exact snapshots. While
+those checkout-local locks remain held, Git uses a detached administrative view
+of the same common ref store to acquire only the branch ref locks. One
+`update-ref --stdin` transaction verifies the
 worktree branch ref and compare-and-swaps the target ref against its original
 `HEAD`, so neither ref check can partially succeed. Post-commit verification
 rechecks both checkouts plus the commit tree, real index tree, parents, refs,
-clean state, and Git operations. Owned preparation failures before the CAS are
-aborted; target-ref drift, post-CAS worktree drift, or any state whose recovery
-cannot be proven is marked recovery-required while every worktree resource and
-external state is preserved.
+clean state, and Git operations. After installation, `git merge --quit` removes
+only Git's auxiliary merge state; Reasonix does not update the `MERGE_HEAD`
+pseudoref directly or reset the prepared index. Owned preparation failures
+before the CAS are aborted only when the prepared state can still be proved;
+target-ref drift, post-CAS drift, or any state whose recovery cannot be proven
+is marked recovery-required while every worktree resource and external state
+is preserved.
 
 A successful merge first navigates to the recorded source checkout. Every UI
 navigation registers an opaque intent token with Desktop; the close request
@@ -133,15 +141,25 @@ remain independent.
 Cleanup runs only when the temporary commit is contained by the target,
 identities still match, and the full status including ignored files is empty.
 The checkout is atomically moved to an unguessable path under the reserved
-quarantine, then its repository, branch, `HEAD`, and status are verified twice
-before ordinary `git worktree remove`. A writer that targets the former public
-path creates content outside the removal target, so that content is preserved
-and reported. Content observed inside quarantine aborts cleanup and restores the
-checkout when the original path is free. A checkout registered at any other
-path also stops cleanup and preserves its branch. The temporary branch is deleted with
-an expected-`HEAD` compare-and-swap. Reasonix never uses forced worktree/branch
-removal or recursive filesystem deletion. The merge remains successful while
-any unproven worktree, branch, or file stays available for recovery.
+quarantine, then its repository, branch, `HEAD`, status, and NUL-safe filesystem
+manifest are verified twice. A mode-0600 v1 `cleanup-state.json` journal records
+the registered path, a second random detached path, stage, and manifest. Older
+versions ignore this sidecar and cannot reach the detached files; unknown journal
+versions fail closed.
+
+Reasonix atomically renames the verified checkout to the detached path and runs
+ordinary `git worktree remove` against the now-missing registered path, so Git
+unregisters the checkout without traversing user files. It then removes only
+manifest leaves whose type, mode, bytes, or symlink target still match, and
+removes directories only when empty. Missing leaves make retries idempotent;
+unknown, changed, ignored, or late content stays in the detached recovery root
+and is reported. A writer targeting the former public path also remains outside
+the cleanup target. Finally, one ref transaction verifies the current target ref
+still contains the merge and worktree commits while deleting the temporary
+branch at its expected `HEAD`; target drift cannot partially delete the recovery
+ref. Reasonix never uses forced worktree/branch removal or recursive filesystem
+deletion. The merge remains successful while any unproven branch or file stays
+available for recovery.
 
 Delivery worktrees stay optional. Non-isolated directories use the workspace
 lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,

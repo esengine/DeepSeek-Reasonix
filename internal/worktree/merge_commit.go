@@ -4,9 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
+
+const (
+	mergeCommitterName  = "Reasonix"
+	mergeCommitterEmail = "reasonix@local"
+)
+
+type sourceMutationFence struct {
+	files []*os.File
+	paths []string
+}
 
 func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (string, bool, error) {
 	originalHead := inspection.TargetHead
@@ -25,10 +38,12 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	if hasConflicts {
 		return "", false, fmt.Errorf("source merge conflicts changed after inspection: %s", strings.Join(conflictFiles, ", "))
 	}
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "merge", "--no-ff", "--no-commit", inspection.WorktreeHead); err != nil {
+	if _, stderr, err := runGit(ctx, inspection.SourceRoot,
+		"-c", "user.name="+mergeCommitterName, "-c", "user.email="+mergeCommitterEmail,
+		"merge", "--no-ff", "--no-commit", "--no-verify", inspection.WorktreeHead); err != nil {
 		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
 		if !recovered {
-			return "", true, fmt.Errorf("merge failed: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr)
+			return "", true, fmt.Errorf("merge failed%s: %w", stderrSuffix(stderr), errors.Join(err, fmt.Errorf("automatic recovery failed: %w", recoveryErr)))
 		}
 		return "", false, fmt.Errorf("merge failed and was aborted: %w%s", err, stderrSuffix(stderr))
 	}
@@ -40,12 +55,12 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 		return abortPreparedWorktreeDrift(ctx, inspection, originalHead, err)
 	}
 	mergedHead, stderr, err := gitValue(ctx, inspection.SourceRoot,
-		"-c", "user.name=Reasonix", "-c", "user.email=reasonix@local",
+		"-c", "user.name="+mergeCommitterName, "-c", "user.email="+mergeCommitterEmail,
 		"commit-tree", expectedTree, "-p", originalHead, "-p", inspection.WorktreeHead, "-m", message)
 	if err != nil {
 		recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
 		if !recovered {
-			return "", true, fmt.Errorf("create exact merge commit: %w%s; automatic recovery failed: %v", err, stderrSuffix(stderr), recoveryErr)
+			return "", true, fmt.Errorf("create exact merge commit%s: %w", stderrSuffix(stderr), errors.Join(err, fmt.Errorf("automatic recovery failed: %w", recoveryErr)))
 		}
 		return "", false, fmt.Errorf("create exact merge commit: %w%s; merge was aborted", err, stderrSuffix(stderr))
 	}
@@ -53,22 +68,40 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	if err := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead, expectedTree); err != nil {
 		return "", true, fmt.Errorf("source changed before target ref update; source state was preserved for recovery: %w", err)
 	}
+	snapshot, err := snapshotPreparedSourceFiles(ctx, inspection.SourceRoot)
+	if err != nil {
+		return abortPreparedSourceDrift(ctx, inspection, originalHead, expectedTree, err)
+	}
 	noteMergeStep("before_merge_ref_update")
-	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
-		return abortPreparedWorktreeDrift(ctx, inspection, originalHead, err)
+	fence, err := acquireSourceMutationFence(ctx, inspection.SourceRoot)
+	if err != nil {
+		return abortPreparedSourceDrift(ctx, inspection, originalHead, expectedTree, fmt.Errorf("acquire source mutation fence: %w", err))
+	}
+	err = verifyPreparedSourceFiles(ctx, inspection.SourceRoot, snapshot)
+	if err == nil {
+		err = verifyWorktreeMergeIdentity(ctx, inspection)
+	}
+	if err == nil {
+		err = verifyPreparedSourceFiles(ctx, inspection.SourceRoot, snapshot)
+	}
+	if err != nil {
+		fence.release()
+		return abortPreparedSourceDrift(ctx, inspection, originalHead, expectedTree, err)
 	}
 	noteMergeStep("before_merge_ref_transaction")
 	if stderr, err := updateMergeRefs(ctx, inspection, originalHead, mergedHead); err != nil {
+		fence.release()
 		return recoverRefUpdateFailure(ctx, inspection, originalHead, expectedTree, stderr, err)
 	}
+	fence.release()
 	noteMergeStep("after_merge_ref_update")
 	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
 		return "", true, fmt.Errorf("merge commit was installed but the worktree identity changed; recovery is required: %w", err)
 	}
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "update-ref", "-d", "MERGE_HEAD", inspection.WorktreeHead); err != nil {
-		return "", true, fmt.Errorf("merge commit was installed but MERGE_HEAD changed; source requires recovery: %w%s", err, stderrSuffix(stderr))
+	if err := verifyInstalledMergeState(ctx, inspection, mergedHead, expectedTree); err != nil {
+		return "", true, fmt.Errorf("merge commit was installed but prepared source state changed; recovery is required: %w", err)
 	}
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "reset", "--quiet", "--soft", "HEAD"); err != nil {
+	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "merge", "--quit"); err != nil {
 		return "", true, fmt.Errorf("merge commit was installed but merge state cleanup failed; source requires recovery: %w%s", err, stderrSuffix(stderr))
 	}
 	noteMergeStep("after_merge_commit")
@@ -82,20 +115,182 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	return verifiedHead, false, nil
 }
 
+func abortPreparedSourceDrift(ctx context.Context, inspection MergeInspection, originalHead, expectedTree string, driftErr error) (string, bool, error) {
+	if verifyErr := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead, expectedTree); verifyErr != nil {
+		return "", true, fmt.Errorf("source changed before target ref update; source state was preserved for recovery: %w", driftErr)
+	}
+	recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
+	if recovered {
+		return "", false, fmt.Errorf("source changed before target ref update; merge was aborted: %w", driftErr)
+	}
+	return "", true, fmt.Errorf("source changed before target ref update: %w", errors.Join(driftErr, fmt.Errorf("automatic recovery failed: %w", recoveryErr)))
+}
+
 func abortPreparedWorktreeDrift(ctx context.Context, inspection MergeInspection, originalHead string, driftErr error) (string, bool, error) {
 	recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
 	if recovered {
 		return "", false, fmt.Errorf("worktree changed before target ref update; merge was aborted: %w", driftErr)
 	}
-	return "", true, fmt.Errorf("worktree changed before target ref update: %w; automatic recovery failed: %v", driftErr, recoveryErr)
+	return "", true, fmt.Errorf("worktree changed before target ref update: %w", errors.Join(driftErr, fmt.Errorf("automatic recovery failed: %w", recoveryErr)))
 }
 
 func updateMergeRefs(ctx context.Context, inspection MergeInspection, originalHead, mergedHead string) (string, error) {
 	targetRef := "refs/heads/" + inspection.TargetBranch
 	worktreeRef := "refs/heads/" + inspection.WorktreeBranch
 	input := fmt.Sprintf("verify %s %s\nupdate %s %s %s\n", worktreeRef, inspection.WorktreeHead, targetRef, mergedHead, originalHead)
-	_, stderr, err := runGitInput(ctx, inspection.SourceRoot, input, "update-ref", "--stdin")
+	transactionDir, err := createDetachedRefTransactionDir(ctx, inspection.SourceRoot)
+	if err != nil {
+		return "", err
+	}
+	_, stderr, updateErr := runGitEnvInput(ctx, "", input, nil, "--git-dir="+transactionDir, "update-ref", "--stdin")
+	cleanupErr := removeDetachedRefTransactionDir(transactionDir)
+	err = errors.Join(updateErr, cleanupErr)
 	return stderr, err
+}
+
+// createDetachedRefTransactionDir gives update-ref access to the repository's
+// common ref store without identifying the source checkout as its active
+// worktree. That lets the caller keep the source HEAD.lock held while Git owns
+// and atomically updates the target/worktree branch refs. A normal update-ref
+// run from the source checkout also tries to lock HEAD for its reflog.
+func createDetachedRefTransactionDir(ctx context.Context, sourceRoot string) (string, error) {
+	commonDir, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("resolve common Git directory for ref transaction: %w%s", err, stderrSuffix(stderr))
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(sourceRoot, commonDir)
+	}
+	commonDir = filepath.Clean(commonDir)
+	transactionDir, err := os.MkdirTemp("", "reasonix-ref-transaction-")
+	if err != nil {
+		return "", fmt.Errorf("create detached ref transaction directory: %w", err)
+	}
+	write := func(name, body string) error {
+		path := filepath.Join(transactionDir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			return fmt.Errorf("write detached ref transaction %s: %w", name, err)
+		}
+		return nil
+	}
+	if err := write("commondir", commonDir+"\n"); err != nil {
+		_ = removeDetachedRefTransactionDir(transactionDir)
+		return "", err
+	}
+	if err := write("HEAD", "ref: refs/reasonix/merge-back-ref-transaction\n"); err != nil {
+		_ = removeDetachedRefTransactionDir(transactionDir)
+		return "", err
+	}
+	return transactionDir, nil
+}
+
+func removeDetachedRefTransactionDir(path string) error {
+	var cleanupErr error
+	for _, name := range []string{"HEAD", "commondir"} {
+		if err := os.Remove(filepath.Join(path, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove detached ref transaction %s: %w", name, err))
+		}
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove detached ref transaction directory: %w", err))
+	}
+	return cleanupErr
+}
+
+func acquireSourceMutationFence(ctx context.Context, sourceRoot string) (*sourceMutationFence, error) {
+	fence := &sourceMutationFence{}
+	// update-ref must own HEAD.lock while advancing the checked-out target.
+	// Keep the mutable non-ref state fenced here and verify HEAD in the same
+	// ref transaction as the target/worktree refs.
+	markers := []string{"HEAD", "MERGE_HEAD", "index"}
+	paths := make([]string, 0, len(markers))
+	for _, marker := range markers {
+		path, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--git-path", marker)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s lock path: %w%s", marker, err, stderrSuffix(stderr))
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(sourceRoot, path)
+		}
+		paths = append(paths, filepath.Clean(path)+".lock")
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			fence.release()
+			return nil, fmt.Errorf("lock %s: %w", filepath.Base(strings.TrimSuffix(path, ".lock")), err)
+		}
+		fence.files = append(fence.files, file)
+		fence.paths = append(fence.paths, path)
+	}
+	return fence, nil
+}
+
+func (fence *sourceMutationFence) release() {
+	if fence == nil {
+		return
+	}
+	for index, file := range slices.Backward(fence.files) {
+		_ = file.Close()
+		_ = os.Remove(fence.paths[index])
+	}
+	fence.files = nil
+	fence.paths = nil
+}
+
+type preparedSourceFiles map[string]string
+
+func snapshotPreparedSourceFiles(ctx context.Context, sourceRoot string) (preparedSourceFiles, error) {
+	snapshot := preparedSourceFiles{}
+	for _, marker := range []string{"HEAD", "MERGE_HEAD", "index"} {
+		path, stderr, err := gitValue(ctx, sourceRoot, "rev-parse", "--git-path", marker)
+		if err != nil {
+			return nil, fmt.Errorf("resolve prepared %s: %w%s", marker, err, stderrSuffix(stderr))
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(sourceRoot, path)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read prepared %s: %w", marker, err)
+		}
+		snapshot[filepath.Clean(path)] = string(body)
+	}
+	return snapshot, nil
+}
+
+func verifyPreparedSourceFiles(ctx context.Context, sourceRoot string, snapshot preparedSourceFiles) error {
+	current, err := snapshotPreparedSourceFiles(ctx, sourceRoot)
+	if err != nil {
+		return err
+	}
+	for path, expected := range snapshot {
+		if current[path] != expected {
+			return fmt.Errorf("prepared %s changed while target ref was fenced", filepath.Base(path))
+		}
+	}
+	return nil
+}
+
+func verifyInstalledMergeState(ctx context.Context, inspection MergeInspection, mergedHead, expectedTree string) error {
+	branch, stderr, err := gitValue(ctx, inspection.SourceRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch != inspection.TargetBranch {
+		return fmt.Errorf("source branch is %q, expected %q%s", branch, inspection.TargetBranch, stderrSuffix(stderr))
+	}
+	head, stderr, err := gitValue(ctx, inspection.SourceRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil || head != mergedHead {
+		return fmt.Errorf("source HEAD is %s, expected installed merge %s%s", head, mergedHead, stderrSuffix(stderr))
+	}
+	mergeHead, stderr, err := gitValue(ctx, inspection.SourceRoot, "rev-parse", "--verify", "MERGE_HEAD")
+	if err != nil || mergeHead != inspection.WorktreeHead {
+		return fmt.Errorf("MERGE_HEAD changed from %s to %s%s", inspection.WorktreeHead, mergeHead, stderrSuffix(stderr))
+	}
+	preparedTree, stderr, err := gitValue(ctx, inspection.SourceRoot, "write-tree")
+	if err != nil || preparedTree != expectedTree {
+		return fmt.Errorf("prepared source tree is %s, expected %s%s", preparedTree, expectedTree, stderrSuffix(stderr))
+	}
+	return nil
 }
 
 func recoverRefUpdateFailure(ctx context.Context, inspection MergeInspection, originalHead, expectedTree, stderr string, updateErr error) (string, bool, error) {
@@ -110,7 +305,7 @@ func recoverRefUpdateFailure(ctx context.Context, inspection MergeInspection, or
 	if recovered {
 		return "", false, fmt.Errorf("target ref update failed and merge was aborted: %w%s", updateErr, stderrSuffix(stderr))
 	}
-	return "", true, fmt.Errorf("target ref update failed: %w%s; automatic recovery failed: %v", updateErr, stderrSuffix(stderr), recoveryErr)
+	return "", true, fmt.Errorf("target ref update failed%s: %w", stderrSuffix(stderr), errors.Join(updateErr, fmt.Errorf("automatic recovery failed: %w", recoveryErr)))
 }
 
 func verifyWorktreeMergeIdentity(ctx context.Context, inspection MergeInspection) error {

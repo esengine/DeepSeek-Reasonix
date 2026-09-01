@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,5 +229,114 @@ func TestFinalizeMergeRetriesAfterWorktreeRemovalAndBranchLockFailure(t *testing
 	cleanup, err = FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
 	if err != nil || !cleanup.Completed || !cleanup.WorktreeRemoved || !cleanup.BranchDeleted {
 		t.Fatalf("branch-lock retry = %+v, %v", cleanup, err)
+	}
+}
+
+func TestFinalizeMergePreservesLateIgnoredContentAfterDetachment(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, ".gitignore", "*.cache\n", "ignore cache")
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorktreeRoot, managed)
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	latePath := ""
+	mergeStepHook = func(step string) {
+		if step != "before_cleanup_detached_remove" {
+			return
+		}
+		entries, err := os.ReadDir(filepath.Join(filepath.Dir(created.WorktreeRoot), ".reasonix-cleanup"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "detached-") {
+				latePath = filepath.Join(filepath.Dir(created.WorktreeRoot), ".reasonix-cleanup", entry.Name(), "late.cache")
+				if err := os.WriteFile(latePath, []byte("preserve ignored\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+		t.Fatal("detached cleanup root was not found")
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	cleanup, err := FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
+	if err == nil || cleanup.Completed || !cleanup.WorktreeRemoved || cleanup.BranchDeleted || !hasBlocker(cleanup.Blockers, "late_content_preserved") {
+		t.Fatalf("late ignored cleanup = %+v, %v", cleanup, err)
+	}
+	if body, readErr := os.ReadFile(latePath); readErr != nil || string(body) != "preserve ignored\n" {
+		t.Fatalf("late ignored content was not preserved: %q, %v", body, readErr)
+	}
+	if got := gitTest(t, repo, "rev-parse", "refs/heads/"+result.WorktreeBranch); got != result.WorktreeHead {
+		t.Fatalf("recovery branch changed after late content: %s", got)
+	}
+
+	mergeStepHook = nil
+	if err := os.Remove(latePath); err != nil {
+		t.Fatal(err)
+	}
+	cleanup, err = FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
+	if err != nil || !cleanup.Completed || !cleanup.WorktreeRemoved || !cleanup.BranchDeleted {
+		t.Fatalf("late ignored cleanup retry = %+v, %v", cleanup, err)
+	}
+	if _, err := os.Stat(cleanupJournalPath(mergeMetadata{WorktreeRoot: created.WorktreeRoot})); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cleanup journal remains after retry: %v", err)
+	}
+}
+
+func TestFinalizeMergeTargetDriftCannotDeleteRecoveryBranch(t *testing.T) {
+	requireGit(t)
+	repo, managed, _, result := mergedWorktreeFixture(t)
+	originalHead := gitTest(t, repo, "rev-parse", result.MergedCommit+"^1")
+	mergeStepHook = func(step string) {
+		if step == "before_cleanup_branch_delete" {
+			gitTest(t, repo, "update-ref", "refs/heads/"+result.TargetBranch, originalHead, result.MergedCommit)
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	cleanup, err := FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
+	if err == nil || cleanup.Completed || !cleanup.WorktreeRemoved || cleanup.BranchDeleted || !strings.Contains(cleanup.Error, "atomic target verification") {
+		t.Fatalf("target drift cleanup = %+v, %v", cleanup, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "refs/heads/"+result.WorktreeBranch); got != result.WorktreeHead {
+		t.Fatalf("recovery branch was deleted after target drift: %s", got)
+	}
+
+	mergeStepHook = nil
+	gitTest(t, repo, "update-ref", "refs/heads/"+result.TargetBranch, result.MergedCommit, originalHead)
+	cleanup, err = FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
+	if err != nil || !cleanup.Completed || !cleanup.WorktreeRemoved || !cleanup.BranchDeleted {
+		t.Fatalf("target drift cleanup retry = %+v, %v", cleanup, err)
+	}
+}
+
+func TestFinalizeMergeRejectsUnknownCleanupJournalVersion(t *testing.T) {
+	requireGit(t)
+	repo, managed, created, result := mergedWorktreeFixture(t)
+	journal := cleanupJournalPath(mergeMetadata{WorktreeRoot: created.WorktreeRoot})
+	if err := os.WriteFile(journal, []byte("{\"version\":99}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanup, err := FinalizeMerge(context.Background(), managed, cleanupFromMerge(result))
+	if err == nil || cleanup.Completed || cleanup.WorktreeRemoved || cleanup.BranchDeleted || !strings.Contains(cleanup.Error, "unsupported cleanup state version") {
+		t.Fatalf("unknown cleanup journal = %+v, %v", cleanup, err)
+	}
+	if _, err := os.Stat(created.WorktreeRoot); err != nil {
+		t.Fatalf("unknown journal removed worktree: %v", err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "refs/heads/"+result.WorktreeBranch); got != result.WorktreeHead {
+		t.Fatalf("unknown journal changed recovery branch: %s", got)
 	}
 }

@@ -349,12 +349,12 @@ func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupReque
 		return cleanupFailure(result, errors.New("worktree HEAD is not contained in the target branch"))
 	}
 
-	blockers, err := finalizeCleanupWorktree(ctx, metadata, request.WorktreeHead, rootExists)
+	blockers, worktreeRemoved, err := finalizeCleanupWorktree(ctx, metadata, request.WorktreeHead, rootExists)
 	result.Blockers = append(result.Blockers, blockers...)
+	result.WorktreeRemoved = worktreeRemoved
 	if err != nil {
 		return cleanupFailure(result, err)
 	}
-	result.WorktreeRemoved = true
 
 	_, stderr, err = runGit(ctx, metadata.SourceRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+metadata.WorktreeBranch)
 	if err == nil {
@@ -365,9 +365,22 @@ func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupReque
 		if branchHead != request.WorktreeHead {
 			return cleanupFailure(result, errors.New("temporary branch moved after merge; it was preserved"))
 		}
+		verifiedTargetHead, targetStderr, targetErr := gitValue(ctx, metadata.SourceRoot, "rev-parse", "--verify", "refs/heads/"+metadata.TargetBranch)
+		if targetErr != nil {
+			return cleanupFailure(result, fmt.Errorf("inspect target branch before temporary branch deletion: %w%s", targetErr, stderrSuffix(targetStderr)))
+		}
+		if ok, ancestorErr := isAncestor(ctx, metadata.SourceRoot, request.MergedCommit, verifiedTargetHead); ancestorErr != nil || !ok {
+			return cleanupFailure(result, errors.New("the target branch changed before temporary branch deletion; the branch was preserved"))
+		}
+		if ok, ancestorErr := isAncestor(ctx, metadata.SourceRoot, request.WorktreeHead, verifiedTargetHead); ancestorErr != nil || !ok {
+			return cleanupFailure(result, errors.New("the target branch no longer contains the worktree commit; the branch was preserved"))
+		}
 		noteMergeStep("before_cleanup_branch_delete")
-		if _, stderr, err := runGit(ctx, metadata.SourceRoot, "update-ref", "-d", "refs/heads/"+metadata.WorktreeBranch, request.WorktreeHead); err != nil {
-			return cleanupFailure(result, fmt.Errorf("delete merged temporary branch with compare-and-swap: %w%s", err, stderrSuffix(stderr)))
+		targetRef := "refs/heads/" + metadata.TargetBranch
+		worktreeRef := "refs/heads/" + metadata.WorktreeBranch
+		input := fmt.Sprintf("verify %s %s\ndelete %s %s\n", targetRef, verifiedTargetHead, worktreeRef, request.WorktreeHead)
+		if _, stderr, err := runGitInput(ctx, metadata.SourceRoot, input, "update-ref", "--stdin"); err != nil {
+			return cleanupFailure(result, fmt.Errorf("delete merged temporary branch with atomic target verification: %w%s", err, stderrSuffix(stderr)))
 		}
 		result.BranchDeleted = true
 	} else if exitCode(err) == 1 {
@@ -438,7 +451,7 @@ func diffStats(ctx context.Context, root, targetHead, worktreeHead, status strin
 	if err != nil {
 		return 0, 0, 0, paths, fmt.Errorf("inspect committed diff: %w%s", err, stderrSuffix(stderr))
 	}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -470,7 +483,7 @@ func diffStats(ctx context.Context, root, targetHead, worktreeHead, status strin
 func statusPaths(status string) []string {
 	seen := map[string]struct{}{}
 	paths := []string{}
-	for _, line := range strings.Split(status, "\n") {
+	for line := range strings.SplitSeq(status, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if len(line) < 4 {
 			continue

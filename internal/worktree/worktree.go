@@ -232,7 +232,7 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 		if err := writeMergeMetadata(result, info.Branch); err != nil {
 			rollbackErr := RollbackCreate(ctx, result)
 			if rollbackErr != nil {
-				return Result{}, fmt.Errorf("%w; exact-clean rollback failed and the worktree was preserved: %v", err, rollbackErr)
+				return Result{}, fmt.Errorf("publish merge metadata and roll back allocation: %w", errors.Join(err, fmt.Errorf("exact-clean rollback failed and the worktree was preserved: %w", rollbackErr)))
 			}
 			return Result{}, err
 		}

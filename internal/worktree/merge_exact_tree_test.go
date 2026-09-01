@@ -51,6 +51,127 @@ func TestMergeBackUsesExactPreparedTreeWithoutHooks(t *testing.T) {
 	}
 }
 
+func TestMergeBackDoesNotRequireUserGitIdentity(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	gitTest(t, repo, "config", "user.useConfigOnly", "true")
+	gitTest(t, repo, "config", "user.name", "")
+	gitTest(t, repo, "config", "user.email", "")
+	inspection := inspectMergeTest(t, created.WorktreeRoot, managed)
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err != nil || !result.Merged || result.RecoveryRequired {
+		t.Fatalf("identity-free merge = %+v, %v", result, err)
+	}
+}
+
+func TestMergeBackFailsClosedWhenSourceMutationFenceIsBusy(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorktreeRoot, managed)
+	indexPath := gitTest(t, repo, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(repo, indexPath)
+	}
+	lockPath := indexPath + ".lock"
+	mergeStepHook = func(step string) {
+		if step == "before_merge_ref_update" {
+			if err := os.WriteFile(lockPath, []byte("held\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		mergeStepHook = nil
+		_ = os.Remove(lockPath)
+	})
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || !result.RecoveryRequired || !strings.Contains(result.Error, "mutation fence") {
+		t.Fatalf("busy source fence = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "refs/heads/"+inspection.TargetBranch); got != inspection.TargetHead {
+		t.Fatalf("target advanced while source fence was busy: %s", got)
+	}
+}
+
+func TestMergeBackRejectsSameHeadSourceBranchSwitchBeforeCAS(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorktreeRoot, managed)
+	mergeStepHook = func(step string) {
+		if step == "before_merge_ref_update" {
+			gitTest(t, repo, "update-ref", "refs/heads/same-head-external", inspection.TargetHead)
+			gitTest(t, repo, "symbolic-ref", "HEAD", "refs/heads/same-head-external")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || !result.RecoveryRequired || !strings.Contains(result.Error, "source changed") {
+		t.Fatalf("same-head source switch = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "refs/heads/"+inspection.TargetBranch); got != inspection.TargetHead {
+		t.Fatalf("target advanced after source branch switch: %s", got)
+	}
+	if got := gitTest(t, repo, "branch", "--show-current"); got != "same-head-external" {
+		t.Fatalf("external source branch was not preserved: %s", got)
+	}
+}
+
+func TestMergeBackFencesSourceHeadDuringRefTransaction(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorktreeRoot, managed)
+	attempted := false
+	mergeStepHook = func(step string) {
+		if step != "before_merge_ref_transaction" {
+			return
+		}
+		attempted = true
+		gitTest(t, repo, "update-ref", "refs/heads/same-head-external", inspection.TargetHead)
+		if _, _, switchErr := runGit(context.Background(), repo, "symbolic-ref", "HEAD", "refs/heads/same-head-external"); switchErr == nil {
+			t.Fatal("source HEAD changed while the mutation fence was held")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err != nil || !result.Merged || result.RecoveryRequired {
+		t.Fatalf("HEAD-fenced merge = %+v, %v", result, err)
+	}
+	if !attempted {
+		t.Fatal("source branch switch was not attempted at the ref transaction boundary")
+	}
+	if got := gitTest(t, repo, "branch", "--show-current"); got != inspection.TargetBranch {
+		t.Fatalf("source branch changed despite the HEAD fence: %s", got)
+	}
+}
+
 func TestMergeBackRejectsIndexMutationBeforeRefUpdate(t *testing.T) {
 	requireGit(t)
 	repo := initRepo(t)

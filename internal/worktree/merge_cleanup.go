@@ -6,13 +6,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
-func finalizeCleanupWorktree(ctx context.Context, metadata mergeMetadata, expectedHead string, rootExists bool) ([]MergeBlocker, error) {
+func finalizeCleanupWorktree(ctx context.Context, metadata mergeMetadata, expectedHead string, rootExists bool) ([]MergeBlocker, bool, error) {
+	state, hasState, err := readCleanupState(metadata, expectedHead)
+	if err != nil {
+		return nil, false, err
+	}
+	if hasState {
+		return resumeCleanupState(ctx, metadata, state)
+	}
 	quarantineRoot, quarantined, err := findQuarantinedWorktree(ctx, metadata, expectedHead)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if quarantined {
 		return removeQuarantinedWorktree(ctx, metadata, quarantineRoot, expectedHead)
@@ -20,79 +28,79 @@ func finalizeCleanupWorktree(ctx context.Context, metadata mergeMetadata, expect
 	if !rootExists {
 		registered, registeredErr := worktreeBranchIsRegistered(ctx, metadata.SourceRoot, metadata.WorktreeBranch)
 		if registeredErr != nil {
-			return nil, registeredErr
+			return nil, false, registeredErr
 		}
 		if registered {
-			return nil, errors.New("worktree remains registered at an unexpected path; it was preserved")
+			return nil, false, errors.New("worktree remains registered at an unexpected path; it was preserved")
 		}
-		return []MergeBlocker{}, nil
+		return []MergeBlocker{}, true, nil
 	}
 
 	branch, stderr, err := gitValue(ctx, metadata.WorktreeRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		registered, registeredErr := worktreeBranchIsRegistered(ctx, metadata.SourceRoot, metadata.WorktreeBranch)
 		if registeredErr != nil {
-			return nil, registeredErr
+			return nil, false, registeredErr
 		}
 		if registered {
-			return nil, fmt.Errorf("worktree branch remains registered at an unexpected path%s", stderrSuffix(stderr))
+			return nil, false, fmt.Errorf("worktree branch remains registered at an unexpected path%s", stderrSuffix(stderr))
 		}
 		return []MergeBlocker{{
 			Code: "late_content_preserved", Message: "content at the former worktree path was preserved", Paths: []string{"."},
-		}}, nil
+		}}, true, nil
 	}
 	if branch != metadata.WorktreeBranch {
-		return nil, fmt.Errorf("worktree branch identity changed%s", stderrSuffix(stderr))
+		return nil, false, fmt.Errorf("worktree branch identity changed%s", stderrSuffix(stderr))
 	}
 	head, stderr, err := gitValue(ctx, metadata.WorktreeRoot, "rev-parse", "--verify", "HEAD")
 	if err != nil || head != expectedHead {
-		return nil, fmt.Errorf("worktree HEAD identity changed%s", stderrSuffix(stderr))
+		return nil, false, fmt.Errorf("worktree HEAD identity changed%s", stderrSuffix(stderr))
 	}
 	status, stderr, err := runGitEnv(ctx, metadata.WorktreeRoot, gitNoOptionalLocks, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored")
 	if err != nil {
-		return nil, fmt.Errorf("inspect cleanup safety: %w%s", err, stderrSuffix(stderr))
+		return nil, false, fmt.Errorf("inspect cleanup safety: %w%s", err, stderrSuffix(stderr))
 	}
 	paths, err := nulStatusPaths(status)
 	if err != nil {
-		return nil, fmt.Errorf("decode cleanup safety: %w", err)
+		return nil, false, fmt.Errorf("decode cleanup safety: %w", err)
 	}
 	if len(paths) > 0 {
-		return []MergeBlocker{{Code: "worktree_content", Message: "tracked, untracked, or ignored files block cleanup", Paths: paths}}, errors.New("worktree contains files that must be preserved")
+		return []MergeBlocker{{Code: "worktree_content", Message: "tracked, untracked, or ignored files block cleanup", Paths: paths}}, false, errors.New("worktree contains files that must be preserved")
 	}
 	return removeWorktreeThroughQuarantine(ctx, metadata, expectedHead)
 }
 
-func removeWorktreeThroughQuarantine(ctx context.Context, metadata mergeMetadata, expectedHead string) ([]MergeBlocker, error) {
+func removeWorktreeThroughQuarantine(ctx context.Context, metadata mergeMetadata, expectedHead string) ([]MergeBlocker, bool, error) {
 	quarantineID, err := randomID()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	originalRoot := metadata.WorktreeRoot
 	quarantineDir := filepath.Join(filepath.Dir(originalRoot), ".reasonix-cleanup")
 	if err := ensureCleanupQuarantineDir(quarantineDir); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	quarantineRoot := filepath.Join(quarantineDir, quarantineID)
 	if _, err := os.Lstat(quarantineRoot); err == nil {
-		return nil, errors.New("cleanup quarantine path already exists")
+		return nil, false, errors.New("cleanup quarantine path already exists")
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect cleanup quarantine path: %w", err)
+		return nil, false, fmt.Errorf("inspect cleanup quarantine path: %w", err)
 	}
 	if _, stderr, err := runGit(ctx, metadata.SourceRoot, "worktree", "move", originalRoot, quarantineRoot); err != nil {
-		return nil, fmt.Errorf("quarantine clean worktree: %w%s", err, stderrSuffix(stderr))
+		return nil, false, fmt.Errorf("quarantine clean worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	noteMergeStep("after_cleanup_quarantine")
 	return removeQuarantinedWorktree(ctx, metadata, quarantineRoot, expectedHead)
 }
 
-func removeQuarantinedWorktree(ctx context.Context, metadata mergeMetadata, quarantineRoot, expectedHead string) ([]MergeBlocker, error) {
+func removeQuarantinedWorktree(ctx context.Context, metadata mergeMetadata, quarantineRoot, expectedHead string) ([]MergeBlocker, bool, error) {
 	originalRoot := metadata.WorktreeRoot
 	if err := verifyQuarantinedWorktree(ctx, metadata, quarantineRoot, expectedHead); err != nil {
 		restoreErr := restoreQuarantinedWorktree(ctx, metadata.SourceRoot, quarantineRoot, originalRoot)
 		if restoreErr != nil {
-			return nil, fmt.Errorf("cleanup_state_changed: %w; quarantined worktree was preserved at %s: %v", err, quarantineRoot, restoreErr)
+			return nil, false, fmt.Errorf("cleanup_state_changed; quarantined worktree was preserved at %s: %w", quarantineRoot, errors.Join(err, fmt.Errorf("restore failed: %w", restoreErr)))
 		}
-		return nil, fmt.Errorf("cleanup_state_changed: %w; worktree was restored", err)
+		return nil, false, fmt.Errorf("cleanup_state_changed: %w; worktree was restored", err)
 	}
 
 	blockers := []MergeBlocker{}
@@ -101,26 +109,157 @@ func removeQuarantinedWorktree(ctx context.Context, metadata mergeMetadata, quar
 			Code: "late_content_preserved", Message: "content appeared at the former worktree path after quarantine and was preserved", Paths: []string{"."},
 		})
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return blockers, fmt.Errorf("inspect former worktree path after quarantine: %w", err)
+		return blockers, false, fmt.Errorf("inspect former worktree path after quarantine: %w", err)
 	}
 
 	noteMergeStep("before_cleanup_quarantine_remove")
 	if err := verifyQuarantinedWorktree(ctx, metadata, quarantineRoot, expectedHead); err != nil {
 		restoreErr := restoreQuarantinedWorktree(ctx, metadata.SourceRoot, quarantineRoot, originalRoot)
 		if restoreErr != nil {
-			return blockers, fmt.Errorf("cleanup_state_changed: %w; quarantined worktree was preserved at %s: %v", err, quarantineRoot, restoreErr)
+			return blockers, false, fmt.Errorf("cleanup_state_changed; quarantined worktree was preserved at %s: %w", quarantineRoot, errors.Join(err, fmt.Errorf("restore failed: %w", restoreErr)))
 		}
-		return blockers, fmt.Errorf("cleanup_state_changed: %w; worktree was restored", err)
+		return blockers, false, fmt.Errorf("cleanup_state_changed: %w; worktree was restored", err)
 	}
-	if _, stderr, err := runGit(ctx, metadata.SourceRoot, "worktree", "remove", quarantineRoot); err != nil {
-		restoreErr := restoreQuarantinedWorktree(ctx, metadata.SourceRoot, quarantineRoot, originalRoot)
-		if restoreErr != nil {
-			return blockers, fmt.Errorf("remove quarantined worktree: %w%s; recovery at %s also failed: %v", err, stderrSuffix(stderr), quarantineRoot, restoreErr)
+	manifest, err := captureCleanupManifest(ctx, quarantineRoot)
+	if err != nil {
+		return blockers, false, err
+	}
+	detachedID, err := randomID()
+	if err != nil {
+		return blockers, false, err
+	}
+	state := cleanupState{
+		Version: cleanupStateVersion, OriginalRoot: originalRoot,
+		RegisteredRoot: quarantineRoot, DetachedRoot: filepath.Join(filepath.Dir(quarantineRoot), "detached-"+detachedID),
+		WorktreeBranch: metadata.WorktreeBranch, WorktreeHead: expectedHead,
+		Stage: cleanupStagePrepared, Manifest: manifest,
+	}
+	if _, err := os.Lstat(cleanupJournalPath(metadata)); err == nil {
+		return blockers, false, errors.New("cleanup state already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return blockers, false, fmt.Errorf("inspect cleanup state path: %w", err)
+	}
+	if err := createCleanupState(metadata, state); err != nil {
+		return blockers, false, err
+	}
+	resumedBlockers, removed, err := resumeCleanupState(ctx, metadata, state)
+	return append(blockers, resumedBlockers...), removed, err
+}
+
+func resumeCleanupState(ctx context.Context, metadata mergeMetadata, state cleanupState) ([]MergeBlocker, bool, error) {
+	blockers := []MergeBlocker{}
+	if _, err := os.Lstat(state.OriginalRoot); err == nil {
+		blockers = append(blockers, MergeBlocker{
+			Code: "late_content_preserved", Message: "content appeared at the former worktree path and was preserved", Paths: []string{"."},
+		})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return blockers, false, fmt.Errorf("inspect former worktree path during cleanup recovery: %w", err)
+	}
+
+	if state.Stage == cleanupStagePrepared {
+		updated, preparedBlockers, removed, err := advancePreparedCleanup(ctx, metadata, state)
+		blockers = append(blockers, preparedBlockers...)
+		if err != nil {
+			return blockers, removed, err
 		}
-		return blockers, fmt.Errorf("remove quarantined worktree: %w%s; worktree was restored", err, stderrSuffix(stderr))
+		state = updated
 	}
-	_ = os.Remove(filepath.Dir(quarantineRoot))
-	return blockers, nil
+
+	if _, err := os.Lstat(state.DetachedRoot); errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(cleanupJournalPath(metadata)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return blockers, true, fmt.Errorf("remove completed cleanup state: %w", err)
+		}
+		return blockers, true, nil
+	} else if err != nil {
+		return blockers, true, fmt.Errorf("inspect detached checkout: %w", err)
+	}
+	detachedBlockers, err := safeRemoveDetachedCheckout(ctx, state)
+	blockers = append(blockers, detachedBlockers...)
+	if err != nil {
+		return blockers, true, err
+	}
+	if err := os.Remove(cleanupJournalPath(metadata)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return blockers, true, fmt.Errorf("remove completed cleanup state: %w", err)
+	}
+	_ = os.Remove(filepath.Dir(state.DetachedRoot))
+	return blockers, true, nil
+}
+
+func advancePreparedCleanup(ctx context.Context, metadata mergeMetadata, state cleanupState) (cleanupState, []MergeBlocker, bool, error) {
+	registeredExists, err := cleanupPathExists(state.RegisteredRoot)
+	if err != nil {
+		return state, nil, false, fmt.Errorf("inspect registered cleanup root: %w", err)
+	}
+	detachedExists, err := cleanupPathExists(state.DetachedRoot)
+	if err != nil {
+		return state, nil, false, fmt.Errorf("inspect detached cleanup root: %w", err)
+	}
+	switch {
+	case registeredExists && !detachedExists:
+		actual, err := captureCleanupManifest(ctx, state.RegisteredRoot)
+		if err != nil || !manifestsEqual(state.Manifest, actual) {
+			return state, nil, false, errors.New("cleanup_state_changed: registered quarantine no longer matches its manifest")
+		}
+		if err := os.Rename(state.RegisteredRoot, state.DetachedRoot); err != nil {
+			return state, nil, false, fmt.Errorf("detach quarantined checkout: %w", err)
+		}
+		noteMergeStep("after_cleanup_detach")
+	case !registeredExists && detachedExists:
+	case registeredExists && detachedExists:
+		return state, nil, false, errors.New("cleanup_state_changed: both registered and detached cleanup roots exist")
+	default:
+		registered, err := worktreeBranchIsRegistered(ctx, metadata.SourceRoot, metadata.WorktreeBranch)
+		if err != nil {
+			return state, nil, false, err
+		}
+		if registered {
+			return state, nil, false, errors.New("cleanup_state_changed: cleanup checkout disappeared while still registered")
+		}
+		state.Stage = cleanupStageUnregistered
+		if err := writeCleanupState(metadata, state); err != nil {
+			return state, nil, true, err
+		}
+		return state, nil, true, nil
+	}
+
+	actual, err := captureCleanupManifest(ctx, state.DetachedRoot)
+	if err != nil || !manifestsEqual(state.Manifest, actual) {
+		paths := []string{"."}
+		if err == nil {
+			paths, _ = unexpectedCleanupPaths(state.Manifest, actual)
+		}
+		blockers := []MergeBlocker{{Code: "late_content_preserved", Message: "content changed after checkout detachment and was preserved", Paths: paths}}
+		return state, blockers, false, errors.New("cleanup_state_changed: detached checkout no longer matches its manifest")
+	}
+	registered, err := worktreeBranchIsRegistered(ctx, metadata.SourceRoot, metadata.WorktreeBranch)
+	if err != nil {
+		return state, nil, false, err
+	}
+	if registered {
+		if _, stderr, err := runGit(ctx, metadata.SourceRoot, "worktree", "remove", state.RegisteredRoot); err != nil {
+			return state, nil, false, fmt.Errorf("unregister detached worktree: %w%s", err, stderrSuffix(stderr))
+		}
+	}
+	registered, err = worktreeBranchIsRegistered(ctx, metadata.SourceRoot, metadata.WorktreeBranch)
+	if err != nil || registered {
+		return state, nil, false, errors.New("detached worktree registration was not removed")
+	}
+	state.Stage = cleanupStageUnregistered
+	if err := writeCleanupState(metadata, state); err != nil {
+		return state, nil, true, err
+	}
+	return state, nil, true, nil
+}
+
+func cleanupPathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func findQuarantinedWorktree(ctx context.Context, metadata mergeMetadata, expectedHead string) (string, bool, error) {
@@ -187,12 +326,7 @@ func worktreeBranchIsRegistered(ctx context.Context, sourceRoot, branch string) 
 		return false, fmt.Errorf("inspect registered worktrees: %w%s", err, stderrSuffix(stderr))
 	}
 	want := "branch refs/heads/" + branch
-	for _, record := range strings.Split(out, "\x00") {
-		if record == want {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.Contains(strings.Split(out, "\x00"), want), nil
 }
 
 func ensureCleanupQuarantineDir(path string) error {
