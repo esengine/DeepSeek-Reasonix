@@ -11,32 +11,129 @@ import (
 	"reasonix/internal/agent"
 )
 
-func (c *Catalog) enqueueRepair(path string) {
+const (
+	repairRetryInitial = 30 * time.Second
+	repairRetryMaximum = 30 * time.Minute
+	repairRetryReset   = 2 * repairRetryMaximum
+)
+
+type repairRetryState struct {
+	failures          int
+	failedAt          time.Time
+	retryAt           time.Time
+	sourceFingerprint string
+}
+
+func (c *Catalog) enqueueRepair(path string) bool {
 	if c == nil || c.opts.DisableRepair || strings.TrimSpace(path) == "" {
-		return
+		return false
 	}
 	key := c.pathKey(path)
+	if !c.repairReady(path) {
+		return false
+	}
 	if _, loaded := c.repairQueued.LoadOrStore(key, struct{}{}); loaded {
-		return
+		return false
 	}
 	select {
 	case c.repairCh <- path:
+		return true
 	case <-c.stop:
 		c.repairQueued.Delete(key)
+		return false
 	default:
 		// Channel pressure must never permanently drop unknown rows. Leave them
 		// in the DB and clear the in-memory marker so the drain ticker requeues.
 		c.repairQueued.Delete(key)
+		return false
 	}
+}
+
+func (c *Catalog) repairNow() time.Time {
+	if c != nil && c.opts.Now != nil {
+		return c.opts.Now()
+	}
+	return time.Now()
+}
+
+func (c *Catalog) repairReadyKey(key string) bool {
+	value, ok := c.repairRetry.Load(key)
+	if !ok {
+		return true
+	}
+	state := value.(repairRetryState)
+	return !c.repairNow().Before(state.retryAt)
+}
+
+func (c *Catalog) repairReady(path string) bool {
+	key := c.pathKey(path)
+	for {
+		value, ok := c.repairRetry.Load(key)
+		if !ok {
+			return true
+		}
+		state := value.(repairRetryState)
+		if fileFingerprint(path) == state.sourceFingerprint {
+			return !c.repairNow().Before(state.retryAt)
+		}
+		if c.repairRetry.CompareAndDelete(key, value) {
+			return true
+		}
+	}
+}
+
+func (c *Catalog) recordRepairFailure(path string) {
+	key := c.pathKey(path)
+	now := c.repairNow()
+	failures := 1
+	if value, ok := c.repairRetry.Load(key); ok {
+		state := value.(repairRetryState)
+		elapsed := now.Sub(state.failedAt)
+		if !state.failedAt.IsZero() && elapsed >= 0 && elapsed <= repairRetryReset {
+			failures = state.failures + 1
+		}
+	}
+	delay := repairRetryInitial
+	for attempt := 1; attempt < failures && delay < repairRetryMaximum; attempt++ {
+		delay *= 2
+		if delay > repairRetryMaximum {
+			delay = repairRetryMaximum
+		}
+	}
+	c.repairRetry.Store(key, repairRetryState{
+		failures:          failures,
+		failedAt:          now,
+		retryAt:           now.Add(delay),
+		sourceFingerprint: fileFingerprint(path),
+	})
+}
+
+func (c *Catalog) clearRepairFailure(path string) {
+	c.repairRetry.Delete(c.pathKey(path))
+}
+
+func (c *Catalog) repairScanLimit(limit int) int {
+	scanLimit := limit
+	c.repairRetry.Range(func(key, _ any) bool {
+		if !c.repairReadyKey(key.(string)) {
+			scanLimit++
+		}
+		return true
+	})
+	c.repairQueued.Range(func(_, _ any) bool {
+		scanLimit++
+		return true
+	})
+	return scanLimit
 }
 
 func (c *Catalog) enqueuePersistedRepairs(ctx context.Context) {
 	c.drainUnknownRepairs(ctx, c.opts.QueueCapacity)
 }
 
-// drainUnknownRepairs pulls the next batch of turns_state=unknown paths from the
-// durable projection. Combined with the repair ticker this gives eventual
-// completeness even when more than QueueCapacity sessions need repair.
+// drainUnknownRepairs pulls the next eligible turns_state=unknown paths from
+// the durable projection. It scans past backed-off or already queued rows so
+// they cannot consume the batch limit and starve later repairs.
 func (c *Catalog) drainUnknownRepairs(ctx context.Context, limit int) {
 	if c == nil || c.db == nil || c.opts.DisableRepair || limit <= 0 {
 		return
@@ -44,16 +141,28 @@ func (c *Catalog) drainUnknownRepairs(ctx context.Context, limit int) {
 	if err := ctx.Err(); err != nil {
 		return
 	}
+	queuedSignals := len(c.repairCh)
+	if queuedSignals >= limit || (cap(c.repairCh) > 0 && queuedSignals >= cap(c.repairCh)) {
+		return
+	}
+	scanLimit := c.repairScanLimit(limit)
 	rows, err := c.db.QueryContext(ctx, `SELECT path FROM catalog_sessions
-        WHERE turns_state='unknown' ORDER BY last_activity_at DESC LIMIT ?`, limit)
+		WHERE turns_state='unknown' ORDER BY last_activity_at DESC,path_key ASC LIMIT ?`, scanLimit)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
+	queued := 0
 	for rows.Next() {
 		var path string
-		if rows.Scan(&path) == nil {
-			c.enqueueRepair(path)
+		if rows.Scan(&path) != nil {
+			continue
+		}
+		if c.enqueueRepair(path) {
+			queued++
+		}
+		if queued >= limit || (cap(c.repairCh) > 0 && len(c.repairCh) >= cap(c.repairCh)) {
+			return
 		}
 	}
 }
@@ -65,7 +174,12 @@ func (c *Catalog) repairLoop() {
 	for {
 		select {
 		case path := <-c.repairCh:
-			c.repairSession(c.workerCtx, path)
+			repaired := c.repairSession(c.workerCtx, path)
+			if repaired {
+				c.clearRepairFailure(path)
+			} else if c.workerCtx.Err() == nil {
+				c.recordRepairFailure(path)
+			}
 			c.repairQueued.Delete(c.pathKey(path))
 			c.drainUnknownRepairs(c.workerCtx, 32)
 			runtime.Gosched()
@@ -77,9 +191,9 @@ func (c *Catalog) repairLoop() {
 	}
 }
 
-func (c *Catalog) repairSession(workerCtx context.Context, path string) {
+func (c *Catalog) repairSession(workerCtx context.Context, path string) bool {
 	if workerCtx.Err() != nil {
-		return
+		return false
 	}
 	// Repair writes a source snapshot that the next directory projection will
 	// consume. Share the directory lock with exact indexing and reconcile so a
@@ -99,21 +213,20 @@ func (c *Catalog) repairSession(workerCtx context.Context, path string) {
 	// LoadSessionDisplayMessages is not yet context-aware; check before/after.
 	msgs, state, _, err := agent.LoadSessionDisplayMessages(path)
 	if ctx.Err() != nil || workerCtx.Err() != nil {
-		return
+		return false
 	}
 	if err != nil {
-		_ = c.applyRepairResult(ctx, path, "", 0, false)
-		return
+		return c.applyRepairResult(ctx, path, "", 0, false) == nil
 	}
 	preview, turns := agent.SessionPreviewFromMessages(msgs)
 	applied, err := agent.UpdateSessionListingProjectionIfCurrent(path, "", preview, turns, false, state)
 	if err != nil || !applied {
-		return
+		return false
 	}
 	if ctx.Err() != nil || workerCtx.Err() != nil {
-		return
+		return false
 	}
-	_ = c.applyRepairResult(ctx, path, preview, turns, true)
+	return c.applyRepairResult(ctx, path, preview, turns, true) == nil
 }
 
 // applyRepairResult updates only fields proven by parsing one transcript. Topic

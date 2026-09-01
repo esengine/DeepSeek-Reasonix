@@ -37,6 +37,7 @@ type Catalog struct {
 	removedPaths     sync.Map
 	repairCh         chan string
 	repairQueued     sync.Map
+	repairRetry      sync.Map
 	reconcileCh      chan DirectoryTarget
 	reconcileQueued  sync.Map
 	reconcileDirtyMu sync.Mutex
