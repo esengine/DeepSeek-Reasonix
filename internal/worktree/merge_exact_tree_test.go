@@ -248,7 +248,13 @@ func TestMergeBackPreservesChangedMergeHeadAfterRefUpdate(t *testing.T) {
 	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
 	mergeStepHook = func(step string) {
 		if step == "after_merge_ref_update" {
-			gitTest(t, repo, "update-ref", "MERGE_HEAD", inspection.TargetHead, inspection.WorktreeHead)
+			mergeHeadPath := gitTest(t, repo, "rev-parse", "--git-path", "MERGE_HEAD")
+			if !filepath.IsAbs(mergeHeadPath) {
+				mergeHeadPath = filepath.Join(repo, mergeHeadPath)
+			}
+			if err := os.WriteFile(mergeHeadPath, []byte(inspection.TargetHead+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Cleanup(func() { mergeStepHook = nil })
