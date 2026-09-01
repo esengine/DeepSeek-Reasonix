@@ -205,7 +205,7 @@ func contextualToolGateOutcome(ctx context.Context, target tool.Tool, name strin
 	msg := fmt.Sprintf("blocked: tool %q is unavailable in the current workflow context", name)
 	switch name {
 	case "update_goal":
-		msg = "update_goal is only available while an active goal turn is running — no goal state was changed"
+		msg = "update_goal is only available while an active goal turn is running — no goal state was changed. This session has no active goal, so the call cannot succeed here: do not retry it, and end the turn with your answer instead."
 	case "complete_step":
 		msg = "blocked: complete_step is only available after plan approval. While planning, keep task state with todo_write and present the plan for user approval."
 	case "bash_output", "wait", "kill_shell":
