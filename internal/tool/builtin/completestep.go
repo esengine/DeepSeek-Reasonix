@@ -107,7 +107,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		Notes     string         `json:"notes"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return "", fmt.Errorf("invalid args: %w%s", err, windowsPathJSONHint(args))
 	}
 	step := completeStepIdentity(p.StepID, p.Step, p.StepIndex)
 	if step == "" {
@@ -216,6 +216,20 @@ func completeStepIdentity(stepID, step string, stepIndex int) string {
 		return strconv.Itoa(stepIndex)
 	}
 	return strings.TrimSpace(step)
+}
+
+func windowsPathJSONHint(args json.RawMessage) string {
+	for i := 0; i+3 < len(args); i++ {
+		if !isASCIIAlpha(args[i]) || args[i+1] != ':' || args[i+2] != '\\' || args[i+3] == '\\' {
+			continue
+		}
+		return `; escape Windows path backslashes in JSON strings, e.g. "D:\\work\\task.md"`
+	}
+	return ""
+}
+
+func isASCIIAlpha(b byte) bool {
+	return ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z')
 }
 
 func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {
