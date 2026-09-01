@@ -172,7 +172,10 @@ console.log("\nbundle budgets");
 // Merge-Back adds identity-bound inspection, navigation, and cleanup orchestration
 // to the startup path. The current merged production tree measures 460.033 KiB;
 // retain 0.067 KiB with the smallest one-decimal ratchet.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 460.1 : 460.1;
+// Failure-atomic merge completion adds the shared navigation-intent fence to
+// every local and remote switch path. The final production build measures
+// 460.7 KiB gzip; ceil(actualKiB * 10) / 10 yields the narrow 460.8 KiB gate.
+const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 460.8 : 460.8;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -305,6 +308,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // ratchet.
 // Merge-Back's startup ownership path brings the exact merged payload to
 // 2461.480 KiB; retain 0.020 KiB with the smallest one-decimal ratchet.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_461.5 : 2_461.5;
+// The failure-atomic navigation fence brings the final raw payload to the
+// rounded 2463.5 KiB measurement; ceil(actualKiB * 10) / 10 is 2463.6 KiB.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_463.6 : 2_463.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

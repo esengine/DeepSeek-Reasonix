@@ -15,6 +15,8 @@ const forkAction = source("../lib/forkWorktree.ts");
 const message = source("../components/Message.tsx");
 const mergeModal = source("../components/WorktreeMergeModal.tsx");
 const mergeStyles = source("../components/WorktreeMergeModal.css");
+const controller = source("../lib/useController.ts");
+const navigationFence = source("../lib/useNavigationIntentFence.ts");
 
 let failed = 0;
 function ok(value: unknown, label: string) {
@@ -54,6 +56,28 @@ ok(/worktreeStateToken/.test(mergeModal) && /expectedWorktreeStateToken/.test(me
 ok(!/ModalCloseButton autoFocus/.test(mergeModal), "merge modal captures its trigger before moving focus so close restores the trigger");
 ok(/CloseMergedWorktreeTab\(request: CloseMergedWorktreeTabRequest\)/.test(bridge), "worktree close is a request-object Wails call");
 ok(/FinalizeWorktreeMerge\(request: WorktreeCleanupRequest\)/.test(bridge), "cleanup is a separate request-object Wails call");
+const fencedNavigationCalls = [
+  ["const resumeSession", "app.ResumeSessionPage"],
+  ["const openChannelSession", "app.OpenChannelSessionPageForTab"],
+  ["const pickWorkspace", "app.PickWorkspace"],
+  ["const switchWorkspace", "app.SwitchWorkspace"],
+  ["const switchTab", "app.SetActiveTab"],
+  ["const openProjectTab", "app.OpenProjectTab"],
+  ["const openGlobalTab", "app.OpenGlobalTab"],
+  ["const openTopicSession", "app.OpenTopicSession"],
+  ["const activateTopic", "app.StartTopicActivation"],
+  ["const ensureBlankTab", "app.EnsureBlankTab"],
+  ["const ensureBlankSurface", "app.EnsureBlankSurface"],
+  ["const createIsolatedWorktree", "app.CreateIsolatedWorktree"],
+  ["const closeTab", "app.CloseTabWithPolicy"],
+];
+ok(fencedNavigationCalls.every(([startMarker, callMarker]) => {
+  const start = controller.indexOf(startMarker);
+  const fence = controller.indexOf("await requireRegisteredNavigationIntent", start);
+  const call = controller.indexOf(callMarker, start);
+  return start >= 0 && fence > start && call > fence;
+}), "navigation entry points await backend intent registration before switching");
+ok(/navigationIntentRegistrationTail\.then/.test(navigationFence) && /navigationIntentRegistrationTail = registered/.test(navigationFence), "navigation registrations preserve user-intent order across deferred Wails calls and remounts");
 
 if (failed) process.exit(1);
 console.log("isolated worktree tests passed");

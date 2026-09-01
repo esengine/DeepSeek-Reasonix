@@ -257,11 +257,15 @@ func inspectMergeDivergence(ctx context.Context, metadata mergeMetadata, worktre
 }
 
 func inspectCleanupBlockers(ctx context.Context, metadata mergeMetadata, inspection *MergeInspection) error {
-	status, stderr, err := runGit(ctx, metadata.WorktreeRoot, "status", "--porcelain=v1", "--untracked-files=all", "--ignored")
+	status, stderr, err := runGitEnv(ctx, metadata.WorktreeRoot, gitNoOptionalLocks, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored")
 	if err != nil {
 		return fmt.Errorf("inspect cleanup safety: %w%s", err, stderrSuffix(stderr))
 	}
-	if paths := statusPaths(status); len(paths) > 0 {
+	paths, err := nulStatusPaths(status)
+	if err != nil {
+		return fmt.Errorf("decode cleanup safety: %w", err)
+	}
+	if len(paths) > 0 {
 		inspection.CleanupBlockers = append(inspection.CleanupBlockers, MergeBlocker{Code: "worktree_content", Message: "tracked, untracked, or ignored files would be preserved", Paths: paths})
 	}
 	if !inspection.AlreadyMerged {
@@ -284,29 +288,9 @@ func MergeBack(ctx context.Context, managedRoot string, request MergeRequest) (M
 		if !request.AutoCommitDirty {
 			return mergeFailure(inspection, false, errors.New("worktree has uncommitted changes; explicit auto-commit is required"))
 		}
-		confirmedToken, tokenErr := worktreeStateToken(ctx, inspection.WorktreeRoot)
-		if tokenErr != nil {
-			return mergeFailure(inspection, false, fmt.Errorf("verify confirmed worktree changes: %w", tokenErr))
-		}
-		if confirmedToken != request.ExpectedWorktreeStateToken {
-			return mergeFailure(inspection, false, errors.New("worktree contents changed after confirmation; inspect and confirm again"))
-		}
-		originalWorktreeHead := inspection.WorktreeHead
-		if _, stderr, err := runGit(ctx, inspection.WorktreeRoot, "add", "-A"); err != nil {
-			return mergeFailure(inspection, false, fmt.Errorf("stage worktree changes: %w%s", err, stderrSuffix(stderr)))
-		}
-		noteMergeStep("after_worktree_add")
-		stagedTree, err := verifyStagedWorktree(ctx, inspection.WorktreeRoot, confirmedToken)
+		committedHead, recoveryRequired, err := autoCommitDirtyWorktree(ctx, inspection)
 		if err != nil {
-			return mergeFailure(inspection, false, fmt.Errorf("worktree changed while staging; staged changes were preserved: %w", err))
-		}
-		if _, stderr, err := runGit(ctx, inspection.WorktreeRoot, "-c", "user.name=Reasonix", "-c", "user.email=reasonix@local", "commit", "-m", "worktree: save changes before merge back"); err != nil {
-			return mergeFailure(inspection, false, fmt.Errorf("commit worktree changes: %w%s", err, stderrSuffix(stderr)))
-		}
-		noteMergeStep("after_worktree_commit")
-		committedHead, err := verifyAutoCommit(ctx, inspection.WorktreeRoot, originalWorktreeHead, stagedTree)
-		if err != nil {
-			return mergeFailure(inspection, false, fmt.Errorf("auto-commit identity changed; worktree and commits were preserved: %w", err))
+			return mergeFailure(inspection, recoveryRequired, err)
 		}
 		inspection, err = InspectMerge(ctx, request.WorkspaceRoot, managedRoot)
 		if err != nil {
@@ -365,31 +349,12 @@ func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupReque
 		return cleanupFailure(result, errors.New("worktree HEAD is not contained in the target branch"))
 	}
 
-	if rootExists {
-		branch, stderr, err := gitValue(ctx, metadata.WorktreeRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
-		if err != nil || branch != metadata.WorktreeBranch {
-			return cleanupFailure(result, fmt.Errorf("worktree branch identity changed%s", stderrSuffix(stderr)))
-		}
-		head, stderr, err := gitValue(ctx, metadata.WorktreeRoot, "rev-parse", "--verify", "HEAD")
-		if err != nil || head != request.WorktreeHead {
-			return cleanupFailure(result, fmt.Errorf("worktree HEAD identity changed%s", stderrSuffix(stderr)))
-		}
-		status, stderr, err := runGit(ctx, metadata.WorktreeRoot, "status", "--porcelain=v1", "--untracked-files=all", "--ignored")
-		if err != nil {
-			return cleanupFailure(result, fmt.Errorf("inspect cleanup safety: %w%s", err, stderrSuffix(stderr)))
-		}
-		if paths := statusPaths(status); len(paths) > 0 {
-			result.Blockers = append(result.Blockers, MergeBlocker{Code: "worktree_content", Message: "tracked, untracked, or ignored files block cleanup", Paths: paths})
-			result.Error = "worktree contains files that must be preserved"
-			return result, errors.New(result.Error)
-		}
-		if _, stderr, err := runGit(ctx, metadata.SourceRoot, "worktree", "remove", metadata.WorktreeRoot); err != nil {
-			return cleanupFailure(result, fmt.Errorf("remove clean worktree: %w%s", err, stderrSuffix(stderr)))
-		}
-		result.WorktreeRemoved = true
-	} else {
-		result.WorktreeRemoved = true
+	blockers, err := finalizeCleanupWorktree(ctx, metadata, request.WorktreeHead, rootExists)
+	result.Blockers = append(result.Blockers, blockers...)
+	if err != nil {
+		return cleanupFailure(result, err)
 	}
+	result.WorktreeRemoved = true
 
 	_, stderr, err = runGit(ctx, metadata.SourceRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+metadata.WorktreeBranch)
 	if err == nil {
@@ -400,8 +365,9 @@ func FinalizeMerge(ctx context.Context, managedRoot string, request CleanupReque
 		if branchHead != request.WorktreeHead {
 			return cleanupFailure(result, errors.New("temporary branch moved after merge; it was preserved"))
 		}
-		if _, stderr, err := runGit(ctx, metadata.SourceRoot, "branch", "-d", metadata.WorktreeBranch); err != nil {
-			return cleanupFailure(result, fmt.Errorf("delete merged temporary branch: %w%s", err, stderrSuffix(stderr)))
+		noteMergeStep("before_cleanup_branch_delete")
+		if _, stderr, err := runGit(ctx, metadata.SourceRoot, "update-ref", "-d", "refs/heads/"+metadata.WorktreeBranch, request.WorktreeHead); err != nil {
+			return cleanupFailure(result, fmt.Errorf("delete merged temporary branch with compare-and-swap: %w%s", err, stderrSuffix(stderr)))
 		}
 		result.BranchDeleted = true
 	} else if exitCode(err) == 1 {

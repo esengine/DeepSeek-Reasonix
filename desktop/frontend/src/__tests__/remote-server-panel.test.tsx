@@ -50,9 +50,13 @@ onRemoteServer((s) => useRemoteStore.getState().setServer(s));
 onRemoteStatus((s) => useRemoteStore.getState().applyStatus(s));
 
 const openCalls: Array<{ hostId: string; workspace: string }> = [];
+const navigationCalls: string[] = [];
 const stopCalls: Array<{ hostId: string; workspace: string }> = [];
 const statusCalls: Array<{ hostId: string; workspace: string }> = [];
 window.go = { main: { App: {
+  async RegisterNavigationIntent(token: string) {
+    navigationCalls.push(token);
+  },
   async RemoteLastWorkspace(hostId: string) {
     return hostId === "box" ? "/srv/app" : "";
   },
@@ -126,6 +130,7 @@ ok(
   openCalls.length === 1 && openCalls[0].hostId === "box" && openCalls[0].workspace === "/srv/app",
   `Open Remote Web calls OpenRemoteWorkspace with the last workspace (got ${JSON.stringify(openCalls)})`,
 );
+ok(navigationCalls.some((token) => token.startsWith("nav-remote-workspace-")), "Open Remote Web registers navigation before launch");
 
 // Fresh host: without a configured or last workspace, the SSH login user's
 // home directory is a safe, enterable zero-configuration fallback.

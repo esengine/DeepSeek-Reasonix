@@ -10,6 +10,7 @@ export function makeMockWorktreeMergeBindings(
   writeTabs: (tabs: TabMeta[]) => void,
 ) {
   return {
+    async RegisterNavigationIntent(_token: string) {},
     async InspectWorktreeMerge(tabID: string) {
       const tabs = readTabs();
       const tab = tabs.find((candidate) => candidate.id === tabID) ?? tabs.find((candidate) => candidate.active);

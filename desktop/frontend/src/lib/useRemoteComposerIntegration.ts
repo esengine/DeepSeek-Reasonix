@@ -3,11 +3,13 @@ import { app } from "./bridge";
 import { reconcileComposerProfile, type ComposerProfile, type ComposerProfilesByTab } from "./composerProfile";
 import type { GoalAction } from "./goalAction";
 import type { CollaborationMode, QualityFloor, RemoteTabRefView, ToolApprovalMode } from "./types";
+import { publishNavigationIntent } from "./useNavigationIntentFence";
 import type { RemoteSessionApi } from "./useRemoteSession";
 
 type RemoteProfile = RemoteSessionApi["composerProfile"];
 
 export async function openRemoteNewSession(remote: RemoteTabRefView, retryHydration: () => Promise<void>): Promise<void> {
+  await publishNavigationIntent("remote-new-session");
   await app.OpenRemoteProjectTab(remote.hostId, remote.workspace, { newSession: true });
   await retryHydration();
 }

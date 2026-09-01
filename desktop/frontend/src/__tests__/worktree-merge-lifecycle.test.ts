@@ -29,7 +29,7 @@ async function staleEnsureDoesNotCloseOrFinalize() {
   let closes = 0;
   let finalizes = 0;
   let preserved = 0;
-  const running = runWorktreeMergeLifecycle(receipt, worktreeTab.id, {
+  const running = runWorktreeMergeLifecycle(receipt, worktreeTab.id, "nav-1", {
     ensureSource: () => ensure.promise,
     isNavigationCurrent: () => current,
     seedSource: () => undefined,
@@ -52,7 +52,7 @@ async function staleListDoesNotCloseOrFinalize() {
   let current = true;
   let closes = 0;
   let finalizes = 0;
-  const running = runWorktreeMergeLifecycle(receipt, worktreeTab.id, {
+  const running = runWorktreeMergeLifecycle(receipt, worktreeTab.id, "nav-2", {
     ensureSource: async () => sourceTab,
     isNavigationCurrent: () => current,
     seedSource: () => undefined,
@@ -72,7 +72,7 @@ async function staleListDoesNotCloseOrFinalize() {
 
 async function stableLifecycleClosesBeforeFinalize() {
   const calls: string[] = [];
-  const result = await runWorktreeMergeLifecycle(receipt, worktreeTab.id, {
+  const result = await runWorktreeMergeLifecycle(receipt, worktreeTab.id, "nav-3", {
     ensureSource: async () => { calls.push("ensure"); return sourceTab; },
     isNavigationCurrent: () => true,
     seedSource: () => { calls.push("seed"); },
@@ -88,7 +88,7 @@ async function stableLifecycleClosesBeforeFinalize() {
 
 async function singleSurfaceStillUsesIdempotentCloseProof() {
   const calls: string[] = [];
-  const result = await runWorktreeMergeLifecycle(receipt, worktreeTab.id, {
+  const result = await runWorktreeMergeLifecycle(receipt, worktreeTab.id, "nav-4", {
     ensureSource: async () => sourceTab,
     isNavigationCurrent: () => true,
     seedSource: () => undefined,
@@ -102,8 +102,36 @@ async function singleSurfaceStillUsesIdempotentCloseProof() {
   assert.deepEqual(calls, ["close", "finalize"]);
 }
 
+async function closeCarriesFenceAndNeverFinalizesAfterBackendRejectsStaleIntent() {
+  const close = deferred<{ closed: boolean; idempotent: boolean }>();
+  let finalizes = 0;
+  let closeToken = "";
+  const running = runWorktreeMergeLifecycle(receipt, worktreeTab.id, "nav-close-fence", {
+    ensureSource: async () => sourceTab,
+    isNavigationCurrent: () => true,
+    seedSource: () => undefined,
+    listTabs: async () => [sourceTab, worktreeTab],
+    closeWorktree: (request) => {
+      closeToken = request.navigationIntentToken;
+      return close.promise;
+    },
+    finalize: async () => {
+      finalizes++;
+      return { completed: true, worktreeRemoved: true, branchDeleted: true, blockers: [] };
+    },
+    onNavigationPreserved: () => undefined,
+    onCloseBlocked: () => undefined,
+  });
+  await Promise.resolve();
+  close.resolve({ closed: false, idempotent: false });
+  assert.deepEqual(await running, { phase: "close-blocked" });
+  assert.equal(closeToken, "nav-close-fence");
+  assert.equal(finalizes, 0);
+}
+
 await staleEnsureDoesNotCloseOrFinalize();
 await staleListDoesNotCloseOrFinalize();
 await stableLifecycleClosesBeforeFinalize();
 await singleSurfaceStillUsesIdempotentCloseProof();
+await closeCarriesFenceAndNeverFinalizesAfterBackendRejectsStaleIntent();
 console.log("worktree merge lifecycle tests passed");

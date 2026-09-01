@@ -45,6 +45,7 @@ export interface CloseMergedWorktreeTabRequest {
   worktreeRoot: string;
   sourceTabId: string;
   sourceRoot: string;
+  navigationIntentToken: string;
 }
 
 export interface CloseMergedWorktreeTabResult {

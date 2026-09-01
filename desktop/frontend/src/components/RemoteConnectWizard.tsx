@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, FileText, Folder, Plus } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
 import { RemoteStatusChip } from "./RemoteHostsPage";
 import type { RemoteDirEntry, RemoteHostInput, RemoteHostView } from "../lib/types";
@@ -338,6 +339,7 @@ export function RemoteConnectWizard({
       const canonical = project.merged ? project.workspace : target;
       if (project.merged) onMerged?.(t("remoteWizard.mergedProject", { path: canonical }));
       try {
+        await publishNavigationIntent("remote-wizard");
         await app.OpenRemoteProjectTab(hostId, canonical, { newSession: true });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));

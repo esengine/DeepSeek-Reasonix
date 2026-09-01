@@ -151,12 +151,12 @@ func TestMergeBackPreservesStagingWhenContentChangesDuringAdd(t *testing.T) {
 	}
 	t.Cleanup(func() { mergeStepHook = nil })
 	result, err := MergeBack(context.Background(), managed, request)
-	if err == nil || result.Merged || !strings.Contains(result.Error, "staged changes were preserved") {
+	if err == nil || result.Merged || !strings.Contains(result.Error, "real index was preserved") {
 		t.Fatalf("add drift = %+v, %v", result, err)
 	}
 	status := gitTest(t, created.WorktreeRoot, "status", "--porcelain=v1")
-	if !strings.Contains(status, "AM feature.txt") {
-		t.Fatalf("staged and later worktree contents were not preserved: %q", status)
+	if !strings.Contains(status, "?? feature.txt") {
+		t.Fatalf("real index or later worktree contents changed: %q", status)
 	}
 }
 
@@ -181,7 +181,7 @@ func TestMergeBackRejectsExtraCommitAfterAutoCommit(t *testing.T) {
 	}
 	t.Cleanup(func() { mergeStepHook = nil })
 	result, err := MergeBack(context.Background(), managed, request)
-	if err == nil || result.Merged || !strings.Contains(result.Error, "unique parent") {
+	if err == nil || result.Merged || !strings.Contains(result.Error, "branch HEAD changed") {
 		t.Fatalf("extra auto-commit = %+v, %v", result, err)
 	}
 }

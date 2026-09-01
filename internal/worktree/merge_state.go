@@ -13,19 +13,28 @@ import (
 	"strings"
 )
 
-// worktreeStateToken fingerprints dirty filesystem state without touching the
-// index or object database. Porcelain -z keeps unusual paths unambiguous.
+// worktreeStateToken fingerprints the real index and dirty filesystem state
+// without modifying either. Porcelain and ls-files -z keep unusual paths
+// unambiguous, while the index entries bind staged-only content and modes.
 func worktreeStateToken(ctx context.Context, root string) (string, error) {
-	status, stderr, err := runGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	status, stderr, err := runGitEnv(ctx, root, gitNoOptionalLocks, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return "", fmt.Errorf("list changed paths: %w%s", err, stderrSuffix(stderr))
+	}
+	index, stderr, err := runGitEnv(ctx, root, gitNoOptionalLocks, "ls-files", "--stage", "-z")
+	if err != nil {
+		return "", fmt.Errorf("snapshot index entries: %w%s", err, stderrSuffix(stderr))
 	}
 	paths, err := nulStatusPaths(status)
 	if err != nil {
 		return "", err
 	}
 	hash := sha256.New()
-	_, _ = io.WriteString(hash, "reasonix-worktree-state-v1\x00")
+	_, _ = io.WriteString(hash, "reasonix-worktree-state-v2\x00status\x00")
+	_, _ = io.WriteString(hash, status)
+	_, _ = io.WriteString(hash, "\x00index\x00")
+	_, _ = io.WriteString(hash, index)
+	_, _ = io.WriteString(hash, "\x00filesystem\x00")
 	for _, relative := range paths {
 		if err := hashWorktreePath(ctx, hash, root, relative); err != nil {
 			return "", err
@@ -121,7 +130,7 @@ func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string
 		if err != nil {
 			return fmt.Errorf("inspect changed Git directory %q: %w%s", relative, err, stderrSuffix(stderr))
 		}
-		status, stderr, err := runGit(ctx, path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+		status, stderr, err := runGitEnv(ctx, path, gitNoOptionalLocks, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 		if err != nil {
 			return fmt.Errorf("inspect changed Git directory status %q: %w%s", relative, err, stderrSuffix(stderr))
 		}
@@ -131,59 +140,6 @@ func hashWorktreePath(ctx context.Context, hash io.Writer, root, relative string
 	}
 	_, _ = io.WriteString(hash, "\x00")
 	return nil
-}
-
-func verifyStagedWorktree(ctx context.Context, root, confirmedToken string) (string, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		token, err := worktreeStateToken(ctx, root)
-		if err != nil {
-			return "", err
-		}
-		if token != confirmedToken {
-			return "", errors.New("worktree contents no longer match the confirmed snapshot")
-		}
-		if _, stderr, err := runGit(ctx, root, "diff", "--quiet", "--"); err != nil {
-			return "", fmt.Errorf("unstaged changes remain after git add%s", stderrSuffix(stderr))
-		}
-		untracked, stderr, err := runGit(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
-		if err != nil {
-			return "", fmt.Errorf("inspect untracked files after git add: %w%s", err, stderrSuffix(stderr))
-		}
-		if untracked != "" {
-			return "", errors.New("untracked files remain after git add")
-		}
-		tree, stderr, err := gitValue(ctx, root, "write-tree")
-		if err != nil {
-			return "", fmt.Errorf("record staged tree: %w%s", err, stderrSuffix(stderr))
-		}
-		if attempt == 1 {
-			return tree, nil
-		}
-	}
-	return "", errors.New("could not stabilize staged changes")
-}
-
-func verifyAutoCommit(ctx context.Context, root, expectedParent, expectedTree string) (string, error) {
-	head, stderr, err := gitValue(ctx, root, "rev-parse", "--verify", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("read auto-commit HEAD: %w%s", err, stderrSuffix(stderr))
-	}
-	line, stderr, err := gitValue(ctx, root, "rev-list", "--parents", "-n", "1", head)
-	if err != nil {
-		return "", fmt.Errorf("read auto-commit parents: %w%s", err, stderrSuffix(stderr))
-	}
-	fields := strings.Fields(line)
-	if len(fields) != 2 || fields[0] != head || fields[1] != expectedParent {
-		return "", errors.New("auto-commit does not have the confirmed HEAD as its unique parent")
-	}
-	tree, stderr, err := gitValue(ctx, root, "rev-parse", "--verify", head+"^{tree}")
-	if err != nil {
-		return "", fmt.Errorf("read auto-commit tree: %w%s", err, stderrSuffix(stderr))
-	}
-	if tree != expectedTree {
-		return "", errors.New("auto-commit tree differs from the staged tree")
-	}
-	return head, nil
 }
 
 func gitOperation(ctx context.Context, root string) (string, error) {

@@ -120,6 +120,7 @@ window.runtime = {
 window.go = {
   main: {
     App: {
+      RegisterNavigationIntent: async () => {},
       ListTabs: async () => tabs.map((tab) => ({ ...tab })),
       SetActiveTab: async (tabId: string) => {
         tabs = tabs.map((tab) => ({ ...tab, active: tab.id === tabId }));

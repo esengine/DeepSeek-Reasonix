@@ -34,6 +34,7 @@ import { createBoundedRefreshCoordinator, sameTabMetaLists, seedActiveTabMetaLis
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { useActiveRemoteSession } from "./lib/useRemoteSession";
 import { useRemoteTabOpened } from "./lib/useRemoteTabOpened";
+import { publishNavigationIntent } from "./lib/useNavigationIntentFence";
 import { renameCurrentRemoteSession } from "./lib/remoteSessionActions";
 import { localizedNoticeText, useController, type HistoryLoadTrigger, type Item } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onReady, onRemoteForwards, onRemoteServer, onRemoteStatus, onRuntimeRebuilt, openExternal } from "./lib/bridge";
@@ -303,7 +304,6 @@ const WorkspacePanel = lazy(async () => {
 
 const CHAT_MIN_WIDTH = 400;
 const WORKSPACE_RESIZER_WIDTH = 8;
-
 function stripLegacyGoalBudgetFlags(arg: string): string {
   const parts = arg.trim().split(/\s+/).filter(Boolean);
   while (parts.length > 0) {
@@ -313,7 +313,6 @@ function stripLegacyGoalBudgetFlags(arg: string): string {
   }
   return parts.join(" ");
 }
-
 function hasLegacyGoalBudgetFlag(arg: string): boolean {
   const first = arg.trim().split(/\s+/, 1)[0]?.toLowerCase();
   return first === "--research" || first === "--auto-research" || first === "--deep" || first === "--simple" || first === "--no-research";
@@ -1042,6 +1041,7 @@ export default function App() {
     openTopicSession,
     activateTopic,
     noteNavigationIntent,
+    registeredNavigationIntent,
     isNavigationIntentCurrent,
     reassertVisibleTabAfterStaleNavigation,
     syncActiveTab,
@@ -2986,6 +2986,7 @@ export default function App() {
     const lastWorkspace = await app.RemoteLastWorkspace(host.id).catch(() => "");
     const workspace = resolveRemoteWorkspace(lastWorkspace, host.defaultWorkspace);
     if (!remoteWorkspaceLaunchGate.current.isCurrent(host.id, requestSeq)) return;
+    await publishNavigationIntent("remote-workspace");
     await app.OpenRemoteWorkspace(host.id, workspace);
   }, []);
 
@@ -5487,7 +5488,12 @@ export default function App() {
               }
               const navigationIntentSeq = noteNavigationIntent();
               try {
-                const lifecycle = await runWorktreeMergeLifecycle(res, tabToClose, {
+                const navigationIntentToken = await registeredNavigationIntent(navigationIntentSeq);
+                if (!navigationIntentToken || !isNavigationIntentCurrent(navigationIntentSeq)) {
+                  showToast(t("worktree.navigationChangedPreserved"), "error", { durationMs: 9000 });
+                  return;
+                }
+                const lifecycle = await runWorktreeMergeLifecycle(res, tabToClose, navigationIntentToken, {
                   ensureSource: (sourceRoot) => singleSurfaceLayout
                     ? ensureBlankSurface("project", sourceRoot, navigationIntentSeq)
                     : ensureBlankTab("project", sourceRoot, navigationIntentSeq),
@@ -5500,7 +5506,10 @@ export default function App() {
                   onCloseBlocked: () => showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 }),
                 });
                 if (lifecycle.phase !== "finalized") return;
-                if (lifecycle.cleanup.completed) {
+                const preservedLateContent = lifecycle.cleanup.blockers.find((blocker) => blocker.code === "late_content_preserved");
+                if (preservedLateContent) {
+                  showToast(preservedLateContent.message, "error", { durationMs: 9000 });
+                } else if (lifecycle.cleanup.completed) {
                   showToast(t("worktree.mergeAndCleanupDone"), "info");
                 } else {
                   showToast(lifecycle.cleanup.error || t("worktree.cleanupPreserved"), "error", { durationMs: 9000 });

@@ -74,7 +74,9 @@ func TestFinalizeReservationRejectsConcurrentFallbackPublication(t *testing.T) {
 
 func TestCleanupReservationRejectsDeletedRootDescendants(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	worktreeRoot := filepath.Join(t.TempDir(), "allocation")
+	allocationsRoot := t.TempDir()
+	allocationRoot := filepath.Join(allocationsRoot, "repo-key", "allocation")
+	worktreeRoot := filepath.Join(allocationRoot, "repository")
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +101,16 @@ func TestCleanupReservationRejectsDeletedRootDescendants(t *testing.T) {
 		unexpectedRelease()
 		t.Fatal("overlapping descendant cleanup reservation was accepted")
 	}
+	quarantined := filepath.Join(allocationRoot, ".reasonix-cleanup", "random", "subproject")
+	if unexpectedRelease, err := app.beginWorkspaceRuntimeAdmission(quarantined); err == nil {
+		unexpectedRelease()
+		t.Fatal("cleanup quarantine descendant entered a cleanup reservation")
+	}
+	allocationSibling := filepath.Join(allocationRoot, "late-project")
+	if unexpectedRelease, err := app.beginWorkspaceRuntimeAdmission(allocationSibling); err == nil {
+		unexpectedRelease()
+		t.Fatal("allocation sibling entered a cleanup reservation")
+	}
 	if aliasAvailable {
 		if unexpectedRelease, err := app.beginWorkspaceRuntimeAdmission(filepath.Join(alias, "saved", "subproject")); err == nil {
 			unexpectedRelease()
@@ -110,13 +122,13 @@ func TestCleanupReservationRejectsDeletedRootDescendants(t *testing.T) {
 		t.Fatalf("deleted-root submit admission = %v", err)
 	}
 
-	sibling := worktreeRoot + "-backup"
-	if err := os.MkdirAll(sibling, 0o755); err != nil {
+	adjacentAllocation := filepath.Join(filepath.Dir(allocationRoot), "allocation-backup", "repository")
+	if err := os.MkdirAll(adjacentAllocation, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	releaseSibling, err := app.beginWorkspaceRuntimeAdmission(sibling)
+	releaseSibling, err := app.beginWorkspaceRuntimeAdmission(adjacentAllocation)
 	if err != nil {
-		t.Fatalf("prefix sibling was rejected: %v", err)
+		t.Fatalf("adjacent allocation was rejected: %v", err)
 	}
 	releaseSibling()
 }

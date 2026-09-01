@@ -231,8 +231,11 @@ type App struct {
 	// Worktree runtime reservations are ordered before App.mu. Runtime owners
 	// hold this gate through final publication; callers must never acquire it
 	// under App.mu. Merge reservations cover both the source and isolated roots,
-	// while cleanup reservations cover the isolated root through removal.
+	// while cleanup reservations cover the complete allocation through removal.
 	worktreeReservations worktreeRuntimeReservations
+	// navigationIntent linearizes frontend intent publication with the final
+	// merged-worktree removal before the runtime mutation barrier and App.mu.
+	navigationIntent navigationIntentFence
 
 	// sessionRemovalMu serializes operations that remove visible or detached
 	// session bindings. Those operations may snapshot controllers before

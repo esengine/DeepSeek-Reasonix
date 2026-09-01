@@ -73,12 +73,15 @@ workspace lease 后，Desktop 会
 短暂封闭 turn start 和 controller publication，再为 canonical source/worktree 两个根登记
 贯穿 Git 变更的 reservation。项目 runtime owner、新 turn 以及 terminal create/write 都
 经过同一 admission；子目录和 symlink 别名受保护，prefix sibling 与无关项目不受影响。
-worktree 有未提交改动时默认禁止合并；只有用户显式开启
-自动提交才会依次执行暂存和提交，并在新提交上重新做冲突预检。目标分支或 `HEAD`
-发生漂移时只刷新确认面板，不会继续执行。确认还会绑定瞬态、NUL-safe 的内容 token，
-覆盖每个脏路径的类型、mode、文件内容或 symlink 目标。`git add -A` 后必须证明 token
-未变、没有残留的 unstaged/untracked 内容，且自动提交只有原 worktree `HEAD` 这一个父
-提交并包含刚记录的 staged tree。source 合并使用 `git merge --no-ff --no-commit`，并把
+worktree 有未提交改动时默认禁止合并；只有用户显式开启自动提交才会继续，并在精确新
+提交上重新做冲突预检。确认 token 使用 NUL-safe 状态，同时绑定真实 index entries、
+每个脏路径的类型、mode、文件内容或 symlink 目标。自动提交从确认的 `HEAD` 创建 `0600`
+临时 index，`git add -A` 只作用于该副本。若真实 index 含有当前完整工作区未表示的
+staged/index-only 内容，Reasonix 会停止，真实 index 和两个版本都保持原样。否则通过无
+hook、单父提交的 `commit-tree` 创建精确提交，对确认的 worktree branch 做 compare-and-swap，
+并仅在真实 index 字节仍一致时通过独占 `index.lock` 安装准备好的 index。branch CAS 后的
+任何失败都返回 recovery-required；目标分支、`HEAD`、index 或内容发生漂移时不会继续。
+source 合并使用 `git merge --no-ff --no-commit`，并把
 实际 index tree 与重新计算的 merge-tree 精确绑定；准备前及安装 ref 前都会重新验证
 worktree root、Git common-dir、symbolic branch、branch ref、`HEAD`、Git operation 和内容
 token。只有这些身份、目标分支、原始 `HEAD`、精确 `MERGE_HEAD` 和 prepared tree 都仍
@@ -89,18 +92,22 @@ commit tree、真实 index tree、parents、refs、干净状态和 Git operation
 Reasonix 拥有的准备失败会执行 abort；target ref 漂移、CAS 后 worktree 漂移或无法证明
 恢复成功的状态返回 recovery-required，同时保留所有 worktree 资源和外部状态。
 
-合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout；
-若此时出现更新的前端导航意图，后续关闭和清理会停止并保留资源。否则后端只会在精确
-source Tab 仍 active、精确 worktree Tab 仍 idle 时关闭页面和终端。独立、可重试的清理
-阶段会在同一临界区内登记 canonical worktree reservation 并扫描可见及 detached
-runtime；所有项目 runtime 的创建、恢复、删除/归档 fallback 和重定向都经过同一
-admission gate。reservation 按“路径位于受管 worktree 内”匹配，而不是只比较根路径，
-因此即使 Git worktree 根已被移除，保存的 symlink、子目录或晚到 runtime 仍不能在检查
-后插入。之后还必须证明临时提交已包含在目标分支、身份仍一致且
-`git status --ignored` 完全为空。
-清理仅使用普通 `git worktree remove` 和 `git branch -d`，绝不强制删除。tracked、
-untracked 或 ignored 文件都会阻止清理并向用户列出；合并结果仍然保留，worktree、
-分支和文件可供恢复或之后重试清理。
+合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout。每次
+前端导航都会向后端登记 opaque intent token；关闭请求在快照前和实际移除 Tab 的线性化
+点都必须仍持有该 token。因此更新导航会停止关闭和清理并保留资源；稳定时后端也只会在
+精确 source Tab 仍 active、精确 worktree Tab 仍 idle 时关闭页面和终端。
+
+独立、可重试的清理会 reservation 包含原 canonical worktree 与固定 quarantine 子树的整个
+allocation，并扫描可见及 detached runtime；项目 runtime 创建、恢复、删除/归档 fallback
+和重定向都经过同一 admission gate。symlink 与子目录受保护，allocation 外的 prefix
+sibling 和其他 allocation 不受影响。只有临时提交已包含在目标分支、身份一致且包含 ignored 文件的
+完整 status 为空时，checkout 才会原子移动到 reservation 覆盖的随机 quarantine 路径。
+Reasonix 在普通 `git worktree remove` 前会两次复核仓库、branch、`HEAD` 和完整 status。
+晚到写入若落在原公开路径，就位于删除目标之外并被保留和报告；quarantine 内检测到内容
+则停止清理，并在原路径空闲时恢复 checkout；若 checkout 已登记在其他路径，清理也会停止并
+保留其分支。临时分支使用预期 `HEAD` 的 CAS 删除。
+全流程不使用强制 worktree/branch 删除或递归文件系统删除；任何无法证明安全的 worktree、
+分支和文件都会保留以便恢复。
 
 Delivery worktree 仍是可选能力。非隔离目录使用 workspace lease（`filelock`）。
 路径型写入对祖先兼容锁和目标路径层级分片加 shared 锁、对具体文件分片加

@@ -104,11 +104,22 @@ func TestCloseMergedWorktreeTabRechecksSourceAndSupportsIdempotence(t *testing.T
 	app.tabs[worktreeTab.ID] = worktreeTab
 	app.tabOrder = []string{source.ID, worktreeTab.ID}
 	app.activeTabID = worktreeTab.ID
-	request := CloseMergedWorktreeTabRequest{TabID: worktreeTab.ID, WorktreeRoot: worktreeRoot, SourceTabID: source.ID, SourceRoot: sourceRoot}
+	if err := app.RegisterNavigationIntent("merge-close-1"); err != nil {
+		t.Fatal(err)
+	}
+	request := CloseMergedWorktreeTabRequest{
+		TabID: worktreeTab.ID, WorktreeRoot: worktreeRoot, SourceTabID: source.ID, SourceRoot: sourceRoot,
+		NavigationIntentToken: "merge-close-1",
+	}
 	if result, err := app.CloseMergedWorktreeTab(request); err == nil || result.Closed {
 		t.Fatalf("close with worktree reselected = %+v, %v", result, err)
 	}
 	app.activeTabID = source.ID
+	missingToken := request
+	missingToken.NavigationIntentToken = ""
+	if result, err := app.CloseMergedWorktreeTab(missingToken); err == nil || result.Closed {
+		t.Fatalf("close without navigation token = %+v, %v", result, err)
+	}
 	result, err := app.CloseMergedWorktreeTab(request)
 	if err != nil || !result.Closed || result.Idempotent {
 		t.Fatalf("exact close = %+v, %v", result, err)
@@ -122,6 +133,41 @@ func TestCloseMergedWorktreeTabRechecksSourceAndSupportsIdempotence(t *testing.T
 	app.mu.Unlock()
 	if result, err := app.CloseMergedWorktreeTab(request); err == nil || result.Closed {
 		t.Fatalf("detached close = %+v, %v", result, err)
+	}
+}
+
+func TestCloseMergedWorktreeTabRejectsNewNavigationDuringSnapshot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sourceRoot := t.TempDir()
+	worktreeRoot := t.TempDir()
+	app := NewApp()
+	source := &WorkspaceTab{ID: "source", Scope: "project", WorkspaceRoot: sourceRoot}
+	worktreeTab := &WorkspaceTab{ID: "worktree", Scope: "project", WorkspaceRoot: worktreeRoot}
+	app.tabs[source.ID] = source
+	app.tabs[worktreeTab.ID] = worktreeTab
+	app.tabOrder = []string{source.ID, worktreeTab.ID}
+	app.activeTabID = source.ID
+	if err := app.RegisterNavigationIntent("merge-close-old"); err != nil {
+		t.Fatal(err)
+	}
+	app.navigationIntent.beforeCloseFinalHook = func() {
+		if err := app.RegisterNavigationIntent("newer-user-navigation"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := CloseMergedWorktreeTabRequest{
+		TabID: worktreeTab.ID, WorktreeRoot: worktreeRoot, SourceTabID: source.ID, SourceRoot: sourceRoot,
+		NavigationIntentToken: "merge-close-old",
+	}
+	result, err := app.CloseMergedWorktreeTab(request)
+	if err == nil || result.Closed {
+		t.Fatalf("stale navigation close = %+v, %v", result, err)
+	}
+	app.mu.RLock()
+	kept := app.tabs[worktreeTab.ID]
+	app.mu.RUnlock()
+	if kept != worktreeTab {
+		t.Fatal("stale navigation removed the worktree tab")
 	}
 }
 

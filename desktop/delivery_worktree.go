@@ -114,10 +114,11 @@ type MergeWorktreeBackRequest struct {
 // CloseMergedWorktreeTabRequest binds the lifecycle handoff to both the source
 // and worktree identities observed by the frontend after navigation.
 type CloseMergedWorktreeTabRequest struct {
-	TabID        string `json:"tabId"`
-	WorktreeRoot string `json:"worktreeRoot"`
-	SourceTabID  string `json:"sourceTabId"`
-	SourceRoot   string `json:"sourceRoot"`
+	TabID                 string `json:"tabId"`
+	WorktreeRoot          string `json:"worktreeRoot"`
+	SourceTabID           string `json:"sourceTabId"`
+	SourceRoot            string `json:"sourceRoot"`
+	NavigationIntentToken string `json:"navigationIntentToken"`
 }
 
 type CloseMergedWorktreeTabResult struct {
@@ -230,28 +231,44 @@ func (a *App) CloseMergedWorktreeTab(request CloseMergedWorktreeTabRequest) (Clo
 	if err != nil {
 		return CloseMergedWorktreeTabResult{}, fmt.Errorf("resolve source identity: %w", err)
 	}
-	defer a.lockRuntimeMutation("close-merged-worktree-tab")()
+	if err := a.requireNavigationIntent(request.NavigationIntentToken); err != nil {
+		return CloseMergedWorktreeTabResult{}, err
+	}
+	releaseRuntime := a.lockRuntimeMutation("close-merged-worktree-tab-snapshot")
 	a.sessionRemovalMu.Lock()
-	defer a.sessionRemovalMu.Unlock()
-
 	a.mu.Lock()
 	tab, err := a.validateMergedWorktreeCloseLocked(request, worktreeKey, sourceKey)
 	if err != nil {
 		a.mu.Unlock()
+		a.sessionRemovalMu.Unlock()
+		releaseRuntime()
 		return CloseMergedWorktreeTabResult{}, err
 	}
-	if tab == nil {
-		a.mu.Unlock()
-		return CloseMergedWorktreeTabResult{Closed: true, Idempotent: true}, nil
-	}
 	a.mu.Unlock()
-	if err := a.snapshotTab(tab); err != nil {
-		return CloseMergedWorktreeTabResult{}, fmt.Errorf("save worktree session before closing: %w", err)
+	if tab != nil {
+		if err := a.snapshotMergedWorktreeCloseTab(tab); err != nil {
+			a.sessionRemovalMu.Unlock()
+			releaseRuntime()
+			return CloseMergedWorktreeTabResult{}, err
+		}
 	}
-	if err := a.saveTabSessionMetaForCurrentSession(tab); err != nil {
-		return CloseMergedWorktreeTabResult{}, fmt.Errorf("save worktree session metadata before closing: %w", err)
+	a.sessionRemovalMu.Unlock()
+	releaseRuntime()
+	if hook := a.navigationIntent.beforeCloseFinalHook; hook != nil {
+		hook()
 	}
 
+	// Linearization order: navigation fence -> runtime barrier -> removal gate
+	// -> App.mu. A newer intent published during the first snapshot wins here.
+	a.navigationIntent.mu.Lock()
+	defer a.navigationIntent.mu.Unlock()
+	if a.navigationIntent.token != strings.TrimSpace(request.NavigationIntentToken) {
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("navigation changed before worktree close; resources were preserved")
+	}
+	releaseRuntime = a.lockRuntimeMutation("close-merged-worktree-tab-final")
+	defer releaseRuntime()
+	a.sessionRemovalMu.Lock()
+	defer a.sessionRemovalMu.Unlock()
 	a.mu.Lock()
 	current, err := a.validateMergedWorktreeCloseLocked(request, worktreeKey, sourceKey)
 	if err != nil {
@@ -262,21 +279,49 @@ func (a *App) CloseMergedWorktreeTab(request CloseMergedWorktreeTabRequest) (Clo
 		a.mu.Unlock()
 		return CloseMergedWorktreeTabResult{}, fmt.Errorf("worktree tab changed before close; resources were preserved")
 	}
-	a.markTabRemovedLocked(tab)
-	delete(a.tabs, tab.ID)
-	a.removeTabOrderLocked(tab.ID)
+	if current == nil {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{Closed: true, Idempotent: true}, nil
+	}
+	a.mu.Unlock()
+	if err := a.snapshotMergedWorktreeCloseTab(current); err != nil {
+		return CloseMergedWorktreeTabResult{}, err
+	}
+	a.mu.Lock()
+	final, err := a.validateMergedWorktreeCloseLocked(request, worktreeKey, sourceKey)
+	if err != nil {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{}, err
+	}
+	if final != current {
+		a.mu.Unlock()
+		return CloseMergedWorktreeTabResult{}, fmt.Errorf("worktree tab changed at close linearization; resources were preserved")
+	}
+	a.markTabRemovedLocked(current)
+	delete(a.tabs, current.ID)
+	a.removeTabOrderLocked(current.ID)
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
 	if a.terminals != nil {
-		a.terminals.closeForTab(tab.ID)
+		a.terminals.closeForTab(current.ID)
 	}
-	a.closeTabRuntimeAdmissionHeld(tab)
+	a.closeTabRuntimeAdmissionHeld(current)
 	if a.workspaceHub != nil {
 		a.workspaceHub.reconcileRoots()
 	}
 	a.emitProjectTreeRuntimeChangedWithLegacy()
 	return CloseMergedWorktreeTabResult{Closed: true}, nil
+}
+
+func (a *App) snapshotMergedWorktreeCloseTab(tab *WorkspaceTab) error {
+	if err := a.snapshotTab(tab); err != nil {
+		return fmt.Errorf("save worktree session before closing: %w", err)
+	}
+	if err := a.saveTabSessionMetaForCurrentSession(tab); err != nil {
+		return fmt.Errorf("save worktree session metadata before closing: %w", err)
+	}
+	return nil
 }
 
 func (a *App) validateMergedWorktreeCloseLocked(request CloseMergedWorktreeTabRequest, worktreeKey, sourceKey string) (*WorkspaceTab, error) {
@@ -664,18 +709,25 @@ func (a *App) reserveWorktreeCleanup(worktreeRoot string) (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve cleanup worktree identity: %w", err)
 	}
+	// Reserve the complete allocation while the checkout moves to quarantine,
+	// so late runtimes cannot enter either path. Adjacent allocations remain
+	// independent reservation domains.
+	allocationKey, err := canonicalRuntimeRootErr(filepath.Dir(key))
+	if err != nil {
+		return nil, fmt.Errorf("resolve cleanup allocation identity: %w", err)
+	}
 	a.worktreeReservations.mu.Lock()
 	if a.worktreeReservations.cleanup == nil {
 		a.worktreeReservations.cleanup = map[string]struct{}{}
 	}
-	if a.cleanupReservationOverlapsLocked(key) || a.mergeReservationOverlapsLocked(key) {
+	if a.cleanupReservationOverlapsLocked(allocationKey) || a.mergeReservationOverlapsLocked(allocationKey) {
 		a.worktreeReservations.mu.Unlock()
 		return nil, fmt.Errorf("worktree maintenance is already in progress")
 	}
 	a.mu.RLock()
-	referenced := a.runtimeReferencesCanonicalLocked(key)
+	referenced := a.runtimeReferencesCanonicalLocked(allocationKey)
 	if !referenced {
-		a.worktreeReservations.cleanup[key] = struct{}{}
+		a.worktreeReservations.cleanup[allocationKey] = struct{}{}
 	}
 	a.mu.RUnlock()
 	a.worktreeReservations.mu.Unlock()
@@ -684,7 +736,7 @@ func (a *App) reserveWorktreeCleanup(worktreeRoot string) (func(), error) {
 	}
 	return func() {
 		a.worktreeReservations.mu.Lock()
-		delete(a.worktreeReservations.cleanup, key)
+		delete(a.worktreeReservations.cleanup, allocationKey)
 		a.worktreeReservations.mu.Unlock()
 	}, nil
 }

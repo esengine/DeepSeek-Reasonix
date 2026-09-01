@@ -26,6 +26,7 @@ export type WorktreeMergeLifecycleResult =
 export async function runWorktreeMergeLifecycle(
   receipt: WorktreeMergeResult,
   worktreeTabId: string,
+  navigationIntentToken: string,
   deps: WorktreeMergeLifecycleDeps,
 ): Promise<WorktreeMergeLifecycleResult> {
   if (!receipt.sourceRoot || !receipt.worktreeRoot || !receipt.targetBranch || !receipt.mergedCommit || !receipt.worktreeBranch || !receipt.worktreeHead) {
@@ -48,6 +49,7 @@ export async function runWorktreeMergeLifecycle(
     worktreeRoot: receipt.worktreeRoot,
     sourceTabId: sourceTab.id,
     sourceRoot: receipt.sourceRoot,
+    navigationIntentToken,
   });
   if (!closed.closed) {
     deps.onCloseBlocked();

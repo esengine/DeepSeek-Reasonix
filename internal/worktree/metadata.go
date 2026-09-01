@@ -91,24 +91,29 @@ func readMergeMetadataForCleanup(worktreeRoot, managedRoot string) (mergeMetadat
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return mergeMetadata{}, "", false, fmt.Errorf("inspect cleanup worktree: %w", err)
 	}
+	if _, err := os.Lstat(worktreeRoot); err == nil {
+		return mergeMetadata{}, "", false, errors.New("cleanup worktree path is a dangling or unreachable link")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return mergeMetadata{}, "", false, fmt.Errorf("inspect missing cleanup worktree: %w", err)
+	}
 	absManaged, err := filepath.Abs(strings.TrimSpace(managedRoot))
 	if err != nil {
 		return mergeMetadata{}, "", false, fmt.Errorf("resolve managed worktree storage: %w", err)
 	}
-	absRoot, err := filepath.Abs(strings.TrimSpace(worktreeRoot))
-	if err != nil {
-		return mergeMetadata{}, "", false, fmt.Errorf("resolve cleanup worktree: %w", err)
-	}
-	rel, err := filepath.Rel(filepath.Clean(absManaged), filepath.Clean(absRoot))
-	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
-	if err != nil || len(parts) != 3 || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return mergeMetadata{}, "", false, errors.New("cleanup worktree does not match the managed allocation layout")
-	}
-	allocationDir := filepath.Dir(absRoot)
 	realManaged, err := filepath.EvalSymlinks(absManaged)
 	if err != nil {
 		return mergeMetadata{}, "", false, fmt.Errorf("resolve managed worktree storage links: %w", err)
 	}
+	realRoot, err := resolveMissingCleanupPath(worktreeRoot)
+	if err != nil {
+		return mergeMetadata{}, "", false, err
+	}
+	rel, err := filepath.Rel(filepath.Clean(realManaged), filepath.Clean(realRoot))
+	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	if err != nil || len(parts) != 3 || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return mergeMetadata{}, "", false, errors.New("cleanup worktree does not match the managed allocation layout")
+	}
+	allocationDir := filepath.Dir(realRoot)
 	realAllocation, err := filepath.EvalSymlinks(allocationDir)
 	if err != nil {
 		return mergeMetadata{}, "", false, fmt.Errorf("resolve cleanup allocation links: %w", err)
@@ -122,15 +127,31 @@ func readMergeMetadataForCleanup(worktreeRoot, managedRoot string) (mergeMetadat
 	if err != nil {
 		return mergeMetadata{}, path, false, err
 	}
-	if filepath.Clean(metadata.WorktreeRoot) != filepath.Clean(absRoot) {
+	realMetadataRoot, err := resolveMissingCleanupPath(metadata.WorktreeRoot)
+	if err != nil {
+		return mergeMetadata{}, path, false, fmt.Errorf("resolve cleanup metadata root: %w", err)
+	}
+	if filepath.Clean(realMetadataRoot) != filepath.Clean(realRoot) {
 		return mergeMetadata{}, path, false, errors.New("cleanup metadata root mismatch")
 	}
-	metadata.WorktreeRoot = filepath.Clean(absRoot)
+	metadata.WorktreeRoot = filepath.Clean(realRoot)
 	metadata.SourceRoot = filepath.Clean(metadata.SourceRoot)
 	metadata.TargetBranch = strings.TrimSpace(metadata.TargetBranch)
 	metadata.CreatedHead = strings.TrimSpace(metadata.CreatedHead)
 	metadata.WorktreeBranch = strings.TrimSpace(metadata.WorktreeBranch)
 	return metadata, path, false, nil
+}
+
+func resolveMissingCleanupPath(path string) (string, error) {
+	absPath, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return "", fmt.Errorf("resolve cleanup worktree: %w", err)
+	}
+	realParent, err := filepath.EvalSymlinks(filepath.Dir(absPath))
+	if err != nil {
+		return "", fmt.Errorf("resolve cleanup allocation links: %w", err)
+	}
+	return filepath.Join(realParent, filepath.Base(absPath)), nil
 }
 
 func decodeMergeMetadata(path string) (mergeMetadata, error) {

@@ -78,6 +78,8 @@ await act(async () => root.unmount());
 let directSwitch: ((meta: TabMeta) => Promise<void>) | undefined;
 let historyCalls = 0;
 let activeCalls = 0;
+let releaseNavigationRegistration: (() => void) | undefined;
+let navigationRegistration = new Promise<void>((resolve) => { releaseNavigationRegistration = resolve; });
 const originalHistory = app.HistorySliceForTab;
 const previousGo = window.go;
 window.go = { main: { App: {
@@ -96,6 +98,7 @@ function SwitchHarness() {
     activeTabIdRef: activeIdRef,
     setActiveTabId: setActiveId,
     beginNavigation: () => 1,
+    requireRegisteredNavigation: () => navigationRegistration,
     navigationCanComplete: () => true,
     navigationIsCurrent: () => true,
     confirmBackendActiveTab: () => undefined,
@@ -106,11 +109,19 @@ function SwitchHarness() {
 
 const switchRoot = createRoot(document.getElementById("root")!);
 await act(async () => switchRoot.render(<SwitchHarness />));
-await act(async () => directSwitch?.(remoteMeta));
+let directSwitchPromise: Promise<void> | undefined;
+await act(async () => {
+  directSwitchPromise = directSwitch?.(remoteMeta);
+  await Promise.resolve();
+});
+eq(activeCalls, 0, "remote activation waits for navigation registration before backend focus");
+releaseNavigationRegistration?.();
+await act(async () => directSwitchPromise);
 eq(document.querySelector("span")?.getAttribute("data-active-id"), "remote-1", "remote activation updates the selected tab");
 eq(activeCalls, 1, "remote activation still binds backend focus");
 eq(historyCalls, 0, "remote activation bypasses local history hydration");
 await act(async () => switchRoot.unmount());
+navigationRegistration = Promise.resolve();
 
 let terminalProbe: RemoteSessionApi | undefined;
 window.go = { main: { App: {

@@ -336,16 +336,27 @@ func inspect(ctx context.Context, workspaceRoot string) (inspection, error) {
 }
 
 func runGit(parent context.Context, dir string, args ...string) (stdout, stderr string, err error) {
-	return runGitInput(parent, dir, "", args...)
+	return runGitEnvInput(parent, dir, "", nil, args...)
 }
 
 func runGitInput(parent context.Context, dir, input string, args ...string) (stdout, stderr string, err error) {
+	return runGitEnvInput(parent, dir, input, nil, args...)
+}
+
+func runGitEnv(parent context.Context, dir string, env []string, args ...string) (stdout, stderr string, err error) {
+	return runGitEnvInput(parent, dir, "", env, args...)
+}
+
+func runGitEnvInput(parent context.Context, dir, input string, env []string, args ...string) (stdout, stderr string, err error) {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(parent, gitTimeout(args))
 	defer cancel()
 	cmd := gitcmd.Command(ctx, dir, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var outBuf, errBuf bytes.Buffer
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
@@ -360,7 +371,7 @@ func runGitInput(parent context.Context, dir, input string, args ...string) (std
 }
 
 func gitTimeout(args []string) time.Duration {
-	if len(args) >= 2 && args[0] == "worktree" && (args[1] == "add" || args[1] == "remove") {
+	if len(args) >= 2 && args[0] == "worktree" && (args[1] == "add" || args[1] == "move" || args[1] == "remove") {
 		return gitWorktreeMutationTimeout
 	}
 	return gitProbeTimeout

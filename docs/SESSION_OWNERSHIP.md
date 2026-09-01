@@ -88,14 +88,20 @@ controller publication, then reserves both canonical source and worktree roots
 through the Git mutation. Project-runtime owners, new turns, and terminal
 create/write calls all use that admission gate; contained paths and symlink
 aliases are covered without blocking prefix siblings or unrelated workspaces.
-Uncommitted worktree changes block the
-merge unless the user explicitly opts into an automatic commit; that option is
-off by default. Confirmation binds a transient, NUL-safe token of every dirty
-path's type, mode, bytes, or symlink target. Before committing, Reasonix proves
-the token survived `git add -A`, no unstaged or untracked content remains, and
-the resulting commit has the exact staged tree and original worktree `HEAD` as
-its only parent; conflict preflight then runs again. A target branch, `HEAD`, or
-content-token change refreshes the confirmation instead of continuing. The
+Uncommitted worktree changes block the merge unless the user explicitly opts
+into an automatic commit; that option is off by default. Confirmation binds a
+transient, NUL-safe token to the real index entries and status as well as every
+dirty path's type, mode, bytes, or symlink target. Auto-commit seeds a private
+`0600` temporary index from the confirmed `HEAD` and runs `git add -A` only
+there. If the real index contains staged or index-only content that the full
+working tree does not represent, Reasonix stops with the real index and both
+versions untouched. Otherwise it creates a hook-free, single-parent
+`commit-tree`, compare-and-swaps only the confirmed worktree branch, and then
+installs the prepared index through Git's exclusive `index.lock` protocol only
+if the real index bytes still match. Any failure after the branch CAS is marked
+recovery-required; conflict preflight runs again on the exact new commit. A
+target branch, `HEAD`, index, or content-token change refreshes the confirmation
+instead of continuing. The
 source merge uses `git merge --no-ff --no-commit` and binds the real index tree
 to a freshly computed merge tree. The worktree root, common repository,
 symbolic branch, branch ref, `HEAD`, Git operation, and content token are
@@ -111,22 +117,31 @@ aborted; target-ref drift, post-CAS worktree drift, or any state whose recovery
 cannot be proven is marked recovery-required while every worktree resource and
 external state is preserved.
 
-A successful merge first navigates to the recorded source checkout. A newer UI
-navigation intent stops the remaining close/cleanup sequence and preserves the
-resources. Otherwise Desktop closes only the exact idle worktree tab while the
-exact source tab is still active. Cleanup is then a separate, retryable step.
-It atomically reserves the canonical worktree identity while checking visible
+A successful merge first navigates to the recorded source checkout. Every UI
+navigation registers an opaque intent token with Desktop; the close request
+must still own that exact token both before its snapshot and at the backend
+removal linearization point. A newer intent therefore stops close and cleanup
+while preserving resources. Otherwise Desktop closes only the exact idle
+worktree tab while the exact source tab is still active. Cleanup is then a
+separate, retryable step. It reserves the complete allocation containing both
+the canonical worktree and its fixed quarantine subtree while checking visible
 and detached runtimes; every project-runtime creation, restoration,
-delete/archive fallback, and redirect uses the same gate. Reservations match
-any path contained by the managed worktree rather than only the exact root, so
-a saved symlink, subdirectory, or late runtime remains blocked even after Git
-has removed the worktree root. Cleanup runs only when the temporary commit is
-contained by the target, identities still match, and `git status --ignored` is
-completely empty.
-Reasonix uses ordinary `git worktree remove` and `git branch -d`; it never uses
-forced removal. Tracked, untracked, or ignored files therefore block cleanup
-and are listed for the user. The merge remains successful while the worktree,
-branch, and files stay available for recovery or a later cleanup retry.
+delete/archive fallback, and redirect uses the same gate. Symlink and contained
+paths are covered. Prefix siblings outside the allocation and other allocations
+remain independent.
+
+Cleanup runs only when the temporary commit is contained by the target,
+identities still match, and the full status including ignored files is empty.
+The checkout is atomically moved to an unguessable path under the reserved
+quarantine, then its repository, branch, `HEAD`, and status are verified twice
+before ordinary `git worktree remove`. A writer that targets the former public
+path creates content outside the removal target, so that content is preserved
+and reported. Content observed inside quarantine aborts cleanup and restores the
+checkout when the original path is free. A checkout registered at any other
+path also stops cleanup and preserves its branch. The temporary branch is deleted with
+an expected-`HEAD` compare-and-swap. Reasonix never uses forced worktree/branch
+removal or recursive filesystem deletion. The merge remains successful while
+any unproven worktree, branch, or file stays available for recovery.
 
 Delivery worktrees stay optional. Non-isolated directories use the workspace
 lease (`filelock`). Path-bound writes take shared ancestor compatibility locks,
