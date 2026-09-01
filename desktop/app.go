@@ -228,10 +228,11 @@ type App struct {
 	// boundary. Git identities are still revalidated after workspace leases are
 	// acquired; this mutex only prevents duplicate in-process Wails calls.
 	worktreeMergeMu sync.Mutex
-	// Cleanup reservations are ordered before App.mu. Runtime owners hold this
-	// gate through final publication; callers must never acquire it under App.mu.
-	worktreeCleanupMu           sync.Mutex
-	worktreeCleanupReservations map[string]struct{}
+	// Worktree runtime reservations are ordered before App.mu. Runtime owners
+	// hold this gate through final publication; callers must never acquire it
+	// under App.mu. Merge reservations cover both the source and isolated roots,
+	// while cleanup reservations cover the isolated root through removal.
+	worktreeReservations worktreeRuntimeReservations
 
 	// sessionRemovalMu serializes operations that remove visible or detached
 	// session bindings. Those operations may snapshot controllers before
@@ -451,18 +452,21 @@ func (a *App) jsProfilingMiddleware() func(http.Handler) http.Handler {
 // last session's desktop-tabs.json.
 func NewApp() *App {
 	a := &App{
-		tabs:                        map[string]*WorkspaceTab{},
-		runtimeByID:                 map[string]*desktopSessionRuntime{},
-		runtimeBySessionKey:         map[string]*desktopSessionRuntime{},
-		catalogReconcileJobs:        map[string]*desktopCatalogReconcileJob{},
-		detachedSessions:            map[string]*WorkspaceTab{},
-		mediaTokens:                 newMediaTokenStore(),
-		botInstalls:                 map[string]*botInstallSession{},
-		botRuntime:                  newDesktopBotRuntime(),
-		remoteWindows:               newRemoteWindowRegistry(),
-		remoteWindowOwnerID:         newRemoteWindowOwnerID(),
-		topicState:                  desktopTopicState,
-		worktreeCleanupReservations: map[string]struct{}{},
+		tabs:                 map[string]*WorkspaceTab{},
+		runtimeByID:          map[string]*desktopSessionRuntime{},
+		runtimeBySessionKey:  map[string]*desktopSessionRuntime{},
+		catalogReconcileJobs: map[string]*desktopCatalogReconcileJob{},
+		detachedSessions:     map[string]*WorkspaceTab{},
+		mediaTokens:          newMediaTokenStore(),
+		botInstalls:          map[string]*botInstallSession{},
+		botRuntime:           newDesktopBotRuntime(),
+		remoteWindows:        newRemoteWindowRegistry(),
+		remoteWindowOwnerID:  newRemoteWindowOwnerID(),
+		topicState:           desktopTopicState,
+		worktreeReservations: worktreeRuntimeReservations{
+			cleanup: map[string]struct{}{},
+			merge:   map[string]struct{}{},
+		},
 	}
 	a.desktopShell.trayState = "probing"
 	a.webView2Recovery = newWebView2RecoveryCoordinator(a)
@@ -5110,7 +5114,6 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", dir)
 	}
-	saveWorkspace(dir)
 
 	// Open a registered topic so the new workspace appears in the project tree
 	// immediately instead of only existing as an in-memory tab.

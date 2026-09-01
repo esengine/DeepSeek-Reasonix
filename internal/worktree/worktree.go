@@ -336,6 +336,10 @@ func inspect(ctx context.Context, workspaceRoot string) (inspection, error) {
 }
 
 func runGit(parent context.Context, dir string, args ...string) (stdout, stderr string, err error) {
+	return runGitInput(parent, dir, "", args...)
+}
+
+func runGitInput(parent context.Context, dir, input string, args ...string) (stdout, stderr string, err error) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -343,6 +347,9 @@ func runGit(parent context.Context, dir string, args ...string) (stdout, stderr 
 	defer cancel()
 	cmd := gitcmd.Command(ctx, dir, args...)
 	var outBuf, errBuf bytes.Buffer
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 	err = cmd.Run()

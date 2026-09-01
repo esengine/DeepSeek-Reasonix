@@ -67,19 +67,27 @@ worktree 根和临时分支。旧版本创建且没有该元数据的 worktree �
 同样按失败关闭处理。
 
 Merge-Back 是“合并、清理分离”的失败原子流程。预检会验证受管路径和仓库身份、精确
-分支与 `HEAD`、source 干净且没有进行中的 Git 操作、Desktop 活动任务、工作区写租约、
-ahead/behind、diff 和冲突。worktree 有未提交改动时默认禁止合并；只有用户显式开启
+分支与 `HEAD`、source 干净且没有进行中的 Git 操作、全部可见或 detached Desktop
+活动任务、工作区写租约、integrated terminal、ahead/behind、diff 和冲突。取得双
+workspace lease 后，Desktop 会
+短暂封闭 turn start 和 controller publication，再为 canonical source/worktree 两个根登记
+贯穿 Git 变更的 reservation。项目 runtime owner、新 turn 以及 terminal create/write 都
+经过同一 admission；子目录和 symlink 别名受保护，prefix sibling 与无关项目不受影响。
+worktree 有未提交改动时默认禁止合并；只有用户显式开启
 自动提交才会依次执行暂存和提交，并在新提交上重新做冲突预检。目标分支或 `HEAD`
 发生漂移时只刷新确认面板，不会继续执行。确认还会绑定瞬态、NUL-safe 的内容 token，
 覆盖每个脏路径的类型、mode、文件内容或 symlink 目标。`git add -A` 后必须证明 token
 未变、没有残留的 unstaged/untracked 内容，且自动提交只有原 worktree `HEAD` 这一个父
 提交并包含刚记录的 staged tree。source 合并使用 `git merge --no-ff --no-commit`，并把
-实际 index tree 与重新计算的 merge-tree 精确绑定；只有目标分支、原始 `HEAD`、精确
-`MERGE_HEAD` 和 prepared tree 都仍一致时，才通过无 hook 的 `commit-tree` 创建固定
-parents/tree 的提交，并用原目标 `HEAD` 对目标 ref 做 compare-and-swap。提交后还会复核
-commit tree、真实 index tree、parents、ref、干净状态和 Git operation。CAS 前的准备失败
-会执行 abort；任何 ref 漂移或无法证明恢复成功的状态返回 recovery-required，同时保留
-所有 worktree 资源和外部状态。
+实际 index tree 与重新计算的 merge-tree 精确绑定；准备前及安装 ref 前都会重新验证
+worktree root、Git common-dir、symbolic branch、branch ref、`HEAD`、Git operation 和内容
+token。只有这些身份、目标分支、原始 `HEAD`、精确 `MERGE_HEAD` 和 prepared tree 都仍
+一致时，才通过无 hook 的 `commit-tree` 创建固定 parents/tree 的提交。单个
+`update-ref --stdin` transaction 会同时验证 worktree branch ref，并用原目标 `HEAD` 对
+target ref 做 compare-and-swap，避免任一 ref 检查部分生效。提交后还会复核两个 checkout、
+commit tree、真实 index tree、parents、refs、干净状态和 Git operations。CAS 前仍由
+Reasonix 拥有的准备失败会执行 abort；target ref 漂移、CAS 后 worktree 漂移或无法证明
+恢复成功的状态返回 recovery-required，同时保留所有 worktree 资源和外部状态。
 
 合并成功后，Reasonix 先通过正常 Desktop 生命周期切换到记录的 source checkout；
 若此时出现更新的前端导航意图，后续关闭和清理会停止并保留资源。否则后端只会在精确

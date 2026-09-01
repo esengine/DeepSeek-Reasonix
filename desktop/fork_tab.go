@@ -70,10 +70,17 @@ func (a *App) forkForTabWithOptions(tabID string, turn int, isolateWorkspace boo
 				result.SourceDirty = true
 				return result, nil
 			} else {
-				var err error
-				created, err = createDeliveryWorktree(a.bootContext(), srcRoot, config.DeliveryWorktreeDir())
-				if err != nil {
-					return ForkWorktreeResultView{}, fmt.Errorf("create isolated fork worktree: %w", err)
+				var createErr error
+				created, createErr = func() (worktree.Result, error) {
+					releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(srcRoot)
+					if err != nil {
+						return worktree.Result{}, err
+					}
+					defer releaseAdmission()
+					return createDeliveryWorktree(a.bootContext(), srcRoot, config.DeliveryWorktreeDir())
+				}()
+				if createErr != nil {
+					return ForkWorktreeResultView{}, fmt.Errorf("create isolated fork worktree: %w", createErr)
 				}
 				if created.SourceDirty {
 					if rollbackErr := rollbackDeliveryWorktree(a.bootContext(), created); rollbackErr != nil {

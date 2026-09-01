@@ -39,15 +39,15 @@ func (a *App) publishRestoredTab(tab *WorkspaceTab, releaseAdmission func()) {
 // workspaceRuntimeAdmissionErr rejects submits that race cleanup reservation
 // or controller readiness. Callers must not hold App.mu.
 func (a *App) workspaceRuntimeAdmissionErr(tab *WorkspaceTab, ctrl control.SessionAPI) error {
-	a.worktreeCleanupMu.Lock()
-	defer a.worktreeCleanupMu.Unlock()
+	a.worktreeReservations.mu.Lock()
+	defer a.worktreeReservations.mu.Unlock()
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if tab != nil && tab.Scope == "project" {
 		if key := canonicalRuntimeRoot(tab.WorkspaceRoot); key == "" {
 			return fmt.Errorf("workspace identity is unavailable")
-		} else if a.workspaceCleanupReservedLocked(key) {
-			return fmt.Errorf("workspace cleanup is in progress")
+		} else if err := a.workspaceRuntimeReservationErrLocked(key); err != nil {
+			return err
 		}
 	}
 	if tab != nil && ctrl != nil && tab.Ctrl == ctrl {
@@ -56,4 +56,18 @@ func (a *App) workspaceRuntimeAdmissionErr(tab *WorkspaceTab, ctrl control.Sessi
 		}
 	}
 	return a.workspaceNotReadyErrLocked(tab)
+}
+
+// workspaceRuntimeReservationErrLocked applies every destructive worktree
+// lifecycle reservation to one canonical project root. The caller holds
+// worktreeReservations.mu so a successful check stays ordered with reservation
+// publication.
+func (a *App) workspaceRuntimeReservationErrLocked(workspaceKey string) error {
+	if a.workspaceCleanupReservedLocked(workspaceKey) {
+		return fmt.Errorf("workspace cleanup is in progress")
+	}
+	if a.workspaceMergeReservedLocked(workspaceKey) {
+		return fmt.Errorf("workspace merge-back is in progress")
+	}
+	return nil
 }

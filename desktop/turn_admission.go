@@ -43,7 +43,7 @@ func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (
 			return nil, nil, readOnlyChannelErr()
 		}
 		if err := a.workspaceRuntimeAdmissionErr(tab, ctrl); err != nil {
-			return nil, nil, a.workspaceNotReadyErr(tab)
+			return nil, nil, err
 		}
 		// Slow workspace repair stays outside the runtime admission barrier.
 		if err := a.ensureTabControllerWorkspace(tab); err != nil {

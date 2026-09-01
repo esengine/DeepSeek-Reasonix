@@ -73,7 +73,7 @@ func TestControllerPublicationRejectsMutationThatCompletesAfterBoot(t *testing.T
 
 	publication := make(chan bool, 1)
 	go func() {
-		unlock, ok := app.lockTabControllerPublication(generation)
+		unlock, ok := app.lockTabControllerPublication(generation, "global", "")
 		if ok {
 			unlock()
 		}

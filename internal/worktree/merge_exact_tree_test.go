@@ -144,3 +144,161 @@ func TestMergeBackPreservesChangedMergeHeadAfterRefUpdate(t *testing.T) {
 		t.Fatalf("installed exact merge parents = %v", parents)
 	}
 }
+
+func TestMergeBackRejectsWorktreeAdvanceBeforePrepare(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	externalHead := ""
+	mergeStepHook = func(step string) {
+		if step == "before_merge_prepare" {
+			gitCommitFile(t, created.WorktreeRoot, "late.txt", "late\n", "late worktree commit")
+			externalHead = gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || result.RecoveryRequired || !strings.Contains(result.Error, "worktree changed before merge preparation") {
+		t.Fatalf("worktree advance before prepare = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "HEAD"); got != inspection.TargetHead {
+		t.Fatalf("target advanced to %s", got)
+	}
+	if got := gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD"); got != externalHead {
+		t.Fatalf("external worktree commit was not preserved: got %s, want %s", got, externalHead)
+	}
+}
+
+func TestMergeBackRejectsWorktreeContentDriftBeforePrepare(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	latePath := filepath.Join(created.WorktreeRoot, "late.txt")
+	mergeStepHook = func(step string) {
+		if step == "before_merge_prepare" {
+			if err := os.WriteFile(latePath, []byte("preserve me\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || result.RecoveryRequired || !strings.Contains(result.Error, "contents changed") {
+		t.Fatalf("worktree content drift before prepare = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "HEAD"); got != inspection.TargetHead {
+		t.Fatalf("target advanced to %s", got)
+	}
+	if body, readErr := os.ReadFile(latePath); readErr != nil || string(body) != "preserve me\n" {
+		t.Fatalf("late worktree content was not preserved: %q, %v", body, readErr)
+	}
+}
+
+func TestMergeBackRejectsWorktreeBranchSwitchBeforePrepare(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	mergeStepHook = func(step string) {
+		if step == "before_merge_prepare" {
+			gitTest(t, created.WorktreeRoot, "switch", "-c", "external-worktree-branch")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || result.RecoveryRequired || !strings.Contains(result.Error, "worktree branch") {
+		t.Fatalf("worktree branch switch = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "HEAD"); got != inspection.TargetHead {
+		t.Fatalf("target advanced to %s", got)
+	}
+	if got := gitTest(t, created.WorktreeRoot, "symbolic-ref", "--short", "HEAD"); got != "external-worktree-branch" {
+		t.Fatalf("external worktree branch was not preserved: %s", got)
+	}
+}
+
+func TestMergeBackRefTransactionRejectsWorktreeAdvanceAtomically(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	externalHead := ""
+	mergeStepHook = func(step string) {
+		if step == "before_merge_ref_transaction" {
+			gitCommitFile(t, created.WorktreeRoot, "late.txt", "late\n", "late worktree commit")
+			externalHead = gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || result.RecoveryRequired {
+		t.Fatalf("atomic worktree ref drift = %+v, %v", result, err)
+	}
+	if got := gitTest(t, repo, "rev-parse", "HEAD"); got != inspection.TargetHead {
+		t.Fatalf("target transaction partially updated ref to %s", got)
+	}
+	if operation, operationErr := gitOperation(context.Background(), repo); operationErr != nil || operation != "" {
+		t.Fatalf("source merge state was not aborted: operation=%q, err=%v", operation, operationErr)
+	}
+	if got := gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD"); got != externalHead {
+		t.Fatalf("external worktree commit was not preserved: got %s, want %s", got, externalHead)
+	}
+}
+
+func TestMergeBackReportsRecoveryWhenWorktreeAdvancesAfterRefTransaction(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	managed := t.TempDir()
+	created, err := Create(context.Background(), repo, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCommitFile(t, created.WorktreeRoot, "feature.txt", "feature\n", "feature")
+	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
+	externalHead := ""
+	mergeStepHook = func(step string) {
+		if step == "after_merge_ref_update" {
+			gitCommitFile(t, created.WorktreeRoot, "late.txt", "late\n", "late worktree commit")
+			externalHead = gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD")
+		}
+	}
+	t.Cleanup(func() { mergeStepHook = nil })
+
+	result, err := MergeBack(context.Background(), managed, requestFromInspection(inspection))
+	if err == nil || result.Merged || !result.RecoveryRequired || !strings.Contains(result.Error, "worktree identity changed") {
+		t.Fatalf("post-CAS worktree drift = %+v, %v", result, err)
+	}
+	parents := strings.Fields(gitTest(t, repo, "rev-list", "--parents", "-n", "1", "HEAD"))
+	if len(parents) != 3 || parents[1] != inspection.TargetHead || parents[2] != inspection.WorktreeHead {
+		t.Fatalf("installed merge parents = %v", parents)
+	}
+	if got := gitTest(t, created.WorktreeRoot, "rev-parse", "HEAD"); got != externalHead {
+		t.Fatalf("post-CAS worktree commit was not preserved: got %s, want %s", got, externalHead)
+	}
+}

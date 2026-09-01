@@ -15,6 +15,9 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	if err := verifySourceIdentity(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, false); err != nil {
 		return "", false, fmt.Errorf("source changed before merge preparation: %w", err)
 	}
+	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
+		return "", false, fmt.Errorf("worktree changed before merge preparation: %w", err)
+	}
 	expectedTree, hasConflicts, conflictFiles, err := mergeTree(ctx, inspection.SourceRoot, originalHead, inspection.WorktreeHead)
 	if err != nil {
 		return "", false, fmt.Errorf("recompute source merge tree: %w", err)
@@ -33,6 +36,9 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	if err := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead, expectedTree); err != nil {
 		return "", true, fmt.Errorf("merge preparation identity changed; source state was preserved for recovery: %w", err)
 	}
+	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
+		return abortPreparedWorktreeDrift(ctx, inspection, originalHead, err)
+	}
 	mergedHead, stderr, err := gitValue(ctx, inspection.SourceRoot,
 		"-c", "user.name=Reasonix", "-c", "user.email=reasonix@local",
 		"commit-tree", expectedTree, "-p", originalHead, "-p", inspection.WorktreeHead, "-m", message)
@@ -48,11 +54,17 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 		return "", true, fmt.Errorf("source changed before target ref update; source state was preserved for recovery: %w", err)
 	}
 	noteMergeStep("before_merge_ref_update")
-	targetRef := "refs/heads/" + inspection.TargetBranch
-	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "update-ref", targetRef, mergedHead, originalHead); err != nil {
+	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
+		return abortPreparedWorktreeDrift(ctx, inspection, originalHead, err)
+	}
+	noteMergeStep("before_merge_ref_transaction")
+	if stderr, err := updateMergeRefs(ctx, inspection, originalHead, mergedHead); err != nil {
 		return recoverRefUpdateFailure(ctx, inspection, originalHead, expectedTree, stderr, err)
 	}
 	noteMergeStep("after_merge_ref_update")
+	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
+		return "", true, fmt.Errorf("merge commit was installed but the worktree identity changed; recovery is required: %w", err)
+	}
 	if _, stderr, err := runGit(ctx, inspection.SourceRoot, "update-ref", "-d", "MERGE_HEAD", inspection.WorktreeHead); err != nil {
 		return "", true, fmt.Errorf("merge commit was installed but MERGE_HEAD changed; source requires recovery: %w%s", err, stderrSuffix(stderr))
 	}
@@ -64,10 +76,33 @@ func mergeSourceCheckout(ctx context.Context, inspection MergeInspection) (strin
 	if err != nil {
 		return "", true, fmt.Errorf("merge succeeded but the source checkout requires recovery: %w", err)
 	}
+	if err := verifyWorktreeMergeIdentity(ctx, inspection); err != nil {
+		return "", true, fmt.Errorf("merge succeeded but the worktree identity changed; recovery is required: %w", err)
+	}
 	return verifiedHead, false, nil
 }
 
+func abortPreparedWorktreeDrift(ctx context.Context, inspection MergeInspection, originalHead string, driftErr error) (string, bool, error) {
+	recovered, recoveryErr := abortAndVerifyMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead)
+	if recovered {
+		return "", false, fmt.Errorf("worktree changed before target ref update; merge was aborted: %w", driftErr)
+	}
+	return "", true, fmt.Errorf("worktree changed before target ref update: %w; automatic recovery failed: %v", driftErr, recoveryErr)
+}
+
+func updateMergeRefs(ctx context.Context, inspection MergeInspection, originalHead, mergedHead string) (string, error) {
+	targetRef := "refs/heads/" + inspection.TargetBranch
+	worktreeRef := "refs/heads/" + inspection.WorktreeBranch
+	input := fmt.Sprintf("verify %s %s\nupdate %s %s %s\n", worktreeRef, inspection.WorktreeHead, targetRef, mergedHead, originalHead)
+	_, stderr, err := runGitInput(ctx, inspection.SourceRoot, input, "update-ref", "--stdin")
+	return stderr, err
+}
+
 func recoverRefUpdateFailure(ctx context.Context, inspection MergeInspection, originalHead, expectedTree, stderr string, updateErr error) (string, bool, error) {
+	targetRef, targetStderr, targetErr := gitValue(ctx, inspection.SourceRoot, "rev-parse", "--verify", "refs/heads/"+inspection.TargetBranch)
+	if targetErr != nil || targetRef != originalHead {
+		return "", true, fmt.Errorf("target ref changed during compare-and-swap; source requires recovery: %w%s%s", updateErr, stderrSuffix(stderr), stderrSuffix(targetStderr))
+	}
 	if verifyErr := verifyPreparedMerge(ctx, inspection.SourceRoot, inspection.TargetBranch, originalHead, inspection.WorktreeHead, expectedTree); verifyErr != nil {
 		return "", true, fmt.Errorf("target ref changed during compare-and-swap; source requires recovery: %w%s", updateErr, stderrSuffix(stderr))
 	}
@@ -76,6 +111,42 @@ func recoverRefUpdateFailure(ctx context.Context, inspection MergeInspection, or
 		return "", false, fmt.Errorf("target ref update failed and merge was aborted: %w%s", updateErr, stderrSuffix(stderr))
 	}
 	return "", true, fmt.Errorf("target ref update failed: %w%s; automatic recovery failed: %v", updateErr, stderrSuffix(stderr), recoveryErr)
+}
+
+func verifyWorktreeMergeIdentity(ctx context.Context, inspection MergeInspection) error {
+	if err := verifyRepositoryRoot(ctx, inspection.WorktreeRoot); err != nil {
+		return fmt.Errorf("worktree checkout identity changed: %w", err)
+	}
+	if err := verifySameCommonDir(ctx, inspection.SourceRoot, inspection.WorktreeRoot); err != nil {
+		return fmt.Errorf("worktree repository identity changed: %w", err)
+	}
+	branch, stderr, err := gitValue(ctx, inspection.WorktreeRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch != inspection.WorktreeBranch {
+		return fmt.Errorf("worktree branch is %q, expected %q%s", branch, inspection.WorktreeBranch, stderrSuffix(stderr))
+	}
+	branchHead, stderr, err := gitValue(ctx, inspection.WorktreeRoot, "rev-parse", "--verify", "refs/heads/"+inspection.WorktreeBranch)
+	if err != nil || branchHead != inspection.WorktreeHead {
+		return fmt.Errorf("worktree branch HEAD changed from %s to %s%s", inspection.WorktreeHead, branchHead, stderrSuffix(stderr))
+	}
+	head, stderr, err := gitValue(ctx, inspection.WorktreeRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil || head != inspection.WorktreeHead {
+		return fmt.Errorf("worktree HEAD changed from %s to %s%s", inspection.WorktreeHead, head, stderrSuffix(stderr))
+	}
+	operation, err := gitOperation(ctx, inspection.WorktreeRoot)
+	if err != nil {
+		return err
+	}
+	if operation != "" {
+		return fmt.Errorf("worktree Git %s operation is in progress", operation)
+	}
+	token, err := worktreeStateToken(ctx, inspection.WorktreeRoot)
+	if err != nil {
+		return fmt.Errorf("snapshot worktree contents: %w", err)
+	}
+	if token != inspection.WorktreeStateToken {
+		return errors.New("worktree contents changed after confirmation")
+	}
+	return nil
 }
 
 func mergeTree(ctx context.Context, root, targetHead, worktreeHead string) (string, bool, []string, error) {

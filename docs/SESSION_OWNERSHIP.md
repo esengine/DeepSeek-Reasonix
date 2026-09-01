@@ -81,8 +81,14 @@ guidance. Unknown metadata versions also fail closed.
 
 Merge-Back is a two-phase, failure-atomic operation. Preflight verifies the
 managed path and repository identity, exact branches and `HEAD`s, clean source,
-absence of an in-progress Git operation, active Desktop work, workspace write
-leases, divergence, diff, and conflicts. Uncommitted worktree changes block the
+absence of an in-progress Git operation, all visible or detached Desktop work,
+integrated terminals, workspace write leases, divergence, diff, and conflicts.
+After the dual leases are held, Desktop briefly quiesces turn starts and
+controller publication, then reserves both canonical source and worktree roots
+through the Git mutation. Project-runtime owners, new turns, and terminal
+create/write calls all use that admission gate; contained paths and symlink
+aliases are covered without blocking prefix siblings or unrelated workspaces.
+Uncommitted worktree changes block the
 merge unless the user explicitly opts into an automatic commit; that option is
 off by default. Confirmation binds a transient, NUL-safe token of every dirty
 path's type, mode, bytes, or symlink target. Before committing, Reasonix proves
@@ -91,14 +97,19 @@ the resulting commit has the exact staged tree and original worktree `HEAD` as
 its only parent; conflict preflight then runs again. A target branch, `HEAD`, or
 content-token change refreshes the confirmation instead of continuing. The
 source merge uses `git merge --no-ff --no-commit` and binds the real index tree
-to a freshly computed merge tree. Only while the target branch, original
-`HEAD`, exact `MERGE_HEAD`, and prepared tree still match does Reasonix create a
-hook-free `commit-tree` object with fixed parents and tree, then compare-and-swap
-the target ref against the original target `HEAD`. Post-commit verification
-checks the commit tree, real index tree, parents, ref, clean state, and Git
-operation. Preparation failures before the CAS are aborted; ref drift or any
-state whose recovery cannot be proven is marked recovery-required while every
-worktree resource and external state is preserved.
+to a freshly computed merge tree. The worktree root, common repository,
+symbolic branch, branch ref, `HEAD`, Git operation, and content token are
+revalidated before preparation and before ref installation. Only while those
+identities, the target branch, original `HEAD`, exact `MERGE_HEAD`, and prepared
+tree still match does Reasonix create a hook-free `commit-tree` object with
+fixed parents and tree. One `update-ref --stdin` transaction verifies the
+worktree branch ref and compare-and-swaps the target ref against its original
+`HEAD`, so neither ref check can partially succeed. Post-commit verification
+rechecks both checkouts plus the commit tree, real index tree, parents, refs,
+clean state, and Git operations. Owned preparation failures before the CAS are
+aborted; target-ref drift, post-CAS worktree drift, or any state whose recovery
+cannot be proven is marked recovery-required while every worktree resource and
+external state is preserved.
 
 A successful merge first navigates to the recorded source checkout. A newer UI
 navigation intent stops the remaining close/cleanup sequence and preserves the
