@@ -459,6 +459,7 @@ the displayed list matches the commands the TUI accepts.
 | `/paste-image` | Read a clipboard image and insert an editable attachment token. |
 | `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling; SSH sessions start with capture off so the terminal's native selection works. |
 | `/effort` | View or change reasoning effort. |
+| `/preset [standard\|delivery]` | Switch the session quality floor; delivery turns on delivery completion gates and shows a PRESET tag in the status line. |
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |

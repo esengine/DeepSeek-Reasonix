@@ -394,6 +394,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
 | `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理；SSH 会话默认关闭接管，保证终端原生选区可用。 |
 | `/effort` | 查看或切换 reasoning effort。 |
+| `/preset [standard\|delivery]` | 切换会话质量底线；delivery 开启交付级完成门槛，并在状态栏显示 PRESET 标记。 |
 | `/output-style` | 选择回答风格。 |
 | `/verbose` | 切换详细 reasoning 显示。 |
 | `/sandbox` | 查看沙盒状态。 |

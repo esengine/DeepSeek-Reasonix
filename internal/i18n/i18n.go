@@ -97,6 +97,7 @@ type Messages struct {
 	RateBandMixed                          string
 	ChatStatusModelLabel                   string
 	ChatStatusEffortLabel                  string
+	ChatStatusPresetLabel                  string
 	ChatStatusCacheLabel                   string
 	ChatStatusContextLabel                 string
 	ChatStatusCompactLabel                 string
@@ -307,6 +308,8 @@ type Messages struct {
 	ArgEffortHigh       string // /effort high
 	ArgEffortXHigh      string // /effort xhigh
 	ArgEffortMax        string // /effort max
+	ArgPresetStandard   string // /preset standard
+	ArgPresetDelivery   string // /preset delivery
 	ArgThemeCurrent     string // /theme <style> active tag
 	ArgLanguageAuto     string // /language auto
 	ArgLanguageEn       string // /language en
