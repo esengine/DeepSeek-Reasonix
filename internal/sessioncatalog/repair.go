@@ -106,7 +106,12 @@ func (c *Catalog) repairSession(workerCtx context.Context, path string) {
 		return
 	}
 	preview, turns := agent.SessionPreviewFromMessages(msgs)
-	applied, err := agent.UpdateSessionListingProjectionIfCurrent(path, "", preview, turns, false, state)
+	// Repair rebuilds the listing sidecar from the authoritative transcript, so
+	// a stale or divergent branch meta (for example a recovery snapshot written
+	// before the transcript diverged) must not block the write. The force path
+	// still rechecks the transcript digest under the save lock, so a live
+	// autosave is never overwritten with a stale projection.
+	applied, err := agent.UpdateSessionListingProjectionForce(path, "", preview, turns, false, state)
 	if err != nil || !applied {
 		return
 	}

@@ -510,3 +510,52 @@ func TestReconcileCleanupPendingFinishesRecoveryTrashWithoutHardDeleteCallback(t
 		t.Fatalf("reconciled trash metadata: %v", err)
 	}
 }
+
+func TestRecoveryBranchCoveredByParentCacheInvalidatesOnWrite(t *testing.T) {
+	dir := t.TempDir()
+	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "cache-invalidate")
+	coverBranchInParent(t, parentPath, branchMsgs)
+
+	if !RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("fixture not covered before cache")
+	}
+	// Second call with no file change must hit the memo and stay consistent.
+	if !RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("cached coverage flipped without a file write")
+	}
+
+	// A write to the branch transcript must invalidate the memo: the branch is
+	// no longer a pure prefix snapshot of its parent.
+	branch, err := LoadSession(branchPath)
+	if err != nil {
+		t.Fatalf("LoadSession branch: %v", err)
+	}
+	branch.Add(provider.Message{Role: provider.RoleUser, Content: "branch continued after fork"})
+	if err := branch.Save(branchPath); err != nil {
+		t.Fatalf("Save branch: %v", err)
+	}
+	if RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("stale memo survived branch write")
+	}
+}
+
+func TestRecoveryBranchCoveredByParentCacheInvalidatesOnParentRemoval(t *testing.T) {
+	dir := t.TempDir()
+	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "cache-parent-removal")
+	coverBranchInParent(t, parentPath, branchMsgs)
+
+	if !RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("fixture not covered before removal")
+	}
+	if !RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("cached coverage flipped without a file write")
+	}
+	for _, artifact := range append([]string{parentPath}, store.SessionSidecarFiles(parentPath)...) {
+		if err := os.Remove(artifact); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove parent artifact %s: %v", artifact, err)
+		}
+	}
+	if RecoveryBranchCoveredByParent(branchPath, dir) {
+		t.Fatal("stale memo survived parent removal")
+	}
+}

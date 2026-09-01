@@ -94,3 +94,63 @@ func TestUpdateSessionListingProjectionIfCurrentStampsMatchingGeneration(t *test
 		t.Fatalf("matching projection not stamped: ok=%v err=%v meta=%+v", ok, err, meta)
 	}
 }
+
+func TestUpdateSessionListingProjectionForceRepairsStaleRecoveryMeta(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "20260101-000000-deepseek-chat-recovery-abcdef.jsonl")
+	writeSessionFile(t, path, []provider.Message{{Role: provider.RoleUser, Content: "recovered question"}})
+	_, state, _, err := LoadSessionDisplayMessages(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A recovery snapshot sidecar records the pre-divergence content digest,
+	// which no longer matches the transcript. IfCurrent must refuse to
+	// overwrite it (the projection is stale), while Force rebuilds it.
+	if err := SaveBranchMeta(path, BranchMeta{ID: BranchID(path), Revision: 1, ContentDigest: "stale-digest"}); err != nil {
+		t.Fatal(err)
+	}
+	_, state, _, err = LoadSessionDisplayMessages(path)
+	if err != nil || state.RevisionKnown {
+		t.Fatalf("stale recovery load = %+v err=%v", state, err)
+	}
+	applied, err := UpdateSessionListingProjectionIfCurrent(path, "", "recovered question", 1, false, state)
+	if err != nil || applied {
+		t.Fatalf("stale recovery projection applied=%v err=%v", applied, err)
+	}
+	applied, err = UpdateSessionListingProjectionForce(path, "", "recovered question", 1, false, state)
+	if err != nil || !applied {
+		t.Fatalf("force repair applied=%v err=%v", applied, err)
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok || meta.Preview != "recovered question" || meta.Turns != 1 || meta.SchemaVersion != BranchMetaCountsVersion {
+		t.Fatalf("force repair missing: ok=%v err=%v meta=%+v", ok, err, meta)
+	}
+}
+
+func TestUpdateSessionListingProjectionForceStillRejectsChangedTranscript(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
+	writeSessionFile(t, path, []provider.Message{{Role: provider.RoleUser, Content: "old question"}})
+	_, state, _, err := LoadSessionDisplayMessages(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(path, BranchMeta{ID: BranchID(path), Revision: 1, ContentDigest: state.DigestHex}); err != nil {
+		t.Fatal(err)
+	}
+	_, state, _, err = LoadSessionDisplayMessages(path)
+	if err != nil || !state.RevisionKnown {
+		t.Fatalf("load current state = %+v err=%v", state, err)
+	}
+	// Transcript advanced after the caller decoded it: the save lock recheck
+	// must reject the stale projection even on the force path.
+	writeSessionFile(t, path, []provider.Message{{Role: provider.RoleUser, Content: "new question"}})
+	applied, err := UpdateSessionListingProjectionForce(path, "", "old question", 1, false, state)
+	if err != nil || applied {
+		t.Fatalf("stale transcript applied=%v err=%v", applied, err)
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok || meta.Preview != "" {
+		t.Fatalf("stale transcript overwrote meta: ok=%v err=%v meta=%+v", ok, err, meta)
+	}
+}

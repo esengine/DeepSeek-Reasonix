@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/fileutil"
@@ -78,12 +79,71 @@ func SessionLeaseHeld(path string) bool {
 // never authorize hiding, migration skipping, bulk trash, or permanent purge.
 // Missing/corrupt metadata, a changed branch, or a missing/diverged parent are
 // all treated conservatively as not covered.
+//
+// The result is memoized per (branch, parent) pair keyed on the stat identity
+// of the branch transcript, its sidecar, and the parent transcript. The
+// periodic catalog reconcile calls this for every recovery member every 30s;
+// without the memo each call re-decodes both JSONL transcripts and re-hashes
+// them, which is the dominant reconcile CPU cost once repair has stopped. A
+// write to any of the three files changes its size/mtime and invalidates the
+// entry, so the cache can never serve a stale answer for a session that moved.
 func RecoveryBranchCoveredByParent(path, parentDir string) bool {
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok || !meta.Recovered || strings.TrimSpace(meta.RecoveryDigest) == "" {
 		return false
 	}
-	return recoveryBranchCoveredByParent(path, parentDir, meta)
+	parentID := strings.TrimSpace(meta.ParentID)
+	if parentID == "" {
+		return false
+	}
+	parentDir = strings.TrimSpace(parentDir)
+	if parentDir == "" {
+		parentDir = filepath.Dir(path)
+	}
+	parentPath := filepath.Join(parentDir, parentID+".jsonl")
+	key := recoveryCoveredKey{path: path, parent: parentPath}
+	sig := recoveryCoveredSignature(path, meta, parentPath)
+	if cached, ok := recoveryCoveredCache.Load(key); ok {
+		entry := cached.(recoveryCoveredEntry)
+		if entry.signature == sig {
+			return entry.covered
+		}
+	}
+	covered := recoveryBranchCoveredByParent(path, parentDir, meta)
+	recoveryCoveredCache.Store(key, recoveryCoveredEntry{signature: sig, covered: covered})
+	return covered
+}
+
+type recoveryCoveredKey struct{ path, parent string }
+
+type recoveryCoveredEntry struct {
+	signature string
+	covered   bool
+}
+
+// recoveryCoveredCache memoizes RecoveryBranchCoveredByParent per branch/parent
+// pair. Entries are keyed on the stat signature, so any file change evicts by
+// mismatch; the map itself is never explicitly pruned (recovery lineages are
+// bounded and cheap).
+var recoveryCoveredCache sync.Map
+
+// recoveryCoveredSignature hashes the identity of every input the coverage
+// decision reads: branch transcript, branch sidecar (digest/parent id), and
+// parent transcript. stat (not content) is enough because a content change
+// always lands on the filesystem with a new size or mtime.
+func recoveryCoveredSignature(path string, meta BranchMeta, parentPath string) string {
+	sig := meta.ContentDigest + "\x00" + meta.RecoveryDigest + "\x00" + meta.ParentID + "\x00"
+	sig += fileStatIdentity(path)
+	sig += "\x00" + fileStatIdentity(parentPath)
+	return sig
+}
+
+func fileStatIdentity(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "missing"
+	}
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
 }
 
 // SessionContentCovers reports whether covering contains the complete message

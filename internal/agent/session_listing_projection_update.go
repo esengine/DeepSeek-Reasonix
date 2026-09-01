@@ -10,6 +10,22 @@ import (
 // its sidecar identity while holding the save lock, so an autosave that landed
 // after the caller's decode cannot receive the stale projection.
 func UpdateSessionListingProjectionIfCurrent(sessionPath, model, preview string, turns int, markActivity bool, expected PersistedState) (bool, error) {
+	return updateSessionListingProjection(sessionPath, model, preview, turns, markActivity, expected, false)
+}
+
+// UpdateSessionListingProjectionForce is the repair-path counterpart of
+// UpdateSessionListingProjectionIfCurrent. It still rechecks the transcript
+// digest under the save lock (an autosave landing after the caller's decode is
+// never overwritten with the stale projection), but it does not require the
+// branch sidecar to be blank or already matching the transcript digest: repair
+// rebuilds a missing or divergent sidecar from the authoritative transcript, so
+// a stale meta (for example a recovery snapshot recorded before the transcript
+// diverged) is exactly what it must replace.
+func UpdateSessionListingProjectionForce(sessionPath, model, preview string, turns int, markActivity bool, expected PersistedState) (bool, error) {
+	return updateSessionListingProjection(sessionPath, model, preview, turns, markActivity, expected, true)
+}
+
+func updateSessionListingProjection(sessionPath, model, preview string, turns int, markActivity bool, expected PersistedState, force bool) (bool, error) {
 	if strings.TrimSpace(sessionPath) == "" {
 		return false, fmt.Errorf("empty session path")
 	}
@@ -38,13 +54,15 @@ func UpdateSessionListingProjectionIfCurrent(sessionPath, model, preview string,
 	if err != nil {
 		return false, err
 	}
-	digest := strings.TrimSpace(meta.ContentDigest)
-	if expected.RevisionKnown {
-		if meta.Revision != expected.Revision || digest != expected.DigestHex {
+	if !force {
+		digest := strings.TrimSpace(meta.ContentDigest)
+		if expected.RevisionKnown {
+			if meta.Revision != expected.Revision || digest != expected.DigestHex {
+				return false, nil
+			}
+		} else if meta.Revision != 0 || digest != "" {
 			return false, nil
 		}
-	} else if meta.Revision != 0 || digest != "" {
-		return false, nil
 	}
 	if strings.TrimSpace(model) != "" {
 		meta.Model = strings.TrimSpace(model)
