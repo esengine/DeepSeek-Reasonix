@@ -25,6 +25,7 @@ import (
 const (
 	readFileBinaryPeek   = 8 * 1024   // bytes scanned for NUL before reading further
 	readFileDetectSample = 256 * 1024 // bytes sampled for encoding detection before streaming
+	readFileMaxLineBytes = 1024 * 1024
 )
 
 func init() { tool.RegisterBuiltin(readFile{}) }
@@ -155,7 +156,8 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// A directory can be os.Open'd but not read as text — catch it up front with
 	// an actionable message (and avoid the doubled "read X: read X:" the scanner's
 	// error would otherwise produce) so the model switches to the ls tool.
-	if info, err := os.Stat(p.Path); err == nil && info.IsDir() {
+	info, statErr := os.Stat(p.Path)
+	if statErr == nil && info.IsDir() {
 		return "", fmt.Errorf("%s is a directory, not a file — use the ls tool to list it, or read a specific file inside it", displayPath)
 	}
 
@@ -167,6 +169,11 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("read %s: %w", displayPath, err)
 	}
 	defer f.Close()
+	if info == nil {
+		if info, err = f.Stat(); err != nil {
+			return "", fmt.Errorf("read %s: %w", displayPath, err)
+		}
+	}
 
 	// Peek the first 8 KiB to reject binary files cheaply (a NUL byte) before
 	// reading further — keeps a multi-GB archive from being slurped just to be
@@ -248,7 +255,95 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if dec := fileenc.Decoder(enc); dec != nil {
 		return r.scan(transform.NewReader(src, dec), p.Offset, p.Limit)
 	}
-	return r.scan(src, p.Offset, p.Limit)
+	return r.scanRawFile(p.Path, info, f, head, p.Offset, p.Limit)
+}
+
+func (r readFile) scanRawFile(path string, info os.FileInfo, f *os.File, head []byte, offset, limit int) (string, error) {
+	startLine, startByte := 0, int64(0)
+	if offset > 0 {
+		if line, byteOffset, ok := readFileLineStarts.nearest(path, info, offset); ok && byteOffset >= int64(len(head)) {
+			startLine, startByte = line, byteOffset
+		}
+	}
+
+	var src io.Reader
+	if startByte > 0 {
+		if _, err := f.Seek(startByte, io.SeekStart); err != nil {
+			return "", fmt.Errorf("scan: seek: %w", err)
+		}
+		src = f
+	} else {
+		src = io.MultiReader(bytes.NewReader(head), f)
+	}
+	return r.scanRawWindow(path, info, src, startLine, startByte, offset, limit)
+}
+
+func (r readFile) scanRawWindow(path string, info os.FileInfo, src io.Reader, startLine int, startByte int64, offset, limit int) (string, error) {
+	reader := bufio.NewReaderSize(src, 64*1024)
+	collected := make([]string, 0, min(limit, 64))
+	starts := []readFileLineStart{{line: startLine, byteOffset: startByte}}
+	lineNo := startLine
+	bytePos := startByte
+	hasMore := false
+
+	for {
+		raw, n, err := readFileRawLine(reader)
+		if err != nil && err != io.EOF {
+			return "", fmt.Errorf("scan: %w", err)
+		}
+		if n == 0 {
+			break
+		}
+
+		lineNo++
+		bytePos += int64(n)
+		if len(raw) > 0 && raw[len(raw)-1] == '\n' && lineNo <= readFileLineStartCacheMax && bytePos < info.Size() {
+			starts = append(starts, readFileLineStart{line: lineNo, byteOffset: bytePos})
+		}
+
+		if lineNo > offset {
+			if len(collected) < limit {
+				collected = append(collected, readFileTrimRawLine(raw))
+			} else {
+				hasMore = true
+				break
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	readFileLineStarts.record(path, info, starts)
+	return formatReadFileWindow(collected, offset, lineNo, hasMore), nil
+}
+
+func readFileRawLine(r *bufio.Reader) ([]byte, int, error) {
+	var line []byte
+	for {
+		part, err := r.ReadSlice('\n')
+		if len(part) > 0 {
+			if len(line)+len(part) > readFileMaxLineBytes {
+				return nil, 0, fmt.Errorf("bufio.Scanner: token too long")
+			}
+			line = append(line, part...)
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return line, len(line), err
+	}
+}
+
+func readFileTrimRawLine(raw []byte) string {
+	end := len(raw)
+	if end > 0 && raw[end-1] == '\n' {
+		end--
+		if end > 0 && raw[end-1] == '\r' {
+			end--
+		}
+	}
+	return string(raw[:end])
 }
 
 // scan reads lines from src and returns the formatted output with line numbers.
@@ -256,7 +351,7 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var collected []string
+	collected := make([]string, 0, min(limit, 64))
 	lineNo := 0
 	hasMore := false
 	for scanner.Scan() {
@@ -277,11 +372,15 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 		return "", fmt.Errorf("scan: %w", err)
 	}
 
+	return formatReadFileWindow(collected, offset, lineNo, hasMore), nil
+}
+
+func formatReadFileWindow(collected []string, offset, lineNo int, hasMore bool) string {
 	if lineNo == 0 {
-		return "(empty file)", nil
+		return "(empty file)"
 	}
 	if len(collected) == 0 {
-		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, lineNo), nil
+		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, lineNo)
 	}
 
 	maxShown := offset + len(collected)
@@ -294,5 +393,5 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	if hasMore {
 		fmt.Fprintf(&b, "\n[more lines below; pass offset=%d to continue]\n", offset+len(collected))
 	}
-	return b.String(), nil
+	return b.String()
 }
