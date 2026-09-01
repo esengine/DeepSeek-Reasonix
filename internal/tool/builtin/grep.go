@@ -29,6 +29,7 @@ const (
 	grepMaxMatches     = 200
 	grepDefaultTimeout = 30 * time.Second
 	grepMaxTimeout     = 300 * time.Second
+	grepBinaryPeek     = 8 * 1024 // bytes scanned for NUL and sampled for encoding detection
 )
 
 // grepTimeout clamps a caller-supplied second count to a sane bound; 0 (omitted)
@@ -162,7 +163,7 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 	truncated := false
 
 	// Reused across the serial walk so each file doesn't re-allocate ~72 KiB.
-	peekBuf := make([]byte, 8*1024)
+	peekBuf := make([]byte, grepBinaryPeek)
 	scanBuf := make([]byte, 0, 64*1024)
 
 	// searchFile returns io.EOF as a sentinel once the cap is reached.
@@ -179,8 +180,9 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 		// Peek the first 8 KiB to reject binaries cheaply without reading
 		// the entire file into memory. Check BOM first (UTF-16 files have
 		// 0x00 for ASCII), then NUL.
-		n, _ := io.ReadFull(f, peekBuf)
+		n, perr := io.ReadFull(f, peekBuf)
 		peek := peekBuf[:n]
+		peekEOF := perr != nil // whole file fit in the peek (EOF / ErrUnexpectedEOF)
 
 		bomKind := fileenc.DetectQuick(peek)
 		if bomKind != fileenc.UTF16LE && bomKind != fileenc.UTF16BE && bomKind != fileenc.UTF8BOM {
@@ -193,7 +195,7 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 		// UTF-8 vs GB18030 distinction (utf8.Valid on 8 KiB is reliable).
 		// Then stream the rest through a decoder so the 200-match cap can
 		// stop reading early instead of buffering the entire file.
-		enc, _ := fileenc.Detect(peek)
+		enc := fileenc.DetectPrefix(peek, !peekEOF)
 
 		var src io.Reader
 		if enc == fileenc.UTF16LE || enc == fileenc.UTF16BE {

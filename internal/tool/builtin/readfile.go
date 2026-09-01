@@ -233,16 +233,9 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		peekEOF = merr != nil
 	}
 
-	// Detect from a char-safe slice: when more file follows, trim to the last
-	// newline so the sample never ends mid multi-byte sequence (UTF-8 and GB18030
-	// are ASCII-transparent, so '\n' is always a clean boundary).
-	sample := head
-	if !peekEOF {
-		if i := bytes.LastIndexByte(head, '\n'); i >= 0 {
-			sample = head[:i+1]
-		}
-	}
-	enc, _ := fileenc.Detect(sample)
+	// Detect from a char-safe slice: a sample that stops mid multi-byte
+	// character is not valid UTF-8 and would be read as GB18030.
+	enc := fileenc.DetectPrefix(head, !peekEOF)
 
 	src := io.MultiReader(bytes.NewReader(head), f)
 	if dec := fileenc.Decoder(enc); dec != nil {
