@@ -31,6 +31,7 @@ import { useGoalActionHandler } from "./lib/goalAction";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { activeLeaseBlockedTab, createBoundedRefreshCoordinator, sameTabMetaLists, seedActiveTabMetaList, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT } from "./lib/tabMetaRefresh";
+import { createBackgroundRuntimeRefreshCoordinator, sameBackgroundRuntimeLists } from "./lib/backgroundRuntimeRefresh";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { useActiveRemoteSession } from "./lib/useRemoteSession";
 import { useRemoteTabOpened } from "./lib/useRemoteTabOpened";
@@ -1268,6 +1269,7 @@ export default function App() {
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const [backgroundRuntimes, setBackgroundRuntimes] = useState<BackgroundRuntimeView[]>([]);
+  const backgroundRuntimeRefreshRef = useRef<ReturnType<typeof createBackgroundRuntimeRefreshCoordinator> | null>(null);
   const [workspaceConflict, setWorkspaceConflict] = useState<WorkspaceConflictView | null>(null);
   const [pendingClose, setPendingClose] = useState<{ tabId: string; work: ActiveWorkView; stopping: boolean } | null>(null);
   const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
@@ -1288,9 +1290,9 @@ export default function App() {
     document.documentElement.setAttribute("data-platform", desktopPlatform);
   }, [desktopPlatform]);
 
-  const refreshBackgroundRuntimes = useCallback(async () => {
+  const refreshBackgroundRuntimes = useCallback(async (afterMutation = false) => {
     try {
-      setBackgroundRuntimes(await app.BackgroundRuntimes());
+      await backgroundRuntimeRefreshRef.current?.refresh(afterMutation ? { afterMutation: true } : undefined);
     } catch {
       // The global recovery entry is supplementary; the active-tab job list
       // remains available even when the detached-runtime list is unavailable.
@@ -1298,16 +1300,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let disposed = false;
-    const refresh = async () => {
-      if (disposed) return;
-      await refreshBackgroundRuntimes();
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    const coordinator = createBackgroundRuntimeRefreshCoordinator(
+      () => app.BackgroundRuntimes(),
+      (runtimes) => setBackgroundRuntimes((current) => (
+        sameBackgroundRuntimeLists(current, runtimes) ? current : runtimes
+      )),
+    );
+    backgroundRuntimeRefreshRef.current = coordinator;
+    void refreshBackgroundRuntimes();
     return () => {
-      disposed = true;
-      window.clearInterval(timer);
+      coordinator.dispose();
+      if (backgroundRuntimeRefreshRef.current === coordinator) backgroundRuntimeRefreshRef.current = null;
     };
   }, [refreshBackgroundRuntimes]);
 
@@ -1961,7 +1964,7 @@ export default function App() {
   const cancelRuntimeJob = useCallback(async (tabId: string, jobId: string): Promise<boolean> => {
     try {
       const cancelled = await app.CancelJobForTab(tabId, jobId);
-      await refreshBackgroundRuntimes();
+      await refreshBackgroundRuntimes(true);
       return cancelled;
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
@@ -2444,6 +2447,7 @@ export default function App() {
     const unsub = onEvent((e) => {
       if (shouldRefreshTabMetaForEvent(e.kind)) {
         void refreshTabMetas(undefined, { afterMutation: true });
+        void refreshBackgroundRuntimes(true);
       }
       if (e.kind !== "turn_done") return;
       const turnTabId = resolvePlanRestoreTabId(e.tabId, activeTabIdRef.current);
@@ -2473,7 +2477,7 @@ export default function App() {
       }, 250);
     });
     return unsub;
-  }, [refreshTabMetas, setControllerCollaborationMode]);
+  }, [refreshBackgroundRuntimes, refreshTabMetas, setControllerCollaborationMode]);
 
   const blankSessionTarget = useCallback(() => {
     const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
@@ -3251,7 +3255,7 @@ export default function App() {
       return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
     });
     await refreshTabMetas(undefined, { afterMutation: true });
-    await refreshBackgroundRuntimes();
+    await refreshBackgroundRuntimes(true);
     setTabRevealSignal((signal) => signal + 1);
     return true;
   }, [activeTabId, closeTab, closeTransientOverlays, refreshBackgroundRuntimes, refreshTabMetas, showToast, t]);

@@ -1763,9 +1763,16 @@ func (s *tabEventSink) Emit(e event.Event) {
 	if app != nil {
 		s.recordDisplay(e)
 	}
-	// Persist after each turn so a force-kill loses at most the in-flight prompt.
-	if e.Kind == event.TurnDone && app != nil {
-		app.scheduleTabSnapshot(tabID)
+	// Checkpoint durable transcript transitions while a turn is in flight. Stream
+	// deltas intentionally stay out of this path so a long answer does not cause
+	// one disk write per token; TurnDone remains the final forced flush.
+	if app != nil {
+		switch e.Kind {
+		case event.TurnStarted, event.Message, event.ToolResult, event.ApprovalRequest, event.AskRequest, event.CompactionDone:
+			app.scheduleTabSnapshot(tabID)
+		case event.TurnDone:
+			app.scheduleTabSnapshot(tabID)
+		}
 	}
 	// Forward event to bot channels when a bot forwarder is attached.
 	// Read the sink under the read lock so SetBotSink can safely swap it

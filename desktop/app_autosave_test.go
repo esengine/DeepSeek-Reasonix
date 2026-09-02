@@ -103,19 +103,31 @@ func TestTurnDonePersistsSession(t *testing.T) {
 	waitForAutosaveIdle(t, tab)
 }
 
-// TestNonTurnDoneDoesNotPersist confirms only TurnDone triggers a save, so the
-// per-token event storm doesn't thrash the disk.
-func TestNonTurnDoneDoesNotPersist(t *testing.T) {
+// TestStreamingDeltasDoNotPersist confirms per-token events stay out of the
+// autosave path, while durable lifecycle events checkpoint the session.
+func TestStreamingDeltasDoNotPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	a, tab := appWithTab(t, path)
 	_ = a
 
 	tab.sink.Emit(event.Event{Kind: event.Text, Text: "tok"})
+	tab.sink.Emit(event.Event{Kind: event.Reasoning, Text: "think"})
+	tab.sink.Emit(event.Event{Kind: event.ToolProgress, Text: "progress"})
 
 	time.Sleep(50 * time.Millisecond)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("a non-TurnDone event wrote the session file (err=%v)", err)
+		t.Fatalf("a streaming event wrote the session file (err=%v)", err)
 	}
+}
+
+func TestTurnStartedCheckpointsSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	_, tab := appWithTab(t, path)
+
+	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+
+	waitForFile(t, path, "remember this turn")
+	waitForAutosaveIdle(t, tab)
 }
 
 // TestScheduleSnapshotCoalesces hammers the scheduler concurrently to prove the
