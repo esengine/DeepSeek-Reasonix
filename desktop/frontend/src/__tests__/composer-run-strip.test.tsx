@@ -215,6 +215,12 @@ console.log("\ncomposer run strip");
   });
   eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu does not own a work-mode section");
   eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
+  ok(document.querySelector(".composer-modebar--floor") !== null, "classic quality floor stays a two-item modebar");
+  eq(document.querySelector(".composer-floor-trigger"), null, "classic quality floor is not a Creation pill");
+  const classicParams = [...(document.querySelector(".composer-meta__params")?.children ?? [])];
+  const classicApproval = classicParams.findIndex((el) => el.classList.contains("composer-meta__control--approval"));
+  const classicFloor = classicParams.findIndex((el) => el.classList.contains("composer-meta__control--floor"));
+  eq(classicFloor, classicApproval + 1, "classic quality floor stays after the approval bar");
 
   await act(async () => {
     root.unmount();
@@ -228,11 +234,14 @@ console.log("\ncomposer run strip");
 {
   const dom = installDom();
   const timers = installWindowTimerQueue();
-  const { root } = await renderComposer({ showContextWindowRing: true });
+  const { root } = await renderComposer({ showContextWindowRing: true, onSetQualityFloor: () => {} });
 
-  for (const selector of [".composer-task-mode-trigger"]) {
-    const trigger = document.querySelector(selector) as HTMLButtonElement | null;
-    if (!trigger) throw new Error(`missing Creation hover trigger: ${selector}`);
+  for (const item of [
+    { selector: ".composer-meta__control--intent .composer-task-mode-trigger", openClass: "composer-task-mode-trigger--open" },
+    { selector: ".composer-floor-trigger", openClass: "composer-floor-trigger--open" },
+  ]) {
+    const trigger = document.querySelector(item.selector) as HTMLButtonElement | null;
+    if (!trigger) throw new Error(`missing Creation hover trigger: ${item.selector}`);
 
     await act(async () => {
       trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
@@ -241,14 +250,22 @@ console.log("\ncomposer run strip");
       timers.advance(140);
     });
 
-    ok(!trigger.classList.contains(`${selector.slice(1)}--open`), `${selector} stays visually closed after a short hover`);
+    ok(!trigger.classList.contains(item.openClass), `${item.selector} stays visually closed after a short hover`);
     ok(
       document.querySelector(".composer-intent-menu") === null,
-      `${selector} does not render a closing-only menu`,
+      `${item.selector} does not render a closing-only menu`,
     );
   }
 
-  const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
+  eq(document.querySelector(".composer-modebar--floor"), null, "Creation replaces the sliding quality-floor modebar with a pill");
+  const creationParams = [...(document.querySelector(".composer-meta__params")?.children ?? [])];
+  const creationIntent = creationParams.findIndex((el) => el.classList.contains("composer-meta__control--intent"));
+  const creationFloor = creationParams.findIndex((el) => el.classList.contains("composer-meta__control--floor"));
+  const creationApproval = creationParams.findIndex((el) => el.classList.contains("composer-meta__control--approval"));
+  eq(creationFloor, creationIntent + 1, "Creation quality floor sits immediately after the task-mode pill");
+  eq(creationApproval, creationFloor + 1, "Creation approval bar stays after the quality-floor pill");
+
+  const intentTrigger = document.querySelector(".composer-meta__control--intent .composer-task-mode-trigger") as HTMLButtonElement | null;
   if (!intentTrigger) throw new Error("missing Creation intent trigger");
   await act(async () => {
     intentTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
@@ -256,6 +273,20 @@ console.log("\ncomposer run strip");
   });
   ok(intentTrigger.classList.contains("composer-task-mode-trigger--open"), "a sustained Creation hover still opens the trigger");
   ok(document.querySelector(".composer-intent-menu") !== null, "a sustained Creation hover still renders the menu");
+
+  await act(async () => {
+    intentTrigger.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+    timers.advance(140);
+  });
+  const floorTrigger = document.querySelector(".composer-floor-trigger") as HTMLButtonElement | null;
+  if (!floorTrigger) throw new Error("missing Creation quality-floor trigger");
+  await act(async () => {
+    floorTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+    timers.advance(120);
+  });
+  ok(floorTrigger.classList.contains("composer-floor-trigger--open"), "a sustained Creation hover opens the quality-floor pill");
+  ok(document.querySelector(".composer-floor-menu") !== null, "a sustained Creation hover renders the quality-floor menu");
+  eq(document.querySelectorAll(".composer-floor-menu [role=\"menuitemradio\"]").length, 2, "quality-floor menu exposes standard and delivery");
 
   timers.restore();
   await act(async () => {

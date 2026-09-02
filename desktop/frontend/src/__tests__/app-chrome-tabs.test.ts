@@ -655,6 +655,8 @@ ok(
     finalDeclaration(".app--windows-frameless.app--creation", "--windows-window-controls-height") === "40px" &&
     finalDeclaration(".app--creation .topicbar", "min-height") === "56px" &&
     finalDeclaration(":root[data-theme-style] .app--creation .topicbar", "padding-top") === "14px" &&
+    finalDeclaration(".app--creation .topicbar", "background") === "transparent !important" &&
+    finalDeclaration(":root[data-theme-style] .app--creation .topicbar", "background") === "transparent !important" &&
     finalDeclaration(".app--creation .topicbar__title-row", "transform") === "translateY(-3px)",
   "Windows Creation stays 40px while macOS and Linux keep the shared Creation geometry",
 );

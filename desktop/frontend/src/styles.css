@@ -32149,12 +32149,16 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .topicbar,
-:root[data-theme-style] .app--creation .topicbar {
+:root[data-theme-style] .app--creation .topicbar,
+:root[data-theme="dark"] .app--creation .topicbar,
+:root[data-theme="light"] .app--creation .topicbar,
+:root[data-theme="light"][data-theme-style] .app--creation .topicbar,
+:root:not([data-theme]) .app--creation .topicbar {
   min-height: 56px;
   padding-top: 14px;
   padding-bottom: 0;
   border-bottom: 0;
-  background: transparent;
+  background: transparent !important;
 }
 
 .app--creation .topicbar__title-row,
@@ -33048,6 +33052,14 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer-meta__control--intent,
 :root[data-theme-style] .app--creation .composer-meta__control--intent {
   max-width: 64px;
+}
+
+.app--creation .composer-meta__control--floor,
+:root[data-theme-style] .app--creation .composer-meta__control--floor {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 64px;
+  margin-inline-start: 0;
 }
 
 .app--creation .composer-modebar,
@@ -34023,26 +34035,17 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing),
 :root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing) {
-  border: 1px solid var(--chat-user-border);
+  border: 1px solid var(--accent);
   border-radius: 9px;
   padding: 7px 14px;
-  background: var(--chat-user-bg);
-  color: var(--chat-user-fg);
-  box-shadow: var(--chat-user-shadow);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
 }
 
 .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing)::after,
 :root[data-theme-style] .app--creation .msg--user:not(.msg--im-source) .msg__body:not(.msg__body--editing)::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: -7px;
-  width: 12px;
-  height: 12px;
-  background: var(--chat-user-bg);
-  border-radius: 3px 2px 3px 0;
-  box-shadow: 1px -1px 0 var(--chat-user-border);
-  transform: translateY(-50%) rotate(45deg);
+  content: none;
 }
 
 .app--creation .msg--user:not(.msg--im-source) .msg__text,
