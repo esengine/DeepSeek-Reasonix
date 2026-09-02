@@ -76,17 +76,28 @@ func TestSummaryCollectorStoresOnlyVisibleText(t *testing.T) {
 
 func TestSummaryCollectorRejectsEmptyAndLengthLimitedOutput(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		chunks []provider.Chunk
-		want   string
+		name    string
+		chunks  []provider.Chunk
+		wantErr string
+		wantOut string
 	}{
 		{
-			name: "reasoning and tool call are empty",
+			// Contract change: a reasoning-only finish is the last-resort
+			// summary source. Failing the fold on it wedged sessions whose
+			// context was already over the limit (#8378, #9258) — the
+			// reasoning is model-authored content about the transcript, and
+			// it only rides when no visible text exists at all.
+			name: "reasoning-only finish becomes the summary",
 			chunks: []provider.Chunk{
-				{Type: provider.ChunkReasoning, Text: "PRIVATE REASONING"},
+				{Type: provider.ChunkReasoning, Text: "REASONING DIGEST"},
 				{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file"}},
 			},
-			want: "empty output",
+			wantOut: "REASONING DIGEST",
+		},
+		{
+			name:   "genuinely empty finish still errors",
+			chunks: []provider.Chunk{{Type: provider.ChunkDone}},
+			wantErr: "empty output",
 		},
 		{
 			name: "length finish",
@@ -94,14 +105,24 @@ func TestSummaryCollectorRejectsEmptyAndLengthLimitedOutput(t *testing.T) {
 				{Type: provider.ChunkText, Text: "partial"},
 				{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "length"}},
 			},
-			want: "output token limit",
+			wantErr: "output token limit",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prov := &summaryChunksProvider{chunks: tc.chunks}
 			a := New(prov, tool.NewRegistry(), NewSession("system"), Options{}, event.Discard)
-			if _, _, err := a.summarize(context.Background(), []provider.Message{{Role: provider.RoleUser, Content: "old"}}, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("summarize error = %v, want %q", err, tc.want)
+			summary, _, err := a.summarize(context.Background(), []provider.Message{{Role: provider.RoleUser, Content: "old"}}, "")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("summarize error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("summarize error = %v, want success", err)
+			}
+			if !strings.Contains(summary, tc.wantOut) {
+				t.Fatalf("summary = %q, want %q", summary, tc.wantOut)
 			}
 		})
 	}

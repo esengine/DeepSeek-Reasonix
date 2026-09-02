@@ -30,6 +30,7 @@ const (
 var (
 	errSummaryOutputTruncated = errors.New("summarizer output truncated")
 	errCheckpointRejected     = errors.New("checkpoint candidate rejected")
+	errSummaryEmptyOutput     = errors.New("summarizer returned empty output")
 )
 
 // summaryTag wraps the compaction summary so the model can distinguish it from
@@ -419,6 +420,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 
 	// Unblock on timeout if the stream stalls while open.
 	var b strings.Builder
+	var reasoning strings.Builder
 	for {
 		select {
 		case <-ctx.Done():
@@ -430,13 +432,24 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 				}
 				s := strings.TrimSpace(b.String())
 				if s == "" {
-					return "", usage, fmt.Errorf("summarizer returned empty output")
+					// Reasoning-first models can spend the whole output budget
+					// thinking and finish with zero visible text. That
+					// thinking is still a summary of the region — failing the
+					// fold here wedges the session (the context stays over the
+					// limit and every later turn trips the same error), so the
+					// reasoning text is the last-resort summary source.
+					if r := strings.TrimSpace(reasoning.String()); r != "" {
+						return r, usage, nil
+					}
+					return "", usage, fmt.Errorf("%w (model produced no visible or reasoning text)", errSummaryEmptyOutput)
 				}
 				return s, usage, nil
 			}
 			switch chunk.Type {
 			case provider.ChunkText:
 				b.WriteString(chunk.Text)
+			case provider.ChunkReasoning:
+				reasoning.WriteString(chunk.Text)
 			case provider.ChunkUsage:
 				usage = chunk.Usage
 			case provider.ChunkError:
@@ -446,11 +459,24 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	}
 }
 
-// summarizeOnce performs exactly one application-layer summary request.
-// Timeouts, empty results, stream errors, and output truncation all fail once
-// with no second attempt.
+// summarizeOnce performs the application-layer summary request with exactly
+// one bounded retry on an empty finish. A genuinely transient empty stream
+// (load-shed gateway, keep-alive hiccup) must not fail the fold — the fold
+// failing while the context is over the limit wedges every later turn — but
+// the retry is capped at one so a persistently broken endpoint still
+// surfaces an error instead of doubling compaction latency forever.
 func (a *Agent) summarizeOnce(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
-	return a.summarize(ctx, fold, instructions)
+	summary, usage, err := a.summarize(ctx, fold, instructions)
+	if err == nil || !errors.Is(err, errSummaryEmptyOutput) {
+		return summary, usage, err
+	}
+	retried, retriedUsage, retryErr := a.summarize(ctx, fold, instructions)
+	if retryErr != nil {
+		// Report the original empty-output cause: the retry shape is
+		// identical, so a second empty finish is the same failure.
+		return "", usage, err
+	}
+	return retried, retriedUsage, nil
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.
