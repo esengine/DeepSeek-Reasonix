@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -577,64 +576,7 @@ func (c *Controller) resolveInputImageCandidates(line string) []string {
 }
 
 func visionFileImageDataURL(path, baseDir string) (string, error) {
-	absPath, absBase, ok := resolveAbsRef(path, baseDir)
-	if !ok {
-		return "", os.ErrNotExist
-	}
-	if absBase == "" {
-		return "", fmt.Errorf("workspace root is required for file image references")
-	}
-
-	root, err := os.OpenRoot(absBase)
-	if err != nil {
-		return "", err
-	}
-	defer root.Close()
-
-	rel, err := filepath.Rel(absBase, absPath)
-	if err != nil {
-		return "", err
-	}
-
-	info, err := root.Lstat(rel)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("image path must not be a symlink")
-	}
-	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("image must be between 1 byte and 64 MB")
-	}
-	f, err := root.Open(rel)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !os.SameFile(info, opened) {
-		return "", fmt.Errorf("image changed while opening")
-	}
-	return dataURLFromImageReader(f, path)
-}
-
-func dataURLFromImageReader(r io.Reader, path string) (string, error) {
-	raw, err := io.ReadAll(io.LimitReader(r, maxImageAttachmentBytes+1))
-	if err != nil {
-		return "", err
-	}
-	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("image must be between 1 byte and 64 MB")
-	}
-	mime := detectedImageMime(raw)
-	if mime == "" {
-		return "", fmt.Errorf("%s is not a supported image", path)
-	}
-	raw, mime = compressForVision(raw, mime)
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
+	return fileref.FileImageDataURL(path, baseDir)
 }
 
 // resolveBareNames batch-resolves simple filenames (no path separator) that
@@ -1164,6 +1106,7 @@ func walkRootDir(root *os.Root, dir, base string, b *strings.Builder, n *int, de
 	return nil
 }
 
+// readPDFRef converts an @-referenced PDF into bounded extracted text.
 // resolveAbsRef resolves the user-supplied @-reference path against baseDir
 // and returns the absolute path plus the absolute base root to sandbox I/O
 // under. With a baseDir, the path is confined under it (a relative path that

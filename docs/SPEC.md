@@ -678,7 +678,13 @@ Effective model and effort precedence is: per-profile
 `effort` on `task`/`fleet`, profile frontmatter, `agent.subagent_model` /
 `agent.subagent_effort`, then executor/default model configuration.
 
-`task` accepts optional `profile` and `write_paths`. `fleet` dispatches 2–64
+`task` accepts optional `profile`, `write_paths`, and `images`. `images` passes
+workspace-local image files (≤8, deduplicated, order preserved) created earlier
+in the turn — rendered charts, screenshots, extracted video frames — to the
+sub-agent as image input; each path is resolved through the same
+workspace-confinement, symlink, size, and TOCTOU checks as `@`-references, and a
+failing path fails the call. The child's provider still owns the vision
+decision: text-only children receive metadata only. `fleet` dispatches 2–64
 profile-aware tasks under a session scheduler
 (`agent.max_subagent_concurrency`, default 6; `agent.max_parallel_writers`,
 default 3). Profile names are resolved at runtime from the Skill store and

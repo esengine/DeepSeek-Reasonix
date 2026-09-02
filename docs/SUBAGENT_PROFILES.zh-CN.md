@@ -61,6 +61,9 @@ fleet(tasks=[
 - `task` / `fleet` 项上的 `profile` 按名称解析 `runAs: subagent` Skill（显式名称可调用
   `invocation: manual` Profile）。
 - Profile 正文成为子智能体的**完整**系统提示词，不再隐式叠加 concise 默认提示。
+- `task` 与 `read_only_task` 还接受 `images`：把本轮早先生成的 workspace 内图片文件
+  （渲染的图表、截图、视频帧）传给具备视觉能力的子智能体直接查看像素。路径经过与
+  `@` 引用相同的 workspace 限制检查；纯文本子智能体仅收到元数据。
 - `write_paths` 声明写入目标，使多个写入子智能体可共享同一工作区并行。文件声明
   必须互不重叠才能同时开工。目录声明可以同时开工，只有落盘到同一文件时才互斥。
   写入任务若省略 `write_paths`，开工时声明整个工作区。若之后只有路径型写入，

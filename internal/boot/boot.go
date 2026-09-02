@@ -39,6 +39,7 @@ import (
 	"reasonix/internal/extension/providerext"
 	"reasonix/internal/extension/sidecar"
 	"reasonix/internal/extension/uihub"
+	"reasonix/internal/fileref"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/guardian"
 	"reasonix/internal/history"
@@ -1091,6 +1092,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			WithProfileConfigResolvers(profileConfigModel, profileConfigEffort).
 			WithBashSandboxEnforced(bashSandboxEnforced).
 			WithCapabilityRuntime(capRuntime).
+			WithImageResolver(func(path, baseDir string) (string, error) {
+				return fileref.FileImageDataURL(path, root)
+			}).
 			WithWriteRoots(writeRootSet)
 	}
 	addTaskTool := func() string {

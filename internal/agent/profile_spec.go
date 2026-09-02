@@ -118,6 +118,9 @@ type ContextRequest struct {
 	// Ephemeral forces a non-persisted transcript for entry points that promise
 	// no durable host side effects, such as read_only_task.
 	Ephemeral bool
+	// Images are the parent-resolved data URLs this call explicitly attaches.
+	// They merge with turn candidates at dispatch, never replacing them.
+	Images []string
 	// Decisions, EvidenceSummary, FileAnchors, and OutputFormat are the only
 	// parent facts a child should start from. The parent transcript is not copied.
 	Decisions       []acceptedDecision

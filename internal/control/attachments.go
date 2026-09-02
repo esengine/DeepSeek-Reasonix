@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/fileref"
 	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
 )
@@ -438,7 +439,7 @@ func visionImageDataURL(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, mime = compressForVision(raw, mime)
+	raw, mime = fileref.CompressForVision(raw, mime)
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw), nil
 }
 
