@@ -4,6 +4,7 @@ import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { resolveRemoteWorkspace } from "../lib/remoteWorkspace";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useOverlayStore } from "../store/overlays";
 import { useRemoteStore, type RemoteExplorerTab } from "../store/remote";
 import type { RemoteDirEntry, RemoteForwardView } from "../lib/types";
@@ -385,6 +386,7 @@ function RemoteServerTab({ hostId, connected, defaultWorkspace }: { hostId: stri
   const start = async () => {
     try {
       setActionErr("");
+      await publishNavigationIntent("remote-workspace");
       await app.OpenRemoteWorkspace(hostId, workspace);
     } catch (e) {
       setActionErr(String(e));

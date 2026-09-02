@@ -70,10 +70,17 @@ func (a *App) forkForTabWithOptions(tabID string, turn int, isolateWorkspace boo
 				result.SourceDirty = true
 				return result, nil
 			} else {
-				var err error
-				created, err = createDeliveryWorktree(a.bootContext(), srcRoot, config.DeliveryWorktreeDir())
-				if err != nil {
-					return ForkWorktreeResultView{}, fmt.Errorf("create isolated fork worktree: %w", err)
+				var createErr error
+				created, createErr = func() (worktree.Result, error) {
+					releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(srcRoot)
+					if err != nil {
+						return worktree.Result{}, err
+					}
+					defer releaseAdmission()
+					return createDeliveryWorktree(a.bootContext(), srcRoot, config.DeliveryWorktreeDir())
+				}()
+				if createErr != nil {
+					return ForkWorktreeResultView{}, fmt.Errorf("create isolated fork worktree: %w", createErr)
 				}
 				if created.SourceDirty {
 					if rollbackErr := rollbackDeliveryWorktree(a.bootContext(), created); rollbackErr != nil {
@@ -151,6 +158,13 @@ func (a *App) openForkedSessionTabWithWorkspace(sourceTab *WorkspaceTab, newPath
 	disabledMCP := cloneServerViewMap(sourceTab.disabledMCP)
 	mcpOrder := append([]string(nil), sourceTab.mcpOrder...)
 	a.mu.RUnlock()
+	if scope == "project" {
+		releaseAdmission, err := a.beginWorkspaceRuntimeAdmission(workspaceRoot)
+		if err != nil {
+			return forkedSessionTabOpen{}, err
+		}
+		defer releaseAdmission()
+	}
 
 	topicID := newTopicID()
 	topicTitle := a.forkTopicTitle(sourceTitle)

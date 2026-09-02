@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/atotto/clipboard"
 
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
@@ -383,9 +385,43 @@ func pasteClipboardImage() tea.Cmd {
 type clipboardTextPasteMsg struct {
 	text             string
 	err              error
+	imageErr         error
 	remote           bool
 	terminalPasteSeq uint64
 	pending          int
+}
+
+// handleClipboardTextPaste applies the guarded native text read that backs a
+// keyboard paste on terminals without bracketed-paste delivery, including the
+// image-probe fallback. A fallback that reads neither text nor a supported
+// image surfaces a notice instead of failing silently (#8377).
+func (m chatTUI) handleClipboardTextPaste(msg clipboardTextPasteMsg) (tea.Model, tea.Cmd) {
+	count := 1
+	if msg.pending > 0 {
+		count = pendingClipboardTextPastes(msg.pending, msg.terminalPasteSeq, m.terminalPasteSeq)
+		if count == 0 {
+			return m, nil
+		}
+	}
+	if msg.remote {
+		m.notice(i18n.M.ClipboardTextPasteRemoteHint)
+		return m, nil
+	}
+	if msg.err != nil {
+		m.notice(fmt.Sprintf(i18n.M.ClipboardTextPasteFailedFmt, sanitizeExternalDisplayText(msg.err.Error())))
+		return m, nil
+	}
+	if msg.text == "" {
+		if msg.pending > 0 {
+			if errors.Is(msg.imageErr, control.ErrUnsupportedClipboardImage) {
+				m.notice(fmt.Sprintf(i18n.M.ClipboardImagePasteFailedFmt, sanitizeExternalDisplayText(msg.imageErr.Error())))
+			} else {
+				m.notice(i18n.M.ClipboardPasteEmptyNotice)
+			}
+		}
+		return m, nil
+	}
+	return m.applyComposerPasteCount(tea.PasteMsg{Content: msg.text}, false, count)
 }
 
 var readNativeClipboardText = clipboard.ReadAll
@@ -394,12 +430,12 @@ var readNativeClipboardText = clipboard.ReadAll
 // paste still arrives from the terminal as a bracketed tea.PasteMsg; this read
 // is deliberately text-only so right-click never probes for an image first.
 func pasteClipboardText() tea.Cmd {
-	return pasteClipboardTextGuarded(0, 0)
+	return pasteClipboardTextGuarded(0, 0, nil)
 }
 
-func pasteClipboardTextGuarded(terminalPasteSeq uint64, pending int) tea.Cmd {
+func pasteClipboardTextGuarded(terminalPasteSeq uint64, pending int, imageErr error) tea.Cmd {
 	return func() tea.Msg {
-		msg := clipboardTextPasteMsg{terminalPasteSeq: terminalPasteSeq, pending: pending}
+		msg := clipboardTextPasteMsg{imageErr: imageErr, terminalPasteSeq: terminalPasteSeq, pending: pending}
 		if remoteClipboardSession() {
 			msg.remote = true
 			return msg

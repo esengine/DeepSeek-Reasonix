@@ -212,6 +212,7 @@ window.runtime = {
 window.go = {
   main: {
     App: {
+      RegisterNavigationIntent: async () => {},
       ListTabs: async () => currentTabs(),
       MetaForTab: async (tabID: string) => {
         if (tabID === "tab-h" && holdNextMetaForH) {

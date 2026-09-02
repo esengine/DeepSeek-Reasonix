@@ -250,6 +250,7 @@ var English = Messages{
 	ClipboardTextPasteFailedFmt:  "paste text failed: %v",
 	ClipboardImagePastingHint:    "Pasting image…",
 	ClipboardImagePasteFailedFmt: "paste image failed: %v",
+	ClipboardPasteEmptyNotice:    "clipboard holds no pasteable text or supported image (PNG/JPEG/GIF/WebP)",
 	MouseCaptureOnHint:           "mouse capture on — in-app drag-select/scrollbar/wheel active",
 	MouseCaptureOffHint:          "mouse capture off — your terminal now handles selection and right-click",
 	MouseCaptureTag:              "native mouse",

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -9,17 +10,22 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 )
 
-func stubEmptyImageClipboard(t *testing.T, text string) {
+func stubEmptyImageClipboard(t *testing.T, text string, imageErrs ...error) {
 	t.Helper()
+	imageErr := control.ErrNoClipboardImage
+	if len(imageErrs) > 0 {
+		imageErr = imageErrs[0]
+	}
 	prevImage := readClipboardImage
 	prevText := readNativeClipboardText
 	t.Cleanup(func() {
 		readClipboardImage = prevImage
 		readNativeClipboardText = prevText
 	})
-	readClipboardImage = func() (string, error) { return "", control.ErrNoClipboardImage }
+	readClipboardImage = func() (string, error) { return "", imageErr }
 	readNativeClipboardText = func() (string, error) { return text, nil }
 }
 
@@ -30,9 +36,10 @@ func imagePasteKey() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
 }
 
-func TestCtrlVPastesTextWhenClipboardHasNoImage(t *testing.T) {
+func TestCtrlVUnsupportedImageFallsBackToText(t *testing.T) {
 	setLocalClipboardSession(t)
-	stubEmptyImageClipboard(t, "https://example.com/x")
+	imageErr := fmt.Errorf("read clipboard image: unsupported image/bmp: %w", errors.Join(control.ErrNoClipboardImage, control.ErrUnsupportedClipboardImage))
+	stubEmptyImageClipboard(t, "https://example.com/x", imageErr)
 
 	m := newComposerMouseTestTUI(t, 60, 16)
 	m.input.SetValue("before ")
@@ -54,6 +61,9 @@ func TestCtrlVPastesTextWhenClipboardHasNoImage(t *testing.T) {
 
 	if got, want := m.input.Value(), "before https://example.com/x"; got != want {
 		t.Fatalf("clipboard text fallback produced %q, want %q", got, want)
+	}
+	if got := strings.Join(m.transcript, "\n"); strings.Contains(got, "image/bmp") {
+		t.Fatalf("successful text fallback surfaced an image error:\n%s", got)
 	}
 }
 
@@ -194,28 +204,35 @@ func TestOverlappingCtrlVStillAttachesImageOnce(t *testing.T) {
 }
 
 func TestLateTerminalPasteCancelsScheduledTextFallback(t *testing.T) {
-	setLocalClipboardSession(t)
-	stubEmptyImageClipboard(t, "term text")
+	for _, nativeText := range []string{"term text", ""} {
+		t.Run(fmt.Sprintf("native_text_%q", nativeText), func(t *testing.T) {
+			setLocalClipboardSession(t)
+			stubEmptyImageClipboard(t, nativeText)
 
-	m := newComposerMouseTestTUI(t, 60, 16)
-	next, imageProbe := m.Update(imagePasteKey())
-	m = next.(chatTUI)
-	next, textFallback := m.Update(imageProbe())
-	m = next.(chatTUI)
-	if textFallback == nil {
-		t.Fatal("empty image clipboard did not schedule a text fallback")
-	}
+			m := newComposerMouseTestTUI(t, 60, 16)
+			next, imageProbe := m.Update(imagePasteKey())
+			m = next.(chatTUI)
+			next, textFallback := m.Update(imageProbe())
+			m = next.(chatTUI)
+			if textFallback == nil {
+				t.Fatal("empty image clipboard did not schedule a text fallback")
+			}
 
-	// The terminal paste arrives after the image result but before the native
-	// text read completes. It still owns this paste and must cancel the fallback.
-	next, _ = m.Update(tea.PasteMsg{Content: "term text"})
-	m = next.(chatTUI)
-	result := clipboardTextPasteResultFromCmd(t, textFallback)
-	next, _ = m.Update(result)
-	m = next.(chatTUI)
+			// The terminal paste arrives after the image result but before the native
+			// text read completes. It owns this paste and must cancel every fallback result.
+			next, _ = m.Update(tea.PasteMsg{Content: "term text"})
+			m = next.(chatTUI)
+			result := clipboardTextPasteResultFromCmd(t, textFallback)
+			next, _ = m.Update(result)
+			m = next.(chatTUI)
 
-	if got, want := m.input.Value(), "term text"; got != want {
-		t.Fatalf("late terminal paste was duplicated: %q, want %q", got, want)
+			if got, want := m.input.Value(), "term text"; got != want {
+				t.Fatalf("late terminal paste was duplicated: %q, want %q", got, want)
+			}
+			if got := strings.Join(m.transcript, "\n"); strings.Contains(got, i18n.M.ClipboardPasteEmptyNotice) {
+				t.Fatalf("terminal-owned paste surfaced a stale empty notice:\n%s", got)
+			}
+		})
 	}
 }
 
@@ -224,7 +241,7 @@ func TestClipboardImagePasteKeepsNoticeForRealFailures(t *testing.T) {
 	m := newComposerMouseTestTUI(t, 60, 16)
 	m.input.SetValue("before ")
 
-	next, cmd := m.Update(clipboardImageMsg{err: errors.New("clipboard image paste needs wl-paste (Wayland) or xclip (X11)")})
+	next, cmd := m.Update(clipboardImageMsg{err: errors.New("clipboard image paste needs wl-paste \x1b]52;c;owned\a (Wayland) or xclip (X11)")})
 	m = next.(chatTUI)
 
 	if cmd != nil {
@@ -232,8 +249,40 @@ func TestClipboardImagePasteKeepsNoticeForRealFailures(t *testing.T) {
 	}
 	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "wl-paste") {
 		t.Fatalf("a real clipboard failure lost its notice:\n%s", got)
+	} else if strings.ContainsAny(got, "\x1b\a") {
+		t.Fatalf("a real clipboard failure rendered terminal controls: %q", got)
 	}
 	if got := m.input.Value(); got != "before " {
 		t.Fatalf("a real clipboard failure changed the composer: %q", got)
+	}
+}
+
+func TestCtrlVEmptyImageProbeWithNoTextSurfacesNotice(t *testing.T) {
+	cases := []struct {
+		name     string
+		imageErr error
+		want     string
+	}{
+		{name: "no image", imageErr: control.ErrNoClipboardImage, want: i18n.M.ClipboardPasteEmptyNotice},
+		{name: "unsupported image", imageErr: fmt.Errorf("unsupported image/bmp: %w", errors.Join(control.ErrNoClipboardImage, control.ErrUnsupportedClipboardImage)), want: "image/bmp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setLocalClipboardSession(t)
+			stubEmptyImageClipboard(t, "", tc.imageErr)
+
+			m := newComposerMouseTestTUI(t, 60, 16)
+			next, cmd := m.Update(imagePasteKey())
+			m = next.(chatTUI)
+			next, cmd = m.Update(cmd())
+			m = next.(chatTUI)
+
+			result := clipboardTextPasteResultFromCmd(t, cmd)
+			next, _ = m.Update(result)
+			m = next.(chatTUI)
+			if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, tc.want) {
+				t.Fatalf("empty image probe notice = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

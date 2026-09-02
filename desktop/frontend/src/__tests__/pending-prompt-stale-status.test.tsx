@@ -422,6 +422,7 @@ window.runtime = {
 window.go = {
   main: {
     App: {
+      RegisterNavigationIntent: async () => {},
       ListTabs: async () => {
         if (holdNextListTabs) {
           const gatePromise = holdNextListTabs;

@@ -275,6 +275,9 @@ func TestRollbackCreateRemovesOnlyUntouchedWorktree(t *testing.T) {
 	if _, err := os.Stat(result.WorktreeRoot); !os.IsNotExist(err) {
 		t.Fatalf("worktree still exists after rollback: %v", err)
 	}
+	if _, err := os.Stat(metadataPath(result.WorktreeRoot)); !os.IsNotExist(err) {
+		t.Fatalf("worktree metadata still exists after rollback: %v", err)
+	}
 	cmd := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+result.Branch)
 	if err := cmd.Run(); err == nil {
 		t.Fatalf("branch %q still exists after rollback", result.Branch)

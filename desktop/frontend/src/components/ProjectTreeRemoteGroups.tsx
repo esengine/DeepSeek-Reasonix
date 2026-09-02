@@ -6,6 +6,7 @@ import type { Translator } from "../lib/i18n";
 import type { ProjectNode, RemoteServerView, RemoteSessionView, RemoteTabRefView } from "../lib/types";
 import type { ToastContextValue } from "../lib/toast";
 import { loadRemoteSessionCache, removeRemoteSessionCache, saveRemoteSessionCache } from "../lib/remoteSessionCache";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
 import type { ContextMenuItem } from "./ContextMenu";
 
@@ -165,6 +166,7 @@ export function useRemoteProjectGroups(
     if (opening.current.has(key)) return;
     opening.current.add(key);
     try {
+      await publishNavigationIntent("remote-project");
       await app.OpenRemoteProjectTab(ref.hostId, ref.workspace,
         opts?.focus ? {} : opts?.sessionName || opts?.sessionPath
           ? { sessionName: opts.sessionName, sessionPath: opts.sessionPath, sessionTitle: opts.sessionTitle }
@@ -211,6 +213,7 @@ export function useRemoteProjectGroups(
         await app.ConnectRemoteHost(ref.hostId);
         await waitForRemoteConnection(ref.hostId);
       }
+      await publishNavigationIntent("remote-workspace");
       await app.OpenRemoteWorkspace(ref.hostId, ref.workspace);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error");

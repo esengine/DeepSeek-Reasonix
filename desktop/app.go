@@ -224,6 +224,19 @@ type App struct {
 	// another navigation is still activating.
 	singleSurfaceMu sync.Mutex
 
+	// worktreeMergeMu serializes the inspect-confirm-merge/finalize mutation
+	// boundary. Git identities are still revalidated after workspace leases are
+	// acquired; this mutex only prevents duplicate in-process Wails calls.
+	worktreeMergeMu sync.Mutex
+	// Worktree runtime reservations are ordered before App.mu. Runtime owners
+	// hold this gate through final publication; callers must never acquire it
+	// under App.mu. Merge reservations cover both the source and isolated roots,
+	// while cleanup reservations cover the complete allocation through removal.
+	worktreeReservations worktreeRuntimeReservations
+	// navigationIntent linearizes frontend intent publication with the final
+	// merged-worktree removal before the runtime mutation barrier and App.mu.
+	navigationIntent navigationIntentFence
+
 	// sessionRemovalMu serializes operations that remove visible or detached
 	// session bindings. Those operations may snapshot controllers before
 	// deletion; keep that snapshot outside a.mu, but do not let DeleteSession or
@@ -453,6 +466,10 @@ func NewApp() *App {
 		remoteWindows:        newRemoteWindowRegistry(),
 		remoteWindowOwnerID:  newRemoteWindowOwnerID(),
 		topicState:           desktopTopicState,
+		worktreeReservations: worktreeRuntimeReservations{
+			cleanup: map[string]struct{}{},
+			merge:   map[string]struct{}{},
+		},
 	}
 	a.desktopShell.trayState = "probing"
 	a.webView2Recovery = newWebView2RecoveryCoordinator(a)
@@ -746,6 +763,10 @@ func (a *App) restoreOrBuildTabs() {
 	if len(f.Tabs) > 0 {
 		toBuild := make([]*WorkspaceTab, 0, len(f.Tabs))
 		for _, entry := range f.Tabs {
+			releaseAdmission, admissionErr := a.beginProjectRuntimeAdmission(entry.Scope, entry.WorkspaceRoot)
+			if admissionErr != nil {
+				continue
+			}
 			a.mu.Lock()
 			id := a.restoredTabIDLocked(entry.ID)
 			a.mu.Unlock()
@@ -781,10 +802,7 @@ func (a *App) restoreOrBuildTabs() {
 			tab.SessionPath = strings.TrimSpace(entry.SessionPath)
 			tab.ReadOnly = entry.ReadOnly
 			tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
-			a.mu.Lock()
-			a.tabs[tab.ID] = tab
-			a.tabOrder = append(a.tabOrder, tab.ID)
-			a.mu.Unlock()
+			a.publishRestoredTab(tab, releaseAdmission)
 			toBuild = append(toBuild, tab)
 		}
 		a.mu.Lock()
@@ -1966,22 +1984,6 @@ func (a *App) workspaceNotReadyErrLocked(tab *WorkspaceTab) error {
 		return fmt.Errorf("workspace failed to start: %s", issue.Message)
 	}
 	return fmt.Errorf("workspace is still starting")
-}
-
-// workspaceRuntimeAdmissionErr is the backend half of the composer readiness
-// contract. The frontend gate avoids an optimistic bubble for known startup
-// states; this check closes the race where a rebuild or lease failure lands
-// after the last metadata refresh but before a bound Submit call.
-func (a *App) workspaceRuntimeAdmissionErr(tab *WorkspaceTab, ctrl control.SessionAPI) error {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if tab != nil && ctrl != nil && tab.Ctrl == ctrl {
-		runtimeView := a.sessionRuntimeViewLocked(tab)
-		if runtimeView.Phase == sessionRuntimeReady {
-			return nil
-		}
-	}
-	return a.workspaceNotReadyErrLocked(tab)
 }
 
 // tabIsReadOnly reads tab.ReadOnly under a.mu; setTabReadOnly can flip it
@@ -3361,14 +3363,21 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		if workspaceRoot == "" {
 			return fmt.Errorf("workspaceRoot is required")
 		}
-		saveWorkspace(workspaceRoot)
-		a.registerProjectRoot(workspaceRoot)
 		actualRoot = workspaceRoot
 	} else {
 		actualRoot = globalWorkspaceRoot()
 		if err := os.MkdirAll(actualRoot, 0o755); err != nil {
 			return fmt.Errorf("create global workspace: %w", err)
 		}
+	}
+	releaseAdmission, err := a.beginProjectRuntimeAdmission(scope, actualRoot)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+	if scope == "project" {
+		saveWorkspace(workspaceRoot)
+		a.registerProjectRoot(workspaceRoot)
 	}
 
 	model, toolApprovalMode := desktopNewSessionDefaults(scope, actualRoot)
@@ -5108,7 +5117,6 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s is not a directory", dir)
 	}
-	saveWorkspace(dir)
 
 	// Open a registered topic so the new workspace appears in the project tree
 	// immediately instead of only existing as an in-memory tab.

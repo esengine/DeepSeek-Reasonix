@@ -2,6 +2,7 @@ import { CloudOff, Loader2, RotateCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useT } from "../lib/i18n";
 import { app } from "../lib/bridge";
+import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { Transcript } from "./Transcript";
 import { AskCard } from "./AskCard";
 import { ApprovalModal } from "./ApprovalModal";
@@ -48,7 +49,10 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
     const retry = () => {
       // With no explicit target, the backend preserves the parked tab's
       // current named/fresh-session intent instead of silently starting over.
-      runAction(() => app.OpenRemoteProjectTab(tab.remote!.hostId, tab.remote!.workspace, {}));
+      runAction(async () => {
+        await publishNavigationIntent("remote-reconnect");
+        return app.OpenRemoteProjectTab(tab.remote!.hostId, tab.remote!.workspace, {});
+      });
     };
     return (
       <div className="remote-surface remote-surface--warning" role="alert">

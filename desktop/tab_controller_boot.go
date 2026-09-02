@@ -28,12 +28,23 @@ func (a *App) buildTabControllerBootFenced(ctx context.Context, generation uint6
 	return a.buildTabControllerBoot(ctx, opts)
 }
 
-// lockTabControllerPublication makes the generation check part of admission.
-// An MCP writer bumps the generation before releasing runtimeAdmissionMu, so a
-// build cannot pass an early check and publish stale registries afterward.
-func (a *App) lockTabControllerPublication(generation uint64) (func(), bool) {
+// lockTabControllerPublication makes extension generation and project
+// maintenance reservations part of the same publication admission. An MCP
+// writer bumps the generation before releasing runtimeAdmissionMu, while a
+// worktree mutation publishes its canonical reservation before releasing the
+// write side, so neither stale registries nor a late project controller can be
+// installed afterward.
+func (a *App) lockTabControllerPublication(generation uint64, scope, workspaceRoot string) (func(), bool) {
 	a.runtimeAdmissionMu.RLock()
 	if a.currentExtensionGeneration() != generation {
+		a.runtimeAdmissionMu.RUnlock()
+		return nil, false
+	}
+	if scope != "project" {
+		return a.runtimeAdmissionMu.RUnlock, true
+	}
+	key := canonicalRuntimeRoot(workspaceRoot)
+	if key == "" || a.workspaceMergeReservedSnapshot(key) {
 		a.runtimeAdmissionMu.RUnlock()
 		return nil, false
 	}

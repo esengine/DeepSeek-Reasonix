@@ -251,6 +251,7 @@ var Chinese = Messages{
 	ClipboardTextPasteFailedFmt:  "粘贴文本失败：%v",
 	ClipboardImagePastingHint:    "正在粘贴图片…",
 	ClipboardImagePasteFailedFmt: "粘贴图片失败：%v",
+	ClipboardPasteEmptyNotice:    "剪贴板中没有可粘贴的文本或受支持的图片（PNG/JPEG/GIF/WebP）",
 	MouseCaptureOnHint:           "鼠标接管已开启 — 应用内拖拽选中/滚动条/滚轮生效",
 	MouseCaptureOffHint:          "鼠标接管已关闭 — 由终端原生处理选中和右键菜单",
 	MouseCaptureTag:              "终端原生鼠标",

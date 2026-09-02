@@ -96,11 +96,18 @@ func RollbackCreate(ctx context.Context, result Result) error {
 	if strings.TrimSpace(status) != "" {
 		return errors.New("rollback worktree contains changes; it was preserved")
 	}
+	metadataFile, err := verifyRollbackMetadata(sourceRoot, worktreeRoot, branch, head)
+	if err != nil {
+		return err
+	}
 	if _, stderr, err := runGit(ctx, sourceRoot, "worktree", "remove", worktreeRoot); err != nil {
 		return fmt.Errorf("remove unused worktree: %w%s", err, stderrSuffix(stderr))
 	}
 	if _, stderr, err := runGit(ctx, sourceRoot, "update-ref", "-d", "refs/heads/"+branch, head); err != nil {
 		return fmt.Errorf("remove unused worktree branch %q: %w%s", branch, err, stderrSuffix(stderr))
+	}
+	if err := os.Remove(metadataFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove unused worktree metadata: %w", err)
 	}
 	return nil
 }
@@ -214,14 +221,22 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 				return Result{}, fmt.Errorf("created worktree is missing selected project subdirectory %q", prefix)
 			}
 		}
-		return Result{
+		result := Result{
 			WorkspaceRoot: selectedRoot,
 			WorktreeRoot:  worktreeRoot,
 			SourceRoot:    info.RepoRoot,
 			Branch:        branch,
 			Head:          info.head,
 			SourceDirty:   info.SourceDirty,
-		}, nil
+		}
+		if err := writeMergeMetadata(result, info.Branch); err != nil {
+			rollbackErr := RollbackCreate(ctx, result)
+			if rollbackErr != nil {
+				return Result{}, fmt.Errorf("publish merge metadata and roll back allocation: %w", errors.Join(err, fmt.Errorf("exact-clean rollback failed and the worktree was preserved: %w", rollbackErr)))
+			}
+			return Result{}, err
+		}
+		return result, nil
 	}
 	return Result{}, errors.New("could not allocate a unique Delivery worktree")
 }
@@ -321,13 +336,31 @@ func inspect(ctx context.Context, workspaceRoot string) (inspection, error) {
 }
 
 func runGit(parent context.Context, dir string, args ...string) (stdout, stderr string, err error) {
+	return runGitEnvInput(parent, dir, "", nil, args...)
+}
+
+func runGitInput(parent context.Context, dir, input string, args ...string) (stdout, stderr string, err error) {
+	return runGitEnvInput(parent, dir, input, nil, args...)
+}
+
+func runGitEnv(parent context.Context, dir string, env []string, args ...string) (stdout, stderr string, err error) {
+	return runGitEnvInput(parent, dir, "", env, args...)
+}
+
+func runGitEnvInput(parent context.Context, dir, input string, env []string, args ...string) (stdout, stderr string, err error) {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(parent, gitTimeout(args))
 	defer cancel()
 	cmd := gitcmd.Command(ctx, dir, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var outBuf, errBuf bytes.Buffer
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 	err = cmd.Run()
@@ -338,7 +371,7 @@ func runGit(parent context.Context, dir string, args ...string) (stdout, stderr 
 }
 
 func gitTimeout(args []string) time.Duration {
-	if len(args) >= 2 && args[0] == "worktree" && (args[1] == "add" || args[1] == "remove") {
+	if len(args) >= 2 && args[0] == "worktree" && (args[1] == "add" || args[1] == "move" || args[1] == "remove") {
 		return gitWorktreeMutationTimeout
 	}
 	return gitProbeTimeout

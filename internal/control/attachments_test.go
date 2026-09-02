@@ -401,3 +401,64 @@ func TestClassifyDarwinClipboardResultDistinguishesMissingTypeFromFailure(t *tes
 		t.Fatalf("darwin operational failure = %v, want wrapped %v", err, want)
 	}
 }
+
+func TestSaveLinuxClipboardImageNegotiatesSupportedImageType(t *testing.T) {
+	t.Chdir(t.TempDir())
+	png, err := base64.StdEncoding.DecodeString(tinyPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readArgs []string
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(_ string, args ...string) ([]byte, []byte, error) {
+			if len(args) == 1 && args[0] == "--list-types" {
+				return []byte("text/plain\nimage/jpeg\n"), nil, nil
+			}
+			readArgs = args
+			return png, nil, nil
+		},
+	)
+	if _, err := saveLinuxClipboardImage(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(readArgs, " "), "--type image/jpeg --no-newline"; got != want {
+		t.Fatalf("read args = %q, want %q", got, want)
+	}
+}
+
+func TestSaveLinuxClipboardImageNamesUnsupportedImageTypes(t *testing.T) {
+	stubClipboardTools(t,
+		func(name string) (string, error) {
+			if name == "wl-paste" {
+				return name, nil
+			}
+			return "", exec.ErrNotFound
+		},
+		func(_ string, args ...string) ([]byte, []byte, error) {
+			if len(args) == 1 && args[0] == "--list-types" {
+				return []byte("text/plain\nimage/bmp\nimage/\x1b]52;c;owned\a\n"), nil, nil
+			}
+			t.Fatalf("unsupported image types must not be read: %v", args)
+			return nil, nil, nil
+		},
+	)
+	_, err := saveLinuxClipboardImage()
+	if !errors.Is(err, ErrNoClipboardImage) {
+		t.Fatalf("unsupported image error = %v, want ErrNoClipboardImage fallback", err)
+	}
+	if !errors.Is(err, ErrUnsupportedClipboardImage) {
+		t.Fatalf("unsupported image error lost its diagnostic type: %v", err)
+	}
+	if !strings.Contains(err.Error(), "image/bmp") || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("error should name the unsupported image type: %v", err)
+	}
+	if strings.ContainsAny(err.Error(), "\x1b\a") {
+		t.Fatalf("error contains clipboard-provided terminal controls: %q", err)
+	}
+}

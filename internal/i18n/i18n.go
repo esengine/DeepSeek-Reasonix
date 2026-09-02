@@ -231,6 +231,7 @@ type Messages struct {
 	ClipboardTextPasteRemoteHint string // mouse paste cannot read the user's local clipboard/PRIMARY selection over SSH
 	ClipboardTextPasteFailedFmt  string // text clipboard read failed, one %v
 	ClipboardImagePastingHint    string // shown while an image is being read from the system clipboard
+	ClipboardPasteEmptyNotice    string
 	ClipboardImagePasteFailedFmt string // image clipboard read failed, one %v
 	MouseCaptureOnHint           string // "/mouse" turned in-app mouse handling back on
 	MouseCaptureOffHint          string // "/mouse" released mouse capture to the terminal

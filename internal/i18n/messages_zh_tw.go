@@ -241,6 +241,7 @@ var ChineseTraditional = Messages{
 	ClipboardTextPasteFailedFmt:  "貼上文字失敗：%v",
 	ClipboardImagePastingHint:    "正在貼上圖片…",
 	ClipboardImagePasteFailedFmt: "貼上圖片失敗：%v",
+	ClipboardPasteEmptyNotice:    "剪貼簿中沒有可粘貼的文字或受支援的圖片（PNG/JPEG/GIF/WebP）",
 	MouseCaptureOnHint:           "滑鼠接管已開啟 — 應用內拖拽選取/捲軸/滾輪生效",
 	MouseCaptureOffHint:          "滑鼠接管已關閉 — 由終端原生處理選取與右鍵選單",
 	MouseCaptureTag:              "終端原生滑鼠",

@@ -10,7 +10,7 @@
     "marker": 0,
     "narrative": 64,
     "struct-state": 116,
-    "test-file-size": 69628
+    "test-file-size": 69629
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -66,7 +66,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4688
+      "file-size": 4734
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 27
@@ -93,7 +93,7 @@
       "test-file-size": 228
     },
     "desktop/frontend/src/__tests__/tab-switch-hydration.test.tsx": {
-      "test-file-size": 161
+      "test-file-size": 162
     },
     "desktop/frontend/src/components/ApprovalModal.tsx": {
       "file-size": 235
@@ -147,7 +147,7 @@
       "file-size": 180
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4920
+      "file-size": 4924
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -156,10 +156,10 @@
       "file-size": 264
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1544
+      "file-size": 1530
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 4208
+      "file-size": 4231
     },
     "desktop/heartbeat.go": {
       "essay": 7

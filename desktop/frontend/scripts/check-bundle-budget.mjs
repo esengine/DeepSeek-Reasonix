@@ -174,7 +174,10 @@ console.log("\nbundle budgets");
 // bounded ListTabs retry, and stale-prompt guard with a 0.1 KiB headroom.
 // Session-catalog repair presentation stays in the lazy project-tree chunk;
 // compact shared helpers keep the combined initial path within the same gate.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 458.7 : 458.7;
+// Merge-Back adds identity-bound inspection, navigation, and retained-recovery
+// orchestration on top. The merged stable build measures 461.338 KiB and the
+// test channel measures 461.323 KiB; retain each exact one-decimal ceiling.
+const initialJSBudgetKiB = 461.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -191,9 +194,9 @@ if (initialCSS.length > 0) {
 // Navigation overlay styles add a bounded 0.1 KiB to the deferred shell.
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
-// The navigation mask's stable composer footprint and remote tab/surface
-// states bring the merged shell to roughly 115.7 KiB gzip.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
+// The merged shell measures 116.003 KiB gzip; retain the smallest one-decimal
+// ceiling for the combined upstream and reference-filter changes.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.1 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -229,7 +232,12 @@ for (const path of localeChunks) {
   // reachable-tail recovery copy, the merged chunks measure 58.923 KiB zh and
   // 59.710 KiB zh-TW. The isolated-fork guidance brings the measured chunks
   // to 59.1 KiB zh and 59.9 KiB zh-TW; retain a narrow one-decimal ratchet.
-  const budget = name.startsWith("zh-TW-") ? 60.0 * 1024 : 59.2 * 1024;
+  // Merge-Back lifecycle and recovery guidance measure 59.819 KiB zh and
+  // 60.612 KiB zh-TW; retain only the next one-decimal ceiling for each.
+  // The retained-recovery receipt and copy action move zh to 59.911 KiB;
+  // session-catalog recovery guidance on the merged base moves zh-TW to
+  // 60.757 KiB; retain only its exact one-decimal ceiling.
+  const budget = name.startsWith("zh-TW-") ? 60.8 * 1024 : 60.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -305,8 +313,11 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // ratchet.
 // Ask turn fencing, rejection reconciliation, and the localized submit-failure
 // notice measure 2456.044 KiB raw; retain 0.056 KiB of one-decimal headroom.
-// The reference-filter UI and hidden-reference hint add 2.7 KiB to the merged
-// payload; retain 0.2 KiB of bounded headroom at the measured 2458.8 KiB.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_459.0 : 2_459.0;
+// Merge-Back's startup ownership and failure-atomic navigation fence add the
+// remaining bounded payload. The retained recovery receipt makes the stable
+// path 2465.105 KiB raw; the merged test channel measures 2464.979 KiB.
+// The reference-filter UI adds the remaining bounded payload; retain only
+// each channel's exact one-decimal ceiling after merging both changes.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_468.0 : 2_468.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

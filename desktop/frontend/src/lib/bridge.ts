@@ -11,6 +11,7 @@ import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blank
 import { makeMockQualityFloorBindings, type QualityFloorBindings } from "./deliveryFloorBridge";
 import { t } from "./i18n";
 import { makeMockForkBindings } from "./forkWorktree";
+import { makeMockWorktreeMergeBindings } from "./worktreeMergeMock";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
@@ -57,6 +58,13 @@ import type {
   DesktopStartupSettingsView,
   DeliveryWorktreeAvailability,
   DeliveryWorktreeOpenResult,
+  WorktreeMergeInspection,
+  WorktreeMergeRequest,
+  WorktreeMergeResult,
+  WorktreeCleanupRequest,
+  WorktreeCleanupResult,
+  CloseMergedWorktreeTabRequest,
+  CloseMergedWorktreeTabResult,
   DroppedItem,
   EffortInfo,
   ExtensionActionView,
@@ -638,6 +646,11 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   IsolatedWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateIsolatedWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
+  InspectWorktreeMerge(tabID: string): Promise<WorktreeMergeInspection>;
+  MergeWorktreeBack(request: WorktreeMergeRequest): Promise<WorktreeMergeResult>;
+  RegisterNavigationIntent(token: string): Promise<void>;
+  CloseMergedWorktreeTab(request: CloseMergedWorktreeTabRequest): Promise<CloseMergedWorktreeTabResult>;
+  FinalizeWorktreeMerge(request: WorktreeCleanupRequest): Promise<WorktreeCleanupResult>;
   // Deprecated one-version aliases kept bound for older desktop clients.
   DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
@@ -1088,7 +1101,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|RegisterNavigationIntent|CloseMergedWorktreeTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -5221,6 +5234,7 @@ function makeMockApp(): AppBindings {
     async CreateDeliveryWorktree(workspaceRoot: string) {
       return this.CreateIsolatedWorktree(workspaceRoot);
     },
+    ...makeMockWorktreeMergeBindings(() => mockTabs, (next) => { mockTabs = next; }),
     async OpenGlobalTab(_topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);
       if (existing) {

@@ -1290,11 +1290,10 @@ func chatREPL(args []string, version string) int {
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
 	// subprocesses — operations that corrupt bubbletea's terminal raw mode
 	// when executed while the TUI is alive.
-	launchWeb := false
-	launchWebPath := ""
-	launchWebSessionID := ""
-	launchWebModelRef := ""
+	var launchWeb bool
+	var launchWebPath, launchWebSessionID, launchWebModelRef string
 	if fm, ok := final.(chatTUI); ok {
+		reportShutdownFailure(fm.shutdownErr)
 		launchWeb = fm.launchWebOnExit
 		for _, oc := range fm.oldControllers {
 			if c, ok := oc.(*control.Controller); ok {

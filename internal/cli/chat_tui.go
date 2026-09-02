@@ -50,9 +50,10 @@ import (
 // normal buffer and commits finalized output to native scrollback via
 // tea.Println so taps can still focus the soft keyboard.
 type chatTUI struct {
-	ctrl    control.SessionAPI
-	label   string
-	missing string // missing-key warning surfaced once in the banner, "" when ready
+	ctrl        control.SessionAPI
+	shutdownErr error // final save's failure; reported after terminal release
+	label       string
+	missing     string // missing-key warning surfaced once in the banner, "" when ready
 	webHandoffState
 	// diagnostics is the process-owned TUI log/watchdog started before terminal
 	// takeover. Nil in unit tests that construct chatTUI without chatREPL.
@@ -486,7 +487,9 @@ type compactDoneMsg struct{ err error }
 // tuiShutdownMsg asks the live TUI model to persist its current controller and
 // quit. It is injected from the signal handler so shutdown does not snapshot a
 // stale controller captured before an in-TUI rebuild.
-type tuiShutdownMsg struct{}
+type tuiShutdownMsg struct {
+	completion *tuiShutdownCompletion
+}
 
 // shutdownNow is the tea.Cmd every in-TUI quit gesture returns instead of
 // tea.Quit. Routing through tuiShutdownMsg gives all exits the same
@@ -1921,11 +1924,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tuiShutdownMsg:
-		if m.ctrl != nil {
-			_ = m.ctrl.Snapshot()
-			m.followSessionLease()
-		}
-		return m, tea.Quit
+		return m.shutdownAndQuit(msg.completion)
 
 	case modelSwitchMsg:
 		m.modelSwitchPending = false
@@ -2028,11 +2027,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// pasting again would duplicate the text.
 				pending := pendingClipboardTextPastes(requests, m.clipboardImageTerminalPasteSeq, m.terminalPasteSeq)
 				if pending > 0 {
-					cmds = append(cmds, pasteClipboardTextGuarded(m.terminalPasteSeq, pending))
+					cmds = append(cmds, pasteClipboardTextGuarded(m.terminalPasteSeq, pending, msg.err))
 				}
 				break
 			}
-			m.notice(fmt.Sprintf(i18n.M.ClipboardImagePasteFailedFmt, msg.err))
+			m.notice(fmt.Sprintf(i18n.M.ClipboardImagePasteFailedFmt, sanitizeExternalDisplayText(msg.err.Error())))
 			break
 		}
 		imageBefore := m.input.Value()
@@ -2042,25 +2041,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case clipboardTextPasteMsg:
-		if msg.remote {
-			m.notice(i18n.M.ClipboardTextPasteRemoteHint)
-			break
-		}
-		if msg.err != nil {
-			m.notice(fmt.Sprintf(i18n.M.ClipboardTextPasteFailedFmt, msg.err))
-			break
-		}
-		if msg.text == "" {
-			break
-		}
-		count := 1
-		if msg.pending > 0 {
-			count = pendingClipboardTextPastes(msg.pending, msg.terminalPasteSeq, m.terminalPasteSeq)
-			if count == 0 {
-				break
-			}
-		}
-		return m.applyComposerPasteCount(tea.PasteMsg{Content: msg.text}, false, count)
+		return m.handleClipboardTextPaste(msg)
 
 	case clipboardCopyMsg:
 		if msg.statusHint && msg.seq != m.copyNoticeSeq {

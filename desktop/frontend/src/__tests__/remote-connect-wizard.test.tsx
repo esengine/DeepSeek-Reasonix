@@ -93,6 +93,9 @@ let platformAttempts = 0;
 // Last AddRemoteHost payload, for credential-mode assertions.
 let lastAddInput: RemoteHostInput | undefined;
 window.go = { main: { App: {
+  async RegisterNavigationIntent(token: string) {
+    tape.push(`RegisterNavigationIntent:${token}`);
+  },
   async RemoteHosts() {
     tape.push("RemoteHosts");
     return savedHosts.slice();
@@ -481,6 +484,8 @@ await act(async () => {
   await flush();
 });
 ok(tape.includes("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true"), "finish opens the selected workspace in a new remote session tab");
+const navigationRegistration = tape.findIndex((entry) => entry.startsWith("RegisterNavigationIntent:nav-remote-wizard-"));
+ok(navigationRegistration >= 0 && navigationRegistration < tape.indexOf("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true"), "finish registers navigation before opening the remote tab");
 ok(tape.includes("AddRemoteProject:gpu-box:/home/dev/projects"), "finish pins the selected remote workspace");
 ok(tape.indexOf("AddRemoteProject:gpu-box:/home/dev/projects") < tape.indexOf("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true"), "the workspace is pinned before its session tab opens");
 ok(tape.indexOf("OpenRemoteProjectTab:gpu-box:/home/dev/projects:true") < tape.indexOf("refresh"), "the project tree refreshes after the session tab opens");
