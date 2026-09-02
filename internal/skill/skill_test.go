@@ -604,7 +604,7 @@ func TestScriptsStayOutOfSkillIndex(t *testing.T) {
 		t.Fatal("test setup expected scripts in the on-demand skill body")
 	}
 
-	index := ApplyIndex("BASE", []Skill{sk})
+	index := IndexBlock([]Skill{sk})
 	if !strings.Contains(index, "withscripts") || !strings.Contains(index, "cache-safe script skill") {
 		t.Fatalf("skill index missing name/description:\n%s", index)
 	}
@@ -904,17 +904,17 @@ func TestIrregularDirectoryEntryFollowsTarget(t *testing.T) {
 	}
 }
 
-func TestApplyIndex(t *testing.T) {
-	if got := ApplyIndex("BASE", nil); got != "BASE" {
-		t.Errorf("empty skills should leave base unchanged, got %q", got)
+func TestIndexBlockListsSkills(t *testing.T) {
+	if got := IndexBlock(nil); got != "" {
+		t.Errorf("no skills should render no listing, got %q", got)
 	}
 	skills := []Skill{
 		{Name: "alpha", Description: "the alpha", RunAs: RunInline},
 		{Name: "beta", Description: "the beta", RunAs: RunSubagent},
 	}
-	out := ApplyIndex("BASE", skills)
-	if !strings.HasPrefix(out, "BASE\n\n# Skills") {
-		t.Error("index should append after the base")
+	out := IndexBlock(skills)
+	if !strings.HasPrefix(out, "# Skills") {
+		t.Errorf("listing should open with its own header: %q", out)
 	}
 	if !strings.Contains(out, "- alpha — the alpha") {
 		t.Errorf("inline skill line missing: %s", out)
@@ -924,8 +924,8 @@ func TestApplyIndex(t *testing.T) {
 	}
 }
 
-func TestApplyIndexMandatesInlineButRestrainsSubagent(t *testing.T) {
-	out := ApplyIndex("BASE", []Skill{{Name: "alpha", Description: "the alpha", RunAs: RunInline}})
+func TestIndexBlockMandatesInlineButRestrainsSubagent(t *testing.T) {
+	out := IndexBlock([]Skill{{Name: "alpha", Description: "the alpha", RunAs: RunInline}})
 
 	if !strings.Contains(out, "inline) skill is even plausibly relevant") ||
 		!strings.Contains(out, "invoke it before continuing") {
@@ -1038,12 +1038,12 @@ func TestManualInvocationSkillExcludedFromIndex(t *testing.T) {
 	}
 }
 
-func TestApplyIndexTruncates(t *testing.T) {
+func TestIndexBlockTruncates(t *testing.T) {
 	var skills []Skill
 	for range 200 {
 		skills = append(skills, Skill{Name: "skill" + strings.Repeat("x", 20), Description: strings.Repeat("d", 50)})
 	}
-	out := ApplyIndex("BASE", skills)
+	out := IndexBlock(skills)
 	if !strings.Contains(out, "truncated") {
 		t.Error("oversized index should be truncated")
 	}

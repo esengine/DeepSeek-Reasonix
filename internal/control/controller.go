@@ -478,6 +478,7 @@ func New(opts Options) *Controller {
 	}
 	c.sessionTemp.Retain()
 
+	c.skills.publishCatalog(opts.Skills) // per-project: owed to the turn, not the prefix
 	if opts.Extensions != nil {
 		c.extensions = opts.Extensions
 		c.sink = newFrontendEventSink(c.sink, opts.Extensions)
@@ -4568,14 +4569,12 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 		})
 	}
 	c.mcp.registerTool(command.NewSlashCommandTool(entries))
+	c.skills.publishCatalog(c.skills.list()) // reachable next turn, without reopening
 	cmdSlice := cmds
 	c.commands.Store(&cmdSlice)
 	return loadErr
 }
 
-// Skills returns the discoverable skills (for the slash menu and `/skills`).
-// When a live Store is available, scan it on demand so skills installed during
-// this session appear without rewriting the cache-stable system prompt.
 // Executor returns the underlying agent when present (nil for pure runners).
 func (c *Controller) Executor() *agent.Agent {
 	if c == nil {
@@ -4584,6 +4583,7 @@ func (c *Controller) Executor() *agent.Agent {
 	return c.executor
 }
 
+// Skills scans the live Store, so a skill installed this session is listed.
 func (c *Controller) Skills() []skill.Skill {
 	return c.skills.list()
 }

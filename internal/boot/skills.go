@@ -18,9 +18,9 @@ type skillAssembly struct {
 	sysPrompt string
 }
 
-// buildSkillAssembly discovers skills and folds their index into the prompt.
-// Rediscovery is skipped on no-op/interceptor/UI rebuilds, where the previous
-// build's assembly is retained and its prompt already carries the index.
+// buildSkillAssembly discovers skills. Their index does not enter the prompt:
+// a per-project catalog in the prefix diverges it, so the controller owes the
+// listing to the turn instead. Rediscovery is skipped on no-op/UI rebuilds.
 func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit bool, sysPrompt string) skillAssembly {
 	a := skillAssembly{sysPrompt: sysPrompt}
 	home := opts.roots().Home()
@@ -44,8 +44,5 @@ func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit 
 	a.skills = a.store.List()
 	a.all = skill.New(skill.Options{ProjectRoot: root, ReasonixHomeDir: home, CustomPaths: cfg.SkillCustomPaths(), PluginPaths: cfg.PluginPackageSkillOwners(), PluginAgentPaths: cfg.PluginPackageAgentOwners(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
 	a.allSkills = a.all.List()
-	if implicit {
-		a.sysPrompt = skill.ApplyIndex(a.sysPrompt, a.skills)
-	}
 	return a
 }

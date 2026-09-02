@@ -12,9 +12,9 @@ import (
 // construction-time snapshots. It is the skills slice of the Capabilities concern
 // (alongside mcpManager).
 //
-// No lock: every field but slashSeq is set once at construction and read
-// thereafter — SetSkillEnabled persists a preference a rebuild picks up — and
-// slashSeq, the one counter, carries its own synchronisation.
+// No lock: every field but slashSeq and catalog is set once at construction and
+// read thereafter — SetSkillEnabled persists a preference a rebuild picks up —
+// and those two carry their own synchronisation.
 type skillSet struct {
 	enabled              []skill.Skill // discovered + enabled skills (the live store supersedes when set)
 	all                  []skill.Skill // every discoverable skill, including config-disabled ones
@@ -22,10 +22,36 @@ type skillSet struct {
 	allStore             *skill.Store  // reloadable all-skill store; nil falls back to all/enabled
 	noImplicitInvocation bool          // the model may not reach a skill on its own; slash still does
 	slashSeq             atomic.Uint64 // numbers the synthetic call a slash-invoked skill reports under
+	// catalog is the listing owed to the next real turn, nil once delivered. It
+	// rides the turn instead of the prefix: a per-project catalog in the prefix
+	// diverges it, and one rewritten mid-session moves it under a live cache.
+	catalog atomic.Pointer[string]
 }
 
 func newSkillSet(enabled, all []skill.Skill, store, allStore *skill.Store, noImplicit bool) skillSet {
 	return skillSet{enabled: enabled, all: all, store: store, allStore: allStore, noImplicitInvocation: noImplicit}
+}
+
+// publishCatalog owes the listing to the next real turn. It is called with what
+// the caller already discovered — never a fresh List(), which walks the disk —
+// so a turn costs nothing when the catalog has not changed.
+func (s *skillSet) publishCatalog(skills []skill.Skill) {
+	if s.noImplicitInvocation {
+		return
+	}
+	block := skill.IndexBlock(skills)
+	if block == "" {
+		return
+	}
+	s.catalog.Store(&block)
+}
+
+// drainCatalog returns the listing owed to this turn, once.
+func (s *skillSet) drainCatalog() string {
+	if block := s.catalog.Swap(nil); block != nil {
+		return *block
+	}
+	return ""
 }
 
 // list returns the enabled skills, preferring the live store.

@@ -1864,12 +1864,17 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		t.Fatalf("Skills() should include the project skill and a built-in; got %v", ctrl.Skills())
 	}
 
-	sys := systemMessage(ctrl.History())
-	if !strings.Contains(sys, "# Skills") {
-		t.Fatalf("skills index missing from system prompt:\n%s", sys)
+	// The catalog is per-project, so it rides the turn, not the prefix every
+	// project on the machine shares.
+	if sys := systemMessage(ctrl.History()); strings.Contains(sys, "# Skills") {
+		t.Fatalf("the skills index reached the cached prefix:\n%s", sys)
 	}
-	if !strings.Contains(sys, "projskill") || !strings.Contains(sys, "explore") {
-		t.Fatalf("skill names missing from index:\n%s", sys)
+	turn := ctrl.Compose("hello")
+	if !strings.Contains(turn, "<available-skills>") {
+		t.Fatalf("skills listing missing from the turn:\n%s", turn)
+	}
+	if !strings.Contains(turn, "projskill") || !strings.Contains(turn, "explore") {
+		t.Fatalf("skill names missing from the listing:\n%s", turn)
 	}
 }
 
@@ -1952,9 +1957,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if sent, ok := ctrl.RunSkill("/superpowers:plan now"); !ok || !strings.Contains(sent, "Plugin body") {
 		t.Fatalf("qualified RunSkill = %q, %v", sent, ok)
 	}
-	sys := systemMessage(ctrl.History())
-	if !strings.Contains(sys, "- plan") || strings.Contains(sys, "superpowers:plan") {
-		t.Fatalf("model skill index changed identifiers:\n%s", sys)
+	turn := ctrl.Compose("hello")
+	if !strings.Contains(turn, "- plan") || strings.Contains(turn, "superpowers:plan") {
+		t.Fatalf("model skill listing changed identifiers:\n%s", turn)
 	}
 	var slashDescription string
 	for _, entry := range ctrl.AllToolContractEntries() {
@@ -1970,8 +1975,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		}
 		return
 	}
-	if !strings.Contains(slashDescription, "superpowers:plan") || strings.Contains(slashDescription, "Available: plan") {
-		t.Fatalf("slash command description = %q", slashDescription)
+	// The names left the schema; the qualified one is asserted on the turn above.
+	if strings.Contains(slashDescription, "plan") {
+		t.Fatalf("a configured name reached the slash_command schema: %q", slashDescription)
 	}
 }
 
@@ -2002,8 +2008,8 @@ model = "x"
 	if strings.Contains(systemMessage(fullReq.Messages), tokenEconomyPrompt) {
 		t.Fatalf("full mode system prompt should not include token economy prompt:\n%s", systemMessage(fullReq.Messages))
 	}
-	if !strings.Contains(systemMessage(fullReq.Messages), "# Skills") || !strings.Contains(systemMessage(fullReq.Messages), "projskill") {
-		t.Fatalf("full mode should preserve the skills index in the system prompt:\n%s", systemMessage(fullReq.Messages))
+	if !strings.Contains(userMessages(fullReq), "<available-skills>") || !strings.Contains(userMessages(fullReq), "projskill") {
+		t.Fatalf("full mode should preserve the skills listing on the turn:\n%s", userMessages(fullReq))
 	}
 	if got, want := toolSchemaNames(fullReq.Tools), toolSchemaNames(defaultReq.Tools); !reflect.DeepEqual(got, want) {
 		t.Fatalf("explicit full mode changed tool schema order\nfull=%v\ndefault=%v", got, want)

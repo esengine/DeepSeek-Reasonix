@@ -4746,13 +4746,17 @@ func TestReloadCommandsFromFilesystem(t *testing.T) {
 		t.Error("/nope should not be found")
 	}
 
-	// Skill should appear in the slash_command tool's description after reload.
+	// The reload must not rewrite a tool schema under the live session: the
+	// catalog reaches the model on the next turn instead.
 	if tool, found := reg.Get("slash_command"); found {
-		if !strings.Contains(tool.Description(), "myskill") {
-			t.Error("skill 'myskill' should appear in slash_command tool Description after ReloadCommands")
+		if strings.Contains(tool.Description(), "myskill") {
+			t.Error("the reload wrote a skill name into a provider-visible tool schema")
 		}
 	} else {
 		t.Error("slash_command tool should be registered after ReloadCommands")
+	}
+	if got := c.Compose("hello"); !strings.Contains(got, "<available-skills>") || !strings.Contains(got, "myskill") {
+		t.Errorf("the reloaded catalog did not reach the next turn: %q", got)
 	}
 
 	// Skill should still be callable via RunSkill after reload.
@@ -5065,9 +5069,13 @@ func TestReloadCommandsEmptySet(t *testing.T) {
 	if !found {
 		t.Fatal("slash_command tool should still exist even with 0 commands")
 	}
-	// It should still contain the skill
-	if !strings.Contains(slashTool.Description(), "preserved") {
-		t.Error("skill 'preserved' should still appear in slash_command tool Description")
+	// The skill survives the reload, but reaches the model on the turn — never
+	// by rewriting the schema this session is already being billed for.
+	if strings.Contains(slashTool.Description(), "preserved") {
+		t.Error("a skill name reached a provider-visible tool schema")
+	}
+	if got := c.Compose("hello"); !strings.Contains(got, "preserved") {
+		t.Errorf("the preserved skill did not reach the next turn: %q", got)
 	}
 }
 

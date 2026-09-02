@@ -203,6 +203,12 @@ func (c *Controller) composeWithGoal(
 		}
 	}
 	if includeHookContext {
+		// The skills listing rides the turn, not the prefix, and is owed once per
+		// session and again after a reload — so installing one reaches the model
+		// on the next turn instead of on the next session.
+		if block := c.skills.drainCatalog(); block != "" {
+			text = "<available-skills>\n" + block + "\n</available-skills>\n\n" + text
+		}
 		if block := c.drainHookContextBlock(); block != "" {
 			text = block + "\n\n" + text
 		}

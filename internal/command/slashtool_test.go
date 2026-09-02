@@ -45,8 +45,17 @@ func TestSlashToolBasics(t *testing.T) {
 	if !tl.ReadOnly() {
 		t.Error("slash_command should be read-only")
 	}
-	if !strings.Contains(tl.Description(), "review") || !strings.Contains(tl.Description(), "git:commit") {
-		t.Errorf("description should list available commands: %q", tl.Description())
+	// The names are a result of the tool, not part of its schema: a per-project
+	// list in a description diverges the cached prefix between projects.
+	if strings.Contains(tl.Description(), "review") || strings.Contains(tl.Description(), "git:commit") {
+		t.Errorf("a configured name reached the tool schema: %q", tl.Description())
+	}
+	listed, err := runSlash(t, tl, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed, "review") || !strings.Contains(listed, "git:commit") {
+		t.Errorf("list should name what the description no longer does: %q", listed)
 	}
 }
 
@@ -109,8 +118,10 @@ func TestSlashToolEmptyRegistry(t *testing.T) {
 	if !strings.Contains(out, "No slash commands") {
 		t.Errorf("empty list = %q", out)
 	}
-	if !strings.Contains(tl.Description(), "No slash commands") {
-		t.Errorf("empty description = %q", tl.Description())
+	// The description must not report the count either: that is the same
+	// per-project fact, one bit wide.
+	if tl.Description() != sampleTool().Description() {
+		t.Errorf("description varies with what is configured: %q", tl.Description())
 	}
 }
 
@@ -153,11 +164,23 @@ func TestPluginSlashToolShowsOnlyCanonicalQualifiedName(t *testing.T) {
 	}
 	plainTool := NewSlashCommandTool(entries(plain))
 	ownedTool := NewSlashCommandTool(entries(owned))
-	if !strings.Contains(plainTool.Description(), "Available: plan.") {
-		t.Fatalf("plain tool description = %q", plainTool.Description())
+	plainList, err := runSlash(t, plainTool, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(ownedTool.Description(), "Available: pwf:plan.") || strings.Contains(ownedTool.Description(), "Available: plan,") {
-		t.Fatalf("plugin tool should list one canonical name, got %q", ownedTool.Description())
+	if !strings.Contains(plainList, "plan") {
+		t.Fatalf("plain listing = %q", plainList)
+	}
+	ownedList, err := runSlash(t, ownedTool, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ownedList, "pwf:plan") {
+		t.Fatalf("plugin listing should carry the canonical name, got %q", ownedList)
+	}
+	// Neither qualification may reach the schema — description included.
+	if plainTool.Description() != ownedTool.Description() {
+		t.Fatalf("plugin qualification changed the description: %q vs %q", plainTool.Description(), ownedTool.Description())
 	}
 	if string(plainTool.Schema()) != string(ownedTool.Schema()) {
 		t.Fatal("plugin qualification must not change the slash_command schema")

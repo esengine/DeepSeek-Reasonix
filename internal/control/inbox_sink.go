@@ -31,5 +31,10 @@ func (s *inboxEventSink) Emit(e event.Event) {
 		if e.Code == event.NoticeCodeUnappliedSteer && e.ItemID != "" {
 			s.c.onInboxUnappliedSteer(e.ItemID)
 		}
+	case event.CompactionDone:
+		// The listing rode a user turn the fold may have just summarised away.
+		// Standing state that is delivered once has to be re-owed when the turn
+		// carrying it stops being verbatim.
+		s.c.skills.publishCatalog(s.c.skills.list())
 	}
 }

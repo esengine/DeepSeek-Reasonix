@@ -57,24 +57,14 @@ func (*slashCommandTool) Name() string { return "slash_command" }
 
 func (*slashCommandTool) ReadOnly() bool { return true }
 
-func (t *slashCommandTool) Description() string {
-	var b strings.Builder
-	b.WriteString("Invoke a project slash command (a reusable prompt template or skill) by name. " +
+// Description is constant. It used to enumerate the configured names, which put
+// a per-project catalog inside a tool schema: it diverged the cached prefix
+// between projects, and a reload rewrote it under a live session. The names are
+// a result of the tool, not part of its contract — "list" returns them.
+func (*slashCommandTool) Description() string {
+	return "Invoke a project slash command (a reusable prompt template or skill) by name. " +
 		"Returns the command's expanded prompt text for you to act on in this turn — it does not run on its own. " +
-		"Call with an empty command (or \"list\") to see what's available. ")
-	if len(t.names) == 0 {
-		b.WriteString("No slash commands are configured in this project.")
-		return b.String()
-	}
-	b.WriteString("Available: ")
-	for i, n := range t.names {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(n)
-	}
-	b.WriteString(".")
-	return b.String()
+		"Call with an empty command (or \"list\") to see what is available."
 }
 
 func (*slashCommandTool) Schema() json.RawMessage {
