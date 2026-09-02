@@ -63,7 +63,6 @@ func TestRenderMemoryGroupsDocsAndStore(t *testing.T) {
 	got := renderMemory(width, &memory.Set{
 		Docs:  []memory.Source{{Path: "/Users/me/project/REASONIX.md", Scope: memory.ScopeProject}},
 		Store: store,
-		Index: store.Index(),
 	})
 	for _, want := range []string{
 		"memory", "instructions", "precedence=1", "scope=project", "REASONIX.md",

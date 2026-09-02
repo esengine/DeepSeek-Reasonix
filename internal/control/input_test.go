@@ -950,19 +950,16 @@ func TestParseGoalCommandStrictOnlyConsumesLeadingFlags(t *testing.T) {
 	}
 }
 
-func TestComposeDrainsQueuedMemory(t *testing.T) {
-	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
+// The model's own remember/forget queues nothing onto the turn: its tool result
+// is already in the conversation, and the reloaded snapshot lets a later turn
+// retrieve the fact. Saying it a second time in a <memory-update> also
+// suppressed that turn's retrieval, which says it better.
+func TestComposeDoesNotEchoTheModelsOwnMemoryWrite(t *testing.T) {
+	c := New(Options{}) // no executor/memory — this is the tool-originated path
 
 	c.QueueMemory("Saved memory \"rmb\": user's balance is in RMB")
-	got := c.Compose("hello")
-	if !strings.Contains(got, "<memory-update>") || !strings.Contains(got, "user's balance is in RMB") {
-		t.Fatalf("queued memory should ride the turn: %q", got)
-	}
-	if !strings.HasSuffix(got, "hello") {
-		t.Fatalf("user text should follow the memory block: %q", got)
-	}
-	if got2 := c.Compose("again"); got2 != "again" {
-		t.Fatalf("pendingMemory should drain after one turn, got %q", got2)
+	if got := c.Compose("hello"); got != "hello" {
+		t.Fatalf("the model's own save rode the turn: %q", got)
 	}
 }
 

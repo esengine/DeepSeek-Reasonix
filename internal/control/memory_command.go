@@ -439,13 +439,12 @@ func memoryOneLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-// renderMemoryPrefixCost reports what memory costs in the cached prefix. The
-// budgets that bound it ship off, so this is how a user sees what their store
-// is charging them before deciding whether to set one.
+// renderMemoryPrefixCost reports what memory costs in the cached prefix: pinned
+// bodies, and nothing else. The saved-fact index is reached through the memory
+// tool and no session pays for it, so it is not reported as a prefix cost.
 func renderMemoryPrefixCost(cost memory.PrefixCost) string {
 	var b strings.Builder
 	b.WriteString("prefix cost (paid once per session)\n")
-	fmt.Fprintf(&b, "  index=%d chars across %d facts\n", cost.IndexChars, cost.Facts)
 	if cost.Pinned > 0 || cost.Budget > 0 {
 		fmt.Fprintf(&b, "  pinned=%d chars across %d facts", cost.PinnedChars, cost.Pinned)
 		if cost.Budget > 0 {

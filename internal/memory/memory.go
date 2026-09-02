@@ -11,7 +11,7 @@ import (
 )
 
 // Set is everything memory loaded for one session: the hierarchical docs and a
-// handle to the auto-memory store (whose index is captured at load time). It is
+// handle to the auto-memory store. It is
 // assembled once at boot and folded into the system prompt by Compose. CWD and
 // UserDir are retained so the controller can resolve quick-add targets without
 // re-deriving discovery context.
@@ -19,7 +19,6 @@ type Set struct {
 	Docs                   []Source // REASONIX.md / AGENTS.md, ascending precedence
 	PinnedGuidance         []Memory // stable snapshot of pinned fact bodies (incl. legacy global user/feedback)
 	Store                  Store    // auto-memory store (may be a zero/disabled Store)
-	Index                  string   // MEMORY.md contents at load time
 	CWD                    string   // project working dir used for discovery
 	UserDir                string   // user config root (may be "")
 	InstructionDiagnostics []instruction.Diagnostic
@@ -67,7 +66,6 @@ func Load(opts Options) *Set {
 		Docs:                   resolved.Documents,
 		PinnedGuidance:         store.pinnedGuidanceForProject(),
 		Store:                  store,
-		Index:                  store.Index(),
 		CWD:                    cwd,
 		UserDir:                opts.UserDir,
 		InstructionDiagnostics: resolved.Diagnostics,
@@ -107,7 +105,7 @@ func (s *Set) DocPath(scope Scope) string {
 // the base prompt byte-for-byte untouched (and the cache prefix maximal) when
 // there is no memory at all.
 func (s *Set) Empty() bool {
-	return s == nil || (len(s.Docs) == 0 && len(s.PinnedGuidance) == 0 && strings.TrimSpace(s.Index) == "" && s.Store.Dir == "")
+	return s == nil || (len(s.Docs) == 0 && len(s.PinnedGuidance) == 0 && s.Store.Dir == "")
 }
 
 // docScopes are the scopes the panel can target for a quick-add or a new doc.
@@ -151,20 +149,26 @@ func (s *Set) WriteDoc(path, body string) (string, error) {
 	return path, writeDocFile(path, body)
 }
 
-// BackgroundBlock renders durable preferences and the fact index without
-// standing instruction files. Keeping these sections separate prevents stale
-// facts from acquiring instruction authority.
+// BackgroundBlock renders the memory protocol and any pinned preferences. The
+// saved-fact index is deliberately absent: it changes on every remember, and
+// everything after it in the prefix — the project instructions, the skills
+// index — would be re-sent with it. The tools reach it instead.
 func (s *Set) BackgroundBlock() string {
 	if s == nil {
 		return ""
 	}
-	index := strings.TrimSpace(s.Index)
-	if len(s.PinnedGuidance) == 0 && index == "" {
-		return emptyStoreBlock(s.Store)
+	if s.Store.Dir == "" && len(s.PinnedGuidance) == 0 {
+		return ""
 	}
 	var b strings.Builder
 	b.WriteString("# Memory\n\n")
+	if s.Store.Dir != "" {
+		b.WriteString(memoryProtocol)
+	}
 	if len(s.PinnedGuidance) > 0 {
+		if s.Store.Dir != "" {
+			b.WriteString("\n\n")
+		}
 		b.WriteString("## Pinned preferences and feedback\n\n")
 		b.WriteString("Facts the user pinned to be always available. Apply them when relevant. " +
 			"The current user request and more specific standing instructions take precedence, and factual details may be stale.\n")
@@ -173,27 +177,19 @@ func (s *Set) BackgroundBlock() string {
 				NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), strings.TrimSpace(m.Body))
 		}
 	}
-	if index != "" {
-		b.WriteString("\n## Background memory index\n\n")
-		b.WriteString("Facts you saved in earlier sessions. They reflect what was true when written and may now be stale — treat them as background, not standing instructions. " +
-			"Read a relevant linked fact with the `memory` tool, and before acting on one that names a file, function, or flag, verify it still exists. " +
-			"Save new durable facts with the `remember` tool; archive ones that turn out wrong with `forget`.\n\n")
-		b.WriteString(index)
-	}
 	return strings.TrimSpace(b.String())
 }
 
-// emptyStoreBlock states that an available store holds nothing yet. The index
-// section is the only place the prompt names `remember`, so skipping the block
-// on an empty store leaves a fresh project unable to save its first fact.
-func emptyStoreBlock(store Store) string {
-	if store.Dir == "" {
-		return ""
-	}
-	return "# Memory\n\n## Background memory index\n\n" +
-		"No facts are saved for this project yet. Durable ones — who the user is, how they want you to work, " +
-		"project constraints the code does not record — reach later sessions only when you save them with the `remember` tool."
-}
+// memoryProtocol is how the model reaches saved facts. It names the tools and
+// carries no facts of its own, so it is byte-identical for every project and
+// session on a machine — which is the whole reason the index it replaced went.
+const memoryProtocol = "## Background memory\n\n" +
+	"Durable facts you saved in earlier sessions are stored for this project. They are not listed here: " +
+	"relevant ones are retrieved onto the turn automatically, and the `memory` tool reaches the rest " +
+	"(`search` ranks them, `list` returns the whole index, `read` returns one body). " +
+	"They reflect what was true when written and may now be stale — treat them as background, not standing " +
+	"instructions, and before acting on one that names a file, function, or flag, verify it still exists. " +
+	"Save new durable facts with the `remember` tool; archive ones that turn out wrong with `forget`."
 
 // Block combines background memory with separately resolved standing
 // instructions. Background comes first so the higher-authority, more specific
@@ -239,33 +235,25 @@ func (s *Set) LoadOptions() Options {
 }
 
 // PrefixCost is what this memory set costs in the cached system-prompt prefix:
-// characters paid once per session, every session. It exists because the
-// budgets that bound it are the user's to set, and a number nobody can see is
-// not a decision anyone can make.
+// characters paid once per session, every session. Only pinned bodies land
+// there. The fact index does not — it is reached through the `memory` tool —
+// so it is not counted here; a number under this name that included it would
+// be measuring the store, not the prefix.
 type PrefixCost struct {
-	IndexChars  int // the fact index every session carries
 	PinnedChars int // pinned bodies folded in verbatim
-	Facts       int // index lines
 	Pinned      int // pinned facts
 	Budget      int // configured pinned ceiling, 0 when unset
 }
 
 // Total is the whole memory block's prefix footprint.
-func (c PrefixCost) Total() int { return c.IndexChars + c.PinnedChars }
+func (c PrefixCost) Total() int { return c.PinnedChars }
 
 // PrefixCost measures the snapshot the session is actually running on.
 func (s *Set) PrefixCost() PrefixCost {
 	if s == nil {
 		return PrefixCost{}
 	}
-	cost := PrefixCost{
-		IndexChars: utf8.RuneCountInString(s.Index),
-		Pinned:     len(s.PinnedGuidance),
-		Budget:     s.opts.PinnedBudgetChars,
-	}
-	if trimmed := strings.TrimSpace(s.Index); trimmed != "" {
-		cost.Facts = strings.Count(trimmed, "\n") + 1
-	}
+	cost := PrefixCost{Pinned: len(s.PinnedGuidance), Budget: s.opts.PinnedBudgetChars}
 	for _, m := range s.PinnedGuidance {
 		cost.PinnedChars += utf8.RuneCountInString(strings.TrimSpace(m.Body))
 	}

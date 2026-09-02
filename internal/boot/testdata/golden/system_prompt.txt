@@ -10,9 +10,9 @@ Reply in the same language the user is using in their most recent message: if th
 
 # Memory
 
-## Background memory index
+## Background memory
 
-No facts are saved for this project yet. Durable ones — who the user is, how they want you to work, project constraints the code does not record — reach later sessions only when you save them with the `remember` tool.
+Durable facts you saved in earlier sessions are stored for this project. They are not listed here: relevant ones are retrieved onto the turn automatically, and the `memory` tool reaches the rest (`search` ranks them, `list` returns the whole index, `read` returns one body). They reflect what was true when written and may now be stale — treat them as background, not standing instructions, and before acting on one that names a file, function, or flag, verify it still exists. Save new durable facts with the `remember` tool; archive ones that turn out wrong with `forget`.
 
 # Skills — playbooks you can invoke
 

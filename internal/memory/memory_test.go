@@ -19,28 +19,40 @@ func TestComposeEmptyIsIdentity(t *testing.T) {
 	if got != base {
 		t.Fatalf("empty memory changed the prompt:\n base=%q\n got =%q", base, got)
 	}
-	// A nil-ish set (no docs, blank index) must also be identity.
-	if got := Compose(base, &Set{Index: "   \n"}); got != base {
-		t.Fatalf("blank index changed the prompt: got %q", got)
-	}
 }
 
-// The index section is the only place the prompt names `remember`, so a store
-// that exists but holds nothing still has to say so: a silent empty store is
-// what a first session reads as an agent with no memory at all.
-func TestEmptyStoreStillNamesRemember(t *testing.T) {
+// The protocol section is the only place the prompt names `remember`, so a store
+// that exists still has to say so: a silent store is what a first session reads
+// as an agent with no memory at all.
+func TestAvailableStoreNamesRemember(t *testing.T) {
 	block := (&Set{Store: Store{Dir: testenv.TempDir(t)}}).Block()
 	if !strings.Contains(block, "remember") {
-		t.Fatalf("empty store block never names the remember tool:\n%s", block)
+		t.Fatalf("store block never names the remember tool:\n%s", block)
 	}
 	// An unavailable store (no user dir) stays identical to no memory at all.
 	if got := Compose("BASE", &Set{}); got != "BASE" {
 		t.Fatalf("unavailable store changed the prompt: %q", got)
 	}
-	// Once facts exist the index replaces the empty notice rather than joining it.
-	populated := (&Set{Store: Store{Dir: testenv.TempDir(t)}, Index: "- [a fact](a.md) — hook"}).Block()
-	if strings.Contains(populated, "No facts are saved") {
-		t.Fatalf("populated index still carries the empty notice:\n%s", populated)
+}
+
+// What the store holds must not reach the prefix at all: saving a fact changes
+// MEMORY.md, and if that text were composed in, every byte after it — the
+// project instructions, the skills index — would be re-sent on the next
+// session. The facts are reached through the `memory` tool instead.
+func TestBlockIsIdenticalWhateverTheStoreHolds(t *testing.T) {
+	empty := testenv.TempDir(t)
+	full := testenv.TempDir(t)
+	if err := os.WriteFile(filepath.Join(full, "MEMORY.md"), []byte("- [a fact](a.md) — hook\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyBlock := (&Set{Store: Store{Dir: empty}}).Block()
+	fullBlock := (&Set{Store: Store{Dir: full}}).Block()
+	if emptyBlock != fullBlock {
+		t.Fatalf("a saved fact changed the cached prefix:\nempty: %q\nfull:  %q", emptyBlock, fullBlock)
+	}
+	if strings.Contains(fullBlock, "a fact") {
+		t.Fatalf("the saved-fact index reached the prefix:\n%s", fullBlock)
 	}
 }
 
@@ -61,11 +73,10 @@ func TestComposeAppendsAfterBase(t *testing.T) {
 func TestBlockSeparatesStandingInstructionsFromBackgroundMemory(t *testing.T) {
 	set := &Set{
 		Docs:  []Source{{Path: "/p/AGENTS.md", Scope: ScopeProject, Directory: "/p", Body: "Always run tests.", Depth: 0}},
-		Index: "- [API decision](api-decision.md) — [project/project] Chosen in an earlier session",
 		Store: Store{Dir: "/memory/project"},
 	}
 	block := set.Block()
-	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "## Background memory index", "background, not standing instructions"} {
+	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "## Background memory", "background, not standing instructions"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("Block() missing %q:\n%s", want, block)
 		}
@@ -353,7 +364,7 @@ func TestLoadHidesMemoryUnderExperimentEnv(t *testing.T) {
 
 	t.Setenv("REASONIX_EXPERIMENT_NO_MEMORY", "1")
 	set := Load(Options{CWD: proj, UserDir: user})
-	if len(set.PinnedGuidance) != 0 || strings.TrimSpace(set.Index) != "" || set.Store.Dir != "" {
+	if len(set.PinnedGuidance) != 0 || set.Store.Dir != "" {
 		t.Fatalf("memory-off arm leaked store state: %+v", set)
 	}
 	if !strings.Contains(set.Block(), "STANDING INSTRUCTION BODY") {

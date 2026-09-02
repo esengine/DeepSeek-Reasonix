@@ -18,7 +18,9 @@ import (
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/provider"
 )
 
@@ -500,3 +502,69 @@ func userMessages(req provider.Request) string {
 	}
 	return b.String()
 }
+
+// TestEffectRememberDoesNotMoveTheCachedPrefix is the cache boundary for saved
+// facts: a session that saves one must leave the next session's system message
+// byte-identical. The index it writes used to be composed in ahead of the
+// project instructions and the skills index, so one remember re-sent all of
+// them; the facts are reached through the memory tool instead.
+func TestEffectRememberDoesNotMoveTheCachedPrefix(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", effectProbeConfig)
+	writeFile(t, dir, "REASONIX.md", "Project rule: keep the prefix stable.")
+
+	indexPath := filepath.Join(memory.StoreFor(config.MemoryUserDir(), dir).Dir, "MEMORY.md")
+
+	first, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("first Build: %v", err)
+	}
+	before := systemMessage(first.History())
+	if _, err := first.SaveMemory(memory.Memory{
+		Name: "deploy-target", Description: "where releases go", Type: memory.TypeProject,
+		Body: "Releases go to the staging bucket first.",
+	}); err != nil {
+		first.Close()
+		t.Fatalf("SaveMemory: %v", err)
+	}
+	first.Close()
+
+	// A prefix that did not move because nothing was written proves nothing.
+	index, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read the index the save was supposed to write: %v", err)
+	}
+	if !strings.Contains(string(index), "deploy-target") {
+		t.Fatalf("the save never reached the index this test is about:\n%s", index)
+	}
+
+	second, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("second Build: %v", err)
+	}
+	after := systemMessage(second.History())
+	second.Close()
+
+	if before != after {
+		t.Fatalf("a saved fact moved the cached prefix; every byte after it is re-sent next session:\nfirst diff site: %q",
+			firstDivergence(before, after))
+	}
+	if strings.Contains(after, "deploy-target") {
+		t.Fatalf("the saved fact reached the prefix:\n%s", after)
+	}
+}
+
+// effectProbeConfig is a build-only config: a provider that is never called,
+// so a test can compose a prefix without registering a recording kind.
+const effectProbeConfig = `
+default_model = "test-model"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`

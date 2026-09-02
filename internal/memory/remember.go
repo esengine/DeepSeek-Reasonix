@@ -51,8 +51,8 @@ func (rememberTool) Description() string {
 		"if asked to remember one of those, save instead the non-obvious point behind it. " +
 		"Choose scope \"project\" for the current workspace (the safe default) or \"global\" only when the fact should affect every project. " +
 		"Standing rules that must always be followed belong in project or global REASONIX.md/AGENTS.md instructions, not background memory. " +
-		"Before saving, check the loaded memory index for an entry that already covers this — reuse that name to update it rather than create a near-duplicate, and use `forget` to drop one that is now wrong. " +
-		"The saved index loads into context at the start of each session."
+		"Before saving, search the store with the `memory` tool for an entry that already covers this — reuse that name to update it rather than create a near-duplicate, and use `forget` to drop one that is now wrong. " +
+		"Saved facts are not listed in the prompt: relevant ones are retrieved onto a later turn, and the `memory` tool reaches the rest."
 }
 
 func (rememberTool) Schema() json.RawMessage {

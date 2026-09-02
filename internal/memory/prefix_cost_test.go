@@ -39,7 +39,7 @@ func TestIndexDropsExpiredFacts(t *testing.T) {
 // The store's prefix footprint has to be reportable, because the budgets that
 // would bound it are off by default: a cost nobody can see is not a decision
 // anyone can make.
-func TestPrefixCostCountsIndexAndPinnedBodies(t *testing.T) {
+func TestPrefixCostCountsPinnedBodiesOnly(t *testing.T) {
 	dir, global := testenv.TempDir(t), testenv.TempDir(t)
 	store := StoreFor("", "")
 	store.Dir, store.GlobalDir = dir, global
@@ -50,17 +50,16 @@ func TestPrefixCostCountsIndexAndPinnedBodies(t *testing.T) {
 	}, SaveOptions{}); err != nil {
 		t.Fatalf("save pinned fact: %v", err)
 	}
-	set := &Set{Store: store, Index: store.Index(), PinnedGuidance: store.pinnedGuidanceForProject()}
+	set := &Set{Store: store, PinnedGuidance: store.pinnedGuidanceForProject()}
 
 	cost := set.PrefixCost()
-	if cost.Facts != 1 || cost.IndexChars == 0 {
-		t.Fatalf("index cost = %+v, want one counted fact with a non-zero size", cost)
-	}
 	if cost.Pinned != 1 || cost.PinnedChars != len([]rune(body)) {
 		t.Fatalf("pinned cost = %+v, want the body counted verbatim", cost)
 	}
-	if cost.Total() != cost.IndexChars+cost.PinnedChars {
-		t.Fatalf("total %d does not equal its parts %+v", cost.Total(), cost)
+	// The saved-fact index is not in the prefix, so it is not in this number.
+	// Counting it here is what made the name a claim the code did not keep.
+	if cost.Total() != cost.PinnedChars {
+		t.Fatalf("total %d counts something other than pinned bodies: %+v", cost.Total(), cost)
 	}
 }
 

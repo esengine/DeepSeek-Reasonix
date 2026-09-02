@@ -180,9 +180,9 @@ func (c *Controller) composeWithGoal(
 	text = agent.WithResponseLanguage(text, responseLanguage)
 	text = agent.WithReasoningLanguageForSource(text, reasoningLanguage, source)
 
-	// Memory added mid-session rides the turn (never the cached system prefix),
-	// so it takes effect now without invalidating the prompt cache. It folds into
-	// the system prefix on the next session, where it costs nothing per turn.
+	// Memory changed from outside the conversation — a "#" quick-add, the memory
+	// panel — rides the turn: nothing else tells a running session. The model's
+	// own remember/forget queues nothing; its tool result is already here.
 	if len(notes) > 0 {
 		var b strings.Builder
 		b.WriteString("<memory-update>\n")
@@ -206,9 +206,9 @@ func (c *Controller) composeWithGoal(
 		if block := c.drainHookContextBlock(); block != "" {
 			text = block + "\n\n" + text
 		}
-		// Relevant facts ride only the real user-turn tail. This preserves the
-		// stable system/tool prefix and keeps synthetic recovery turns free of
-		// accidental recall. A just-written fact already arrives in memory-update.
+		// Relevant facts ride only the real user-turn tail, which preserves the
+		// stable prefix and keeps synthetic recovery turns free of accidental
+		// recall. What an out-of-band write just supplied verbatim is not re-fetched.
 		if len(notes) == 0 && !c.ablation.Off(ablation.Retrieval) {
 			result := c.memory.recall(source)
 			event.RecordMemoryRecall(c.sink, memoryRecallAudit(result))

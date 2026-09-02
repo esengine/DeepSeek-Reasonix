@@ -279,18 +279,15 @@ func (m *memoryManager) restoreArchived(archivePath string) (memory.Memory, erro
 	return result.Memory, nil
 }
 
-// queue rides a note on the next turn — the model's remember/forget tool path
-// (memory.Queue). It refreshes the snapshot a memory panel reads when memory is
-// enabled, and still queues the turn-tail note when it isn't (there's no snapshot
-// to re-discover).
-func (m *memoryManager) queue(note string) {
+// queue refreshes the snapshot a memory panel reads after the model's own
+// remember/forget tool wrote (memory.Queue). It queues no turn-tail note: the
+// tool result is already in the conversation, and the reloaded snapshot lets a
+// later turn retrieve the fact. A note would say the same thing twice and
+// suppress the retrieval that says it better.
+func (m *memoryManager) queue(string) {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 	if mem := m.current(); mem != nil {
-		m.applyWrite(mem, note)
-		return
+		m.applyWrite(mem, "")
 	}
-	m.mu.Lock()
-	m.pending = append(m.pending, note)
-	m.mu.Unlock()
 }
