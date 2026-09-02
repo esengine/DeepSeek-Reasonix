@@ -24364,10 +24364,10 @@ body > .mermaid-diagram--fullscreen {
 
 .tabbar__tab--active .tabbar__status {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--project-accent, var(--accent)) 18%, transparent);
-  animation: tab-status-breathe 2.6s ease-in-out infinite;
 }
 
-.tabbar__status--running {
+.tabbar__status--running,
+.tabbar__tab--active .tabbar__status--running {
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--project-accent, var(--accent)) 24%, transparent);
   animation: tab-status-breathe-running 1.8s ease-in-out infinite;
 }
@@ -24379,15 +24379,6 @@ body > .mermaid-diagram--fullscreen {
 
 .tabbar__tab--active .tabbar__file-icon {
   color: var(--fg-dim);
-}
-
-@keyframes tab-status-breathe {
-  0%, 100% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--project-accent, var(--accent)) 16%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--project-accent, var(--accent)) 24%, transparent);
-  }
 }
 
 @keyframes tab-status-breathe-running {

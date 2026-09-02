@@ -1303,12 +1303,13 @@ export default function App() {
       await refreshBackgroundRuntimes();
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    const active = state.running || backgroundRuntimes.length > 0;
+    const timer = window.setInterval(() => void refresh(), active ? 1000 : 15000);
     return () => {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [refreshBackgroundRuntimes]);
+  }, [backgroundRuntimes.length, refreshBackgroundRuntimes, state.running]);
 
   useEffect(() => {
     if (!activeTabId || !state.running) {
