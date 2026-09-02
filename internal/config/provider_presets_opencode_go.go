@@ -63,6 +63,11 @@ func openCodeGoRecommendedChatOverrides() map[string]ProviderModelOverride {
 			SupportedEfforts:  []string{"disabled", "high", "max"},
 			DefaultEffort:     "high",
 		},
+		"deepseek-v4-flash-vision-exp": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "low", "high", "max"},
+			DefaultEffort:     "high",
+		},
 		"deepseek-v4-pro": {
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
 			SupportedEfforts:  []string{"disabled", "high", "max"},

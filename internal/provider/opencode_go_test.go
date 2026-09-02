@@ -4,17 +4,18 @@ import "testing"
 
 func TestOpenCodeGoChatModelsMatchPinnedLimits(t *testing.T) {
 	want := map[string]OpenCodeGoModelLimits{
-		"glm-5.3":           {Context: 1_000_000, MaxOutput: 131_072},
-		"glm-5.2":           {Context: 1_000_000, MaxOutput: 131_072},
-		"glm-5.1":           {Context: 202_752, MaxOutput: 32_768},
-		"kimi-k3":           {Context: 1_048_576, MaxOutput: 131_072},
-		"kimi-k2.7-code":    {Context: 262_144, MaxOutput: 262_144},
-		"kimi-k2.6":         {Context: 262_144, MaxOutput: 65_536},
-		"deepseek-v4-pro":   {Context: 1_000_000, MaxOutput: 384_000},
-		"deepseek-v4-flash": {Context: 1_000_000, MaxOutput: 384_000},
-		"mimo-v2.5-pro":     {Context: 1_048_576, MaxOutput: 128_000},
-		"mimo-v2.5":         {Context: 1_000_000, MaxOutput: 128_000},
-		"hy3":               {Context: 256_000, MaxOutput: 64_000},
+		"glm-5.3":                      {Context: 1_000_000, MaxOutput: 131_072},
+		"glm-5.2":                      {Context: 1_000_000, MaxOutput: 131_072},
+		"glm-5.1":                      {Context: 202_752, MaxOutput: 32_768},
+		"kimi-k3":                      {Context: 1_048_576, MaxOutput: 131_072},
+		"kimi-k2.7-code":               {Context: 262_144, MaxOutput: 262_144},
+		"kimi-k2.6":                    {Context: 262_144, MaxOutput: 65_536},
+		"deepseek-v4-pro":              {Context: 1_000_000, MaxOutput: 384_000},
+		"deepseek-v4-flash":            {Context: 1_000_000, MaxOutput: 384_000},
+		"deepseek-v4-flash-vision-exp": {Context: 1_000_000, MaxOutput: 384_000},
+		"mimo-v2.5-pro":                {Context: 1_048_576, MaxOutput: 128_000},
+		"mimo-v2.5":                    {Context: 1_000_000, MaxOutput: 128_000},
+		"hy3":                          {Context: 256_000, MaxOutput: 64_000},
 	}
 	got := OpenCodeGoChatModels()
 	if len(got) != len(want) {

@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 // Load builds the configuration: defaults, then user config, then project
@@ -1543,17 +1544,77 @@ func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) (changed bool) {
 			strings.TrimSpace(p.Model) != "" {
 			continue
 		}
+		originalVisionModels := p.VisionModels
 		p.Models = append([]string(nil), opencodeGoModels...)
 		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, nil)
+		if originalVisionModels == nil {
+			p.VisionModels = mergeModelLists(p.VisionModels, []string{openai.OfficialDeepSeekVisionModel})
+		}
 		mergeMissingKimiK3Override(p, ProviderModelOverride{
 			ReasoningProtocol: ReasoningProtocolOpenAI,
 			SupportedEfforts:  []string{"high", "max"},
 			DefaultEffort:     "max",
 			ContextWindow:     1_048_576,
 		})
+		mergeMissingOpenCodeGoVisionOverride(p)
 		changed = true
 	}
 	return changed
+}
+
+// normalizeLegacyOpenCodeGoVisionCatalog upgrades only the untouched Chat
+// catalog that predates OpenCode Go's DeepSeek vision SKU. Custom model lists
+// and explicit image-input choices remain user-owned.
+func normalizeLegacyOpenCodeGoVisionCatalog(c *Config) (changed bool) {
+	if c == nil {
+		return false
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!stringSlicesEqual(p.Models, preVisionOpenCodeGoModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), opencodeGoModels...)
+		if p.VisionModels == nil || stringSlicesEqual(p.VisionModels, preVisionOpenCodeGoVisionModels) {
+			p.VisionModels = append([]string(nil), opencodeGoVisionModels...)
+		}
+		mergeMissingOpenCodeGoVisionOverride(p)
+		changed = true
+	}
+	return changed
+}
+
+func mergeMissingOpenCodeGoVisionOverride(p *ProviderEntry) {
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	const model = "deepseek-v4-flash-vision-exp"
+	key := model
+	for candidate := range p.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			key = candidate
+			break
+		}
+	}
+	override := p.ModelOverrides[key]
+	if strings.TrimSpace(override.ReasoningProtocol) == "" {
+		override.ReasoningProtocol = ReasoningProtocolDeepSeek
+	}
+	if override.SupportedEfforts == nil {
+		override.SupportedEfforts = []string{"disabled", "low", "high", "max"}
+	}
+	if strings.TrimSpace(override.DefaultEffort) == "" && containsString(normalizedEffortLevels(override.SupportedEfforts), "high") {
+		override.DefaultEffort = "high"
+	}
+	if override.ContextWindow <= 0 {
+		override.ContextWindow = 1_000_000
+	}
+	p.ModelOverrides[key] = override
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {

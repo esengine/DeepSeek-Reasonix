@@ -370,8 +370,10 @@ DeepSeek Responses 预设接入已验证的 Flash 线路，并默认启用 provi
 Responses 变体使用无状态上下文回放。原有混合 OpenCode Go Anthropic 预设仍只包含 Qwen
 与 MiniMax，避免把服务端搜索工具发送给未验证模型。DeepSeek Pro 暂时仍只放在 Chat
 Completions 预设中，因为真实 Anthropic
-和 Responses 请求目前会在 OpenCode Go 的上游转换阶段失败。OpenCode Go 预设原生包含
-订阅线路的 `kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
+和 Responses 请求目前会在 OpenCode Go 的上游转换阶段失败。OpenCode Go Chat 预设包含
+`deepseek-v4-flash-vision-exp`，支持图片输入，并沿用 Flash 的 1,000,000 token 上下文与
+384,000 token 上游输出上限。该预设也原生包含订阅线路的 `kimi-k3`，并配置图像输入、
+`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
 模型目录的既有 OpenCode Go 预设会自动升级；用户编辑过的模型目录保持不变。
 Kimi CN 和 Kimi Global 直连 API 预设也包含 `kimi-k3`，支持图像输入、1,048,576 token
 上下文窗口以及官方 `low`/`high`/`max` 推理强度（默认 `max`）。对官方 K3 端点，Reasonix

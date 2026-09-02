@@ -434,8 +434,10 @@ variant uses stateless context replay. The existing mixed OpenCode Go Anthropic
 preset remains scoped to Qwen and MiniMax so server tools are not sent to
 unverified models. DeepSeek Pro remains on the Chat Completions preset because
 live Anthropic and Responses requests currently fail in the OpenCode Go upstream
-conversion. The OpenCode Go preset includes its native `kimi-k3` subscription
-route with image input,
+conversion. The OpenCode Go Chat preset includes
+`deepseek-v4-flash-vision-exp` with image input and the same 1,000,000-token
+context and 384,000-token upstream output limits as Flash. It also includes its
+native `kimi-k3` subscription route with image input,
 `high`/`max` reasoning effort, and a 1,048,576-token context window. Existing untouched
 OpenCode Go preset installs are upgraded automatically; edited model catalogs
 are preserved. The Kimi CN and Kimi Global direct-API presets also include

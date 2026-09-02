@@ -140,8 +140,10 @@ var (
 	stepfunAPIVisionModels = []string{"step-3.7-flash"}
 
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
-	opencodeGoModels                 = []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
-	opencodeGoVisionModels           = []string{"kimi-k3"}
+	preVisionOpenCodeGoModels        = []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
+	preVisionOpenCodeGoVisionModels  = []string{"kimi-k3"}
+	opencodeGoModels                 = []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", openai.OfficialDeepSeekVisionModel, "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
+	opencodeGoVisionModels           = []string{"kimi-k3", openai.OfficialDeepSeekVisionModel}
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}
 
@@ -723,6 +725,11 @@ var curatedProviderPresets = []ProviderPreset{
 				"deepseek-v4-flash": {
 					ReasoningProtocol: ReasoningProtocolDeepSeek,
 					SupportedEfforts:  []string{"disabled", "high", "max"},
+					DefaultEffort:     "high",
+				},
+				"deepseek-v4-flash-vision-exp": {
+					ReasoningProtocol: ReasoningProtocolDeepSeek,
+					SupportedEfforts:  []string{"disabled", "low", "high", "max"},
 					DefaultEffort:     "high",
 				},
 				"deepseek-v4-pro": {

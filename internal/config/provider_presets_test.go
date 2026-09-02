@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 func TestCurrentBuiltInAnthropicCompatibleProvidersRemainLocalByCapability(t *testing.T) {
@@ -147,6 +148,37 @@ func TestOpenCodeGoContextWindowPresetsMatchModelsDev(t *testing.T) {
 	dsResp, _ := CuratedProviderPreset("opencode-go-deepseek-responses")
 	if dsResp.Entries[0].ContextWindow != 1_000_000 {
 		t.Fatalf("deepseek responses window = %d", dsResp.Entries[0].ContextWindow)
+	}
+}
+
+func TestOpenCodeGoChatPresetsExposeDeepSeekVisionModel(t *testing.T) {
+	for _, presetID := range []string{"opencode-go", "opencode-go-recommended"} {
+		preset, ok := CuratedProviderPreset(presetID)
+		if !ok {
+			t.Fatalf("missing %s preset", presetID)
+		}
+		var entry *ProviderEntry
+		for i := range preset.Entries {
+			if preset.Entries[i].Name == "opencode-go" {
+				entry = &preset.Entries[i]
+				break
+			}
+		}
+		if entry == nil || !entry.HasModel(openai.OfficialDeepSeekVisionModel) || !entry.HasVisionModel(openai.OfficialDeepSeekVisionModel) {
+			t.Fatalf("%s Chat entry = %+v, want DeepSeek vision SKU in model and vision catalogs", presetID, entry)
+		}
+		resolved := *entry
+		resolved.Model = openai.OfficialDeepSeekVisionModel
+		resolved.applyModelOverride()
+		if !EffectiveVision(&resolved) || resolved.ContextWindow != 1_000_000 || resolved.MaxOutputTokens != 32_768 {
+			t.Fatalf("%s vision capability = vision:%t context:%d output:%d", presetID, EffectiveVision(&resolved), resolved.ContextWindow, resolved.MaxOutputTokens)
+		}
+		cap := EffortCapabilityForEntry(&resolved)
+		for _, level := range []string{"disabled", "low", "high", "max"} {
+			if !containsString(cap.Levels, level) {
+				t.Fatalf("%s vision effort capability = %+v, want %q", presetID, cap, level)
+			}
+		}
 	}
 }
 

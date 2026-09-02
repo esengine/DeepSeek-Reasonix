@@ -545,6 +545,47 @@ func TestNormalizeLegacyOpenCodeGoKimiK3CatalogMigratesOnlyUntouchedPreset(t *te
 	}
 }
 
+func TestNormalizeLegacyOpenCodeGoVisionCatalogMigratesOnlyUntouchedPreset(t *testing.T) {
+	preVisionModels := []string{"glm-5.3", "glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5", "hy3"}
+	base := ProviderEntry{
+		Name:          "opencode-go",
+		Kind:          "openai",
+		BaseURL:       "https://opencode.ai/zen/go/v1",
+		Models:        append([]string(nil), preVisionModels...),
+		VisionModels:  []string{"kimi-k3"},
+		Default:       "glm-5.2",
+		PresetID:      "opencode-go",
+		ContextWindow: 128_000,
+	}
+	customCatalog := base
+	customCatalog.Name = "opencode-go-custom"
+	customCatalog.Models = append(customCatalog.Models, "private-model")
+	explicitNoVision := base
+	explicitNoVision.Name = "opencode-go-no-vision"
+	explicitNoVision.VisionModels = []string{}
+	c := &Config{Providers: []ProviderEntry{base, customCatalog, explicitNoVision}}
+
+	if !normalizeLegacyOpenCodeGoVisionCatalog(c) {
+		t.Fatal("legacy OpenCode Go vision catalog migration did not report a change")
+	}
+	got := &c.Providers[0]
+	if !got.HasModel("deepseek-v4-flash-vision-exp") || !got.HasVisionModel("deepseek-v4-flash-vision-exp") {
+		t.Fatalf("migrated OpenCode Go catalog = %+v, want DeepSeek vision SKU", got)
+	}
+	visionOverride := got.ModelOverrides["deepseek-v4-flash-vision-exp"]
+	if visionOverride.ReasoningProtocol != ReasoningProtocolDeepSeek ||
+		!stringSlicesEqual(visionOverride.SupportedEfforts, []string{"disabled", "low", "high", "max"}) ||
+		visionOverride.DefaultEffort != "high" || visionOverride.ContextWindow != 1_000_000 {
+		t.Fatalf("migrated vision override = %+v", visionOverride)
+	}
+	if c.Providers[1].HasModel("deepseek-v4-flash-vision-exp") {
+		t.Fatal("custom model catalog was unexpectedly migrated")
+	}
+	if !c.Providers[2].HasModel("deepseek-v4-flash-vision-exp") || c.Providers[2].VisionModels == nil || len(c.Providers[2].VisionModels) != 0 {
+		t.Fatalf("explicit no-vision choice = models:%v vision:%#v, want model added without enabling images", c.Providers[2].ModelList(), c.Providers[2].VisionModels)
+	}
+}
+
 func TestNormalizeLegacyKimiK3CatalogMigratesOnlyOfficialUntouchedPresets(t *testing.T) {
 	legacyEntry := func(id, baseURL string) ProviderEntry {
 		return ProviderEntry{
