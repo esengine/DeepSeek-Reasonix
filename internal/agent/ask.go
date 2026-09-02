@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -132,12 +133,26 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 
 	answers, err := asker.Ask(ctx, qs)
 	if err != nil {
+		// A host with no interactive user (unattended daemon answering every
+		// prompt with a rejection) must not kill the turn: degrade to the same
+		// explicit model-assumption fallback the headless run produces, so
+		// autonomous ACP runs keep going (#8238). Every other ask error stays
+		// an error.
+		if errors.Is(err, ErrAskUnattended) {
+			return "No interactive user answered. This is a model-assumption fallback, not a user answer. Proceed with your best judgment, state the assumption you made, and prefer the safest reversible option when choices differ in risk.", nil
+		}
 		return "", fmt.Errorf("ask: %w", err)
 	}
 	summary := formatAnswers(qs, answers)
 	rememberDecisionForQuestions(ctx, id, qs[0].Prompt, summary, qs)
 	return summary + "\n\ndecision_id: " + id, nil
 }
+
+// ErrAskUnattended is returned by an Asker when the host resolved the
+// question with no interactive user available at all (an unattended daemon
+// answering every prompt with a rejection). The ask tool maps it to its
+// model-assumption fallback instead of failing the turn (#8238).
+var ErrAskUnattended = errors.New("ask: no interactive user is available on this host")
 
 // formatAnswers renders the user's selections as a compact, model-facing summary,
 // keyed by question header so the model can tell which answer is which. When the
