@@ -508,6 +508,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "bash    = %q\n", c.BashMode())
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
+	if c.Sandbox.OptimisticWrite {
+		fmt.Fprintf(&b, "optimistic_write = %v\n", c.Sandbox.OptimisticWrite)
+	} else {
+		b.WriteString("# optimistic_write = false    # enable write-if-unchanged parallel writes (#9213)\n")
+	}
 	b.WriteString("\n")
 
 	b.WriteString("[statusline]\n")
@@ -1192,6 +1197,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if c.Sandbox.Network != d.Sandbox.Network {
 			fmt.Fprintf(&sandboxBuf, "network = %v\n", c.Sandbox.Network)
+		}
+		if c.Sandbox.OptimisticWrite != d.Sandbox.OptimisticWrite {
+			fmt.Fprintf(&sandboxBuf, "optimistic_write = %v\n", c.Sandbox.OptimisticWrite)
 		}
 		if sandboxBuf.Len() > 0 {
 			b.WriteString("[sandbox]\n")

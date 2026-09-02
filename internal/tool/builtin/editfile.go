@@ -31,7 +31,7 @@ func (editFile) Description() string {
 }
 
 func (editFile) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"}},"required":["path","old_string","new_string"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"},` + expectedContentSchemaField() + `},"required":["path","old_string","new_string"]}`)
 }
 
 func (editFile) ReadOnly() bool { return false }
@@ -45,6 +45,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
 		NewString string `json:"new_string"`
+		Expected  string `json:"expected"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -57,6 +58,9 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
 	if err := confineWrite(ctx, effectiveWriteRoots(ctx, e.rootSet, e.roots), e.guard, e.managed, p.Path); err != nil {
+		return "", err
+	}
+	if err := checkOptimisticExpected(ctx, e.overlay, p.Path, p.Expected, "edit_file"); err != nil {
 		return "", err
 	}
 

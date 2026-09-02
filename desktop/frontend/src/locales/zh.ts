@@ -2301,6 +2301,8 @@ export const zh: Record<DictKey, string> = {
   "settings.botListPlaceholder": "每行一个 ID，也可用逗号分隔",
   "settings.permissions": "权限",
   "settings.writerMode": "写操作模式",
+  "settings.optimisticWrite": "并行写入安全检查",
+  "settings.optimisticWriteHint": "默认开启：多个会话写同一项目时在单一工作区写锁后串行。关闭后允许并行写入，改用 write-if-unchanged（expected）陈旧内容检测兜底（#9213）。",
   "settings.modeAsk": "ask（写操作前询问）",
   "settings.modeAllow": "allow（自动执行普通写操作）",
   "settings.modeDeny": "deny（阻止写操作）",

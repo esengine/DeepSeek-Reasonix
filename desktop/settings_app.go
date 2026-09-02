@@ -3255,6 +3255,16 @@ func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowW
 	})
 }
 
+// SetOptimisticWrite toggles the optimistic-concurrency write mode (#9213).
+// When enabled, path-bound file writers skip the whole-path serialization wait
+// and rely on write-if-unchanged ("expected") stale-content detection instead.
+func (a *App) SetOptimisticWrite(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.Sandbox.OptimisticWrite = enabled
+		return nil
+	})
+}
+
 // SetNetwork updates ordinary outbound proxy settings.
 func (a *App) SetNetwork(n NetworkView) error {
 	return a.applyConfigChange(func(c *config.Config) error {

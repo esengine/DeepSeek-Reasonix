@@ -1171,6 +1171,11 @@ type SandboxConfig struct {
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.
 	Network bool `toml:"network"`
+	// OptimisticWrite, when true, lets path-bound file writers skip the
+	// whole-path serialization wait and instead rely on write-if-unchanged
+	// ("expected") stale-content detection for parallel safety (see #9213).
+	// Default false keeps the pessimistic path-lock behavior.
+	OptimisticWrite bool `toml:"optimistic_write"`
 }
 
 // WriteRoots returns the directories file-writer tools may modify: the

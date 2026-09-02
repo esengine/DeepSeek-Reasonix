@@ -7326,6 +7326,17 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
           <option value="deny">{t("settings.modeDeny")}</option>
         </select>
       </SettingsField>
+      <SettingsField label={t("settings.optimisticWrite")} hint={t("settings.optimisticWriteHint")}>
+        <label className="set-check set-check--inline">
+          <input
+            type="checkbox"
+            checked={!s.sandbox?.optimisticWrite}
+            disabled={busy}
+            onChange={(e) => void apply(() => app.SetOptimisticWrite(!e.target.checked))}
+          />
+          {t("settings.optimisticWrite")}
+        </label>
+      </SettingsField>
     </SettingsSection>
     <SettingsSection title={t("settings.permissionRules")} description={t("settings.ruleForm")}>
       <div className="set-rules-grid">

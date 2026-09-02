@@ -185,6 +185,10 @@ interface DesktopWindowState {
 // AppBindings is the hand-written React-to-Go contract. _CheckGeneratedBindings
 // catches generated methods missing here; update this interface and typecheck.
 export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganizationBindings, HistoryCatalogBindings, TaskCatalogBindings, BlankProjectBindings, QualityFloorBindings, SessionTitleBindings, ScrollDiagnosticBindings, RemoteProjectBindings, MCPAppBindings {
+  // Optimistic-concurrency write mode (#9213): when enabled, path-bound file
+  // writers skip the whole-path serialization wait and use write-if-unchanged
+  // stale-content detection instead.
+  SetOptimisticWrite(enabled: boolean): Promise<void>;
   Platform(): Promise<string>;
   MinimiseMainWindow(): Promise<void>;
   ToggleMaximiseMainWindow(): Promise<void>;
@@ -2500,6 +2504,11 @@ function makeMockApp(): AppBindings {
     },
     async CloseMainWindow() {
       console.info("mock CloseMainWindow");
+    },
+    async SetOptimisticWrite(enabled: boolean) {
+      // Browser preview mock: no file writes in the browser, so there is no
+      // per-write stale-content state to track here; accept and ignore.
+      void enabled;
     },
     async Platform() {
       const override = browserPlatformOverride();

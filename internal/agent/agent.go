@@ -958,6 +958,10 @@ type Options struct {
 	WriteScheduler *SubagentScheduler
 	// WriteWorkspaceRoot normalizes parent write reservations.
 	WriteWorkspaceRoot string
+	// OptimisticWrite enables write-if-unchanged concurrency (#9213): when true,
+	// path-bound file writers skip the whole-path serialization wait and rely on
+	// the "expected" stale-content check for parallel safety. Default false.
+	OptimisticWrite bool
 	// SessionTemp owns the exact private scratch root for delivery accounting.
 	SessionTemp *sessiontemp.Manager
 	// WriteRoots is the session-scoped writable directory manager.

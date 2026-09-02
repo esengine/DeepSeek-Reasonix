@@ -2299,6 +2299,8 @@ export const en = {
   "settings.botListPlaceholder": "One ID per line, or comma-separated",
   "settings.permissions": "Permissions",
   "settings.writerMode": "Writer mode",
+  "settings.optimisticWrite": "Parallel-write safety check",
+  "settings.optimisticWriteHint": "When on (default), concurrent sessions writing the same project are serialized behind a single workspace write lock. Turn off to allow parallel writes where each writer uses write-if-unchanged (expected) stale-content detection instead (#9213).",
   "settings.modeAsk": "ask (prompt before writers)",
   "settings.modeAllow": "allow (auto-run ordinary writers)",
   "settings.modeDeny": "deny (block writers)",

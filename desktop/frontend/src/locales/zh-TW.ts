@@ -1566,6 +1566,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.saveKey": "儲存金鑰",
   "settings.permissions": "權限",
   "settings.writerMode": "寫操作模式",
+  "settings.optimisticWrite": "並行寫入安全檢查",
+  "settings.optimisticWriteHint": "預設開啟：多個會話寫同一專案時在單一工作區寫鎖後串行。關閉後允許並行寫入，改用 write-if-unchanged（expected）陳舊內容偵測兜底（#9213）。",
   "settings.modeAsk": "ask（寫操作前詢問）",
   "settings.modeAllow": "allow（自動執行普通寫操作）",
   "settings.modeDeny": "deny（阻止寫操作）",
