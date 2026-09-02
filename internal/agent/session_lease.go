@@ -38,6 +38,13 @@ type SessionLeaseInfo struct {
 	PID         int       `json:"pid"`
 	Hostname    string    `json:"hostname,omitempty"`
 	AcquiredAt  time.Time `json:"acquired_at"`
+	// HandoffTo, when non-empty, marks this lease as handed off by the
+	// previous holder to the named runtime (writer_id). The OS lock is free
+	// while this field is set; only the named target may acquire it, and only
+	// until HandoffExpiresAt. This is the explicit, user-authorized path for
+	// transferring session ownership between runtimes (serve <-> desktop).
+	HandoffTo        string    `json:"handoff_to,omitempty"`
+	HandoffExpiresAt time.Time `json:"handoff_expires_at,omitempty"`
 }
 
 const sessionLeaseOwnerOffset int64 = 1
@@ -48,6 +55,10 @@ func sessionLeaseOwnerBytes(b []byte) []byte {
 	copy(payload[sessionLeaseOwnerOffset:], b)
 	return payload
 }
+
+// HandoffWindow is how long a released-for-handoff lease stays reserved for
+// its intended target before falling back to normal acquire semantics.
+const HandoffWindow = 30 * time.Second
 
 type SessionLeaseError struct {
 	Path string
@@ -123,6 +134,16 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 	if _, loaded := sessionLeaseOwners.LoadOrStore(path, ownerID); loaded {
 		info, _ := LoadSessionLeaseInfo(path)
 		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	// Respect an unexpired handoff reservation: while the previous holder has
+	// released the lease for a named target, only that target may acquire
+	// (via TryAcquireSessionLeaseWithHandoff). A plain acquire during the
+	// window would defeat the user-authorized transfer.
+	if info, err := LoadSessionLeaseInfo(path); err == nil && info != nil && info.HandoffTo != "" {
+		if info.HandoffExpiresAt.IsZero() || time.Now().UTC().Before(info.HandoffExpiresAt) {
+			sessionLeaseOwners.CompareAndDelete(path, ownerID)
+			return nil, &SessionLeaseError{Path: path, Info: info}
+		}
 	}
 	leaseLock, err := tryTakeSessionLeaseLock(path)
 	if err != nil {
@@ -265,6 +286,125 @@ func (l *SessionLease) Path() string {
 		return ""
 	}
 	return l.path
+}
+
+// ReleaseForHandoff releases the lease like Release, but instead of
+// deleting the lease info it rewrites it with a handoff reservation naming
+// targetWriterID. The OS lock is freed (normal acquire proceeds), while the
+// reservation makes TryAcquireSessionLeaseWithHandoff the only acquirer for
+// HandoffWindow. This is the explicit user-authorized transfer path between
+// runtimes; there is no silent stealing path.
+func (l *SessionLease) ReleaseForHandoff(targetWriterID string) error {
+	if l == nil {
+		return nil
+	}
+	if strings.TrimSpace(targetWriterID) == "" {
+		return fmt.Errorf("handoff target writer id is required")
+	}
+	// Same save-drain wait as Release: a concurrent save that already passed
+	// Valid() must finish before ownership is revoked (ABA).
+	for {
+		l.mu.Lock()
+		if l.released {
+			l.mu.Unlock()
+			return nil
+		}
+		if l.activeSaves == 0 {
+			break
+		}
+		if l.releaseWait == nil {
+			l.releaseWait = make(chan struct{})
+		}
+		wait := l.releaseWait
+		l.mu.Unlock()
+		<-wait
+	}
+	l.released = true
+	leaseLock := l.leaseLock
+	l.leaseLock = nil
+	l.mu.Unlock()
+
+	sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
+	// Write the handoff reservation while the OS lock is still held so a
+	// concurrent acquirer can never observe a free lock without the marker.
+	info := newSessionLeaseInfo(l.path)
+	info.HandoffTo = targetWriterID
+	info.HandoffExpiresAt = time.Now().UTC().Add(HandoffWindow)
+	if err := SaveSessionLeaseInfo(l.path, info); err != nil {
+		// Reservation write failed: fall back to a plain release so the
+		// session does not stay wedged. The target simply retries takeover.
+		sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
+		if leaseLock != nil {
+			_ = leaseLock.RemoveAndUnlock()
+		}
+		return err
+	}
+	sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
+	if leaseLock != nil {
+		_ = leaseLock.RemoveAndUnlock()
+	}
+	_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
+	return nil
+}
+
+// TryAcquireSessionLeaseWithHandoff acquires a lease that was released via
+// ReleaseForHandoff for this runtime. It refuses leases without a valid,
+// unexpired handoff reservation naming this writer, so a live holder is never
+// disturbed and a stale reservation cannot wedge the session. On success the
+// reservation fields are cleared by the normal SaveSessionLeaseInfo path.
+func TryAcquireSessionLeaseWithHandoff(path, sourceWriterID string) (*SessionLease, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("empty session path")
+	}
+	path = canonicalSessionSavePath(path)
+	info, err := LoadSessionLeaseInfo(path)
+	if err != nil || info == nil {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	if info.HandoffTo == "" {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	// Only the named handoff target may acquire: the acquiring runtime's own
+	// writer identity must match the reservation. The caller-supplied
+	// sourceWriterID identifies the RELEASING runtime and must match
+	// info.WriterID (the releasing side) — not handoff_to, so a runtime that
+	// merely reads the lease info cannot spoof the target check by echoing
+	// handoff_to back at us.
+	if SessionWriterID() != info.HandoffTo {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	if sourceWriterID != "" && info.WriterID != sourceWriterID {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	if !info.HandoffExpiresAt.IsZero() && time.Now().UTC().After(info.HandoffExpiresAt) {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	// Reservation valid: take the OS lock directly (the previous holder
+	// released it). We cannot reuse TryAcquireSessionLease here because it
+	// refuses unexpired handoff reservations.
+	ownerID := sessionLeaseSeq.Add(1)
+	if _, loaded := sessionLeaseOwners.LoadOrStore(path, ownerID); loaded {
+		return nil, &SessionLeaseError{Path: path, Info: info}
+	}
+	leaseLock, err := tryTakeSessionLeaseLock(path)
+	if err != nil {
+		sessionLeaseOwners.CompareAndDelete(path, ownerID)
+		if errors.Is(err, ErrSessionLeaseHeld) {
+			return nil, &SessionLeaseError{Path: path, Info: info}
+		}
+		return nil, err
+	}
+	sessionLeaseActiveOwners.Delete(path)
+	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
+	// Clear the reservation by publishing a fresh owner identity inside
+	// .lease.lock itself (new-format owner info; the legacy .lease.json
+	// sidecar is never written on the handoff path either).
+	if err := publishSessionLeaseOwner(leaseLock, path); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	sessionLeaseActiveOwners.Store(path, ownerID)
+	return lease, nil
 }
 
 func (l *SessionLease) Release() {
