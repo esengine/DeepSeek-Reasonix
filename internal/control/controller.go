@@ -4944,6 +4944,19 @@ func (c *Controller) Executor() *agent.Agent {
 	return c.executor
 }
 
+// DualModel reports whether the runner wraps the executor in a two-model
+// Coordinator (planner_model configured AND distinct from the executor on the
+// full provider/model ref). Hosts surface planner state and pricing off this
+// instead of re-deriving it from config, which cannot see runtime degradation
+// (an unresolvable planner silently continues executor-only).
+func (c *Controller) DualModel() bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.runner.(*agent.Coordinator)
+	return ok
+}
+
 func (c *Controller) Skills() []skill.Skill {
 	return c.skills.list()
 }
