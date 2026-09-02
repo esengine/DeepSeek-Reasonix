@@ -146,6 +146,67 @@ func TestBwrapProtectedWriteArgsSkipsUnreachableStateBoundary(t *testing.T) {
 	}
 }
 
+func TestBwrapArgsIncludesGitWorktreeMetadataRoots(t *testing.T) {
+	mainRepo := t.TempDir()
+	common := filepath.Join(mainRepo, ".git")
+	admin := filepath.Join(common, "worktrees", "feature")
+	worktree := filepath.Join(t.TempDir(), "feature")
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+admin+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	argv := bwrapBaseArgs(Spec{WriteRoots: []string{worktree}, MinimalWrites: true})
+	if indexArgs(argv, "--bind", admin, admin) < 0 {
+		t.Fatalf("worktree admin directory is not writable: %v", argv)
+	}
+	if indexArgs(argv, "--bind", common, common) < 0 {
+		t.Fatalf("common Git directory is not writable: %v", argv)
+	}
+}
+
+func TestBwrapArgsFindsGitWorktreeFromSubdirectory(t *testing.T) {
+	mainRepo := t.TempDir()
+	common := filepath.Join(mainRepo, ".git")
+	admin := filepath.Join(common, "worktrees", "feature")
+	worktree := filepath.Join(t.TempDir(), "feature")
+	subdir := filepath.Join(worktree, "src")
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+admin+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(admin, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := gitWorktreeWriteRoots([]string{subdir}); !containsPath(got, admin) || !containsPath(got, common) {
+		t.Fatalf("worktree metadata roots from subdirectory = %v", got)
+	}
+}
+
+func TestBwrapArgsDoesNotAddOrdinaryGitDirectory(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktree, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitWorktreeWriteRoots([]string{worktree}); len(got) != 0 {
+		t.Fatalf("ordinary repository metadata roots = %v, want none", got)
+	}
+}
+
 func TestBwrapArgsBindsSessionTempAtTmp(t *testing.T) {
 	private := t.TempDir()
 	argv := bwrapArgs(Spec{
