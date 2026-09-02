@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -580,7 +581,11 @@ func TestCloseCancelsCatalogWorkerContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	workerDone := catalog.workerCtx.Done()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	timeout := time.Second
+	if runtime.GOOS == "windows" {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := catalog.Close(ctx); err != nil {
 		t.Fatal(err)

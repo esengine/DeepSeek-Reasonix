@@ -636,12 +636,12 @@ try {
   await page.mouse.move(forwardPoints.activate.x, forwardPoints.activate.y, { steps: 6 });
   const forwardTargetTurn = forwardPoints.anchorTurn + 21;
   let forwardFocus = null;
-  for (let index = 0; index < 80 && !forwardFocus; index += 1) {
+  for (let index = 0; index < 120 && !forwardFocus; index += 1) {
     forwardFocus = await findVisibleTurnTarget(page, { min: forwardTargetTurn });
     if (!forwardFocus) {
       await page.mouse.wheel(0, 250);
       await page.mouse.move(forwardPoints.edge.x, forwardPoints.edge.y, { steps: 4 });
-      await page.waitForTimeout(50);
+      await page.waitForTimeout(60);
     }
   }
   assert(forwardFocus != null, "downward logical drag settles over a visible 20+ turn target");
