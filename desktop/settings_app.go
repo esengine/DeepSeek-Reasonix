@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 )
@@ -59,6 +60,7 @@ type ProviderView struct {
 	Headers                     map[string]string           `json:"headers"`
 	ExtraBody                   map[string]any              `json:"extraBody"`
 	AuthHeader                  bool                        `json:"authHeader"`
+	NoProxy                     bool                        `json:"noProxy"`
 	KeySet                      bool                        `json:"keySet"` // the env var currently resolves to a non-empty value
 	RequiresKey                 bool                        `json:"requiresKey"`
 	Configured                  bool                        `json:"configured"` // selectable: either key is present or no key is required
@@ -141,17 +143,6 @@ type PermissionsView struct {
 	Deny  []string `json:"deny"`
 }
 
-type SandboxView struct {
-	Bash                   string   `json:"bash"`
-	Network                bool     `json:"network"`
-	WorkspaceRoot          string   `json:"workspaceRoot"`
-	AllowWrite             []string `json:"allowWrite"`
-	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
-	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string   `json:"effectiveShell,omitempty"`
-}
-
 // ReferenceSettingsView contains project-scoped @-picker filters.
 // These values never act as a read permission gate.
 type ReferenceSettingsView struct {
@@ -160,7 +151,6 @@ type ReferenceSettingsView struct {
 	WorkspaceRoot   string   `json:"workspaceRoot"`
 	ConfigPath      string   `json:"configPath"`
 }
-
 type NetworkProxyView struct {
 	Type     string `json:"type"`
 	Server   string `json:"server"`
@@ -688,6 +678,7 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		Headers:                     nonNilStringMap(p.Headers),
 		ExtraBody:                   nonNilAnyMap(p.ExtraBody),
 		AuthHeader:                  p.AuthHeader,
+		NoProxy:                     p.NoProxy,
 		KeySet:                      key.Set,
 		RequiresKey:                 requiresKey,
 		Configured:                  !requiresKey || key.Set,
@@ -1007,19 +998,13 @@ func (a *App) Settings() SettingsView {
 	if err != nil {
 		return a.defaultSettingsView()
 	}
-	ctrl := a.activeCtrl()
-	bash := cfg.BashMode()
-	shell := cfg.Tools.Shell.Prefer
-	if shell == "" {
-		shell = "auto"
-	}
 	root := a.activeWorkspaceRoot()
 	writeRoots := cfg.WriteRootsForRoot(root)
 	effectiveWorkspaceRoot := ""
 	if len(writeRoots) > 0 {
 		effectiveWorkspaceRoot = writeRoots[0]
 	}
-	effectiveShell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, nil)
+	ctrl := a.activeCtrl()
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -1036,12 +1021,7 @@ func (a *App) Settings() SettingsView {
 			Ask:   nonNil(cfg.Permissions.Ask),
 			Deny:  nonNil(cfg.Permissions.Deny),
 		},
-		Sandbox: SandboxView{
-			Bash: bash, Network: cfg.Sandbox.Network,
-			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
-			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
-			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
-		},
+		Sandbox: a.sandboxViewFor(cfg, ctrl, writeRoots, effectiveWorkspaceRoot),
 		Reference: ReferenceSettingsView{
 			FollowGitignore: cfg.Reference.FollowGitignore,
 			ExcludePatterns: nonNil(cfg.Reference.ExcludePatterns),
@@ -1116,20 +1096,6 @@ func (a *App) Settings() SettingsView {
 		v.Providers = append(v.Providers, providerView)
 	}
 	return v
-}
-
-func sandboxEffectiveShellView(sh sandbox.Shell) string {
-	if sh.Kind == sandbox.ShellPowerShell {
-		if sh.SupportsChaining() {
-			return "pwsh"
-		}
-		return "powershell"
-	}
-	path := strings.ToLower(strings.ReplaceAll(sh.Path, "\\", "/"))
-	if strings.Contains(path, "/git/") && strings.HasSuffix(path, "bash.exe") {
-		return "git-bash"
-	}
-	return "bash"
 }
 
 func botSettingsView(b config.BotConfig) BotSettingsView {
@@ -1857,15 +1823,6 @@ func (a *App) activeWorkspaceRoot() string {
 	return "."
 }
 
-func (a *App) saveProviderCredential(apiKeyEnv, value string) (string, error) {
-	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
-	value = strings.TrimSpace(value)
-	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
-		return "", err
-	}
-	return providerCredentialSourceNotice(apiKeyEnv, value), nil
-}
-
 func providerCredentialSourceNotice(apiKeyEnv, value string) string {
 	return ""
 }
@@ -1993,16 +1950,10 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 	ctrl, restoredRuntime, path, err := a.buildSettingReplacementController(tab, snap, runtime, model, prevPath, setting, oldCtrl, carried, reload)
 	if err != nil {
 		if oldCtrl == nil {
-			leaseHeld := false
 			a.mu.Lock()
-			leaseHeld = setTabStartupError(tab, err)
-			tab.Ready = false
-			if leaseHeld {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-			} else {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-			}
+			leaseHeld, save := a.markTabStartupFailureLocked(tab, err, keepStartupRestore)
 			a.mu.Unlock()
+			a.writeTabsSaveRequest(save)
 			if leaseHeld {
 				a.scheduleDeferredStartupBuild(tab.ID)
 			}
@@ -2554,6 +2505,7 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	e.Headers = p.Headers
 	e.ExtraBody = p.ExtraBody
 	e.AuthHeader = p.AuthHeader
+	e.NoProxy = p.NoProxy
 	e.BalanceURL = strings.TrimSpace(p.BalanceURL)
 	e.ContextWindow = p.ContextWindow
 	e.ReasoningProtocol = p.ReasoningProtocol
@@ -3046,7 +2998,10 @@ func providerPresetNoExistingProviderError(id string) error {
 // FetchProviderModels probes the provider's OpenAI-compatible model-list
 // endpoint and returns the available model IDs. This is a settings-only helper:
 // it never touches chat request serialization or provider-visible prompt data.
+// The probe rides the configured network proxy so a broken proxy path fails
+// here, at setup time, instead of succeeding and stalling chat later (#9560).
 func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
+	root := a.activeWorkspaceRoot()
 	e := config.ProviderEntry{
 		Name:       p.Name,
 		Kind:       p.Kind,
@@ -3056,14 +3011,47 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 		Headers:    p.Headers,
 		AuthHeader: p.AuthHeader,
 	}
-	e.ResolveAPIKeyForRoot(a.activeWorkspaceRoot())
+	e.ResolveAPIKeyForRoot(root)
 	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
 	defer cancel()
-	models, err := e.FetchModels(ctx)
+	models, err := e.FetchModelsWithProxy(ctx, withProbeDirectHost(a.networkProxySpecForRoot(root), e.BaseURL, p.NoProxy))
 	if err != nil {
 		return []string{}, err
 	}
 	return nonNil(chatProviderModels(models)), nil
+}
+
+// networkProxySpecForRoot resolves the effective proxy policy chat requests use
+// for this workspace. The load includes project reasonix.toml and project .env
+// expansion but never pins provider credentials into the process environment.
+// A missing or unreadable config falls back to the default policy rather than
+// blocking model discovery.
+func (a *App) networkProxySpecForRoot(root string) netclient.ProxySpec {
+	cfg, err := config.LoadForRootWithoutCredentialsReadOnly(root)
+	if err != nil || cfg == nil {
+		return netclient.ProxySpec{}
+	}
+	return cfg.NetworkProxySpec()
+}
+
+// withProbeDirectHost mirrors the runtime's per-provider no_proxy bypass for the
+// unsaved editor state: when the edited provider is marked no_proxy, its
+// endpoint must also be probed directly. Custom proxy mode wins over provider
+// no_proxy, matching NetworkProxySpec's behavior.
+func withProbeDirectHost(spec netclient.ProxySpec, baseURL string, noProxy bool) netclient.ProxySpec {
+	if !noProxy || netclient.NormalizeMode(spec.Mode) == netclient.ModeCustom {
+		return spec
+	}
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return spec
+	}
+	host := u.Hostname()
+	if host == "" || slices.Contains(spec.DirectHosts, host) {
+		return spec
+	}
+	spec.DirectHosts = append([]string{host}, spec.DirectHosts...)
+	return spec
 }
 
 // FetchAllProviderModels fetches model lists for all providers in a single
@@ -3076,6 +3064,7 @@ func (a *App) FetchAllProviderModels(providers []ProviderView) map[string][]stri
 	g, ctx := errgroup.WithContext(a.reqCtx())
 	g.SetLimit(4)
 	root := a.activeWorkspaceRoot()
+	proxy := a.networkProxySpecForRoot(root)
 	for i := range providers {
 		p := providers[i]
 		g.Go(func() error {
@@ -3091,7 +3080,7 @@ func (a *App) FetchAllProviderModels(providers []ProviderView) map[string][]stri
 			e.ResolveAPIKeyForRoot(root)
 			ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			models, err := e.FetchModels(ctx)
+			models, err := e.FetchModelsWithProxy(ctx, proxy)
 			if err != nil {
 				// Omit failed providers so the frontend can retry them through
 				// the cached single-provider path without emitting JSON null.
@@ -3214,7 +3203,8 @@ func (a *App) ensureProviderAccessForKey(apiKeyEnv string) error {
 // ClearProviderKey removes a provider secret from Reasonix's global .env
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
-	if strings.TrimSpace(apiKeyEnv) == "" {
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
 	if err := a.ensureActiveTabRebuildAllowed("provider key"); err != nil {
@@ -3223,6 +3213,7 @@ func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
 	}
+	a.revokeCredentialProxyRoutesByCredential(apiKeyEnv)
 	if err := a.rebuildSetting("provider key"); err != nil {
 		if _, ok := a.deferredRebuildWarning("provider key", err); ok {
 			return nil
@@ -3256,6 +3247,10 @@ func (a *App) ReloadSettings() error {
 	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
 		return err
 	}
+	// A manual Git Bash/Bash repair changes the host filesystem without a
+	// config write. The explicit reload action is the user's request to re-check
+	// that environment now rather than wait for the discovery TTL.
+	sandbox.InvalidateShellInventory()
 	if err := a.rebuild(); err != nil {
 		// The on-disk config already diverged from the runtime; retry the
 		// refresh once the other window releases the session lease.

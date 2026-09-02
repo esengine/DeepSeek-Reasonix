@@ -17,6 +17,7 @@ func MapWriter(profile evidence.EffectProfile, seq int, workspaceRoot string, te
 	targets := profile.TargetKeys()
 	class := classifyWriter(profile, workspaceRoot)
 	pre, verifyKind, origin, verifyEnf, reviews := writerDuties(class)
+	reviews = applyArchitectureReview(class, profile, workspaceRoot, reviews)
 	if testsForbidden {
 		if verifyEnf != EnforcementAdvisory {
 			verifyEnf = EnforcementAdvisory
@@ -165,7 +166,7 @@ func writerDuties(class writerClass) (pre []ObligationKind, verify ObligationKin
 	case writerDestructive:
 		return []ObligationKind{ObligationTodo, ObligationCriteria}, ObligationActionReceipt, ReasonDestructive, EnforcementStrict, []ObligationKind{ObligationDiffReview}
 	case writerOpaque:
-		return []ObligationKind{ObligationTodo, ObligationCriteria}, ObligationFullVerify, ReasonOpaqueWriter, EnforcementStrict, []ObligationKind{ObligationDiffReview, ObligationIndependentReview, ObligationSignoff}
+		return []ObligationKind{ObligationTodo, ObligationCriteria}, ObligationFullVerify, ReasonOpaqueWriter, EnforcementStrict, []ObligationKind{ObligationDiffReview, ObligationSignoff}
 	default:
 		return nil, "", "", 0, nil
 	}

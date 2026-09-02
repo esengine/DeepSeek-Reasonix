@@ -15,7 +15,7 @@ func TestCommandIsReadOnly(t *testing.T) {
 		`grep 'a|b' file`, `printf "%s\n" "a && b"`,
 		// tooling probes.
 		"go version", "go env", "go list ./...", "go doc fmt",
-		"npm view react version", "npm outdated", "cargo check",
+		"npm view react version", "npm outdated",
 		"docker ps", "docker images", "kubectl get pods",
 		"node -v", "node --version", "python --version", "python3 --version",
 		// PowerShell permission-safe inspection commands.
@@ -36,6 +36,9 @@ func TestCommandIsReadOnly(t *testing.T) {
 		"git reset --hard", "git branch -d feature", "git remote add o url",
 		"go build ./...", "go test ./...", "npm install", "docker rm x",
 		"kubectl apply -f x.yaml", "mv a b", "chmod 777 x",
+		// cargo runs build.rs (arbitrary code) even for its "checking" and
+		// doc-rendering subcommands; only the registry query is read-only.
+		"cargo check", "cargo doc",
 		// shell syntax can smuggle a write past a read-only base word.
 		"git status && rm -rf /", "cat a | tee b", "echo $(rm x)",
 		"git status > out.txt", "ls; rm x", "git log `whoami`", "echo $HOME",

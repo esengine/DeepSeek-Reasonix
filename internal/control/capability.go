@@ -130,7 +130,7 @@ func (c *Controller) WireCapabilityRouting(plugins []config.PluginEntry, specs [
 		return
 	}
 	c.pluginCfg = append([]config.PluginEntry(nil), plugins...)
-	c.capCachedTools, c.capCacheKeyOK = capability.LoadCachedToolsForSpecs(specs)
+	c.capCachedTools, c.capCacheKeyOK = capability.LoadCachedToolsForSpecs(specs, c.mcpHostProfile())
 	c.semanticRouter = router
 	c.capabilityAudit = audit
 }

@@ -63,12 +63,16 @@ type toolOutcome struct {
 	// execution is local shell metadata (optional). Provider messages strip it
 	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
 	execution *tool.ShellExecution
+	// mcpApp is the optional MCP Apps presentation; provider-excluded like
+	// execution, persisted for Desktop cards.
+	mcpApp *provider.MCPAppPresentation
 	// recoveryGeneration is the gate generation captured before execution so
 	// ObserveResult can ignore stale results after a mode switch.
 	recoveryGeneration uint64
 	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
 	recoveryStopTurn   bool
 	recoveryStopReason string
+	incompleteRead     *incompleteReadDeferred
 }
 
 // batchExecution is the result of one provider tool-call batch.
@@ -92,19 +96,19 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// state separate so refreshing a dependent preview never mutates shared
 	// session memory outside Session's lock.
 	calls = append([]provider.ToolCall(nil), calls...)
+	if err := a.prepareToolBatch(ctx, calls); err != nil {
+		return batchExecution{err: err}
+	}
 	if a.task.ledger != nil {
 		ctx = withObservationBoundary(ctx, a.task.ledger.ObservationBoundary())
-	}
-	for _, c := range calls {
-		if err := a.emitFullToolDispatch(ctx, c, false); err != nil {
-			return batchExecution{err: fmt.Errorf("persist tool dispatch %s: %w", c.ID, err)}
-		}
 	}
 
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
 	durations := make([]int64, len(calls))
 	startedAt := make([]int64, len(calls))
+	ranParallel := make([]bool, len(calls))
+	batchStart := time.Now()
 	// Snapshot the receipt count before the batch runs: if a loop guard fires
 	// for this batch, successes recorded during it (a mixed batch where only one
 	// call was guard-blocked) must already count as progress against the pass.
@@ -155,10 +159,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		results[i] = outcomes[i].output
 	}
 	finalize := func(i int) {
-		if calls[i].ResolvedReadOnly != nil {
-			a.sess.conversation.UpdateToolCallResolution(calls[i])
-			a.emitResolvedToolDispatch(calls[i])
-		}
+		a.finalizeIncompleteReadOutcome(outcomes[i].incompleteRead, &outcomes[i])
+		results[i] = outcomes[i].output
+		a.commitBatchCallResolution(calls[i])
 		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
 			earlierWriterRan = true
 		}
@@ -272,6 +275,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			// Parallel segments are read-only by construction; no mutation barrier.
 			ranUntil := runParallel(ctx, batch.start, batch.end, run)
 			for i := batch.start; i < ranUntil; i++ {
+				ranParallel[i] = true
 				finalize(i)
 			}
 			// After parallel execution completes, check if context was cancelled.
@@ -351,41 +355,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		}
 	}
 
-	for i, c := range calls {
-		o := outcomes[i]
-		t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
-		ok := t != nil && len(ambiguous) == 0
-		readOnly := ok && t.ReadOnly()
-		if c.ResolvedReadOnly != nil {
-			readOnly = *c.ResolvedReadOnly
-		}
-		tr := event.Tool{
-			ID:           c.ID,
-			Name:         c.Name,
-			Args:         c.Arguments,
-			ResolvedName: c.ResolvedName,
-			CapabilityID: c.CapabilityID,
-			Output:       o.output,
-			Err:          o.errMsg,
-			ReadOnly:     readOnly,
-			Truncated:    o.truncated,
-			DurationMs:   durations[i],
-			Execution:    toEventShellExecution(o.execution, durations[i]),
-		}
-		if startedAt[i] > 0 {
-			tr.StartedAt = startedAt[i]
-			tr.EndedAt = startedAt[i] + durations[i]
-			if mutation := o.workspaceMutation; mutation != nil {
-				tr.WorkspaceMutation = true
-				tr.WorkspacePaths = append([]string(nil), mutation.Paths...)
-				tr.WorkspaceAllPaths = mutation.AllPaths
-			}
-		}
-		a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
-		if o.truncated && o.truncMsg != "" {
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
-		}
-	}
+	a.emitBatchToolResults(calls, outcomes, durations, startedAt, ranParallel, batchStart)
 	a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
@@ -408,6 +378,14 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}
+}
+
+func (a *Agent) commitBatchCallResolution(call provider.ToolCall) {
+	if call.ResolvedReadOnly == nil {
+		return
+	}
+	a.sess.conversation.UpdateToolCallResolution(call)
+	a.emitResolvedToolDispatch(call)
 }
 
 // batchCallMutationFailureCause returns a sanitized effect description when a
@@ -511,10 +489,10 @@ func (a *Agent) toolCallBatches(calls []provider.ToolCall) []toolCallBatch {
 func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
 	var batches []toolCallBatch
 	for i := 0; i < len(calls); {
-		if parallelisable(r, calls[i].Name) {
+		if parallelisableCall(r, calls[i]) {
 			start := i
 			i++
-			for i < len(calls) && parallelisable(r, calls[i].Name) {
+			for i < len(calls) && parallelisableCall(r, calls[i]) {
 				i++
 			}
 			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
@@ -526,13 +504,23 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallB
 	return batches
 }
 
-func parallelisable(r *tool.Registry, name string) bool {
-	switch name {
-	case "complete_step", "todo_write", "wait", "bash_output", "use_capability", "compress":
+func parallelisableCall(r *tool.Registry, call provider.ToolCall) bool {
+	switch call.Name {
+	case "complete_step", "todo_write", "wait", "bash_output", "compress":
 		return false
 	}
-	t, _, ambiguous := r.ResolveCall(name)
-	return t != nil && len(ambiguous) == 0 && t.ReadOnly()
+	target, _, ambiguous := r.ResolveCall(call.Name)
+	if target == nil || len(ambiguous) != 0 {
+		return false
+	}
+	if classifier, ok := target.(tool.BatchClassifier); ok {
+		class := classifier.ClassifyCall(json.RawMessage(call.Arguments))
+		return class.Known && class.ReadOnly && class.ParallelSafe
+	}
+	if _, dynamic := target.(tool.CallResolver); dynamic {
+		return false
+	}
+	return target.ReadOnly()
 }
 
 func runParallel(ctx context.Context, start, end int, run func(int)) int {

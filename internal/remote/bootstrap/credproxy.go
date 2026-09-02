@@ -104,6 +104,32 @@ type CredentialProxyOptions struct {
 	Kind string
 }
 
+// EnsureCredentialProvider updates only the managed tunnel-backed provider and
+// virtual credential on an already connected host. Desktop model switches use
+// this without restarting Serve; the controller adopts the staged provider via
+// its ordinary active-work-gated model switch.
+func EnsureCredentialProvider(ctx context.Context, conn Conn, opts *CredentialProxyOptions) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("bootstrap: remote connection is required")
+	}
+	fs, err := conn.SFTP()
+	if err != nil {
+		return false, err
+	}
+	home, err := fs.RealPath(ctx, "~")
+	if err != nil {
+		return false, fmt.Errorf("bootstrap: resolve remote home: %w", err)
+	}
+	return ensureCredentialProvider(ctx, fs, home, opts)
+}
+
+// HealCredentialProvider refreshes the managed provider outside a full Serve
+// bootstrap round. The desktop watchdog uses it after an SSH reverse-forward
+// rebind, before asking running Serve processes to reload providers.
+func HealCredentialProvider(ctx context.Context, conn Conn, opts *CredentialProxyOptions) (bool, error) {
+	return EnsureCredentialProvider(ctx, conn, opts)
+}
+
 // ensureCredentialProvider installs or heals the proxy provider and virtual
 // token. The result reports whether a running serve must reload its config.
 func ensureCredentialProvider(ctx context.Context, fs *sftpfs.FS, home string, opts *CredentialProxyOptions) (bool, error) {

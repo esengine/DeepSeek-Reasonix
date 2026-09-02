@@ -297,4 +297,50 @@ func TestRemoteForwardEndToEnd(t *testing.T) {
 	}
 }
 
+// A remote listener that dies under an attached Set must clear Up. Leaving the
+// entry marked Up with a dead BoundAddr makes credential-proxy ensure reuse the
+// stale port and the remote serve dials connection refused forever.
+func TestRemoteForwardAcceptExitMarksDown(t *testing.T) {
+	srv := sshtest.Start(t, sshtest.Options{})
+	cl := dialSSHClient(t, srv)
+	target := echoServer(t)
+
+	set := NewSet(nil)
+	defer set.Close()
+	if err := set.Attach(cl); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.Add(Spec{Name: "cred", Direction: Remote, BindAddr: "127.0.0.1:0", TargetAddr: target}); err != nil {
+		t.Fatalf("add remote forward: %v", err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		entries := set.List()
+		if len(entries) == 1 && entries[0].Up && entries[0].BoundAddr != "" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("remote forward never came up: %+v", entries)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+
+	// Close the SSH client without Detach: Accept returns, and the registry
+	// must not keep advertising the dead listener as Up.
+	_ = cl.Close()
+	deadline = time.After(5 * time.Second)
+	for {
+		entries := set.List()
+		if len(entries) == 1 && !entries[0].Up {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("dead remote forward still Up: %+v", entries)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 var _ = fmt.Sprintf

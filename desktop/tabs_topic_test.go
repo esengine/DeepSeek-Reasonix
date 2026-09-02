@@ -73,7 +73,7 @@ func waitForTopicDirMarker(t *testing.T, dir, marker string) {
 
 func waitForCatalogTopic(t *testing.T, app *App, scope, workspaceRoot, topicID string) []ProjectNode {
 	t.Helper()
-	app.startSessionCatalog(false)
+	app.startSessionCatalog()
 	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -398,6 +398,7 @@ func TestDeleteTopicRetryAfterPartialFailureCompletesCleanup(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	seedLegacyTopicBridge(t, projectRoot)
 	topicID := "topic_partial_delete"
 	if err := addProject(projectRoot, ""); err != nil {
 		t.Fatalf("add project: %v", err)
@@ -412,8 +413,7 @@ func TestDeleteTopicRetryAfterPartialFailureCompletesCleanup(t *testing.T) {
 		t.Fatalf("index topic: %v", err)
 	}
 
-	// Inject a failure before title removal: swapping the title-sources file
-	// for a directory makes its load fail while the title locator is intact.
+	// Block the legacy source mirror while the title locator is still intact.
 	sourcesPath := topicTitleSourcesPath(projectRoot)
 	backupPath := sourcesPath + ".bak"
 	if err := os.Rename(sourcesPath, backupPath); err != nil {
@@ -484,13 +484,12 @@ func TestDeleteTopicTitleOnlyRetryAfterSourceFailureCompletesCleanup(t *testing.
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	seedLegacyTopicBridge(t, projectRoot)
 	topicID := "topic_title_only_delete"
 	if err := addProject(projectRoot, ""); err != nil {
 		t.Fatalf("add project: %v", err)
 	}
-	// No prependTopicInProjectsFile: the topic renders purely through the
-	// orderedTopicIDs title-map fallback, so the title entry is the only
-	// locator a retry can use.
+	// Without a sidebar index, the title is the retry's only locator.
 	if err := setTopicTitle(projectRoot, topicID, "Doomed"); err != nil {
 		t.Fatalf("set topic title: %v", err)
 	}
@@ -541,6 +540,7 @@ func TestDeleteTopicTitleOnlyRetryAfterSecondaryMetadataFailureCompletesCleanup(
 			isolateDesktopUserDirs(t)
 
 			projectRoot := t.TempDir()
+			seedLegacyTopicBridge(t, projectRoot)
 			topicID := "topic_title_only_" + strings.ReplaceAll(tt.name, "-", "_")
 			if err := addProject(projectRoot, ""); err != nil {
 				t.Fatalf("add project: %v", err)
@@ -595,6 +595,7 @@ func TestDeleteTopicIgnoresUnrelatedProjectMetadataDamage(t *testing.T) {
 	// reaching the target root.
 	brokenRoot := t.TempDir()
 	targetRoot := t.TempDir()
+	seedLegacyTopicBridge(t, brokenRoot)
 	topicID := "topic_target_delete"
 	if err := addProject(brokenRoot, ""); err != nil {
 		t.Fatalf("add broken project: %v", err)
@@ -615,8 +616,7 @@ func TestDeleteTopicIgnoresUnrelatedProjectMetadataDamage(t *testing.T) {
 		t.Fatalf("index topic: %v", err)
 	}
 
-	// Make the unrelated project's title metadata unreadable: deleting the
-	// target topic must skip over it instead of aborting half-way.
+	// Unrelated unreadable legacy metadata must not abort target deletion.
 	for _, path := range []string{topicTitlesPath(brokenRoot), topicTitleSourcesPath(brokenRoot)} {
 		if err := os.Remove(path); err != nil {
 			t.Fatalf("remove %s: %v", path, err)
@@ -631,7 +631,6 @@ func TestDeleteTopicIgnoresUnrelatedProjectMetadataDamage(t *testing.T) {
 	}
 	assertTopicFullyDeleted(t, targetRoot, topicID)
 
-	// The broken project's own sidebar index must be untouched.
 	f := loadProjectsFile()
 	if i := projectIndexByRoot(f.Projects, brokenRoot); i < 0 {
 		t.Fatalf("projects = %#v, want entry for broken root", f.Projects)
@@ -765,7 +764,7 @@ func TestAmbiguousLegacyRecoverySessionsMigrateIntoTopics(t *testing.T) {
 	app := NewApp()
 	// Filename recovery folds into the root ordinary row; History keeps the
 	// physical recovery file reachable as another saved version.
-	app.startSessionCatalog(false)
+	app.startSessionCatalog()
 	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
 	nodes := waitForCatalogTreeCondition(t, app, "filename recovery folded into one ordinary row", func(nodes []ProjectNode) bool {
 		for _, folder := range nodes {
@@ -2303,11 +2302,11 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
 		t.Fatalf("open project tab: %v", err)
 	}
 	waitForTabReady(t, app, tab.ID)
-	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic titles: %v", err)
+	if err := saveTopicTitles(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic titles: %v", err)
 	}
-	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic title sources: %v", err)
+	if err := saveTopicTitleSources(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic title sources: %v", err)
 	}
 
 	if err := app.RenameTopic(topic.ID, "恢复标题"); err != nil {
@@ -2338,11 +2337,11 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromSessionMeta(t *testing.
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	writeTopicSession(t, dir, "missing-index.jsonl", topicID, "旧标题", projectRoot)
-	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic titles: %v", err)
+	if err := saveTopicTitles(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic titles: %v", err)
 	}
-	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic title sources: %v", err)
+	if err := saveTopicTitleSources(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic title sources: %v", err)
 	}
 
 	if err := NewApp().RenameTopic(topicID, "恢复标题"); err != nil {
@@ -2371,8 +2370,8 @@ func TestOpenProjectTabRecoversMissingTopicTitleFromSessionMeta(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	sessionPath := writeTopicSessionWithPrompt(t, dir, "stored-meta.jsonl", topic.ID, "用户保存标题", projectRoot, "first prompt should not win", time.Now())
-	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic titles: %v", err)
+	if err := saveTopicTitles(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic titles: %v", err)
 	}
 	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
 		t.Fatalf("precondition title source = %q, want manual", got)
@@ -2414,8 +2413,8 @@ func TestOpenProjectTabRecoversMissingTopicTitleFromSessionTitle(t *testing.T) {
 	if err := setSessionTitle(dir, sessionPath, "历史手动标题"); err != nil {
 		t.Fatalf("set session title: %v", err)
 	}
-	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
-		t.Fatalf("remove topic titles: %v", err)
+	if err := saveTopicTitles(projectRoot, map[string]string{}); err != nil {
+		t.Fatalf("clear topic titles: %v", err)
 	}
 	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceManual {
 		t.Fatalf("precondition title source = %q, want manual", got)

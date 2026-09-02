@@ -86,6 +86,10 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 		a.turn.stormCount++
 	}
 	stormHit := ok && a.turn.stormCount >= stormBreakThreshold
+	if !stormHit && consecutiveNormalizedFailure(calls, outcomes, &a.turn.loop) {
+		stormHit = true
+		a.turn.stormCount = max(a.turn.stormCount, 2)
+	}
 	streakHit := allBlocked && a.turn.blockedTurnStreak >= stormBreakThreshold
 	if !stormHit && !streakHit {
 		return intervention{}
@@ -154,9 +158,13 @@ func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (str
 		if outcomes[i].errMsg == "" {
 			return "", false
 		}
-		sb.WriteString(calls[i].Name)
+		name := calls[i].Name
+		if calls[i].ResolvedName != "" {
+			name = calls[i].ResolvedName
+		}
+		sb.WriteString(name)
 		sb.WriteByte(0)
-		sb.WriteString(outcomes[i].errMsg)
+		sb.WriteString(errorCategory(name, outcomes[i].errMsg))
 		sb.WriteByte(0)
 	}
 	return sb.String(), true

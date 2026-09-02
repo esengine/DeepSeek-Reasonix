@@ -187,11 +187,18 @@ func TestUpdateSinkDropsAndWarns(t *testing.T) {
 	if got := len(fn.notifs); got != 0 {
 		t.Fatalf("info notice produced %d notifications, want 0", got)
 	}
-	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "watch out"})
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeCompletionUncertain, Text: "completion could not be confirmed"})
 	if got := len(fn.notifs); got != 1 {
-		t.Fatalf("warn notice produced %d notifications, want 1", got)
+		t.Fatalf("completion uncertainty produced %d notifications, want 1", got)
 	}
-	u := fn.updateMap(t, 0)
+	if text := chunkText(t, fn.updateMap(t, 0)); !strings.Contains(text, "completion could not be confirmed") || strings.Contains(text, "[warning]") {
+		t.Fatalf("completion uncertainty notice = %q, want informational text", text)
+	}
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "watch out"})
+	if got := len(fn.notifs); got != 2 {
+		t.Fatalf("warn notice produced %d notifications, want 2 total", got)
+	}
+	u := fn.updateMap(t, 1)
 	if u["sessionUpdate"] != "agent_message_chunk" {
 		t.Errorf("warn update = %v", u["sessionUpdate"])
 	}

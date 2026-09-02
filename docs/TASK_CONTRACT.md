@@ -71,6 +71,15 @@ verdict. Sequential writes to a second production target establish the same
 todo and acceptance-criteria preconditions as a multi-file write observed in a
 single tool call.
 
+Automatic independent review is attached only for architecture-worthy writes:
+protocol/schema/public API surfaces, concurrency-sensitive paths, cross-module
+edits, or large scope (eight or more files). Same-package multi-file edits and
+pathless opaque MCP writers do not auto-demand it. The host adds at most one
+first independent review and one re-review from receipts; explicit `/review` or
+`run_skill` review still runs. Review sub-agents default to 8 steps and a 2048
+output-token cap, and start from a parent facts pack (decisions, evidence
+summary, file anchors) rather than the parent transcript.
+
 ## Example
 
 ```text

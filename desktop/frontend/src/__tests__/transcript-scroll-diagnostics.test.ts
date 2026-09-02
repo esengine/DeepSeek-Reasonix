@@ -191,6 +191,28 @@ detailDiagnostics.record("scroll-write", {
   offBottomFrames: 2,
   stagnantFrames: 0,
 });
+detailDiagnostics.record("geometry-revision", {
+  geometryRevision: 12,
+  sources: ["row-measure", "items-rendered", "private-source"],
+  scrollHeight: 5_400,
+  footerHeight: 220,
+  viewport: 800,
+  mounted: 40,
+  total: 420,
+  transient: true,
+});
+detailDiagnostics.record("scroll-write", {
+  owner: "anchor-compensation",
+  writeKind: "scrollBy",
+  source: "reader-stability",
+  phase: "correct-offset",
+  sequence: 13,
+  generation: 4,
+  ownershipEpoch: 8,
+  geometryRevision: 12,
+  transactionId: 3,
+  rejectedReason: "duplicate-revision-phase",
+});
 const detailPayload = detailDiagnostics.stop();
 const rowMeasurement = detailPayload.events.find((event) => event.type === "row-measure");
 assert.deepEqual(rowMeasurement, {
@@ -221,6 +243,12 @@ assert.deepEqual(geometryViolation, {
   layoutVariant: "tool-collapsed",
   estimateSource: "static",
 });
+const geometryRevision = detailPayload.events.find((event) => event.type === "geometry-revision");
+assert.deepEqual(geometryRevision?.sources, ["row-measure", "items-rendered"], "geometry sources keep only fixed, content-free enums");
+const anchorWrite = detailPayload.events.find((event) => event.owner === "anchor-compensation");
+assert.equal(anchorWrite?.owner, "anchor-compensation", "known anchor writers do not degrade to other");
+assert.equal(anchorWrite?.ownershipEpoch, 8, "writer ownership epochs survive sanitization");
+assert.equal(anchorWrite?.rejectedReason, "duplicate-revision-phase", "writer rejection reasons survive sanitization");
 const detailSerialized = JSON.stringify(detailPayload);
 assert.equal(detailSerialized.includes("PRIVATE_ROW_KEY"), false, "row measurements exclude stable row keys");
 assert.equal(detailSerialized.includes("PRIVATE_TRANSCRIPT_CANARY"), false, "row measurements exclude transcript text");

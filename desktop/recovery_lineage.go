@@ -5,16 +5,21 @@ import (
 	"path/filepath"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/sessioncatalog"
 )
 
 type RecoveryLineageMember struct {
-	Path      string `json:"path"`
-	Role      string `json:"role"`
-	Canonical bool   `json:"canonical"`
-	Turns     int    `json:"turns"`
-	Open      bool   `json:"open"`
-	Running   bool   `json:"running"`
+	Path           string `json:"path"`
+	Role           string `json:"role"`
+	Canonical      bool   `json:"canonical"`
+	Turns          int    `json:"turns"`
+	Open           bool   `json:"open"`
+	Running        bool   `json:"running"`
+	VersionNote    string `json:"versionNote,omitempty"`
+	Preview        string `json:"preview,omitempty"`
+	CreatedAt      int64  `json:"createdAt,omitempty"`
+	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
 }
 
 type RecoveryLineageView struct {
@@ -57,6 +62,10 @@ type RecoveryCleanupResult struct {
 
 func (a *App) GetRecoveryLineage(key ProjectTopicKey) RecoveryLineageView {
 	out := RecoveryLineageView{Members: []RecoveryLineageMember{}}
+	if a.catalogRebuilding.Load() {
+		out.State = "repairing"
+		return out
+	}
 	catalog := a.sessionCatalog.Load()
 	if catalog == nil {
 		return out
@@ -65,34 +74,53 @@ func (a *App) GetRecoveryLineage(key ProjectTopicKey) RecoveryLineageView {
 	if err != nil || !ok {
 		return out
 	}
-	groupID, directory := "", ""
-	for _, record := range topic.Sessions {
-		if record.Recovered && record.RecoveryGroupID != "" {
-			groupID, directory = record.RecoveryGroupID, filepath.Dir(record.Path)
-			break
-		}
-	}
-	if groupID == "" || directory == "" {
+	groupID, directory, ok := recoveryLineageSelection(topic, key.Path)
+	if !ok {
 		return out
 	}
 	groups, err := catalog.ListRecoveryGroups(a.bootContext(), directory)
 	if err != nil {
 		return out
 	}
-	members := []sessioncatalog.SessionRecord{}
+	groupFound := false
 	for _, group := range groups {
 		if group.ID == groupID {
-			members = group.Members
 			out.State = group.State
+			groupFound = true
 			break
 		}
 	}
+	if !groupFound {
+		return RecoveryLineageView{Members: []RecoveryLineageMember{}}
+	}
 	out.GroupID = groupID
 	_, overlays := a.catalogRuntimeOverlays()
-	for _, record := range members {
+	representativeInGroup := false
+	for _, record := range topic.Sessions {
+		if recoveryRecordBelongsToGroup(record, groupID) && sameRecoveryLineagePath(record.Path, topic.RepresentativePath) {
+			representativeInGroup = true
+			break
+		}
+	}
+	for _, record := range topic.Sessions {
+		if !recoveryRecordBelongsToGroup(record, groupID) {
+			continue
+		}
 		overlay := overlays[sessionRuntimeKey(record.Path)]
-		out.Members = append(out.Members, RecoveryLineageMember{Path: record.Path, Role: record.RecoveryRole,
-			Canonical: record.RecoveryCanonical, Turns: record.Turns, Open: overlay.open, Running: overlay.running})
+		versionNote := record.CustomTitle
+		if meta, ok, err := agent.LoadBranchMeta(record.Path); err == nil && ok {
+			versionNote = meta.CustomTitle
+		}
+		canonical := record.RecoveryCanonical
+		if representativeInGroup {
+			canonical = sameRecoveryLineagePath(record.Path, topic.RepresentativePath)
+		}
+		out.Members = append(out.Members, RecoveryLineageMember{
+			Path: record.Path, Role: record.RecoveryRole, Canonical: canonical,
+			Turns: record.Turns, Open: overlay.open, Running: overlay.running,
+			VersionNote: versionNote, Preview: record.Preview,
+			CreatedAt: record.CreatedAt, LastActivityAt: record.LastActivityAt,
+		})
 		out.BranchCount++
 		if record.RecoveryRole == sessioncatalog.RecoveryRoleDiverged {
 			out.Unresolved++
@@ -107,7 +135,102 @@ func (a *App) GetRecoveryLineage(key ProjectTopicKey) RecoveryLineageView {
 	if out.State == "preferred" {
 		out.Unresolved = 0
 	}
+	// The lower-level group API historically calls an all-covered lineage
+	// "repairing". Expose its stable state so event consumers can clear pending
+	// recovery notifications without polling forever.
+	if recoveryLineageIsCovered(out) {
+		out.State = "covered"
+	}
+	if key.RecordClassification {
+		recordRecoveryLineageClassification(key.Path, out)
+	}
 	return out
+}
+
+func recordRecoveryLineageClassification(selectedPath string, view RecoveryLineageView) {
+	outcome := ""
+	switch view.State {
+	case "covered", "adopted", "preferred", "diverged":
+		outcome = "classified_" + view.State
+	default:
+		return
+	}
+	path := ""
+	for _, member := range view.Members {
+		if sameRecoveryLineagePath(member.Path, selectedPath) {
+			path = member.Path
+			break
+		}
+		if path == "" || member.Canonical {
+			path = member.Path
+		}
+	}
+	control.RecordRecoveryLifecycle(path, outcome)
+}
+
+func recoveryLineageSelection(topic sessioncatalog.TopicRecord, selectedPath string) (string, string, bool) {
+	if sessioncatalog.PathIdentityKey(selectedPath) != "" {
+		for _, record := range topic.Sessions {
+			if !sameRecoveryLineagePath(record.Path, selectedPath) {
+				continue
+			}
+			groupID := record.RecoveryGroupID
+			if !record.Recovered {
+				groupID = agent.BranchID(record.Path)
+			}
+			if groupID != "" && recoveryTopicHasGroup(topic, groupID) {
+				return groupID, filepath.Dir(record.Path), true
+			}
+			return "", "", false
+		}
+		return "", "", false
+	}
+
+	groupID, directory := "", ""
+	for _, record := range topic.Sessions {
+		if !record.Recovered || record.RecoveryGroupID == "" {
+			continue
+		}
+		if groupID != "" && groupID != record.RecoveryGroupID {
+			// An older frontend cannot safely choose between multiple groups.
+			return "", "", false
+		}
+		groupID, directory = record.RecoveryGroupID, filepath.Dir(record.Path)
+	}
+	return groupID, directory, groupID != "" && directory != ""
+}
+
+func sameRecoveryLineagePath(left, right string) bool {
+	leftKey := sessioncatalog.PathIdentityKey(left)
+	return leftKey != "" && leftKey == sessioncatalog.PathIdentityKey(right)
+}
+
+func recoveryTopicHasGroup(topic sessioncatalog.TopicRecord, groupID string) bool {
+	for _, record := range topic.Sessions {
+		if record.Recovered && record.RecoveryGroupID == groupID {
+			return true
+		}
+	}
+	return false
+}
+
+func recoveryRecordBelongsToGroup(record sessioncatalog.SessionRecord, groupID string) bool {
+	if record.Recovered {
+		return record.RecoveryGroupID == groupID
+	}
+	return agent.BranchID(record.Path) == groupID
+}
+
+func recoveryLineageIsCovered(view RecoveryLineageView) bool {
+	if view.State != "repairing" || view.CleanupEligible == 0 {
+		return false
+	}
+	for _, member := range view.Members {
+		if member.Role != sessioncatalog.RecoveryRoleNormal && member.Role != sessioncatalog.RecoveryRoleCoveredCopy {
+			return false
+		}
+	}
+	return true
 }
 
 // ChooseRecoveryBranch changes only the default open target. Diverged content
@@ -121,12 +244,9 @@ func (a *App) ChooseRecoveryBranch(req RecoveryPreferenceRequest) error {
 	if err != nil || !ok {
 		return errors.New("recovery lineage is unavailable")
 	}
-	groupID, dir := "", ""
-	for _, record := range topic.Sessions {
-		if record.Recovered && record.RecoveryGroupID != "" {
-			groupID, dir = record.RecoveryGroupID, filepath.Dir(record.Path)
-			break
-		}
+	groupID, dir, ok := recoveryLineageSelection(topic, req.Path)
+	if !ok {
+		return errors.New("selected branch is outside the recovery lineage")
 	}
 	groups, err := catalog.ListRecoveryGroups(a.bootContext(), dir)
 	if err != nil {
@@ -134,15 +254,23 @@ func (a *App) ChooseRecoveryBranch(req RecoveryPreferenceRequest) error {
 	}
 	paths := []string{}
 	chosen := ""
+	foundGroup := false
 	for _, group := range groups {
-		if group.ID != groupID {
+		if group.ID == groupID {
+			foundGroup = true
+			break
+		}
+	}
+	if !foundGroup {
+		return errors.New("recovery lineage is unavailable")
+	}
+	for _, member := range topic.Sessions {
+		if !recoveryRecordBelongsToGroup(member, groupID) {
 			continue
 		}
-		for _, member := range group.Members {
-			paths = append(paths, member.Path)
-			if sessionRuntimeKey(member.Path) == sessionRuntimeKey(req.Path) && member.RecoveryRole != sessioncatalog.RecoveryRoleCoveredCopy {
-				chosen = member.Path
-			}
+		paths = append(paths, member.Path)
+		if sameRecoveryLineagePath(member.Path, req.Path) && member.RecoveryRole != sessioncatalog.RecoveryRoleCoveredCopy {
+			chosen = member.Path
 		}
 	}
 	if chosen == "" {

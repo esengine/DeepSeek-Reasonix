@@ -111,6 +111,23 @@ console.log("\nsubagent progress card");
     }
   });
   ok(!!document.querySelector(".tool__subagent-preview .md"), "auto mode expands reasoning when the card mounts mid-stream");
+
+  const responding = makeItem("responding");
+  responding.id = "task-reasoning";
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: responding })));
+    await flushTimers();
+  });
+  ok(!!document.querySelector(".tool__subagent-preview"), "auto mode keeps the subagent card open after reasoning starts responding");
+  ok(!!document.querySelector(".tool__subagent-preview .md"), "auto mode keeps completed subagent reasoning expanded while the task runs");
+
+  const completed = makeItem("completed");
+  completed.id = "task-reasoning";
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: completed })));
+    await flushTimers();
+  });
+  ok(!document.querySelector(".tool__subagent-preview"), "auto mode collapses the untouched subagent card after the task settles");
   await act(async () => root.unmount());
   dom.window.close();
   hydrateReasoningDisplayMode("summary", true);

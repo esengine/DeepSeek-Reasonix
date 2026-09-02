@@ -25,6 +25,8 @@ func TestClassifyPathRejectsSubstringFalsePositives(t *testing.T) {
 		{"testdata/fixture.json", PathTest},
 		{"web/app.css", PathStyle},
 		{"internal/agent/agent.go", PathOrdinary},
+		{"internal/agent/mutex.go", PathConcurrency},
+		{"internal/agent/mutex_test.go", PathTest},
 	}
 	for _, tt := range tests {
 		if got := ClassifyPath(tt.path, ""); got != tt.want {
@@ -51,5 +53,17 @@ func TestPathLooksSensitiveUsesSegments(t *testing.T) {
 	}
 	if !pathLooksSensitive("internal/auth/session.go", "") {
 		t.Fatal("auth/session.go must be sensitive")
+	}
+}
+
+func TestPathModuleSplitsTopLevelPackages(t *testing.T) {
+	if got, want := PathModule("internal/agent/agent.go", ""), "internal/agent"; got != want {
+		t.Fatalf("agent module = %q, want %q", got, want)
+	}
+	if got, want := PathModule("internal/plugin/plugin.go", ""), "internal/plugin"; got != want {
+		t.Fatalf("plugin module = %q, want %q", got, want)
+	}
+	if PathModule("internal/agent/agent.go", "") == PathModule("internal/plugin/plugin.go", "") {
+		t.Fatal("agent and plugin must be distinct modules")
 	}
 }

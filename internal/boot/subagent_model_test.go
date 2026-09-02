@@ -164,7 +164,7 @@ func TestSubagentSkillOptionsPreserveScheduledQuoteContext(t *testing.T) {
 			}
 		},
 	}
-	factory := newSubagentSkillOptionsFactory(config.AgentConfig{}, quoteCtx, nil, 0, 1, ablation.Set{}, nil, nil)
+	factory := newSubagentSkillOptionsFactory(config.AgentConfig{}, quoteCtx, nil, 0, 1, ablation.Set{}, nil, nil, completionEval{})
 	opts := factory(context.Background(), 5, &provider.Pricing{CacheHit: 0.30, Input: 9, Output: 27, Currency: "CNY"}, 1_000_000, 1)
 	if opts.QuoteContext != quoteCtx {
 		t.Fatal("skill subagent did not retain the host QuoteContext")

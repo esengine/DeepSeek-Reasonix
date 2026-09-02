@@ -11,14 +11,8 @@ import (
 
 func (a *App) sessionCatalogTargets() []sessioncatalog.DirectoryTarget {
 	f := loadProjectsFile()
-	seen := map[string]bool{}
 	out := []sessioncatalog.DirectoryTarget{}
 	add := func(target sessioncatalog.DirectoryTarget) {
-		target.Path = filepath.Clean(strings.TrimSpace(target.Path))
-		if target.Path == "." || target.Path == "" || seen[target.Path] {
-			return
-		}
-		seen[target.Path] = true
 		out = append(out, target)
 	}
 	add(sessioncatalog.DirectoryTarget{Path: config.SessionDir(), Scope: "global"})
@@ -48,7 +42,7 @@ func (a *App) sessionCatalogTargets() []sessioncatalog.DirectoryTarget {
 		}
 		a.mu.RUnlock()
 	}
-	return out
+	return sessioncatalog.UniqueDirectoryTargets(out)
 }
 
 func (a *App) indexRestoredSessionPaths(ctx context.Context, catalog *sessioncatalog.Catalog) {

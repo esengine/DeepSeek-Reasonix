@@ -14,7 +14,7 @@ func TestNormalizeMCPToolArguments(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "object", raw: json.RawMessage(`{"filesToRebuild":["a.go"]}`), want: `{"filesToRebuild":["a.go"]}`},
-		{name: "string object", raw: json.RawMessage(`"{\"filesToRebuild\":[\"a.go\"]}"`), want: `{"filesToRebuild":["a.go"]}`},
+		{name: "string object", raw: json.RawMessage(`"{\"filesToRebuild\":[\"a.go\"]}"`), wantErr: true},
 		{name: "missing", want: `{}`},
 		{name: "null", raw: json.RawMessage(`null`), want: `{}`},
 		{name: "array", raw: json.RawMessage(`[]`), wantErr: true},
@@ -42,20 +42,14 @@ func TestNormalizeMCPToolArguments(t *testing.T) {
 	}
 }
 
-func TestUseCapabilityNormalizesMCPArgumentsBeforeResolution(t *testing.T) {
+func TestUseCapabilityRejectsStringWrappedMCPArgumentsBeforeResolution(t *testing.T) {
 	proxy := NewUseCapabilityTool(context.Background(), nil, nil, nil, nil, nil, nil)
-	resolved, err := proxy.ResolveCall(t.Context(), json.RawMessage(`{
-		"action":"call",
-		"capability_id":"mcp-tool:missing/tool",
-		"arguments":"{\"value\":1}"
-	}`))
-	if err != nil {
-		t.Fatalf("ResolveCall rejected normalized arguments: %v", err)
-	}
-	if string(resolved.Args) != `{"value":1}` {
-		t.Fatalf("resolved arguments = %s, want normalized object", resolved.Args)
-	}
-	if !resolved.Unavailable {
-		t.Fatal("missing MCP target should remain unavailable after argument normalization")
+	_, err := proxy.ResolveCall(t.Context(), json.RawMessage(`{
+			"action":"call",
+			"capability_id":"mcp-tool:missing/tool",
+			"arguments":"{\"value\":1}"
+		}`))
+	if err == nil {
+		t.Fatal("ResolveCall accepted a JSON-string-wrapped object")
 	}
 }

@@ -15,9 +15,15 @@ export type TranscriptScrollDiagnosticSource =
   | "reset"
   | "user-scroll-intent"
   | "manual-reading"
-  | "reader-intent-ended"
+  | "reader-idle-deadline"
+  | "reader-stability"
+  | "reader-tail-handoff"
+  | "reader-transaction-end"
+  | "native-scrollbar-begin"
+  | "native-scrollbar-end"
   | "scroll-delivered"
   | "tail-content-changed"
+  | "tail-settle-exhausted"
   | "content-shrank"
   | "layout-height-changed"
   | "viewport-resized"
@@ -35,9 +41,9 @@ export type TranscriptScrollDiagnosticSource =
   | "native-scrollbar-release";
 
 export type TranscriptTailWriteDiagnostic = {
-  source: TranscriptScrollDiagnosticSource;
+  source?: TranscriptScrollDiagnosticSource;
   phase: "initial" | "settle";
-  settle?: { frame: number; offBottomFrames: number; stagnantFrames: number };
+  settle?: { frame: number; offBottomFrames?: number; stagnantFrames?: number };
 };
 
 function sourceForEvent(event: TranscriptScrollEvent["type"]): TranscriptScrollDiagnosticSource {
@@ -45,9 +51,15 @@ function sourceForEvent(event: TranscriptScrollEvent["type"]): TranscriptScrollD
     case "RESET": return "reset";
     case "USER_SCROLL_INTENT": return "user-scroll-intent";
     case "MANUAL_READING": return "manual-reading";
-    case "READER_INTENT_ENDED": return "reader-intent-ended";
+    case "READER_IDLE_DEADLINE": return "reader-idle-deadline";
+    case "READER_STABILITY_SAMPLE": return "reader-stability";
+    case "READER_TAIL_HANDOFF": return "reader-tail-handoff";
+    case "READER_TRANSACTION_END": return "reader-transaction-end";
+    case "NATIVE_SCROLLBAR_BEGIN": return "native-scrollbar-begin";
+    case "NATIVE_SCROLLBAR_END": return "native-scrollbar-end";
     case "SCROLL_DELIVERED": return "scroll-delivered";
     case "TAIL_CONTENT_CHANGED": return "tail-content-changed";
+    case "TAIL_SETTLE_EXHAUSTED": return "tail-settle-exhausted";
     case "CONTENT_SHRANK": return "content-shrank";
     case "LAYOUT_HEIGHT_CHANGED": return "layout-height-changed";
     case "VIEWPORT_RESIZED": return "viewport-resized";
@@ -80,6 +92,8 @@ export function recordTranscriptScrollTransition(
     || previousState.scrollable !== nextState.scrollable
     || previousState.readerIntent !== nextState.readerIntent
     || previousState.readerIntentCanClaimTail !== nextState.readerIntentCanClaimTail
+    || previousState.readerPhase !== nextState.readerPhase
+    || previousState.readerStableFrames !== nextState.readerStableFrames
     || previousState.recoveryId !== nextState.recoveryId;
   if (stateChanged || tailCommand || event.type === "CONTENT_SHRANK" || event.type === "LAYOUT_HEIGHT_CHANGED") {
     recordTranscriptScrollDiagnostic("scroll-state", {
@@ -89,6 +103,8 @@ export function recordTranscriptScrollTransition(
       atBottom: nextState.atBottom,
       scrollable: nextState.scrollable,
       readerIntent: nextState.readerIntent,
+      phase: nextState.readerPhase,
+      stableFrames: nextState.readerStableFrames,
       canClaimTail: nextState.readerIntentCanClaimTail,
       substantial: event.type === "SCROLL_DELIVERED" ? event.substantial === true : undefined,
       tailCommand,

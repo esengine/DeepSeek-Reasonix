@@ -71,7 +71,10 @@ var readOnlyPrefixes = map[string]map[string]bool{
 		"outdated": true, "audit": true,
 	},
 	"cargo": {
-		"check": true, "doc": true, "search": true,
+		// check/doc are deliberately absent: cargo runs the crate's build.rs
+		// (arbitrary code) even for them — classifyCargo already bills both as
+		// code-executing writers, and this legacy table must not disagree.
+		"search": true,
 	},
 	"docker": {
 		"ps": true, "images": true, "inspect": true, "logs": true,

@@ -755,8 +755,11 @@ func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
 	m.shellOutputs["shell-old"] = "old shell output\n"
 	m.shellExpanded["shell-old"] = true
 	m.shellTranscriptIdx["shell-old"] = 2
-	next, _ = m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
+	next, cmd := m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
 	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("confirmed /clear should clear native scrollback after rotating the session")
+	}
 	if ctrl.SessionPath() == path {
 		t.Fatal("confirmed /clear should rotate to a fresh session path")
 	}
@@ -773,6 +776,90 @@ func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
 	if len(m.shellTranscriptIdx) != 0 || len(m.shellOutputs) != 0 || len(m.shellExpanded) != 0 {
 		t.Fatalf("confirmed /clear should reset shell display state: idx=%v outputs=%v expanded=%v",
 			m.shellTranscriptIdx, m.shellOutputs, m.shellExpanded)
+	}
+}
+
+// TestClearCommandInYOLOModeSkipsConfirmation guards the non-interactive fast
+// path: with YOLO already active, /clear must clear the session immediately
+// instead of opening the confirmation overlay.
+func TestClearCommandInYOLOModeSkipsConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	ctrl := control.New(control.Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	if cmd := m.runSlashCommand("/clear"); cmd == nil {
+		t.Fatal("/clear in YOLO mode should clear native scrollback after rotating the session")
+	}
+	if m.clearConfirm != nil {
+		t.Fatal("/clear in YOLO mode should not open a confirmation prompt")
+	}
+	if ctrl.SessionPath() == path {
+		t.Fatal("/clear in YOLO mode should rotate to a fresh session path")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("/clear in YOLO mode should remove the old transcript, stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
+	}
+}
+
+func TestClearCommandFailureKeepsDisplayAndDoesNotClearScreen(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	runner := &blockingTurnRunner{started: make(chan struct{})}
+	ctrl := control.New(control.Options{
+		Runner: runner, Executor: exec, SystemPrompt: "sys",
+		SessionDir: dir, SessionPath: path, Label: "test", Sink: event.Discard,
+	})
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.Send("active turn")
+	<-runner.started
+	t.Cleanup(func() {
+		ctrl.Cancel()
+		deadline := time.Now().Add(2 * time.Second)
+		for ctrl.Running() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.commitLine("visible transcript sentinel")
+	m.shellOutputs["shell-old"] = "old shell output\n"
+	m.shellExpanded["shell-old"] = true
+	m.shellTranscriptIdx["shell-old"] = len(m.transcript) - 1
+	m.runSlashCommand("/clear")
+
+	next, cmd := m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatal("failed /clear should not clear native scrollback")
+	}
+	if ctrl.SessionPath() != path {
+		t.Fatalf("failed /clear rotated session path to %q, want %q", ctrl.SessionPath(), path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("failed /clear should preserve the session file: %v", err)
+	}
+	if !strings.Contains(strings.Join(m.transcript, "\n"), "visible transcript sentinel") {
+		t.Fatalf("failed /clear erased the visible transcript: %+v", m.transcript)
+	}
+	if m.shellOutputs["shell-old"] == "" || !m.shellExpanded["shell-old"] {
+		t.Fatalf("failed /clear reset shell display state: outputs=%v expanded=%v", m.shellOutputs, m.shellExpanded)
 	}
 }
 
@@ -2815,12 +2902,12 @@ func TestQueuedFoldedPasteExpandsBeforeInterjectSend(t *testing.T) {
 		SessionDir: dir,
 		Label:      "test",
 	})
+	defer ctrl.Close()
 	ctrl.EnsureSessionPath()
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.eventCh = make(chan event.Event, 8)
 	m.state = tuiRunning
-
 	pasted := strings.Repeat("queued pasted content\n", 10)
 	model, _ := m.Update(tea.PasteMsg{Content: pasted})
 	m = model.(chatTUI)

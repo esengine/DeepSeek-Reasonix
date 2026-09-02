@@ -1349,25 +1349,18 @@ func TestPlannerBlocksDestructiveMCPWithExecutorHandoff(t *testing.T) {
 	}
 }
 
-func TestUseCapabilityCallsAreAlwaysSerialized(t *testing.T) {
+func TestUseCapabilityDiscoveryCallsAreParallel(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	reg.Add(fakeTool{name: "use_capability", readOnly: true})
+	reg.Add(NewUseCapabilityTool(t.Context(), nil, nil, reg, nil, nil, nil))
 	calls := []provider.ToolCall{
 		{ID: "1", Name: "use_capability", Arguments: `{"action":"list"}`},
 		{ID: "2", Name: "use_capability", Arguments: `{"action":"list"}`},
 		{ID: "3", Name: "read_file", Arguments: `{"path":"a.go"}`},
 	}
 	got := partitionToolCalls(reg, calls)
-	if len(got) != 3 {
-		t.Fatalf("partition = %+v, want 3 batches (uc, uc, read)", got)
-	}
-	if got[0].parallel || got[1].parallel {
-		t.Fatalf("use_capability batches must be serial for every agent: %+v", got)
-	}
-	// A lone read_file may still be marked parallelisable; it is a single-call batch.
-	if got[2].start != 2 || got[2].end != 3 {
-		t.Fatalf("trailing read batch = %+v", got[2])
+	if len(got) != 1 || !got[0].parallel || got[0].end != 3 {
+		t.Fatalf("list/read-only discovery should batch: %+v", got)
 	}
 }
 

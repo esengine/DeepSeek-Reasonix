@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
@@ -65,12 +65,14 @@ type BranchMeta struct {
 	// listing fields (Turns/Preview). Only snapshot/Fork/Branch stamp it; readers
 	// use it to distinguish authoritative current counts from legacy zeros.
 	SchemaVersion int `json:"schema_version,omitempty"`
-	// Turns and Preview are listing-only fields for sidebar/CLI pickers. Autosave
-	// keeps them fresh from the in-memory conversation, so ListSessions avoids
-	// decoding the transcript; SchemaVersion marks whether zero counts are authoritative.
-	Turns        int               `json:"turns,omitempty"`
-	Preview      string            `json:"preview,omitempty"`
-	InFlightTurn *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
+	// Turns/Preview accelerate listings; the listing identity binds them to the
+	// transcript generation they describe, so a failed projection write makes
+	// old counts visibly stale instead of silently reusable.
+	Turns                int               `json:"turns,omitempty"`
+	Preview              string            `json:"preview,omitempty"`
+	ListingRevision      int64             `json:"listing_revision,omitempty"`
+	ListingContentDigest string            `json:"listing_content_digest,omitempty"`
+	InFlightTurn         *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
 	// Closed completed todo shelves; desktop remounts hide the same fingerprint.
 	DismissedTodoBatches []string `json:"dismissed_todo_batches,omitempty"`
 }
@@ -233,18 +235,6 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	})
 }
 
-// saveBranchMetaKeepInFlightTurn keeps any existing in-flight turn on rewrite.
-func saveBranchMetaKeepInFlightTurn(sessionPath string, m BranchMeta) error {
-	return UpdateBranchMeta(sessionPath, true, func(current *BranchMeta) error {
-		if m.InFlightTurn == nil {
-			m.InFlightTurn = current.InFlightTurn
-		}
-		preserveBranchMetaPersistence(&m, *current)
-		*current = m
-		return nil
-	})
-}
-
 func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 	return UpdateBranchMeta(sessionPath, false, func(current *BranchMeta) error {
 		preserveBranchMetaPersistence(&m, *current)
@@ -260,6 +250,10 @@ func SaveBranchMetaPreserveUpdatedLocked(sessionPath string, m BranchMeta) error
 }
 
 func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
+	return saveBranchMetaContext(context.Background(), sessionPath, m, touchUpdated)
+}
+
+func saveBranchMetaContext(ctx context.Context, sessionPath string, m BranchMeta, touchUpdated bool) error {
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
 		return fmt.Errorf("empty session path")
@@ -283,34 +277,15 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	if existing, ok, err := LoadBranchMeta(sessionPath); err == nil && ok {
 		preserveBranchMetaPersistence(&m, existing)
 	}
-	fileutil.Crash("branch-meta", metaPath)
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := marshalJSONIndentContext(ctx, m)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(metaPath), ".branch.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := fileutil.ReplaceFile(tmpPath, metaPath); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return atomicWriteFileContext(ctx, metaPath, ".branch.*.tmp", "branch-meta", b, 0o600, false)
 }
 
 func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
@@ -322,6 +297,7 @@ func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
 		next.Revision = existing.Revision
 		next.ContentDigest = existing.ContentDigest
 		next.WriterID = existing.WriterID
+		preserveBranchMetaListingProjection(next, existing)
 		return
 	}
 	if existing.Revision == next.Revision {
@@ -331,7 +307,19 @@ func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
 		if strings.TrimSpace(next.WriterID) == "" {
 			next.WriterID = existing.WriterID
 		}
+		if next.ListingRevision == 0 && existing.ListingRevision != 0 ||
+			strings.TrimSpace(next.ListingContentDigest) == "" && strings.TrimSpace(existing.ListingContentDigest) != "" {
+			preserveBranchMetaListingProjection(next, existing)
+		}
 	}
+}
+
+func preserveBranchMetaListingProjection(next *BranchMeta, existing BranchMeta) {
+	next.SchemaVersion = existing.SchemaVersion
+	next.Turns = existing.Turns
+	next.Preview = existing.Preview
+	next.ListingRevision = existing.ListingRevision
+	next.ListingContentDigest = existing.ListingContentDigest
 }
 
 func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {
@@ -670,5 +658,6 @@ func UpdateSessionMeta(sessionPath, model, preview string, turns int, markActivi
 	// These counts were derived from the current content, so mark them
 	// authoritative — listing can then trust Turns (even 0) without re-decoding.
 	m.SchemaVersion = BranchMetaCountsVersion
+	stampSessionListingProjection(&m)
 	return saveBranchMeta(sessionPath, m, markActivity)
 }

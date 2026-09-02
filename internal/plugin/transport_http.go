@@ -15,11 +15,38 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const mcpSubscriptionsListenMethod = "subscriptions/listen"
+
+// asyncStreamableHTTPSubscriptions keeps the optional SEP-2575 notification
+// stream from becoming part of the mandatory startup critical path. Some MCP
+// HTTP bridges buffer a streaming Web Response before writing HTTP response
+// headers, so the SDK's synchronous transport write would otherwise block
+// Client.Connect even though server/discover already completed successfully.
+//
+// The underlying call still uses the SDK-owned connection and context. A
+// compliant server therefore keeps delivering notifications normally, while a
+// buffering server is cancelled with the session without blocking tools/list.
+func asyncStreamableHTTPSubscriptions(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+	return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+		if method != mcpSubscriptionsListenMethod {
+			return next(ctx, method, req)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		go func() {
+			_, _ = next(ctx, method, req)
+		}()
+		return &mcpsdk.SubscriptionsListenResult{}, nil
+	}
+}
+
 func newHTTPTransport(s Spec) (*sdkSessionTransport, error) {
 	if strings.TrimSpace(s.Type) == "" {
 		s.Type = "http"
 	}
-	return newSDKSessionTransport(context.Background(), s)
+	// Transient OAuth/probe connections declare no optional capabilities.
+	return newSDKSessionTransport(context.Background(), s, HostProfileCore)
 }
 
 func validateMCPURL(name, transport, raw string) error {

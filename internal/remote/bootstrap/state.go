@@ -16,6 +16,7 @@ type ServeState struct {
 	Addr      string `json:"addr"` // 127.0.0.1:<port> on the remote host
 	Workspace string `json:"workspace"`
 	Version   string `json:"version,omitempty"`
+	ServeCaps string `json:"serve_caps,omitempty"`
 	TokenFile string `json:"token_file"`
 	LogFile   string `json:"log_file,omitempty"`
 	StartedAt int64  `json:"started_at,omitempty"` // unix seconds

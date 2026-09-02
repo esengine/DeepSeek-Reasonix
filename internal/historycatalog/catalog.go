@@ -304,11 +304,18 @@ func (c *Catalog) drainPending(ctx context.Context) {
 			delete(c.paths, path)
 			c.mu.Unlock()
 			_ = c.indexPath(ctx, queued.root, path, 0, queued.appendFrom)
+		case path := <-c.rootCh:
+			c.mu.Lock()
+			root, ok := c.roots[path]
+			c.mu.Unlock()
+			if ok {
+				_ = c.reconcileRoot(ctx, root)
+			}
 		default:
 			c.mu.Lock()
 			empty := len(c.paths) == 0 && len(c.dirtyRoots) == 0
 			c.mu.Unlock()
-			if empty && len(c.queue) == 0 {
+			if empty && len(c.queue) == 0 && len(c.rootCh) == 0 {
 				return
 			}
 			// Another goroutine may have enqueued between checks; yield once.
@@ -316,7 +323,7 @@ func (c *Catalog) drainPending(ctx context.Context) {
 			c.mu.Lock()
 			empty = len(c.paths) == 0 && len(c.dirtyRoots) == 0
 			c.mu.Unlock()
-			if empty && len(c.queue) == 0 {
+			if empty && len(c.queue) == 0 && len(c.rootCh) == 0 {
 				return
 			}
 		}

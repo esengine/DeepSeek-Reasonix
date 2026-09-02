@@ -371,6 +371,36 @@ func TestSetRecoveryPreferredKeepsExactlyOneChoice(t *testing.T) {
 	}
 }
 
+func TestSetRecoveryPreferredAllowsOriginalLineageMember(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	branch := filepath.Join(dir, "branch.jsonl")
+	for _, path := range []string{root, branch} {
+		session := NewSession("sys")
+		session.Add(provider.Message{Role: provider.RoleUser, Content: filepath.Base(path)})
+		if err := session.Save(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SaveBranchMeta(root, BranchMeta{ID: BranchID(root)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMeta(branch, BranchMeta{ID: BranchID(branch), Recovered: true, ParentID: BranchID(root)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRecoveryPreferred([]string{root, branch}, root); err != nil {
+		t.Fatal(err)
+	}
+	rootMeta, ok, err := LoadBranchMeta(root)
+	if err != nil || !ok || !rootMeta.RecoveryPreferred || !RecoveryPreferenceCurrent(root, rootMeta) {
+		t.Fatalf("original preference ok=%v err=%v meta=%+v", ok, err, rootMeta)
+	}
+	branchMeta, _, _ := LoadBranchMeta(branch)
+	if branchMeta.RecoveryPreferred {
+		t.Fatal("choosing the original left a recovery leaf preferred")
+	}
+}
+
 func TestTrashReclaimableRecoveryBranchEnforcesGraceAtFinalGuard(t *testing.T) {
 	dir := t.TempDir()
 	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "trash-fresh")

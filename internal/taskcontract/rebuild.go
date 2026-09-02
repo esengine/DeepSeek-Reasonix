@@ -73,6 +73,11 @@ func (c *Contract) AbsorbReceipt(seq int, rec evidence.Receipt, workspaceRoot st
 		c.satisfyKindAfter(ObligationSignoff, seq, rec)
 		c.resolveCitedCriteria(rec)
 	}
+	if rec.Success && rec.ToolName == "review_report" {
+		if report, err := evidence.ParseReviewReport(rec.Args); err == nil && report.Kind == evidence.ReviewKindReview && !report.HasBlockingFinding() {
+			c.independentReviews++
+		}
+	}
 	if !rec.Success {
 		return
 	}
@@ -80,7 +85,11 @@ func (c *Contract) AbsorbReceipt(seq int, rec evidence.Receipt, workspaceRoot st
 	if profile.MutatesState() {
 		c.invalidateAfterWrite(seq, profile.TargetKeys())
 		mapping := MapWriter(profile, seq, workspaceRoot, testsForbidden)
+		capped := c.independentReviews >= maxAutoIndependentReviews
 		for _, o := range mapping.PostSuccess {
+			if capped && o.Kind == ObligationIndependentReview {
+				continue
+			}
 			c.addObligation(o)
 		}
 		if requireFullVerification && workspaceProofTarget(profile, workspaceRoot) {
@@ -172,6 +181,9 @@ func (c *Contract) promoteCriteriaStrict(origin ReasonCode) {
 func (c *Contract) invalidateAfterWrite(seq int, targets []evidence.TargetKey) {
 	for i := range c.Obligations {
 		o := &c.Obligations[i]
+		if o.Kind == ObligationIndependentReview && c.independentReviews >= maxAutoIndependentReviews {
+			continue
+		}
 		if !invalidatedByWrite(o.Kind) {
 			continue
 		}

@@ -22,6 +22,9 @@ func completeDesktopShutdown(tracker *desktopLifecycleTracker, body func()) {
 }
 
 func (a *App) shutdownBody() {
+	if a.topicState != nil {
+		defer a.topicState.close()
+	}
 	if a.desktopShell.linuxRecovery != nil {
 		a.desktopShell.linuxRecovery.stop()
 	}

@@ -57,7 +57,7 @@ export function makeMockSessionCatalogBindings(cloneProjectTree: () => ProjectNo
           ...project,
           children: asArray(project.children).filter((topic) => Boolean(topic.pinned)),
         })),
-        catalog: { state: "ready", mode: "memory", revision: 1, indexed: 4, total: 4, repairPending: 0, sourceCount: 4, unindexedTargetCount: 0, canRebuild: true },
+        catalog: { state: "ready", mode: "memory", revision: 1, indexed: 4, total: 4, repairPending: 0, sourceCount: 4, unindexedTargetCount: 0, canRebuild: false },
         indexed: 4,
         total: 4,
         indexingDone: true,
@@ -70,7 +70,7 @@ export function makeMockSessionCatalogBindings(cloneProjectTree: () => ProjectNo
         ?? { key: "", kind: key.scope === "global" ? "global_topic" : "topic", label: "", children: [] };
     },
     async GetSessionCatalogStatus() {
-      return { state: "ready", mode: "memory", revision: 1, indexed: 4, total: 4, repairPending: 0, sourceCount: 4, unindexedTargetCount: 0, canRebuild: true };
+      return { state: "ready", mode: "memory", revision: 1, indexed: 4, total: 4, repairPending: 0, sourceCount: 4, unindexedTargetCount: 0, canRebuild: false };
     },
     async RebuildSessionCatalog() {},
   };

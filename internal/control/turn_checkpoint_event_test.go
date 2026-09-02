@@ -132,7 +132,7 @@ func TestCancelBeforeRunnerAddsUserCarriesFallbackCheckpoint(t *testing.T) {
 	requireCheckpointTurn(t, done, 0)
 	messages := session.Snapshot()
 	if len(messages) < 2 || messages[1].Role != provider.RoleUser ||
-		!agent.IsUserAuthoredTurn(agent.UserMessageText(messages[1])) {
+		!agent.IsUserAuthoredTurnMessage(messages[1]) {
 		t.Fatalf("cancel fallback messages = %+v, want a retained user prompt at the checkpoint boundary", messages)
 	}
 }

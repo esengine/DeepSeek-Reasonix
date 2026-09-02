@@ -13,6 +13,7 @@ type agentConfig struct {
 	temperature        float64
 	usageSource        string
 	modelRef           string
+	completionAgentConfig
 	// workspaceID is a prompt-cache lineage component, so it must not move
 	// while an agent lives — a change would silently rekey the cache.
 	workspaceID string

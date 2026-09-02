@@ -21,7 +21,6 @@ func (p *coalesceWiringProvider) Stream(_ context.Context, req provider.Request)
 		chunks = append(chunks, provider.Chunk{Type: provider.ChunkText, Text: fmt.Sprintf("w%d ", i)})
 	}
 	chunks = append(chunks, provider.Chunk{Type: provider.ChunkDone})
-	chunks = finishCompliantBootChunks(req, 0, chunks)
 	ch := make(chan provider.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		ch <- chunk

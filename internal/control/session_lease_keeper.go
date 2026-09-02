@@ -19,10 +19,11 @@ import (
 //
 // The zero value is not ready for use; construct with NewSessionLeaseKeeper.
 type SessionLeaseKeeper struct {
-	mu         sync.Mutex
-	lease      *agent.SessionLease
-	controller *Controller
-	retired    []<-chan struct{}
+	mu              sync.Mutex
+	lease           *agent.SessionLease
+	controller      *Controller
+	retired         []<-chan struct{}
+	ownershipBinder func(*Controller, *SessionLeaseKeeper)
 }
 
 func NewSessionLeaseKeeper() *SessionLeaseKeeper {
@@ -64,14 +65,31 @@ func (k *SessionLeaseKeeper) Rebind(path string) error {
 // recovery path before releasing the original lease, so a failed handoff keeps
 // the previous session protected.
 func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) error {
+	_, err := k.handleSessionRecovered(nil, false, info)
+	return err
+}
+
+// HandleSessionRecoveredFor applies a recovery only while this keeper still
+// owns c. Multi-session frontends use the boolean to retry against the
+// controller's newly published keeper when a captured callback races an
+// ownership transfer.
+func (k *SessionLeaseKeeper) HandleSessionRecoveredFor(c *Controller, info SessionRecoveryInfo) (bool, error) {
+	return k.handleSessionRecovered(c, true, info)
+}
+
+func (k *SessionLeaseKeeper) handleSessionRecovered(c *Controller, requireOwner bool, info SessionRecoveryInfo) (bool, error) {
 	recoveryPath := strings.TrimSpace(info.RecoveryPath)
 	if k == nil || recoveryPath == "" {
-		return nil
+		return true, nil
 	}
 	k.mu.Lock()
+	if requireOwner && k.controller != c {
+		k.mu.Unlock()
+		return false, nil
+	}
 	if k.lease != nil && k.lease.Path() == agent.CanonicalSessionPath(recoveryPath) {
 		k.mu.Unlock()
-		return nil
+		return true, nil
 	}
 	lease, err := agent.TryAcquireSessionLease(recoveryPath)
 	if err == nil && k.controller != nil {
@@ -83,13 +101,13 @@ func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) er
 		}
 		k.mu.Unlock()
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
-			return fmt.Errorf("bind recovery session: %s; %s",
+			return true, fmt.Errorf("bind recovery session: %s; %s",
 				SessionInUseMessage(err), SessionLeaseCloseHint)
 		}
 		// The detailed error can contain a machine-local path. Keep it in
 		// diagnostics and return path-free text to every frontend.
 		slog.Error("control: bind recovery session lease", "err", err)
-		return fmt.Errorf("bind recovery session: unable to secure recovered transcript")
+		return true, fmt.Errorf("bind recovery session: unable to secure recovered transcript")
 	}
 	old := k.lease
 	k.lease = lease
@@ -108,7 +126,7 @@ func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) er
 			close(retired)
 		}()
 	}
-	return nil
+	return true, nil
 }
 
 // HandleSessionTransition acquires and binds an intentional path-change target
@@ -219,7 +237,130 @@ func (k *SessionLeaseKeeper) BindControllerAuthority(c *Controller) error {
 	}
 	k.controller = c
 	c.SetOnSessionTransition(k.HandleSessionTransition)
+	if k.ownershipBinder != nil {
+		k.ownershipBinder(c, k)
+	}
 	return nil
+}
+
+// BindSessionAuthority issues the held lease's next write generation directly
+// onto a private session candidate. Resume callers use it before publishing
+// that candidate through their controller; binding the controller itself would
+// only update the outgoing executor session that Resume is about to replace.
+func (k *SessionLeaseKeeper) BindSessionAuthority(sess *agent.Session) error {
+	if k == nil || sess == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	sess.RequireWriteAuthority()
+	if k.lease == nil {
+		sess.ClearWriteAuthority()
+		return agent.ErrSessionWriteAuthorityMissing
+	}
+	return k.lease.Writer().Bind(sess, agent.NextSessionWriteGeneration())
+}
+
+// SetControllerOwnershipBinder lets an owning frontend compose its routing
+// callbacks with lease handoff. The binder follows a controller through
+// Split, RebindDetaching, and Adopt instead of those transfers replacing the
+// frontend callback with the keeper-only default.
+func (k *SessionLeaseKeeper) SetControllerOwnershipBinder(bind func(*Controller, *SessionLeaseKeeper)) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	k.ownershipBinder = bind
+	if k.controller != nil && bind != nil {
+		bind(k.controller, k)
+	}
+	k.mu.Unlock()
+}
+
+func (k *SessionLeaseKeeper) bindTransferredController(c *Controller) {
+	if c == nil {
+		return
+	}
+	c.SetOnSessionTransition(k.HandleSessionTransition)
+	if k.ownershipBinder != nil {
+		k.ownershipBinder(c, k)
+	} else {
+		c.SetOnSessionRecovered(k.HandleSessionRecovered)
+	}
+}
+
+// Split moves the held lease and controller binding into a new keeper without
+// releasing either. Multi-session Serve uses this when a busy controller moves
+// to the background and must keep saving its own transcript to completion.
+func (k *SessionLeaseKeeper) Split() *SessionLeaseKeeper {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.lease == nil && k.controller == nil && len(k.retired) == 0 {
+		return nil
+	}
+	dst := &SessionLeaseKeeper{lease: k.lease, controller: k.controller, retired: k.retired, ownershipBinder: k.ownershipBinder}
+	if dst.controller != nil {
+		dst.bindTransferredController(dst.controller)
+	}
+	k.lease, k.controller, k.retired = nil, nil, nil
+	return dst
+}
+
+// RebindDetaching acquires path and returns the previous binding in a separate
+// keeper. Acquisition is failure-atomic: on error the receiver is unchanged.
+func (k *SessionLeaseKeeper) RebindDetaching(path string) (*SessionLeaseKeeper, error) {
+	if k == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(path) == "" {
+		return k.Split(), nil
+	}
+	k.mu.Lock()
+	canonical := agent.CanonicalSessionPath(path)
+	if k.lease != nil && k.lease.Path() == canonical {
+		k.mu.Unlock()
+		return nil, nil
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		k.mu.Unlock()
+		return nil, err
+	}
+	var dst *SessionLeaseKeeper
+	if k.lease != nil || k.controller != nil || len(k.retired) > 0 {
+		dst = &SessionLeaseKeeper{lease: k.lease, controller: k.controller, retired: k.retired, ownershipBinder: k.ownershipBinder}
+	}
+	if dst.controller != nil {
+		dst.bindTransferredController(dst.controller)
+	}
+	k.lease, k.controller, k.retired = lease, nil, nil
+	k.mu.Unlock()
+	return dst, nil
+}
+
+// Adopt transfers another keeper's lease and controller binding into the
+// receiver. The source is emptied; any receiver binding is released first.
+func (k *SessionLeaseKeeper) Adopt(other *SessionLeaseKeeper) {
+	if k == nil || other == nil || k == other {
+		return
+	}
+	other.mu.Lock()
+	inLease, inCtrl, inRetired, inBinder := other.lease, other.controller, other.retired, other.ownershipBinder
+	other.lease, other.controller, other.retired = nil, nil, nil
+	other.mu.Unlock()
+	k.mu.Lock()
+	k.releaseLocked()
+	if k.ownershipBinder == nil {
+		k.ownershipBinder = inBinder
+	}
+	k.lease, k.controller, k.retired = inLease, inCtrl, inRetired
+	if inCtrl != nil {
+		k.bindTransferredController(inCtrl)
+	}
+	k.mu.Unlock()
 }
 
 func (k *SessionLeaseKeeper) releaseLocked() {
@@ -229,6 +370,7 @@ func (k *SessionLeaseKeeper) releaseLocked() {
 	}
 	if k.controller != nil {
 		k.controller.SetOnSessionTransition(nil)
+		k.controller.SetOnSessionRecovered(nil)
 		_ = k.controller.BindSessionWriteAuthority(nil)
 		k.controller = nil
 	}

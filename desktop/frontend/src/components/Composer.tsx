@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, PackageCheck, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FileText, Folder, Gauge, List, MessageSquare, PackageCheck, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -10,10 +10,11 @@ import { formatInboxError, isInboxItemMissing } from "../lib/inboxError";
 import { inboxScopeKey } from "../lib/composerInboxQueue";
 import { useComposerInboxRefresh } from "../lib/useComposerInboxRefresh";
 import { useComposerImeGuard } from "../lib/useComposerImeGuard";
+import { useComposerCommandCatalog } from "../lib/useComposerCommandCatalog";
 import { guidanceIsInFlight, guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
 import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
-import { sessionTurnsLabel } from "../lib/sessionCatalogPresentation";
+import { sessionTurnsLabel } from "../lib/sessionTurnsPresentation";
 import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
@@ -77,6 +78,7 @@ import {
   type SelectedTextReference,
 } from "../lib/selectedTextContext";
 import { formatGoalWorkTime } from "../lib/goalRuntime";
+import { ComposerContentMenuActions } from "./ComposerContentMenuActions";
 
 interface Attachment {
   path: string;
@@ -548,12 +550,15 @@ export function Composer({
   goalRuntime,
   cwd,
   modelLabel,
+  commandCatalog,
   imageInputEnabled = true,
   imageUnderstandingEnabled = false,
+  attachmentInputEnabled = true,
   tabId, turnId,
   effort,
   onSend,
   onSteer,
+  localDurableGuidance = true,
   onCancel,
   onCycleMode,
   onSetMode,
@@ -619,14 +624,19 @@ export function Composer({
   goalRuntime?: GoalRuntime;
   cwd?: string;
   modelLabel: string;
+  commandCatalog?: readonly CommandInfo[];
   imageInputEnabled?: boolean;
   /** True when text-only image turns are preprocessed by a configured vision model. */
   imageUnderstandingEnabled?: boolean;
+  /** False for remote sessions because local filesystem paths are not portable to Serve. */
+  attachmentInputEnabled?: boolean;
   tabId?: string; turnId?: string;
   effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
   onInvocationMetadataChange?: (metadata: Record<string, { kind: "skill" | "subagent"; color?: string }>) => void;
   onSteer?: (submitText: string, tabId?: string) => void | Promise<void>;
+  /** False when the owning surface provides its own durable remote inbox. */
+  localDurableGuidance?: boolean;
   // Returns the un-sent text plus the exact durable queue IDs the backend
   // confirmed were withdrawn and are therefore safe to restore.
   onCancel: (queuedItemIDs?: string[]) => Promise<CancelOutcome>;
@@ -785,6 +795,7 @@ export function Composer({
   const [, setHistoryIndex] = useState(-1);
   const savedTextRef = useRef("");
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const measureTaRef = useRef<HTMLTextAreaElement>(null);
   const richInputRef = useRef<RichComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editHistoryByDraftRef = useRef<Record<string, ComposerEditHistory>>({});
@@ -1252,18 +1263,7 @@ export function Composer({
   }, [guidanceExpanded, pendingGuidance.length]);
 
   // --- slash commands ---
-  const [commands, setCommands] = useState<CommandInfo[]>([]);
-  useEffect(() => {
-    let live = true;
-    app.Commands()
-      .then((next) => {
-        if (live) setCommands(asArray(next));
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [ready, cwd, running, workspaceScopeKey]);
+  const commands = useComposerCommandCatalog(commandCatalog, ready ?? false, cwd, running, workspaceScopeKey ?? "");
   useEffect(() => {
     onInvocationMetadataChange?.(Object.fromEntries(
       commands
@@ -1779,6 +1779,7 @@ export function Composer({
     }
     const ref = parseWorkspaceReference(insertRequest.text);
     if (ref) {
+      if (!attachmentInputEnabled) return;
       addWorkspaceReference(ref);
       return;
     }
@@ -2044,6 +2045,7 @@ export function Composer({
     const trimmedDraft = typedGoalDraft ?? rawDraft;
     const trimmedText = trimmedDraft.text;
     if (draftHasPendingPaste(submitDraftKey)) return;
+    if (!attachmentInputEnabled && (attachmentsRef.current.length > 0 || workspaceRefsRef.current.length > 0)) return;
     if (!imageInputEnabled && !imageUnderstandingEnabled && hasImageAttachments(attachmentsRef.current)) {
       warnImageInputFallback();
     }
@@ -2109,6 +2111,15 @@ export function Composer({
         const guidanceText = displayText.trim() || (structured?.display.trim() ?? "");
         const guidanceSubmitText = submitText.trim();
         if (guidanceText) {
+          if (!localDurableGuidance && onSteer) {
+            try {
+              await onSteer(guidanceSubmitText, submitTabId);
+              clearSubmittedDraft(submitDraftKey);
+            } catch (error) {
+              showToast(formatInboxError(error, locale), "warn");
+            }
+            return;
+          }
           // Durable follow-up: only clear the composer after a durable receipt.
           const receiptTracker = guidanceReceiptTrackerRef.current;
           receiptTracker?.start(submitDraftKey);
@@ -2273,6 +2284,7 @@ export function Composer({
     });
 
   const attachImageFiles = async (files: File[], sourceDraftKey: string) => {
+    if (!attachmentInputEnabled) return;
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
     for (const file of images) {
@@ -2297,6 +2309,7 @@ export function Composer({
   // Non-image pastes (PDFs, docs): the clipboard hands us bytes, not a path, so
   // the kernel stores them and we reference the saved path — attached, not ignored.
   const attachOtherFiles = async (files: File[], sourceDraftKey: string) => {
+    if (!attachmentInputEnabled) return;
     const others = files.filter((f) => !f.type.startsWith("image/"));
     if (others.length === 0) return;
     for (const file of others) {
@@ -2318,12 +2331,14 @@ export function Composer({
   };
 
   const attachFiles = (files: File[]) => {
+    if (!attachmentInputEnabled) return;
     const sourceDraftKey = activeDraftKeyRef.current;
     void attachImageFiles(files, sourceDraftKey);
     void attachOtherFiles(files, sourceDraftKey);
   };
 
   const attachNativeClipboardImage = async (notifyOnError: boolean, sourceDraftKey: string) => {
+    if (!attachmentInputEnabled) return;
     updatePendingPasteForDraft(sourceDraftKey, 1);
     try {
       const path = await app.SaveClipboardImage();
@@ -2344,6 +2359,7 @@ export function Composer({
   // workspace @reference or a stored attachment.
   const attachDroppedPaths = async (paths: string[], sourceDraftKey = activeDraftKeyRef.current) => {
     setDragOver(false);
+    if (!attachmentInputEnabled) return;
     for (const path of paths) {
       updatePendingPasteForDraft(sourceDraftKey, 1);
       try {
@@ -2366,15 +2382,16 @@ export function Composer({
   };
 
   useEffect(() => {
+    if (!attachmentInputEnabled) return;
     return onFilesDropped((paths) => void attachDroppedPaths(paths, activeDraftKeyRef.current));
-  }, []);
+  }, [attachmentInputEnabled]);
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
     clearNativeClipboardPasteTimer();
     const files = clipboardFiles(e.clipboardData);
     if (files.length > 0) {
       e.preventDefault();
-      attachFiles(files);
+      if (attachmentInputEnabled) attachFiles(files);
       return;
     }
 
@@ -2382,7 +2399,7 @@ export function Composer({
     const hasImageHint = clipboardHasImageHint(e.clipboardData);
     if (hasImageHint || pasted === "") {
       e.preventDefault();
-      void attachNativeClipboardImage(hasImageHint, activeDraftKeyRef.current);
+      if (attachmentInputEnabled) void attachNativeClipboardImage(hasImageHint, activeDraftKeyRef.current);
       return;
     }
 
@@ -2641,7 +2658,7 @@ export function Composer({
     // Try reading clipboard items for image detection (no event in menu path)
     try {
       const items = await navigator.clipboard.read();
-      if (items.some((item) => item.types.some((t) => t.startsWith("image/")))) {
+      if (attachmentInputEnabled && items.some((item) => item.types.some((t) => t.startsWith("image/")))) {
         void attachNativeClipboardImage(true, sourceDraftKey);
         return;
       }
@@ -2665,7 +2682,7 @@ export function Composer({
         if (sourceDraftKey === activeDraftKeyRef.current) {
           focusInputRange(selection.from, selection.to, selection.afterInvocationId);
         }
-        void attachNativeClipboardImage(false, sourceDraftKey);
+        if (attachmentInputEnabled) void attachNativeClipboardImage(false, sourceDraftKey);
         return;
       }
       insertPastedText(
@@ -2728,6 +2745,11 @@ export function Composer({
   const onFileDropCapture = (e: DragEvent<HTMLDivElement>) => {
     if (hasWorkspaceReferenceDrag(e.dataTransfer) || !hasFileDrag(e.dataTransfer)) return;
     e.preventDefault();
+    if (!attachmentInputEnabled) {
+      stopNativeFileDrop(e);
+      setDragOver(false);
+      return;
+    }
     if (!hasPathlessFileDrop(e.dataTransfer)) return;
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
@@ -2741,6 +2763,7 @@ export function Composer({
     if (droppedWorkspaceRef) {
       e.preventDefault();
       setDragOver(false);
+      if (!attachmentInputEnabled) return;
       addWorkspaceReference(droppedWorkspaceRef);
       return;
     }
@@ -2756,12 +2779,11 @@ export function Composer({
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (!hasWorkspaceReferenceDrag(e.dataTransfer) && !hasFileDrag(e.dataTransfer)) return;
     e.preventDefault(); // required for the drop event to fire
-    e.dataTransfer.dropEffect = "copy";
-    setDragOver(true);
+    e.dataTransfer.dropEffect = attachmentInputEnabled ? "copy" : "none";
+    setDragOver(attachmentInputEnabled);
   };
 
   const onDragLeave = () => setDragOver(false);
-
   // handleCancel stops the in-flight turn; if it was cancelled before the server
   // replied, the just-sent text is handed back so we drop it back into the input.
   const handleCancel = async () => {
@@ -2952,36 +2974,29 @@ export function Composer({
     // Creation empty hero starts single-line but must grow so multi-line drafts
     // stay readable before send (review: fixed 20px + overflow:hidden clipped).
     if (heroMode) {
-      const node = taRef.current;
-      if (!node) {
+      const measureNode = measureTaRef.current;
+      if (!measureNode) {
         setTextareaAutoHeight(20);
         setTextareaAutoOverflow(false);
         return;
       }
-      const previousHeight = node.style.height;
-      node.style.height = "auto";
-      const scrollHeight = node.scrollHeight || 20;
+      const scrollHeight = measureNode.scrollHeight || 20;
       const maxHeight = composerHeroInputMaxHeight();
       const nextHeight = Math.min(Math.max(scrollHeight, 20), maxHeight);
       const nextOverflow = scrollHeight > maxHeight + 1;
-      node.style.height = previousHeight;
       setTextareaAutoHeight((current) => (current === nextHeight ? current : nextHeight));
       setTextareaAutoOverflow((current) => (current === nextOverflow ? current : nextOverflow));
       return;
     }
     const richHeight = invocationsRef.current.length > 0 ? richInputRef.current?.scrollHeight() : 0;
-    const node = taRef.current;
-    if (!richHeight && !node) return;
-    const previousHeight = node?.style.height;
-    if (node) node.style.height = "auto";
-    const scrollHeight = richHeight || node?.scrollHeight || 0;
+    const scrollHeight = richHeight || measureTaRef.current?.scrollHeight || 0;
+    if (!scrollHeight) return;
     const sizing = resolveComposerContentSizing({
       contentHeight: scrollHeight,
       manualLogicalHeight: composerHeight,
       maxLogicalHeight: composerMaxHeight(),
       reservedHeight: COMPOSER_AUTO_RESERVED_HEIGHT,
     });
-    if (node && previousHeight !== undefined) node.style.height = previousHeight;
     setTextareaAutoHeight((current) => (current === sizing.inputHeight ? current : sizing.inputHeight));
     setTextareaAutoOverflow((current) => (current === sizing.overflow ? current : sizing.overflow));
   }, [composerHeight, heroMode, invocations.length]);
@@ -3215,6 +3230,7 @@ export function Composer({
 
   const chooseAttachmentFiles = () => {
     setContentMenuOpen(false);
+    if (!attachmentInputEnabled) return;
     fileInputRef.current?.click();
   };
 
@@ -3347,7 +3363,7 @@ export function Composer({
     if (e.key === "Enter" && composing) return;
     if (fnKey) return;
 
-    if (isPasteShortcut(e) && !composing) {
+    if (attachmentInputEnabled && isPasteShortcut(e) && !composing) {
       clearNativeClipboardPasteTimer();
       const sourceDraftKey = activeDraftKeyRef.current;
       nativeClipboardPasteTimerRef.current = window.setTimeout(() => {
@@ -3908,7 +3924,7 @@ export function Composer({
         decisionPending ? "composer-wrap--decision-pending" : "",
         heroMode ? "composer-wrap--hero" : "",
       ].filter(Boolean).join(" ")}
-      style={{ "--wails-drop-target": "drop" } as CSSProperties}
+      style={attachmentInputEnabled ? { "--wails-drop-target": "drop" } as CSSProperties : undefined}
       onDropCapture={onFileDropCapture}
     >
       <input
@@ -3916,6 +3932,7 @@ export function Composer({
         className="composer-content-file-input"
         type="file"
         multiple
+        disabled={!attachmentInputEnabled}
         tabIndex={-1}
         aria-hidden="true"
         onChange={(event) => {
@@ -3932,43 +3949,12 @@ export function Composer({
         className="composer-access-menu composer-content-menu"
         align="start"
       >
-        <div className="composer-access-menu__section" role="menu" aria-label={t("composer.contentMenuTitle")}>
-          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={chooseAttachmentFiles}>
-            <FilePlus2 size={16} aria-hidden="true" />
-            <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.contentAddAttachment")}</span>
-              <span className="composer-access-menu__desc">{t("composer.contentAddAttachmentDesc")}</span>
-            </span>
-          </button>
-          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={() => insertContentTrigger("@")}>
-            <AtSign size={16} aria-hidden="true" />
-            <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.contentReferenceFiles")}</span>
-              <span className="composer-access-menu__desc">{t("composer.contentReferenceFilesDesc")}</span>
-            </span>
-          </button>
-          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={() => insertContentTrigger("#")}>
-            <Hash size={16} aria-hidden="true" />
-            <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.contentReferenceSessions")}</span>
-              <span className="composer-access-menu__desc">{t("composer.contentReferenceSessionsDesc")}</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="composer-access-menu__item composer-content-menu__item"
-            onClick={() => insertContentTrigger("/")}
-            disabled={text.trim().length > 0}
-            title={text.trim().length > 0 ? t("composer.contentUseCommandsEmptyOnly") : undefined}
-          >
-            <span className="composer-content-menu__trigger-icon" aria-hidden="true">/</span>
-            <span className="composer-access-menu__copy">
-              <span className="composer-access-menu__title">{t("composer.contentUseCommands")}</span>
-              <span className="composer-access-menu__desc">{text.trim().length > 0 ? t("composer.contentUseCommandsEmptyOnly") : t("composer.contentUseCommandsDesc")}</span>
-            </span>
-          </button>
-        </div>
+        <ComposerContentMenuActions
+          attachmentInputEnabled={attachmentInputEnabled}
+          textPresent={text.trim().length > 0}
+          onChooseAttachment={chooseAttachmentFiles}
+          onInsertTrigger={insertContentTrigger}
+        />
       </AnchoredPopover>
       {!heroMode && <AnchoredPopover
         open={intentMenuOpen}
@@ -4541,45 +4527,51 @@ export function Composer({
                   }}
                 />
               ) : (
-                <textarea
-                  id="composer-input"
-                  ref={taRef}
-                  className="composer__input"
-                  aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
-                  value={composingRef.current ? undefined : text}
-                  onInputCapture={(e) => {
-                    pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;
-                  }}
-                  onChange={(e) => {
-                    const targetDraftKey = activeDraftKeyRef.current;
-                    const inputType = (e.nativeEvent as InputEvent).inputType
-                      || pendingNativeInputTypeRef.current;
-                    pendingNativeInputTypeRef.current = undefined;
-                    trackImeInputChange(e.nativeEvent as InputEvent, inputType, e.target.value);
-                    resetPromptHistoryNavigation();
-                    textRef.current = e.target.value;
-                    setText(e.target.value);
-                    const nextSelection = {
-                      start: e.target.selectionStart ?? e.target.value.length,
-                      end: e.target.selectionEnd ?? e.target.value.length,
-                    };
-                    lastSelectionRef.current = nextSelection;
-                    setPlainSelection(nextSelection);
-                    syncComposerNativeHistory(targetDraftKey, inputType);
-                    if (composerPrompt) setComposerPrompt(null);
-                  }}
-                  onSelect={rememberCaret}
-                  onClick={rememberCaret}
-                  onKeyUp={rememberCaret}
-                  onFocus={rememberCaret}
-                  onContextMenu={openInputMenu}
-                  onPaste={onPaste}
-                  onKeyDown={onKeyDown}
-                  style={textareaStyle}
-                  placeholder={composerPlaceholder}
-                  rows={1}
-                  disabled={disabled || readOnly}
-                />
+                <>
+                  <textarea
+                    id="composer-input"
+                    ref={taRef}
+                    className="composer__input"
+                    aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
+                    value={composingRef.current ? undefined : text}
+                    onInputCapture={(e) => {
+                      pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;
+                    }}
+                    onChange={(e) => {
+                      const targetDraftKey = activeDraftKeyRef.current;
+                      const inputType = (e.nativeEvent as InputEvent).inputType
+                        || pendingNativeInputTypeRef.current;
+                      pendingNativeInputTypeRef.current = undefined;
+                      trackImeInputChange(e.nativeEvent as InputEvent, inputType, e.target.value);
+                      resetPromptHistoryNavigation();
+                      textRef.current = e.target.value;
+                      setText(e.target.value);
+                      const nextSelection = {
+                        start: e.target.selectionStart ?? e.target.value.length,
+                        end: e.target.selectionEnd ?? e.target.value.length,
+                      };
+                      lastSelectionRef.current = nextSelection;
+                      setPlainSelection(nextSelection);
+                      syncComposerNativeHistory(targetDraftKey, inputType);
+                      if (composerPrompt) setComposerPrompt(null);
+                    }}
+                    onSelect={rememberCaret}
+                    onClick={rememberCaret}
+                    onKeyUp={rememberCaret}
+                    onFocus={rememberCaret}
+                    onContextMenu={openInputMenu}
+                    onPaste={onPaste}
+                    onKeyDown={onKeyDown}
+                    style={textareaStyle}
+                    placeholder={composerPlaceholder}
+                    rows={1}
+                    disabled={disabled || readOnly}
+                  />
+                  <textarea
+                    ref={measureTaRef} className="composer__input composer__input--measure"
+                    value={text} readOnly aria-hidden="true" tabIndex={-1}
+                  />
+                </>
               )}
             </div>
             {composerPrompt && (

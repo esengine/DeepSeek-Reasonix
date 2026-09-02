@@ -39,6 +39,9 @@ ask_request = true   # notify when a question is waiting
 # system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
 temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
+# completion_validation = "enforce" # off | shadow | enforce; default enforce; REASONIX_COMPLETION_VALIDATION_MODE overrides per process
+# shadow observes synchronously and still incurs one evaluator call plus up to 30 seconds of latency
+# completion_evaluator_model = ""   # optional; empty follows the working model so session content stays on it
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (recommended default) / 0.85 (late)

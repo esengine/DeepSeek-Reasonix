@@ -9,6 +9,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/jobs"
+	"reasonix/internal/mcpinteraction"
 	"reasonix/internal/memory"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -71,6 +72,10 @@ type agentServices struct {
 	hooks ToolHooks
 	// asker lets the `ask` tool put questions to the user; nil in headless runs.
 	asker Asker
+	// interactionBroker carries MCP server-initiated elicitations to the user
+	// for tool calls whose ctx reaches the SDK elicitation handler; nil in
+	// headless runs, where requests cancel instead of guessing.
+	interactionBroker mcpinteraction.Broker
 	// preEdit is the seam the checkpoint store uses to snapshot pre-edit
 	// content. Only non-ReadOnly tool.Previewer tools fire it, so bash — whose
 	// targets are unknowable — is never tracked. Prefer mutationObserver.

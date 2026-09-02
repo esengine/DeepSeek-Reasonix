@@ -153,7 +153,7 @@ jobs:
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sessioncatalog/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -381,20 +381,37 @@ jobs:
         run: |
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
-          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium webkit
           pnpm --dir frontend build
 
       - name: Test desktop frontend
         run: |
           pnpm --dir frontend test:terminal
           pnpm --dir frontend test:task-monitor
+          pnpm --dir frontend test:mcp-app
           pnpm --dir frontend test:workspace
           pnpm --dir frontend test:stream
           pnpm --dir frontend test:motion
           pnpm --dir frontend test:motion-browser
           pnpm --dir frontend test:composer
+          pnpm --dir frontend test:todo-visibility
           pnpm --dir frontend test:transcript
           xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
+
+      - name: Test WebKitGTK native transcript scrolling
+        timeout-minutes: 5
+        run: |
+          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort >/tmp/reasonix-transcript-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
+            sleep 0.1
+          done
+          xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
+            -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
+            -script transcript_native_smoke_contract.js
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -470,6 +487,41 @@ jobs:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI and build frontend
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: Test WKWebView native transcript scrolling
+        timeout-minutes: 5
+        env:
+          REASONIX_NATIVE_SMOKE_ISOLATED_CI: "1"
+        run: |
+          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort >/tmp/reasonix-transcript-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
+            sleep 0.1
+          done
+          go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
+            -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
+            -script transcript_native_smoke_contract.js
 
       - name: Test integrated terminal, PTY, and FSEvents lifecycle
         run: go test -race -run 'Test(DarwinWorkspaceWatcher|WorkspaceChangeHub|ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
@@ -552,9 +604,37 @@ jobs:
           pnpm --dir frontend exec playwright install chromium
           pnpm --dir frontend test:transcript-browser
 
+      - name: Test WebView2 native transcript and composer scrolling
+        timeout-minutes: 5
+        run: |
+          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/reasonix-transcript-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
+            sleep 0.1
+          done
+          go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
+            -url 'http://127.0.0.1:4173/?mock=bench&bench=1&nativeComposer=1' \
+            -script transcript_native_smoke_contract.js
+
       - name: Test WebView2 native smoke state machine
         shell: pwsh
         run: ../scripts/test-webview2-native-smoke.ps1 -SelfTest
+
+      - name: Test WebView2 transcript selection compositor
+        shell: pwsh
+        timeout-minutes: 5
+        run: ../scripts/test-transcript-selection-webview2.ps1 -Iterations 3
+
+      - name: Upload WebView2 transcript selection evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webview2-transcript-selection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reasonix-transcript-selection-smoke
+          if-no-files-found: warn
+          retention-days: 14
 
       # Build the real Wails executable on every desktop PR and exercise the
       # exact production startup path in Microsoft's installed WebView2 runtime.
@@ -675,6 +755,7 @@ jobs:
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
             .github/workflows/docs-impact.yml \
+            .github/workflows/transcript-native-smoke.yml \
             .github/workflows/ci.yml
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs

@@ -77,7 +77,7 @@ eq(finalDeclaration(".slashmenu", "max-height"), "min(360px, var(--composer-menu
 // AC4 — App.tsx applies footer--decision exactly when a decision surface owns
 // the footer, and the pre-existing footer--compact wiring stays intact.
 eq(/visibleDecisionSurface \? "footer--decision" : ""/.test(appSource), true, "App.tsx toggles footer--decision on the visible decision surface");
-eq(/terminalPanelOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource), true, "footer--compact wiring stays intact");
+eq(/terminalSurfaceOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource), true, "footer--compact wiring stays intact");
 eq(/ref=\{composerWrapRef\}/.test(composerSource), true, "Composer measures the real menu anchor");
 eq(/observeComposerMenuViewport\(anchor\)/.test(composerSource), true, "Composer observes geometry while a menu is open");
 

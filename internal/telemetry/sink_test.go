@@ -94,6 +94,79 @@ func TestSinkWritesOnlyWhitelistedContentFreeCounters(t *testing.T) {
 	}
 }
 
+func TestCompletionValidationMetricsAreImmediateAndIsolated(t *testing.T) {
+	home := t.TempDir()
+	reporter := &Reporter{home: home, version: "v1.34.0"}
+	sink := reporter.Wrap(event.Discard)
+	secret := "PRIVATE_COMPLETION_TEXT_456"
+	sink.Emit(event.Event{Kind: event.Usage, UsageSource: event.UsageSourceCompletionEvaluator, Usage: &provider.Usage{
+		FinishReason: "stop", CacheHitTokens: 90, CacheMissTokens: 10,
+	}})
+	sink.Emit(event.Event{Kind: event.Notice, Text: secret, Reasoning: secret})
+	event.RecordCompletionValidation(sink, event.CompletionValidationInfo{
+		Mode: "enforce", Outcome: "error", Attempt: 2, DurationMs: 5_200, ErrorClass: "timeout",
+	})
+
+	entries, err := os.ReadDir(filepath.Join(home, pendingDirName))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("immediate pending files = %d, err = %v", len(entries), err)
+	}
+	got := map[string]map[string]int{}
+	for _, entry := range entries {
+		b, err := os.ReadFile(filepath.Join(home, pendingDirName, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), secret) {
+			t.Fatalf("pending payload leaked completion content: %s", b)
+		}
+		var payload pendingPayload
+		if err := json.Unmarshal(b, &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, counter := range payload.Counters {
+			if got[counter.Signal] == nil {
+				got[counter.Signal] = map[string]int{}
+			}
+			got[counter.Signal][counter.Bucket] += counter.Count
+		}
+	}
+	want := map[string]string{
+		"completion_evaluator_finish_reason": "stop",
+		"completion_evaluator_cache_hit":     "90_100",
+		"completion_validation_outcome":      "enforce_error",
+		"completion_validation_latency":      "s_5_15",
+		"completion_validation_attempt":      "repair",
+		"completion_validation_error":        "timeout",
+	}
+	for signal, bucket := range want {
+		if got[signal][bucket] != 1 {
+			t.Errorf("%s/%s = %d, want 1", signal, bucket, got[signal][bucket])
+		}
+	}
+	if got["finish_reason"] != nil || got["cache_hit"] != nil {
+		t.Fatalf("evaluator usage polluted generic metrics: %+v", got)
+	}
+}
+
+func TestCompletionValidationLatencyBucketsStayBounded(t *testing.T) {
+	for _, tc := range []struct {
+		ms   int64
+		want string
+	}{
+		{ms: -1, want: "lt_1s"},
+		{ms: 999, want: "lt_1s"},
+		{ms: 1_000, want: "s_1_5"},
+		{ms: 5_000, want: "s_5_15"},
+		{ms: 15_000, want: "s_15_60"},
+		{ms: 60_000, want: "s_15_60"},
+	} {
+		if got := completionValidationLatencyBucket(tc.ms); got != tc.want {
+			t.Errorf("completionValidationLatencyBucket(%d) = %q, want %q", tc.ms, got, tc.want)
+		}
+	}
+}
+
 func TestCleanupRemovesPendingQueueOnly(t *testing.T) {
 	home := t.TempDir()
 	if err := appendPending(home, pendingPayload{

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -385,9 +384,6 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		// preferred conflict forks. Open/running recovery is still not a
 		// second row — status is already aggregated above.
 		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
-			if session.Recovered || session.RecoveryCopy {
-				node.RecoveryCopyCount++
-			}
 			continue
 		}
 		visible = append(visible, session)
@@ -480,14 +476,14 @@ func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []se
 	return summary
 }
 
-func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
+func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
 	catalog := a.sessionCatalog.Load()
 	if catalog == nil {
 		return a.metadataTopicPage(req), nil
 	}
 	availability := a.catalogWorkspaceAvailability(catalog, req.Scope, req.WorkspaceRoot)
 	if !availability.usable {
-		// A freshly opened v5 cache is live but empty until the first directory
+		// A freshly opened catalog cache is live but empty until the first directory
 		// scan. Treat that the same as "catalog unavailable" so upgrade does
 		// not blank the sidebar that desktop-projects.json still knows about.
 		page := a.metadataTopicPage(req)
@@ -698,20 +694,6 @@ func (a *App) GetSessionCatalogStatus() SessionCatalogStatus {
 	return a.currentSessionCatalogStatus()
 }
 
-func (a *App) RebuildSessionCatalog() error {
-	if a == nil || a.shuttingDown.Load() {
-		return errors.New("application is shutting down")
-	}
-	if !a.catalogRebuilding.CompareAndSwap(false, true) {
-		return nil
-	}
-	go func() {
-		a.stopSessionCatalog(250 * time.Millisecond)
-		a.startSessionCatalog(true)
-	}()
-	return nil
-}
-
 // ListProjectTree is the one-release compatibility wrapper. It composes only
 // catalog pages and project shells; it never migrates, scans, or decodes a
 // session synchronously.
@@ -742,6 +724,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 		// folders. This compatibility wrapper rebuilds the complete child list,
 		// so start clean to avoid duplicating those shells with catalog rows.
 		project.Children = []ProjectNode{}
+		if project.Remote != nil {
+			continue
+		}
 		scope := "project"
 		root := project.Root
 		if project.Kind == "global_folder" {

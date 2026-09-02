@@ -48,14 +48,26 @@ func TestParseAgentPresetAcceptsLegacyLabels(t *testing.T) {
 	}
 }
 
-func TestWorkModeCompletionHidesCompatibilityCommands(t *testing.T) {
+func TestPresetCompletionSurfacesCommandNotAliases(t *testing.T) {
 	m := newTestChatTUI()
-	for _, command := range []string{"/preset", "/profile", "/work-mode"} {
+	if !hasLabel(m.slashItems(), "/preset") {
+		t.Fatal("/preset should appear in slash completion, matching the desktop preset chips")
+	}
+	for _, command := range []string{"/profile", "/work-mode"} {
 		if hasLabel(m.slashItems(), command) {
-			t.Fatalf("compatibility command %q should not appear in slash completion", command)
+			t.Fatalf("compatibility alias %q should not appear in slash completion", command)
 		}
 	}
-	for _, input := range []string{"/preset ", "/work-mode ", "/profile "} {
+	for _, input := range []string{"/preset "} {
+		items, _, ok := m.slashArgItems(input)
+		if !ok {
+			t.Fatalf("%q should offer preset argument completion", input)
+		}
+		if !hasLabel(items, "delivery") || !hasLabel(items, "standard") {
+			t.Fatalf("%q should offer standard and delivery, got %v", input, labels(items))
+		}
+	}
+	for _, input := range []string{"/work-mode ", "/profile "} {
 		if _, _, ok := m.slashArgItems(input); ok {
 			t.Fatalf("%q should not offer execution-mode argument completion", input)
 		}
@@ -109,15 +121,29 @@ func TestLegacyModeFlagsAreHiddenFromCommandHelp(t *testing.T) {
 	}
 }
 
-func TestWorkModeHelpHidesDeprecatedCommand(t *testing.T) {
-	if hasLabel(builtinHelpItems(), "/preset") {
-		t.Fatal("deprecated /preset should not appear in built-in help")
+func TestPresetHelpListsCommandNotAliases(t *testing.T) {
+	if !hasLabel(builtinHelpItems(), "/preset") {
+		t.Fatal("/preset should appear in built-in help, matching the desktop preset chips")
 	}
 	if hasLabel(builtinHelpItems(), "/profile") {
 		t.Fatal("built-in help should not list the technical /profile alias")
 	}
 	if hasLabel(builtinHelpItems(), "/work-mode") {
 		t.Fatal("built-in help should not list the legacy /work-mode alias")
+	}
+}
+
+func TestPresetTagShowsDeliveryFloorOnly(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	if tag := m.presetTag(); tag != "" {
+		t.Fatalf("standard floor should stay quiet, got %q", tag)
+	}
+	if err := ctrl.SetQualityFloor(control.QualityFloorDelivery); err != nil {
+		t.Fatal(err)
+	}
+	if tag := m.presetTag(); !strings.Contains(ansi.Strip(tag), "delivery") {
+		t.Fatalf("delivery floor should surface a footer tag, got %q", tag)
 	}
 }
 

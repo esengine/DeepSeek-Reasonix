@@ -12,9 +12,15 @@ import type { FrontendDiagnosticFields } from "./frontendDiagnosticBridge";
 
 export { isFrontendDiagnosticsBuild } from "./frontendDiagnosticsBuild";
 
-export const FRONTEND_DIAGNOSTIC_SCHEMA_VERSION = 1;
+export const FRONTEND_DIAGNOSTIC_SCHEMA_VERSION = 2;
 export const MAX_FRONTEND_DIAGNOSTIC_EVENTS = 16_384;
 export const FRONTEND_DIAGNOSTIC_DURATION_MS = 120_000;
+
+/** Geometry replay fixtures produced by v1 remain valid inputs. New captures
+ * always write v2. */
+export function isSupportedFrontendDiagnosticSchemaVersion(value: unknown): value is 1 | 2 {
+  return value === 1 || value === FRONTEND_DIAGNOSTIC_SCHEMA_VERSION;
+}
 
 export type FrontendDiagnosticStatus = "idle" | "recording" | "stopped";
 
@@ -33,6 +39,8 @@ export type FrontendDiagnosticEvent = {
   visibility?: string;
   phase?: string;
   reason?: string;
+  rejectedReason?: string;
+  result?: string;
   status?: string;
   mode?: string;
   previousMode?: string;
@@ -70,6 +78,20 @@ export type FrontendDiagnosticEvent = {
   measuredSize?: number;
   sizeDelta?: number;
   relativeError?: number;
+  sequence?: number;
+  generation?: number;
+  surfaceGeneration?: number;
+  ownershipEpoch?: number;
+  geometryRevision?: number;
+  transactionId?: number;
+  footerHeight?: number;
+  viewport?: number;
+  mounted?: number;
+  total?: number;
+  reverseDisplacement?: number;
+  extentDelta?: number;
+  stableFrames?: number;
+  direction?: number;
   disclosureCount?: number;
   contentRevision?: number;
   tabCount?: number;
@@ -116,6 +138,7 @@ export type FrontendDiagnosticEvent = {
   readerIntent?: boolean;
   canClaimTail?: boolean;
   substantial?: boolean;
+  transient?: boolean;
   tailCommand?: boolean;
   isTrusted?: boolean;
   queryActive?: boolean;
@@ -132,6 +155,7 @@ export type FrontendDiagnosticEvent = {
   button?: number;
   modifiers?: number;
   intent?: number;
+  sources?: Array<"footer-resize" | "row-measure" | "data-change" | "viewport-resize" | "fold-change" | "typography-change" | "items-rendered">;
 };
 
 export type FrontendDiagnosticAnomaly = {
@@ -183,17 +207,21 @@ const NUMBER_FIELDS = [
   "width", "height", "x", "y", "deltaX", "deltaY", "targetTop", "listHeight", "durationMs", "scrollTop", "scrollHeight",
   "clientHeight", "bottomDistance", "mountedRows", "totalRows", "firstVisibleIndex", "firstVisibleTop",
   "rowIndex", "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "relativeError", "disclosureCount", "contentRevision", "tabCount", "patchCount", "button", "modifiers", "intent",
+  "sequence", "generation", "surfaceGeneration", "ownershipEpoch", "geometryRevision", "transactionId", "footerHeight", "viewport", "mounted", "total", "reverseDisplacement", "extentDelta", "stableFrames", "direction",
   "workspaceSessions", "visibleSessions", "hiddenSessions", "hiddenByFilter", "hiddenByCollapsed", "hiddenByTruncation", "runtimeSessions", "runtimeOnlySessions", "recoveryOnlySessions", "recoveryCopySessions", "recoveryCopies", "runningSessions", "unreadSessions", "pinnedSessions", "activeSessions", "activeVisibleSessions", "folderCount", "expandedFolders", "showAllFolders", "catalogRevision", "catalogIndexed", "catalogTotal", "repairPending", "treeRevision", "organizationRevision", "unloadedSessions", "deltaWorkspaceSessions", "deltaVisibleSessions", "deltaHiddenSessions", "deltaRecoveryCopies", "deltaRuntimeOnlySessions",
 ] as const;
 const BOOLEAN_FIELDS = [
   "hasActiveTab", "ready", "running", "hydrating", "runtimeTransitioning", "atBottom", "scrollable", "blank", "readerIntent", "canClaimTail", "substantial", "tailCommand", "isTrusted",
-  "queryActive", "timeFilterActive", "catalogPartial", "catalogRebuilding",
+  "queryActive", "timeFilterActive", "catalogPartial", "catalogRebuilding", "transient",
 ] as const;
 const STRING_FIELDS = [
   "source", "eventSource", "action", "target", "targetRole", "targetTag", "keyClass", "pointerType", "inputType", "visibility", "phase",
-  "reason", "status", "mode", "previousMode", "owner", "writeKind", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode",
+  "reason", "rejectedReason", "result", "status", "mode", "previousMode", "owner", "writeKind", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode",
   "directoryState", "changeReason", "outcome", "trigger", "scope", "variant", "timeFilter",
 ] as const;
+const GEOMETRY_SOURCES = new Set([
+  "footer-resize", "row-measure", "data-change", "viewport-resize", "fold-change", "typography-change", "items-rendered",
+]);
 
 export function analyzeFrontendDiagnosticAnomalies(events: readonly FrontendDiagnosticEvent[]): FrontendDiagnosticAnomaly[] {
   const anomalies: FrontendDiagnosticAnomaly[] = [];
@@ -303,6 +331,12 @@ function sanitizeEvent(t: number, type: string, fields: EventFields): FrontendDi
   for (const field of STRING_FIELDS) {
     const value = safeToken(fields[field]);
     if (value !== undefined) target[field] = value;
+  }
+  if (Array.isArray(fields.sources)) {
+    const sources = [...new Set(fields.sources.filter((value): value is FrontendDiagnosticEvent["sources"] extends Array<infer Item> ? Item : never => (
+      typeof value === "string" && GEOMETRY_SOURCES.has(value)
+    )))];
+    if (sources.length > 0) event.sources = sources;
   }
   return event;
 }

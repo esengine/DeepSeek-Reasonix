@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"runtime"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
@@ -38,8 +39,15 @@ func (a *App) defaultSettingsView() SettingsView {
 		ProviderPresets: providerPresetViewsForRootWithResolver(nil, a.activeWorkspaceRoot(), nil),
 		ProviderKinds:   nonNil(provider.Kinds()),
 		Permissions:     PermissionsView{Mode: "ask", Allow: []string{}, Ask: []string{}, Deny: []string{}},
-		Sandbox:         SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
-		Reference:       ReferenceSettingsView{ExcludePatterns: []string{}, WorkspaceRoot: a.activeWorkspaceRoot(), ConfigPath: filepath.Join(a.activeWorkspaceRoot(), "reasonix.toml")},
+		Sandbox: SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto",
+			EffectiveShell:      sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
+			ResolvedShell:       sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
+			ShellCapabilities:   sandboxCapabilityViews("", ""),
+			GitCapability:       gitCapabilityView("", ""),
+			ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS),
+			ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
+			GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS)},
+		Reference: ReferenceSettingsView{ExcludePatterns: []string{}, WorkspaceRoot: a.activeWorkspaceRoot(), ConfigPath: filepath.Join(a.activeWorkspaceRoot(), "reasonix.toml")},
 		Agent: AgentView{
 			PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth,
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,

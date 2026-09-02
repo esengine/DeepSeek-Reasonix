@@ -10,11 +10,10 @@ import (
 	"reasonix/internal/tool"
 )
 
-// A model that emits structurally-invalid JSON for a tool's args should get the
-// tool's schema echoed back, so the retry lands a valid shape instead of
-// repeating the same broken one (the "invalid character ':' after array element"
-// case from the ask tool).
-func TestMalformedToolArgsEchoSchema(t *testing.T) {
+// A model that emits structurally-invalid JSON must be rejected by the host
+// validator before hooks or Execute. The correction contract is deliberately
+// value-free and bounded rather than echoing the full provider schema.
+func TestMalformedToolArgsReturnHostValidationContract(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(NewAskTool())
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
@@ -26,13 +25,18 @@ func TestMalformedToolArgsEchoSchema(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	got := toolResult(a.sess.conversation, "ask")
-	if !strings.Contains(got, "not valid JSON") || !strings.Contains(got, `"options"`) {
-		t.Fatalf("malformed-args result should echo the schema, got %q", got)
+	if !strings.Contains(got, "argument validation failed") ||
+		!strings.Contains(got, "one valid JSON object") ||
+		!strings.Contains(got, "remote_dispatched=false") {
+		t.Fatalf("malformed-args result should carry the host correction contract, got %q", got)
+	}
+	if strings.Contains(got, `"properties"`) || strings.Contains(got, `"options"`) {
+		t.Fatalf("malformed-args result must not echo the full schema, got %q", got)
 	}
 }
 
-// A valid-JSON arg that fails the tool's own validation must surface that error
-// as-is, without the schema hint (the shape was fine; the values weren't).
+// A valid-JSON arg that violates the schema must surface the precise keyword
+// and expectation without echoing the full schema.
 func TestValidArgsErrorOmitsSchema(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(NewAskTool())
@@ -45,10 +49,10 @@ func TestValidArgsErrorOmitsSchema(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	got := toolResult(a.sess.conversation, "ask")
-	if strings.Contains(got, "not valid JSON") {
-		t.Fatalf("a valid-JSON arg error must not get the schema hint, got %q", got)
+	if strings.Contains(got, `"properties"`) {
+		t.Fatalf("a valid-JSON arg error must not get the full schema, got %q", got)
 	}
-	if !strings.Contains(got, "two options") {
-		t.Fatalf("expected the real validation error, got %q", got)
+	if !strings.Contains(got, "minItems") || !strings.Contains(got, "at least 2 items") {
+		t.Fatalf("expected the precise host validation error, got %q", got)
 	}
 }

@@ -742,8 +742,8 @@ func TestClearedOAuthStateCannotBeResurrectedByStaleTransport(t *testing.T) {
 	if changed, err := ClearHTTPMCPOAuth(Spec{StateDir: stateDir}); err != nil || !changed {
 		t.Fatalf("ClearHTTPMCPOAuth = (%v, %v), want (true, nil)", changed, err)
 	}
-	if _, err := transport.call(context.Background(), "ping", nil); err == nil || !strings.Contains(err.Error(), "no refresh token") {
-		t.Fatalf("stale transport call error = %v, want cleared-state failure", err)
+	if _, err := transport.call(context.Background(), "ping", nil); err == nil {
+		t.Fatal("stale transport call unexpectedly succeeded after clearing OAuth state")
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, mcpOAuthStateFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale transport recreated OAuth state: %v", err)

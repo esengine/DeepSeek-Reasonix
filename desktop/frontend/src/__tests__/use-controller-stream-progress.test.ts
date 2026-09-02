@@ -222,7 +222,9 @@ function ev(s: typeof initialState, e: WireEvent) {
   s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", args: '{"path":"a"}', readOnly: false } } as WireEvent);
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "c2").length, 1, "final success has committed parent tool card");
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent card still present after commit");
-  eq(s.live?.text, "full answer", "final text is the committed attempt only");
+  const committedAssistant = s.items.find((it) => it.kind === "assistant" && it.text === "full answer");
+  eq(Boolean(committedAssistant), true, "full dispatch settles the committed attempt text");
+  eq(s.live, undefined, "full dispatch closes the compatibility-path assistant segment");
 }
 
 // --- 1d. stale discard must not clear a newer attempt journal ---
@@ -236,6 +238,104 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(s.items.filter((it) => it.kind === "tool" && it.id === "c-new").length, 1, "stale discard does not remove current partial card");
   s = ev(s, { kind: "turn_done" } as WireEvent);
   eq(s.streamAttemptJournal, undefined, "turn_done clears stream attempt journal");
+}
+
+// --- 1e. one backend turn keeps each provider sampling round in timeline order ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "", reasoning: "first analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-1", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "lookup-1", name: "read_file", args: "{}", readOnly: true, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "begin", attempt: 1, max: 3 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "message", text: "final answer", reasoning: "second analysis" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "round-2", action: "commit", attempt: 1, max: 3 } } as WireEvent);
+  const replayedStart = ev(s, { kind: "turn_started", turnId: "multi-round" } as WireEvent);
+  eq(replayedStart.items.filter((item) => item.kind === "assistant").length, 2, "a replayed turn_started event does not duplicate settled segments");
+  s = replayedStart;
+  s = ev(s, { kind: "turn_done", turnId: "multi-round" } as WireEvent);
+
+  const timeline = s.items.filter((item) => item.kind === "assistant" || item.kind === "tool");
+  eq(timeline.map((item) => item.kind).join(","), "assistant,tool,assistant", "multi-round live order matches persisted history order");
+  eq(timeline[0]?.id, "a:multi-round:0", "first sample owns ordinal zero");
+  eq(timeline[2]?.id, "a:multi-round:1", "second sample owns a distinct ordinal");
+  eq(timeline[0]?.kind === "assistant" ? timeline[0].reasoning : "", "first analysis", "first reasoning is not overwritten");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].text : "", "final answer", "final answer remains in the second segment");
+  eq(timeline[2]?.kind === "assistant" ? timeline[2].wasStreamed : undefined, true, "live-origin identity survives completion");
+
+}
+
+// --- 1f. tool-only samples remove their placeholder before the next round ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "tool-only" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", readOnly: false, partial: true, attemptId: "tool-round" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "tool-round", action: "commit", attempt: 1, max: 2 } } as WireEvent);
+  eq(s.items.some((item) => item.kind === "assistant"), false, "tool-only commit removes its empty assistant placeholder");
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  s = ev(s, { kind: "tool_result", tool: { id: "shell-1", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "answer-round", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "after tool" } as WireEvent);
+  s = ev(s, { kind: "message", text: "done", reasoning: "after tool" } as WireEvent);
+  const visible = s.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(visible.map((item) => item.kind).join(","), "tool,assistant", "next reasoning is appended below the committed tool");
+  eq(visible[1]?.id, "a:tool-only:1", "tool-only placeholder ordinal is not reused");
+}
+
+// --- 1g. discard retries preserve segment identity; legacy full tools retire placeholders ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started", turnId: "retry-segment" } as WireEvent);
+  const segmentId = s.currentAssistant;
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "begin", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "reasoning", reasoning: "discard me" } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "bad", action: "discard", attempt: 1, max: 2 } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "good", action: "begin", attempt: 2, max: 2 } } as WireEvent);
+  eq(s.currentAssistant, segmentId, "retry reuses the same sampling segment identity");
+  eq(s.live?.reasoning, "", "retry starts from the rolled-back reasoning baseline");
+
+  let legacy = ev({ ...initialState }, { kind: "turn_started", turnId: "legacy" } as WireEvent);
+  legacy = ev(legacy, { kind: "tool_dispatch", tool: { id: "legacy-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+  legacy = ev(legacy, { kind: "reasoning", reasoning: "legacy follow-up" } as WireEvent);
+  const legacyTimeline = legacy.items.filter((item) => item.kind === "tool" || item.kind === "assistant");
+  eq(legacyTimeline.map((item) => item.kind).join(","), "tool,assistant", "full dispatch compatibility path retires the empty placeholder");
+  eq(legacyTimeline[1]?.id, "a:legacy:1", "legacy follow-up gets the next segment ordinal");
+
+  let partialLegacy = ev({ ...initialState, activeTurnId: "partial-legacy", running: true, turnActive: true }, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", readOnly: false, partial: true },
+  } as WireEvent);
+  eq(partialLegacy.currentAssistant, "a:partial-legacy:0", "first partial dispatch backfills a sampling segment");
+  partialLegacy = ev(partialLegacy, {
+    kind: "tool_dispatch",
+    tool: { id: "partial-legacy-tool", name: "bash", args: "{}", readOnly: false },
+  } as WireEvent);
+  eq(partialLegacy.items.some((item) => item.kind === "assistant"), false, "legacy full dispatch removes the partial path's empty segment");
+}
+
+// --- 1h. terminal duration belongs to the last retained assistant segment ---
+{
+  const originalNow = Date.now;
+  let now = 100_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started", turnId: "terminal-duration" } as WireEvent);
+    now = 101_000;
+    s = ev(s, { kind: "message", text: "first answer" } as WireEvent);
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false } } as WireEvent);
+    s = ev(s, { kind: "tool_result", tool: { id: "duration-tool", name: "bash", args: "{}", readOnly: false, output: "ok" } } as WireEvent);
+    now = 110_000;
+    s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "empty-final", action: "begin", attempt: 1, max: 1 } } as WireEvent);
+    s = ev(s, { kind: "turn_done", turnId: "terminal-duration", status: "interrupted" } as WireEvent);
+
+    const assistants = s.items.filter((item) => item.kind === "assistant");
+    eq(assistants.length, 1, "turn_done removes the empty terminal placeholder");
+    eq(assistants[0]?.kind === "assistant" ? assistants[0].workDurationMs : 0, 10_000, "turn_done assigns total work duration to the last visible assistant");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 // --- 2. usageSeq bumps for every source ---

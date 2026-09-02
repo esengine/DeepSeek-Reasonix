@@ -40,6 +40,27 @@ func (t *goalUsageTee) Emit(e event.Event) {
 	if t == nil {
 		return
 	}
+	t.recordUsage(e)
+	if t.inner != nil {
+		t.inner.Emit(e)
+	}
+}
+
+// EmitChecked preserves durability-aware sink behavior through the usage tee.
+// Prompt and dispatch commits must still fail closed when the inner ledger
+// rejects an event.
+func (t *goalUsageTee) EmitChecked(e event.Event) error {
+	if t == nil {
+		return nil
+	}
+	if err := event.EmitChecked(t.inner, e); err != nil {
+		return err
+	}
+	t.recordUsage(e)
+	return nil
+}
+
+func (t *goalUsageTee) recordUsage(e event.Event) {
 	if e.Kind == event.Usage && e.Usage != nil && e.UsageSource != event.UsageSourceTitle {
 		t.mu.Lock()
 		rec := t.active
@@ -47,9 +68,6 @@ func (t *goalUsageTee) Emit(e event.Event) {
 		if rec != nil {
 			rec.addUsageWithRequests(usageTotalTokens(e.Usage), e.Usage.RequestCount)
 		}
-	}
-	if t.inner != nil {
-		t.inner.Emit(e)
 	}
 }
 

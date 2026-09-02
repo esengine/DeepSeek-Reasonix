@@ -20,6 +20,11 @@ Reasonix carries only these behavioural additions in `pkg/edge`:
 - `--no-proxy-server` for the embedded/loopback UI (network clients remain in
   the Go host).
 
+The `reasonix_transcript_smoke` test build also exposes asynchronous
+`CapturePreview` polling and the selected runtime version to the independent
+Win11 compositor regression host. Those symbols are excluded from production
+builds and do not instrument the Wails application or frontend bridge.
+
 Obsolete pre-native-loader DLLs from v1.0.23 were removed. Update this file,
 the upstream commit, and the Windows cross-compile test together on each rebase.
 

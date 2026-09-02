@@ -220,6 +220,14 @@ ok(
   "the retired standalone reasoning-summary setting does not return",
 );
 ok(
+  settingsSource.includes('t("settings.notificationVolume")') &&
+    settingsSource.includes("<NotificationVolumeSlider") &&
+    [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+      source.includes('"settings.notificationVolume"'),
+    ),
+  "sound settings expose the persisted notification volume control in every locale",
+);
+ok(
   !/mockPreset\("deepseek-anthropic",/.test(bridgeSource),
   "browser mock hides the redundant DeepSeek Anthropic preset",
 );

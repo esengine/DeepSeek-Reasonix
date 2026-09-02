@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/plugin"
 )
 
 func TestMCPServerPolicyDefaultsToParallelExceptKnownStateful(t *testing.T) {
@@ -26,6 +27,48 @@ func TestMCPServerPolicyDefaultsToParallelExceptKnownStateful(t *testing.T) {
 		if got := mcpServerIsSerial(tc.entry); got != tc.want {
 			t.Errorf("%s: serial = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+func TestMCPRuntimeConfigurationPreservesConcurrencyPolicy(t *testing.T) {
+	runtime := &MCPCapabilityRuntime{
+		servers: map[string]mcpRuntimeServer{},
+		state:   &mcpProxySharedState{connected: map[string]bool{}},
+	}
+	runtime.ConfigureServers(
+		[]config.PluginEntry{{Name: "github", Concurrency: " SERIAL "}},
+		[]plugin.Spec{{Name: "github"}},
+		map[string]bool{"github": true},
+	)
+	if !runtime.serverIsSerial("github") {
+		t.Fatal("ConfigureServers dropped the explicit serial policy")
+	}
+	configured := runtime.configuredServers()
+	if len(configured) != 1 || configured[0].entry.Concurrency != MCPConcurrencySerial {
+		t.Fatalf("configured concurrency = %+v, want serial", configured)
+	}
+
+	runtime.UpsertServer(
+		config.PluginEntry{Name: "browser", Concurrency: " PARALLEL "},
+		plugin.Spec{Name: "browser"},
+		true,
+	)
+	if runtime.serverIsSerial("browser") {
+		t.Fatal("UpsertServer dropped the explicit parallel override")
+	}
+	configured = runtime.configuredServers()
+	foundBrowser := false
+	for _, server := range configured {
+		if server.entry.Name != "browser" {
+			continue
+		}
+		foundBrowser = true
+		if server.entry.Concurrency != MCPConcurrencyParallel {
+			t.Fatalf("upserted concurrency = %q, want parallel", server.entry.Concurrency)
+		}
+	}
+	if !foundBrowser {
+		t.Fatal("UpsertServer did not publish the browser entry")
 	}
 }
 

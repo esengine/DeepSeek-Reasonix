@@ -1710,15 +1710,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 		}
 		if m := app.metrics.Load(); m != nil {
 			m.observe(e)
-			if e.Kind == event.TurnDone {
-				// Display persistence and its projection acknowledgement run first,
-				// so successful compaction is included in this content-free snapshot.
-				if tab := app.tabByID(tabID); tab != nil && tab.Ctrl != nil {
-					observeControllerRecoveryMetrics(m, tab.Ctrl)
-					observeControllerTurnEventMetrics(m, tab.Ctrl)
-				}
-				m.persist()
-			}
+			persistMetricsEvent(app, m, tabID, e)
 		}
 	}
 	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt))
@@ -2423,7 +2415,7 @@ func (a *App) ListTabs() []TabMeta {
 	}
 	a.mu.RUnlock()
 	if !needsRepair {
-		return enrichTabMetas(out)
+		return a.listTabsWithRemote(out)
 	}
 
 	a.mu.Lock()
@@ -2434,7 +2426,7 @@ func (a *App) ListTabs() []TabMeta {
 		}
 	}
 	a.mu.Unlock()
-	return enrichTabMetas(out)
+	return a.listTabsWithRemote(out)
 }
 
 // syncTabWorkspaceRootSpellings repoints visible and detached project runtimes
@@ -2862,11 +2854,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	topicID := newTopicID()
 	topicTitle := defaultTopicTitle
 	createdAt := time.Now().UnixMilli()
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
-		a.mu.Unlock()
-		return TabMeta{}, err
-	}
-	if err := setTopicCreatedAt(workspaceRoot, topicID, createdAt); err != nil {
+	if err := createTopicState(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto, createdAt); err != nil {
 		a.mu.Unlock()
 		return TabMeta{}, err
 	}
@@ -3211,83 +3199,58 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 	return ""
 }
 
-// SetActiveTab switches the frontend's active tab. A no-op when tabID is
-// already active or unknown.
-func (a *App) SetActiveTab(tabID string) error {
-	a.mu.RLock()
-	_, ok := a.tabs[tabID]
-	alreadyActive := a.activeTabID == tabID
-	a.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("tab %q not found", tabID)
-	}
-	if alreadyActive {
-		return nil
-	}
-	a.mu.RLock()
-	active := a.tabs[a.activeTabID]
-	a.mu.RUnlock()
-	if err := a.snapshotTabForAction(active, "switching tabs"); err != nil {
-		return err
-	}
-
-	a.mu.Lock()
-	if _, ok := a.tabs[tabID]; !ok {
-		a.mu.Unlock()
-		return fmt.Errorf("tab %q not found", tabID)
-	}
-	if a.activeTabID == tabID {
-		a.mu.Unlock()
-		return nil
-	}
-	a.activeTabID = tabID
-	next := a.tabs[tabID]
-	// A direct tab click supersedes a pending ticketed activation's
-	// publication (prune + ready event), but does not cancel its build: the
-	// tab stays open in this layout, so the build may legitimately complete.
-	// Switching to the pending activation's own tab keeps it alive.
-	supersededReq, supersededTab := a.supersedePendingTopicActivationLocked(tabID, false)
-	dir, entries, activeID, version := a.saveTabsCollectLocked()
-	a.mu.Unlock()
-
-	// I/O outside the lock — disk writes can block for hundreds of ms on
-	// Windows when antivirus or the search indexer briefly locks the file.
-	a.saveTabsWrite(dir, entries, activeID, version)
-	if active != nil {
-		active.clearRuntimeDisplayCurrency()
-	}
-	if next != nil {
-		next.clearRuntimeDisplayCurrency()
-	}
-	if supersededReq != "" {
-		a.emitTopicActivation(TopicActivationEvent{RequestID: supersededReq, TabID: supersededTab, Phase: topicActivationPhaseCancelled})
-	}
-	a.kickDeferredRebuildRetry()
-	return nil
-}
-
-// ReorderTabs persists the frontend's manual tab order. The submitted order must
-// contain every currently open tab exactly once.
+// ReorderTabs persists the full local+remote strip while keeping each
+// registry's internal order independent.
 func (a *App) ReorderTabs(tabIDs []string) error {
+	a.remoteTabMu.Lock()
+	remoteCount := len(a.remoteTabs)
+	a.remoteTabMu.Unlock()
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(tabIDs) != len(a.tabs) {
+	if len(tabIDs) != len(a.tabs)+remoteCount {
+		a.mu.Unlock()
 		return fmt.Errorf("tab order length mismatch")
 	}
 	seen := make(map[string]bool, len(tabIDs))
-	next := make([]string, 0, len(tabIDs))
+	next := make([]string, 0, len(a.tabs))
+	nextRemote := make([]string, 0, remoteCount)
 	for _, id := range tabIDs {
-		if _, ok := a.tabs[id]; !ok {
-			return fmt.Errorf("tab %q not found", id)
-		}
 		if seen[id] {
+			a.mu.Unlock()
 			return fmt.Errorf("duplicate tab %q", id)
 		}
 		seen[id] = true
-		next = append(next, id)
+		if _, ok := a.tabs[id]; ok {
+			next = append(next, id)
+		} else {
+			nextRemote = append(nextRemote, id)
+		}
 	}
+	if len(next) != len(a.tabs) {
+		a.mu.Unlock()
+		return fmt.Errorf("tab order is missing local tabs")
+	}
+	a.remoteTabMu.Lock()
+	remoteOK := len(nextRemote) == len(a.remoteTabs)
+	if remoteOK {
+		for _, id := range nextRemote {
+			if a.remoteTabs[id] == nil {
+				remoteOK = false
+				break
+			}
+		}
+	}
+	if !remoteOK {
+		a.remoteTabMu.Unlock()
+		a.mu.Unlock()
+		return fmt.Errorf("tab order is missing remote tabs")
+	}
+	a.remoteTabLayout.order = append([]string(nil), nextRemote...)
+	a.remoteTabLayout.stripOrder = append([]string(nil), tabIDs...)
+	a.remoteTabMu.Unlock()
 	a.tabOrder = next
-	a.saveTabsLocked()
+	dir, entries, activeID, version := a.saveTabsCollectLocked()
+	a.mu.Unlock()
+	a.saveTabsWrite(dir, entries, activeID, version)
 	return nil
 }
 
@@ -3312,7 +3275,7 @@ func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 		a.mu.Unlock()
 		return fmt.Errorf("tab %q not found", tabID)
 	}
-	if len(a.tabs) <= 1 {
+	if len(a.tabs) <= 1 && !a.hasRemoteTabSurface() {
 		a.mu.Unlock()
 		return fmt.Errorf("cannot close the last tab")
 	}
@@ -3344,7 +3307,7 @@ func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 		}
 		return fmt.Errorf("tab %q changed while closing", tabID)
 	}
-	if len(a.tabs) <= 1 {
+	if len(a.tabs) <= 1 && !a.hasRemoteTabSurface() {
 		a.mu.Unlock()
 		return fmt.Errorf("cannot close the last tab")
 	}
@@ -3792,21 +3755,15 @@ func clearTabStartupError(tab *WorkspaceTab) {
 }
 
 func (a *App) recordTabStartupFailure(tab *WorkspaceTab, buildGeneration uint64, wailsCtx context.Context, err error) {
-	leaseHeld := false
 	a.mu.Lock()
 	if a.tabBuildSupersededLocked(tab, buildGeneration) {
 		a.mu.Unlock()
 		return
 	}
-	leaseHeld = setTabStartupError(tab, err)
-	tab.Ready = false
-	if leaseHeld {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-	} else {
-		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-	}
+	leaseHeld, save := a.markTabStartupFailureLocked(tab, err, keepStartupRestore)
 	tab.releaseSessionLease()
 	a.mu.Unlock()
+	a.writeTabsSaveRequest(save)
 	if leaseHeld {
 		a.scheduleDeferredStartupBuild(tab.ID)
 	}
@@ -4080,23 +4037,17 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		}
 		if resumeLoadErr != nil {
 			resumeLoadErr = friendlySessionLoadError(resumeLoadErr)
-			leaseHeld := false
 			a.mu.Lock()
 			if a.tabBuildSupersededLocked(tab, buildGeneration) {
 				a.mu.Unlock()
 				a.abandonSupersededBuild(tab, ctrl, rootKey, "")
 				return
 			}
-			leaseHeld = setTabStartupError(tab, resumeLoadErr)
-			tab.Ready = false
-			if leaseHeld {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, resumeLoadErr)
-			} else {
-				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, resumeLoadErr)
-			}
+			leaseHeld, save := a.markTabStartupFailureLocked(tab, resumeLoadErr, suppressStartupRestore)
 			hostKey := takeTabSharedHostKey(tab)
 			tab.releaseSessionLease()
 			a.mu.Unlock()
+			a.writeTabsSaveRequest(save)
 			ctrl.Close()
 			if hostKey != "" {
 				a.releaseSharedHost(hostKey)
@@ -4120,26 +4071,20 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			}
 			preLeaseKey := tab.sessionLeaseRuntimeKey()
 			if err := a.ensureTabSessionLeaseForRebuild(tab, path, ""); err != nil {
-				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
 					a.mu.Unlock()
 					a.abandonSupersededBuild(tab, ctrl, rootKey, "")
 					return
 				}
-				leaseHeld = setTabStartupError(tab, err)
-				tab.Ready = false
-				if leaseHeld {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
-				} else {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
-				}
+				leaseHeld, save := a.markTabStartupFailureLocked(tab, err, suppressStartupRestore)
 				hostKey := takeTabSharedHostKey(tab)
 				// Release only a lease bound to THIS build's session: a failed
 				// ensure leaves any prior lease untouched, and that lease may
 				// belong to a runtime a concurrent switch just installed.
 				tab.releaseSessionLeaseForKey(sessionRuntimeKey(path))
 				a.mu.Unlock()
+				a.writeTabsSaveRequest(save)
 				ctrl.Close()
 				if hostKey != "" {
 					a.releaseSharedHost(hostKey)
@@ -4170,23 +4115,17 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 			var restoreErr error
 			restoredRuntime, restoreErr = resumeControllerRuntimeWithSession(ctrl, resumeSession, path, buildRuntime)
 			if restoreErr != nil {
-				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
 					a.mu.Unlock()
 					a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
 					return
 				}
-				leaseHeld = setTabStartupError(tab, restoreErr)
-				tab.Ready = false
-				if leaseHeld {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, restoreErr)
-				} else {
-					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, restoreErr)
-				}
+				leaseHeld, save := a.markTabStartupFailureLocked(tab, restoreErr, suppressStartupRestore)
 				hostKey := takeTabSharedHostKey(tab)
 				tab.releaseSessionLeaseForKey(sessionRuntimeKey(path))
 				a.mu.Unlock()
+				a.writeTabsSaveRequest(save)
 				ctrl.Close()
 				if hostKey != "" {
 					a.releaseSharedHost(hostKey)
@@ -4724,6 +4663,8 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	if tab == nil {
 		return false
 	}
+	a.topicTitleMutationMu.Lock()
+	defer a.topicTitleMutationMu.Unlock()
 	// Runs on the autosave goroutine; TopicID/Scope/WorkspaceRoot/Ctrl are
 	// written under a.mu by session switches and recovery.
 	a.mu.RLock()
@@ -4751,6 +4692,9 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	if !updated {
 		return false
 	}
+	if topicAutoTitleCommittedHookForTest != nil {
+		topicAutoTitleCommittedHookForTest()
+	}
 	a.updateOpenTopicTitle(topicID, nextTitle, topicTitleSourceAuto)
 	changedDirs := a.updateTopicSessionTitles(topicID, nextTitle)
 	if len(changedDirs) > 0 {
@@ -4776,14 +4720,14 @@ func autoTitleTopicFromSession(workspaceRoot, topicID, sessionPath string) (stri
 		return "", false
 	}
 	nextTitle := proposal.Title
-	if nextTitle == strings.TrimSpace(loadTopicTitle(workspaceRoot, topicID)) {
-		_ = recordTopicAutoTitleMeta(workspaceRoot, topicID, proposal)
+	sameTitle := nextTitle == strings.TrimSpace(loadTopicTitle(workspaceRoot, topicID))
+	applied, err := applyAutoTopicTitle(workspaceRoot, topicID, nextTitle, proposal)
+	if err != nil || !applied {
 		return "", false
 	}
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, nextTitle, topicTitleSourceAuto); err != nil {
+	if sameTitle {
 		return "", false
 	}
-	_ = recordTopicAutoTitleMeta(workspaceRoot, topicID, proposal)
 	return nextTitle, true
 }
 
@@ -4909,14 +4853,14 @@ func topicTitleUserTurnsFromSession(path string) []string {
 		// mid-turn steers are persisted as role "user" but are not user-authored:
 		// counting them inflated userTurns past the stage-3 threshold and let
 		// "Host final-answer readiness check failed…" become a topic title.
-		if !agent.IsUserAuthoredTurn(msg.Text) {
+		if !agent.IsUserAuthoredTurnMessage(msg.Message) {
 			continue
 		}
 		// UserPreviewText is the canonical user-authored view: it unwraps
 		// memory-compiler execution contracts and strips transient blocks
 		// (and runs HandoffTask), so internal wrappers can never become a
 		// title basis (#5666).
-		content := control.StripComposePrefixes(agent.UserPreviewText(msg.Text))
+		content := control.StripComposePrefixes(agent.UserPreviewText(agent.UserMessageText(msg.Message)))
 		content = control.StripReferencedContextPrefix(content)
 		if strings.TrimSpace(content) != "" {
 			users = append(users, content)
@@ -5016,33 +4960,11 @@ type desktopTabEntry struct {
 }
 
 type desktopTabsFile struct {
-	Tabs      []desktopTabEntry `json:"tabs"`
-	ActiveTab string            `json:"activeTab"`
-}
-
-func singleSurfaceLayoutStyle(style string) bool {
-	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "workbench", "creation":
-		return true
-	default:
-		return false
-	}
-}
-
-func singleSurfaceTabsFile(f desktopTabsFile) desktopTabsFile {
-	if len(f.Tabs) <= 1 {
-		return f
-	}
-	chosen := f.Tabs[0]
-	if active := strings.TrimSpace(f.ActiveTab); active != "" {
-		for _, entry := range f.Tabs {
-			if entry.ID == active {
-				chosen = entry
-				break
-			}
-		}
-	}
-	return desktopTabsFile{Tabs: []desktopTabEntry{chosen}, ActiveTab: chosen.ID}
+	Tabs           []desktopTabEntry       `json:"tabs"`
+	ActiveTab      string                  `json:"activeTab"`
+	RemoteTabs     []desktopRemoteTabEntry `json:"remoteTabs,omitempty"`
+	RemoteTabOrder []string                `json:"remoteTabOrder,omitempty"`
+	TabOrder       []string                `json:"tabOrder,omitempty"`
 }
 
 func desktopConfigDir() string {
@@ -5063,6 +4985,9 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 	var entries []desktopTabEntry
 	for _, id := range a.orderedTabIDsLocked() {
 		if tab := a.tabs[id]; tab != nil {
+			if a.suppressTabStartupRestoreLocked(tab) {
+				continue
+			}
 			entries = append(entries, desktopTabEntry{
 				ID:               tab.ID,
 				Scope:            tab.Scope,
@@ -5082,7 +5007,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 		}
 	}
 	a.tabsSaveVersion++
-	return dir, entries, a.activeTabID, a.tabsSaveVersion
+	return dir, entries, persistedActiveTabID(entries, a.activeTabID), a.tabsSaveVersion
 }
 
 // saveTabsWrite writes the tab-snapshot to disk. It does not require a.mu, but
@@ -5098,7 +5023,15 @@ func (a *App) saveTabsWrite(dir string, entries []desktopTabEntry, activeID stri
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	f := desktopTabsFile{Tabs: entries, ActiveTab: activeID}
+	localIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		localIDs = append(localIDs, entry.ID)
+	}
+	remoteEntries, remoteOrder, tabOrder, remoteActive := a.remoteTabsFileEntries(localIDs)
+	if remoteActive != "" {
+		activeID = remoteActive
+	}
+	f := desktopTabsFile{Tabs: entries, ActiveTab: activeID, RemoteTabs: remoteEntries, RemoteTabOrder: remoteOrder, TabOrder: tabOrder}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return
@@ -5923,34 +5856,6 @@ func (a *App) localizedTopicTitle(title, source string) string {
 	return title
 }
 
-func topicTitlesPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
-	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitlesFile)
-}
-
-func topicTitleSourcesPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
-	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicTitleSourcesFile)
-}
-
-func topicCreatedAtsPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
-	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicCreatedAtsFile)
-}
-
-func topicAutoTitleMetaPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicAutoTitlesFile)
-	}
-	return filepath.Join(workspaceRoot, ".reasonix", topicAutoTitlesFile)
-}
-
 const topicFileReadTimeout = 200 * time.Millisecond
 
 var readFileWithTimeoutSlots = make(chan struct{}, 16)
@@ -5984,56 +5889,11 @@ func readFileWithTimeout(path string, timeout time.Duration) ([]byte, error) {
 	}
 }
 
-func loadTopicTitles(workspaceRoot string) map[string]string {
-	m := map[string]string{}
-	b, err := readFileWithTimeout(topicTitlesPath(workspaceRoot), topicFileReadTimeout)
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(b, &m)
-	// Same read-boundary cleaning as loadSessionTitles: older builds could
-	// persist titles carrying internal wrappers (#5666).
-	for key, title := range m {
-		m[key] = agent.UserPreviewText(title)
-	}
-	return m
-}
-
-func loadTopicTitleSources(workspaceRoot string) map[string]string {
-	m := map[string]string{}
-	b, err := readFileWithTimeout(topicTitleSourcesPath(workspaceRoot), topicFileReadTimeout)
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(b, &m)
-	return m
-}
-
-func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
-	m := map[string]int64{}
-	b, err := readFileWithTimeout(topicCreatedAtsPath(workspaceRoot), topicFileReadTimeout)
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(b, &m)
-	return m
-}
-
 type topicAutoTitleMeta struct {
 	Stage     int    `json:"stage,omitempty"`
 	UserTurns int    `json:"userTurns,omitempty"`
 	BasisHash string `json:"basisHash,omitempty"`
 	UpdatedAt int64  `json:"updatedAt,omitempty"`
-}
-
-func loadTopicAutoTitleMeta(workspaceRoot string) map[string]topicAutoTitleMeta {
-	m := map[string]topicAutoTitleMeta{}
-	b, err := readFileWithTimeout(topicAutoTitleMetaPath(workspaceRoot), topicFileReadTimeout)
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(b, &m)
-	return m
 }
 
 func loadStringMapForUpdate(path string) (map[string]string, error) {
@@ -6051,122 +5911,58 @@ func loadStringMapForUpdate(path string) (map[string]string, error) {
 	return m, nil
 }
 
-func loadTopicAutoTitleMetaForUpdate(workspaceRoot string) (map[string]topicAutoTitleMeta, error) {
-	m := map[string]topicAutoTitleMeta{}
-	path := topicAutoTitleMetaPath(workspaceRoot)
-	b, err := readFileUTF8(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return m, nil
-		}
-		return nil, err
-	}
-	if err := json.Unmarshal(b, &m); err != nil || m == nil {
-		return map[string]topicAutoTitleMeta{}, nil
-	}
-	return m, nil
-}
-
-func loadInt64MapForUpdate(path string) (map[string]int64, error) {
-	m := map[string]int64{}
-	b, err := readFileUTF8(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return m, nil
-		}
-		return nil, err
-	}
-	if err := json.Unmarshal(b, &m); err != nil || m == nil {
-		return map[string]int64{}, nil
-	}
-	return m, nil
-}
-
 func loadTopicTitlesForUpdate(workspaceRoot string) (map[string]string, error) {
-	return loadStringMapForUpdate(topicTitlesPath(workspaceRoot))
+	snapshot, err := desktopTopicState.snapshot(workspaceRoot)
+	if err != nil {
+		if !legacyTopicFilesExist(workspaceRoot) {
+			return nil, err
+		}
+		legacy, legacyErr := loadLegacyStringMap(topicTitlesPath(workspaceRoot))
+		if legacyErr != nil {
+			return nil, errors.Join(err, legacyErr)
+		}
+		return legacy, nil
+	}
+	values := make(map[string]string, len(snapshot.Records))
+	for id, record := range snapshot.Records {
+		if record.Title != "" {
+			values[id] = agent.UserPreviewText(record.Title)
+		}
+	}
+	return values, nil
 }
 
 func loadTopicTitleSourcesForUpdate(workspaceRoot string) (map[string]string, error) {
-	return loadStringMapForUpdate(topicTitleSourcesPath(workspaceRoot))
-}
-
-func loadTopicCreatedAtsForUpdate(workspaceRoot string) (map[string]int64, error) {
-	return loadInt64MapForUpdate(topicCreatedAtsPath(workspaceRoot))
-}
-
-// ensureTopicStateDir prepares the directory holding a topic-state file. A
-// project file lives under the workspace root, so the directory is only created
-// while that root still exists — otherwise deleting the folder outside Reasonix
-// resurrects it on the next launch (#4566).
-func ensureTopicStateDir(workspaceRoot, path string) error {
-	if root := strings.TrimSpace(workspaceRoot); root != "" && !existingDirectory(root) {
-		return fmt.Errorf("workspace root %q no longer exists", root)
+	snapshot, err := desktopTopicState.snapshot(workspaceRoot)
+	if err != nil {
+		if !legacyTopicFilesExist(workspaceRoot) {
+			return nil, err
+		}
+		legacy, legacyErr := loadLegacyStringMap(topicTitleSourcesPath(workspaceRoot))
+		if legacyErr != nil {
+			return nil, errors.Join(err, legacyErr)
+		}
+		return legacy, nil
 	}
-	return os.MkdirAll(filepath.Dir(path), 0o755)
+	values := make(map[string]string, len(snapshot.Records))
+	for id, record := range snapshot.Records {
+		if record.TitleSource != "" {
+			values[id] = record.TitleSource
+		}
+	}
+	return values, nil
 }
 
 func saveTopicTitles(workspaceRoot string, m map[string]string) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := topicTitlesPath(workspaceRoot)
-	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return fileutil.ReplaceFile(tmp, path)
+	return desktopTopicState.replaceTitles(workspaceRoot, m)
 }
 
 func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := topicTitleSourcesPath(workspaceRoot)
-	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return fileutil.ReplaceFile(tmp, path)
+	return desktopTopicState.replaceSources(workspaceRoot, m)
 }
 
 func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := topicCreatedAtsPath(workspaceRoot)
-	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return fileutil.ReplaceFile(tmp, path)
-}
-
-func saveTopicAutoTitleMeta(workspaceRoot string, m map[string]topicAutoTitleMeta) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := topicAutoTitleMetaPath(workspaceRoot)
-	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return fileutil.ReplaceFile(tmp, path)
+	return desktopTopicState.replaceCreatedAts(workspaceRoot, m)
 }
 
 func loadTopicTitle(workspaceRoot, topicID string) string {
@@ -6373,8 +6169,7 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 				_ = saveTelemetry(info.RecoveryPath+".telemetry.json", tab.telemetrySnapshot())
 			}
 		}
-		a.emitProjectTreeChangedForSessionDirs(sessionDirectoryForPath(info.RecoveryPath))
-		a.emitRuntimeEvent("session:recovered", sessionRecoveryEvent{
+		a.emitSessionRecoveredAndRefresh(sessionDirectoryForPath(info.RecoveryPath), sessionRecoveryEvent{
 			OriginalPath:     info.OriginalPath,
 			RecoveryPath:     info.RecoveryPath,
 			Scope:            scope,
@@ -6391,41 +6186,23 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 	}
 }
 
+// emitSessionRecoveredAndRefresh registers the frontend pending item before a
+// catalog reconcile can publish the revision that classifies it.
+func (a *App) emitSessionRecoveredAndRefresh(dir string, recovered sessionRecoveryEvent) {
+	a.emitRuntimeEvent("session:recovered", recovered)
+	a.emitProjectTreeChangedForSessionDirs(dir)
+}
+
 func setTopicTitle(workspaceRoot, topicID, title string) error {
 	return setTopicTitleWithSource(workspaceRoot, topicID, title, topicTitleSourceManual)
 }
 
 func setTopicTitleWithSource(workspaceRoot, topicID, title, source string) error {
-	m, err := loadTopicTitlesForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(title) == "" {
-		delete(m, topicID)
-	} else {
-		m[topicID] = strings.TrimSpace(title)
-	}
-	if err := saveTopicTitles(workspaceRoot, m); err != nil {
-		return err
-	}
+	return desktopTopicState.setTitle(workspaceRoot, topicID, title, source)
+}
 
-	sources, err := loadTopicTitleSourcesForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(title) == "" || strings.TrimSpace(source) == "" {
-		delete(sources, topicID)
-	} else {
-		sources[topicID] = strings.TrimSpace(source)
-	}
-	if err := saveTopicTitleSources(workspaceRoot, sources); err != nil {
-		return err
-	}
-	if strings.TrimSpace(source) == topicTitleSourceManual ||
-		(strings.TrimSpace(source) == topicTitleSourceAuto && isDefaultTopicTitle(title)) {
-		_ = deleteTopicAutoTitleMeta(workspaceRoot, topicID)
-	}
-	return nil
+func createTopicState(workspaceRoot, topicID, title, source string, createdAt int64) error {
+	return desktopTopicState.createTopic(workspaceRoot, topicID, title, source, createdAt)
 }
 
 func recordTopicAutoTitleMeta(workspaceRoot, topicID string, proposal autoTopicTitleProposal) error {
@@ -6433,17 +6210,24 @@ func recordTopicAutoTitleMeta(workspaceRoot, topicID string, proposal autoTopicT
 	if topicID == "" || proposal.Stage <= 0 || proposal.BasisHash == "" {
 		return nil
 	}
-	m, err := loadTopicAutoTitleMetaForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	m[topicID] = topicAutoTitleMeta{
+	value := topicAutoTitleMeta{
 		Stage:     proposal.Stage,
 		UserTurns: proposal.UserTurns,
 		BasisHash: proposal.BasisHash,
 		UpdatedAt: time.Now().UnixMilli(),
 	}
-	return saveTopicAutoTitleMeta(workspaceRoot, m)
+	return desktopTopicState.setAutoMeta(workspaceRoot, topicID, &value)
+}
+
+func applyAutoTopicTitle(workspaceRoot, topicID, title string, proposal autoTopicTitleProposal) (bool, error) {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" || proposal.Stage <= 0 || proposal.BasisHash == "" {
+		return false, nil
+	}
+	return desktopTopicState.applyAutoTitle(workspaceRoot, topicID, title, topicAutoTitleMeta{
+		Stage: proposal.Stage, UserTurns: proposal.UserTurns,
+		BasisHash: proposal.BasisHash, UpdatedAt: time.Now().UnixMilli(),
+	})
 }
 
 func deleteTopicAutoTitleMeta(workspaceRoot, topicID string) error {
@@ -6451,41 +6235,15 @@ func deleteTopicAutoTitleMeta(workspaceRoot, topicID string) error {
 	if topicID == "" {
 		return nil
 	}
-	m, err := loadTopicAutoTitleMetaForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	if _, ok := m[topicID]; !ok {
-		return nil
-	}
-	delete(m, topicID)
-	return saveTopicAutoTitleMeta(workspaceRoot, m)
+	return desktopTopicState.setAutoMeta(workspaceRoot, topicID, nil)
 }
 
 func setTopicCreatedAt(workspaceRoot, topicID string, createdAt int64) error {
-	created, err := loadTopicCreatedAtsForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	topicID = strings.TrimSpace(topicID)
-	if topicID == "" || createdAt <= 0 {
-		delete(created, topicID)
-	} else {
-		created[topicID] = createdAt
-	}
-	return saveTopicCreatedAts(workspaceRoot, created)
+	return desktopTopicState.setCreatedAt(workspaceRoot, topicID, createdAt)
 }
 
-func deleteTopicCreatedAt(workspaceRoot, topicID string) error {
-	created, err := loadTopicCreatedAtsForUpdate(workspaceRoot)
-	if err != nil {
-		return err
-	}
-	if _, ok := created[topicID]; !ok {
-		return nil
-	}
-	delete(created, topicID)
-	return saveTopicCreatedAts(workspaceRoot, created)
+func deleteTopicState(workspaceRoot, topicID string) error {
+	return desktopTopicState.delete(workspaceRoot, topicID)
 }
 
 // topicIndexMu serializes recovery writes to desktop-projects.json and topic
@@ -6493,7 +6251,19 @@ func deleteTopicCreatedAt(workspaceRoot, topicID string) error {
 // repair its missing index.
 var topicIndexMu sync.Mutex
 
+// topicAutoTitleCommittedHookForTest pauses between the authoritative auto
+// title commit and its in-memory/session publication. Production leaves it nil.
+var topicAutoTitleCommittedHookForTest func()
+
 func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) error {
+	return ensureTopicIndexedState(scope, workspaceRoot, topicID, title, source, 0)
+}
+
+func ensureTopicIndexedWithCreatedAt(scope, workspaceRoot, topicID, title, source string, createdAt int64) error {
+	return ensureTopicIndexedState(scope, workspaceRoot, topicID, title, source, createdAt)
+}
+
+func ensureTopicIndexedState(scope, workspaceRoot, topicID, title, source string, createdAt int64) error {
 	topicID = strings.TrimSpace(topicID)
 	if topicID == "" {
 		return fmt.Errorf("topicID is required")
@@ -6513,8 +6283,31 @@ func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) err
 	if source == "" {
 		source = topicTitleSourceManual
 	}
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, source); err != nil {
+	wasDeleted := containsDesktopString(loadProjectsFile().DeletedTopics, topicID)
+	if wasDeleted {
+		// A migrated scope prunes tombstoned SQLite rows before mirroring. Clear
+		// the tombstone first for an explicit restore; if the authoritative state
+		// write then fails, restore the tombstone so the topic cannot be half shown.
+		if err := prependTopicInProjectsFile(workspaceRoot, topicID, true); err != nil {
+			return err
+		}
+	}
+	var err error
+	if createdAt > 0 {
+		err = createTopicState(workspaceRoot, topicID, title, source, createdAt)
+	} else {
+		err = setTopicTitleWithSource(workspaceRoot, topicID, title, source)
+	}
+	if err != nil {
+		if wasDeleted {
+			if rollbackErr := removeTopicFromProjectsFile(topicID); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("restore topic tombstone: %w", rollbackErr))
+			}
+		}
 		return err
+	}
+	if wasDeleted {
+		return nil
 	}
 	return prependTopicInProjectsFile(workspaceRoot, topicID, true)
 }
@@ -6622,9 +6415,9 @@ type ProjectNode struct {
 	RecoveryBranchCount          int    `json:"recoveryBranchCount,omitempty"`
 	RecoveryUnresolvedCount      int    `json:"recoveryUnresolvedCount,omitempty"`
 	RecoveryCleanupEligibleCount int    `json:"recoveryCleanupEligibleCount,omitempty"`
-	// RecoveryCopyCount is the number of recovery copies folded behind this
-	// logical row (covered or diverged). The ordinary tree renders it as a
-	// muted "恢复副本" count badge; History still owns the full copy list.
+	// RecoveryCopyCount is retained for Wails compatibility with older desktop
+	// frontends. Ordinary project-tree payloads intentionally leave it at zero:
+	// physical recovery copies are an internal persistence detail.
 	RecoveryCopyCount int           `json:"recoveryCopyCount,omitempty"`
 	IsolatedWorktree  bool          `json:"isolatedWorktree,omitempty"`
 	Remote            *RemoteTabRef `json:"remote,omitempty"`
@@ -6749,7 +6542,7 @@ func restoreSessionTopicIndex(dir, sessionPath string) error {
 	if title == "" {
 		title = defaultTopicTitle
 	}
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, topicTitleSourceManual); err != nil {
+	if err := ensureTopicIndexed(scope, workspaceRoot, topicID, title, topicTitleSourceManual); err != nil {
 		return err
 	}
 
@@ -6762,9 +6555,6 @@ func restoreSessionTopicIndex(dir, sessionPath string) error {
 	}
 	meta.TopicID = topicID
 	meta.TopicTitle = title
-	if err := prependTopicInProjectsFile(workspaceRoot, topicID, scope == "project"); err != nil {
-		return err
-	}
 	if err := agent.SaveBranchMetaPreserveUpdatedLocked(sessionPath, meta); err != nil {
 		return err
 	}
@@ -6846,10 +6636,7 @@ func (a *App) CreateTopic(scope, workspaceRoot, title string) (TopicMeta, error)
 			workspaceRoot = abs
 		}
 	}
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, trimmedTitle, titleSource); err != nil {
-		return TopicMeta{}, err
-	}
-	if err := setTopicCreatedAt(workspaceRoot, topicID, createdAt); err != nil {
+	if err := createTopicState(workspaceRoot, topicID, trimmedTitle, titleSource, createdAt); err != nil {
 		return TopicMeta{}, err
 	}
 	// New topics should appear first in their project/global group so the item
@@ -6972,6 +6759,8 @@ func (a *App) ReorderProjects(workspaceRoots []string) error {
 
 // RenameTopic updates a topic's display title.
 func (a *App) RenameTopic(topicID, title string) error {
+	a.topicTitleMutationMu.Lock()
+	defer a.topicTitleMutationMu.Unlock()
 	trimmed := strings.TrimSpace(title)
 	if trimmed == "" {
 		trimmed = defaultTopicTitle
@@ -7176,6 +6965,12 @@ func (a *App) deleteTopic(topicID string) error {
 		indexed[p.Root] = containsDesktopString(p.Topics, topicID) ||
 			containsDesktopString(p.PinnedTopics, topicID)
 	}
+	// Publish the tombstone before clearing any per-scope state. A concurrent
+	// session repair may already hold a stale title snapshot, but its commit-time
+	// merge will now see the tombstone and cannot resurrect this topic.
+	if err := removeTopicFromProjectsFile(topicID); err != nil {
+		return err
+	}
 	roots = append(roots, "")
 	for _, root := range roots {
 		titles, err := loadTopicTitlesForUpdate(root)
@@ -7189,35 +6984,9 @@ func (a *App) deleteTopic(topicID string) error {
 		if !hasTitle && !indexed[root] {
 			continue
 		}
-		// Fallible cleanup runs before the title entry is removed: for a
-		// title-map-only topic the title is the only locator that makes this
-		// root a candidate again, so it must survive a failed attempt and be
-		// deleted last.
-		sources, err := loadTopicTitleSourcesForUpdate(root)
-		if err != nil {
+		if err := deleteTopicState(root, topicID); err != nil {
 			return err
 		}
-		if _, ok := sources[topicID]; ok {
-			delete(sources, topicID)
-			if err := saveTopicTitleSources(root, sources); err != nil {
-				return err
-			}
-		}
-		if err := deleteTopicCreatedAt(root, topicID); err != nil {
-			return err
-		}
-		if err := deleteTopicAutoTitleMeta(root, topicID); err != nil {
-			return err
-		}
-		if hasTitle {
-			delete(titles, topicID)
-			if err := saveTopicTitles(root, titles); err != nil {
-				return err
-			}
-		}
-	}
-	if err := removeTopicFromProjectsFile(topicID); err != nil {
-		return err
 	}
 	a.emitProjectTreeMetadataChanged()
 	return nil

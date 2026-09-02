@@ -43,7 +43,7 @@ model = "x"
 			ctrl.Close()
 			t.Fatalf("Run(%q): %v", mode, err)
 		}
-		reqs := prov.Requests()
+		reqs := mainConversationRequests(prov.Requests())
 		if len(reqs) != 1 {
 			ctrl.Close()
 			t.Fatalf("requests(%q)=%d", mode, len(reqs))

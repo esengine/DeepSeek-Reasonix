@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,19 +32,23 @@ import (
 const credentialProxyProviderName = "reasonix-desktop-proxy"
 
 type credProxyRoute struct {
-	proxy *httputil.ReverseProxy
-	model string
+	proxy     *httputil.ReverseProxy
+	model     string
+	ref       string
+	apiKeyEnv string
+	provider  string
 }
 
 // credentialProxy is the desktop-side key holder: a loopback HTTP endpoint
 // that authenticates requests by virtual token and forwards them to the real
 // provider with the real key. One instance serves the whole app.
 type credentialProxy struct {
-	mu     sync.Mutex
-	ln     net.Listener
-	server *http.Server
-	port   int
-	routes map[string]*credProxyRoute
+	mu       sync.Mutex
+	updateMu sync.Mutex
+	ln       net.Listener
+	server   *http.Server
+	port     int
+	routes   map[string]*credProxyRoute
 }
 
 func (p *credentialProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,28 +115,66 @@ func rewriteJSONModel(body []byte, model string) []byte {
 	return out
 }
 
-func (p *credentialProxy) setRoute(token string, upstream *url.URL, apiKey, model, kind string) {
-	if kind == "" {
-		kind = "openai"
+func (p *credentialProxy) setRoute(token, ref string, upstream *url.URL, apiKey, model, kind string) {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+	p.setRouteLocked(token, ref, proxyUpstream{url: upstream, apiKey: apiKey, model: model, kind: kind})
+}
+
+func (p *credentialProxy) resolveAndSetRoute(token, ref string, resolve func() (proxyUpstream, error)) (proxyUpstream, error) {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+	up, err := resolve()
+	if err != nil {
+		return proxyUpstream{}, err
+	}
+	p.setRouteLocked(token, ref, up)
+	return up, nil
+}
+
+func (p *credentialProxy) setRouteLocked(token, ref string, up proxyUpstream) {
+	if up.kind == "" {
+		up.kind = "openai"
 	}
 	proxy := &httputil.ReverseProxy{FlushInterval: -1}
 	proxy.Rewrite = func(req *httputil.ProxyRequest) {
-		req.SetURL(upstream)
+		req.SetURL(up.url)
 		for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "Via"} {
 			req.Out.Header.Del(header)
 		}
-		if kind == "anthropic" {
+		if up.kind == "anthropic" {
 			req.Out.Header.Del("Authorization")
-			req.Out.Header.Set("x-api-key", apiKey)
+			req.Out.Header.Set("x-api-key", up.apiKey)
 			req.Out.Header.Set("anthropic-version", "2023-06-01")
 		} else {
 			req.Out.Header.Del("x-api-key")
-			req.Out.Header.Set("Authorization", "Bearer "+apiKey)
+			req.Out.Header.Set("Authorization", "Bearer "+up.apiKey)
 		}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.routes[token] = &credProxyRoute{proxy: proxy, model: model}
+	p.routes[token] = &credProxyRoute{
+		proxy: proxy, model: up.model, ref: ref,
+		apiKeyEnv: strings.TrimSpace(up.apiKeyEnv), provider: strings.TrimSpace(up.provider),
+	}
+}
+
+type credentialRouteRegistration struct {
+	token string
+	ref   string
+}
+
+func (p *credentialProxy) routeRegistrationsLocked() []credentialRouteRegistration {
+	p.mu.Lock()
+	registrations := make([]credentialRouteRegistration, 0, len(p.routes))
+	for token, route := range p.routes {
+		if route != nil && strings.TrimSpace(route.ref) != "" {
+			registrations = append(registrations, credentialRouteRegistration{token: token, ref: route.ref})
+		}
+	}
+	p.mu.Unlock()
+	sort.Slice(registrations, func(i, j int) bool { return registrations[i].token < registrations[j].token })
+	return registrations
 }
 
 func (p *credentialProxy) close() {
@@ -193,34 +237,45 @@ func (a *App) closeCredentialProxy() {
 func (a *App) credentialProxySecret() (string, error) {
 	remotePrefsMu.Lock()
 	defer remotePrefsMu.Unlock()
-	p := loadRemotePrefs()
-	if p.CredentialProxySecret == "" {
+	p, err := updateRemotePrefsLocked(func(p *remotePrefs) (bool, error) {
+		if p.CredentialProxySecret != "" {
+			return false, nil
+		}
 		buf := make([]byte, 32)
 		if _, err := rand.Read(buf); err != nil {
-			return "", fmt.Errorf("credential proxy: generate secret: %w", err)
+			return false, fmt.Errorf("credential proxy: generate secret: %w", err)
 		}
 		p.CredentialProxySecret = hex.EncodeToString(buf)
-		if err := saveRemotePrefs(p); err != nil {
-			return "", fmt.Errorf("credential proxy: persist secret: %w", err)
-		}
+		return true, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("credential proxy: persist secret: %w", err)
 	}
 	return p.CredentialProxySecret, nil
 }
 
-// credentialProxyTokenFor derives a virtual token. Tokens are stable across
-// desktop restarts, so a reused remote serve keeps working.
-func credentialProxyTokenFor(secret, hostID, workspace string) string {
+// credentialProxyModelTokenFor gives each staged model an immutable route.
+// A controller already running with the previous virtual token therefore keeps
+// its old upstream for the whole turn while Serve builds and publishes the new
+// controller. This is the cross-process half of failure-atomic model switches.
+func credentialProxyModelTokenFor(secret, hostID, workspace, modelRef string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte("reasonix-credential-proxy:" + hostID + ":" + workspace))
+	_, _ = mac.Write([]byte("reasonix-credential-proxy-model:v2"))
+	for _, field := range []string{hostID, workspace, modelRef} {
+		var size [8]byte
+		binary.BigEndian.PutUint64(size[:], uint64(len(field)))
+		_, _ = mac.Write(size[:])
+		_, _ = mac.Write([]byte(field))
+	}
 	return hex.EncodeToString(mac.Sum(nil))[:32]
 }
 
-func (a *App) credentialProxyToken(hostID, workspace string) (string, error) {
+func (a *App) credentialProxyModelToken(hostID, workspace, modelRef string) (string, error) {
 	secret, err := a.credentialProxySecret()
 	if err != nil {
 		return "", err
 	}
-	return credentialProxyTokenFor(secret, hostID, workspace), nil
+	return credentialProxyModelTokenFor(secret, hostID, workspace, modelRef), nil
 }
 
 // credentialProxyRouteInfo is everything a serve bootstrap needs to install
@@ -236,10 +291,12 @@ type credentialProxyRouteInfo struct {
 
 // proxyUpstream is the resolved desktop-side provider a route forwards to.
 type proxyUpstream struct {
-	apiKey string
-	url    *url.URL
-	model  string
-	kind   string
+	apiKey    string
+	url       *url.URL
+	model     string
+	kind      string
+	apiKeyEnv string
+	provider  string
 }
 
 // resolveProxyProvider resolves a desktop model ref into the upstream the
@@ -252,7 +309,7 @@ func resolveProxyProvider(cfg *config.Config, ref string) (proxyUpstream, error)
 	}
 	apiKey := config.ResolveCredential(entry.APIKeyEnv).Value
 	if apiKey == "" {
-		return proxyUpstream{}, fmt.Errorf("credential proxy: %s is not set — the local key is required in local-proxy mode", entry.APIKeyEnv)
+		return proxyUpstream{}, fmt.Errorf("credential proxy: the local provider credential is not configured")
 	}
 	base := strings.TrimSpace(entry.BaseURL)
 	if base == "" {
@@ -269,7 +326,10 @@ func resolveProxyProvider(cfg *config.Config, ref string) (proxyUpstream, error)
 	if kind == "" {
 		kind = "openai"
 	}
-	return proxyUpstream{apiKey: apiKey, url: upstream, model: entry.Model, kind: kind}, nil
+	return proxyUpstream{
+		apiKey: apiKey, url: upstream, model: entry.Model, kind: kind,
+		apiKeyEnv: entry.APIKeyEnv, provider: entry.Name,
+	}, nil
 }
 
 // registerCredentialProxyRoute binds one workspace token to the current
@@ -280,10 +340,31 @@ func (a *App) registerCredentialProxyRoute(hostID, workspace string) (credential
 		return credentialProxyRouteInfo{}, err
 	}
 	ref := strings.TrimSpace(cfg.DefaultModel)
-	up, err := resolveProxyProvider(cfg, ref)
-	if err != nil {
-		return credentialProxyRouteInfo{}, err
+	if workspaceModel := a.desktopModelForWorkspace(hostID, workspace); workspaceModel != "" {
+		ref = workspaceModel
 	}
+	return a.applyCredentialProxyModel(hostID, workspace, ref)
+}
+
+// desktopModelForWorkspace deterministically selects the newest tab-owned
+// model for a workspace; map iteration order must never choose a route.
+func (a *App) desktopModelForWorkspace(hostID, workspace string) string {
+	a.remoteTabMu.Lock()
+	defer a.remoteTabMu.Unlock()
+	var selected string
+	var selectedSeq uint64
+	for _, tab := range a.remoteTabs {
+		if tab == nil || tab.ref.HostID != hostID || tab.ref.Workspace != workspace || strings.TrimSpace(tab.model) == "" {
+			continue
+		}
+		if tab.modelSeq >= selectedSeq {
+			selected, selectedSeq = tab.model, tab.modelSeq
+		}
+	}
+	return selected
+}
+
+func (a *App) applyCredentialProxyModel(hostID, workspace, ref string) (credentialProxyRouteInfo, error) {
 	port, err := a.credentialProxyPort()
 	if err != nil {
 		return credentialProxyRouteInfo{}, err
@@ -294,12 +375,70 @@ func (a *App) registerCredentialProxyRoute(hostID, workspace string) (credential
 	if proxy == nil {
 		return credentialProxyRouteInfo{}, fmt.Errorf("credential proxy: not running")
 	}
-	token, err := a.credentialProxyToken(hostID, workspace)
+	// Route tokens include the canonical desktop model ref. Never mutate the
+	// route held by an in-flight controller during a model switch.
+	token, err := a.credentialProxyModelToken(hostID, workspace, ref)
 	if err != nil {
 		return credentialProxyRouteInfo{}, err
 	}
-	proxy.setRoute(token, up.url, up.apiKey, up.model, up.kind)
+	up, err := proxy.resolveAndSetRoute(token, ref, func() (proxyUpstream, error) {
+		cfg, err := config.Load()
+		if err != nil {
+			return proxyUpstream{}, err
+		}
+		return resolveProxyProvider(cfg, ref)
+	})
+	if err != nil {
+		return credentialProxyRouteInfo{}, err
+	}
 	return credentialProxyRouteInfo{token: token, model: up.model, kind: up.kind, port: port}, nil
+}
+
+// saveProviderCredential persists a provider key and synchronously refreshes
+// every route that captured its previous value before returning to the UI.
+func (a *App) saveProviderCredential(apiKeyEnv, value string) (string, error) {
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	value = strings.TrimSpace(value)
+	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
+		return "", err
+	}
+	if value == "" {
+		a.revokeCredentialProxyRoutesByCredential(apiKeyEnv)
+	} else {
+		a.refreshCredentialProxyRoutes()
+	}
+	return providerCredentialSourceNotice(apiKeyEnv, value), nil
+}
+
+// refreshCredentialProxyRoutes rebuilds every registered model-token route.
+// updateMu covers credential resolution through route replacement, so an
+// older save cannot capture a stale key and publish it after a newer save.
+func (a *App) refreshCredentialProxyRoutes() {
+	a.credProxyMu.Lock()
+	proxy := a.credProxy
+	a.credProxyMu.Unlock()
+	if proxy == nil {
+		return
+	}
+	proxy.updateMu.Lock()
+	defer proxy.updateMu.Unlock()
+	// Credential saves can run inside a user-config edit transaction (for
+	// example while installing provider access). Use the non-migrating loader
+	// so route refresh never tries to reacquire that transaction's file lock.
+	cfg, err := config.LoadForRootReadOnly(".")
+	if err != nil {
+		log.Printf("[remote] credProxy: credential route refresh skipped: %v", err)
+		return
+	}
+	for _, registration := range proxy.routeRegistrationsLocked() {
+		up, err := resolveProxyProvider(cfg, registration.ref)
+		if err != nil {
+			proxy.revokeRouteLocked(registration.token)
+			log.Printf("[remote] credProxy: invalid credential route revoked: %v", err)
+			continue
+		}
+		proxy.setRouteLocked(registration.token, registration.ref, up)
+	}
 }
 
 // credentialModeView returns the host entry's normalized credential mode for

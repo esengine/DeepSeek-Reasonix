@@ -3,6 +3,7 @@ import {
   analyzeFrontendDiagnosticAnomalies,
   createFrontendDiagnostics,
   isFrontendDiagnosticsBuild,
+  isSupportedFrontendDiagnosticSchemaVersion,
 } from "../lib/frontendDiagnostics";
 
 let now = 10_000;
@@ -100,7 +101,10 @@ assert.ok(active.droppedEventCount > 0, "overflow is visible in the summary");
 assert.equal(active.markerCount, 0, "evicted markers are not counted as retained");
 
 const payload = diagnostics.stop();
-assert.equal(payload.schemaVersion, 1);
+assert.equal(payload.schemaVersion, 2);
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(1), true, "schema v1 remains readable by replay tools");
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(2), true, "schema v2 is the current capture format");
+assert.equal(isSupportedFrontendDiagnosticSchemaVersion(3), false, "unknown future schemas are rejected explicitly");
 assert.equal(payload.manifest.platform, "windows");
 assert.equal(payload.events[payload.events.length - 1]?.type, "stop");
 const serialized = JSON.stringify(payload);

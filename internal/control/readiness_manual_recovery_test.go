@@ -56,6 +56,67 @@ func TestStandardStopsAfterOneVisibleTurn(t *testing.T) {
 	}
 }
 
+func TestStandardStartReplyContinuesCurrentTodoInsideVisibleTurn(t *testing.T) {
+	c, prov := manualReadinessController(t, [][]provider.Chunk{
+		{toolCallChunk("todo-1", "todo_write", `{"todos":[{"content":"重写第 4 节","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		textTurn("让我先列出待办，接下来会重写。"),
+		{
+			toolCallChunk("write-1", "write_file", `{"path":"PRD.md"}`),
+			toolCallChunk("todo-2", "todo_write", `{"todos":[{"content":"重写第 4 节","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		textTurn("第 4 节已经完成重写。"),
+	})
+	if err := c.SetQualityFloor(QualityFloorStandard); err != nil {
+		t.Fatalf("SetQualityFloor: %v", err)
+	}
+	c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "让我写完整新第 4 节。"})
+
+	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "开始", "开始", "开始"); err != nil {
+		t.Fatalf("standard start reply returned %v", err)
+	}
+	if prov.call != 4 {
+		t.Fatalf("provider calls = %d, want Todo stop repaired inside the same visible turn", prov.call)
+	}
+	if got := syntheticUserTurnCount(c.executor.Session().Snapshot()); got != 1 {
+		t.Fatalf("synthetic user turns = %d, want one hidden Todo continuation", got)
+	}
+}
+
+func TestStandardStartWithoutConversationDoesNotArmTodoContinuation(t *testing.T) {
+	c, prov := manualReadinessController(t, [][]provider.Chunk{
+		{toolCallChunk("todo-1", "todo_write", `{"todos":[{"content":"重写第 4 节","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		textTurn("等待下一步。"),
+		textTurn("不应被隐藏续跑消费"),
+	})
+
+	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "开始", "开始", "开始"); err != nil {
+		t.Fatalf("standard start reply returned %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want no continuation without prior context", prov.call)
+	}
+}
+
+func TestStandardTodoContinuationYieldsToPendingUserWork(t *testing.T) {
+	c, prov := manualReadinessController(t, [][]provider.Chunk{
+		{toolCallChunk("todo-1", "todo_write", `{"todos":[{"content":"重写第 4 节","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		textTurn("等待下一步。"),
+		textTurn("不应被隐藏续跑消费"),
+	})
+	c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "让我写完整新第 4 节。"})
+	c.mu.Lock()
+	c.canceling = true
+	c.mu.Unlock()
+
+	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "开始", "开始", "开始"); err != nil {
+		t.Fatalf("standard start reply returned %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want pending user work to preempt continuation", prov.call)
+	}
+}
+
 func TestDeliveryStopsAtReadinessAndWaitsForExplicitRecovery(t *testing.T) {
 	c, prov := manualReadinessController(t, [][]provider.Chunk{
 		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},

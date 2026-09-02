@@ -7,6 +7,10 @@ export interface SessionCatalogStatus {
   indexed: number;
   total: number;
   repairPending: number;
+  repairActive?: number;
+  repairDeferred?: number;
+  repairBlocked?: number;
+  nextRepairAt?: number;
   repairReason?: string;
   sourceCount?: number;
   unindexedTargetCount?: number;
@@ -49,6 +53,8 @@ export interface ProjectTopicKey {
   scope: "global" | "project" | string;
   workspaceRoot?: string;
   topicId: string;
+  path?: string;
+  recordClassification?: boolean;
 }
 
 export interface ProjectTreeChangedV2 {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/billing"
+	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/fileutil"
@@ -92,30 +93,36 @@ type RunMetrics struct {
 	MissingReasoningSuppressed int `json:"missing_reasoning_retry_suppressed,omitempty"`
 	MissingReasoningFallbacks  int `json:"missing_reasoning_fallbacks,omitempty"`
 	// Capability / Delivery routing counters (optional; zero for older readers).
-	CapabilityRoutes               int     `json:"capability_routes,omitempty"`
-	CapabilityRoutedCandidates     int     `json:"capability_routed_candidates,omitempty"`
-	CapabilityRoutedRequire        int     `json:"capability_routed_require,omitempty"`
-	CapabilityRoutedPrefer         int     `json:"capability_routed_prefer,omitempty"`
-	CapabilityRoutedSuggest        int     `json:"capability_routed_suggest,omitempty"`
-	CapabilityDeclines             int     `json:"capability_declines,omitempty"`
-	CapabilitySemanticRoutes       int     `json:"capability_semantic_routes,omitempty"`
-	CapabilitySemanticFallbacks    int     `json:"capability_semantic_fallbacks,omitempty"`
-	CapabilityRequireMissing       int     `json:"capability_require_missing,omitempty"`
-	CapabilityRequireRecovered     int     `json:"capability_require_recovered,omitempty"`
-	CapabilityPreferMissing        int     `json:"capability_prefer_missing,omitempty"`
-	CapabilityPreferRecovered      int     `json:"capability_prefer_recovered,omitempty"`
-	CapabilitySkillInvocations     int     `json:"capability_skill_invocations,omitempty"`
-	CapabilitySkillFailures        int     `json:"capability_skill_failures,omitempty"`
-	CapabilitySkillUnavailable     int     `json:"capability_skill_unavailable,omitempty"`
-	CapabilityMCPInspect           int     `json:"capability_mcp_inspect,omitempty"`
-	CapabilityMCPCall              int     `json:"capability_mcp_call,omitempty"`
-	CapabilityMCPCallFailures      int     `json:"capability_mcp_call_failures,omitempty"`
-	CapabilityReviewBlocks         int     `json:"capability_review_blocks,omitempty"`
-	CapabilitySecurityReviewBlocks int     `json:"capability_security_review_blocks,omitempty"`
-	CapabilityRouterPromptTokens   int     `json:"capability_router_prompt_tokens,omitempty"`
-	CapabilityRouterCompletionTok  int     `json:"capability_router_completion_tokens,omitempty"`
-	CapabilityRouterCost           float64 `json:"capability_router_cost,omitempty"`
-	CapabilityRouterLatencyMs      int64   `json:"capability_router_latency_ms,omitempty"`
+	CapabilityRoutes               int                       `json:"capability_routes,omitempty"`
+	CapabilityRoutedCandidates     int                       `json:"capability_routed_candidates,omitempty"`
+	CapabilityRoutedRequire        int                       `json:"capability_routed_require,omitempty"`
+	CapabilityRoutedPrefer         int                       `json:"capability_routed_prefer,omitempty"`
+	CapabilityRoutedSuggest        int                       `json:"capability_routed_suggest,omitempty"`
+	CapabilityDeclines             int                       `json:"capability_declines,omitempty"`
+	CapabilitySemanticRoutes       int                       `json:"capability_semantic_routes,omitempty"`
+	CapabilitySemanticFallbacks    int                       `json:"capability_semantic_fallbacks,omitempty"`
+	CapabilityRequireMissing       int                       `json:"capability_require_missing,omitempty"`
+	CapabilityRequireRecovered     int                       `json:"capability_require_recovered,omitempty"`
+	CapabilityPreferMissing        int                       `json:"capability_prefer_missing,omitempty"`
+	CapabilityPreferRecovered      int                       `json:"capability_prefer_recovered,omitempty"`
+	CapabilitySkillInvocations     int                       `json:"capability_skill_invocations,omitempty"`
+	CapabilitySkillFailures        int                       `json:"capability_skill_failures,omitempty"`
+	CapabilitySkillUnavailable     int                       `json:"capability_skill_unavailable,omitempty"`
+	CapabilityMCPInspect           int                       `json:"capability_mcp_inspect,omitempty"`
+	CapabilityMCPCall              int                       `json:"capability_mcp_call,omitempty"`
+	CapabilityMCPCallFailures      int                       `json:"capability_mcp_call_failures,omitempty"`
+	CapabilityReviewBlocks         int                       `json:"capability_review_blocks,omitempty"`
+	CapabilitySecurityReviewBlocks int                       `json:"capability_security_review_blocks,omitempty"`
+	CapabilityRouterPromptTokens   int                       `json:"capability_router_prompt_tokens,omitempty"`
+	CapabilityRouterCompletionTok  int                       `json:"capability_router_completion_tokens,omitempty"`
+	CapabilityRouterCost           float64                   `json:"capability_router_cost,omitempty"`
+	CapabilityRouterLatencyMs      int64                     `json:"capability_router_latency_ms,omitempty"`
+	CapabilityDiscovery            capability.DiscoveryAudit `json:"capability_discovery,omitempty"`
+	CapabilityArguments            capability.ArgumentAudit  `json:"capability_arguments,omitempty"`
+	CapabilityLoopGuard            capability.LoopGuardAudit `json:"capability_loop_guard,omitempty"`
+	CapabilityMCPLists             capability.MCPListAudit   `json:"capability_mcp_lists,omitempty"`
+	CapabilityToolExec             capability.ToolExecAudit  `json:"capability_tool_exec,omitempty"`
+	CapabilityPhases               capability.PhaseAudit     `json:"capability_phases,omitempty"`
 
 	// Run accounting: what a benchmark needs to price one solved task and name
 	// the guard that ended a failed one.
@@ -543,6 +550,69 @@ func (s *metricsSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
 
 func (s *metricsSink) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(s.inner, sample)
+}
+
+func (s *metricsSink) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	event.RecordCompletionValidation(s.inner, info)
+}
+
+// MergeCapabilityAudit copies a capability audit snapshot plus process-local
+// MCP tools/list stats into RunMetrics.
+func (m *RunMetrics) MergeCapabilityAudit(snap *capability.Audit) {
+	if m == nil || snap == nil {
+		return
+	}
+	m.MergeCapabilityAuditCounters(
+		snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
+		snap.SemanticRoutes, snap.SemanticFallbacks,
+		snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
+		snap.SkillInvocations, snap.SkillFailures, snap.SkillUnavailable,
+		snap.MCPInspect, snap.MCPCall, snap.MCPCallFailures,
+		snap.ReviewBlocks, snap.SecurityReviewBlocks,
+		snap.RouterPromptTokens, snap.RouterCompletionTokens,
+		snap.RouterCost, snap.RouterLatencyMs,
+	)
+	m.CapabilityDiscovery.Lists += snap.Discovery.Lists
+	m.CapabilityDiscovery.Searches += snap.Discovery.Searches
+	m.CapabilityDiscovery.Inspects += snap.Discovery.Inspects
+	m.CapabilityDiscovery.ResultCount += snap.Discovery.ResultCount
+	m.CapabilityDiscovery.ResultBytes += snap.Discovery.ResultBytes
+	m.CapabilityDiscovery.NetworkCalls += snap.Discovery.NetworkCalls
+	m.CapabilityArguments.Validations += snap.Arguments.Validations
+	m.CapabilityArguments.Fail += snap.Arguments.Fail
+	m.CapabilityArguments.Skip += snap.Arguments.Skip
+	m.CapabilityArguments.RemoteDispatch += snap.Arguments.RemoteDispatch
+	m.CapabilityLoopGuard.RepeatFailures += snap.LoopGuard.RepeatFailures
+	m.CapabilityLoopGuard.RepeatClarifications += snap.LoopGuard.RepeatClarifications
+	m.CapabilityLoopGuard.SoftBudgetNudges += snap.LoopGuard.SoftBudgetNudges
+	m.CapabilityLoopGuard.BlockedCalls += snap.LoopGuard.BlockedCalls
+	m.CapabilityMCPLists.SharedHost += snap.MCPLists.SharedHost
+	m.CapabilityMCPLists.DiskCache += snap.MCPLists.DiskCache
+	m.CapabilityMCPLists.Remote += snap.MCPLists.Remote
+	m.CapabilityMCPLists.DurationMs += snap.MCPLists.DurationMs
+	m.CapabilityMCPLists.ToolCount += snap.MCPLists.ToolCount
+	m.CapabilityMCPLists.SchemaBytes += snap.MCPLists.SchemaBytes
+	if len(snap.MCPLists.Triggers) > 0 {
+		if m.CapabilityMCPLists.Triggers == nil {
+			m.CapabilityMCPLists.Triggers = map[string]int{}
+		}
+		for trigger, count := range snap.MCPLists.Triggers {
+			m.CapabilityMCPLists.Triggers[trigger] += count
+		}
+	}
+	m.CapabilityToolExec.Calls += snap.ToolExec.Calls
+	m.CapabilityToolExec.ReadOnly += snap.ToolExec.ReadOnly
+	m.CapabilityToolExec.Parallel += snap.ToolExec.Parallel
+	m.CapabilityToolExec.QueueMs += snap.ToolExec.QueueMs
+	m.CapabilityToolExec.ExecMs += snap.ToolExec.ExecMs
+	m.CapabilityToolExec.RawBytes += snap.ToolExec.RawBytes
+	m.CapabilityToolExec.VisibleBytes += snap.ToolExec.VisibleBytes
+	m.CapabilityPhases.ProviderWaitMs += snap.Phases.ProviderWaitMs
+	m.CapabilityPhases.ToolExecMs += snap.Phases.ToolExecMs
+	m.CapabilityPhases.SubagentWaitMs += snap.Phases.SubagentWaitMs
+	m.CapabilityPhases.UserWaitMs += snap.Phases.UserWaitMs
+	m.CapabilityPhases.CompactMs += snap.Phases.CompactMs
+	m.CapabilityPhases.ReviewMs += snap.Phases.ReviewMs
 }
 
 // MergeCapabilityAuditCounters copies capability counters into RunMetrics.

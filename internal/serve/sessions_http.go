@@ -16,12 +16,14 @@ type sessionListEntry struct {
 	Title      string `json:"title,omitempty"`
 	Turns      int    `json:"turns,omitempty"`
 	Current    bool   `json:"current,omitempty"`
+	Running    bool   `json:"running,omitempty"`
 	MtimeMilli int64  `json:"mtimeMilli"`
 }
 
 // sessions lists saved sessions with event-log-aware titles and turn counts.
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	dir := s.ctl().SessionDir()
+	ctrl := s.ctl()
+	dir := ctrl.SessionDir()
 	if dir == "" {
 		writeJSON(w, []any{})
 		return
@@ -31,19 +33,33 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []any{})
 		return
 	}
-	current := filepath.Clean(s.ctl().SessionPath())
+	current := agent.CanonicalSessionPath(ctrl.SessionPath())
+	running := map[string]bool{}
+	s.detachedMu.Lock()
+	for path, detached := range s.detached {
+		running[filepath.Clean(path)] = controllerHasActiveRuntimeWork(detached.ctrl)
+	}
+	s.detachedMu.Unlock()
 	out := make([]sessionListEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !store.IsSessionTranscriptName(entry.Name()) {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
+		path := agent.CanonicalSessionPath(filepath.Join(dir, entry.Name()))
 		if agent.IsCleanupPending(path) {
 			continue
 		}
 		mtime := agent.SessionContentModTime(path)
-		row := sessionListEntry{Name: strings.TrimSuffix(entry.Name(), ".jsonl"), Path: path, Current: filepath.Clean(path) == current, MtimeMilli: mtime.UnixMilli()}
-		if first, turns := agent.SessionPreview(path); turns > 0 {
+		cleanPath := agent.CanonicalSessionPath(path)
+		row := sessionListEntry{Name: strings.TrimSuffix(entry.Name(), ".jsonl"), Path: path, Current: cleanPath == current, Running: running[cleanPath], MtimeMilli: mtime.UnixMilli()}
+		if row.Current {
+			row.Running = controllerHasActiveRuntimeWork(ctrl)
+		}
+		first, turns, cached := agent.SessionPreviewCached(path)
+		if !cached {
+			first, turns = agent.SessionPreview(path)
+		}
+		if turns > 0 {
 			row.Turns = turns
 			row.Title = s.sessionTitle(r.Context(), entry.Name(), first, mtime.UnixNano())
 		}

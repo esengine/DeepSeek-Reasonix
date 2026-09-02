@@ -339,6 +339,10 @@ func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
 	event.RecordRunBudget(r.inner, sample)
 }
 
+func (r *Recorder) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	event.RecordCompletionValidation(r.inner, info)
+}
+
 // Close flushes and closes the file, returning the first error seen. Events
 // arriving after Close (late background jobs) are forwarded but not recorded.
 func (r *Recorder) Close() error {

@@ -1,7 +1,6 @@
 import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BrainCircuit, ChevronDown, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
-import { MemoryCitations } from "./MemoryCitations";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ComposerContextCard } from "./ComposerContextCard";
@@ -13,18 +12,19 @@ import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
-import { historyEntryIdForItemId } from "../lib/transcriptRows";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
-import type { Item, MessageActionScope } from "../lib/useController";
+import { messageActionLabelKey, type MessageActionScope } from "../lib/messageActions";
+import type { Item } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
 import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
-import { AssistantReasoningPanel } from "./AssistantReasoningPanel";
 
+const AssistantReasoningPanel = lazy(() => import("./AssistantReasoningPanel").then((module) => ({ default: module.AssistantReasoningPanel })));
+const MemoryCitations = lazy(() => import("./MemoryCitations").then((module) => ({ default: module.MemoryCitations })));
 const SearchSourcesPanel = lazy(() => import("./SearchSourcesPanel").then((module) => ({ default: module.SearchSourcesPanel }))); type AssistantItem = Extract<Item, { kind: "assistant" }>;
-export type TurnActionMenu = "summary" | "rewind";
+export type TurnActionMenu = "summary" | "rewind" | "fork";
 export const InvocationMetadataContext = createContext<InvocationMetadataMap>({});
 type ImSourceMessage = {
   provider: string;
@@ -600,7 +600,7 @@ export function TurnActions({
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
-    if ((scope === "fork" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
+    if ((scope === "fork" || scope === "fork-worktree" || scope === "summ-from" || scope === "conversation") && !checkpoint.canConversation) {
       return t("rewind.disabledNoBoundary");
     }
     if (scope === "summ-from" && isLastTurn) {
@@ -617,38 +617,7 @@ export function TurnActions({
     }
     return "";
   };
-  const actionLabel = (scope: MessageActionScope): string => {
-    if (confirmScope !== scope) {
-      switch (scope) {
-        case "fork":
-          return t("rewind.fork");
-        case "summ-from":
-          return t("rewind.summFrom");
-        case "summ-upto":
-          return t("rewind.summUpto");
-        case "conversation":
-          return t("rewind.conversation");
-        case "code":
-          return t("rewind.code");
-        default:
-          return t("rewind.both");
-      }
-    }
-    switch (scope) {
-      case "fork":
-        return t("rewind.confirmFork");
-      case "summ-from":
-        return t("rewind.confirmSummFrom");
-      case "summ-upto":
-        return t("rewind.confirmSummUpto");
-      case "conversation":
-        return t("rewind.confirmConversation");
-      case "code":
-        return t("rewind.confirmCode");
-      default:
-        return t("rewind.confirmBoth");
-    }
-  };
+  const actionLabel = (scope: MessageActionScope): string => t(messageActionLabelKey(scope, confirmScope === scope));
   const actionMeta = (scope: MessageActionScope): string => {
     const total = checkpoint?.fileCount ?? checkpoint?.files?.length ?? 0;
     if ((scope === "code" || scope === "both") && total > 0) {
@@ -728,16 +697,32 @@ export function TurnActions({
       {text.trim() && <CopyButton text={text} label={t("msg.copy")} />}
       {canAct && (
         <>
-          <button
-            className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
-            type="button"
-            disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || t("rewind.forkTooltip")}
-            onClick={() => selectRewind("fork")}
+          <div
+            className={`turn-actions__group${openMenu === "fork" ? " turn-actions__group--open" : ""}`}
+            onMouseEnter={() => openHoverMenu("fork")}
           >
-            <GitBranch size={13} />
-            <span className="turn-actions__label-inline">{actionLabel("fork")}</span>
-          </button>
+            <button
+              className={`turn-actions__btn${confirmScope === "fork" || confirmScope === "fork-worktree" ? " turn-actions__btn--confirm" : ""}`}
+              type="button"
+              disabled={Boolean(forkDisabledReason)}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === "fork"}
+              title={forkDisabledReason || t("rewind.forkTooltip")}
+              onClick={() => toggleMenu("fork")}
+            >
+              <GitBranch size={13} />
+              <span className="turn-actions__label-inline">
+                <span>{confirmScope === "fork-worktree" ? actionLabel("fork-worktree") : (confirmScope === "fork" ? actionLabel("fork") : t("rewind.fork"))}</span>
+                <ChevronDown size={12} />
+              </span>
+            </button>
+            {openMenu === "fork" && (
+              <div className="rewind__menu turn-actions__menu" role="menu">
+                {renderAction("fork-worktree")}
+                {renderAction("fork")}
+              </div>
+            )}
+          </div>
           <div
             className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
             onMouseEnter={() => openHoverMenu("summary")}
@@ -815,14 +800,14 @@ export const AssistantMessage = memo(function AssistantMessage({
   const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
   const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
   if (processOnly && (reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending")) return null;
+  const reasoningFallback = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending" ? null
+    : <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || reasoningDisplayMode === "expanded" || (item.streaming && (reasoningDisplayMode === "auto" || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <AssistantReasoningPanel
-          item={item}
-          defaultExpanded={defaultExpanded}
-          expandWhileStreaming={expandWhileStreaming}
-        />
+        <Suspense fallback={reasoningFallback}>
+          <AssistantReasoningPanel item={item} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />
+        </Suspense>
       )}
       {(hasText || hasFootnotes) && (
         <div className="msg__body" data-transcript-selectable="message">
@@ -831,13 +816,14 @@ export const AssistantMessage = memo(function AssistantMessage({
               text={item.text}
               plainStatusBlocks={creationMode}
               streaming={item.streaming}
-              entryId={historyEntryIdForItemId(item.id)}
+              cacheKey={item.id}
+              wasStreamed={item.wasStreamed}
             />
           )}
           <Suspense fallback={null}><SearchSourcesPanel sources={item.searchSources} /></Suspense>
         </div>
       )}
-      <MemoryCitations citations={item.memoryCitations} />
+      {Boolean(item.memoryCitations?.length) && <Suspense fallback={null}><MemoryCitations citations={item.memoryCitations} /></Suspense>}
     </div>
   );
 });

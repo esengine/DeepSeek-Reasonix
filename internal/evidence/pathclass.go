@@ -21,6 +21,7 @@ const (
 	PathAuth
 	PathSecret
 	PathPublicAPI
+	PathConcurrency
 )
 
 // ClassifyPath reports the strongest structured class for a workspace path.
@@ -62,6 +63,8 @@ func ClassifyPath(p, workspaceRoot string) PathClass {
 		return PathDocs
 	case pathLooksLowRisk(p, workspaceRoot):
 		return PathDocs
+	case classMatches(segments, tokens, ext, concurrencyPathMatch):
+		return PathConcurrency
 	default:
 		return PathOrdinary
 	}
@@ -110,6 +113,10 @@ var (
 	}
 	stylePathMatch = pathMatch{
 		exts: []string{".css", ".scss", ".sass", ".less"},
+	}
+	concurrencyPathMatch = pathMatch{
+		segments: []string{"concurrent", "concurrency", "goroutine"},
+		tokens:   []string{"mutex", "rwmutex", "rwlock", "concurrent", "concurrency", "goroutine", "waitgroup", "atomic", "deadlock", "race"},
 	}
 )
 
@@ -167,6 +174,27 @@ func filenameTokens(stem string) []string {
 	}
 	flush()
 	return out
+}
+
+// PathModule is the top-level package/module key used for architecture scope.
+// internal/agent/foo.go and cmd/reasonix/main.go are different modules.
+func PathModule(p, workspaceRoot string) string {
+	relevant := riskRelevantPath(p, workspaceRoot)
+	if relevant == "" || relevant == "." {
+		return ""
+	}
+	lower := strings.ToLower(strings.ReplaceAll(relevant, `\`, "/"))
+	segments := pathSegments(lower)
+	if len(segments) == 0 {
+		return ""
+	}
+	switch segments[0] {
+	case "internal", "cmd", "desktop", "tools", "docs":
+		if len(segments) >= 2 {
+			return segments[0] + "/" + segments[1]
+		}
+	}
+	return segments[0]
 }
 
 func isTestFilename(segments []string) bool {

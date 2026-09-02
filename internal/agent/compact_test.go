@@ -35,6 +35,10 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Name() string { return "fake" }
 
+func (f *fakeProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
+	return provider.ContextBudgetPolicy{WindowMode: provider.ContextWindowIndependent}
+}
+
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
 	if f.hang {

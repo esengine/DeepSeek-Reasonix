@@ -26,11 +26,21 @@ const noticeCodeKeys: Record<string, DictKey> = {
   context_editing_fallback: "notice.contextEditingFallback",
 };
 
+const streamInterruptReasonCodeKeys: Record<string, DictKey> = {
+  stream_interrupted_idle_timeout: "notice.streamInterruptReason.idleTimeout",
+  stream_interrupted_premature_eof: "notice.streamInterruptReason.prematureEof",
+  stream_interrupted_connection_reset: "notice.streamInterruptReason.connectionReset",
+};
+
 export function localizedNoticeText(text: string, code?: string): string {
   if (code === "unapplied_steer") {
     const separator = text.indexOf("\n");
     const guidance = separator >= 0 ? text.slice(separator + 1) : text;
     return t("notice.unappliedSteer", { guidance });
+  }
+  const streamReasonKey = code ? streamInterruptReasonCodeKeys[code] : undefined;
+  if (streamReasonKey) {
+    return t("notice.streamInterruptReason", { reason: t(streamReasonKey) });
   }
   const key = code ? noticeCodeKeys[code] : undefined;
   return key ? t(key) : localizedBackendNoticeText(text);

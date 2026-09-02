@@ -157,7 +157,7 @@ func (c *Controller) validatedCheckpointTurn(completion *guardedTurnCompletion) 
 	}
 	message := messages[candidate.messageIndex]
 	if message.Role != provider.RoleUser || message.LocalOnly ||
-		!agent.IsUserAuthoredTurn(agent.UserMessageText(message)) ||
+		!agent.IsUserAuthoredTurnMessage(message) ||
 		(message.CreatedAt > 0 && candidate.openedAt > 0 && message.CreatedAt < candidate.openedAt) {
 		return nil
 	}

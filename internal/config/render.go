@@ -226,11 +226,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>\n")
 	}
 	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
-	if strings.TrimSpace(c.Agent.RecoveryModel) != "" {
-		fmt.Fprintf(&b, "recovery_model = %q   # optional independent reviewer for low-risk automatic recovery\n", c.Agent.RecoveryModel)
-	} else {
-		b.WriteString("# recovery_model = \"deepseek-pro\"   # optional; falls back to guardian then main model\n")
-	}
+	renderRecoveryAndCompletionValidation(&b, c)
 	if lang := c.ReasoningLanguage(); lang != "auto" {
 		fmt.Fprintf(&b, "reasoning_language = %q   # visible reasoning language: auto|zh|en\n", lang)
 	} else {
@@ -930,10 +926,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 		fmt.Fprintf(&agentBuf, "temperature = %s\n", formatFloat(c.Agent.Temperature))
 		anyAgent = true
 	}
-	if c.Agent.RecoveryModel != "" && c.Agent.RecoveryModel != d.Agent.RecoveryModel {
-		fmt.Fprintf(&agentBuf, "recovery_model = %q\n", c.Agent.RecoveryModel)
-		anyAgent = true
-	}
+	diffRecoveryAndCompletionValidation(&agentBuf, *c, *d, &anyAgent)
 	if c.Agent.ReasoningLanguage != d.Agent.ReasoningLanguage {
 		if l := c.ReasoningLanguage(); l != "auto" {
 			fmt.Fprintf(&agentBuf, "reasoning_language = %q\n", l)

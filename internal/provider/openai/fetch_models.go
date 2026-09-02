@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/netclient"
 )
 
 type modelFetchStatusError struct {
@@ -33,6 +35,10 @@ const (
 type FetchModelsOptions struct {
 	Headers  map[string]string
 	AuthMode ModelFetchAuthMode
+	// Proxy routes the model-list request through the same transport policy as
+	// chat requests, so a broken proxy surfaces at setup time instead of only
+	// stalling the first chat turn later (#9560).
+	Proxy netclient.ProxySpec
 }
 
 func (e modelFetchStatusError) Error() string {
@@ -58,7 +64,11 @@ func FetchModels(ctx context.Context, baseURL, apiKey string, headers map[string
 // FetchModelsWithOptions calls the OpenAI-compatible GET /models endpoint and
 // returns the available model IDs.
 func FetchModelsWithOptions(ctx context.Context, baseURL, apiKey string, opts FetchModelsOptions) ([]string, error) {
-	cli := &http.Client{Timeout: 10 * time.Second}
+	transport, err := netclient.NewTransport(opts.Proxy, netclient.TransportOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("fetch models: network: %w", err)
+	}
+	cli := &http.Client{Timeout: 10 * time.Second, Transport: transport}
 	url := strings.TrimRight(baseURL, "/")
 	if !strings.HasSuffix(url, "/models") {
 		url += "/models"

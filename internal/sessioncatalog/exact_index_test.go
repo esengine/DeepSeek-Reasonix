@@ -118,6 +118,23 @@ func TestExactIndexDoesNotDowngradeKnownCounts(t *testing.T) {
 	}
 }
 
+func TestRecordFromOrderRejectsPreviousGenerationListingProjection(t *testing.T) {
+	record := recordFromOrder(DirectoryTarget{Path: "/sessions", Scope: "global"}, agent.SessionOrderInfo{
+		Path:                 "/sessions/chat.jsonl",
+		Scope:                "global",
+		Preview:              "stale preview",
+		Turns:                7,
+		SchemaVersion:        agent.BranchMetaCountsVersion,
+		Revision:             2,
+		ContentDigest:        "new-digest",
+		ListingRevision:      1,
+		ListingContentDigest: "old-digest",
+	})
+	if record.TurnsState != TurnsUnknown || record.Turns != 0 || record.Preview != "" {
+		t.Fatalf("stale listing projection remained visible: %+v", record)
+	}
+}
+
 func TestExactIndexDoesNotRegressKnownActivity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

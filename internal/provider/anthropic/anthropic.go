@@ -406,20 +406,7 @@ func (c *client) buildRequest(ctx context.Context, req provider.Request) anthReq
 		}
 	}
 
-	var tools []anthTool
-	if c.webSearch {
-		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
-	}
-	for _, t := range req.Tools {
-		schema := t.Parameters
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		if c.mimo {
-			schema = provider.NormalizeLegacyTupleItemsForDraft202012(schema)
-		}
-		tools = append(tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: schema})
-	}
+	tools := encodeAnthTools(c, req)
 
 	// Prompt-cache breakpoints (ephemeral, prefix-match). DeepSeek ignores
 	// cache_control and manages prefix caching automatically, so keep those fields
@@ -821,6 +808,8 @@ type anthTool struct {
 	Name         string          `json:"name,omitempty"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	Strict       bool            `json:"strict,omitempty"`
+	DeferLoading bool            `json:"defer_loading,omitempty"`
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 

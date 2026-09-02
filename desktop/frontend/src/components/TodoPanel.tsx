@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { Todo } from "../lib/tools";
-import { shouldOpenTodoPanelByDefault } from "../lib/todoVisibility";
+import {
+  shouldOpenTodoPanelByDefault,
+  todoPresentationStatus,
+  type TodoPresentationStatus,
+} from "../lib/todoVisibility";
 import { PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 
 const STORAGE_KEY = "todoPanel:openStates";
 const MAX_STORED_OPEN_STATES = 80;
+const COMPLETION_HOLD_MS = 900;
+const COMPLETION_FADE_MS = 240;
 
 function loadOpenStates(): Record<string, boolean> {
   try {
@@ -43,14 +49,22 @@ function saveOpenState(stateKey: string, open: boolean): void {
 // latest todo_write call drives it, and it updates in place as the agent flips
 // items to in_progress / completed. Each new todo batch starts collapsed so the
 // header can show live progress and the current task without occupying extra
-// space. Manual expand/collapse is restored only for the same batch.
+// space. A batch that just reached completion briefly shows its final count,
+// then leaves the composer shelf; the transcript tool call remains.
+// Manual expand/collapse is restored only for the same batch.
 export function TodoPanel({
   stateKey,
   todos,
+  running,
+  pendingPrompt,
+  onContinue,
   onDismiss,
 }: {
   stateKey: string;
   todos: Todo[];
+  running: boolean;
+  pendingPrompt: boolean;
+  onContinue?: () => void;
   onDismiss: () => void;
 }) {
   const t = useT();
@@ -61,25 +75,33 @@ export function TodoPanel({
   const allDone = todos.length > 0 && done === todos.length;
   const summary = current?.activeForm || current?.content || todos[todos.length - 1]?.content || "";
   const [open, setOpen] = useState(() => loadOpenState(stateKey, shouldOpenTodoPanelByDefault()));
-  const wasAllDoneRef = useRef(allDone);
+  const [visible, setVisible] = useState(!allDone);
 
   useEffect(() => {
-    if (allDone && !wasAllDoneRef.current) {
-      saveOpenState(stateKey, false);
-      setOpen(false);
+    if (!allDone) {
+      setVisible(true);
+      return;
     }
-    wasAllDoneRef.current = allDone;
-  }, [allDone, stateKey]);
+    if (!visible) return;
+
+    saveOpenState(stateKey, false);
+    setOpen(false);
+    const dismissTimer = window.setTimeout(() => setVisible(false), COMPLETION_HOLD_MS + COMPLETION_FADE_MS);
+    return () => {
+      window.clearTimeout(dismissTimer);
+    };
+  }, [allDone, stateKey, visible]);
 
   useEffect(() => {
     if (!open) return;
     currentRef.current?.scrollIntoView({ block: "nearest" });
   }, [open, current?.content, current?.activeForm]);
 
-  if (todos.length === 0) return null;
+  if (todos.length === 0 || !visible) return null;
 
   return (
     <PromptShelf
+      className={allDone ? "todo-exit" : undefined}
       titleId="todo-shelf-title"
       title={t("todo.title")}
       badges={<PromptBadge>{done}/{todos.length}</PromptBadge>}
@@ -93,29 +115,32 @@ export function TodoPanel({
         saveOpenState(stateKey, next);
         return next;
       })}
-      headerActions={
-        allDone && (
-          <PromptHeaderAction onClick={onDismiss}>
-            {t("common.close")}
-          </PromptHeaderAction>
-        )
-      }
+      headerActions={allDone ? (
+        <PromptHeaderAction onClick={onDismiss}>
+          {t("common.close")}
+        </PromptHeaderAction>
+      ) : current && !running && !pendingPrompt && onContinue ? (
+        <PromptHeaderAction onClick={onContinue}>
+          {t("todo.continue")}
+        </PromptHeaderAction>
+      ) : undefined}
     >
       {open && (
         <ul className="todobar__list">
           {todos.map((todo, index) => {
-            const status = normalizeTodoStatus(todo.status);
+            const sourceStatus = normalizeTodoStatus(todo.status);
+            const status = todoPresentationStatus(sourceStatus, { running, pendingPrompt });
             return (
               <li
                 key={index}
-                ref={status === "in_progress" ? currentRef : undefined}
+                ref={sourceStatus === "in_progress" ? currentRef : undefined}
                 className={`todobar__item todobar__item--${status}${todo.level ? " todobar__item--sub" : ""}`}
               >
                 <span className={`todobar__status todobar__status--${status}`}>
                   {t(todoStatusLabelKey(status))}
                 </span>
                 <span className="todobar__text">
-                  {status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content}
+                  {sourceStatus === "in_progress" && todo.activeForm ? todo.activeForm : todo.content}
                 </span>
               </li>
             );
@@ -137,12 +162,16 @@ function normalizeTodoStatus(status: Todo["status"]): "pending" | "in_progress" 
   }
 }
 
-function todoStatusLabelKey(status: "pending" | "in_progress" | "completed"): "todo.pending" | "todo.inProgress" | "todo.completed" {
+function todoStatusLabelKey(status: TodoPresentationStatus): "todo.pending" | "todo.inProgress" | "status.runtimePendingPrompt" | "todo.paused" | "todo.completed" {
   switch (status) {
     case "completed":
       return "todo.completed";
     case "in_progress":
       return "todo.inProgress";
+    case "waiting":
+      return "status.runtimePendingPrompt";
+    case "paused":
+      return "todo.paused";
     default:
       return "todo.pending";
   }

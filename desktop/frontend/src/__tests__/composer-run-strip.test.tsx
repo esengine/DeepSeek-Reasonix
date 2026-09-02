@@ -556,8 +556,9 @@ console.log("\ncomposer run strip");
   eq(card.style.getPropertyValue("--composer-height"), "124px", "idle card keeps the user's logical height");
 
   const textarea = document.querySelector(".composer__input") as HTMLTextAreaElement;
+  const measureTextarea = document.querySelector(".composer__input--measure") as HTMLTextAreaElement;
   let measuredDraftHeight = 108;
-  Object.defineProperty(textarea, "scrollHeight", {
+  Object.defineProperty(measureTextarea, "scrollHeight", {
     configurable: true,
     get: () => measuredDraftHeight,
   });

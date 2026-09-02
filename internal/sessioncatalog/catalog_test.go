@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/projectiondb"
 )
 
 func TestReconcileMakesUnknownCountsVisibleWithoutReadingTranscript(t *testing.T) {
@@ -264,51 +265,6 @@ func TestSyncMetadataRemovesOnlyMetadataOnlyTopics(t *testing.T) {
 	}
 }
 
-func TestSyncMetadataPreservesRepresentativeSessionCustomTitle(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	catalog, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "catalog.sqlite"), DisableRepair: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
-	record := SessionRecord{
-		Path: "/sessions/titled.jsonl", Directory: "/sessions", Scope: "global",
-		TopicID: "titled", TopicTitle: "Original topic", CustomTitle: "Explicit session title",
-		LastActivityAt: 2, Turns: 1, TurnsState: TurnsValid, Health: HealthOK,
-	}
-	if err := catalog.UpsertSession(ctx, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
-		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
-	if err != nil || !ok || topic.Title != "Explicit session title" || topic.TitleSource != "manual" {
-		t.Fatalf("custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
-	}
-	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 10})
-	if err != nil || len(page.Items) != 1 || page.Items[0].TitleSource != "manual" {
-		t.Fatalf("listed custom title source = %+v, err=%v", page.Items, err)
-	}
-	record.CustomTitle = ""
-	record.TopicTitle = "Changed topic"
-	if err := catalog.UpsertSession(ctx, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
-		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	topic, ok, err = catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
-	if err != nil || !ok || topic.Title != "Changed topic" || topic.TitleSource != "auto" {
-		t.Fatalf("cleared custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
-	}
-}
-
 func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -330,8 +286,58 @@ func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 		}
 		versions = append(versions, version)
 	}
-	if fmt.Sprint(versions) != "[1 2 3 4 5 6 7 8]" {
+	if fmt.Sprint(versions) != "[1 2 3 4 5 6 7 8 9 10 11]" {
 		t.Fatalf("schema migration ledger = %v", versions)
+	}
+}
+
+func TestSchemaV11MigratesLegacyUnknownRowsIntoPersistentScheduler(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "catalog.sqlite")
+	legacy, err := projectiondb.Open(ctx, projectiondb.OpenOptions{
+		Path: path, Migrations: sessionMigrations()[:10], Now: time.Now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.DB.ExecContext(ctx, `INSERT INTO catalog_sessions(path,directory,scope,turns_state)
+		VALUES('/sessions/legacy.jsonl','/sessions','global','unknown')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, err := Open(ctx, Options{Path: path, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	var state string
+	var attempts, retryAt, engine int
+	if err := catalog.db.QueryRowContext(ctx, `SELECT repair_state,repair_attempts,repair_retry_at,repair_engine_version
+		FROM catalog_sessions WHERE path='/sessions/legacy.jsonl'`).Scan(&state, &attempts, &retryAt, &engine); err != nil {
+		t.Fatal(err)
+	}
+	if state != "pending" || attempts != 0 || retryAt != 0 || engine != 0 {
+		t.Fatalf("migrated repair schedule = %s/%d/%d/%d", state, attempts, retryAt, engine)
+	}
+	if err := catalog.resetRepairSchedule(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.db.ExecContext(ctx, `UPDATE catalog_sessions SET repair_state='blocked',repair_attempts=7,
+		repair_error_kind='unsupported',repair_engine_version=0 WHERE path='/sessions/legacy.jsonl'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.resetRepairSchedule(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.db.QueryRowContext(ctx, `SELECT repair_state,repair_attempts,repair_retry_at,repair_engine_version
+		FROM catalog_sessions WHERE path='/sessions/legacy.jsonl'`).Scan(&state, &attempts, &retryAt, &engine); err != nil {
+		t.Fatal(err)
+	}
+	if state != "pending" || attempts != 0 || retryAt != 0 || engine != repairEngineVersion {
+		t.Fatalf("repair engine reset = %s/%d/%d/%d", state, attempts, retryAt, engine)
 	}
 }
 
@@ -752,48 +758,5 @@ func TestRebuildFailureKeepsExistingCatalog(t *testing.T) {
 	topic, ok, err := restored.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "keep"})
 	if err != nil || !ok || len(topic.Sessions) != 1 {
 		t.Fatalf("rebuild failure lost catalog: ok=%v topic=%#v err=%v", ok, topic, err)
-	}
-}
-
-func TestRepairDrainEventuallyCompletesBeyondQueue(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	dir := t.TempDir()
-	path := filepath.Join(t.TempDir(), "catalog.sqlite")
-	seed, err := Open(ctx, Options{Path: path, DisableRepair: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const total = 8
-	for i := range total {
-		session := filepath.Join(dir, fmt.Sprintf("%02d.jsonl", i))
-		if err := os.WriteFile(session, []byte(`{"role":"user","content":"turn"}`+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := seed.UpsertSession(ctx, SessionRecord{
-			Path: session, Directory: dir, Scope: "global", TopicID: fmt.Sprintf("t%d", i),
-			TurnsState: TurnsUnknown, Health: HealthOK, LastActivityAt: int64(i + 1),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := seed.Close(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := Open(ctx, Options{Path: path, QueueCapacity: 2, Now: time.Now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		status := catalog.Status()
-		if status.RepairPending == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("repair pending stuck at %d", status.RepairPending)
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }

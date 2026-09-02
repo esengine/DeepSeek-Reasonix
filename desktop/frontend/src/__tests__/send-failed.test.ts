@@ -169,6 +169,64 @@ eq(notice.kind === "notice" && notice.level, "warn", "the notice is a warning");
 eq(failedState.running, false, "send_failed stops the running indicator");
 eq(failedState.pendingUser, undefined, "send_failed clears the pending marker");
 
+const waitingAsk = reducer({ ...initialState }, {
+  type: "event",
+  e: {
+    kind: "ask_request",
+    turnId: "turn-existing",
+    ask: { id: "ask-existing", questions: [{ id: "q1", prompt: "Choose", options: [{ label: "A" }] }] },
+  } as WireEvent,
+});
+const collidingSubmit = reducer(waitingAsk, { type: "user", text: "continue", seq: waitingAsk.seq, submissionId: "send-collision" });
+const rejectedCollision = reducer(collidingSubmit, {
+  type: "turn_submit_rejected",
+  submissionId: "send-collision",
+  error: "Send failed: turn already running",
+});
+eq(rejectedCollision.items.some((item) => item.kind === "user" && item.failed), true, "rejected admission marks the exact optimistic bubble failed");
+eq(rejectedCollision.running, true, "rejected admission stays conservatively running until reconciliation");
+eq(rejectedCollision.pendingPrompt, true, "rejected admission restores the visible Ask gate");
+eq(rejectedCollision.ask?.id, "ask-existing", "rejected admission preserves the pending Ask");
+
+const reconciledCollision = reducer(rejectedCollision, {
+  type: "backend_status",
+  running: true,
+  pendingPrompt: true,
+  backgroundJobs: 0,
+  cancelRequested: false,
+  cancellable: true,
+  turnId: "turn-existing",
+});
+eq(reconciledCollision.activeTurnId, "turn-existing", "authoritative active snapshot restores the existing turn id");
+eq(reconciledCollision.running, true, "authoritative active snapshot keeps the composer blocked");
+
+const reconciledIdle = reducer(rejectedCollision, {
+  type: "backend_status",
+  running: false,
+  pendingPrompt: false,
+  backgroundJobs: 0,
+  cancelRequested: false,
+  cancellable: false,
+});
+eq(reconciledIdle.running, false, "authoritative idle snapshot releases the rejected submit gate");
+eq(reconciledIdle.ask, undefined, "authoritative idle snapshot clears a stale Ask");
+
+const answeredAsk = reducer(waitingAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: waitingAsk.promptEpoch });
+eq(answeredAsk.ask, undefined, "successful Ask submission clears the matching prompt");
+eq(answeredAsk.resolvedPromptId, "ask-existing", "successful Ask submission tombstones the matching prompt id");
+const nextAsk = reducer(waitingAsk, {
+  type: "event",
+  e: { kind: "ask_request", turnId: "turn-existing", ask: { id: "ask-next", questions: [] } } as WireEvent,
+});
+const lateAskSuccess = reducer(nextAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: nextAsk.promptEpoch });
+eq(lateAskSuccess.ask?.id, "ask-next", "late Ask success cannot clear a newer prompt");
+const rebuiltAsk = reducer(reducer(waitingAsk, { type: "controller_rebuilt" }), {
+  type: "event",
+  e: { kind: "ask_request", turnId: "turn-new", ask: { id: "ask-existing", questions: [] } } as WireEvent,
+});
+const oldEpochSuccess = reducer(rebuiltAsk, { type: "ask_submit_succeeded", id: "ask-existing", epoch: waitingAsk.promptEpoch });
+eq(oldEpochSuccess.ask?.id, "ask-existing", "old prompt epoch cannot clear an id reused by a rebuilt controller");
+
 const readinessStarted = reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent });
 const readinessState = reducer(readinessStarted, {
   type: "event",
@@ -245,6 +303,27 @@ eq(
 const recoveryUser = recoveryPaused.items.find((it) => it.kind === "user");
 eq(recoveryUser?.kind === "user" && Boolean(recoveryUser.failed), false, "recovery_paused does not mark the user message as failed");
 eq(recoveryPaused.running, false, "recovery_paused frees the composer");
+
+const completionUncertain = reducer(readinessStarted, {
+  type: "event",
+  e: {
+    kind: "turn_done",
+    submissionId: "send-0",
+    outcome: "completion_uncertain",
+    err: "Completion could not be confirmed. Reasonix kept the current result and all completed work.",
+  } as WireEvent,
+});
+const uncertainNotice = completionUncertain.items[completionUncertain.items.length - 1];
+eq(uncertainNotice.kind === "notice" && uncertainNotice.level, "info", "completion_uncertain uses informational severity, not a send failure");
+eq(uncertainNotice.kind === "notice" && Boolean(uncertainNotice.title), true, "completion_uncertain shows a product title");
+eq(
+  uncertainNotice.kind === "notice" && uncertainNotice.text,
+  "The result could not be confirmed as complete. The current answer and all completed work are kept. Send “继续 / continue” to resume, or restate what should change.",
+  "completion_uncertain uses the localized product copy",
+);
+const uncertainUser = completionUncertain.items.find((it) => it.kind === "user");
+eq(uncertainUser?.kind === "user" && Boolean(uncertainUser.failed), false, "completion_uncertain does not mark the user message as failed");
+eq(completionUncertain.running, false, "completion_uncertain frees the composer");
 
 const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0, submissionId: "shell-0" });
 const shellFailed = reducer(shellSent, { type: "send_failed", submissionId: "shell-0", error: "Command failed: workspace is still starting" });

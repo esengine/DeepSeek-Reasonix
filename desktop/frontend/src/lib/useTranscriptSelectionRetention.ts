@@ -15,6 +15,7 @@ import {
 } from "./transcriptSelectionStore";
 import { mergeTranscriptSelectableRows } from "./transcriptSelectionText";
 import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
+import { nativeTranscriptBottomTop } from "./transcriptScrollGeometry";
 
 const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MIN_PX = 4;
@@ -153,10 +154,15 @@ export function useTranscriptSelectionRetention({
       speed = EDGE_SCROLL_MIN_PX + ratio * (EDGE_SCROLL_MAX_PX - EDGE_SCROLL_MIN_PX);
     }
     if (speed === 0) return;
-    const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    const max = nativeTranscriptBottomTop(scroll);
     const next = Math.max(0, Math.min(max, scroll.scrollTop + speed));
     if (next === scroll.scrollTop) {
       scheduleLogicalFocus();
+      // A transient Virtuoso extent can clamp the native scrollTop at a false
+      // boundary before the range commit catches up. Keep one edge observer
+      // alive for the active drag so a later extent/range rebound can resume
+      // scrolling and refresh the logical focus without another pointermove.
+      edgeFrameRef.current = requestAnimationFrame(edgeScrollTick);
       return;
     }
     if (!writeOffset("selection-edge-scroll", next)) return;

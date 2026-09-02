@@ -23,6 +23,9 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string { return m.name }
+func (m *mockProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
+	return provider.ContextBudgetPolicy{WindowMode: provider.ContextWindowIndependent}
+}
 
 func (m *mockProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	m.lastReq = req
@@ -52,8 +55,8 @@ func lastUser(req provider.Request) string {
 	return ""
 }
 
-// TestCoordinatorHandsPlanToExecutor checks the two-session handoff: the planner
-// sees the raw task in its own session, and the executor receives the plan.
+// TestCoordinatorHandsPlanToExecutor checks that the planner sees the raw task
+// in its own session and the executor receives the plan.
 func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "1. read main.go\n2. fix the loop"},
@@ -1488,13 +1491,9 @@ func TestCoordinatorRunsExecutorWhenMarkerNotAlone(t *testing.T) {
 	}
 }
 
-// TestCoordinatorHandoffSurvivesPlannerCompaction pins the plan-scan boundary
-// against session rewrites: when the tool-enabled planner's final answer pushes
-// usage past the compaction trigger, Agent.Run rewrites and shortens the
-// planner session right after producing the plan. The pre-turn message count
-// then no longer bounds "this turn's messages" — scanning from it must not
-// hide the plan, or Coordinator.Run degrades to a raw executor turn despite a
-// successful plan.
+// TestCoordinatorHandoffSurvivesPlannerCompaction pins the canonical plan scan.
+// Projection compaction must not let a pre-turn message count hide this turn's
+// plan and degrade Coordinator.Run to a raw executor turn.
 func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
 		{ // preflight compaction on the large filler history (estimate-based)

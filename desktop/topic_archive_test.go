@@ -296,9 +296,10 @@ func TestTrashTopicCommittedCleanupFailureReconcilesWithoutFailureResponse(t *te
 	}
 }
 
-func TestTrashTopicMetadataFailureReconcilesFromDurableIntent(t *testing.T) {
+func TestTrashTopicLegacyMirrorFailureStaysCommittedAndRepairs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	projectRoot := t.TempDir()
+	seedLegacyTopicBridge(t, projectRoot)
 	topicID := "topic_metadata_retry"
 	if err := addProject(projectRoot, ""); err != nil {
 		t.Fatalf("add project: %v", err)
@@ -311,27 +312,35 @@ func TestTrashTopicMetadataFailureReconcilesFromDurableIntent(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	writeTopicSessionWithPrompt(t, dir, "metadata-retry.jsonl", topicID, "Metadata retry", projectRoot, "preserve me", time.Now())
-	blockedTempPath := topicTitleSourcesPath(projectRoot) + ".tmp"
-	if err := os.MkdirAll(blockedTempPath, 0o755); err != nil {
-		t.Fatalf("block metadata temp write: %v", err)
+	topicLegacyWriteHookForTest = func(path string) error {
+		if path == topicTitleSourcesPath(projectRoot) {
+			return errors.New("injected legacy mirror failure")
+		}
+		return nil
 	}
+	t.Cleanup(func() { topicLegacyWriteHookForTest = nil })
 
 	app := NewApp()
 	if err := app.TrashTopic(topicID); err != nil {
 		t.Fatalf("committed TrashTopic returned a failure: %v", err)
 	}
-	if got := loadTopicTitle(projectRoot, topicID); got != "Metadata retry" {
-		t.Fatalf("failed metadata cleanup title = %q, want retained retry locator", got)
+	if got := loadTopicTitle(projectRoot, topicID); got != "" {
+		t.Fatalf("authoritative deleted title = %q, want empty", got)
 	}
-	if _, err := os.Stat(topicArchiveMetadataPendingPath(topicID)); err != nil {
-		t.Fatalf("metadata cleanup intent was not retained: %v", err)
+	if _, err := os.Stat(topicArchiveMetadataPendingPath(topicID)); !os.IsNotExist(err) {
+		t.Fatalf("SQLite-committed delete should not create archive retry intent: %v", err)
 	}
 
-	if err := os.RemoveAll(blockedTempPath); err != nil {
-		t.Fatalf("unblock metadata temp write: %v", err)
+	topicLegacyWriteHookForTest = nil
+	if err := setTopicCreatedAt(projectRoot, "topic-live", 1234); err != nil {
+		t.Fatalf("trigger pending mirror repair: %v", err)
 	}
-	if err := reconcileTopicArchiveMetadataPending(app.deleteTopic); err != nil {
-		t.Fatalf("reconcile topic metadata: %v", err)
+	legacyTitles, err := loadLegacyStringMap(topicTitlesPath(projectRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := legacyTitles[topicID]; ok {
+		t.Fatalf("repaired legacy mirror resurrected deleted topic: %#v", legacyTitles)
 	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("reconciled archive retained topic title %q", got)
@@ -656,4 +665,77 @@ func writeEmptyNamedSession(t *testing.T, dir, name, topicID, topicTitle, worksp
 		t.Fatalf("pin empty session: %v", err)
 	}
 	return path
+}
+
+func TestTrashTopicArchivesFailedRuntimeWithStaleWriteAuthority(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_failed_authority"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Failed authority"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "failed-authority.jsonl", topicID, "Failed authority", projectRoot)
+	ctrl := controllerWithContent(t, sessionPath)
+	defer ctrl.Close()
+	lease, err := agent.TryAcquireSessionLease(sessionPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	if err := ctrl.BindSessionWriteAuthority(lease); err != nil {
+		lease.Release()
+		t.Fatalf("BindSessionWriteAuthority: %v", err)
+	}
+	lease.Release()
+	if err := ctrl.Snapshot(); !errors.Is(err, agent.ErrSessionWriteAuthorityStale) {
+		t.Fatalf("Snapshot error = %v, want %v", err, agent.ErrSessionWriteAuthorityStale)
+	}
+
+	failed := &WorkspaceTab{ID: "failed", Scope: "project", WorkspaceRoot: projectRoot, TopicID: topicID,
+		TopicTitle: "Failed authority", SessionPath: sessionPath, Ctrl: ctrl, disabledMCP: map[string]ServerView{}}
+	keep := &WorkspaceTab{ID: "keep", Scope: "project", WorkspaceRoot: projectRoot, TopicID: "keep", Ready: true}
+	app := &App{tabs: map[string]*WorkspaceTab{failed.ID: failed, keep.ID: keep}, tabOrder: []string{failed.ID, keep.ID}, activeTabID: failed.ID}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(failed, sessionRuntimeKey(sessionPath))
+	_, save := app.markTabStartupFailureLocked(failed, agent.ErrSessionWriteAuthorityStale, suppressStartupRestore)
+	app.mu.Unlock()
+	app.writeTabsSaveRequest(save)
+
+	if err := app.TrashTopic(topicID); err != nil {
+		t.Fatalf("TrashTopic: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("archived session still exists, err=%v", err)
+	}
+	if app.tabs[keep.ID] != keep || app.tabs[failed.ID] != nil {
+		t.Fatalf("runtime bindings after archive = %#v", app.tabs)
+	}
+}
+
+func TestTopicArchiveRejectsFailedRuntimeThatStartedRetrying(t *testing.T) {
+	topicID := "topic_retrying_failure"
+	tab := &WorkspaceTab{ID: "failed", Scope: "global", TopicID: topicID, SessionPath: "retrying.jsonl"}
+	app := &App{tabs: map[string]*WorkspaceTab{tab.ID: tab}, tabOrder: []string{tab.ID}, activeTabID: tab.ID}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(tab, sessionRuntimeKey(tab.SessionPath))
+	app.markTabStartupFailureLocked(tab, errors.New("restore failed"), suppressStartupRestore)
+	app.mu.Unlock()
+	captured := app.captureTopicRuntimeBindings(topicID)
+
+	app.mu.Lock()
+	app.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
+	app.mu.Unlock()
+	if _, unchanged := app.removeTopicRuntimeBindingsIfUnchanged(topicID, captured); unchanged {
+		t.Fatal("archive detached a failed runtime after its retry changed generation state")
+	}
+	if app.tabs[tab.ID] != tab || tab.removed {
+		t.Fatal("rejected stale archive changed the retrying tab")
+	}
 }

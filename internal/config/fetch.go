@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 )
@@ -26,6 +27,14 @@ var knownModelFetchCompatSuffixes = []string{
 // FetchModels queries the provider's OpenAI-compatible GET /models endpoint and
 // returns the available model IDs, sorted alphabetically.
 func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
+	return e.FetchModelsWithProxy(ctx, netclient.ProxySpec{})
+}
+
+// FetchModelsWithProxy is FetchModels routed through the same network policy as
+// chat requests. Passing cfg.NetworkProxySpec() makes model discovery fail at
+// setup time when the proxy path is broken, instead of succeeding here and
+// stalling the first chat turn later (#9560).
+func (e *ProviderEntry) FetchModelsWithProxy(ctx context.Context, proxy netclient.ProxySpec) ([]string, error) {
 	if e.BaseURL == "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
 	}
@@ -44,6 +53,7 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		models, err := openai.FetchModelsWithOptions(ctx, u, key, openai.FetchModelsOptions{
 			Headers:  e.Headers,
 			AuthMode: authMode,
+			Proxy:    proxy,
 		})
 		if err == nil {
 			return provider.FilterOfficialOpenCodeGoModels(e.Kind, e.BaseURL, models), nil

@@ -29,10 +29,10 @@ func (p *effectRecordingProvider) Stream(_ context.Context, req provider.Request
 	p.mu.Lock()
 	p.reqs = append(p.reqs, req)
 	p.mu.Unlock()
-	chunks := finishCompliantBootChunks(req, len(p.requests()), []provider.Chunk{
+	chunks := []provider.Chunk{
 		{Type: provider.ChunkText, Text: "ok"},
 		{Type: provider.ChunkDone},
-	})
+	}
 	ch := make(chan provider.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		ch <- chunk
@@ -64,6 +64,9 @@ default_model = "test-model"
 
 [agent]
 system_prompt = "BASE"
+
+[environment]
+enabled = false
 
 [[providers]]
 name = "test-model"

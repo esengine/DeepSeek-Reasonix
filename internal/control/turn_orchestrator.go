@@ -74,6 +74,7 @@ func (o *turnOrchestrator) runGoalContinuationTurnWithRawDisplay(
 func (o *turnOrchestrator) runComposedSyntheticTurn(ctx context.Context, text string) error {
 	c := o.c
 	ctx = agent.WithRawUserInput(ctx, text)
+	ctx = withTurnInputOrigin(ctx, true)
 	ctx = c.withPlannerTurnMetadata(ctx, text, true, c.messageCount())
 	return c.runner.Run(ctx, c.ComposeSynthetic(text))
 }
@@ -159,7 +160,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-	c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images, CreatedAt: time.Now().UnixMilli()})
+	c.executor.Session().Add(persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli()))
 
 	for _, sk := range skills {
 		sk = c.skills.prepare(sk)
@@ -208,6 +209,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	ctx = agent.WithUserImages(ctx, userImages)
 	ctx = agent.WithSubagentImageCandidates(ctx, imageCandidates)
 	ctx = agent.WithRawUserInput(ctx, turn.raw)
+	ctx = withTurnInputOrigin(ctx, turn.synthetic)
 	continuation := turn.goalContinuation
 	var input string
 	if continuation != nil {
@@ -267,7 +269,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		}
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
-	marker = c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
+	marker = c.markInFlightTurn(startMessages, !turn.synthetic)
 	if continuation != nil {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{
 			ID:       continuation.scopeID,
@@ -303,28 +305,19 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		// but is marked local-only, and a bounded recovery summary is folded into
 		// the next real user turn (#5499, #6680).
 		if errors.Is(err, context.Canceled) && c.CancelRequested() {
-			if turn.synthetic || IsSyntheticUserMessage(turn.raw) {
+			if turn.synthetic {
 				c.stripInterruptedSyntheticTurnMessagesAfter(startMessages)
 			} else {
-				c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, provider.Message{
-					Role:      provider.RoleUser,
-					Content:   input,
-					Images:    append([]string(nil), userImages...),
-					CreatedAt: time.Now().UnixMilli(),
-				})
+				c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages,
+					persistedUserTurn(input, turn.raw, userImages, time.Now().UnixMilli()))
 			}
-		} else if !turn.synthetic && !IsSyntheticUserMessage(turn.raw) && c.hasInterruptedDisplayAfter(startMessages, provider.Message{
-			Role: provider.RoleUser, Content: input,
-		}) {
+		} else if !turn.synthetic && c.hasInterruptedDisplayAfter(startMessages,
+			persistedUserTurn(input, turn.raw, nil, 0)) {
 			// Provider/API failures use the same safe recovery path as an explicit
 			// stop once the agent has recorded a partial stream. Completed tool
 			// pairs survive; unsafe stream fragments stay local-only.
-			c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, provider.Message{
-				Role:      provider.RoleUser,
-				Content:   input,
-				Images:    append([]string(nil), userImages...),
-				CreatedAt: time.Now().UnixMilli(),
-			})
+			c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages,
+				persistedUserTurn(input, turn.raw, userImages, time.Now().UnixMilli()))
 		}
 		return err
 	}

@@ -1184,6 +1184,7 @@ grep -Fq 'branch="release-notes/v${VERSION}"' "$prepare_notes"
 grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' "$prepare_notes"
 grep -Fq 'gh pr create --repo ${{ github.repository }} --base main-v2 --head $RELEASE_NOTES_BRANCH --fill' "$prepare_notes"
 grep -Eq 'GITHUB_STEP_SUMMARY' "$prepare_notes"
+grep -Fq 'node scripts/generate-release-notes.mjs --version "$VERSION" --to origin/main-v2' "$prepare_notes"
 grep -Fq 'thinking: { type: "disabled" }' "$generate_notes"
 
 desktop_candidate_resolver="$repo_root/scripts/resolve-desktop-candidate.sh"

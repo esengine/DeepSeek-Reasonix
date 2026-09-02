@@ -28,7 +28,7 @@ func TestLoadCachedToolsForSpecsHonorsSchemaCacheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cached, keyOK := LoadCachedToolsForSpecs([]plugin.Spec{fresh, stale, {Name: "absent"}})
+	cached, keyOK := LoadCachedToolsForSpecs([]plugin.Spec{fresh, stale, {Name: "absent"}}, plugin.HostProfileCore)
 	if len(cached["gh"]) != 1 || !keyOK["gh"] {
 		t.Fatalf("fresh cache: tools=%v keyOK=%v", cached["gh"], keyOK["gh"])
 	}

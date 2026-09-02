@@ -33,7 +33,7 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 			copy.InterruptedTools = append([]string(nil), copy.InterruptedTools...)
 			return &copy
 		}
-		if m.Role == provider.RoleUser && IsUserAuthoredTurn(m.Content) {
+		if IsUserAuthoredTurnMessage(m) {
 			return nil
 		}
 	}

@@ -57,15 +57,10 @@ func sessionsCommand(args []string) int {
 		return printSessionCatalogRebuild(status, *jsonOut)
 	}
 	targets := make([]sessioncatalog.DirectoryTarget, 0, len(dirs))
-	seen := map[string]bool{}
 	for _, dir := range dirs {
-		dir = filepath.Clean(strings.TrimSpace(dir))
-		if dir == "." || dir == "" || seen[dir] {
-			continue
-		}
-		seen[dir] = true
 		targets = append(targets, sessioncatalog.DirectoryTarget{Path: dir, Scope: "global"})
 	}
+	targets = sessioncatalog.UniqueDirectoryTargets(targets)
 	status, err := sessioncatalog.Rebuild(context.Background(), sessioncatalog.DefaultPath(), targets)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -117,6 +112,11 @@ func sessionsRecoveryCommand(args []string, cleanup bool) int {
 			dirs = append(dirs, target.Path)
 		}
 	}
+	targets := make([]sessioncatalog.DirectoryTarget, 0, len(dirs))
+	for _, dir := range dirs {
+		targets = append(targets, sessioncatalog.DirectoryTarget{Path: dir, Scope: "global"})
+	}
+	targets = sessioncatalog.UniqueDirectoryTargets(targets)
 	report := sessionRecoveryReport{Errors: []string{}, DryRun: !cleanup || !*apply}
 	persisted, persistedErr := sessioncatalog.Open(context.Background(), sessioncatalog.Options{
 		Path: sessioncatalog.DefaultPath(), DisableRepair: true,
@@ -126,13 +126,8 @@ func sessionsRecoveryCommand(args []string, cleanup bool) int {
 	} else {
 		defer persisted.Close(context.Background())
 	}
-	seen := map[string]bool{}
-	for _, rawDir := range dirs {
-		dir := filepath.Clean(strings.TrimSpace(rawDir))
-		if dir == "." || dir == "" || seen[dir] {
-			continue
-		}
-		seen[dir] = true
+	for _, target := range targets {
+		dir := target.Path
 		report.Directories++
 		inspectSessionRecoveryDirectory(context.Background(), dir, persisted, &report)
 	}
@@ -289,14 +284,8 @@ func defaultSessionCatalogTargets() []sessioncatalog.DirectoryTarget {
 	if data, err := os.ReadFile(filepath.Join(home, "desktop-projects.json")); err == nil {
 		_ = json.Unmarshal(data, &saved)
 	}
-	seen := map[string]bool{}
 	targets := make([]sessioncatalog.DirectoryTarget, 0, len(saved.Projects)+2)
 	add := func(target sessioncatalog.DirectoryTarget) {
-		target.Path = filepath.Clean(strings.TrimSpace(target.Path))
-		if target.Path == "." || target.Path == "" || seen[target.Path] {
-			return
-		}
-		seen[target.Path] = true
 		targets = append(targets, target)
 	}
 	add(sessioncatalog.DirectoryTarget{Path: config.SessionDir(), Scope: "global"})
@@ -313,5 +302,5 @@ func defaultSessionCatalogTargets() []sessioncatalog.DirectoryTarget {
 			Path: config.ProjectSessionDir(root), Scope: "project", WorkspaceRoot: root,
 		})
 	}
-	return targets
+	return sessioncatalog.UniqueDirectoryTargets(targets)
 }

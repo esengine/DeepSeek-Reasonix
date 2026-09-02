@@ -1028,3 +1028,42 @@ func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.
 		t.Fatalf("stored non-tool reasoning = %q, want transformed display text", got)
 	}
 }
+
+// TestRunNotifiesWhenStreamRetriesExhausted pins the #9560 visibility fix:
+// when every sampling attempt of a model round ends in a stream interruption,
+// the run must surface a user-readable warn notice explaining the failure —
+// not only the generic interrupted-turn record.
+func TestRunNotifiesWhenStreamRetriesExhausted(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("dial tcp: lookup gw.invalid: no such host"), Reason: provider.StreamInterruptIdleTimeout}
+	script := make([]testutil.Turn, maxSamplingAttempts)
+	for i := range script {
+		script[i] = testutil.Turn{ChunkError: interrupted}
+	}
+	mp := testutil.NewMock("m", script...)
+	sink := &recordSink{}
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
+
+	err := a.Run(withNoClosedLoop(context.Background()), "go")
+	if err == nil {
+		t.Fatal("Run must fail after exhausting stream retries")
+	}
+	if !provider.IsStreamInterrupted(err) {
+		t.Fatalf("terminal error = %v, want a stream interruption", err)
+	}
+	var sawExplanation bool
+	for _, e := range sink.kinds(event.Notice) {
+		if e.Level == event.LevelWarn && strings.Contains(e.Text, "idle timeout") {
+			sawExplanation = true
+			if e.Code != event.NoticeCodeStreamInterruptedIdleTimeout {
+				t.Fatalf("stream interruption notice code = %q", e.Code)
+			}
+			if strings.Contains(e.Text, "gw.invalid") || strings.Contains(e.Text, "dial tcp") {
+				t.Fatalf("notice leaks raw transport error text: %q", e.Text)
+			}
+		}
+	}
+	if !sawExplanation {
+		notices := sink.kinds(event.Notice)
+		t.Fatalf("no warn notice explains the exhausted stream; notices = %+v", notices)
+	}
+}

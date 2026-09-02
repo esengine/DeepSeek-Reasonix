@@ -1205,7 +1205,7 @@ func historyWindowWithPersistedTimes(msgs []provider.Message, sessionPath string
 	}
 	needsPersistedTime := false
 	for _, msg := range msgs {
-		if msg.Role == provider.RoleUser && msg.CreatedAt <= 0 && agent.IsUserAuthoredTurn(agent.UserMessageText(msg)) {
+		if msg.CreatedAt <= 0 && agent.IsUserAuthoredTurnMessage(msg) {
 			needsPersistedTime = true
 			break
 		}

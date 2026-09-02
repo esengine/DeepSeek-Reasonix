@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
-	"reasonix/internal/agent"
 )
 
 const (
@@ -20,32 +18,38 @@ const (
 // the authoritative path/sidecar projection before trusting the ready marker.
 func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarget, signature string) (bool, error) {
 	path := target.Path
+	directoryKey := c.pathKey(path)
 	target.Scope, target.WorkspaceRoot = normalizeScope(target.Scope, target.WorkspaceRoot)
+	if c.directoryVerified(target, signature) {
+		return true, nil
+	}
 	var expectedTotal, present, unprojected, missing int
 	var storedScope, storedRoot string
 	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,total,
-		(SELECT COUNT(*) FROM catalog_sessions WHERE directory=? AND missing_since=0),
+		(SELECT COUNT(*) FROM catalog_sessions WHERE directory_key=? AND missing_since=0),
 		(SELECT COUNT(*) FROM catalog_sessions s
-		 WHERE s.directory=? AND s.missing_since=0 AND s.topic_id<>''
+		 WHERE s.directory_key=? AND s.missing_since=0 AND s.topic_id<>''
 		 AND NOT EXISTS (
 			 SELECT 1 FROM catalog_topics t
-			 WHERE t.scope=s.scope AND t.workspace_root=s.workspace_root AND t.topic_id=s.topic_id
+			 WHERE t.scope=s.scope AND t.workspace_root_key=s.workspace_root_key AND t.topic_id=s.topic_id
 		 )),
-		(SELECT COUNT(*) FROM catalog_sessions WHERE directory=? AND missing_since>0)
+		(SELECT COUNT(*) FROM catalog_sessions WHERE directory_key=? AND missing_since>0)
 		FROM catalog_directories
-		WHERE path=? AND signature=? AND state='ready'`,
-		path, path, path, path, signature).Scan(&storedScope, &storedRoot, &expectedTotal, &present, &unprojected, &missing)
+		WHERE path_key=? AND signature=? AND state='ready'`,
+		directoryKey, directoryKey, directoryKey, directoryKey, signature).Scan(&storedScope, &storedRoot, &expectedTotal, &present, &unprojected, &missing)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if storedScope != target.Scope || storedRoot != target.WorkspaceRoot {
+	if storedScope != target.Scope ||
+		c.workspaceRootKey(storedScope, storedRoot) != c.workspaceRootKey(target.Scope, target.WorkspaceRoot) {
 		c.markRepair(repairReasonScopeMismatch, c.opts.Now().UnixMilli())
 		return false, nil
 	}
-	ordered, err := agent.ListSessionOrder(path)
+	content := newStrictRecoveryContentCache(c.testSessionContentLoadHook)
+	ordered, err := listSessionOrderWithContent(path, content)
 	if err != nil {
 		return false, err
 	}
@@ -58,12 +62,12 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		return false, err
 	}
 	for i := range expectedRecords {
-		expectedRecords[i] = classifyRecoveryLineageFromContent(expectedRecords[i])
+		expectedRecords[i] = classifyRecoveryLineageWithContent(expectedRecords[i], content)
 	}
-	expectedRecords = promoteCanonicalLeaves(expectedRecords)
+	expectedRecords = promoteCanonicalLeavesWithContent(expectedRecords, content)
 	expected := make(map[string]SessionRecord, len(expectedRecords))
 	for _, record := range expectedRecords {
-		expected[record.Path] = record
+		expected[c.pathKey(record.Path)] = record
 	}
 	if expectedTotal != len(expected) || present != len(expected) {
 		c.markRepair(repairReasonPathMismatch, c.opts.Now().UnixMilli())
@@ -74,7 +78,7 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		turns,turns_state,recovered,recovery_reason,recovery_digest,parent_id,
 		recovery_copy,recovery_group_id,recovery_role,recovery_canonical,
 		logical_topic_id,ordinary_visible,content_fingerprint,meta_fingerprint,health
-		FROM catalog_sessions WHERE directory=? AND missing_since=0`, path)
+		FROM catalog_sessions WHERE directory_key=? AND missing_since=0`, directoryKey)
 	if err != nil {
 		return false, err
 	}
@@ -96,13 +100,14 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		got.RecoveryCopy = recoveryCopy != 0
 		got.RecoveryCanonical = recoveryCanonical != 0
 		got.OrdinaryVisible = ordinaryVisible != 0
-		want, ok := expected[got.Path]
+		gotKey := c.pathKey(got.Path)
+		want, ok := expected[gotKey]
 		if !ok {
 			_ = rows.Close()
 			c.markRepair(repairReasonPathMismatch, c.opts.Now().UnixMilli())
 			return false, nil
 		}
-		seen[got.Path] = struct{}{}
+		seen[gotKey] = struct{}{}
 		if !sameSessionProjection(got, want) {
 			_ = rows.Close()
 			c.markRepair(repairReasonTopicMismatch, c.opts.Now().UnixMilli())
@@ -124,7 +129,38 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		c.markRepair(repairReasonTopicMismatch, c.opts.Now().UnixMilli())
 		return false, nil
 	}
+	c.markDirectoryVerified(target, signature)
 	return true, nil
+}
+
+func (c *Catalog) directoryVerified(target DirectoryTarget, signature string) bool {
+	key := c.verifiedDirectoryKey(target)
+	c.verifiedDirsMu.RLock()
+	verified := c.verifiedDirs[key] == signature
+	c.verifiedDirsMu.RUnlock()
+	return verified
+}
+
+func (c *Catalog) markDirectoryVerified(target DirectoryTarget, signature string) {
+	c.verifiedDirsMu.Lock()
+	if c.verifiedDirs == nil {
+		c.verifiedDirs = map[string]string{}
+	}
+	c.verifiedDirs[c.verifiedDirectoryKey(target)] = signature
+	c.verifiedDirsMu.Unlock()
+}
+
+func (c *Catalog) markDirectoryVerifiedIfStable(ctx context.Context, target DirectoryTarget, signature string) {
+	var missing int
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE directory_key=? AND missing_since>0`,
+		c.pathKey(target.Path)).Scan(&missing); err == nil && missing == 0 {
+		c.markDirectoryVerified(target, signature)
+	}
+}
+
+func (c *Catalog) verifiedDirectoryKey(target DirectoryTarget) string {
+	scope, root := normalizeScope(target.Scope, target.WorkspaceRoot)
+	return c.pathKey(target.Path) + "\x00" + scope + "\x00" + c.workspaceRootKey(scope, root)
 }
 
 func sameSessionProjection(got, want SessionRecord) bool {

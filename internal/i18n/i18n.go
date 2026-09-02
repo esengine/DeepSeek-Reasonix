@@ -38,6 +38,7 @@ type Messages struct {
 	FinalReadinessRecovery string // replay hint for a durable final-readiness pause
 	ReadinessContinuing    string // host is automatically finishing known readiness gaps
 	RecoveryPaused         string // controlled Auto retry pause; user can continue in the next message
+	CompletionUncertain    string // completion validator could not confirm the result; work is kept
 	ReceiptVerified        string // end-of-turn receipt, nothing unproven
 	ReceiptGapsHeader      string // end-of-turn receipt, header above the unproven list
 	ReceiptRisksHeader     string // end-of-turn receipt, header above declared risks
@@ -96,6 +97,7 @@ type Messages struct {
 	RateBandMixed                          string
 	ChatStatusModelLabel                   string
 	ChatStatusEffortLabel                  string
+	ChatStatusPresetLabel                  string
 	ChatStatusCacheLabel                   string
 	ChatStatusContextLabel                 string
 	ChatStatusCompactLabel                 string
@@ -175,6 +177,11 @@ type Messages struct {
 	AskSubmitTitle     string // submit-tab title in the ask tool question card
 	AskUnanswered      string // placeholder for an unanswered ask question
 	AskSubmitHint      string // submit-tab keyboard hint
+	ElicitURLHint      string // url-mode elicitation keyboard hint
+	ElicitConfirmOnly  string // schema-less form elicitation hint
+	ElicitUnanswered   string // placeholder for an unanswered elicitation field
+	ElicitSubmit       string // elicitation submit row label
+	ElicitSubmitHint   string // elicitation keyboard hint
 
 	// output style listing (/output-style).
 	OutputStyleNone           string // no styles available
@@ -301,6 +308,8 @@ type Messages struct {
 	ArgEffortHigh       string // /effort high
 	ArgEffortXHigh      string // /effort xhigh
 	ArgEffortMax        string // /effort max
+	ArgPresetStandard   string // /preset standard
+	ArgPresetDelivery   string // /preset delivery
 	ArgThemeCurrent     string // /theme <style> active tag
 	ArgLanguageAuto     string // /language auto
 	ArgLanguageEn       string // /language en

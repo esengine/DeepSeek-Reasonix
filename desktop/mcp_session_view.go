@@ -10,6 +10,7 @@ func pluginServerToView(server plugin.ServerStatus) ServerView {
 		HasTools: server.HasTools, ToolList: pluginToolsToView(server.ToolList),
 		ProtocolVersion: server.ProtocolVersion, SessionState: string(server.SessionState),
 		ReconnectAttempts: server.ReconnectAttempts, ErrorKind: string(server.LastErrorKind), Error: server.LastError,
+		HostProfile: server.HostProfile, ElicitationNegotiated: server.ElicitationNegotiated, AppsNegotiated: server.AppsNegotiated,
 	}
 }
 

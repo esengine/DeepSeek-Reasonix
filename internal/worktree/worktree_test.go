@@ -251,11 +251,108 @@ func TestGitWorktreeAddUsesExtendedTimeout(t *testing.T) {
 		t.Fatalf("status timeout = %v, want %v", got, gitProbeTimeout)
 	}
 	got := gitTimeout([]string{"worktree", "add", "-b", "branch", "destination", "HEAD"})
-	if got != gitWorktreeAddTimeout {
-		t.Fatalf("worktree add timeout = %v, want %v", got, gitWorktreeAddTimeout)
+	if got != gitWorktreeMutationTimeout {
+		t.Fatalf("worktree add timeout = %v, want %v", got, gitWorktreeMutationTimeout)
+	}
+	if remove := gitTimeout([]string{"worktree", "remove", "destination"}); remove != gitWorktreeMutationTimeout {
+		t.Fatalf("worktree remove timeout = %v, want %v", remove, gitWorktreeMutationTimeout)
 	}
 	if got < 2*time.Minute || got <= gitProbeTimeout {
 		t.Fatalf("worktree add timeout = %v, want a checkout-safe timeout longer than probes", got)
+	}
+}
+
+func TestRollbackCreateRemovesOnlyUntouchedWorktree(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	result, err := Create(context.Background(), repo, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackCreate(context.Background(), result); err != nil {
+		t.Fatalf("RollbackCreate: %v", err)
+	}
+	if _, err := os.Stat(result.WorktreeRoot); !os.IsNotExist(err) {
+		t.Fatalf("worktree still exists after rollback: %v", err)
+	}
+	cmd := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+result.Branch)
+	if err := cmd.Run(); err == nil {
+		t.Fatalf("branch %q still exists after rollback", result.Branch)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "README.md")); err != nil {
+		t.Fatalf("source repository was damaged: %v", err)
+	}
+}
+
+func TestRollbackCreatePreservesChangedWorktree(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	result, err := Create(context.Background(), repo, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := filepath.Join(result.WorktreeRoot, "uncommitted.txt")
+	if err := os.WriteFile(change, []byte("preserve me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RollbackCreate(context.Background(), result); err == nil || !strings.Contains(err.Error(), "contains changes") {
+		t.Fatalf("RollbackCreate error = %v, want changed-worktree refusal", err)
+	}
+	if got, err := os.ReadFile(change); err != nil || string(got) != "preserve me\n" {
+		t.Fatalf("changed worktree was not preserved: data=%q err=%v", got, err)
+	}
+	cmd := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+result.Branch)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("changed worktree branch was removed: %v", err)
+	}
+}
+
+func TestRollbackCreatePreservesIgnoredContent(t *testing.T) {
+	requireGit(t)
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "file", path: "ignored.txt"},
+		{name: "directory", path: filepath.Join("cache", "artifact.bin")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initRepo(t)
+			if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("ignored.txt\ncache/\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			git := exec.Command("git", "-C", repo, "add", ".gitignore")
+			if out, err := git.CombinedOutput(); err != nil {
+				t.Fatalf("git add .gitignore: %v %s", err, out)
+			}
+			git = exec.Command("git", "-C", repo, "-c", "user.name=Reasonix Test", "-c", "user.email=reasonix@example.invalid", "commit", "-m", "ignore generated files")
+			if out, err := git.CombinedOutput(); err != nil {
+				t.Fatalf("git commit .gitignore: %v %s", err, out)
+			}
+
+			result, err := Create(context.Background(), repo, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ignoredPath := filepath.Join(result.WorktreeRoot, tc.path)
+			if err := os.MkdirAll(filepath.Dir(ignoredPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ignoredPath, []byte("preserve me\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := RollbackCreate(context.Background(), result); err == nil || !strings.Contains(err.Error(), "contains changes") {
+				t.Fatalf("RollbackCreate error = %v, want ignored-content refusal", err)
+			}
+			if got, err := os.ReadFile(ignoredPath); err != nil || string(got) != "preserve me\n" {
+				t.Fatalf("ignored content was not preserved: data=%q err=%v", got, err)
+			}
+			git = exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+result.Branch)
+			if err := git.Run(); err != nil {
+				t.Fatalf("ignored-content branch was removed: %v", err)
+			}
+		})
 	}
 }
 

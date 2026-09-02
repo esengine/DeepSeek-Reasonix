@@ -136,7 +136,7 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
           onDismiss: () => undefined,
           onStop: () => undefined,
         }),
@@ -160,7 +160,7 @@ console.log("\nask card layout");
   eq(computed.overflowWrap, "anywhere", "long unspaced ask questions can break within the shelf");
   ok(card.getAttribute("role") === "dialog", "ask prompt shelf keeps dialog semantics");
   ok(document.querySelector(".prompt-shelf--decision") != null, "ask uses the unified decision surface layout");
-  eq(window.getComputedStyle(card).maxHeight, "min(62vh, 560px)", "Ask card stays bounded by the viewport");
+  eq(parseFloat(window.getComputedStyle(card).maxHeight), Number(Math.min(window.innerHeight * 0.62, 560).toFixed(2)), "Ask card stays bounded by the viewport");
   eq(window.getComputedStyle(card).overflow, "hidden", "Ask card delegates overflow to one content scroller");
   eq(window.getComputedStyle(content).overflow, "auto", "Ask title, question, and options share one scroll region");
   eq(content.contains(footer), false, "Ask confirmation footer stays outside the scrolling content");
@@ -313,7 +313,7 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
           onDismiss: () => undefined,
           onStop: () => undefined,
         }),
@@ -389,7 +389,7 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
           onDismiss: () => undefined,
           onStop: () => undefined,
         }),
@@ -448,7 +448,7 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
           onDismiss: () => undefined,
           onStop: () => undefined,
         }),
@@ -510,7 +510,7 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
           onDismiss: () => undefined,
           onStop: () => undefined,
         }),
@@ -592,6 +592,125 @@ console.log("\nask card layout");
   await act(async () => {
     root.unmount();
   });
+  dom.window.close();
+}
+
+// A failed asynchronous submit must preserve multi-question progress and
+// selections instead of remounting the card at question 1.
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const submitted: QuestionAnswer[][] = [];
+  let attempts = 0;
+  const ask: WireAsk = {
+    id: "ask-async-retry",
+    questions: [
+      { id: "q1", prompt: "First choice?", options: [{ label: "First A" }, { label: "First B" }] },
+      { id: "q2", prompt: "Second choice?", options: [{ label: "Second A" }, { label: "Second B" }] },
+    ],
+  };
+
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null,
+        React.createElement(AskCard, {
+          ask,
+          onAnswer: async (_id: string, answers: QuestionAnswer[]) => {
+            attempts += 1;
+            submitted.push(answers);
+            if (attempts === 1) throw new Error("bridge rejected answer");
+          },
+          onDismiss: () => undefined,
+          onStop: () => undefined,
+        }),
+      ),
+    );
+    await flushTimers();
+  });
+
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
+      .find((button) => button.textContent?.includes("First A"))?.click();
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "multi-question Ask advances to question 2");
+
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
+      .find((button) => button.textContent?.includes("Second B"))?.click();
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
+    await flushTimers();
+  });
+
+  eq(attempts, 1, "failed final submit is attempted exactly once");
+  eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "failed final submit stays on question 2");
+  eq(document.querySelector(".ask-shelf__crumbs")?.textContent?.includes("First A"), true, "failed final submit preserves the first answer");
+  eq(
+    [...document.querySelectorAll<HTMLElement>(".prompt-action")]
+      .some((button) => button.getAttribute("aria-selected") === "true" && button.textContent?.includes("Second B")),
+    true,
+    "failed final submit preserves the second answer",
+  );
+  eq(document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.disabled, false, "failed final submit re-enables retry");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
+    await flushTimers();
+  });
+  eq(attempts, 2, "retry submits once after the failure");
+  eq(submitted[1]?.map((answer) => answer.selected?.[0]).join("|"), "First A|Second B", "retry submits the preserved answer batch");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+// Skip uses the same retry contract as an answered Ask.
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  let dismissAttempts = 0;
+  const ask: WireAsk = {
+    id: "ask-skip-retry",
+    questions: [{ id: "q1", prompt: "Skip this?", options: [{ label: "Continue" }] }],
+  };
+
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null,
+        React.createElement(AskCard, {
+          ask,
+          onAnswer: () => undefined,
+          onDismiss: async () => {
+            dismissAttempts += 1;
+            if (dismissAttempts === 1) throw new Error("skip failed");
+          },
+          onStop: () => undefined,
+        }),
+      ),
+    );
+    await flushTimers();
+  });
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.click();
+    await flushTimers();
+  });
+  eq(dismissAttempts, 1, "failed skip is attempted exactly once");
+  eq(Boolean(document.querySelector(".prompt-shelf--ask")), true, "failed skip keeps the Ask visible");
+  eq(document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.disabled, false, "failed skip re-enables the action");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.click();
+    await flushTimers();
+  });
+  eq(dismissAttempts, 2, "skip can be retried once after failure");
+
+  await act(async () => { root.unmount(); });
   dom.window.close();
 }
 

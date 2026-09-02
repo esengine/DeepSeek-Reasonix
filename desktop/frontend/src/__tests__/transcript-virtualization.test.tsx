@@ -52,6 +52,36 @@ function firstTextNode(root: Node): Text | null {
   return null;
 }
 
+// ── App-footer resize tail ownership ─────────────────────────────────────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    const items = turns(30);
+    await harness.render(items, { footerHeight: 48 });
+    await harness.settle();
+    const el = harness.scrollElement();
+    const bottom = () => Math.max(0, el.scrollHeight - el.clientHeight);
+
+    // Model WebView2 committing a multiline composer before its resize
+    // observers deliver: logical tail ownership remains true while the native
+    // viewport is already displaced from its physical bottom.
+    el.scrollTop = Math.max(0, bottom() - 74);
+    await harness.render(items, { footerHeight: 122 });
+    ok(bottom() - el.scrollTop <= 4, "footer height commit repairs an already-owned tail before paint");
+
+    el.scrollTop = Math.max(0, bottom() - 300);
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, bubbles: true }));
+    dispatchScroll(el);
+    await harness.flush();
+    const manualTop = el.scrollTop;
+    await harness.render(items, { footerHeight: 180 });
+    ok(Math.abs(el.scrollTop - manualTop) <= 1, "footer height commit never moves a manual reader");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
 // ── Empty hydration uses a stable loading surface ────────────────────────────
 {
   const harness = await createTranscriptHarness();

@@ -120,6 +120,14 @@ func doctorSessionsCommand(args []string) int {
 	fmt.Printf("  physical sessions: %d\n", status.PhysicalSessions)
 	fmt.Printf("  logical sessions: %d\n", status.LogicalSessions)
 	fmt.Printf("  repair pending: %d\n", status.RepairPending)
+	fmt.Printf("  repair: %d active, %d deferred, %d blocked\n",
+		status.RepairActive, status.RepairDeferred, status.RepairBlocked)
+	if len(status.RepairErrorKinds) > 0 {
+		fmt.Printf("  repair error kinds: %v\n", status.RepairErrorKinds)
+	}
+	if status.LastRepairDurationMS > 0 {
+		fmt.Printf("  last repair wave: %dms\n", status.LastRepairDurationMS)
+	}
 	fmt.Printf("  recovery: %d groups, %d branches, %d diverged, %d safe cleanup\n",
 		status.RecoveryGroups, status.RecoveryBranches, status.RecoveryDiverged, status.CleanupEligible)
 	if status.LastError != "" {

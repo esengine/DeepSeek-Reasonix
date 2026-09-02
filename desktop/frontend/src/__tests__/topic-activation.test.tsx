@@ -348,6 +348,8 @@ await act(async () => {
 });
 await waitFor("running session hydrates on first open", () =>
   controller?.activeTabId === "tab-r" &&
+  controller.state.running === true &&
+  controller.state.hydrating === false &&
   (controller.state.items.some((item) => item.kind === "user" && item.text === "帮我查询，现在我链接的 deep") ?? false),
 );
 eq(controller?.state.running, true, "reattached thinking session stays marked running");
@@ -379,6 +381,7 @@ await act(async () => {
 });
 await waitFor("switch-back restores the thinking transcript", () =>
   controller?.activeTabId === "tab-r" &&
+  controller.state.running === true &&
   controller.state.hydrating === false &&
   (controller.state.items.some((item) => item.kind === "user" && item.text === "帮我查询，现在我链接的 deep") ?? false),
 );

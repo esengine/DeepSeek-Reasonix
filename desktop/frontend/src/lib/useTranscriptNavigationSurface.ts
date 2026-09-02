@@ -10,7 +10,7 @@ import {
 } from "react";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { advanceSurfacePaintCommit, type SurfacePaintProgress } from "./navigationSurfaceTransition";
-import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./useTranscriptScrollArbiter";
+import { hasTranscriptScrollableRange, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./useTranscriptScrollArbiter";
 import type { HistoryLoadTrigger } from "./useController";
 
 type ScrollRef = { current: HTMLDivElement | null };
@@ -177,7 +177,7 @@ export function useTranscriptSurfaceCommit(input: {
       const element = scrollRef.current;
       const rendered = empty || renderedTokenRef.current === token;
       const placementReady = empty ? Boolean(element) : Boolean(element && virtuosoReadyRef.current && !layoutTransientRef.current);
-      const bottomReady = Boolean(element && element.scrollHeight - element.scrollTop - element.clientHeight <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX);
+      const bottomReady = Boolean(element && nativeTranscriptDistanceFromBottom(element) <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX);
       const decision = advanceSurfacePaintCommit(progress, {
         rendered, placementReady, geometryReady: bottomReady,
         geometryKey: element ? transcriptSurfaceGeometryKey(element) : undefined,

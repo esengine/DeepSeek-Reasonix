@@ -18,6 +18,7 @@ func TestTombstonesDoNotTruncateSessionOrTopicPagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	catalog.pathIdentity = func(path string) string { return "identity:" + filepath.Clean(path) }
 
 	paths := make([]string, 5)
 	for i := range paths {
@@ -32,8 +33,8 @@ func TestTombstonesDoNotTruncateSessionOrTopicPagination(t *testing.T) {
 	}
 	// Keep the two newest SQL rows behind the read-visible overlay, as happens
 	// while an authoritative archive waits for the durable DELETE worker.
-	catalog.removedPaths.Store(paths[0], struct{}{})
-	catalog.removedPaths.Store(paths[1], struct{}{})
+	catalog.removedPaths.Store(catalog.pathKey(paths[0]), uint64(1))
+	catalog.removedPaths.Store(catalog.pathKey(paths[1]), uint64(1))
 
 	sessions, err := catalog.ListSessions(ctx, SessionPageRequest{Scope: "all", Limit: 2})
 	if err != nil {
@@ -76,6 +77,7 @@ func TestTopicVisibilityScansPastTombstonedPayloadWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	catalog.pathIdentity = func(path string) string { return "identity:" + filepath.Clean(path) }
 
 	paths := make([]string, MaxLimit+1)
 	for i := range paths {
@@ -88,7 +90,7 @@ func TestTopicVisibilityScansPastTombstonedPayloadWindow(t *testing.T) {
 		}
 	}
 	for _, path := range paths[:MaxLimit] {
-		catalog.removedPaths.Store(path, struct{}{})
+		catalog.removedPaths.Store(catalog.pathKey(path), uint64(1))
 	}
 	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "deep"})
 	if err != nil {

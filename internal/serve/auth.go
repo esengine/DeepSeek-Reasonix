@@ -661,13 +661,17 @@ func isLoopbackHost(hostport string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// PlainHTTPAuthWarning reports whether serve is exposing authenticated access
-// over a non-loopback plain-HTTP listener. The listener may still be valid for a
-// trusted LAN or reverse-proxy setup, but users should see the risk explicitly.
+// PlainHTTPAuthWarning returns a warning string when serve is exposed on a
+// non-loopback plain-HTTP listener. The listener may still be valid for a
+// trusted LAN or reverse-proxy setup, but users should see the risk explicitly
+// — loudest for the unauthenticated case, which used to be the silent one.
 func PlainHTTPAuthWarning(cfg config.ServeConfig, addr string) string {
 	mode, err := NormalizeAuthMode(cfg.AuthMode)
-	if err != nil || mode == "none" || isLoopbackHost(addr) {
+	if err != nil || isLoopbackHost(addr) {
 		return ""
+	}
+	if mode == "none" {
+		return "warning: serve is listening on non-loopback HTTP with authentication disabled; anyone on this network can drive the agent — bind to 127.0.0.1 or set serve.auth_mode"
 	}
 	return "warning: authenticated serve is listening on non-loopback HTTP; use HTTPS via a trusted reverse proxy or bind to 127.0.0.1 for local-only access"
 }

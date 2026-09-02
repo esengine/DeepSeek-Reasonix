@@ -44,6 +44,7 @@ const (
 const (
 	CompactionModeNative     = "native"
 	CompactionModeSummarized = "summarized"
+	CompactionModeChunked    = "chunked"
 	CompactionModeDegraded   = "degraded"
 	CompactionModeSnip       = "snip"
 )
@@ -52,6 +53,7 @@ const (
 	SummaryInputCachePrefix        = "cache_prefix"
 	SummaryInputExtensionRewritten = "extension_rewritten"
 	SummaryInputNonPrefix          = "non_prefix"
+	SummaryInputChunked            = "chunked"
 )
 
 // ContextProjection is the model-visible view of a session. The canonical
@@ -549,7 +551,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 // formatSummaryMessage builds the stable user-turn wrapper around a digest.
 func formatSummaryMessage(summary string) provider.Message {
 	return provider.Message{
-		Role: provider.RoleUser,
+		Role: provider.RoleUser, Origin: provider.MessageOriginHost,
 		Content: summaryTagOpen + "\n" +
 			"Summary of earlier conversation (older messages were compacted to save context):\n" +
 			summary + "\n" +

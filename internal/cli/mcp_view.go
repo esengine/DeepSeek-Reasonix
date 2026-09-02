@@ -13,9 +13,15 @@ import (
 
 const mcpMaxItemsPerSection = 6
 
-func renderMCPStatus(width int, servers []plugin.ServerStatus, prompts []plugin.Prompt, resources []plugin.Resource, failures []plugin.Failure) string {
+func renderMCPStatus(width int, servers []plugin.ServerStatus, prompts []plugin.Prompt, resources []plugin.Resource, failures []plugin.Failure, views []plugin.CapabilityView) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", viewHeader("MCP servers (%d)", len(servers)))
+	if len(views) > 0 {
+		b.WriteString(viewHeader("Capability matrix"))
+		b.WriteString("\n")
+		b.WriteString(plugin.FormatCapabilityViews(views))
+		b.WriteString("\n")
+	}
 
 	promptsByServer := map[string][]plugin.Prompt{}
 	for _, p := range prompts {

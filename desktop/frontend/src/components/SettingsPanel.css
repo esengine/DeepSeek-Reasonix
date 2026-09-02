@@ -446,6 +446,21 @@
   }
 }
 
+@container settings-general (max-width: 440px) {
+  .settings-sound-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .settings-sound-row .sound-select,
+  .settings-sound-row .notification-volume-control {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
 @media (max-width: 980px) {
   .settings-page--general .settings-field {
     grid-template-columns: 1fr;

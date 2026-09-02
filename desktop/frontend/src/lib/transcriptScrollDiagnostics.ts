@@ -20,6 +20,9 @@ export type TranscriptScrollDiagnosticEventType =
   | "list-height"
   | "row-measure"
   | "geometry-contract-violation"
+  | "geometry-revision"
+  | "scroll-anomaly"
+  | "reader-transaction"
   | "scroll-state"
   | "blank-check"
   | "blank-reset"
@@ -50,16 +53,31 @@ export type TranscriptScrollDiagnosticEvent = {
   settleFrame?: number;
   offBottomFrames?: number;
   stagnantFrames?: number;
-  mode?: "tail-follow" | "manual" | "user-resize" | "selection" | "restoring" | "unknown";
-  previousMode?: "tail-follow" | "manual" | "user-resize" | "selection" | "restoring" | "unknown";
-  owner?: "tail-follow" | "jump" | "rewind" | "jump-bottom" | "custom-scrollbar" | "selection-edge-scroll" | "recovery" | "other";
-  writeKind?: "scrollTo" | "scrollBy" | "scrollToIndex";
-  source?: "reset" | "user-scroll-intent" | "manual-reading" | "reader-intent-ended" | "scroll-delivered"
+  sequence?: number;
+  generation?: number;
+  ownershipEpoch?: number;
+  geometryRevision?: number;
+  transactionId?: number;
+  footerHeight?: number;
+  viewport?: number;
+  mounted?: number;
+  total?: number;
+  reverseDisplacement?: number;
+  extentDelta?: number;
+  stableFrames?: number;
+  direction?: number;
+  mode?: "tail-follow" | "manual" | "native-thumb" | "user-resize" | "selection" | "restoring" | "unknown";
+  previousMode?: "tail-follow" | "manual" | "native-thumb" | "user-resize" | "selection" | "restoring" | "unknown";
+  owner?: "tail-follow" | "jump" | "rewind" | "jump-bottom" | "custom-scrollbar" | "selection-edge-scroll" | "recovery" | "reader-stability" | "anchor-compensation" | "block-window-prepend" | "other";
+  writeKind?: "scrollTo" | "scrollBy" | "scrollToIndex" | "pinTail";
+  source?: "reset" | "user-scroll-intent" | "manual-reading" | "reader-idle-deadline" | "reader-stability" | "reader-tail-handoff" | "reader-transaction-end" | "scroll-delivered"
     | "tail-content-changed" | "content-shrank" | "layout-height-changed" | "viewport-resized"
     | "user-resize-begin" | "user-resize-end" | "selection-begin" | "selection-end"
     | "programmatic-begin" | "programmatic-end" | "jump-bottom" | "jump-index" | "scroll-offset"
-    | "recovery-begin" | "recovery-end" | "native-scrollbar-release" | "other";
-  phase?: "initial" | "settle";
+    | "recovery-begin" | "recovery-end" | "recovery-mount" | "recovery-anchor" | "extent-rebound" | "tail-follow" | "native-scrollbar-release" | "other";
+  phase?: "active" | "settling" | "handoff-pending" | "inactive" | "mount-anchor" | "correct-offset" | "initial" | "settle" | "end";
+  rejectedReason?: string;
+  result?: string;
   rowKind?: "older-history" | "user" | "process-header" | "reasoning" | "tool" | "tool-batch"
     | "tool-group" | "phase" | "process-notice" | "notice" | "compaction" | "answer" | "extension"
     | "turn-actions";
@@ -79,6 +97,8 @@ export type TranscriptScrollDiagnosticEvent = {
   canClaimTail?: boolean;
   substantial?: boolean;
   tailCommand?: boolean;
+  transient?: boolean;
+  sources?: Array<"footer-resize" | "row-measure" | "data-change" | "viewport-resize" | "fold-change" | "typography-change" | "items-rendered">;
 };
 
 export type TranscriptScrollDiagnosticEnvironment = {
@@ -136,19 +156,19 @@ type RecorderOptions = {
 
 const EVENT_TYPES = new Set<TranscriptScrollDiagnosticEventType>([
   "start", "stop", "mark", "sample", "wheel", "scroll", "scroll-write",
-  "items-rendered", "list-height", "row-measure", "geometry-contract-violation", "scroll-state", "blank-check", "blank-reset", "recovery",
+  "items-rendered", "list-height", "row-measure", "geometry-contract-violation", "geometry-revision", "scroll-anomaly", "reader-transaction", "scroll-state", "blank-check", "blank-reset", "recovery",
 ]);
-const MODES = new Set(["tail-follow", "manual", "user-resize", "selection", "restoring", "unknown"]);
-const OWNERS = new Set(["tail-follow", "jump", "rewind", "jump-bottom", "custom-scrollbar", "selection-edge-scroll", "recovery", "other"]);
-const WRITE_KINDS = new Set(["scrollTo", "scrollBy", "scrollToIndex"]);
+const MODES = new Set(["tail-follow", "manual", "native-thumb", "user-resize", "selection", "restoring", "unknown"]);
+const OWNERS = new Set(["tail-follow", "jump", "rewind", "jump-bottom", "custom-scrollbar", "selection-edge-scroll", "recovery", "reader-stability", "anchor-compensation", "block-window-prepend", "other"]);
+const WRITE_KINDS = new Set(["scrollTo", "scrollBy", "scrollToIndex", "pinTail"]);
 const SOURCES = new Set([
-  "reset", "user-scroll-intent", "manual-reading", "reader-intent-ended", "scroll-delivered",
+  "reset", "user-scroll-intent", "manual-reading", "reader-idle-deadline", "reader-stability", "reader-tail-handoff", "reader-transaction-end", "scroll-delivered",
   "tail-content-changed", "content-shrank", "layout-height-changed", "viewport-resized",
   "user-resize-begin", "user-resize-end", "selection-begin", "selection-end",
   "programmatic-begin", "programmatic-end", "jump-bottom", "jump-index", "scroll-offset",
-  "recovery-begin", "recovery-end", "native-scrollbar-release", "other",
+  "recovery-begin", "recovery-end", "recovery-mount", "recovery-anchor", "extent-rebound", "tail-follow", "native-scrollbar-release", "other",
 ]);
-const PHASES = new Set(["initial", "settle"]);
+const PHASES = new Set(["active", "settling", "handoff-pending", "inactive", "mount-anchor", "correct-offset", "initial", "settle", "end"]);
 const ROW_KINDS = new Set([
   "older-history", "user", "process-header", "reasoning", "tool", "tool-batch", "tool-group", "phase",
   "process-notice", "notice", "compaction", "answer", "extension", "turn-actions",
@@ -168,8 +188,10 @@ const NUMBER_FIELDS = [
   "firstVisibleIndex", "firstVisibleTop", "deltaY", "targetTop", "listHeight", "rowIndex",
   "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "contentRevision", "disclosureCount",
   "settleFrame", "offBottomFrames", "stagnantFrames", "relativeError",
+  "sequence", "generation", "ownershipEpoch", "geometryRevision", "transactionId", "footerHeight", "viewport", "mounted", "total", "reverseDisplacement", "extentDelta", "stableFrames", "direction",
 ] as const;
-const BOOLEAN_FIELDS = ["atBottom", "scrollable", "blank", "readerIntent", "canClaimTail", "substantial", "tailCommand"] as const;
+const BOOLEAN_FIELDS = ["atBottom", "scrollable", "blank", "readerIntent", "canClaimTail", "substantial", "tailCommand", "transient"] as const;
+const GEOMETRY_SOURCES = new Set(["footer-resize", "row-measure", "data-change", "viewport-resize", "fold-change", "typography-change", "items-rendered"]);
 
 function finiteNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -211,6 +233,14 @@ function sanitizeEvent(
   if (typeof input.foldState === "string" && FOLD_STATES.has(input.foldState)) event.foldState = input.foldState as TranscriptScrollDiagnosticEvent["foldState"];
   if (typeof input.state === "string" && STATES.has(input.state)) event.state = input.state as TranscriptScrollDiagnosticEvent["state"];
   if (typeof input.reason === "string") event.reason = (REASONS.has(input.reason) ? input.reason : "other") as TranscriptScrollDiagnosticEvent["reason"];
+  if (typeof input.rejectedReason === "string" && /^[a-z0-9-]{1,64}$/.test(input.rejectedReason)) event.rejectedReason = input.rejectedReason;
+  if (typeof input.result === "string" && /^[a-z0-9-]{1,64}$/.test(input.result)) event.result = input.result;
+  if (Array.isArray(input.sources)) {
+    const sources = input.sources.filter((value): value is NonNullable<TranscriptScrollDiagnosticEvent["sources"]>[number] => (
+      typeof value === "string" && GEOMETRY_SOURCES.has(value)
+    ));
+    if (sources.length > 0) event.sources = [...new Set(sources)];
+  }
   return event;
 }
 

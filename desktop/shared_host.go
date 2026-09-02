@@ -126,7 +126,12 @@ func (a *App) acquireSharedHost(root string) *plugin.Host {
 		return entry.host
 	}
 
-	host := plugin.NewHost()
+	// Full Apps surface; a failed sandbox listener degrades here to
+	// interactive-v1 rather than downgrading a negotiated session.
+	host := plugin.NewHostWithProfile(plugin.HostProfileDesktopApps)
+	if !a.mcpAppsSandboxAvailable() {
+		host = plugin.NewHostWithProfile(plugin.HostProfileInteractive)
+	}
 	a.sharedHosts[root] = &sharedPluginHost{host: host, refs: 1}
 	slog.Debug("shared host acquired (new)", "root", root)
 	return host

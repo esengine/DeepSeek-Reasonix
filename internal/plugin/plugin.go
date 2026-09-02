@@ -7,7 +7,6 @@ package plugin
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,6 +192,14 @@ type Host struct {
 	// changing provider-visible tool prefixes (spatiotemporal composability).
 	proxies map[string]*serverProxy
 
+	// profile is the host's semantic client-capability surface, fixed at
+	// creation; cache identity and the capability matrix derive from it.
+	profile HostProfile
+
+	// appInstances is the bounded MCP Apps instance registry, built with the
+	// Host and never nil.
+	appInstances *appInstanceRegistry
+
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
 	bgWrites  sync.WaitGroup
@@ -365,7 +372,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// Transport on the parent ctx, startup RPCs on the timed callCtx: the
 			// per-plugin timeout caps initialize+listTools, but the long-lived
 			// stdio child must outlive the startup scope and later phase-B calls.
-			c, err := start(ctx, callCtx, spec)
+			c, err := start(ctx, callCtx, spec, h.profile)
 			if err != nil {
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
@@ -396,7 +403,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			if !p.SkipPersistence {
 				h.bgWrites.Go(func() {
 					_ = RecordStartup(spec.Name, phaseADur)
-					_ = SaveCachedSchema(spec.Name, CachedSchema{
+					_ = SaveCachedSchemaForProfile(h.profile, spec.Name, CachedSchema{
 						CacheKey: SchemaCacheKey(spec),
 						Capabilities: map[string]bool{
 							"tools":     c.capabilities.tools,
@@ -626,6 +633,7 @@ type Client struct {
 	instanceID uint64 // Host-local identity for RemoveIfInstance rollback
 	t          transport
 	spec       Spec
+	profile    HostProfile
 
 	// registrationClaims and registrationCommitted are guarded by Host.mu.
 	// Claims keep a tentative shared instance alive across overlapping builds;
@@ -635,9 +643,9 @@ type Client struct {
 
 	// Advertised surface and list-changed capabilities are kept together so
 	// initialization publishes one coherent capability snapshot.
-	capabilities clientCapabilities
-
-	transport string // declared transport type, for /mcp status ("stdio"/"http")
+	capabilities    clientCapabilities
+	protocolVersion string
+	transport       string // declared transport type, for /mcp status ("stdio"/"http")
 
 	// Prompts and resources discovered during StartAll, stored here so the
 	// parallel startup can collect them per-client before merging into Host.
@@ -691,6 +699,15 @@ type ServerStatus struct {
 	ReconnectAttempts int
 	LastErrorKind     SessionErrorKind
 	LastError         string
+	// HostProfile is the client-capability profile this host declares
+	// ("core-v1", "interactive-v1", "desktop-apps-2026-01-26-v1").
+	HostProfile string
+	// ElicitationNegotiated reports that the client declared elicitation and
+	// the session runs a protocol revision where the server can use it.
+	ElicitationNegotiated bool
+	// AppsNegotiated reports two-way MCP Apps agreement: the client declared
+	// io.modelcontextprotocol/ui and the server answered with the extension.
+	AppsNegotiated bool
 }
 
 // AuthorizeSpecLaunch records durable consent for an explicitly user-installed
@@ -787,6 +804,7 @@ func (h *Host) Servers() []ServerStatus {
 			Tools:        len(c.toolCatalog.adapters),
 			HasTools:     c.capabilities.tools,
 		}
+		fillServerNegotiation(&s, h.profile, c)
 		s.ToolList = append([]ToolInfo(nil), c.toolCatalog.infos...)
 		c.toolsMu.RUnlock()
 		if provider, ok := c.t.(sessionDiagnosticsProvider); ok {
@@ -862,10 +880,20 @@ func (h *Host) clearFailure(name string) {
 	h.failures = kept
 }
 
-// NewHost returns an empty Host. Boot always constructs one — even with no
-// plugins configured — so servers can be hot-added later via Add (the `/mcp add`
-// command), which keeps the controller's host pointer stable for the session.
-func NewHost() *Host { return &Host{} }
+// NewHost returns an empty core-v1 Host. Boot always constructs one — even
+// with no plugins configured — so servers can be hot-added later via Add (the
+// `/mcp add` command), keeping the controller's host pointer stable.
+func NewHost() *Host { return NewHostWithProfile(HostProfileCore) }
+
+// NewHostWithProfile returns an empty Host declaring the given profile's
+// client capabilities. Immutable once set; a degraded frontend constructs
+// the Host with a lower profile instead of mutating a live one.
+func NewHostWithProfile(profile HostProfile) *Host {
+	return &Host{profile: profile.Normalize(), appInstances: newAppInstanceRegistry()}
+}
+
+// Profile returns the host's semantic capability profile, fixed at creation.
+func (h *Host) Profile() HostProfile { return h.profile.Normalize() }
 
 func (h *Host) registerDeferredCancel(name string, cancel context.CancelFunc) uint64 {
 	h.mu.Lock()
@@ -1289,7 +1317,7 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	}
 	h.mu.RUnlock()
 
-	c, err := start(lifeCtx, callCtx, s)
+	c, err := start(lifeCtx, callCtx, s, h.profile)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,6 +1402,9 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 		return ToolPrefix(name), true
 	}
 	removed := h.removeClientAtLocked(idx)
+	if h.appInstances != nil {
+		h.appInstances.ReleaseServer(name)
+	}
 	h.mu.Unlock()
 
 	for _, cancel := range cancels {
@@ -1401,7 +1432,7 @@ var ErrDeferredSpawnCancelled = errors.New("deferred MCP spawn cancelled")
 // registered stdio server; the child also has to outlive phase A so phase B
 // (prompts + resources) can still call it later. Callers that don't care pass
 // the same ctx for both.
-func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
+func start(lifeCtx, callCtx context.Context, s Spec, profile HostProfile) (*Client, error) {
 	started := time.Now()
 	var err error
 	s, err = applyStoredLauncherLock(s)
@@ -1412,7 +1443,7 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	if err != nil {
 		return nil, newStartupFailure("authorization", started, "", err)
 	}
-	t, err := newTransport(lifeCtx, s)
+	t, err := newTransport(lifeCtx, s, profile)
 	if err != nil {
 		return nil, newStartupFailure("launch", started, "", err)
 	}
@@ -1429,6 +1460,7 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 		name:      s.Name,
 		t:         t,
 		spec:      s,
+		profile:   profile.Normalize(),
 		transport: tt,
 		refresh: toolListRefreshState{
 			ctx:    refreshCtx,
@@ -1509,8 +1541,8 @@ func (s Spec) ServerAuthorized() bool {
 
 // newTransport builds the transport for a spec's declared type. Empty / unknown
 // defaults to stdio.
-func newTransport(ctx context.Context, s Spec) (transport, error) {
-	return newSDKSessionTransport(ctx, s)
+func newTransport(ctx context.Context, s Spec, profile HostProfile) (transport, error) {
+	return newSDKSessionTransport(ctx, s, profile)
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -1522,7 +1554,9 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		defer cancel()
 	}
 
+	started := time.Now()
 	res, err := c.callTransport(callCtx, method, params)
+	c.observeProtocol(method, res, time.Since(started), err)
 	if timeout > 0 && errors.Is(err, context.DeadlineExceeded) && callCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 		slog.Warn("plugin: MCP call timed out",
 			"server", c.name, "method", method, "tool", rawToolNameFromCallParams(params), "timeout", timeout)
@@ -1621,66 +1655,6 @@ func formatTimeout(timeout time.Duration) string {
 	return timeout.String()
 }
 
-func (c *Client) initialize(ctx context.Context) error {
-	res, err := c.call(ctx, "initialize", nil)
-	if err != nil {
-		return err
-	}
-	// Record which optional capabilities the server advertises. Presence of the
-	// key (even with an empty object) signals support.
-	var ir struct {
-		Capabilities map[string]json.RawMessage `json:"capabilities"`
-	}
-	if err := json.Unmarshal(res, &ir); err != nil {
-		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
-	}
-	toolsCapability, hasTools := ir.Capabilities["tools"]
-	c.capabilities.tools = hasTools
-	c.capabilities.toolsListChanged = false
-	if hasTools && len(toolsCapability) > 0 {
-		var advertised struct {
-			ListChanged bool `json:"listChanged"`
-		}
-		if err := json.Unmarshal(toolsCapability, &advertised); err != nil {
-			slog.Warn("plugin: parse tools capability", "server", c.name, "err", err)
-		} else {
-			c.capabilities.toolsListChanged = advertised.ListChanged
-		}
-	}
-	promptsCapability, hasPrompts := ir.Capabilities["prompts"]
-	c.capabilities.prompts = hasPrompts
-	c.capabilities.promptsListChanged = capabilityListChanged(promptsCapability)
-	resourcesCapability, hasResources := ir.Capabilities["resources"]
-	c.capabilities.resources = hasResources
-	c.capabilities.resourcesListChanged = capabilityListChanged(resourcesCapability)
-
-	return nil
-}
-
-func capabilityListChanged(capability json.RawMessage) bool {
-	if len(capability) == 0 {
-		return false
-	}
-	var advertised struct {
-		ListChanged bool `json:"listChanged"`
-	}
-	return json.Unmarshal(capability, &advertised) == nil && advertised.ListChanged
-}
-
-type mcpTool struct {
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	InputSchema  json.RawMessage `json:"inputSchema"`
-	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
-	// Annotations carries MCP's optional tool hints. readOnlyHint controls reader
-	// classification; destructiveHint remains destructive even when another hint
-	// claims the tool is read-only. Approval policy is applied separately.
-	Annotations *struct {
-		ReadOnlyHint    bool `json:"readOnlyHint"`
-		DestructiveHint bool `json:"destructiveHint"`
-	} `json:"annotations"`
-}
-
 // toolName builds Reasonix's canonical model-visible name
 // "mcp__<server>__<tool>". The registry separately resolves unique portable
 // and Claude plugin-qualified references without exposing duplicate schemas.
@@ -1755,6 +1729,12 @@ type remoteTool struct {
 	// conflicting readOnlyHint in Plan and strict read-only execution.
 	destructive bool
 	generation  uint64
+	// Apps metadata: whether the App channel may call this tool and the ui
+	// resource an App renders results with.
+	visibility    []string
+	appCallable   bool
+	uiResourceURI string
+	uiCSP         map[string][]string
 }
 
 func (t *remoteTool) Name() string        { return t.name }
@@ -1773,6 +1753,15 @@ func (t *remoteTool) MCPPackageName() string {
 	}
 	return t.client.spec.Package
 }
+
+// AppCallable reports whether an App instance may invoke this tool.
+func (t *remoteTool) AppCallable() bool { return t.appCallable }
+
+// UIResourceURI returns the MCP Apps _meta.ui.resourceUri (empty = none).
+func (t *remoteTool) UIResourceURI() string { return t.uiResourceURI }
+
+// UICSP returns the resource's declared CSP directives (nil = default deny).
+func (t *remoteTool) UICSP() map[string][]string { return t.uiCSP }
 
 func (t *remoteTool) MCPServerAuthorized() bool {
 	return t.client != nil && t.client.spec.ServerAuthorized()
@@ -1816,25 +1805,60 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 // content items, which callers with a structural image channel (the agent)
 // forward to vision models instead of relying on the text placeholders alone.
 func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
+	res, err := t.callRaw(ctx, args)
+	if err != nil {
+		return "", nil, err
+	}
+	stampMCPAppResult(ctx, t, res)
+	return parseToolResultWithSchema(res, t.outputSchema)
+}
+
+// ExecuteForApp returns the complete standard CallToolResult to an MCP App.
+// The text and isError flag are separate host-local projections used for hooks
+// and transcript events; an MCP isError result remains a successful bridge
+// response so the App receives its structured fields and metadata.
+func (t *remoteTool) ExecuteForApp(ctx context.Context, args json.RawMessage) (json.RawMessage, string, bool, error) {
+	res, err := t.callRaw(ctx, args)
+	if err != nil {
+		return nil, "", false, err
+	}
+	res, err = tool.ValidateMCPAppCallResult(res)
+	if err != nil {
+		return nil, "", false, err
+	}
+	var status struct {
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(res, &status); err != nil {
+		return nil, "", false, fmt.Errorf("decode MCP App tool result: %w", err)
+	}
+	text, _, parseErr := parseToolResultForApp(res)
+	if parseErr != nil && !status.IsError {
+		return nil, "", false, parseErr
+	}
+	return res, text, status.IsError, nil
+}
+
+func (t *remoteTool) callRaw(ctx context.Context, args json.RawMessage) (json.RawMessage, error) {
 	if t.client == nil {
-		return "", nil, errors.New("MCP tool client is unavailable")
+		return nil, errors.New("MCP tool client is unavailable")
 	}
 	t.client.toolDispatchMu.RLock()
 	defer t.client.toolDispatchMu.RUnlock()
 	if t.client.closed.Load() {
-		return "", nil, fmt.Errorf("MCP server %q is closed", t.client.name)
+		return nil, fmt.Errorf("MCP server %q is closed", t.client.name)
 	}
 	if t.client.toolCatalogStale() {
 		t.client.ensureToolsRefresh()
-		return "", nil, fmt.Errorf("MCP server %q changed its tool catalog and the refresh is still pending or failed; retry so Reasonix can apply the current schema and safety metadata", t.client.name)
+		return nil, fmt.Errorf("MCP server %q changed its tool catalog and the refresh is still pending or failed; retry so Reasonix can apply the current schema and safety metadata", t.client.name)
 	}
 	if t.generation == 0 || t.generation != t.client.catalogGeneration {
-		return "", nil, fmt.Errorf("MCP server %q changed tool %q after this call was authorized; retry so Reasonix can apply the current schema and safety metadata", t.client.name, t.rawName)
+		return nil, fmt.Errorf("MCP server %q changed tool %q after this call was authorized; retry so Reasonix can apply the current schema and safety metadata", t.client.name, t.rawName)
 	}
 	var argMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {
-			return "", nil, fmt.Errorf("invalid args: %w", err)
+			return nil, fmt.Errorf("invalid args: %w", err)
 		}
 	}
 	readOnly, destructive := t.readOnly, t.destructive
@@ -1845,7 +1869,7 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 		// authorization or safety metadata changed — state drift here returns an
 		// actionable error instead of dispatching.
 		if !t.MCPServerAuthorized() || !readOnly || destructive {
-			return "", nil, fmt.Errorf("MCP server %q changed the authorization or security metadata for tool %q; the call was blocked before dispatch — refresh the server from a parent session before retrying", t.client.name, t.rawName)
+			return nil, fmt.Errorf("MCP server %q changed the authorization or security metadata for tool %q; the call was blocked before dispatch — refresh the server from a parent session before retrying", t.client.name, t.rawName)
 		}
 	}
 	if tool.HasNonDestructiveMCPExecutionIntent(ctx) {
@@ -1853,105 +1877,16 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 		// is intentional and does not block; destructive promotion or lost
 		// authorization must produce zero tools/call.
 		if !t.MCPServerAuthorized() || destructive {
-			return "", nil, fmt.Errorf("MCP server %q changed the authorization or destructive classification for tool %q; the call was blocked before dispatch — retry so Reasonix can re-apply the current Planner MCP safety boundary", t.client.name, t.rawName)
+			return nil, fmt.Errorf("MCP server %q changed the authorization or destructive classification for tool %q; the call was blocked before dispatch — retry so Reasonix can re-apply the current Planner MCP safety boundary", t.client.name, t.rawName)
 		}
 	}
+	tool.ObserveRemoteDispatch(ctx)
 	res, err := t.client.call(ctx, "tools/call", map[string]any{
 		"name":      t.rawName,
 		"arguments": argMap,
 	})
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return parseToolResult(res)
-}
-
-// Tool-result images are forwarded to vision models as base64 data URLs, so
-// each item is validated and budgeted here rather than trusted from the MCP
-// server: payloads that are oversized, unparseable, beyond the per-result
-// count, or of a mime type outside the set every supported vision API accepts
-// are replaced with a text placeholder instead of poisoning the provider
-// request.
-const (
-	maxToolResultImageBytes = 4 << 20 // base64 length; stays under provider per-image and request caps
-	maxToolResultImages     = 5
-)
-
-var toolResultImageMimes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/gif":  true,
-	"image/webp": true,
-}
-
-// parseToolResult flattens an MCP tools/call result into plain text plus the
-// image content items as data URLs. Every image item leaves a short placeholder
-// in the text at its position, so text-only consumers (and non-vision models)
-// still learn an image was returned.
-func parseToolResult(res json.RawMessage) (string, []string, error) {
-	var out struct {
-		Content []struct {
-			Type     string `json:"type"`
-			Text     string `json:"text"`
-			Data     string `json:"data"`
-			MimeType string `json:"mimeType"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	}
-	if err := json.Unmarshal(res, &out); err != nil {
-		return "", nil, fmt.Errorf("decode tool result: %w", err)
-	}
-	var sb strings.Builder
-	var images []string
-	for _, c := range out.Content {
-		switch c.Type {
-		case "text":
-			sb.WriteString(c.Text)
-		case "image":
-			placeholder, url := toolResultImage(c.MimeType, c.Data, len(images))
-			sb.WriteString(placeholder)
-			if url != "" {
-				images = append(images, url)
-			}
-		}
-	}
-	text := sb.String()
-	if out.IsError {
-		return text, images, fmt.Errorf("plugin tool reported error: %s", text)
-	}
-	return text, images, nil
-}
-
-// toolResultImage validates one MCP image content item and returns its text
-// placeholder plus the data URL to forward ("" when the item is dropped).
-func toolResultImage(mime, data string, kept int) (placeholder, url string) {
-	if kept >= maxToolResultImages {
-		return "[image omitted: per-result image limit reached]", ""
-	}
-	mime = strings.ToLower(strings.TrimSpace(mime))
-	if mime == "" {
-		mime = "image/png"
-	}
-	if !toolResultImageMimes[mime] {
-		return "[image omitted: unsupported type " + mime + "]", ""
-	}
-	// Some servers wrap base64 in whitespace; vision APIs reject non-canonical
-	// payloads, so normalize before validating.
-	data = strings.Map(func(r rune) rune {
-		switch r {
-		case '\n', '\r', '\t', ' ':
-			return -1
-		}
-		return r
-	}, data)
-	if data == "" {
-		return "[image omitted: no data]", ""
-	}
-	if len(data) > maxToolResultImageBytes {
-		return fmt.Sprintf("[image omitted: %d bytes exceeds the %d-byte limit]", len(data), maxToolResultImageBytes), ""
-	}
-	if _, err := base64.StdEncoding.DecodeString(data); err != nil {
-		return "[image omitted: invalid base64]", ""
-	}
-	return "[image: " + mime + "]", "data:" + mime + ";base64," + data
+	return res, nil
 }

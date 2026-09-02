@@ -61,7 +61,8 @@ func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []pr
 	_, goalScoped := DeliveryExecutionScopeFromContext(ctx)
 	progress := a.applyProgressGuard(outcomes, receiptMark, goalScoped)
 	shadow := a.observeOutcomeShadow(receiptMark, outcomes)
-	a.applyInterventions(results, outcomes, storm, progress, shadow)
+	budget := a.applySoftBudget(outcomes)
+	a.applyInterventions(results, outcomes, storm, progress, shadow, budget)
 	a.observeDelegationAdmission(calls)
 }
 

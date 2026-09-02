@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
 )
 
 // promptStopReason maps a finished controller run onto ACP v1. Controlled
@@ -26,6 +27,10 @@ func promptStopReason(runErr error, cancelled bool, sessionID string) (StopReaso
 	if errors.As(runErr, &recoveryPause) {
 		return StopEndTurn, "", nil
 	}
+	var completionPause *agent.CompletionUncertainError
+	if errors.As(runErr, &completionPause) {
+		return StopEndTurn, clipStatusError(runErr, 2_048), nil
+	}
 	if pause, ok := agent.InspectRunPause(runErr); ok {
 		stop := StopEndTurn
 		if pause.Kind == "max_steps" {
@@ -37,4 +42,14 @@ func promptStopReason(runErr error, cancelled bool, sessionID string) (StopReaso
 	reason := clipStatusError(runErr, 2_048)
 	slog.Error("acp: session/prompt failed", "session_id", sessionID, "err", reason)
 	return "", "", &RPCError{Code: ErrInternal, Message: "session/prompt: " + reason}
+}
+
+func promptPauseNotice(runErr error, text string) event.Event {
+	notice := event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text}
+	var completionPause *agent.CompletionUncertainError
+	if errors.As(runErr, &completionPause) {
+		notice.Level = event.LevelInfo
+		notice.Code = event.NoticeCodeCompletionUncertain
+	}
+	return notice
 }

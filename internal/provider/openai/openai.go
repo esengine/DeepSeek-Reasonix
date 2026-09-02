@@ -760,20 +760,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	}
 	flushToolImages()
 
-	var tools []chatTool
-	for _, t := range req.Tools {
-		parameters := t.Parameters
-		if len(parameters) == 0 {
-			parameters = provider.CanonicalizeSchema(nil)
-		}
-		if c.mimo {
-			parameters = provider.NormalizeLegacyTupleItemsForDraft202012(parameters)
-		}
-		tools = append(tools, chatTool{
-			Type:     "function",
-			Function: chatFunction{Name: t.Name, Description: t.Description, Parameters: parameters},
-		})
-	}
+	tools := encodeChatTools(req, c.mimo)
 
 	maxOutputTokens := req.MaxTokens
 	if maxOutputTokens == 0 {
@@ -1274,14 +1261,16 @@ func imageContentParts(text string, images []string, detail string) []chatConten
 }
 
 type chatTool struct {
-	Type     string       `json:"type"`
-	Function chatFunction `json:"function"`
+	Type         string       `json:"type"`
+	Function     chatFunction `json:"function"`
+	DeferLoading bool         `json:"defer_loading,omitempty"`
 }
 
 type chatFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      bool            `json:"strict,omitempty"`
 }
 
 type chatToolCall struct {

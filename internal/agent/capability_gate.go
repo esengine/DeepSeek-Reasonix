@@ -236,26 +236,8 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		// Existing light review (read/diff) already checked elsewhere.
 		return ""
 	case evidence.RiskMedium:
-		if !hasReviewTool {
-			// Test/minimal registries without review keep the light review gate.
-			return ""
-		}
-		ok, blocking, report := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
-		if blocking {
-			if a.capabilityAudit != nil {
-				a.capabilityAudit.RecordReviewBlock(false)
-			}
-			return "structured review reported blocking findings; fix them and re-run review"
-		}
-		if !ok {
-			hostProof := a.task.ledger.HasSuccessfulDeliverySignoffAfter(mutation) &&
-				a.task.ledger.HasHostReviewCoverageAfter(mutation, paths)
-			if !hostProof {
-				return "medium-risk changes require either a successful structured review or host-proven verification plus diff/file inspection after the latest mutation" + reviewCoverageHint(paths)
-			}
-		}
-		if report != nil {
-			a.turn.reviewWarnings = append(a.turn.reviewWarnings, report.WarningSummaries()...)
+		if msg := a.deliveryMediumReviewFailure(mutation, paths, hasReviewTool); msg != "" {
+			return msg
 		}
 	case evidence.RiskHigh:
 		if !hasReviewTool && !hasSecurityTool {
@@ -287,6 +269,33 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		if repS != nil {
 			a.turn.reviewWarnings = append(a.turn.reviewWarnings, repS.WarningSummaries()...)
 		}
+	}
+	return ""
+}
+
+func (a *Agent) deliveryMediumReviewFailure(mutation int, paths []string, hasReviewTool bool) string {
+	if !hasReviewTool {
+		return ""
+	}
+	ok, blocking, report := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
+	if blocking {
+		if a.capabilityAudit != nil {
+			a.capabilityAudit.RecordReviewBlock(false)
+		}
+		return "structured review reported blocking findings; fix them and re-run review"
+	}
+	if !ok {
+		if a.task.ledger.CountSuccessfulReviewReportsOfKind(evidence.ReviewKindReview) >= 2 {
+			return ""
+		}
+		hostProof := a.task.ledger.HasSuccessfulDeliverySignoffAfter(mutation) &&
+			a.task.ledger.HasHostReviewCoverageAfter(mutation, paths)
+		if !hostProof {
+			return "medium-risk changes require either a successful structured review or host-proven verification plus diff/file inspection after the latest mutation" + reviewCoverageHint(paths)
+		}
+	}
+	if report != nil {
+		a.turn.reviewWarnings = append(a.turn.reviewWarnings, report.WarningSummaries()...)
 	}
 	return ""
 }

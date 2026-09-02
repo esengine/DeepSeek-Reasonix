@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -33,14 +32,21 @@ type ShellKind int
 const (
 	ShellBash ShellKind = iota
 	ShellPowerShell
+	ShellZsh
+	ShellSh
 )
 
 func (k ShellKind) String() string {
-	if k == ShellPowerShell {
-		return "powershell"
+	names := [...]string{"bash", "powershell", "zsh", "sh"}
+	if int(k) >= 0 && int(k) < len(names) {
+		return names[k]
 	}
 	return "bash"
 }
+
+// IsPOSIX reports whether this interpreter accepts the POSIX-family command
+// path used by the bash tool. zsh and sh are macOS fallbacks, not PowerShell.
+func (k ShellKind) IsPOSIX() bool { return k != ShellPowerShell }
 
 // Shell is the resolved interpreter the bash tool executes commands with: a kind
 // (so callers can adapt prompts) and the executable to invoke.
@@ -55,8 +61,11 @@ type Shell struct {
 // "powershell"/"pwsh" forces that interpreter (path overrides the PATH lookup),
 // warning to warn and falling back to auto-detection if the forced one is
 // missing — so a typo or an uninstalled shell can never leave the tool broken.
+// Discovery (candidate ordering, probing) is served by the process-wide shell
+// inventory snapshot, so repeated calls share one probe pass for 30 seconds.
 func ResolveShell(prefer, path string, warn io.Writer) Shell {
-	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), windowsPowerShellCandidates(), probeBash, isWindowsWSLBash)
+	snap := defaultShellInventory.snapshot(runtime.GOOS, prefer, path)
+	return resolveShell(prefer, path, warn, snap.goos, snap.lookPath, snap.exists, snap.bashCands, snap.psCands, snap.probe, snap.isWSL)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
@@ -64,9 +73,22 @@ func ResolveShell(prefer, path string, warn io.Writer) Shell {
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
 func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, winPowerShellCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
+	findPOSIX := func(name string, kind ShellKind) (Shell, bool) {
+		if p, err := lookPath(name); err == nil && !isWSL(p) && probe(p) {
+			return Shell{Kind: kind, Path: p}, true
+		}
+		if goos != "windows" {
+			for _, p := range []string{"/bin/" + name, "/usr/bin/" + name} {
+				if exists(p) && probe(p) {
+					return Shell{Kind: kind, Path: p}, true
+				}
+			}
+		}
+		return Shell{}, false
+	}
 	findBash := func() (Shell, bool) {
-		if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
-			return Shell{Kind: ShellBash, Path: p}, true
+		if sh, ok := findPOSIX("bash", ShellBash); ok {
+			return sh, true
 		}
 		for _, p := range winBashCandidates {
 			if exists(p) && probe(p) {
@@ -92,22 +114,13 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		}
 		return Shell{}, false
 	}
-	auto := func() Shell {
-		if sh, ok := findBash(); ok {
-			return sh
-		}
-		if goos == "windows" {
-			if sh, ok := findPowerShell([]string{"pwsh", "powershell"}); ok {
-				return sh
-			}
-		}
-		return Shell{Kind: ShellBash, Path: "bash"}
-	}
+	auto := func() Shell { return autoDetectedShell(goos, findBash, findPOSIX, findPowerShell) }
 
 	switch strings.ToLower(strings.TrimSpace(prefer)) {
 	case "", "auto":
-		return auto()
+		return autoShellWithConfiguredPath(goos, path, exists, probe, isWSL, auto)
 	case "bash":
+		path = configuredShellPath(goos, ShellBash, path, exists, isWSL)
 		if path != "" && exists(path) && probe(path) {
 			return Shell{Kind: ShellBash, Path: path}
 		}
@@ -117,6 +130,7 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		warnMissingShell(warn, prefer)
 		return auto()
 	case "powershell", "pwsh":
+		path = configuredShellPath(goos, ShellPowerShell, path, exists, isWSL)
 		if path != "" && exists(path) {
 			return Shell{Kind: ShellPowerShell, Path: path}
 		}
@@ -135,6 +149,45 @@ func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath fun
 		}
 		return auto()
 	}
+}
+
+// autoShellWithConfiguredPath gives a compatible explicit Windows Bash path
+// priority over PATH while keeping resolveShell's decision table compact. Auto
+// accepts only well-known Bash names; arbitrary wrappers remain an explicit
+// opt-in through prefer="bash".
+func autoShellWithConfiguredPath(goos, path string, exists, probe, isWSL func(string) bool, fallback func() Shell) Shell {
+	if goos == "windows" {
+		base := strings.TrimSuffix(strings.ToLower(pathBase(strings.TrimSpace(path))), ".exe")
+		if base == "bash" || base == "git-bash" {
+			configured := configuredShellPath(goos, ShellBash, path, exists, isWSL)
+			if configured != "" && exists(configured) && probe(configured) {
+				return Shell{Kind: ShellBash, Path: configured}
+			}
+		}
+	}
+	return fallback()
+}
+
+func autoDetectedShell(goos string, findBash func() (Shell, bool), findPOSIX func(string, ShellKind) (Shell, bool), findPowerShell func([]string) (Shell, bool)) Shell {
+	if sh, ok := findBash(); ok {
+		return sh
+	}
+	if goos == "darwin" {
+		for _, fallback := range []struct {
+			name string
+			kind ShellKind
+		}{{"zsh", ShellZsh}, {"sh", ShellSh}} {
+			if sh, ok := findPOSIX(fallback.name, fallback.kind); ok {
+				return sh
+			}
+		}
+	}
+	if goos == "windows" {
+		if sh, ok := findPowerShell([]string{"pwsh", "powershell"}); ok {
+			return sh
+		}
+	}
+	return Shell{Kind: ShellBash, Path: "bash"}
 }
 
 func warnMissingShell(warn io.Writer, prefer string) {
@@ -191,26 +244,83 @@ func pathBase(p string) string {
 	return p
 }
 
-// windowsBashCandidates lists the bash.exe paths a Git-for-Windows install
-// ships, across the usual program-files roots and a per-user install.
-func windowsBashCandidates() []string {
-	var roots []string
-	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
-		if v := os.Getenv(env); v != "" {
-			roots = append(roots, v)
+func pathDir(p string) string {
+	if i := strings.LastIndexAny(p, `/\`); i >= 0 {
+		return p[:i]
+	}
+	return "."
+}
+
+// ConfiguredShellPathForPreference returns a configured executable only when
+// it is compatible with the forced interpreter. The path remains persisted
+// even when rejected here, so changing preferences never destroys the user's
+// custom setting while runtime consumers avoid launching it with the wrong
+// argv contract.
+func ConfiguredShellPathForPreference(prefer, path string) string {
+	var kind ShellKind
+	switch strings.ToLower(strings.TrimSpace(prefer)) {
+	case "bash":
+		kind = ShellBash
+	case "powershell", "pwsh":
+		kind = ShellPowerShell
+	default:
+		return ""
+	}
+	return configuredShellPath(runtime.GOOS, kind, path, fileExists, isWindowsWSLBash)
+}
+
+// configuredShellPath is the shared safety boundary for every consumer of
+// [tools.shell].path. Known cross-kind executables are ignored instead of being
+// relabeled, while unknown names remain available for intentional wrappers.
+func configuredShellPath(goos string, kind ShellKind, path string, exists func(string) bool, isWSL func(string) bool) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if kind == ShellBash && goos == "windows" {
+		path = sanitizeWindowsBashPath(path, exists)
+		if isWSL != nil && isWSL(path) {
+			return ""
 		}
 	}
-	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		roots = append(roots, filepath.Join(v, "Programs"))
+	base := strings.TrimSuffix(strings.ToLower(pathBase(path)), ".exe")
+	switch kind {
+	case ShellBash:
+		if base == "git-bash" || base == "powershell" || base == "pwsh" || base == "zsh" || base == "sh" {
+			return ""
+		}
+	case ShellPowerShell:
+		if base == "bash" || base == "git-bash" || base == "zsh" || base == "sh" {
+			return ""
+		}
 	}
-	var out []string
-	for _, r := range roots {
-		out = append(out,
-			filepath.Join(r, "Git", "bin", "bash.exe"),
-			filepath.Join(r, "Git", "usr", "bin", "bash.exe"),
-		)
+	return path
+}
+
+func sanitizeWindowsBashPath(path string, exists func(string) bool) string {
+	if path == "" {
+		return path
 	}
-	return out
+	base := strings.ToLower(pathBase(path))
+	if base == "git-bash.exe" || base == "git-bash" {
+		dir := pathDir(path)
+		sep := "/"
+		if strings.Contains(path, `\`) {
+			sep = `\`
+		}
+		parent := pathDir(dir)
+		for _, sub := range []string{
+			dir + sep + "bin" + sep + "bash.exe",
+			dir + sep + "usr" + sep + "bin" + sep + "bash.exe",
+			parent + sep + "bin" + sep + "bash.exe",
+			parent + sep + "usr" + sep + "bin" + sep + "bash.exe",
+		} {
+			if exists(sub) {
+				return sub
+			}
+		}
+	}
+	return path
 }
 
 // windowsPowerShellCandidates lists common PowerShell executables that are not

@@ -104,6 +104,12 @@ const rectAt = (top: number) => ({ top, bottom: top + 100, height: 100, left: 0,
 
 const scrollElement = dom.window.document.getElementById("scroll") as HTMLDivElement;
 const rowElement = scrollElement.querySelector<HTMLElement>(".transcript__row")!;
+const guardedRowTop = (physicalTop: number) => physicalTop + Number.parseFloat(
+  scrollElement.style.getPropertyValue("--transcript-reader-visual-offset") || "0",
+);
+rowElement.dataset.index = "0";
+rowElement.dataset.transcriptLastRow = "true";
+scrollElement.dataset.transcriptRowCount = "1";
 scrollElement.getBoundingClientRect = () => rectAt(0);
 rowElement.getBoundingClientRect = () => rectAt(200);
 Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 100 });
@@ -148,16 +154,19 @@ const wheel = async (deltaY: number) => act(async () => {
 });
 const wheelDown = () => wheel(40);
 
-// ── Bottom-hold re-entry (#8709/#9099): auto re-entry into tail-follow
-// requires the bottom to be HELD — two consecutive at-bottom deliveries inside
-// one reader-intent window with no upward gesture in between. A single
-// touch-down claims the gesture but stays manual.
+// ── Reader transaction handoff: wheel deliveries remain observational. Tail
+// ownership requires the 180ms idle boundary and two stable geometry frames.
 scrollElement.scrollTop = 400;
 await act(async () => arbiter?.releaseTailFollow());
 await wheelDown();
 check(arbiter?.modeRef.current === "manual", "a single downward touch-down stays manual");
 await wheelDown();
-check(arbiter?.modeRef.current === "tail-follow", "a held bottom (second delivery) re-enters tail-follow");
+check(arbiter?.modeRef.current === "manual", "repeated delivery alone cannot claim tail-follow");
+await advanceClock(180);
+await flushFrames();
+await flushFrames();
+await flushFrames();
+check(arbiter?.modeRef.current === "tail-follow", "two stable frames hand the transaction to tail-follow");
 
 // An upward gesture between at-bottom deliveries breaks the hold streak; the
 // next downward gesture restarts it from zero.
@@ -171,7 +180,12 @@ scrollElement.scrollTop = 400;
 await wheelDown();
 check(arbiter?.modeRef.current === "manual", "an upward gesture between at-bottom deliveries breaks the hold");
 await wheelDown();
-check(arbiter?.modeRef.current === "tail-follow", "two consecutive held deliveries after the reset re-enter tail-follow");
+check(arbiter?.modeRef.current === "manual", "a new downward transaction starts with no inherited stability");
+await advanceClock(180);
+await flushFrames();
+await flushFrames();
+await flushFrames();
+check(arbiter?.modeRef.current === "tail-follow", "the replacement transaction hands off after its own stable frames");
 
 // The 180ms idle close performs one final native delivery so a large wheel or
 // touch gesture that clamps at the physical bottom can complete the hold even
@@ -180,12 +194,20 @@ check(arbiter?.modeRef.current === "tail-follow", "two consecutive held deliveri
 await act(async () => arbiter?.releaseTailFollow());
 await wheelDown();
 await advanceClock(200);
-check(arbiter?.modeRef.current === "tail-follow", "idle close re-samples a held physical bottom before ending intent");
+await flushFrames();
+await flushFrames();
+await flushFrames();
+check(arbiter?.modeRef.current === "tail-follow", "idle settling samples a stable physical bottom before handoff");
 await act(async () => arbiter?.releaseTailFollow());
 await wheelDown();
 check(arbiter?.modeRef.current === "manual", "a fresh intent window rebuilds the bottom hold from zero");
 await wheelDown();
-check(arbiter?.modeRef.current === "tail-follow", "the fresh window re-enters tail-follow after its second delivery");
+check(arbiter?.modeRef.current === "manual", "the fresh transaction still requires geometry stability");
+await advanceClock(180);
+await flushFrames();
+await flushFrames();
+await flushFrames();
+check(arbiter?.modeRef.current === "tail-follow", "the fresh transaction hands off after its second stable frame");
 
 // A thumb gesture that reaches the frozen native bottom claims the tail when
 // the drag's own deliveries already held the bottom before release resumes
@@ -217,22 +239,26 @@ await act(async () => arbiter?.reset());
 scrollElement.appendChild(rowElement);
 // Real-geometry stub: the row's client position tracks scrollTop like a
 // browser's would (document top 150).
-rowElement.getBoundingClientRect = () => rectAt(150 - scrollElement.scrollTop);
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(150 - scrollElement.scrollTop));
 scrollElement.scrollTop = 100;
 await act(async () => arbiter?.setMode("manual", "test-anchor-compensation"));
 await act(async () => arbiter?.deliverScroll());
 scrollWrites.length = 0;
 // A fold above the viewport expands: extent and the row both move +200.
 scrollExtent = 700;
-rowElement.getBoundingClientRect = () => rectAt(350 - scrollElement.scrollTop);
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(350 - scrollElement.scrollTop));
 await act(async () => arbiter?.followGrowingTail());
-await flushFrames(); // followGrowingTail frame: LAYOUT_HEIGHT_CHANGED + compensation scheduled
+await flushFrames(); // geometry callback schedules compensation before paint
+check(scrollElement.dataset.transcriptReaderVisualGuard === "true",
+  "large idle-manual anchor drift is visually guarded in the geometry callback");
 await flushFrames(); // compensation measures drift and writes once
 await flushFrames(); // stable frame 1
 await flushFrames(); // stable frame 2: done
 const compensationWrites = scrollWrites.filter((write) => write.owner === "anchor-compensation");
 check(compensationWrites.length === 1, `above-viewport growth in manual mode emits exactly one anchor-compensation write (${compensationWrites.length})`);
 check(compensationWrites[0]?.top === 300 && scrollElement.scrollTop === 300, "the compensation restores the anchor row's viewport offset");
+check(scrollElement.dataset.transcriptReaderVisualGuard === undefined,
+  "the idle-manual visual guard clears after the writer commits the physical offset");
 check(arbiter?.modeRef.current === "manual", "anchor compensation preserves manual reading ownership");
 check(rowElement.getBoundingClientRect().top === 50, "the anchor row is physically back at its pre-change offset");
 
@@ -252,25 +278,30 @@ check(scrollElement.scrollTop === 300, "below-viewport growth leaves the reading
 // A collapse above the viewport (CONTENT_SHRINK path) compensates upward.
 scrollWrites.length = 0;
 scrollExtent = 600;
-rowElement.getBoundingClientRect = () => rectAt(150 - scrollElement.scrollTop);
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(150 - scrollElement.scrollTop));
 await act(async () => arbiter?.followGrowingTail());
 for (let i = 0; i < 4; i += 1) await flushFrames();
 const shrinkWrites = scrollWrites.filter((write) => write.owner === "anchor-compensation");
 check(shrinkWrites.length === 1 && shrinkWrites[0]?.top === 100, "an above-viewport collapse compensates upward exactly once");
 check(scrollElement.scrollTop === 100, "the upward compensation restores the anchor offset");
+// The correction write resets the controller's stable-frame count. Drain its
+// two confirmation samples so the following scenario cannot inherit a frame
+// from this compensation transaction.
+await flushFrames();
+await flushFrames();
 
 // A user gesture mid-compensation cancels the loop: the reader owns the
 // viewport from there on.
 await act(async () => arbiter?.deliverScroll());
 scrollWrites.length = 0;
 scrollExtent = 800;
-rowElement.getBoundingClientRect = () => rectAt(350 - scrollElement.scrollTop);
+rowElement.getBoundingClientRect = () => rectAt(guardedRowTop(350 - scrollElement.scrollTop));
 await act(async () => arbiter?.followGrowingTail());
 await flushFrames(); // schedules the compensation
 await act(async () => arbiter?.releaseTailFollow());
 for (let i = 0; i < 4; i += 1) await flushFrames();
 check(
-  scrollWrites.filter((write) => write.owner === "anchor-compensation").length === 0,
+  scrollWrites.filter((write) => write.owner === "anchor-compensation" && !write.rejectedReason).length === 0,
   "user scroll intent cancels a pending anchor compensation",
 );
 

@@ -195,6 +195,34 @@ func TestMemoryOpenUsesOneConnectionDespiteRequestedPool(t *testing.T) {
 	}
 }
 
+func TestMemoryOpenIsolatesHandlesWithSameNameAndClock(t *testing.T) {
+	t.Parallel()
+	fixedNow := func() time.Time { return time.Unix(123, 456) }
+	opts := OpenOptions{
+		InMemory: true, MemoryName: "same-name", Migrations: testMigrations(), Now: fixedNow,
+	}
+	first, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.DB.Close() })
+	second, err := Open(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.DB.Close() })
+	if _, err := first.DB.Exec(`INSERT INTO values_table(value) VALUES('first-only')`); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := second.DB.QueryRow(`SELECT COUNT(*) FROM values_table`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("second memory projection contains %d rows from first handle, want isolated database", count)
+	}
+}
+
 func TestRebuildRequireDiskSurfacesOpenErrors(t *testing.T) {
 	t.Parallel()
 	// RequireDisk rebuild of an unwritable parent should not silently memory-open.

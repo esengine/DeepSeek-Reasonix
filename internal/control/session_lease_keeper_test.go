@@ -175,6 +175,71 @@ func TestSessionLeaseKeeperRecoveryRebindsControllerBeforeReturning(t *testing.T
 	releaseSave()
 }
 
+func TestSessionLeaseKeeperBindsPrivateResumeCandidate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target.jsonl")
+	outgoing := agent.NewSession("outgoing")
+	ctrl := New(Options{Executor: agent.New(nil, nil, outgoing, agent.Options{}, event.Discard), SessionPath: path, Sink: event.Discard})
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.BindControllerAuthority(ctrl); err != nil {
+		t.Fatal(err)
+	}
+	oldAuthority := outgoing.WriteAuthority()
+	candidate := agent.NewSession("candidate")
+	if err := keeper.BindSessionAuthority(candidate); err != nil {
+		t.Fatalf("BindSessionAuthority: %v", err)
+	}
+	if auth := candidate.WriteAuthority(); auth == nil || !auth.Covers(path) {
+		t.Fatal("private resume candidate was not bound to the held path")
+	}
+	if oldAuthority == nil || oldAuthority.Valid() {
+		t.Fatal("candidate binding did not retire the outgoing write generation")
+	}
+	ctrl.Resume(candidate, path)
+	if got, want := ctrl.WriteAuthorityGeneration(), candidate.WriteAuthority().Generation(); got != want || got == 0 {
+		t.Fatalf("resumed controller authority generation = %d, want %d", got, want)
+	}
+}
+
+func TestSessionLeaseKeeperRebindDetachingTransfersRecoveryCallback(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	c := filepath.Join(dir, "c.jsonl")
+	ctrl := New(Options{Executor: agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard), SessionPath: a, Sink: event.Discard})
+	keeper := NewSessionLeaseKeeper()
+	if err := keeper.Rebind(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.BindControllerAuthority(ctrl); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.SetOnSessionRecovered(keeper.HandleSessionRecovered)
+	detached, err := keeper.RebindDetaching(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keeper.Release()
+	defer detached.Release()
+	handler := ctrl.sessionRecoveredHandler()
+	if handler == nil {
+		t.Fatal("detached controller lost its recovery callback")
+	}
+	if err := handler(SessionRecoveryInfo{RecoveryPath: c}); err != nil {
+		t.Fatal(err)
+	}
+	if got := detached.HeldPath(); got != agent.CanonicalSessionPath(c) {
+		t.Fatalf("detached recovery moved %q, want %q", got, agent.CanonicalSessionPath(c))
+	}
+	if got := keeper.HeldPath(); got != agent.CanonicalSessionPath(b) {
+		t.Fatalf("foreground keeper moved to %q, want %q", got, agent.CanonicalSessionPath(b))
+	}
+}
+
 func TestSessionLeaseKeeperTransitionBindsCandidateBeforeMove(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.jsonl")
@@ -279,5 +344,59 @@ func TestSessionInUseMessageFallsBackWithoutInfo(t *testing.T) {
 		if strings.Contains(msg, "pid "+strconv.Itoa(os.Getpid())) {
 			t.Fatalf("%s: fallback should not invent a pid: %q", name, msg)
 		}
+	}
+}
+
+func TestSessionLeaseKeeperRebindDetachingIsFailureAtomic(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current.jsonl")
+	target := filepath.Join(dir, "target.jsonl")
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(current); err != nil {
+		t.Fatal(err)
+	}
+	outside, err := agent.TryAcquireSessionLease(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outside.Release()
+
+	detached, err := keeper.RebindDetaching(target)
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) || detached != nil {
+		t.Fatalf("RebindDetaching = (%v, %v), want held error and nil keeper", detached, err)
+	}
+	if got, want := keeper.HeldPath(), agent.CanonicalSessionPath(current); got != want {
+		t.Fatalf("held path = %q, want unchanged %q", got, want)
+	}
+}
+
+func TestSessionLeaseKeeperSplitAndAdopt(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "current.jsonl")
+	target := filepath.Join(dir, "target.jsonl")
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(current); err != nil {
+		t.Fatal(err)
+	}
+	detached, err := keeper.RebindDetaching(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := detached.HeldPath(), agent.CanonicalSessionPath(current); got != want {
+		t.Fatalf("detached path = %q, want %q", got, want)
+	}
+	if got, want := keeper.HeldPath(), agent.CanonicalSessionPath(target); got != want {
+		t.Fatalf("foreground path = %q, want %q", got, want)
+	}
+	foreground := keeper.Split()
+	defer foreground.Release()
+	keeper.Adopt(detached)
+	if got, want := keeper.HeldPath(), agent.CanonicalSessionPath(current); got != want {
+		t.Fatalf("adopted path = %q, want %q", got, want)
+	}
+	if got := detached.HeldPath(); got != "" {
+		t.Fatalf("source keeper still holds %q", got)
 	}
 }

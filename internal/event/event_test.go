@@ -79,10 +79,11 @@ func TestSyncTreatsTypedNilSinkAsDiscard(t *testing.T) {
 }
 
 type readinessAuditRecorder struct {
-	events    []evidence.ReadinessAudit
-	recovery  []ProtocolRecoveryAudit
-	workspace []WorkspaceMutation
-	turns     int
+	events     []evidence.ReadinessAudit
+	recovery   []ProtocolRecoveryAudit
+	workspace  []WorkspaceMutation
+	completion []CompletionValidationInfo
+	turns      int
 }
 
 func (r *readinessAuditRecorder) Emit(Event) {}
@@ -101,6 +102,10 @@ func (r *readinessAuditRecorder) RecordWorkspaceMutation(m WorkspaceMutation) {
 	r.workspace = append(r.workspace, m)
 }
 
+func (r *readinessAuditRecorder) RecordCompletionValidation(info CompletionValidationInfo) {
+	r.completion = append(r.completion, info)
+}
+
 func TestSyncForwardsTurnCompletion(t *testing.T) {
 	rec := &readinessAuditRecorder{}
 	RecordTurnCompletion(Sync(rec))
@@ -115,6 +120,15 @@ func TestSyncForwardsWorkspaceMutationWithoutUIEvent(t *testing.T) {
 	RecordWorkspaceMutation(sink, WorkspaceMutation{ToolName: "write_file", Paths: []string{"a.go"}, Content: true})
 	if len(rec.workspace) != 1 || rec.workspace[0].ToolName != "write_file" || len(rec.workspace[0].Paths) != 1 {
 		t.Fatalf("workspace mutation not forwarded through Sync: %+v", rec.workspace)
+	}
+}
+
+func TestSyncForwardsCompletionValidationWithoutUIEvent(t *testing.T) {
+	rec := &readinessAuditRecorder{}
+	sink := Sync(rec)
+	RecordCompletionValidation(sink, CompletionValidationInfo{Mode: "enforce", Outcome: "continue"})
+	if len(rec.completion) != 1 || rec.completion[0].Outcome != "continue" {
+		t.Fatalf("completion validation not forwarded through Sync: %+v", rec.completion)
 	}
 }
 

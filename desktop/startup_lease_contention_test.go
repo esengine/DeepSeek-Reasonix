@@ -79,3 +79,38 @@ func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
 		t.Fatalf("tab lease key = %q, want %q", key, sessionRuntimeKey(path))
 	}
 }
+
+func TestAcquireSessionRemovalGuardSurvivesTransientHolder(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "contended-removal.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"keep"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	lease, err := agent.TryAcquireSessionLease(sessionRuntimeKey(path))
+	if err != nil {
+		t.Fatalf("transient lease acquire: %v", err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		lease.Release()
+		close(released)
+	}()
+
+	started := time.Now()
+	guard, err := acquireSessionRemovalGuard(path)
+	if err != nil {
+		<-released
+		t.Fatalf("removal guard failed against a transient holder: %v", err)
+	}
+	defer guard.Release()
+	<-released
+	if elapsed := time.Since(started); elapsed < sessionLeaseContentionRetryInterval {
+		t.Fatalf("removal guard did not exercise contention retry: elapsed=%s", elapsed)
+	}
+}

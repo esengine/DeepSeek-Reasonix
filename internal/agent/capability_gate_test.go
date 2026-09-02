@@ -161,6 +161,27 @@ func TestClosedLoopReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *t
 	}
 }
 
+func TestClosedLoopReviewGateMediumCapsAtTwoSuccessfulReviews(t *testing.T) {
+	ledger := evidence.NewLedger()
+	report := json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/agent/parser.go"],"findings":[]}`)
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: report})
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: report})
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{deliveryScopeActive: true},
+	}
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("medium-risk auto review after two successes = %q, want capped", got)
+	}
+}
+
 func TestClosedLoopReviewGateDefersToParentInSubagents(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))

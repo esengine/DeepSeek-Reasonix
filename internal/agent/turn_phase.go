@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"time"
 
 	"reasonix/internal/agentpreset"
 	"reasonix/internal/completion"
@@ -10,12 +11,35 @@ import (
 	"reasonix/internal/taskcontract"
 )
 
+type phaseClock struct {
+	last event.TurnPhaseName
+	at   time.Time
+}
+
 // emitTurnPhase publishes a content-free host phase for the active turn.
 func (a *Agent) emitTurnPhase(phase event.TurnPhaseName) {
 	if a == nil || a.svc.sink == nil || phase == "" {
 		return
 	}
+	now := time.Now()
+	if !a.turn.phase.at.IsZero() && a.capabilityAudit != nil {
+		a.capabilityAudit.RecordPhaseMs(phaseAuditName(a.turn.phase.last), now.Sub(a.turn.phase.at).Milliseconds())
+	}
+	a.turn.phase = phaseClock{last: phase, at: now}
 	a.svc.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
+}
+
+func phaseAuditName(phase event.TurnPhaseName) string {
+	switch phase {
+	case event.TurnPhaseWorking:
+		return "provider"
+	case event.TurnPhaseChecking, event.TurnPhaseVerifying:
+		return "tool"
+	case event.TurnPhaseReviewing:
+		return "review"
+	default:
+		return ""
+	}
 }
 
 // emitCompletionSummary publishes the content-free end-of-turn quality summary

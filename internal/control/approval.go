@@ -114,6 +114,10 @@ type approvalManager struct {
 	// attach handoff. It is separate from promptMu because promptMu remains
 	// held while waiting for the user's answer.
 	promptEmitMu sync.Mutex
+
+	// mcpInteractions holds pending MCP elicitations, guarded by mu and
+	// grouped so the struct-state ratchet grows by one field.
+	mcpInteractions mcpInteractionState
 }
 
 type promptResolution struct {
@@ -614,11 +618,15 @@ func (a *approvalManager) clearAll() {
 	defer a.mu.Unlock()
 	clear(a.approvals)
 	clear(a.asks)
+	clear(a.mcpInteractions.pending)
 	for id := range a.approvalResolutions {
 		a.cancelApprovalResolutionLocked(id)
 	}
 	for id := range a.askResolutions {
 		a.cancelAskResolutionLocked(id)
+	}
+	for id := range a.mcpInteractions.resolutions {
+		a.finishMCPInteractionResolutionLocked(id, a.mcpInteractions.resolutions[id], context.Canceled)
 	}
 }
 
@@ -640,7 +648,7 @@ func (a *approvalManager) clearKind(kind string) {
 func (a *approvalManager) hasPending() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.approvals) > 0 || len(a.asks) > 0
+	return len(a.approvals) > 0 || len(a.asks) > 0 || len(a.mcpInteractions.pending) > 0
 }
 
 // mode returns the normalized runtime approval posture.

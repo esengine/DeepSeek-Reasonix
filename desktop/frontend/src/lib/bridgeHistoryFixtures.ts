@@ -45,9 +45,17 @@ export function mockHistorySlice(
   // row geometry, not an unrelated history-prepend transaction. Prepend is
   // covered by the dedicated history pagination scenario below.
   const geometryContract = messages.some((message) => message.content?.includes("Geometry contract fixture complete."));
+  // The browser selection contract spans 20+ turns in the 3.2k-message
+  // tool-dense fixture. A production request is turn-budgeted, but the dev
+  // mock's generic 120-entry fallback would expose barely two such turns and
+  // make the test depend on a long chain of incidental prepend timings.
+  const toolDenseSelectionContract = messages.length > 1_500
+    && messages.some((message) => message.content?.startsWith("bench turn 38:"));
   const maxEntries = geometryContract
     ? messages.length
-    : Math.max(1, Math.floor(req.entries || 120));
+    : toolDenseSelectionContract
+      ? Math.max(1_000, Math.floor(req.entries || 0))
+      : Math.max(1, Math.floor(req.entries || 120));
   if (before - lo > maxEntries) lo = before - maxEntries;
   const entries = messages.slice(lo, before).map((message, index) => {
     const entryId = `smock-${tabID}:r0:m${lo + index}:o0`;

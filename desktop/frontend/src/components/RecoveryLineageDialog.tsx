@@ -1,76 +1,80 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { GitBranch, Trash2, X } from "lucide-react";
+import { GitBranch, Pencil, X } from "lucide-react";
 import { app } from "../lib/bridge";
-import { asArray } from "../lib/array";
 import type { ProjectTopicKey } from "../lib/sessionCatalogTypes";
-import type { RecoveryCleanupResult, RecoveryLineageView } from "../lib/types";
+import type { RecoveryLineageMember, RecoveryLineageView } from "../lib/types";
 import { useT } from "../lib/i18n";
+import { useToast } from "../lib/toast";
+import { normalizeRecoveryLineageView, userVisibleRecoveryVersions } from "../lib/sessionRecoveryVersions";
 
 interface RecoveryLineageDialogProps {
   topic: ProjectTopicKey;
   initial: RecoveryLineageView;
   onClose: () => void;
-  onChanged: () => Promise<void> | void;
-  onOpenVersion?: (path: string) => Promise<void> | void;
+  onChanged: (view: RecoveryLineageView) => Promise<void> | void;
+  onOpenVersion?: (member: RecoveryLineageMember) => Promise<void> | void;
 }
 
-function fileName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
-function roleKey(role: string): "recovery.role.covered_copy" | "recovery.role.adopted" | "recovery.role.preferred" | "recovery.role.diverged" | "recovery.role.normal" {
-  if (role === "covered_copy") return "recovery.role.covered_copy";
-  if (role === "adopted") return "recovery.role.adopted";
-  if (role === "preferred") return "recovery.role.preferred";
-  if (role === "diverged") return "recovery.role.diverged";
-  return "recovery.role.normal";
+function versionActivityAt(member: RecoveryLineageMember): number {
+  return member.lastActivityAt || member.createdAt || 0;
 }
 
 export function RecoveryLineageDialog({ topic, initial, onClose, onChanged, onOpenVersion }: RecoveryLineageDialogProps) {
   const t = useT();
-  const [view, setView] = useState(initial);
-  const [preview, setPreview] = useState<RecoveryCleanupResult | null>(null);
+  const { showToast } = useToast();
+  const [view, setView] = useState(() => normalizeRecoveryLineageView(initial));
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<RecoveryCleanupResult | null>(null);
+  const [editingPath, setEditingPath] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const members = useMemo(() => userVisibleRecoveryVersions(view), [view]);
+
+  useEffect(() => setView(normalizeRecoveryLineageView(initial)), [initial]);
+
+  const refresh = async () => {
+    const next = normalizeRecoveryLineageView(await app.GetRecoveryLineage(topic));
+    setView(next);
+    await onChanged(next);
+    return next;
+  };
 
   const choose = async (path: string) => {
     if (busy) return;
     setBusy(true);
     try {
       await app.ChooseRecoveryBranch({ ...topic, path });
-      setView(await app.GetRecoveryLineage(topic));
-      await onChanged();
+      await refresh();
     } finally {
       setBusy(false);
     }
   };
 
-  const openVersion = async (path: string) => {
+  const openVersion = async (member: RecoveryLineageMember) => {
     if (busy || !onOpenVersion) return;
     setBusy(true);
     try {
-      await onOpenVersion(path);
+      await onOpenVersion(member);
       onClose();
     } finally {
       setBusy(false);
     }
   };
 
-  const clean = async (apply: boolean) => {
+  const startNoteEdit = (member: RecoveryLineageMember) => {
     if (busy) return;
+    setEditingPath(member.path);
+    setNoteDraft(member.versionNote || "");
+  };
+
+  const saveNote = async (member: RecoveryLineageMember) => {
+    if (busy || editingPath !== member.path) return;
     setBusy(true);
     try {
-      const next = await app.CleanRecoveryLineage({ ...topic, apply });
-      if (!apply) {
-        setPreview(next);
-        return;
-      }
-      setResult(next);
-      setPreview(null);
-      setView(await app.GetRecoveryLineage(topic));
-      await onChanged();
+      await app.RenameSession(member.path, noteDraft.trim());
+      setEditingPath("");
+      await refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusy(false);
     }
@@ -85,57 +89,68 @@ export function RecoveryLineageDialog({ topic, initial, onClose, onChanged, onOp
               <GitBranch size={17} aria-hidden="true" /> {t("recovery.lineageTitle")}
             </div>
             <div className="management-modal__summary">
-              {t("recovery.lineageSummary", { branches: view.branchCount, unresolved: view.unresolved })}
+              {t("recovery.lineageSummary", { branches: members.length, unresolved: view.unresolved })}
             </div>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label={t("common.close")}><X size={16} /></button>
         </header>
         <div className="recovery-lineage-dialog__body">
-          {asArray(view.members).map((member) => (
-            <div className="recovery-lineage-dialog__member" key={member.path}>
-              <div className="recovery-lineage-dialog__member-name" title={member.path}>{fileName(member.path)}</div>
-              <div className="recovery-lineage-dialog__member-meta">
-                <span>{t(roleKey(member.role))}</span>
-                <span>{t(member.turns === 1 ? "history.turnOne" : "history.turnOther", { n: member.turns })}</span>
-                {(member.open || member.running) && <span>{t("recovery.inUse")}</span>}
-                {member.canonical && <span>{t("recovery.role.preferred")}</span>}
-                {onOpenVersion && (
-                  <button type="button" className="recovery-lineage-dialog__choose" disabled={busy} onClick={() => void openVersion(member.path)}>
-                    {t("recovery.openVersion")}
-                  </button>
-                )}
-                {member.role !== "covered_copy" && !member.canonical && (
-                  <button type="button" className="recovery-lineage-dialog__choose" disabled={busy} onClick={() => void choose(member.path)}>
-                    {t("recovery.chooseBranch")}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          {view.members.length === 0 && <div className="management-modal__summary">{t("recovery.lineageEmpty")}</div>}
-          {preview && (
-            <div className="recovery-lineage-dialog__notice" role="status">
-              {t("recovery.cleanupConfirm", { count: preview.eligible })}
-            </div>
-          )}
-          {result && (
-            <div className="recovery-lineage-dialog__notice" role="status">
-              {t("recovery.cleanupResult", { moved: result.moved, busy: result.busy, kept: result.kept })}
-            </div>
-          )}
+          {members.map((member) => {
+            const activityAt = versionActivityAt(member);
+            const editing = editingPath === member.path;
+            return (
+              <article className="recovery-lineage-dialog__member" key={member.path}>
+                <div className="recovery-lineage-dialog__member-copy">
+                  <div className="recovery-lineage-dialog__member-name">
+                    {t(member.canonical ? "recovery.defaultVersion" : "recovery.alternateVersion")}
+                    {(member.open || member.running) && <span className="hist-item__badge hist-item__badge--open">{t("recovery.inUse")}</span>}
+                  </div>
+                  {editing ? (
+                    <div className="recovery-lineage-dialog__note-editor">
+                      <input
+                        autoFocus
+                        value={noteDraft}
+                        onChange={(event) => setNoteDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveNote(member);
+                          if (event.key === "Escape") setEditingPath("");
+                        }}
+                        placeholder={t("recovery.versionNotePlaceholder")}
+                      />
+                      <button type="button" className="btn btn--small" disabled={busy} onClick={() => void saveNote(member)}>{t("common.save")}</button>
+                      <button type="button" className="btn btn--small" disabled={busy} onClick={() => setEditingPath("")}>{t("common.cancel")}</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="recovery-lineage-dialog__version-note" disabled={busy} onClick={() => startNoteEdit(member)}>
+                      <Pencil size={12} aria-hidden="true" />
+                      {member.versionNote?.trim() || t("recovery.addVersionNote")}
+                    </button>
+                  )}
+                  <div className="recovery-lineage-dialog__preview">{member.preview?.trim() || t("recovery.versionPreviewEmpty")}</div>
+                  <div className="recovery-lineage-dialog__member-meta">
+                    <span>{t(member.turns === 1 ? "history.turnOne" : "history.turnOther", { n: member.turns })}</span>
+                    {activityAt > 0 && <span>{new Date(activityAt).toLocaleString()}</span>}
+                  </div>
+                </div>
+                <div className="recovery-lineage-dialog__member-actions">
+                  {onOpenVersion && (
+                    <button type="button" className="btn btn--small btn--primary" disabled={busy} onClick={() => void openVersion(member)}>
+                      {t("recovery.openVersion")}
+                    </button>
+                  )}
+                  {!member.canonical && (
+                    <button type="button" className="btn btn--small" disabled={busy} onClick={() => void choose(member.path)}>
+                      {t("recovery.chooseBranch")}
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+          {members.length === 0 && <div className="management-modal__summary">{t("recovery.lineageEmpty")}</div>}
         </div>
         <footer className="modal__actions recovery-lineage-dialog__actions">
           <button type="button" className="btn" onClick={onClose}>{t("common.close")}</button>
-          {view.cleanupEligible > 0 && !preview && (
-            <button type="button" className="btn" disabled={busy} onClick={() => void clean(false)}>
-              <Trash2 size={14} /> {t("recovery.previewCleanup")}
-            </button>
-          )}
-          {preview && preview.eligible > 0 && (
-            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void clean(true)}>
-              <Trash2 size={14} /> {t("recovery.applyCleanup")}
-            </button>
-          )}
         </footer>
       </section>
     </div>,

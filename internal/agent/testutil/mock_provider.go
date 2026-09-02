@@ -20,10 +20,6 @@ type Turn struct {
 	Reasoning string
 	ToolCalls []provider.ToolCall
 	Usage     *provider.Usage
-	// OmitFinish keeps a scripted no-tool response protocol-invalid even when
-	// the request exposes the production finish contract. Legacy tests default
-	// to a compliant terminal response; protocol-failure tests opt out here.
-	OmitFinish bool
 	// Chunks, when non-empty, is emitted exactly as provided. It is useful for
 	// edge cases such as partial tool-call starts followed by an error.
 	Chunks []provider.Chunk
@@ -86,10 +82,6 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 	t := p.script[p.seen]
 	p.seen++
 	p.mu.Unlock()
-	if len(t.Chunks) == 0 && len(t.ToolCalls) == 0 && !t.OmitFinish && requestHasTool(req, "finish") {
-		t.ToolCalls = []provider.ToolCall{{ID: fmt.Sprintf("mock-finish-%d", p.seen), Name: "finish", Arguments: `{"outcome":"completed"}`}}
-	}
-
 	if t.StreamError != nil {
 		return nil, t.StreamError
 	}
@@ -135,15 +127,6 @@ func (p *MockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 		}
 	}()
 	return ch, nil
-}
-
-func requestHasTool(req provider.Request, name string) bool {
-	for _, schema := range req.Tools {
-		if schema.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // Requests returns all recorded requests in call order. Safe to call from

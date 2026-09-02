@@ -86,7 +86,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout, guard: w.SessionGuard, terminal: w.Terminal, sessionTemp: w.SessionTemp},
 		"ls":            listDir{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"glob":          globTool{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},
+		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
 		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
 	}
 	all := tool.Builtins()

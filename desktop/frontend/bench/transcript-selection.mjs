@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startPreviewServer } from "./vite-preview-server.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
@@ -104,9 +104,28 @@ async function findVisibleTurnTarget(page, turnPredicate) {
         && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
     });
     if (!root) return null;
-    const rect = root.getBoundingClientRect();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const textRects = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      textRects.push(...range.getClientRects());
+    }
+    const rect = textRects.find((candidate) =>
+      candidate.width > 8
+      && candidate.height > 0
+      && candidate.bottom > viewport.top
+      && candidate.top < viewport.bottom
+    );
+    if (!rect) return null;
+    const visibleLeft = Math.max(rect.left, viewport.left);
+    const visibleRight = Math.min(rect.right, viewport.right);
+    if (visibleRight - visibleLeft < 4) return null;
+    const width = visibleRight - visibleLeft;
     return {
-      x: Math.min(rect.right - 2, rect.left + Math.max(rect.width * 0.45, 24)),
+      x: visibleLeft + width * 0.7,
+      probeX: visibleLeft + width * 0.35,
       y: (Math.max(rect.top, viewport.top) + Math.min(rect.bottom, viewport.bottom)) / 2,
     };
   }, turnPredicate);
@@ -114,7 +133,9 @@ async function findVisibleTurnTarget(page, turnPredicate) {
 
 async function waitForLogicalSelection(page, timeout = 8_000) {
   return page.waitForFunction(
-    () => document.querySelector(".transcript")?.dataset.scrollMode === "selection",
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "selection"
+      && document.querySelectorAll(".transcript-selection-overlay__rect").length > 0
+      && (document.getSelection()?.isCollapsed ?? true),
     undefined,
     { timeout },
   ).then(() => true, () => false);
@@ -136,12 +157,132 @@ async function waitForServer() {
   throw new Error("transcript browser preview did not become ready");
 }
 
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const preview = spawn(packageManager, ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
-  cwd: frontendDir,
-  stdio: "ignore",
-  shell: process.platform === "win32",
-});
+async function runSelectionTableRepaintGeometry(page) {
+  await page.click('.project-tree__topic-main:has-text("bench:selection-table")');
+  await page.waitForFunction(() => (
+    document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:selection-table")
+      && [...document.querySelectorAll("strong")].some((element) => element.textContent?.includes("SELECTION REPAINT TARGET"))
+  ), undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 30_000 });
+
+  const target = page.locator("strong", { hasText: "SELECTION REPAINT TARGET" });
+  await target.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const targetBox = await target.boundingBox();
+  assert(targetBox != null, "selection-table exposes the strong-text multi-click target");
+
+  const initial = await page.evaluate(() => {
+    const targetElement = [...document.querySelectorAll("strong")].find((element) => element.textContent?.includes("SELECTION REPAINT TARGET"));
+    const transcript = document.querySelector(".transcript");
+    const table = targetElement?.closest("table");
+    const row = targetElement?.closest("tr");
+    const host = document.querySelector('.transcript-selection-action[data-surface="transcript"]');
+    if (!targetElement || !transcript || !table || !row || !host) return null;
+    const abort = new AbortController();
+    const rect = (element) => {
+      const value = element.getBoundingClientRect();
+      return { top: value.top, left: value.left, right: value.right, bottom: value.bottom };
+    };
+    const capture = (event) => {
+      const currentHost = document.querySelector('.transcript-selection-action[data-surface="transcript"]');
+      const selection = document.getSelection();
+      window.__selectionTableProbe.samples.push({
+        event,
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+        table: rect(table),
+        row: rect(row),
+        target: rect(targetElement),
+        hostCount: document.querySelectorAll('.transcript-selection-action[data-surface="transcript"]').length,
+        hostStable: currentHost === host,
+        hostState: currentHost?.getAttribute("data-state") ?? null,
+        selectionRects: selection?.rangeCount
+          ? [...selection.getRangeAt(selection.rangeCount - 1).getClientRects()].map((value) => ({
+              top: value.top,
+              left: value.left,
+              right: value.right,
+              bottom: value.bottom,
+            }))
+          : [],
+      });
+    };
+    window.__selectionTableProbe = { host, samples: [], capture, abort };
+    document.addEventListener("pointerdown", () => capture("pointerdown"), { capture: true, signal: abort.signal });
+    document.addEventListener("pointerup", () => capture("pointerup"), { capture: true, signal: abort.signal });
+    document.addEventListener("selectionchange", () => capture("selectionchange"), { signal: abort.signal });
+    capture("initial");
+    return window.__selectionTableProbe.samples[0];
+  });
+  assert(initial != null, "selection-table geometry probe attaches to the settled transcript");
+  assert(initial.scrollTop > 0, `selection-table target exercises a non-top transcript viewport (${initial.scrollTop})`);
+  assert(initial.hostCount === 1 && initial.hostStable, "selection-table starts with one stable transcript action host");
+
+  const clickIntervals = [400, 320, 180, 0];
+  const clickPoint = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
+  await page.mouse.move(clickPoint.x, clickPoint.y);
+  for (let index = 0; index < clickIntervals.length; index += 1) {
+    await page.mouse.down({ button: "left", clickCount: index + 1 });
+    await page.waitForTimeout(30);
+    await page.mouse.up({ button: "left", clickCount: index + 1 });
+    await page.evaluate(async (click) => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      window.__selectionTableProbe.capture(`click-${click}-raf-1`);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      window.__selectionTableProbe.capture(`click-${click}-raf-2`);
+    }, index + 1);
+    if (clickIntervals[index] > 0) await page.waitForTimeout(clickIntervals[index]);
+  }
+
+  await page.keyboard.press("Escape");
+  await page.evaluate(async () => {
+    document.getSelection()?.removeAllRanges();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    window.__selectionTableProbe.capture("settled");
+  });
+  const result = await page.evaluate(() => {
+    const probe = window.__selectionTableProbe;
+    probe.abort.abort();
+    const samples = probe.samples;
+    const baseline = samples[0];
+    const maxDelta = (field) => Math.max(...samples.map((sample) => Math.max(
+      Math.abs(sample[field].top - baseline[field].top),
+      Math.abs(sample[field].left - baseline[field].left),
+    )));
+    const settled = samples.at(-1);
+    delete window.__selectionTableProbe;
+    return {
+      samples: samples.length,
+      maxTableDelta: maxDelta("table"),
+      maxRowDelta: maxDelta("row"),
+      maxTargetDelta: maxDelta("target"),
+      scrollStable: samples.every((sample) => (
+        sample.scrollTop === baseline.scrollTop
+          && sample.scrollHeight === baseline.scrollHeight
+          && sample.clientHeight === baseline.clientHeight
+      )),
+      hostStable: samples.every((sample) => sample.hostCount === 1 && sample.hostStable),
+      observedOpen: samples.some((sample) => sample.hostState === "open"),
+      settledState: settled.hostState,
+      settledButtonDisabled: document.querySelector('.transcript-selection-action[data-surface="transcript"] button')?.disabled,
+      settledButtonTabIndex: document.querySelector('.transcript-selection-action[data-surface="transcript"] button')?.tabIndex,
+    };
+  });
+  assert(result.samples >= 13, `selection-table records pointer, selection, and frame geometry (${result.samples} samples)`);
+  assert(result.hostStable, "four native multi-clicks retain one transcript action host identity");
+  assert(result.observedOpen, "native multi-click selection opens the transcript action host");
+  assert(result.scrollStable, "native multi-click selection preserves scrollTop/scrollHeight/clientHeight");
+  assert(result.maxTableDelta <= 0.5, `table top/left stay within 0.5px (${result.maxTableDelta})`);
+  assert(result.maxRowDelta <= 0.5, `table row top/left stay within 0.5px (${result.maxRowDelta})`);
+  assert(result.maxTargetDelta <= 0.5, `strong target top/left stay within 0.5px (${result.maxTargetDelta})`);
+  assert(
+    result.settledState === "closed" && result.settledButtonDisabled && result.settledButtonTabIndex === -1,
+    "settled action host is closed, disabled, and outside the tab order",
+  );
+}
+
+const preview = await startPreviewServer(frontendDir, port);
 
 let browser;
 try {
@@ -162,6 +303,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelectorAll(".transcript__row").length > 4, undefined, { timeout: 30_000 });
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
+  await runSelectionTableRepaintGeometry(page);
   await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
   await page.waitForFunction(() => (
     document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t")
@@ -173,22 +315,19 @@ try {
     { timeout: 30_000 },
   );
   await page.waitForTimeout(300);
-  // Preload the selection fixture with real upward wheel intent. Directly
-  // assigning scrollTop used to make Virtuoso's startReached callback page in
-  // the background, but viewport paging now requires one permit per page.
-  for (let pageIndex = 0; pageIndex < 32; pageIndex += 1) {
-    const before = Number(await page.locator(".transcript").getAttribute("data-transcript-row-count") ?? 0);
-    const box = await page.locator(".transcript").boundingBox();
-    if (!box) break;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.wheel(0, -100_000);
-    const loaded = await page.waitForFunction((previous) => {
-      const transcript = document.querySelector(".transcript");
-      const current = Number(transcript?.getAttribute("data-transcript-row-count") ?? 0);
-      return current > previous;
-    }, before, { timeout: 2_000 }).then(() => true, () => false);
-    if (!loaded) break;
-  }
+  // The tool-dense bench mock serves a deterministic 1k-entry selection
+  // window. Verify that it contains the full contract range before dragging;
+  // paging farther back would intentionally evict its newest edge.
+  const earliestLoadedTurn = () => page.evaluate(() => {
+    const turns = [...document.querySelectorAll('.jump-item[data-loaded="true"]')]
+      .map((marker) => Number(marker.getAttribute("data-turn")))
+      .filter(Number.isFinite);
+    return turns.length > 0 ? Math.min(...turns) : null;
+  });
+  const requiredFirstTurn = 18;
+  const firstLoadedTurn = await earliestLoadedTurn();
+  assert(firstLoadedTurn !== null && firstLoadedTurn <= requiredFirstTurn,
+    `selection fixture preloads a 20+ turn range (${firstLoadedTurn})`);
   await clickIfPresent(page, ".transcript__jump-bottom");
   try {
     await page.waitForFunction(() => {
@@ -218,57 +357,47 @@ try {
   // Tool-dense fixtures often land the native tail on non-selectable tool
   // rows. Wheel off the pinned tail until a mounted "bench turn N" row is
   // visible before beginning the logical selection gesture.
-  const points = await waitForVisibleSelectionStart(page, { preferHighest: true });
+  let points = await waitForVisibleSelectionStart(page, { preferHighest: true, wheelDelta: -80 });
   assert(points != null, "bench transcript exposes a selectable visible message");
+  assert(points.anchorTurn === 38, `selection starts from the final loaded question (${points.anchorTurn})`);
 
+  let downState = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page.mouse.move(points.start.x, points.start.y);
+    await page.mouse.down();
+    downState = await page.evaluate(({ x, y }) => ({
+      mode: document.querySelector(".transcript")?.dataset.scrollMode,
+      target: document.elementFromPoint(x, y)?.outerHTML.slice(0, 300),
+    }), points.start);
+    if (downState.mode === "selection") break;
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    points = await waitForVisibleSelectionStart(page, { preferHighest: true });
+  }
+  assert(downState.mode === "selection", `primary pointerdown transfers scroll ownership to selection (${downState.mode}; ${downState.target})`);
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
       window.__transcriptProgrammaticWrites.push(write);
     };
   });
-
-  await page.mouse.move(points.start.x, points.start.y);
-  await page.mouse.down();
-  const downState = await page.evaluate(({ x, y }) => ({
-    mode: document.querySelector(".transcript")?.dataset.scrollMode,
-    target: document.elementFromPoint(x, y)?.outerHTML.slice(0, 300),
-  }), points.start);
-  assert(downState.mode === "selection", `primary pointerdown transfers scroll ownership to selection (${downState.mode}; ${downState.target})`);
   await page.mouse.move(points.activate.x, points.activate.y, { steps: 6 });
   await page.waitForTimeout(50);
-  for (let index = 0; index < 8; index += 1) {
-    await page.mouse.wheel(0, -650);
+  // Cross at least one mounted row before relying on logical edge scrolling.
+  // Small wheel steps expose a neighbouring selectable without skipping the
+  // 20-turn target range on fast Chromium/Windows runners.
+  for (let index = 0; index < 3; index += 1) {
+    await page.mouse.wheel(0, -160);
     await page.mouse.move(points.edge.x, points.edge.y, { steps: 4 });
     await page.waitForTimeout(60);
   }
   await page.mouse.move(points.edge.x, points.edge.y);
-  await page.waitForFunction(() => {
-    const transcript = document.querySelector(".transcript");
-    if (!transcript) return false;
-    const max = transcript.scrollHeight - transcript.clientHeight;
-    return max > 0 && transcript.scrollTop <= max * 0.3;
-  }, undefined, { timeout: 30_000 });
   const neutralPoint = await page.evaluate(() => {
     const rect = document.querySelector(".transcript")?.getBoundingClientRect();
     return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
   });
   assert(neutralPoint != null, "deep logical drag keeps the transcript mounted");
-  await page.mouse.move(neutralPoint.x, neutralPoint.y);
-  await page.evaluate(() => {
-    const transcript = document.querySelector(".transcript");
-    if (!transcript) return;
-    transcript.scrollTop = (transcript.scrollHeight - transcript.clientHeight) * 0.1;
-    transcript.dispatchEvent(new Event("scroll"));
-  });
-  await page.waitForTimeout(300);
-  // One extra turn of margin below the 20-turn contract: Virtuoso can still
-  // be settling row heights after edge scrolling, so the caret may land one
-  // row away from the measured target when the pointer move is delivered.
-  const focusTargetTurn = Math.max(0, points.anchorTurn - 21);
-  // Target one extra turn beyond the 20-turn contract: Virtuoso can still be
-  // settling row heights after edge scrolling, so the caret may land one row
-  // away from the measured target when the pointer move is delivered.
+  const focusTargetTurn = Math.max(0, points.anchorTurn - 20);
   const findLogicalFocusPoint = () => page.evaluate((targetTurn) => {
     const transcript = document.querySelector(".transcript");
     if (!transcript) return null;
@@ -285,16 +414,44 @@ try {
       x: Math.min(rect.right - 2, rect.left + 8),
       y: (Math.max(rect.top, viewport.top) + Math.min(rect.bottom, viewport.bottom)) / 2,
     };
-  }, Math.max(0, points.anchorTurn - 21));
+  }, focusTargetTurn);
   let logicalFocusPoint = null;
-  for (let index = 0; index < 40 && !logicalFocusPoint; index += 1) {
+  for (let index = 0; index < 600 && !logicalFocusPoint; index += 1) {
     logicalFocusPoint = await findLogicalFocusPoint();
-    if (!logicalFocusPoint) {
-      await page.mouse.wheel(0, -250);
-      await page.waitForTimeout(50);
-    }
+    if (!logicalFocusPoint) await page.waitForTimeout(50);
   }
-  assert(logicalFocusPoint != null, "deep logical drag settles over a visible 20+ turn target");
+  await page.mouse.move(neutralPoint.x, neutralPoint.y);
+  await page.waitForTimeout(100);
+  const focusFailure = logicalFocusPoint ? null : await page.evaluate(() => {
+    const transcript = document.querySelector(".transcript");
+    const viewport = transcript?.getBoundingClientRect();
+    const list = transcript?.querySelector('[data-testid="virtuoso-item-list"]');
+    const mountedRows = [...(transcript?.querySelectorAll(".transcript__row") ?? [])];
+    return {
+      top: transcript?.scrollTop,
+      height: transcript?.scrollHeight,
+      mode: transcript?.dataset.scrollMode,
+      hydrating: transcript?.dataset.transcriptHydrating,
+      totalRows: transcript?.dataset.transcriptRowCount,
+      readerVisualGuard: transcript?.dataset.transcriptReaderVisualGuard ?? null,
+      listRect: list ? { top: list.getBoundingClientRect().top, bottom: list.getBoundingClientRect().bottom } : null,
+      mountedRows: mountedRows.slice(0, 6).map((row) => ({
+        index: row.dataset.index,
+        key: row.dataset.rowKey,
+        top: row.getBoundingClientRect().top,
+        bottom: row.getBoundingClientRect().bottom,
+      })),
+      visibleTurns: [...(transcript?.querySelectorAll("[data-transcript-selectable]") ?? [])]
+        .filter((row) => {
+          const rect = row.getBoundingClientRect();
+          return viewport && rect.bottom > viewport.top && rect.top < viewport.bottom;
+        })
+        .map((row) => row.textContent?.match(/\bbench turn (\d+):/)?.[1] ?? null),
+      writeOwners: [...new Set((window.__transcriptProgrammaticWrites ?? []).map((write) => write.owner))],
+    };
+  });
+  assert(logicalFocusPoint != null,
+    `deep logical drag settles over a visible 20+ turn target${focusFailure ? ` (${JSON.stringify(focusFailure)})` : ""}`);
   // Rows can shift between measuring the focus target and delivering the
   // pointer move. Re-derive the coordinates on every attempt so the caret
   // ends on a mounted selectable row and the overlay actually paints.
@@ -452,14 +609,30 @@ try {
   assert(forwardPoints != null, "settled reverse selection leaves a viewport where forward selection can start");
   assert(forwardPoints.anchorTurn <= 17, `forward drag must start early enough to cover 20 turns (${forwardPoints.anchorTurn})`);
   await page.evaluate(() => {
-    window.__transcriptProgrammaticWrites = [];
     window.__logicalClipboardText = null;
+  });
+  let forwardDownMode = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);
+    await page.mouse.down();
+    forwardDownMode = await page.locator(".transcript").getAttribute("data-scroll-mode");
+    if (forwardDownMode === "selection") break;
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    forwardPoints = await waitForVisibleSelectionStart(page, {
+      preferHighest: false,
+      wheelDelta: -80,
+      timeout: 1_200,
+    });
+  }
+  assert(forwardDownMode === "selection",
+    `forward pointerdown transfers scroll ownership to selection (${forwardDownMode})`);
+  await page.evaluate(() => {
+    window.__transcriptProgrammaticWrites = [];
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
       window.__transcriptProgrammaticWrites.push(write);
     };
   });
-  await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);
-  await page.mouse.down();
   await page.mouse.move(forwardPoints.activate.x, forwardPoints.activate.y, { steps: 6 });
   const forwardTargetTurn = forwardPoints.anchorTurn + 21;
   let forwardFocus = null;
@@ -474,7 +647,11 @@ try {
   assert(forwardFocus != null, "downward logical drag settles over a visible 20+ turn target");
   let forwardPromoted = false;
   for (let attempt = 0; attempt < 5 && !forwardPromoted; attempt += 1) {
-    await page.mouse.move(forwardFocus.x + 24, forwardFocus.y, { steps: 4 });
+    // Stay inside a real text client rect. The selectable row is a full-width
+    // block, so its geometric center can be empty padding on slower layouts;
+    // moving there does not extend the browser Range and cannot promote the
+    // cross-row gesture to the logical selection owner.
+    await page.mouse.move(forwardFocus.probeX, forwardFocus.y, { steps: 4 });
     await page.mouse.move(forwardFocus.x, forwardFocus.y, { steps: 8 });
     forwardPromoted = await waitForLogicalSelection(page, 3_000);
     if (!forwardPromoted) forwardFocus = (await findVisibleTurnTarget(page, { min: forwardTargetTurn })) ?? forwardFocus;
@@ -482,9 +659,12 @@ try {
   const forwardDuring = await page.evaluate(() => ({
     mode: document.querySelector(".transcript")?.dataset.scrollMode,
     rows: document.querySelectorAll(".transcript__row").length,
+    overlayRects: document.querySelectorAll(".transcript-selection-overlay__rect").length,
+    nativeCollapsed: document.getSelection()?.isCollapsed ?? true,
     owners: [...new Set((window.__transcriptProgrammaticWrites ?? []).map((write) => write.owner))],
   }));
-  assert(forwardDuring.mode === "selection", "downward cross-page drag also promotes to logical selection");
+  assert(forwardPromoted && forwardDuring.mode === "selection",
+    `downward cross-page drag also promotes to logical selection (${JSON.stringify(forwardDuring)})`);
   assert(forwardDuring.owners.every((owner) => owner === "selection-edge-scroll"), "forward logical gesture preserves scroll ownership");
   await page.mouse.up();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+C" : "Control+C");
@@ -502,5 +682,5 @@ try {
   await page.evaluate(() => { window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined; });
 } finally {
   await browser?.close();
-  preview.kill("SIGTERM");
+  await preview.close();
 }

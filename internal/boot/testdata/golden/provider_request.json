@@ -34,8 +34,16 @@
       "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply.",
       "parameters": {
         "properties": {
+          "decision_id": {
+            "description": "Required when reopening a previously accepted decision; cite the original decision_id.",
+            "type": "string"
+          },
+          "new_evidence": {
+            "description": "Required with decision_id when asking again after the user already accepted a consequence.",
+            "type": "string"
+          },
           "questions": {
-            "description": "1-4 questions to ask together.",
+            "description": "1-3 related questions to ask together. Same ambiguity is asked only once.",
             "items": {
               "properties": {
                 "header": {
@@ -80,7 +88,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 4,
+            "maxItems": 3,
             "minItems": 1,
             "type": "array"
           }
@@ -284,28 +292,6 @@
       }
     },
     {
-      "name": "finish",
-      "description": "Finalize this turn after giving the user a visible final answer. Call finish exactly once, in a separate tool-call batch after all work is done. Use completed when the request is fully handled, partial when useful work was completed but some requested work remains, or blocked when progress requires external state or user input. To ask the user a question, call ask instead of finish.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "outcome": {
-            "description": "Machine-readable result of this turn.",
-            "enum": [
-              "completed",
-              "partial",
-              "blocked"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "outcome"
-        ],
-        "type": "object"
-      }
-    },
-    {
       "name": "kill_shell",
       "description": "Terminate a running background job (bash or task) started with run_in_background. A no-op if the job has already finished or the id is unknown.",
       "parameters": {
@@ -323,7 +309,7 @@
     },
     {
       "name": "read_file",
-      "description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer.",
+      "description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round.",
       "parameters": {
         "properties": {
           "limit": {
@@ -459,11 +445,19 @@
     },
     {
       "name": "use_capability",
-      "description": "Fixed-schema capability proxy: list, inspect, call by stable id (tool:grep, skill:review, mcp-tool:server/tool, task:subagent, workflow:name, web:/lsp:/session:/memory: namespaces), or decline a prefer capability with a reason. memory:remember saves facts (description+body required; activation=\"relevant\" on create; omit activation on update; \"pinned\" only if user asks); memory:forget(name); tool:memory(operation=search|read|list). Calls keep the provider-visible schema fixed. Writers still pass permission, plan mode, sandbox, write-path, and workspace-lease checks. The Planner leaves destructive MCP for the Executor.",
+      "description": "Fixed-schema capability proxy. Prefer search(query, limit\u003c=8), then inspect one exact capability, then call it. list is a compact diagnostic inventory only. Supports stable ids such as tool:grep, skill:review, mcp-tool:server/tool, task:subagent, workflow:name, and web:/lsp:/session:/memory: namespaces. memory:remember saves facts (description+body required; activation=\"relevant\" on create; omit activation on update; \"pinned\" only if user asks); memory:forget(name); tool:memory(operation=search|read|list). decline records a reason for a prefer capability. Independent list/search/inspect calls are read-only and may be issued together. Calls keep the provider-visible schema fixed; real writers still pass permission, plan mode, sandbox, write-path, and workspace-lease checks.",
       "parameters": {
+        "additionalProperties": false,
         "properties": {
           "action": {
-            "description": "list | inspect | call | decline",
+            "description": "Use search for discovery, inspect one exact result, then call. list is diagnostic only.",
+            "enum": [
+              "list",
+              "search",
+              "inspect",
+              "call",
+              "decline"
+            ],
             "type": "string"
           },
           "arguments": {
@@ -472,6 +466,17 @@
           },
           "capability_id": {
             "description": "Capability id such as skill:review, mcp-server:github, or mcp-tool:github/search_issues. Not required for action=list.",
+            "type": "string"
+          },
+          "limit": {
+            "default": 5,
+            "description": "Maximum search results; defaults to 5.",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "description": "Local catalog query required for action=search. No process or network is started.",
             "type": "string"
           },
           "reason": {

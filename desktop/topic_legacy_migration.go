@@ -169,11 +169,8 @@ func migrateLegacySessionsIntoGlobalTopicsWithGates(dir string, migrationDone, r
 	// saves, so a concurrent DeleteTopic of an unrelated topic must not have
 	// its title written back by this migration batch.
 	pruneDeletedTopicEntries(topicTitles, topicSources)
-	if topicTitles != nil {
-		_ = saveTopicTitles(topicTitleRoot, topicTitles)
-	}
-	if topicSources != nil {
-		_ = saveTopicTitleSources(topicTitleRoot, topicSources)
+	if topicTitles != nil || topicSources != nil {
+		_ = saveTopicTitleIndex(topicTitleRoot, topicTitles, topicSources)
 	}
 	invalidateTopicSessionIndex(dir)
 	if !deferred {
@@ -272,15 +269,13 @@ func repairIndexedSessionTopicsWithGate(dir string, repairDone func(string) bool
 		if !legacySessionScopeMatchesMigrationTarget(meta, scope, workspaceRoot) {
 			continue
 		}
+		title, titleChanged, err := repairedIndexedSessionTopicTitle(dir, &sessionTitles, topicTitles, topicID, info, meta)
+		if err != nil {
+			deferred = true
+			continue
+		}
 		repairedTopicIDs = append(repairedTopicIDs, topicID)
-		if strings.TrimSpace(topicTitles[topicID]) == "" {
-			if sessionTitles == nil {
-				sessionTitles = loadSessionTitles(dir)
-			}
-			title := indexedSessionTopicTitle(sessionTitles, info, meta)
-			if title == "" {
-				title = defaultTopicTitle
-			}
+		if titleChanged {
 			topicTitles[topicID] = title
 			titlesChanged = true
 		}
@@ -311,13 +306,8 @@ func repairIndexedSessionTopicsWithGate(dir string, repairDone func(string) bool
 		if err := prependTopicsInProjectsFile(workspaceRoot, repairedTopicIDs, false); err != nil {
 			deferred = true
 		}
-		if titlesChanged {
-			if err := saveTopicTitles(topicTitleRoot, topicTitles); err != nil {
-				deferred = true
-			}
-		}
-		if sourcesChanged {
-			if err := saveTopicTitleSources(topicTitleRoot, topicSources); err != nil {
+		if titlesChanged || sourcesChanged {
+			if err := saveTopicTitleIndex(topicTitleRoot, topicTitles, topicSources); err != nil {
 				deferred = true
 			}
 		}
@@ -329,17 +319,51 @@ func repairIndexedSessionTopicsWithGate(dir string, repairDone func(string) bool
 	return nil
 }
 
-func indexedSessionTopicTitle(sessionTitles map[string]string, info agent.SessionOrderInfo, meta agent.BranchMeta) string {
+func repairedIndexedSessionTopicTitle(dir string, sessionTitles *map[string]string, topicTitles map[string]string, topicID string, info agent.SessionOrderInfo, meta agent.BranchMeta) (string, bool, error) {
+	if strings.TrimSpace(topicTitles[topicID]) != "" {
+		return "", false, nil
+	}
+	if *sessionTitles == nil {
+		var err error
+		*sessionTitles, err = loadSessionTitlesWithError(dir)
+		if err != nil {
+			return "", false, err
+		}
+	}
+	title, err := indexedSessionTopicTitle(*sessionTitles, info, meta)
+	if err != nil {
+		// The transcript is still the authority when its listing projection is
+		// stale. Leave the topic untouched so a later pass can retry instead of
+		// certifying a permanent default title.
+		return "", false, err
+	}
+	if title == "" {
+		title = defaultTopicTitle
+	}
+	return title, true, nil
+}
+
+func indexedSessionTopicTitle(sessionTitles map[string]string, info agent.SessionOrderInfo, meta agent.BranchMeta) (string, error) {
 	if title := topicTitleFromText(meta.TopicTitle); title != "" {
-		return title
+		return title, nil
 	}
 	if title := topicTitleFromText(info.TopicTitle); title != "" {
-		return title
+		return title, nil
 	}
 	if title := topicTitleFromText(sessionTitles[filepath.Base(info.Path)]); title != "" {
-		return title
+		return title, nil
 	}
-	return topicTitleFromText(info.Preview)
+	if !info.ListingProjectionFresh() {
+		// Pre-upgrade sidecars can identify the transcript generation without the
+		// newer listing fields. This one-shot repair must decode the transcript
+		// rather than certify a generic title from a stale projection.
+		preview, _, err := agent.SessionPreviewWithError(info.Path)
+		if err != nil {
+			return "", err
+		}
+		return topicTitleFromText(preview), nil
+	}
+	return topicTitleFromText(info.Preview), nil
 }
 
 func sessionOrderInfoIsAutomaticRecovery(info agent.SessionOrderInfo) bool {

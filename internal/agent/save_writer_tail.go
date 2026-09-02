@@ -52,15 +52,17 @@ func (s *Session) writerTailDecision(path string, next []provider.Message, nextD
 	if err != nil || info.Size() != base.LogTail {
 		return snapshotWriteDecision{}, false
 	}
+	ledgerRevision, ledgerDigest, err := sessionContentRevision(path)
+	if err != nil || ledgerRevision != base.Revision || ledgerDigest != base.ContentDigest {
+		// A failed commit can reserve the next metadata revision before its WAL
+		// record lands. Treat that reservation as a changed tail identity so the
+		// full disk classifier adopts it as the next commit's base.
+		return snapshotWriteDecision{}, false
+	}
 
 	nextDigestHex := digestString(nextDigest)
 	if base.ContentDigest == nextDigestHex {
-		decision := snapshotWriteDecision{revision: base.Revision, upToDate: true}
-		if _, ledgerDigest, ledgerErr := sessionContentRevision(path); ledgerErr == nil &&
-			ledgerDigest != "" && ledgerDigest != nextDigestHex {
-			decision.ledgerStale = true
-		}
-		return decision, true
+		return snapshotWriteDecision{revision: base.Revision, upToDate: true}, true
 	}
 	if allowOwnedRewrite {
 		return snapshotWriteDecision{revision: base.Revision}, true

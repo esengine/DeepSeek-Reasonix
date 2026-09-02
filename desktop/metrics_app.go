@@ -321,6 +321,11 @@ func (m *metricsAggregator) observe(e event.Event) {
 		if e.Usage == nil {
 			return
 		}
+		if e.UsageSource == event.UsageSourceCompletionEvaluator {
+			m.inc("completion_evaluator_finish_reason", completionEvaluatorFinishReasonBucket(e.Usage.FinishReason))
+			m.inc("completion_evaluator_cache_hit", completionEvaluatorCacheBucket(e.Usage.CacheHitTokens, e.Usage.CacheMissTokens))
+			return
+		}
 		if e.Usage.FinishReason != "" {
 			m.inc("finish_reason", e.Usage.FinishReason)
 		}
@@ -329,7 +334,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")
-		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused {
+		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused && e.Outcome != event.TurnOutcomeCompletionUncertain {
 			m.inc("provider_error", errorClass(e.Err.Error()))
 		}
 	case event.ToolResult:
@@ -342,6 +347,72 @@ func (m *metricsAggregator) observe(e event.Event) {
 		if e.Text == "No visible answer was produced; asking the assistant to respond again." || strings.HasPrefix(e.Detail, "empty final answer blocked") {
 			m.inc("empty_final", "total")
 		}
+	}
+}
+
+func (m *metricsAggregator) observeCompletionValidation(info event.CompletionValidationInfo) {
+	mode := knownBucket(info.Mode, "off", "shadow", "enforce")
+	outcome := knownBucket(info.Outcome, "complete", "continue", "needs_user", "blocked", "uncertain", "error")
+	m.inc("completion_validation_outcome", mode+"_"+outcome)
+	m.inc("completion_validation_latency", completionValidationLatencyBucket(info.DurationMs))
+	if info.Attempt > 1 {
+		m.inc("completion_validation_attempt", "repair")
+	} else {
+		m.inc("completion_validation_attempt", "first")
+	}
+	if strings.TrimSpace(info.ErrorClass) != "" {
+		m.inc("completion_validation_error", knownBucket(info.ErrorClass, "timeout", "invalid_output", "unavailable", "over_budget", "error"))
+	}
+}
+
+func completionValidationLatencyBucket(ms int64) string {
+	switch {
+	case ms < 1_000:
+		return "lt_1s"
+	case ms < 5_000:
+		return "s_1_5"
+	case ms < 15_000:
+		return "s_5_15"
+	default:
+		return "s_15_60"
+	}
+}
+
+func metricsEventRequiresPersist(e event.Event) bool {
+	return e.Kind == event.TurnDone ||
+		(e.Kind == event.Usage && e.UsageSource == event.UsageSourceCompletionEvaluator)
+}
+
+func completionEvaluatorFinishReasonBucket(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stop", "tool_calls", "length", "content_filter", "repetition_truncation":
+		return strings.ToLower(strings.TrimSpace(value))
+	case "":
+		return "unknown"
+	default:
+		return "other"
+	}
+}
+
+func completionEvaluatorCacheBucket(hit, miss int) string {
+	total := hit + miss
+	if total <= 0 {
+		return "unknown"
+	}
+	pct := hit * 100 / total
+	switch {
+	case pct == 0:
+		return "0"
+	case pct < 25:
+		return "1_24"
+	case pct < 50:
+		return "25_49"
+	case pct < 75:
+		return "50_74"
+	case pct < 90:
+		return "75_89"
+	default:
+		return "90_100"
 	}
 }
 

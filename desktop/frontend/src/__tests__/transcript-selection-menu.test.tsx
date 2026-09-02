@@ -98,6 +98,14 @@ async function dispatchContextMenu(target: Element, clientX = 120, clientY = 80)
   return event;
 }
 
+function transcriptActionHost(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.transcript-selection-action[data-surface="transcript"]');
+}
+
+function transcriptActionState(): string | undefined {
+  return transcriptActionHost()?.dataset.state;
+}
+
 console.log("\ntranscript selection menu");
 
 {
@@ -134,6 +142,28 @@ console.log("\ntranscript selection menu");
     );
     await flushTimers();
   });
+
+  const stableActionHost = transcriptActionHost();
+  eq(document.querySelectorAll('.transcript-selection-action[data-surface="transcript"]').length, 1, "transcript owns exactly one stable action host");
+  eq(transcriptActionState(), "closed", "the stable action host starts closed");
+  eq(stableActionHost?.getAttribute("aria-hidden"), "true", "the closed action host is hidden from assistive technology");
+  eq(stableActionHost?.querySelector("button")?.getAttribute("tabindex"), "-1", "the closed action button leaves the tab order");
+  eq((stableActionHost?.querySelector("button") as HTMLButtonElement | null)?.disabled, true, "the closed action button cannot be activated");
+
+  for (let cycle = 1; cycle <= 4; cycle += 1) {
+    selectNodeText(msgBody.firstChild as Node);
+    await act(async () => {
+      msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      await drainFrame();
+    });
+    eq(transcriptActionHost(), stableActionHost, `selection cycle ${cycle} reuses the stable action host`);
+    eq(transcriptActionState(), "open", `selection cycle ${cycle} opens the stable action host`);
+    await act(async () => {
+      document.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+      await flushTimers();
+    });
+    eq(transcriptActionState(), "closed", `selection cycle ${cycle} closes without unmounting the host`);
+  }
 
   // Message selection opens the menu and suppresses the (already dead) default.
   selectNodeText(msgBody.firstChild as Node);
@@ -173,7 +203,7 @@ console.log("\ntranscript selection menu");
   });
   eq(additions[0], "assistant reply text", "Add to Chat forwards the exact selected text");
   eq(document.getSelection()?.isCollapsed, true, "Add to Chat clears the browser selection");
-  eq(document.querySelector(".transcript-selection-action"), null, "Add to Chat closes the floating action");
+  eq(transcriptActionState(), "closed", "Add to Chat closes the floating action without unmounting it");
 
   // The shortcut is scoped to a live transcript selection, so it cannot steal
   // Cmd/Ctrl+L during normal app navigation.
@@ -195,23 +225,23 @@ console.log("\ntranscript selection menu");
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "pointer selection re-exposes the floating action");
+  eq(transcriptActionState(), "open", "pointer selection re-exposes the floating action");
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await flushTimers();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "Escape dismisses the floating action");
+  eq(transcriptActionState(), "closed", "Escape dismisses the floating action without unmounting it");
   eq(document.getSelection()?.isCollapsed, false, "Escape keeps the browser selection");
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
     await drainFrame();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "the Escape keyup does not re-open the dismissed action");
+  eq(transcriptActionState(), "closed", "the Escape keyup does not re-open the dismissed action");
   await act(async () => {
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "a fresh pointer gesture re-opens the dismissed action");
+  eq(transcriptActionState(), "open", "a fresh pointer gesture re-opens the dismissed action");
 
   // A new left-click must release the previous browser range before the
   // WebView's selectionchange event arrives. This keeps a stale selection from
@@ -222,7 +252,7 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
   eq(document.getSelection()?.isCollapsed, true, "a new left-click clears the previous transcript selection");
-  eq(document.querySelector(".transcript-selection-action"), null, "clearing the selection closes the floating action");
+  eq(transcriptActionState(), "closed", "clearing the selection closes the floating action");
   selectNodeText(msgBody.firstChild as Node);
   await act(async () => {
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
@@ -265,7 +295,7 @@ console.log("\ntranscript selection menu");
     msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
     await drainFrame();
   });
-  ok(document.querySelector(".transcript-selection-action") != null, "selection opens the floating action before a tab switch");
+  eq(transcriptActionState(), "open", "selection opens the floating action before a tab switch");
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -274,7 +304,7 @@ console.log("\ntranscript selection menu");
     );
     await flushTimers();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "a tab switch discards the captured selection action");
+  eq(transcriptActionState(), "closed", "a tab switch discards the captured selection action without unmounting the host");
   eq(document.getSelection()?.isCollapsed, true, "a tab switch clears the native transcript selection");
   await act(async () => {
     root.render(
@@ -288,7 +318,7 @@ console.log("\ntranscript selection menu");
     document.dispatchEvent(new window.KeyboardEvent("keyup", { key: "Meta", bubbles: true }));
     await drainFrame();
   });
-  eq(document.querySelector(".transcript-selection-action"), null, "keyup over a hydration placeholder cannot re-summon the action");
+  eq(transcriptActionState(), "closed", "keyup over a hydration placeholder cannot re-summon the action");
   selectNodeText(msgBody.firstChild as Node);
   const disabledContextEvent = await dispatchContextMenu(msgBody);
   eq(disabledContextEvent.defaultPrevented, false, "disabled selection handling leaves the native context menu alone");

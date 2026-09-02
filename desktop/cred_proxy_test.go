@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"reasonix/internal/config"
@@ -51,7 +53,7 @@ func TestCredentialProxyAuthSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 	const token = "virtual-tok"
-	a.credProxy.setRoute(token, mustParseURL(t, upstream.URL), "sk-real-key", "", "")
+	a.credProxy.setRoute(token, "", mustParseURL(t, upstream.URL), "sk-real-key", "", "")
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d/v1/chat", port)
 
 	do := func(auth string) (int, string) {
@@ -116,7 +118,7 @@ func TestCredentialProxyRewritesRequestModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	const token = "virtual-tok"
-	a.credProxy.setRoute(token, mustParseURL(t, upstream.URL), "sk-real-key", "deepseek-v4-pro", "openai")
+	a.credProxy.setRoute(token, "", mustParseURL(t, upstream.URL), "sk-real-key", "deepseek-v4-pro", "openai")
 
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/chat/completions", port), strings.NewReader(`{"model":"deepseek-v4-flash","messages":[]}`))
 	if err != nil {
@@ -150,7 +152,7 @@ func TestCredentialProxyRejectsUnreadableOrOversizeBodies(t *testing.T) {
 	}))
 	defer upstream.Close()
 	p := &credentialProxy{routes: map[string]*credProxyRoute{}}
-	p.setRoute("virtual-tok", mustParseURL(t, upstream.URL), "sk-real-key", "model", "openai")
+	p.setRoute("virtual-tok", "", mustParseURL(t, upstream.URL), "sk-real-key", "model", "openai")
 
 	request := func(body io.ReadCloser, contentLength int64) int {
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/v1/chat/completions", body)
@@ -172,11 +174,13 @@ func TestCredentialProxyRejectsUnreadableOrOversizeBodies(t *testing.T) {
 }
 
 // TestCredentialProxyTokenStableAcrossRestarts: the virtual token derives
-// from a persisted secret, so a restarted desktop keeps the same token (a
-// reused remote serve keeps working); different hosts and different
-// workspaces derive different tokens.
+// from a persisted secret plus host/workspace/model identity, so a restarted
+// desktop keeps the same route while distinct workspaces stay isolated.
 func TestCredentialProxyTokenStableAcrossRestarts(t *testing.T) {
 	seedBridgeTestHost(t, "box")
+	const keyEnv = "TEST_PROXY_TOKEN_STABILITY_KEY"
+	setDesktopTestCredential(t, keyEnv, "sk-test")
+	configureCredentialProxyTestModels(t, "https://example.invalid/v1", keyEnv)
 	a1 := &App{}
 	t.Cleanup(a1.closeCredentialProxy)
 	i1, err := a1.registerCredentialProxyRoute("box", "~/app")
@@ -208,8 +212,27 @@ func TestCredentialProxyTokenStableAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestCredentialProxyModelTokensKeepRoutesImmutable(t *testing.T) {
+	secret := strings.Repeat("ab", 32)
+	one := credentialProxyModelTokenFor(secret, "box", "~/app", "provider/model-a")
+	two := credentialProxyModelTokenFor(secret, "box", "~/app", "provider/model-b")
+	again := credentialProxyModelTokenFor(secret, "box", "~/app", "provider/model-a")
+	if one == two {
+		t.Fatal("different models shared one mutable credential proxy route token")
+	}
+	if one != again {
+		t.Fatal("the same model route token was not stable across registration")
+	}
+	if collision := credentialProxyModelTokenFor(secret, "box", "~/app", "provider:model-a"); collision == credentialProxyModelTokenFor(secret, "box", "~/app:provider", "model-a") {
+		t.Fatal("length-framed route identities shared a token")
+	}
+}
+
 func TestCredentialProxyReconnectRegistersTrackedWorkspaces(t *testing.T) {
 	seedBridgeTestHost(t, "box")
+	const keyEnv = "TEST_PROXY_RECONNECT_KEY"
+	setDesktopTestCredential(t, keyEnv, "sk-test")
+	configureCredentialProxyTestModels(t, "https://example.invalid/v1", keyEnv)
 	app := &App{}
 	t.Cleanup(app.closeCredentialProxy)
 	mgr := newDesktopRemoteManager(app)
@@ -221,7 +244,11 @@ func TestCredentialProxyReconnectRegistersTrackedWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherToken, err := app.credentialProxyToken("box", "~/other")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherToken, err := app.credentialProxyModelToken("box", "~/other", cfg.DefaultModel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +256,64 @@ func TestCredentialProxyReconnectRegistersTrackedWorkspaces(t *testing.T) {
 	defer app.credProxy.mu.Unlock()
 	if info.token == "" || app.credProxy.routes[info.token] == nil || app.credProxy.routes[otherToken] == nil {
 		t.Fatalf("tracked routes were not registered together: current=%q count=%d", info.token, len(app.credProxy.routes))
+	}
+}
+
+func TestCredentialWatchdogHealsEveryTrackedWorkspace(t *testing.T) {
+	mgr := newDesktopRemoteManager(nil)
+	mgr.hosts["box"] = &managedHost{serves: map[string]*serveEntry{
+		"~/alpha": {},
+		"~/beta":  {},
+		"~/gamma": {},
+	}}
+	workspaces := mgr.trackedCredentialWorkspaces("box", "~/beta")
+	want := []string{"~/beta", "~/alpha", "~/gamma"}
+	if !slices.Equal(workspaces, want) {
+		t.Fatalf("tracked credential workspaces = %v, want %v", workspaces, want)
+	}
+
+	var setupCalls, healCalls []string
+	err := healTrackedCredentialProviders(context.Background(), workspaces,
+		func(workspace string) (*bootstrap.CredentialProxyOptions, error) {
+			setupCalls = append(setupCalls, workspace)
+			return &bootstrap.CredentialProxyOptions{Provider: workspace}, nil
+		},
+		func(_ context.Context, opts *bootstrap.CredentialProxyOptions) error {
+			healCalls = append(healCalls, opts.Provider)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(setupCalls, want) || !slices.Equal(healCalls, want) {
+		t.Fatalf("credential heals = setup:%v heal:%v, want every workspace %v", setupCalls, healCalls, want)
+	}
+}
+
+func TestCredentialEnsureHealsEveryConfigBeforeReload(t *testing.T) {
+	workspaces := []string{"~/current", "~/peer"}
+	var calls []string
+	err := healCredentialConfigsBeforeReload(t.Context(), workspaces,
+		func(workspace string) (*bootstrap.CredentialProxyOptions, error) {
+			calls = append(calls, "setup:"+workspace)
+			return &bootstrap.CredentialProxyOptions{Provider: workspace}, nil
+		},
+		func(_ context.Context, opts *bootstrap.CredentialProxyOptions) error {
+			calls = append(calls, "heal:"+opts.Provider)
+			return nil
+		},
+		func() bool {
+			calls = append(calls, "reload")
+			return true
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"setup:~/current", "heal:~/current", "setup:~/peer", "heal:~/peer", "reload"}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("ensure heal order = %v, want %v", calls, want)
 	}
 }
 
@@ -274,7 +359,7 @@ func TestCredentialProxyAnthropicAuthShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.credProxy.setRoute("virtual-tok", mustParseURL(t, upstream.URL), "sk-real-key", "", "anthropic")
+	a.credProxy.setRoute("virtual-tok", "", mustParseURL(t, upstream.URL), "sk-real-key", "", "anthropic")
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/messages", port), strings.NewReader("{}"))
 	if err != nil {
 		t.Fatal(err)
@@ -345,15 +430,135 @@ func TestCredentialModeConfigRoundTrip(t *testing.T) {
 	}
 }
 
-// seedBridgeTestHost installs a config-backed host for bridge-level tests.
-func seedBridgeTestHost(t *testing.T, hostID string) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("REASONIX_HOME", home)
-	t.Setenv("HOME", home)
-	if err := editUserConfig(func(c *config.Config) error {
-		return c.UpsertRemoteHost(config.RemoteHostEntry{Name: hostID, Host: "127.0.0.1", Port: 22, User: "dev"})
-	}); err != nil {
+// TestSaveProviderCredentialRefreshesEveryModelRoute: old model tokens can
+// remain active in detached/background controllers, so rotating a provider key
+// must update all registered routes rather than only the workspace's latest
+// model.
+func TestSaveProviderCredentialRefreshesEveryModelRoute(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	const keyEnv = "TEST_PROXY_REFRESH_KEY"
+	setDesktopTestCredential(t, keyEnv, "sk-before-rotation")
+	auth := make(chan string, 2)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth <- r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	firstRef, secondRef := configureCredentialProxyTestModels(t, upstream.URL, keyEnv)
+	a := &App{}
+	t.Cleanup(a.closeCredentialProxy)
+	first, err := a.applyCredentialProxyModel("box", "~/app", firstRef)
+	if err != nil {
 		t.Fatal(err)
+	}
+	second, err := a.applyCredentialProxyModel("box", "~/app", secondRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.token == second.token {
+		t.Fatal("different models shared one route token")
+	}
+	if _, err := a.saveProviderCredential(keyEnv, "sk-after-rotation"); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []credentialProxyRouteInfo{first, second} {
+		requestCredentialProxy(t, route.port, route.token)
+		if got := <-auth; got != "Bearer sk-after-rotation" {
+			t.Fatalf("refreshed upstream auth = %q, want rotated credential", got)
+		}
+	}
+}
+
+// TestCredentialProxySerializesResolveAndPublish pins the latest-save-wins
+// boundary: a newer route update queued while an older credential resolution
+// is in progress must publish last. Channel gates make the overlap exact and
+// avoid scheduler sleeps.
+func TestCredentialProxySerializesResolveAndPublish(t *testing.T) {
+	auth := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth <- r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+	parsed := mustParseURL(t, upstream.URL)
+	p := &credentialProxy{routes: map[string]*credProxyRoute{}}
+
+	oldResolving := make(chan struct{})
+	releaseOld := make(chan struct{})
+	newCalling := make(chan struct{})
+	errs := make(chan error, 2)
+	var updates sync.WaitGroup
+	updates.Add(2)
+	go func() {
+		defer updates.Done()
+		_, err := p.resolveAndSetRoute("virtual-tok", "provider/model", func() (proxyUpstream, error) {
+			close(oldResolving)
+			<-releaseOld
+			return proxyUpstream{url: parsed, apiKey: "sk-older", model: "model", kind: "openai"}, nil
+		})
+		errs <- err
+	}()
+	<-oldResolving
+	go func() {
+		defer updates.Done()
+		close(newCalling)
+		_, err := p.resolveAndSetRoute("virtual-tok", "provider/model", func() (proxyUpstream, error) {
+			return proxyUpstream{url: parsed, apiKey: "sk-newer", model: "model", kind: "openai"}, nil
+		})
+		errs <- err
+	}()
+	<-newCalling
+	close(releaseOld)
+	updates.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/v1/chat/completions", strings.NewReader(`{"model":"model"}`))
+	req.Header.Set("Authorization", "Bearer virtual-tok")
+	recorder := httptest.NewRecorder()
+	p.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if got := <-auth; got != "Bearer sk-newer" {
+		t.Fatalf("final upstream auth = %q, want the newer credential", got)
+	}
+}
+
+func configureCredentialProxyTestModels(t *testing.T, baseURL, keyEnv string) (string, string) {
+	t.Helper()
+	const firstRef = "proxy-first/model-a"
+	const secondRef = "proxy-second/model-b"
+	cfg := config.Default()
+	cfg.DefaultModel = firstRef
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "proxy-first", Kind: "openai", BaseURL: baseURL, Model: "model-a", APIKeyEnv: keyEnv},
+		{Name: "proxy-second", Kind: "openai", BaseURL: baseURL, Model: "model-b", APIKeyEnv: keyEnv},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save credential proxy test config: %v", err)
+	}
+	return firstRef, secondRef
+}
+
+func requestCredentialProxy(t *testing.T, port int, token string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/chat/completions", port), strings.NewReader(`{"model":"placeholder"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }

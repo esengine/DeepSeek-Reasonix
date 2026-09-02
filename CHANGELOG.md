@@ -6,6 +6,21 @@ branch.
 
 ## Unreleased
 
+### Added
+
+- **MCP 2026-07-28 protocol:** multi-round-trip form/URL elicitation across
+  Desktop, CLI TUI, and serve; headless entries stay on the core surface and
+  cancel unanswered requests instead of guessing.
+- **MCP Apps 2026-01-26 (Desktop):** inline app surfaces in tool cards behind
+  a per-server double-iframe sandbox, app-tool visibility metadata, bounded
+  aggregate local presentations, tab-bound AppBridge routing and teardown,
+  immutable digest-bound resource snapshots, and confirmed external links;
+  local rich results, instance-gated app tool calls, and the four-layer
+  capability matrix in MCP status.
+- **Profile-scoped MCP schema caches:** capability-declaring hosts keep their
+  own `v3` cache files so catalogs negotiated under different client
+  capabilities never cross-read.
+
 ### Changed
 
 - **Fact-driven execution:** Ordinary requests always enter the executor.
@@ -18,7 +33,76 @@ branch.
   readable on old sessions and are stripped from new provider context.
   Old `--preset`/`--profile` compatibility no-ops are unchanged.
 
+- **Remote connect wizard host picker:** Step 1's host field now opens the
+  saved SSH connections through an explicit chevron dropdown on the input's
+  right edge instead of the old focus-triggered popup. The dropdown lists
+  every saved connection unfiltered, appends non-standard ports to each row,
+  leads with a "saved SSH connections" caption, and closes on pick, arrow
+  toggle, Escape (before the Escape that exits the wizard), or an outside
+  pointer press. The arrow is hidden while no hosts are saved and disabled
+  while a connection is busy.
+
 ### Fixed
+
+- **Premature natural-turn completion:** completion validation now defaults to
+  `enforce`, so a candidate that only promises future work is continued once
+  and then paused recoverably if it remains incomplete. The isolated evaluator
+  adds one bounded model request per candidate final (up to 30 seconds); users
+  can explicitly select synchronous `shadow` (same call cost and latency) or
+  `off`, including through `REASONIX_COMPLETION_VALIDATION_MODE`. One-shot CLI
+  runs exit `1` when validation remains uncertain while retaining the
+  structured `completion_uncertain` outcome and the recoverable session.
+  Persisted user/host message provenance replaces text-prefix classification
+  for current sessions while retaining a narrow legacy replay fallback;
+  provider request bytes remain unchanged. Content-free validation audits stay
+  host-only and never enter frontend or persisted event-wire payloads.
+
+- **serve Host-header allowlist:** `reasonix serve` now rejects requests whose
+  `Host` is neither loopback nor the actual listen address (HTTP 421), closing
+  the DNS-rebinding bypass of the JSON content-type CSRF guard — a rebind page
+  becomes same-origin with the loopback listener and could previously drive
+  `/bypass`, `/submit`, and read `/history`. `behind_proxy` deployments and
+  wildcard/non-loopback binds are exempt. The non-loopback plaintext-HTTP
+  startup warning now also fires — loudest — for the unauthenticated `auth =
+  none` case that used to stay silent.
+
+- **Preview read confinement:** `write_file` / `edit_file` / `multi_edit`
+  previews now apply the same `confinePreview` boundary as `delete_range` /
+  `delete_symbol`. A model-supplied absolute path outside the workspace roots
+  previously read the file (rendering its contents into the approval card and
+  session log) even though Execute would refuse the write.
+
+- **Clean-filter hardening on internal diffs:** gitcmd diff invocations now
+  neutralize every `filter.<driver>` defined in the repository's local
+  `.git/config` (`clean=` emptied, `required` forced off), so viewing a changed
+  file's diff can no longer execute a repository-configured clean filter via
+  `.gitattributes`. Emptied filters are identity pass-throughs: the diff still
+  renders the real working-tree change.
+
+- **install_source proxy SSRF parity:** the install_source SSRF dial guard now
+  also validates the request destination (IP literals) at the RoundTripper
+  boundary, so a configured HTTP/HTTPS proxy can no longer forward a blocked
+  target (cloud metadata, RFC1918, link-local, CGNAT) that the dial-time check
+  never sees — matching web_fetch's proxy-path behavior.
+
+- **awk approval classification:** the bash indirect-execution classifier now
+  treats `awk`/`gawk`/`mawk`/`nawk` with an inline program (anything not read
+  via `-f`/`--file`) like `python -c`: it always requires human approval and
+  can never be covered by a remembered reusable prefix rule. `awk
+  'BEGIN{system("…")}'` previously fell through to the reusable class.
+
+- **cargo check/doc read-only correction:** the legacy read-only command table
+  no longer lists `cargo check` / `cargo doc` as permission readers — cargo
+  executes the crate's `build.rs` for both. The effect classifier already
+  billed them as code-executing writers; the stale table entry (and its test)
+  now agree. Only `cargo search` remains read-only.
+
+- **Compact MCP discovery:** `use_capability(action=list)` now returns one
+  compact summary per configured MCP server instead of expanding every cached
+  tool description, including tools from disabled servers. Inspecting one
+  enabled `mcp-server:<name>` still returns its live or cached directory
+  without starting it, while direct known-ID calls, routing, authorization,
+  and the fixed provider-visible tool schema remain unchanged.
 
 - **Project MCP session reliability:** The MCP client now uses the official Go
   SDK for stdio, legacy SSE, and Streamable HTTP while retaining Reasonix's

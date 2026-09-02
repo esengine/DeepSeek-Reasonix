@@ -130,6 +130,11 @@ func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	event.RecordProtocolRecovery(s.inner, a)
 }
 
+func (s *sink) RecordCompletionValidation(info event.CompletionValidationInfo) {
+	s.reporter.append(completionValidationCounters(info))
+	event.RecordCompletionValidation(s.inner, info)
+}
+
 func (s *sink) observe(e event.Event) {
 	switch e.Kind {
 	case event.TurnStarted:
@@ -147,6 +152,13 @@ func (s *sink) observe(e event.Event) {
 		}
 	case event.Usage:
 		if e.Usage != nil {
+			if e.UsageSource == event.UsageSourceCompletionEvaluator {
+				counts := map[string]int{}
+				add(counts, "completion_evaluator_finish_reason", finishReasonBucket(e.Usage.FinishReason), 1)
+				add(counts, "completion_evaluator_cache_hit", cacheBucket(e.Usage.CacheHitTokens, e.Usage.CacheMissTokens), 1)
+				s.reporter.append(counts)
+				break
+			}
 			add(s.counts, "finish_reason", finishReasonBucket(e.Usage.FinishReason), 1)
 			add(s.counts, "cache_hit", cacheBucket(e.Usage.CacheHitTokens, e.Usage.CacheMissTokens), 1)
 		}
@@ -177,6 +189,40 @@ func (s *sink) observe(e event.Event) {
 		s.started = time.Time{}
 		s.hasText = false
 		s.emptyFinalSeen = false
+	}
+}
+
+func completionValidationCounters(info event.CompletionValidationInfo) map[string]int {
+	counts := map[string]int{}
+	mode := enumBucket(info.Mode, "off", "shadow", "enforce")
+	outcome := enumBucket(info.Outcome, "complete", "continue", "needs_user", "blocked", "uncertain", "error")
+	add(counts, "completion_validation_outcome", mode+"_"+outcome, 1)
+	add(counts, "completion_validation_latency", completionValidationLatencyBucket(info.DurationMs), 1)
+	attempt := "first"
+	if info.Attempt > 1 {
+		attempt = "repair"
+	}
+	add(counts, "completion_validation_attempt", attempt, 1)
+	if strings.TrimSpace(info.ErrorClass) != "" {
+		add(counts, "completion_validation_error", enumBucket(info.ErrorClass, "timeout", "invalid_output", "unavailable", "over_budget", "error"), 1)
+	}
+	return counts
+}
+
+// completionValidationLatencyBucket is intentionally identical to the
+// Desktop aggregator. The evaluator is bounded to 30 seconds, but clamping an
+// unexpected larger duration into the terminal bucket keeps the two clients'
+// aggregate contracts stable as well.
+func completionValidationLatencyBucket(ms int64) string {
+	switch {
+	case ms < 1_000:
+		return "lt_1s"
+	case ms < 5_000:
+		return "s_1_5"
+	case ms < 15_000:
+		return "s_5_15"
+	default:
+		return "s_15_60"
 	}
 }
 
@@ -360,6 +406,9 @@ func exitBucket(e event.Event) string {
 	}
 	if e.Outcome == event.TurnOutcomeRecoveryPaused {
 		return "recovery_paused"
+	}
+	if e.Outcome == event.TurnOutcomeCompletionUncertain {
+		return "completion_uncertain"
 	}
 	if e.Err != nil {
 		return "error"

@@ -16,9 +16,8 @@ type ModelTextObservation struct {
 }
 
 // ModelTextObserver is an optional reader capability. The agent passes the
-// final unbounded tool result before compatibility truncation, so a reader can
-// report exactly the text window that will be available through RawContent on
-// the next provider request without retaining source text.
+// final unbounded tool result, but records the returned hashes only after that
+// complete result has crossed the provider-visible recovery boundary.
 type ModelTextObserver interface {
 	ObserveModelText(args json.RawMessage, output string) (ModelTextObservation, bool)
 }

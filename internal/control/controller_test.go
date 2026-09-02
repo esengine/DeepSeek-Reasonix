@@ -1573,7 +1573,6 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 	if err := base.SaveSnapshot(path); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-
 	current, err := agent.LoadSession(path)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
@@ -1589,11 +1588,10 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 		Label:       "shutdown",
 		Sink:        sink,
 		OnSessionRecovered: func(info SessionRecoveryInfo) error {
-			handoff = info
+			info.OnCommit(func() { handoff = info })
 			return nil
 		},
 	})
-
 	recoveryPath, err := c.recoverShutdownSnapshot(path, agent.ErrSessionFileLockHeld)
 	if err != nil {
 		t.Fatalf("recoverShutdownSnapshot: %v", err)

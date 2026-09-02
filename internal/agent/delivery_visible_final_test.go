@@ -12,9 +12,8 @@ import (
 )
 
 func TestRunSubAgentSalvagesCurrentAnswerBeforePairedGoalError(t *testing.T) {
-	// Providers can co-stream a real final answer with an accidental Goal-only
-	// update_goal call. Delivery salvage must recover that current answer after
-	// the host pairs the invalid call with its tool error.
+	// Co-streamed answer text cannot skip the Goal-tool repair round; salvage
+	// recovers the clean follow-up answer after the readiness stop.
 	goalTool, ok := tool.LookupBuiltin("update_goal")
 	if !ok {
 		t.Fatal("update_goal builtin not registered")
@@ -29,6 +28,7 @@ func TestRunSubAgentSalvagesCurrentAnswerBeforePairedGoalError(t *testing.T) {
 			toolCallChunk("goal", "update_goal", `{"status":"complete"}`),
 			{Type: provider.ChunkDone},
 		},
+		{{Type: provider.ChunkText, Text: "done, explanations added"}, {Type: provider.ChunkDone}},
 	}}
 	sess := NewSession("sys")
 	answer, err := RunSubAgentWithSession(withClosedLoopContext(context.Background()), prov, reg, sess,
@@ -41,8 +41,8 @@ func TestRunSubAgentSalvagesCurrentAnswerBeforePairedGoalError(t *testing.T) {
 			t.Fatalf("salvaged answer %q missing %q", answer, want)
 		}
 	}
-	if prov.call != 3 {
-		t.Fatalf("provider calls = %d, want no hidden repair round", prov.call)
+	if prov.call != 4 {
+		t.Fatalf("provider calls = %d, want one repair round before the salvage", prov.call)
 	}
 	if got := lastToolResult(sess, "update_goal"); !strings.Contains(got, "only available while an active goal turn") {
 		t.Fatalf("paired update_goal result = %q", got)

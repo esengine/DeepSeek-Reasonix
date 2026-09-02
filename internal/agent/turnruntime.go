@@ -13,14 +13,8 @@ type turnRuntime struct {
 	runMaxSteps    int
 	runMaxStepsKey string
 
-	emptyFinalBlocks   int
-	handoffNudges      int
+	terminal           terminalProtocolState
 	usedAnyTool        bool
-	contextToolRepairs int
-	protocolRepairs    int
-	finishCalls        int
-	pendingFinalAnswer bool
-	finishOutcome      FinishOutcome
 	graceRound         bool
 	recoveryGraceRound bool
 
@@ -28,6 +22,11 @@ type turnRuntime struct {
 	trackingTodoProgress bool
 	todoStallRounds      int
 	seenTodoProgress     map[string]struct{}
+	// standardTodoContinuations is the bounded same-Run repair for a Standard
+	// execution turn that wrote an active todo and then tried to stop. The
+	// fingerprint gates the optional second nudge on new host-observed work.
+	standardTodoContinuations int
+	standardTodoProgress      string
 
 	executorHandoff bool
 	input           string
@@ -74,6 +73,8 @@ type turnRuntime struct {
 	// repeatSuccessCounts catches the shape stormSig cannot see: the same write
 	// succeeding over and over leaves no error for a failure-only breaker.
 	repeatSuccessCounts map[string]int
+	loop                turnLoopState
+	softBudgetMutation  bool
 
 	// constraints and engine are frozen at the start of the Run.
 	constraints runtimepolicy.Constraints
@@ -95,15 +96,42 @@ type turnRuntime struct {
 	// lastReasoning is the previous executor round's reasoning-token spend,
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
+
+	// incompleteReads tracks unread read_file results within one Agent.Run; a
+	// fresh user turn may choose a different strategy, but this run cannot write
+	// or finish from a silent partial read.
+	incompleteReads incompleteReadState
+
+	phase phaseClock
 }
 
-// TurnFinishOutcome is read while emitting TurnDone, before the next admission
-// can reset the per-run state.
-func (a *Agent) TurnFinishOutcome() FinishOutcome {
-	if a == nil {
-		return ""
-	}
-	return a.turn.finishOutcome
+// completionPhase bounds the completion-validation protocol: a candidate
+// terminal may trigger at most one continuation inside one Run, and after that
+// the run either validates or pauses — never loops.
+type completionPhase uint8
+
+const (
+	completionInitial completionPhase = iota
+	completionRepairing
+	completionValidated
+	completionPaused
+)
+
+// terminalProtocolState groups the run's terminal-protocol bookkeeping: the
+// bounded host repair nudges before a stop can be accepted, plus the
+// completion-validation phase. One named sub-state replaces independent
+// scalars whose cross-products were states no caller reasoned about.
+type terminalProtocolState struct {
+	// emptyFinalBlocks counts consecutive reasoning-only stops retried for a
+	// visible final answer.
+	emptyFinalBlocks int
+	// handoffNudges counts executor-handoff repairs sent this run.
+	handoffNudges int
+	// contextToolRepairs counts contextual-tool repair rounds; a second
+	// violation after a repair ends the run in a recoverable pause.
+	contextToolRepairs int
+	// validation is the completion-validator phase for this run.
+	validation completionPhase
 }
 
 // pendingTurn is what someone outside the Run arms for the next one: a

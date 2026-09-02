@@ -1209,11 +1209,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if warning != "" {
 		// The TUI keeps completed work for deliberate run boundaries; mirror
 		// that for ACP and tell clients how the successful turn ended.
-		sess.sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelWarn,
-			Text:  warning,
-		})
+		sess.sink.Emit(promptPauseNotice(runErr, warning))
 	}
 	res := SessionPromptResult{StopReason: stop}
 	if sess.transcript != "" {

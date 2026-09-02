@@ -72,6 +72,9 @@ func TestMapWriterMatrix(t *testing.T) {
 	if !hasKind(got.Preconditions, ObligationTodo, EnforcementRecoverable) {
 		t.Fatalf("opaque MCP writer must require todo/criteria: %+v", got)
 	}
+	if hasKind(got.PostSuccess, ObligationIndependentReview, EnforcementStrict) {
+		t.Fatalf("pathless opaque writer must not auto-demand architecture review: %+v", got)
+	}
 
 	multi := evidence.ClassifyEffect(evidence.EffectInput{
 		ToolName: "edit_file", ActualPaths: []string{"internal/agent/agent.go", "internal/agent/run_loop.go"},
@@ -81,6 +84,10 @@ func TestMapWriterMatrix(t *testing.T) {
 		!hasKind(got.Preconditions, ObligationCriteria, EnforcementRecoverable) ||
 		!hasKind(got.PostSuccess, ObligationTargetedVerify, EnforcementRecoverable) {
 		t.Fatalf("multi-file mapping = %+v", got)
+	}
+	if hasKind(got.PostSuccess, ObligationIndependentReview, EnforcementRecoverable) ||
+		hasKind(got.PostSuccess, ObligationIndependentReview, EnforcementStrict) {
+		t.Fatalf("same-package multi-file must not auto-demand architecture review: %+v", got)
 	}
 
 	schema := evidence.ClassifyEffect(evidence.EffectInput{

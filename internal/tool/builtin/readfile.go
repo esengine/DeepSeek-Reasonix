@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	readFileBinaryPeek   = 8 * 1024   // bytes scanned for NUL before reading further
-	readFileDetectSample = 256 * 1024 // bytes sampled for encoding detection before streaming
+	readFileBinaryPeek        = 8 * 1024   // bytes scanned for NUL before reading further
+	readFileDetectSample      = 256 * 1024 // bytes sampled for encoding detection before streaming
+	readFileMaxLineBytes      = 1024 * 1024
+	readFileMaxFormattedBytes = 8 << 20
 )
 
 func init() { tool.RegisterBuiltin(readFile{}) }
@@ -51,7 +53,7 @@ const (
 func (readFile) Name() string { return "read_file" }
 
 func (readFile) Description() string {
-	return "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer."
+	return "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round."
 }
 
 func (readFile) Schema() json.RawMessage {
@@ -180,18 +182,8 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// naive NUL check would misidentify them as binary.
 	switch fileenc.DetectQuick(peek) {
 	case fileenc.UTF16LE, fileenc.UTF16BE:
-		// UTF-16 is not self-synchronising and can't be streamed line-by-line, so
-		// buffer it fully (these files are rare and usually small).
-		rest, rerr := io.ReadAll(f)
-		if rerr != nil {
-			if rp.External {
-				return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(rerr))
-			}
-			return "", fmt.Errorf("read %s: %w", displayPath, rerr)
-		}
-		all := append(peek, rest...)
-		bom := fileenc.DetectQuick(all)
-		return r.scan(bytes.NewReader(fileenc.Decode(all, bom)), p.Offset, p.Limit)
+		enc := fileenc.DetectQuick(peek)
+		return r.scan(transform.NewReader(io.MultiReader(bytes.NewReader(peek), f), fileenc.Decoder(enc)), p.Offset, p.Limit)
 	case fileenc.UTF8BOM:
 		// Strip the 3-byte BOM; the content is valid UTF-8 and streams directly.
 		body := peek
@@ -205,15 +197,7 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// no BOM, so it reaches here; recognise it by its NUL pattern and decode it
 	// rather than rejecting it as binary.
 	if k, ok := fileenc.DetectUTF16NoBOM(peek); ok {
-		rest, rerr := io.ReadAll(f)
-		if rerr != nil {
-			if rp.External {
-				return "", fmt.Errorf("read %s: %s", displayPath, rp.ErrorText(rerr))
-			}
-			return "", fmt.Errorf("read %s: %w", displayPath, rerr)
-		}
-		all := append(peek, rest...)
-		return r.scan(bytes.NewReader(fileenc.Decode(all, k)), p.Offset, p.Limit)
+		return r.scan(transform.NewReader(io.MultiReader(bytes.NewReader(peek), f), fileenc.Decoder(k)), p.Offset, p.Limit)
 	}
 
 	if bytes.IndexByte(peek, 0) >= 0 {
@@ -254,18 +238,33 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 // scan reads lines from src and returns the formatted output with line numbers.
 func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	scanner := bufio.NewScanner(src)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), readFileMaxLineBytes)
 
 	var collected []string
+	textBytes := 0
 	lineNo := 0
 	hasMore := false
+	safetyPaged := false
+	requestedEnd := offset + limit
 	for scanner.Scan() {
 		lineNo++
 		if lineNo <= offset {
 			continue
 		}
 		if len(collected) < limit {
-			collected = append(collected, scanner.Text())
+			line := scanner.Text()
+			count := len(collected) + 1
+			width := len(strconv.Itoa(offset + count))
+			nextOffset := offset + count
+			bodyBytes := textBytes + len(line) + count*(width+len("→")+1)
+			trailer := readFileSafetyTrailer(nextOffset, requestedEnd)
+			if bodyBytes+len(trailer) > readFileMaxFormattedBytes {
+				hasMore = true
+				safetyPaged = true
+				break
+			}
+			collected = append(collected, line)
+			textBytes += len(line)
 			continue
 		}
 		// A line past the requested window exists — stop here rather than reading
@@ -274,6 +273,9 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 		break
 	}
 	if err := scanner.Err(); err != nil {
+		if strings.Contains(err.Error(), "token too long") {
+			return "", fmt.Errorf("scan: source line exceeds the 1 MiB local safety limit: %w", err)
+		}
 		return "", fmt.Errorf("scan: %w", err)
 	}
 
@@ -291,8 +293,14 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	for i, line := range collected {
 		fmt.Fprintf(&b, "%*d→%s\n", w, offset+i+1, line)
 	}
-	if hasMore {
+	if safetyPaged {
+		b.WriteString(readFileSafetyTrailer(offset+len(collected), requestedEnd))
+	} else if hasMore {
 		fmt.Fprintf(&b, "\n[more lines below; pass offset=%d to continue]\n", offset+len(collected))
 	}
 	return b.String(), nil
+}
+
+func readFileSafetyTrailer(nextOffset, requestedEnd int) string {
+	return fmt.Sprintf("\n[read_file local safety page; next_offset=%d requested_end=%d]\n", nextOffset, requestedEnd)
 }

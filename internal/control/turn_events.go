@@ -74,7 +74,8 @@ func (s *turnEventSink) Emit(e event.Event) {
 func turnEventSynchronousBarrier(kind event.Kind) bool {
 	switch kind {
 	case event.ToolDispatch, event.ToolResult, event.AskRequest, event.ApprovalRequest,
-		event.PromptAnswered, event.TurnStatusChanged, event.TurnStarted, event.TurnDone:
+		event.MCPInteractionRequest, event.PromptAnswered, event.TurnStatusChanged,
+		event.TurnStarted, event.TurnDone:
 		return true
 	default:
 		return false
@@ -168,7 +169,7 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	switch e.Kind {
 	case event.TurnStarted:
 		status = event.TurnInProgress
-	case event.AskRequest, event.ApprovalRequest:
+	case event.AskRequest, event.ApprovalRequest, event.MCPInteractionRequest:
 		status = event.TurnWaitingUser
 	case event.TurnDone:
 		status = terminalTurnStatus(e)
@@ -269,13 +270,13 @@ func (s *turnEventDurableSink) RecordWorkspaceMutation(a event.WorkspaceMutation
 func (s *turnEventDurableSink) RecordRunBudget(a event.RunBudgetSample) {
 	event.RecordRunBudget(s.inner(), a)
 }
+func (s *turnEventDurableSink) RecordCompletionValidation(a event.CompletionValidationInfo) {
+	event.RecordCompletionValidation(s.inner(), a)
+}
 
 func terminalTurnStatus(e event.Event) event.TurnStatus {
 	if e.Cancelled || errors.Is(e.Err, context.Canceled) {
 		return event.TurnInterrupted
-	}
-	if agent.IsProtocolFailed(e.Err) {
-		return event.TurnProtocolFailed
 	}
 	if e.Err != nil {
 		return event.TurnFailed
@@ -324,9 +325,6 @@ func (c *Controller) applyTurnDoneProtocol(done event.Event, cancelRequested boo
 		// Interruption is a terminal state, not a send failure; partial text is
 		// already display-only by this point.
 		done.Err = nil
-	}
-	if done.Outcome == "" && c.executor != nil {
-		done.Outcome = string(c.executor.TurnFinishOutcome())
 	}
 	return done
 }

@@ -15,38 +15,31 @@ function emit(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(DISPLAY_EVENT, { detail: currentMode }));
 }
 
-function normalizeMode(value: unknown): ReasoningDisplayMode | undefined {
+function validMode(value: unknown): ReasoningDisplayMode | undefined {
   return value === "hidden" || value === "summary" || value === "auto" || value === "expanded" ? value : undefined;
 }
 
-function legacySummaryValue(): "on" | "off" | undefined {
+function legacyValue(): boolean | undefined {
   if (typeof localStorage === "undefined") return undefined;
   const stored = localStorage.getItem(LEGACY_SUMMARY_KEY);
-  if (stored === "1") return "on";
-  if (stored === "0") return "off";
-  return undefined;
+  return stored === "1" ? true : stored === "0" ? false : undefined;
 }
 
 export function resolveReasoningDisplayMode(
   configuredMode: unknown,
   explicit: boolean,
 ): ResolvedReasoningDisplayMode {
-  const normalized = normalizeMode(configuredMode);
+  const normalized = validMode(configuredMode);
   if (explicit && normalized) return normalized;
-  switch (legacySummaryValue()) {
-    case "off":
-      return "legacy-collapsed";
-    case "on":
-      return "summary";
-  }
+  const legacy = legacyValue();
+  if (legacy !== undefined) return legacy ? "summary" : "legacy-collapsed";
   return normalized ?? "auto";
 }
 
 export function getReasoningDisplayMode(): ResolvedReasoningDisplayMode {
   if (!currentModeExplicit && currentMode !== "pending") {
-    const legacy = legacySummaryValue();
-    if (legacy === "off") return "legacy-collapsed";
-    if (legacy === "on") return "summary";
+    const legacy = legacyValue();
+    if (legacy !== undefined) return legacy ? "summary" : "legacy-collapsed";
   }
   return currentMode;
 }

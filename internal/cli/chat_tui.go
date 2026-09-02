@@ -309,6 +309,8 @@ type chatTUI struct {
 	// chooser holds the `ask` tool's question card (nil when none). While set, the
 	// run goroutine is blocked awaiting ctrl.AnswerQuestion and keys drive the card.
 	chooser *chooser
+	// elicit holds the pending MCP elicitation card (nil when none).
+	elicit *elicitCard
 
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
@@ -692,15 +694,6 @@ func transcriptContentWidth(termW int, nativeScrollback bool) int {
 	return max(termW, 1)
 }
 
-// mouseCaptureOffByDefault lets a user opt out of in-app mouse capture for
-// every run (e.g. a terminal/multiplexer combo where the native right-click
-// menu and click-drag selection matter more than the scrollbar and
-// wheel-scroll) without having to type "/mouse" each session.
-func mouseCaptureOffByDefault() bool {
-	v := strings.TrimSpace(os.Getenv("REASONIX_DISABLE_MOUSE"))
-	return v != "" && v != "0"
-}
-
 func configureChatTextarea(ti *textarea.Model) {
 	// Keep a stable two-cell input affordance, matching the prompt treatment in
 	// other coding TUIs. Continuation rows receive two spaces so text and the
@@ -918,9 +911,8 @@ func (m *chatTUI) prompts() []plugin.Prompt {
 
 func (m chatTUI) Init() tea.Cmd {
 	return tea.Batch(
-		textarea.Blink,
-		waitForAgentEvent(m.eventCh),
-		fetchBalance(m.ctrl),
+		textarea.Blink, forceSyncOutputCmd(),
+		waitForAgentEvent(m.eventCh), fetchBalance(m.ctrl),
 		m.runStatusline(), // nil (no-op) unless a custom status line is configured
 		m.refreshGitStatus(),
 	)
@@ -1337,6 +1329,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the
 		// custom answer, Esc backs out of typing — so input/IME work as usual.
+		if m.elicit != nil {
+			if model, cmd, handled := m.elicitKey(msg, cmds); handled {
+				return model, cmd
+			}
+		}
 		if m.chooser != nil {
 			if m.chooser.typing {
 				switch msg.String() {
@@ -2264,6 +2261,7 @@ func (m chatTUI) bottomRows() int {
 		m.renderTodoPanel(),
 		m.renderApprovalBanner(),
 		m.renderChooser(),
+		m.renderElicit(),
 		m.renderRewind(),
 		m.renderMCPImport(),
 		m.renderResumePicker(),
@@ -2312,7 +2310,7 @@ func (m chatTUI) hideComposer() bool {
 	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.quickPick != nil || m.copyPick != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
-	return m.chooser != nil && !m.chooser.typing
+	return (m.chooser != nil && !m.chooser.typing) || (m.elicit != nil && !m.elicit.typing)
 }
 
 // transcriptHeight is the row budget left for the transcript viewport once the
@@ -3407,6 +3405,10 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox += strings.Count(banner, "\n") + 1
 	}
 	if card := m.renderChooser(); card != "" {
+		parts = append(parts, card)
+		rowsAboveBox += strings.Count(card, "\n") + 1
+	}
+	if card := m.renderElicit(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
@@ -4596,6 +4598,9 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.finalizeStreamed()
 		m.chooser = newChooser(e.Ask)
 
+	case event.MCPInteractionRequest:
+		m.startElicit(e.MCPInteraction)
+
 	case event.MCPSurfaceReady:
 		// Prompts/resources may have arrived after connect; refresh host and
 		// drop the slash catalog so /prompt names reappear without a restart.
@@ -4603,6 +4608,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.refreshMCPManager()
 
 	case event.TurnDone:
+		m.clearElicitCard()
 		// The turn settled — freeze anything still streaming, surface a real error,
 		// and gate a plan-mode proposal on the user's approval. Autosave already
 		// happened in Controller so every frontend shares the same activity-time
@@ -4619,13 +4625,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.noteWatchdogIdle()
 		m.queueEditCursor, m.queueEditDraft = -1, ""
 		m.clearSubmittedPastes()
-		if e.Outcome == event.TurnOutcomeRecoveryPaused {
-			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
-		} else if e.Outcome == event.TurnOutcomeFinalReadiness {
-			m.commitLine(wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, m.width, activeCLITheme.info))
-		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
-		}
+		m.commitTurnPauseNotice(e)
 		m.commitReceipt(e.Receipt)
 		// Long turns on Windows ConPTY often drop mouse tracking; re-arm on
 		// the next frame so wheel keeps scrolling the transcript (#7583).
@@ -4691,7 +4691,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashNewDone)
 	case "/clear":
 		m.echoLocalCommand(input)
-		m.clearConfirm = &clearConfirm{confirm: 1}
+		if m.ctrl.ToolApprovalMode() == control.ToolApprovalYolo {
+			// YOLO is an explicit commitment to skip confirmations; /clear is
+			// rarely mistyped and the damage is recoverable, so clear directly.
+			return m.clearContext()
+		} else {
+			m.clearConfirm = &clearConfirm{confirm: 1}
+		}
 	case "/cls":
 		m.echoLocalCommand(input)
 		m.finalizeStreamed()
@@ -5296,7 +5302,7 @@ func (m *chatTUI) showMCPStatus() {
 		m.notice(i18n.M.SlashMCPNone)
 		return
 	}
-	m.commitLine(renderMCPStatus(m.width, m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures()))
+	m.commitLine(renderMCPStatus(m.width, m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures(), m.host.CapabilityViews()))
 }
 
 // notice queues a dim informational line to scrollback.

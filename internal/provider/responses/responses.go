@@ -191,6 +191,15 @@ func responsesAutoOutputBudget(vendor, effort string) int {
 
 func (c *client) Name() string { return c.name }
 
+func (c *client) NativeToolSearchAvailable() bool {
+	return c != nil && provider.IsFirstPartyOpenAI(c.baseURL) && nativeToolSearchModel(c.model)
+}
+
+func nativeToolSearchModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-5.4") || strings.HasPrefix(model, "gpt-5.5") || strings.HasPrefix(model, "gpt-5.6")
+}
+
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey != "", RetryAuth: c.authed.Load()}
 }
@@ -298,23 +307,7 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		body["temperature"] = *req.Temperature
 	}
 	if c.webSearch || len(req.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(req.Tools)+1)
-		// Keep the server tool first and stable across turns. DeepSeek executes
-		// this tool itself; ordinary Reasonix tools remain function entries.
-		if c.webSearch {
-			tools = append(tools, map[string]any{"type": "web_search"})
-		}
-		for _, tool := range req.Tools {
-			parameters := tool.Parameters
-			if len(parameters) == 0 {
-				parameters = provider.CanonicalizeSchema(nil)
-			}
-			tools = append(tools, map[string]any{
-				"type": "function", "name": tool.Name, "description": tool.Description,
-				"parameters": json.RawMessage(parameters),
-			})
-		}
-		body["tools"] = tools
+		body["tools"] = encodeResponsesTools(c, req)
 	}
 	instructions, rest := splitInstructions(messages)
 	if instructions != "" {

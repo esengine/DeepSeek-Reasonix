@@ -73,6 +73,7 @@ export function resolveToolCardDefaultOpen(
   const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
   const keepSubagentReasoningExpanded = reasoningDisplayMode === "expanded" && Boolean(item.subagentProgress?.reasoning);
   return (nestedCount > 0 && item.status === "running")
+    || (liveFollow && Boolean(item.subagentProgress) && item.status === "running")
     || (liveFollow && subagentReasoningRunning)
     || keepSubagentReasoningExpanded;
 }

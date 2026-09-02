@@ -3,6 +3,8 @@ package plugin
 import (
 	"sort"
 	"strings"
+
+	"reasonix/internal/tool"
 )
 
 // Prompts returns every MCP prompt discovered across connected servers.
@@ -20,6 +22,19 @@ func (h *Host) Resources() []Resource {
 }
 
 // ServerNames returns the connected servers' names, in connection order.
+// CachedTools returns the already-listed live adapters for a connected server
+// without issuing tools/list.
+func (h *Host) CachedTools(name string) ([]tool.Tool, bool) {
+	if h == nil {
+		return nil, false
+	}
+	c := h.lookupClient(name)
+	if c == nil {
+		return nil, false
+	}
+	return c.cachedTools()
+}
+
 func (h *Host) ServerNames() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

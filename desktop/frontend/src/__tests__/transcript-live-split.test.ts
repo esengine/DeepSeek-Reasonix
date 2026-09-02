@@ -5,11 +5,11 @@ import {
   buildTranscriptRows,
   buildTurnModels,
   EMPTY_FOLDS,
-  splitTranscriptLiveRows,
   userRowKey,
   type BuildRowsOptions,
   type TranscriptLiveFlags,
 } from "../lib/transcriptRows";
+import { resolveLiveTurnGrowthFloor, splitTranscriptLiveRows } from "../lib/transcriptLiveTurn";
 
 let passed = 0;
 let failed = 0;
@@ -51,6 +51,10 @@ function rowsFor(items: Item[], live?: TranscriptLiveFlags, running = false) {
 }
 const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key).join(",");
 
+check(resolveLiveTurnGrowthFloor(3, 5, 420, null) === 420, "adding live rows carries the previous painted height into the next commit");
+check(resolveLiveTurnGrowthFloor(5, 5, 420, null) === null, "steady live rows do not invent a geometry floor");
+check(resolveLiveTurnGrowthFloor(5, 4, 420, 420) === 420, "an active floor survives an unrelated intermediate commit");
+
 // ── Settled transcript: everything is history ────────────────────────────────
 {
   const { models, rows } = rowsFor([
@@ -67,11 +71,12 @@ const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key).jo
 {
   const live: TranscriptLiveFlags = { id: "a2", hasAnswerText: false, hasReasoning: true };
   const { models, rows } = rowsFor([user("u1"), assistant("a2", { streaming: true })], live, true);
-  check(keys(rows) === `${userRowKey("u1")},ph:a2,r:a2`, `running turn rows look as expected (got ${keys(rows)})`);
+  const processKey = models[0].segments[0].key;
+  check(keys(rows) === `${userRowKey("u1")},ph:${processKey},r:a2`, `running turn rows look as expected (got ${keys(rows)})`);
   const split = splitTranscriptLiveRows(models, rows, "a2", true);
   check(split.liveActive, "running turn marks the live region active");
   check(keys(split.historyRows) === userRowKey("u1"), "the active turn's user message stays in history");
-  check(keys(split.liveRows) === "ph:a2,r:a2", "the active turn's process rows render in the live region");
+  check(keys(split.liveRows) === `ph:${processKey},r:a2`, "the active turn's process rows render in the live region");
 }
 
 // ── A later user message stays in visual order behind the streaming turn ─────
@@ -83,9 +88,10 @@ const keys = (rows: readonly { key: string }[]) => rows.map((row) => row.key).jo
     true,
   );
   const split = splitTranscriptLiveRows(models, rows, "a1", true);
+  const processKey = models[0].segments[0].key;
   check(keys(split.historyRows) === userRowKey("u1"), "only the streaming turn's user row stays in history");
   check(
-    keys(split.liveRows) === `ph:a1,r:a1,a:a1,${userRowKey("u2")}`,
+    keys(split.liveRows) === `ph:${processKey},r:a1,a:a1,${userRowKey("u2")}`,
     `rows after the live turn keep their order in the live region (got ${keys(split.liveRows)})`,
   );
 }

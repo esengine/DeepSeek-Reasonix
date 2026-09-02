@@ -14,15 +14,14 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `delete_range` | false | Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions - smaller changes should use edit_file. |
 | `delete_symbol` | false | Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors. |
 | `edit_file` | false | Replace an exact string in a file with another. old_string must occur exactly once; add surrounding context to disambiguate. Use for targeted edits instead of rewriting the whole file. |
-| `finish` | true | Finalize the turn after a visible final answer. Call it exactly once with `completed`, `partial`, or `blocked`; use `ask` instead when user input is required. |
-| `glob` | true | Find files matching a glob pattern (e.g. "*.go", "internal/*/*.go", "**/*.test.ts"). Supports shell metacharacters * ? [] and the recursive ** pattern. |
-| `grep` | true | Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. |
+| `glob` | true | Find files matching a glob pattern (e.g. "*.go", "internal/*/*.go", "**/*.test.ts"). Supports shell metacharacters * ? [] and the recursive ** pattern. Independent globs with no data dependency should be issued in the same round. |
+| `grep` | true | Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches. Independent searches with no data dependency should be issued in the same round. |
 | `kill_shell` | false | Terminate a running background job (bash or task) started with run_in_background. A no-op if the job has already finished or the id is unknown. |
-| `ls` | true | List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules). |
+| `ls` | true | List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules). Independent directory reads with no data dependency should be issued in the same round. |
 | `move_file` | false | Move or rename a file from source_path to destination_path. Creates the destination parent directory as needed. Use instead of shell mv, Move-Item, or ren for file moves so workspace confinement and file-edit permissions apply. |
 | `multi_edit` | false | Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls - a failure in step 3 leaves the file untouched instead of half-edited. |
 | `notebook_edit` | false | Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: "replace" (default) swaps the cell's source; "insert" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; "delete" removes the cell. cell_type is "code" or "markdown" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks - it keeps the JSON valid. |
-| `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. |
+| `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round. |
 | `todo_write` | true | Record and update a structured task list for the current work. Send the COMPLETE list every call - it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. |
 | `update_goal` | true | Report this turn's disposition for the active goal: `continue` (work is ongoing - give a concrete next_action), `complete` (the request is done and verification was attempted or reported unavailable), or `blocked` (only the user can unblock). An optional `completion` account may accompany `complete`: `verified` commands are reconciled against the session's real receipts, while `unverified` and `risks` are declarations the host cannot infer and do not block Light/Balanced completion. The host validates the claim against Delivery acceptance criteria and budget and decides whether to continue automatically. Outside an active goal turn the call fails closed without changing any state. |
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
@@ -77,8 +76,14 @@ capability discovered during planning remains directly callable after handoff;
 their ledgers/audits are isolated while Host connections are shared. A
 single-model session has no independent Planner.
 
-`use_capability` resolution is side-effect free: `action=list` returns sorted
-configured MCP servers without starting them; `action=call` on a
+`use_capability` is a fixed-schema proxy: prefer `search(query)` then `inspect`
+one exact id then `call`. `action=list` is a compact diagnostic inventory.
+Independent `list`/`search`/`inspect` calls are read-only and may be issued
+together. Resolution is side-effect free: `action=list` returns compact,
+sorted configured MCP server summaries without expanding every cached tool
+description or starting any server. Use `action=inspect` on one enabled
+`mcp-server:<name>` to read that server's live or cached tool directory without
+starting it. `action=call` on a
 not-yet-connected server resolves to a deferred target, Plan re-checks only an
 explicit phase opt-out on the real target, and the server process starts only
 after the permission gate and PreToolUse hooks approve the call. On-demand children
@@ -141,7 +146,7 @@ flags and canonical schemas.
 Every task starts with the same lean provider-visible core: direct
 coding tools, background-shell lifecycle tools, and the stable capability proxy:
 
-`bash`, `bash_output`, `edit_file`, `finish`, `kill_shell`, `read_file`,
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`,
 `wait`, `write_file`, `compress` (when registered), and `use_capability`.
 
 Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs,

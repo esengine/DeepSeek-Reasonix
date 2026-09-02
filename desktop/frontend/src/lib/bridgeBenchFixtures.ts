@@ -284,6 +284,47 @@ const benchStormHistory = (): HistoryMessage[] => {
   return messages;
 };
 
+export const BENCH_SELECTION_TABLE_MARKER = "SELECTION REPAINT TARGET";
+
+const benchSelectionTableHistory = (): HistoryMessage[] => {
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 12; turn += 1) {
+    messages.push(
+      { role: "user", content: `selection fixture turn ${turn}: summarize the stable table inputs.` },
+      {
+        role: "assistant",
+        content: [
+          `## Selection fixture turn ${turn}`,
+          "",
+          "This deterministic paragraph keeps the virtual transcript away from its native top while all rows remain settled.",
+          "",
+          "- no streaming output",
+          "- no asynchronous content refs",
+          "- stable Markdown geometry",
+        ].join("\n"),
+      },
+    );
+  }
+  messages.push(
+    { role: "user", content: "Render the final selection regression table." },
+    {
+      role: "assistant",
+      content: [
+        "## WebView2 selection repaint regression",
+        "",
+        "| check | target | expected |",
+        "| --- | --- | --- |",
+        "| native multi-click | **SELECTION REPAINT TARGET** | transcript pixels remain stable |",
+        "| scroll geometry | fixed table row | no viewport movement |",
+        "| portal lifetime | one toolbar host | no mount churn |",
+        "",
+        "The table is the final settled row in this fixture.",
+      ].join("\n"),
+    },
+  );
+  return messages;
+};
+
 /** The bench session for a mock topic, or undefined for non-bench topics. */
 export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined {
   switch (topicId) {
@@ -301,6 +342,8 @@ export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined
       return benchFixture("geometry-contract", benchGeometryContractHistory);
     case "topic_bench_storm":
       return benchFixture("storm", benchStormHistory);
+    case "topic_bench_selection_table":
+      return benchFixture("selection-table", benchSelectionTableHistory);
     default:
       return undefined;
   }

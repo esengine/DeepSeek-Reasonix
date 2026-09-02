@@ -809,7 +809,7 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 		text = fmt.Sprintf("background %s killed: %s", kind, id)
 	}
 	if shouldEmit {
-		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
+		m.sink.Emit(event.Event{Kind: event.Notice, Code: event.NoticeCodeBackgroundJobFinished, Level: level, Text: text, Detail: detail})
 	}
 }
 

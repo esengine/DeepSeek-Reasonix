@@ -36,14 +36,24 @@ func Load() (*Config, error) {
 // mergeRuntimeTOMLFileSnapshot). Callers that must not mutate config files should use
 // LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) {
-	return loadForRoot(root, true)
+	return loadForRoot(root, loadForRootOptions{migrateOnDisk: true, loadCredentials: true})
 }
 
 // LoadForRootReadOnly is like LoadForRoot but never writes config files: it skips
 // on-disk legacy MCP tier migration. Prefer this for diagnostics, doctor, and
 // other read-only inspection paths.
 func LoadForRootReadOnly(root string) (*Config, error) {
-	return loadForRoot(root, false)
+	return loadForRoot(root, loadForRootOptions{loadCredentials: true})
+}
+
+// LoadForRootWithoutCredentialsReadOnly is the credential-free form of
+// LoadForRootReadOnly. It still merges the effective user + project config and
+// carries project .env values for workspace-scoped expansion, but it neither
+// pins Reasonix credentials into the process environment nor resolves provider
+// API keys. Settings probes use it when they need runtime network policy before
+// resolving only the edited provider's credential explicitly.
+func LoadForRootWithoutCredentialsReadOnly(root string) (*Config, error) {
+	return loadForRoot(root, loadForRootOptions{})
 }
 
 // LoadUserConfigReadOnly loads only the trusted user-global config. It never
@@ -65,9 +75,17 @@ func LoadUserConfigReadOnly() (*Config, error) {
 	return cfg, nil
 }
 
-func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
+type loadForRootOptions struct {
+	migrateOnDisk   bool
+	loadCredentials bool
+}
+
+func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	root = resolveRoot(root)
-	expansionEnv := loadDotEnvForRoot(root)
+	expansionEnv := loadProjectDotEnvForExpansion(root)
+	if opts.loadCredentials {
+		loadCredentialStoreForRoot(root)
+	}
 	cfg := Default()
 	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
@@ -86,7 +104,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 
 	mergeTOML := mergeFileSnapshot
-	if migrateOnDisk {
+	if opts.migrateOnDisk {
 		mergeTOML = mergeRuntimeTOMLFileSnapshot
 	}
 
@@ -215,32 +233,17 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	}
 	_ = mergeInstalledPluginPackages(cfg, root)
-	normalizePluginCommandLines(cfg)
-	normalizeLegacyEffort(cfg)
-	cfg.ignoredLegacyStepLimits = normalizeLegacyAgentStepLimits(cfg)
-	normalizeRetiredAutoPlan(cfg)
-	normalizeLegacyMCPTiers(cfg)
-	normalizeLegacyStepFunBaseURLs(cfg)
-	normalizeLegacyLongCatContextWindows(cfg)
-	normalizeLegacyQwenContextWindows(cfg)
-	normalizeLegacyKimiK3Catalog(cfg)
-	normalizeLegacyOpenCodeGoInstalls(cfg)
-	normalizeLegacyMimoCustomProviders(cfg)
-	normalizeLegacyProviderModels(cfg)
-	normalizeDesktopOfficialProviderAccess(cfg)
-	normalizeOfficialDeepSeekModels(cfg)
-	migrateBillingDisplayCurrency(cfg)
-	freezeProviderBillingCurrencies(cfg)
-	applyDeepSeekOfficialDefaultPricing(cfg)
-	backfillDeepSeekOfficialPrices(cfg)
-	normalizeEffortConfig(cfg)
-	backfillDeepSeekPro(cfg)
+	if err := normalizeLoadedConfig(cfg); err != nil {
+		return nil, err
+	}
 	if userDefaultModelExplicit {
 		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
 	}
 	cfg.CredentialsStore = credentialsStoreMode()
 	cfg.setExpansionEnv(expansionEnv)
-	resolveProviderCredentialsForRoot(root, cfg)
+	if opts.loadCredentials {
+		resolveProviderCredentialsForRoot(root, cfg)
+	}
 	return cfg, nil
 }
 

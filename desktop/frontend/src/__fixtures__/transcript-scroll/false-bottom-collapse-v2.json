@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "name": "false-bottom-collapse",
+  "viewport": 800,
+  "direction": 1,
+  "samples": [
+    { "top": 22800, "height": 24600 },
+    { "top": 20800, "height": 22600 },
+    { "top": 18800, "height": 20600 },
+    { "top": 22800, "height": 24600 }
+  ],
+  "expected": { "stableHeight": 24600, "minimumCollapse": 2000, "maximumReverse": 96 }
+}

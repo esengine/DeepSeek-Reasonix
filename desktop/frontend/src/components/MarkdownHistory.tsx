@@ -1,6 +1,6 @@
 // MarkdownHistory — history (non-streaming) Markdown rendering driven by the
 // parse worker (Phase E). Mounted rows: check the transcript markdown cache
-// (entryId + content revision) → on miss request a worker parse → render the
+// (stable row key + content revision) → on miss request a worker parse → render the
 // resulting HAST blocks with the same components map react-markdown uses.
 // Unmounted rows never reach this component, so cold-zone rows never parse.
 //
@@ -18,6 +18,10 @@ import {
   type MarkdownBlock,
 } from "../lib/markdownPipeline";
 import { getMarkdownWorkerClient } from "../lib/markdownWorkerClient";
+import {
+  nativeTranscriptDistanceFromBottom,
+  TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX,
+} from "../lib/transcriptScrollGeometry";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { createComponents } from "./markdownComponents";
 import { VirtualMarkdownSourceTable } from "./MarkdownTable";
@@ -34,7 +38,6 @@ const MARKDOWN_WINDOW_BLOCKS = MARKDOWN_TAIL_BLOCKS + MARKDOWN_PREPEND_BLOCKS * 
 const MARKDOWN_SENTINEL_STYLE = { display: "block", height: 1 } as const;
 const MARKDOWN_ANCHOR_STYLE = { display: "block", height: 0 } as const;
 const MARKDOWN_FALLBACK_MARKER_STYLE = { display: "none" } as const;
-const MARKDOWN_PARSE_SWAP_BOTTOM_EPSILON_PX = 2;
 
 type BlockWindow = {
   identity: MarkdownBlock[] | undefined;
@@ -49,12 +52,29 @@ type PendingScrollAnchor = {
   scroller: HTMLElement | null;
 };
 
-function cachedBlocks(entryId: string | undefined, revision: number, text: string): MarkdownBlock[] | undefined {
-  if (!entryId) return undefined;
-  const cached = getTranscriptStore().getMarkdown(entryId, revision);
+function cachedBlocks(cacheKey: string | undefined, revision: number, text: string): MarkdownBlock[] | undefined {
+  if (!cacheKey) return undefined;
+  const cached = getTranscriptStore().getMarkdown(cacheKey, revision);
   // The revision is a content hash; the stored source comparison is the
   // fidelity backstop against collisions and stale writes.
   return cached && cached.source === text ? cached.blocks : undefined;
+}
+
+/** Conservatively detect whether the pending history row intersects its scroller. */
+function fallbackRowIntersectsTranscript(marker: HTMLElement | null, scroller: HTMLElement): boolean {
+  const row = marker?.closest<HTMLElement>(".transcript__row") ?? null;
+  if (!row || scroller.clientHeight <= 0) return true;
+  const rowRect = row.getBoundingClientRect();
+  const scrollerRect = scroller.getBoundingClientRect();
+  if (
+    !Number.isFinite(rowRect.top)
+    || !Number.isFinite(rowRect.bottom)
+    || !Number.isFinite(scrollerRect.top)
+    || rowRect.bottom <= rowRect.top
+  ) return true;
+  const viewportTop = scrollerRect.top;
+  const viewportBottom = viewportTop + scroller.clientHeight;
+  return rowRect.bottom > viewportTop && rowRect.top < viewportBottom;
 }
 
 /** Keep a bounded block window whose edges advance only on viewport demand. */
@@ -119,6 +139,7 @@ function useBlockWindowSentinel(
 export const MarkdownHistory = memo(function MarkdownHistory({
   text,
   plainStatusBlocks = false,
+  cacheKey,
   entryId,
   fallback,
   onParsed,
@@ -126,25 +147,28 @@ export const MarkdownHistory = memo(function MarkdownHistory({
 }: {
   text: string;
   plainStatusBlocks?: boolean;
-  /** History entry id (`he:<entryId>` rows) — enables the parsed-block cache. */
+  /** Stable transcript item key — enables cache reuse across live/history hosts. */
+  cacheKey?: string;
+  /** @deprecated Use cacheKey. Retained for focused history callers. */
   entryId?: string;
   /** What to show while the worker parses (plain text or the streaming view). */
   fallback: ReactNode;
   onParsed?: () => void;
   onError?: () => void;
 }) {
+  const stableCacheKey = cacheKey ?? entryId;
   const revision = useMemo(() => markdownContentRevision(text), [text]);
   // Parsed state is keyed by its source text: a text change renders the
   // fallback (never stale blocks) until the new parse lands.
   const [parsed, setParsed] = useState<{ text: string; blocks: MarkdownBlock[] } | undefined>(() => {
-    const cached = cachedBlocks(entryId, revision, text);
+    const cached = cachedBlocks(stableCacheKey, revision, text);
     return cached ? { text, blocks: cached } : undefined;
   });
   const blocks = parsed && parsed.text === text ? parsed.blocks : undefined;
   const fallbackMarkerRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    const cached = cachedBlocks(entryId, revision, text);
+    const cached = cachedBlocks(stableCacheKey, revision, text);
     if (cached) {
       setParsed({ text, blocks: cached });
       onParsed?.();
@@ -156,8 +180,8 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     handle.promise
       .then((result) => {
         if (cancelled || !result) return;
-        if (entryId) {
-          getTranscriptStore().setMarkdown(entryId, revision, {
+        if (stableCacheKey) {
+          getTranscriptStore().setMarkdown(stableCacheKey, revision, {
             source: text,
             blocks: result.blocks,
             selectionText: result.selectionText,
@@ -175,17 +199,39 @@ export const MarkdownHistory = memo(function MarkdownHistory({
         };
         const scroller = fallbackMarkerRef.current?.closest<HTMLElement>(".transcript") ?? null;
         const isAtBottom = () => !scroller
-          || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= MARKDOWN_PARSE_SWAP_BOTTOM_EPSILON_PX;
+          || nativeTranscriptDistanceFromBottom(scroller) <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX;
         if (isAtBottom()) {
           commit();
           return;
         }
+        // A reader who is not at the bottom does not have to lose the
+        // rendered view (#9570): the deferred handoff below is only needed
+        // when swapping the fallback for the bounded tail window would
+        // visibly remove content the reader is looking at.
+        //
+        // 1. Answers within one tail window (total <= MARKDOWN_TAIL_BLOCKS)
+        //    render the full document in the block window — nothing is
+        //    removed, so the swap cannot yank the scroller.
+        if (result.blocks.length <= MARKDOWN_TAIL_BLOCKS) {
+          commit();
+          return;
+        }
+        // 2. Longer answers outside the transcript viewport swap safely: any height
+        //    change happens off-screen, and the reader scrolling up meets
+        //    rendered blocks instead of the raw source.
+        //    Measure the real Virtuoso row, not the display:none marker: hidden
+        //    elements have an empty DOMRect and the app window is not the
+        //    transcript's scroll viewport.
+        if (scroller && !fallbackRowIntersectsTranscript(fallbackMarkerRef.current, scroller)) {
+          commit();
+          return;
+        }
 
-        // A fresh history mount uses the complete plain-text source while the
-        // worker parses. Replacing that source mid-read with the bounded tail
-        // block window removes the reader's visible blocks from the DOM and
-        // makes the native scroller jump to the end. Cache the result above,
-        // but keep the stable fallback until the reader deliberately returns
+        // 3. A long answer the reader is currently looking at keeps the
+        // stable fallback: replacing the complete plain-text source with the
+        // bounded tail block window removes the visible blocks from the DOM
+        // and makes the native scroller jump to the end. Cache the result
+        // above, but keep the fallback until the reader deliberately returns
         // to the bottom; that handoff needs no competing scroll write.
         const handleScroll = () => {
           if (isAtBottom()) commit();
@@ -204,7 +250,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     // onParsed/onError are stable caller callbacks; re-running per identity
     // change would re-request parses the cache already serves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, entryId, revision]);
+  }, [text, stableCacheKey, revision]);
 
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);
   const totalBlocks = blocks?.length ?? 0;

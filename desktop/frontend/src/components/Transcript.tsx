@@ -1,5 +1,5 @@
 import { lazy, Suspense, type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Virtuoso, type ListItem } from "react-virtuoso";
+import { Virtuoso } from "react-virtuoso";
 import type { ControllerLiveStore, HistoryLoadTrigger, HistoryMutation, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta, WireCompletionSummary } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -25,16 +25,16 @@ import {
   foldMapWithToggle,
   foldSegmentStates,
   reconcileFoldEntries,
-  splitTranscriptLiveRows,
   EMPTY_FOLDS,
   NO_LIVE,
-  type AssistantItem,
   type FoldMap,
   type ToolItem,
   type TranscriptLiveFlags,
   type TranscriptRow,
   transcriptRowMeasurementVersion,
 } from "../lib/transcriptRows";
+import { assistantAnswerOnly } from "../lib/transcriptLiveTurn";
+import { useTranscriptLiveTurnStability } from "../lib/useTranscriptLiveTurnStability";
 import { createTranscriptMeasuredSizes, type TranscriptSynthesizedSizes } from "../lib/transcriptMeasuredSizes";
 import {
   transcriptRowLayoutVariant,
@@ -45,7 +45,7 @@ import {
 import { readTranscriptGeometryEnvironment } from "../lib/transcriptGeometryEnvironment";
 import { onTypographyPreferencesChange } from "../lib/typographyPreferences";
 import { acquireMarkdownWorkerClient, releaseMarkdownWorkerClient } from "../lib/markdownWorkerClient";
-import { noteTranscriptRecoveryTerminal, noteTranscriptRowCounts } from "../lib/sessionDiagnostics";
+import { noteTranscriptRecoveryTerminal } from "../lib/sessionDiagnostics";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import { InlineAssistantReasoning } from "./InlineAssistantReasoning";
 import { ProcessFoldHeader } from "./ProcessFoldHeader";
@@ -55,6 +55,7 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
 import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptScrollArbiter } from "../lib/useTranscriptScrollArbiter";
+import { TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT } from "../lib/transcriptHistoryPrependLease";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import { TranscriptLayoutIntentProvider, TranscriptScrollWriteProvider } from "./TranscriptLayoutIntentContext";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
@@ -62,6 +63,7 @@ import { recordTranscriptScrollDiagnostic } from "../lib/transcriptScrollProbe";
 import { recordFrontendDiagnostic } from "../lib/frontendDiagnosticBridge";
 import { useTranscriptQuestionJump, useTranscriptQuestions } from "../lib/useTranscriptQuestionNavigation";
 import { useTranscriptHistoryAutoFill, useTranscriptPagingAuthorization, useTranscriptSurfaceCommit } from "../lib/useTranscriptNavigationSurface";
+import { useTranscriptGeometryLifecycle } from "../lib/useTranscriptGeometryLifecycle";
 import {
   LiveAssistantMessage,
   SHOW_SCROLL_DIAGNOSTICS,
@@ -72,7 +74,7 @@ import {
 
 // NoticeCard lives with the other row cards; keep the historical export path.
 export { NoticeCard } from "./TranscriptCards";
-type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
+type OpenTurnAction = { turn: number; menu: "summary" | "rewind" | "fork" };
 const QUESTION_NAV_MIN_COUNT = 2;
 const EMPTY_CHECKPOINTS: CheckpointMeta[] = [];
 const EMPTY_INVOCATION_METADATA: InvocationMetadataMap = {};
@@ -87,10 +89,10 @@ const FrontendDiagnosticsPanel = SHOW_FRONTEND_DIAGNOSTICS
   ? lazy(() => import("./FrontendDiagnosticsPanel"))
   : null;
 const VIRTUAL_OVERSCAN_ROWS = 8;
-
-function assistantAnswerOnly(item: AssistantItem): AssistantItem {
-  return { ...item, reasoning: "", reasoningComplete: true, reasoningDurationMs: undefined };
-}
+const READER_MOUNT_CORRIDOR_ROWS = 112;
+const READER_MOUNT_CORRIDOR_VIEWPORTS = 7;
+// Keep paged history measured during manual reading so WKWebView cannot replace
+// non-overlapping ranges without an anchor; large sessions keep a bounded corridor.
 export function Transcript({
   items,
   live: liveProp,
@@ -223,6 +225,8 @@ export function Transcript({
     scrollRef,
     itemSize,
     nativeScrollbarDragging,
+    readerTransactionActive,
+    modeRef: scrollModeRef,
     scrollElement,
     pinnedRef: stick,
     onWheelIntent,
@@ -237,9 +241,11 @@ export function Transcript({
     atBottomStateChange,
     deliverScroll,
     scrollToBottom,
+    pinLiveTailBeforePaint,
     followGrowingTail,
-    beginUserResize,
-    scrollToDataIndex,
+    revalidateTail,
+    beginUserResize, userResizeRevision,
+    scrollToDataIndex, beginQuestionJump, finishQuestionJump,
     releaseTailFollow,
     setMode: setScrollMode,
     writeOffset,
@@ -247,8 +253,7 @@ export function Transcript({
     finishProgrammaticScroll,
     submitRecoveryRequest,
     retryRecoveryRequest,
-    lastGoodAnchorRef,
-    layoutTransientRef,
+    lastGoodAnchorRef, layoutTransientRef, historyPrependLease,
   } = useTranscriptScrollArbiter({
     onRecoveryTerminal: noteTranscriptRecoveryTerminal,
     onItemMeasured: recordMeasuredGeometry,
@@ -303,10 +308,10 @@ export function Transcript({
     virtuosoReadyRef.current = false;
   }, [resetScroll, revealSignal, tabId]);
 
-  useEffect(() => {
-    if (hydrating || !virtuosoReadyRef.current || !stick.current) return;
-    followGrowingTail();
-  }, [footerHeight, followGrowingTail, hydrating, stick]);
+  useLayoutEffect(() => {
+    if (!virtuosoReadyRef.current || !stick.current) return;
+    scrollToBottom();
+  }, [footerHeight, scrollToBottom, stick]);
 
   const refreshGeometryEnvironment = useCallback((element: HTMLElement) => {
     const next = readTranscriptGeometryEnvironment(element);
@@ -334,15 +339,16 @@ export function Transcript({
         lastWidth = width;
         setLayoutWidth(width);
         refreshGeometryEnvironment(element);
+        if (!hydrating) followGrowingTail("typography-change");
       }
       if (height !== lastHeight) {
         lastHeight = height;
-        if (!hydrating) followGrowingTail();
+        if (!hydrating || scrollModeRef.current === "tail-follow") followGrowingTail("viewport-resize");
       }
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hydrating, scrollElement, followGrowingTail, refreshGeometryEnvironment]);
+  }, [hydrating, scrollElement, followGrowingTail, refreshGeometryEnvironment, scrollModeRef]);
 
   // Typography settings update CSS variables synchronously. Re-read the
   // geometry signature without remounting Virtuoso; old exact samples then
@@ -434,14 +440,10 @@ export function Transcript({
     }),
     [turnModels, folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn, reasoningDisplayMode, subcallsByParent],
   );
-  // The active (streaming) turn renders as the list's in-flow Footer, outside
-  // the measured size tree: the list only ever owns static, bounded rows, so
-  // streaming never churns Virtuoso's measurements or scroll anchoring
-  // (#8657/#8688).
-  const liveSplit = useMemo(
-    () => splitTranscriptLiveRows(turnModels, rows, liveId, running),
-    [turnModels, rows, liveId, running],
-  );
+  const { liveSplit, liveMinHeight } = useTranscriptLiveTurnStability({
+    turnModels, rows, liveId, running, stabilityKey: `${layoutSurfaceKey}:${userResizeRevision}`,
+    scrollElement, hydrating, tailOwnedRef: stick, pinLiveTailBeforePaint,
+  });
   // Keep the load-older affordance in Virtuoso's measured Header slot so an
   // older page is a true data prepend, rather than an insertion after row 0.
   const virtualRows = useMemo(
@@ -601,26 +603,19 @@ export function Transcript({
     scheduleActiveQuestionSync();
     scheduleBlankViewportCheck();
   }, [creationMode, deliverScroll, handleCreationScroll, noteScrollActivity, pagingAuthorization, scheduleActiveQuestionSync, scheduleBlankViewportCheck]);
-  const [handleJumpToQuestion, handleEarlierHistoryReached, retryOlderHistory] = useTranscriptQuestionJump({
-    questions,
-    loadedByTurn,
-    layoutSurfaceKey,
-    rowIndexByKey,
-    hasOlderHistory,
-    loadingOlderHistory,
-    olderHistoryError,
-    running,
-    onLoadOlderHistory,
-    clearTranscriptSelection,
-    invalidateAnchors,
-    scrollToDataIndex,
-    setActiveQuestion,
-    rewindSignal,
+  const [handleJumpToQuestion, handleEarlierHistoryReached, retryOlderHistory, questionJumpSurface] = useTranscriptQuestionJump({
+    questions, loadedByTurn, layoutSurfaceKey, rowIndexByKey,
+    hasOlderHistory, loadingOlderHistory, olderHistoryError, running, scrollElement, scheduleRecovery: scheduleBlankViewportCheck,
+    onLoadOlderHistory, clearTranscriptSelection, invalidateAnchors,
+    beginQuestionJump, finishQuestionJump, scrollToDataIndex, setActiveQuestion, rewindSignal,
   });
   const handleViewportEarlierHistoryReached = useCallback(() => {
     if (hydrating || !pagingAuthorization.consume()) return;
-    void Promise.resolve(handleEarlierHistoryReached()).finally(pagingAuthorization.complete);
-  }, [handleEarlierHistoryReached, hydrating, pagingAuthorization]);
+    const generation = historyPrependLease.begin(historyMutation?.seq ?? 0);
+    void Promise.resolve(handleEarlierHistoryReached())
+      .then((loaded) => { if (!loaded) historyPrependLease.cancel(generation); }, () => { historyPrependLease.cancel(generation); })
+      .finally(pagingAuthorization.complete);
+  }, [handleEarlierHistoryReached, historyMutation?.seq, historyPrependLease, hydrating, pagingAuthorization]);
   useTranscriptHistoryAutoFill({
     readySurfaceKey: surfacePaintReadySurfaceKey, layoutSurfaceKey, hydrating, hasOlderHistory, loadingOlderHistory,
     olderHistoryError, running, historyStartTurn, virtualRowCount: virtualRows.length, scrollRef, virtuosoReadyRef,
@@ -676,7 +671,11 @@ export function Transcript({
       case "reasoning":
         return (
           <div className="turn-collapse__body">
-            <InlineAssistantReasoning item={row.item} onManualOpen={() => handleReasoningManualOpen(row.segmentKey)} />
+            <InlineAssistantReasoning
+              item={row.item}
+              autoFollowActive={row.autoFollowActive}
+              onManualOpen={() => handleReasoningManualOpen(row.segmentKey)}
+            />
           </div>
         );
       case "tool":
@@ -841,45 +840,28 @@ export function Transcript({
     }, 300);
     return () => window.clearTimeout(timeout);
   }, [holdingLiveRegion]);
+  useLayoutEffect(() => {
+    if (!holdingLiveRegion || !scrollRef.current) return;
+    const held = heldLiveRowsRef.current;
+    const lastKey = held.length > 0 ? String(held[held.length - 1].key) : null;
+    if (lastKey === null) return;
+    const mounted = Array.from(scrollRef.current.querySelectorAll<HTMLElement>(".transcript__row[data-row-key]"))
+      .some((row) => row.dataset.rowKey === lastKey && !row.closest('[data-live-region="true"]'));
+    if (!mounted) return;
+    heldLiveRowsRef.current = [];
+    setHoldingLiveRegion(false);
+  }, [contentRevision, holdingLiveRegion, scrollRef, virtualRows.length]);
   const heldLiveRows = heldSurfaceRef.current === layoutSurfaceKey ? heldLiveRowsRef.current : NO_HELD_ROWS;
   const showLiveRegion = liveSplit.liveActive || (holdingLiveRegion && heldLiveRows.length > 0);
-
-  const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
-    noteTranscriptRowCounts(rendered.length, virtualRows.length);
-    selectionRetention.reconcileLogicalFocus();
-    handleRecoveryItemsRendered(rendered.length);
-    scheduleActiveQuestionSync();
-    if (holdingLiveRegion) {
-      const held = heldLiveRowsRef.current;
-      const lastKey = held.length > 0 ? String(held[held.length - 1].key) : null;
-      if (lastKey === null || rendered.some((item) => String(item.data?.key ?? "") === lastKey)) {
-        heldLiveRowsRef.current = [];
-        setHoldingLiveRegion(false);
-      }
-    }
-    markSurfaceItemsRendered(rendered.length);
-  }, [handleRecoveryItemsRendered, holdingLiveRegion, markSurfaceItemsRendered, scheduleActiveQuestionSync, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
-
-  const prependLayoutTransientRef = useRef(false);
-  useEffect(() => {
-    if (historyMutation?.kind !== "prepend") return;
-    prependLayoutTransientRef.current = true;
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        prependLayoutTransientRef.current = false;
-      });
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      prependLayoutTransientRef.current = false;
-    };
-  }, [historyMutation?.kind, historyMutation?.seq]);
-
-  const handleTotalListHeightChanged = useCallback((height: number) => {
-    if (SHOW_SCROLL_DIAGNOSTICS) recordTranscriptScrollDiagnostic("list-height", { listHeight: height });
-    if (hydrating || prependLayoutTransientRef.current) return;
-    followGrowingTail();
-  }, [followGrowingTail, hydrating]);
+  const readerMountCorridorRows = readerTransactionActive && virtualRows.length <= TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT
+    ? Math.max(READER_MOUNT_CORRIDOR_ROWS, virtualRows.length)
+    : READER_MOUNT_CORRIDOR_ROWS;
+  const { handleItemsRendered, handleTotalListHeightChanged } = useTranscriptGeometryLifecycle({
+    virtualRowCount: virtualRows.length, hydrating, readerTransactionActive, historyMutation, historyPrependLease, scrollModeRef,
+    followGrowingTail, revalidateTail,
+    reconcileLogicalFocus: selectionRetention.reconcileLogicalFocus,
+    handleRecoveryItemsRendered, scheduleActiveQuestionSync, markSurfaceItemsRendered,
+  });
 
   const virtuosoContext = useMemo<TranscriptVirtuosoContext>(() => ({
     tabId,
@@ -898,7 +880,9 @@ export function Transcript({
           rows: liveSplit.liveActive ? liveSplit.liveRows : heldLiveRows,
           renderRow,
           showStatus: liveSplit.liveActive,
+          overlay: !liveSplit.liveActive,
           turnStartAt,
+          minHeight: liveMinHeight ?? undefined,
           onPointerDownCapture: selectionRetention.onPointerDownCapture,
         }
       : null,
@@ -917,6 +901,7 @@ export function Transcript({
     heldLiveRows,
     liveSplit.liveActive,
     liveSplit.liveRows,
+    liveMinHeight,
     loadingOlderHistory,
     contentRevision,
     nativeScrollbarDragging,
@@ -939,7 +924,7 @@ export function Transcript({
     <MarkdownImageTabContext.Provider value={tabId ?? ""}>
     <TranscriptLayoutIntentProvider value={beginUserResize}>
     <TranscriptScrollWriteProvider value={writeOffset}>
-    <div className="transcript-shell">
+    <div className="transcript-shell" aria-busy={Boolean(questionJumpSurface) || undefined}>
       {empty ? (
         <div
           className={`transcript transcript--empty${creationMode ? " transcript--creation-scrollbar" : ""}`}
@@ -969,6 +954,8 @@ export function Transcript({
             key={virtuosoResetKey}
             ref={virtuosoRef}
             className={`transcript${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
+            data-transcript-hydrating={hydrating ? "true" : "false"}
+            data-transcript-reader-layout-lease={readerTransactionActive ? "true" : "false"}
             data-transcript-row-count={virtualRows.length}
             data-transcript-estimated-total={estimatedTotalHeight}
             data-transcript-reset-key={virtuosoResetKey}
@@ -993,11 +980,14 @@ export function Transcript({
             atBottomStateChange={atBottomStateChange}
             heightEstimates={heightEstimates}
             itemSize={itemSize}
-            minOverscanItemCount={layoutSafeMode
-              ? { top: 32, bottom: 32 }
+            minOverscanItemCount={layoutSafeMode || readerTransactionActive
+              ? { top: readerMountCorridorRows, bottom: readerMountCorridorRows }
               : { top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
-            increaseViewportBy={layoutSafeMode
-              ? { top: (scrollElement?.clientHeight ?? 0) * 2, bottom: (scrollElement?.clientHeight ?? 0) * 2 }
+            increaseViewportBy={layoutSafeMode || readerTransactionActive
+              ? {
+                  top: (scrollElement?.clientHeight ?? 0) * READER_MOUNT_CORRIDOR_VIEWPORTS,
+                  bottom: (scrollElement?.clientHeight ?? 0) * READER_MOUNT_CORRIDOR_VIEWPORTS,
+                }
               : { top: 480, bottom: 480 }}
             scrollerRef={handleScrollerRef}
             itemsRendered={handleItemsRendered}
@@ -1051,6 +1041,16 @@ export function Transcript({
         >
           <ArrowDown size={18} strokeWidth={2.2} aria-hidden="true" />
         </button>
+      )}
+      {questionJumpSurface && (
+        <div
+          className="transcript-navigation-overlay transcript-question-jump-overlay"
+          data-question-jump-mask="true" data-question-jump-phase={questionJumpSurface.phase}
+          role="status" aria-live="polite"
+        >
+          <span className="transcript-navigation-overlay__spinner" aria-hidden="true" />
+          <span>{t("common.loading")}</span>
+        </div>
       )}
       {FrontendDiagnosticsPanel && <Suspense fallback={null}><FrontendDiagnosticsPanel scrollElement={scrollElement} totalRows={virtualRows.length} /></Suspense>}
     </div>

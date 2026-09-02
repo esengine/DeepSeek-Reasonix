@@ -56,6 +56,17 @@ type clientCapabilities struct {
 	toolsListChanged     bool
 	promptsListChanged   bool
 	resourcesListChanged bool
+	// serverExtensions records extension IDs the server declared in its
+	// initialize capabilities. MCP Apps needs two-way agreement: the client
+	// declares io.modelcontextprotocol/ui, the server answers with it.
+	serverExtensions map[string]bool
+}
+
+// appsUI reports two-way MCP Apps agreement for this server.
+func (cc clientCapabilities) appsUI() bool { return cc.serverExtensions[AppsUIExtensionID] }
+
+func (c *Client) appsNegotiated() bool {
+	return c != nil && c.profile.Capabilities().AppsUI && c.capabilities.appsUI()
 }
 
 // toolCatalogSnapshot is immutable after publication. All slices are built off
@@ -67,12 +78,16 @@ type toolCatalogSnapshot struct {
 	fingerprint [sha256.Size]byte
 	infos       []ToolInfo
 	adapters    []tool.Tool
+	// appAdapters holds App-callable tools (visibility contains "app"),
+	// including app-only ones that never enter the model catalog.
+	appAdapters []tool.Tool
 }
 
 type toolCatalogFingerprintEntry struct {
 	RawName         string          `json:"raw_name"`
 	VisibleName     string          `json:"visible_name"`
 	Description     string          `json:"description"`
+	Visibility      []string        `json:"visibility,omitempty"`
 	Schema          json.RawMessage `json:"schema,omitempty"`
 	OutputSchema    json.RawMessage `json:"output_schema,omitempty"`
 	SchemaError     string          `json:"schema_error,omitempty"`
@@ -538,6 +553,7 @@ func (c *Client) fetchToolCatalog(ctx context.Context, settleEmpty bool) (toolCa
 
 	toolInfos := make([]ToolInfo, 0, len(out))
 	tools := make([]tool.Tool, 0, len(out))
+	appTools := make([]tool.Tool, 0, len(out))
 	fingerprintEntries := make([]toolCatalogFingerprintEntry, 0, len(out))
 	normalizedSchemas := make(map[string]json.RawMessage, len(out))
 	for _, candidate := range out {
@@ -549,6 +565,8 @@ func (c *Client) fetchToolCatalog(ctx context.Context, settleEmpty bool) (toolCa
 	for _, candidate := range out {
 		readOnlyHint := candidate.Annotations != nil && candidate.Annotations.ReadOnlyHint
 		destructiveHint := candidate.Annotations != nil && candidate.Annotations.DestructiveHint
+		modelVisible, appVisible := candidate.Meta.appVisibility()
+		appCallable := appVisible && c.appsNegotiated()
 		info := ToolInfo{Name: candidate.Name, Description: candidate.Description, ReadOnlyHint: readOnlyHint, DestructiveHint: destructiveHint}
 		visibleName := candidate.Name
 		if c.spec.StripRawPrefix != "" {
@@ -559,17 +577,23 @@ func (c *Client) fetchToolCatalog(ctx context.Context, settleEmpty bool) (toolCa
 			if _, err := normalizeAndValidateToolSchema(candidate.InputSchema); err != nil {
 				info.SchemaError = schemaValidationError(err)
 			}
-			toolInfos = append(toolInfos, info)
+			if modelVisible {
+				toolInfos = append(toolInfos, info)
+			}
 			fingerprintEntries = append(fingerprintEntries, toolCatalogFingerprintEntry{
 				RawName: candidate.Name, VisibleName: visibleName, Description: candidate.Description,
 				SchemaError: info.SchemaError, ReadOnlyHint: readOnlyHint, DestructiveHint: destructiveHint,
+				Visibility: candidate.Meta.visibilityCopy(),
 			})
 			continue
 		}
-		toolInfos = append(toolInfos, info)
+		if modelVisible {
+			toolInfos = append(toolInfos, info)
+		}
 		outputSchema := append(json.RawMessage(nil), candidate.OutputSchema...)
 		fingerprintOutputSchema := canonicalizeCatalogJSON(outputSchema)
-		tools = append(tools, &remoteTool{
+		uiResourceURI, uiCSP := candidate.Meta.uiResource()
+		adapter := &remoteTool{
 			client:           c,
 			name:             toolName(c.name, visibleName),
 			rawName:          candidate.Name,
@@ -580,10 +604,21 @@ func (c *Client) fetchToolCatalog(ctx context.Context, settleEmpty bool) (toolCa
 			declaredReadOnly: readOnlyHint,
 			readOnly:         readOnlyHint,
 			destructive:      destructiveHint,
-		})
+			visibility:       candidate.Meta.visibilityCopy(),
+			appCallable:      appCallable,
+			uiResourceURI:    uiResourceURI,
+			uiCSP:            uiCSP,
+		}
+		if modelVisible {
+			tools = append(tools, adapter)
+		}
+		if appCallable {
+			appTools = append(appTools, adapter)
+		}
 		fingerprintEntries = append(fingerprintEntries, toolCatalogFingerprintEntry{
 			RawName: candidate.Name, VisibleName: visibleName, Description: candidate.Description,
 			Schema: schema, OutputSchema: fingerprintOutputSchema, ReadOnlyHint: readOnlyHint, DestructiveHint: destructiveHint,
+			Visibility: candidate.Meta.visibilityCopy(),
 		})
 	}
 	sort.SliceStable(toolInfos, func(i, j int) bool { return toolInfos[i].Name < toolInfos[j].Name })
@@ -595,7 +630,7 @@ func (c *Client) fetchToolCatalog(ctx context.Context, settleEmpty bool) (toolCa
 	}
 	return toolCatalogSnapshot{
 		listed: true, fingerprint: sha256.Sum256(fingerprintJSON),
-		infos: toolInfos, adapters: sortedTools,
+		infos: toolInfos, adapters: sortedTools, appAdapters: sortToolsByName(appTools),
 	}, nil
 }
 
@@ -627,19 +662,34 @@ func (c *Client) publishToolCatalog(candidate toolCatalogSnapshot, targetRevisio
 	c.toolsMu.Lock()
 	changed := !c.toolCatalog.listed || c.toolCatalog.fingerprint != candidate.fingerprint
 	if changed {
+		oldFingerprints := catalogSchemaFingerprints(c.toolCatalog.adapters)
 		c.catalogGeneration++
 		candidate.generation = c.catalogGeneration
-		for _, adapter := range candidate.adapters {
-			if remote, ok := adapter.(*remoteTool); ok {
-				remote.generation = candidate.generation
+		for _, adapters := range [][]tool.Tool{candidate.adapters, candidate.appAdapters} {
+			for _, adapter := range adapters {
+				if remote, ok := adapter.(*remoteTool); ok {
+					remote.generation = candidate.generation
+				}
 			}
 		}
 		c.toolCatalog = candidate
+		tool.InvalidateArgumentSchemas(oldFingerprints)
 	}
 	tools := append([]tool.Tool(nil), c.toolCatalog.adapters...)
 	c.toolsMu.Unlock()
 	c.advancePublishedToolListRevision(targetRevision)
 	return tools, changed, nil
+}
+
+func catalogSchemaFingerprints(adapters []tool.Tool) []string {
+	out := make([]string, 0, len(adapters))
+	for _, adapter := range adapters {
+		if adapter == nil {
+			continue
+		}
+		out = append(out, tool.SchemaFingerprint(adapter.Schema()))
+	}
+	return out
 }
 
 func (c *Client) advancePublishedToolListRevision(revision uint64) {

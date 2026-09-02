@@ -37,15 +37,91 @@ func classifyRecoveryLineage(record SessionRecord) SessionRecord {
 	return record
 }
 
-func classifyRecoveryLineageFromContent(record SessionRecord) SessionRecord {
+type recoveryContentResult struct {
+	snapshot agent.SessionContentSnapshot
+	ok       bool
+}
+
+type recoveryContentCache struct {
+	entries map[string]recoveryContentResult
+	onLoad  func(string)
+	strict  bool
+}
+
+func newRecoveryContentCache(onLoad func(string)) *recoveryContentCache {
+	return &recoveryContentCache{entries: map[string]recoveryContentResult{}, onLoad: onLoad}
+}
+
+func newStrictRecoveryContentCache(onLoad func(string)) *recoveryContentCache {
+	return &recoveryContentCache{entries: map[string]recoveryContentResult{}, onLoad: onLoad, strict: true}
+}
+
+func listSessionOrderWithContent(dir string, content *recoveryContentCache) ([]agent.SessionOrderInfo, error) {
+	return agent.ListSessionOrderWithRecoveryPreferenceResolver(dir, func(path string, meta agent.BranchMeta) bool {
+		digest := strings.TrimSpace(meta.RecoveryPreferredDigest)
+		if !meta.RecoveryPreferred || digest == "" {
+			return false
+		}
+		_, ok := content.load(path, digest)
+		return ok
+	})
+}
+
+func (c *recoveryContentCache) load(path, digest string) (agent.SessionContentSnapshot, bool) {
+	key := PathIdentityKey(path)
+	result, loaded := c.entries[key]
+	if !loaded {
+		if c.onLoad != nil {
+			c.onLoad(path)
+		}
+		result.snapshot, result.ok = agent.LoadSessionContentSnapshot(path)
+		c.entries[key] = result
+	}
+	if !result.ok || strings.TrimSpace(digest) != "" && !result.snapshot.MatchesDigest(digest) {
+		return agent.SessionContentSnapshot{}, false
+	}
+	return result.snapshot, true
+}
+
+func (c *recoveryContentCache) loadRecord(record SessionRecord) (agent.SessionContentSnapshot, bool) {
+	if c.strict && record.Recovered && strings.TrimSpace(record.RecoveryDigest) == "" {
+		return agent.SessionContentSnapshot{}, false
+	}
+	return c.load(record.Path, record.RecoveryDigest)
+}
+
+func classifyRecoveryLineageWithContent(record SessionRecord, content *recoveryContentCache) SessionRecord {
+	if !record.Recovered {
+		if record.RecoveryRole == "" {
+			record.RecoveryRole = RecoveryRoleNormal
+		}
+		return record
+	}
 	record.RecoveryCopy = false
-	return classifyRecoveryLineage(record)
+	record.RecoveryGroupID = firstNonEmpty(record.ParentID, agent.BranchID(record.Path))
+	record.RecoveryRole = RecoveryRoleDiverged
+	record.RecoveryCanonical = false
+	parentPath := recoveryParentPath(record)
+	if parentPath == "" {
+		return record
+	}
+	branch, branchOK := content.loadRecord(record)
+	parent, parentOK := content.load(parentPath, "")
+	if branchOK && parentOK && parent.Covers(branch) {
+		record.RecoveryCopy = true
+		record.RecoveryRole = RecoveryRoleCoveredCopy
+	}
+	return record
 }
 
 // promoteCanonicalLeaves marks unique non-covered leaves that cover every
 // ancestor in their group as adopted/canonical. Multiple non-covering leaves
 // stay diverged. open/running/pinned/leased decisions are left to callers.
 func promoteCanonicalLeaves(records []SessionRecord) []SessionRecord {
+	return promoteCanonicalLeavesWithContent(records, newRecoveryContentCache(nil))
+}
+
+func promoteCanonicalLeavesWithContent(records []SessionRecord, cache *recoveryContentCache) []SessionRecord {
 	byGroup, groupRoot := recoveryLineageGroups(records)
 	for groupID, idxs := range byGroup {
 		for _, i := range idxs {
@@ -54,7 +130,11 @@ func promoteCanonicalLeaves(records []SessionRecord) []SessionRecord {
 		}
 		rootIndex, hasRoot := groupRoot[groupID]
 		preferred := -1
-		for _, index := range idxs {
+		preferenceIndexes := append([]int{}, idxs...)
+		if hasRoot {
+			preferenceIndexes = append(preferenceIndexes, rootIndex)
+		}
+		for _, index := range preferenceIndexes {
 			if records[index].RecoveryPreferred {
 				if preferred >= 0 {
 					preferred = -2 // multiple stale preferences fail closed
@@ -72,7 +152,7 @@ func promoteCanonicalLeaves(records []SessionRecord) []SessionRecord {
 		if hasRoot {
 			contentIdxs = append(contentIdxs, rootIndex)
 		}
-		content := loadRecoveryGroupContent(records, contentIdxs)
+		content := loadRecoveryGroupContent(records, contentIdxs, cache)
 		candidate, ok := uniqueLongestRecovery(records, idxs, content)
 		if !ok {
 			// No unique covering leaf: still pick one stable representative so
@@ -374,13 +454,13 @@ func recoveryLineageGroups(records []SessionRecord) (map[string][]int, map[strin
 	return byGroup, groupRoot
 }
 
-func loadRecoveryGroupContent(records []SessionRecord, idxs []int) map[int]agent.SessionContentSnapshot {
+func loadRecoveryGroupContent(records []SessionRecord, idxs []int, cache *recoveryContentCache) map[int]agent.SessionContentSnapshot {
 	content := make(map[int]agent.SessionContentSnapshot, len(idxs))
 	for _, index := range idxs {
 		if _, loaded := content[index]; loaded {
 			continue
 		}
-		if snapshot, ok := agent.LoadSessionContentSnapshot(records[index].Path); ok {
+		if snapshot, ok := cache.loadRecord(records[index]); ok {
 			content[index] = snapshot
 		}
 	}

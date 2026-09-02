@@ -204,11 +204,17 @@ func (s *updateSink) Emit(e event.Event) {
 
 	case event.Notice:
 		// Surface warnings to the host as a message chunk so they're not lost;
-		// info-level notices stay out of band.
+		// generic info-level notices stay out of band. Completion uncertainty is
+		// a recoverable terminal result and is shown without warning severity.
 		if e.Level == event.LevelWarn && e.Text != "" {
 			s.send(messageChunk{
 				SessionUpdate: "agent_message_chunk",
 				Content:       textBlock("\n\n[warning] " + e.Text),
+			})
+		} else if e.Code == event.NoticeCodeCompletionUncertain && e.Text != "" {
+			s.send(messageChunk{
+				SessionUpdate: "agent_message_chunk",
+				Content:       textBlock("\n\n" + e.Text),
 			})
 		}
 

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/filelock"
@@ -22,6 +23,8 @@ import (
 )
 
 type Mode string
+
+var memoryDatabaseSequence atomic.Uint64
 
 const (
 	ModeDisk   Mode = "disk"
@@ -195,7 +198,11 @@ func diskFileDSN(path string) string {
 func open(ctx context.Context, opts OpenOptions, mode Mode) (*sql.DB, error) {
 	var dsn string
 	if mode == ModeMemory {
-		dsn = fmt.Sprintf("file:reasonix-%s-%d?mode=memory&cache=shared", url.PathEscape(opts.MemoryName), opts.Now().UnixNano())
+		// time.Now has coarse resolution on some platforms, notably Windows.
+		// A process-local sequence prevents concurrently opened projections with
+		// the same logical name from sharing one SQLite memory database by accident.
+		dsn = fmt.Sprintf("file:reasonix-%s-%d-%d?mode=memory&cache=shared", url.PathEscape(opts.MemoryName),
+			opts.Now().UnixNano(), memoryDatabaseSequence.Add(1))
 	} else {
 		dsn = diskFileDSN(opts.Path)
 	}

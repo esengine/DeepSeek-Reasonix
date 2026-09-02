@@ -1,0 +1,72 @@
+name: Transcript Native Smoke
+
+on:
+  pull_request:
+    branches: [main-v2]
+    paths:
+      - ".github/workflows/transcript-native-smoke.yml"
+      - "desktop/cmd/transcript-native-smoke/**"
+      - "desktop/frontend/src/components/Transcript*.tsx"
+      - "desktop/frontend/src/lib/transcript*.ts"
+      - "desktop/frontend/src/lib/useTranscript*.ts"
+      - "desktop/frontend/src/styles.css"
+      - "desktop/transcript_native_smoke_contract.js"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transcript-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-wkwebview:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Build focused transcript fixture
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend exec vite build
+
+      - name: Test sustained WKWebView transcript reading
+        timeout-minutes: 5
+        env:
+          REASONIX_NATIVE_SMOKE_ISOLATED_CI: "1"
+        run: |
+          pnpm --dir frontend exec vite preview --host 127.0.0.1 --port 4173 --strictPort >"$RUNNER_TEMP/reasonix-transcript-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            curl -fsS http://127.0.0.1:4173/ >/dev/null && break
+            sleep 0.1
+          done
+          go run -tags reasonix_transcript_smoke ./cmd/transcript-native-smoke \
+            -url 'http://127.0.0.1:4173/?mock=bench&bench=1' \
+            -script transcript_native_smoke_contract.js

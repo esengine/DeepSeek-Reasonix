@@ -220,9 +220,16 @@ await act(async () => {
   await Promise.all([generationTwoHistory.promise.catch(() => undefined), generationTwoSwitch]);
   await flushPromises();
 });
-await waitFor("source restored after target history error", () => controller?.activeTabId === "tab-a");
-ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "history A") ?? false, "target history failure restores the previous tab transcript");
-ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "history O generation 1") ?? false), "target history failure never restores the prior generation");
+await waitFor("source restored after target history failure", () => controller?.activeTabId === "tab-a");
+eq(backendActiveId, "tab-a", "target history failure rebinds backend focus to the retained source session");
+ok(controller?.state.items.some((item) => item.kind === "user" && item.text === "history A") ?? false, "target history failure restores the retained source transcript");
+ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "history O generation 1") ?? false), "target history failure never restores the prior target generation");
+
+await act(async () => {
+  await controller?.openProjectTab(reboundTabO.workspaceRoot, reboundTabO.topicId || "");
+  await flushPromises();
+});
+await waitFor("generation two retry", () => controller?.state.items.some((item) => item.kind === "user" && item.text === "history O generation 2") ?? false);
 
 // A mount/ready sync can start before a same-tab session rebind and resolve
 // afterwards. Its tab id still matches, so the navigation generation — not the

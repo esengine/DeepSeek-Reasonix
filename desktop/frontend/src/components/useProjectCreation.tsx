@@ -54,6 +54,7 @@ export function useProjectCreation({
         <RemoteConnectWizard
           onRefresh={onRefresh}
           onClose={() => setRemoteFlowOpen(false)}
+          onMerged={(message) => showToast(message, "info")}
         />
       </Suspense>
     ) : null,

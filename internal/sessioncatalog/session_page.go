@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,7 +17,7 @@ type sessionPageCursor struct {
 	Path     string `json:"p"`
 }
 
-const sessionSelectColumns = `path,directory,scope,workspace_root,topic_id,topic_title,
+const sessionSelectColumns = `path,path_key,directory,scope,workspace_root,topic_id,topic_title,
     custom_title,created_at,last_activity_at,preview,turns,turns_state,recovered,
     recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
     recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
@@ -27,7 +26,7 @@ const sessionSelectColumns = `path,directory,scope,workspace_root,topic_id,topic
 func scanSession(scanner interface{ Scan(...any) error }) (SessionRecord, error) {
 	var record SessionRecord
 	var recoveryCopy, recoveryCanonical, ordinaryVisible int
-	err := scanner.Scan(&record.Path, &record.Directory, &record.Scope, &record.WorkspaceRoot,
+	err := scanner.Scan(&record.Path, &record.pathKey, &record.Directory, &record.Scope, &record.WorkspaceRoot,
 		&record.TopicID, &record.TopicTitle, &record.CustomTitle, &record.CreatedAt,
 		&record.LastActivityAt, &record.Preview, &record.Turns, &record.TurnsState,
 		&record.Recovered, &record.RecoveryReason, &record.RecoveryDigest,
@@ -75,16 +74,16 @@ func (c *Catalog) ListSessions(ctx context.Context, req SessionPageRequest) (Ses
 	switch strings.ToLower(strings.TrimSpace(req.Scope)) {
 	case "", "all":
 	case "project":
-		where = append(where, `scope='project'`, `workspace_root=?`)
-		args = append(args, strings.TrimSpace(req.WorkspaceRoot))
+		where = append(where, `scope='project'`, `workspace_root_key=?`)
+		args = append(args, c.workspaceRootKey("project", req.WorkspaceRoot))
 	case "global":
 		where = append(where, `scope='global'`)
 	default:
 		return out, fmt.Errorf("invalid session catalog scope %q", req.Scope)
 	}
 	if directory := strings.TrimSpace(req.Directory); directory != "" {
-		where = append(where, `directory=?`)
-		args = append(args, filepath.Clean(directory))
+		where = append(where, `directory_key=?`)
+		args = append(args, c.pathKey(directory))
 	}
 	if query := strings.ToLower(strings.TrimSpace(req.Query)); query != "" {
 		where = append(where, `(lower(custom_title) LIKE ? OR lower(preview) LIKE ? OR lower(topic_title) LIKE ? OR lower(topic_id) LIKE ?)`)
@@ -117,7 +116,7 @@ func (c *Catalog) ListSessions(ctx context.Context, req SessionPageRequest) (Ses
 			}
 			rawCount++
 			lastScanned = record
-			if c.pathRemoved(record.Path) {
+			if c.pathRemovedKey(record.pathKey, record.Path) {
 				continue
 			}
 			out.Items = append(out.Items, record)
@@ -166,14 +165,14 @@ func appendSessionTimeFilter(where *[]string, args *[]any, filter string, now ti
 }
 
 func (c *Catalog) GetSession(ctx context.Context, path string) (SessionRecord, bool, error) {
-	path = filepath.Clean(strings.TrimSpace(path))
-	if path == "." || path == "" {
+	path = cleanCatalogAccessPath(path)
+	if path == "" {
 		return SessionRecord{}, false, nil
 	}
 	if c.pathRemoved(path) {
 		return SessionRecord{}, false, nil
 	}
-	record, err := scanSession(c.db.QueryRowContext(ctx, `SELECT `+sessionSelectColumns+` FROM catalog_sessions WHERE path=?`, path))
+	record, err := scanSession(c.db.QueryRowContext(ctx, `SELECT `+sessionSelectColumns+` FROM catalog_sessions WHERE path_key=?`, c.pathKey(path)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionRecord{}, false, nil
 	}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { MessageSquare } from "lucide-react";
 import { ContextMenu, type ContextMenuPoint } from "./ContextMenu";
@@ -16,11 +16,60 @@ import { transcriptSelectionStore } from "../lib/transcriptSelectionStore";
 import { rowKeyForNode, transcriptSelectionPointClientRect } from "../lib/transcriptSelectionDom";
 import { useToast } from "../lib/toast";
 
+// Vite loads this beside the already-lazy selection menu chunk. The direct
+// tsx unit-test runner has no CSS loader, so it deliberately leaves MODE unset.
+if (import.meta.env?.MODE) void import("./TranscriptSelectionMenu.css");
+
 type SelectionAction =
   | { kind: "native"; text: string; point: ContextMenuPoint }
   | { kind: "logical"; snapshotId: number; sourceTabId: string; point: ContextMenuPoint };
 
 const ACTION_EDGE_GAP = 8;
+
+type SelectionActionOverlayState = {
+  phase: "closed" | "positioning" | "open";
+  action: SelectionAction | null;
+  point: ContextMenuPoint;
+  revision: number;
+};
+
+type SelectionActionOverlayEvent =
+  | { type: "show"; action: SelectionAction }
+  | { type: "positioned"; point: ContextMenuPoint; revision: number }
+  | { type: "close" }
+  | { type: "reset" };
+
+const INITIAL_ACTION_OVERLAY_STATE: SelectionActionOverlayState = {
+  phase: "closed",
+  action: null,
+  point: { left: -10_000, top: -10_000 },
+  revision: 0,
+};
+
+function selectionActionOverlayReducer(
+  state: SelectionActionOverlayState,
+  event: SelectionActionOverlayEvent,
+): SelectionActionOverlayState {
+  switch (event.type) {
+    case "show":
+      return {
+        ...state,
+        phase: "positioning",
+        action: event.action,
+        revision: state.revision + 1,
+      };
+    case "positioned":
+      if (state.phase !== "positioning" || state.revision !== event.revision || !state.action) return state;
+      return { ...state, phase: "open", point: event.point };
+    case "close":
+    case "reset":
+      if (!state.action) return state;
+      // Keep the last painted coordinates while hidden. Moving a detached or
+      // transparent fixed layer during native selection churn is one of the
+      // WebView2 stale-pixel triggers this stable host avoids.
+      return { ...state, phase: "closed", action: null };
+  }
+}
 
 export function TranscriptSelectionMenu({
   enabled = true,
@@ -39,8 +88,13 @@ export function TranscriptSelectionMenu({
     transcriptSelectionStore.getSnapshot,
   );
   const [menu, setMenu] = useState<SelectionAction | null>(null);
-  const [action, setAction] = useState<SelectionAction | null>(null);
-  const [actionPoint, setActionPoint] = useState<ContextMenuPoint | null>(null);
+  const [actionOverlay, dispatchActionOverlay] = useReducer(
+    selectionActionOverlayReducer,
+    INITIAL_ACTION_OVERLAY_STATE,
+  );
+  const action = actionOverlay.action;
+  const actionOverlayStateRef = useRef(actionOverlay);
+  actionOverlayStateRef.current = actionOverlay;
   const actionRef = useRef<HTMLDivElement>(null);
   const dismissedRef = useRef<string | number | null>(null);
   const previousResetKeyRef = useRef(resetKey);
@@ -56,8 +110,15 @@ export function TranscriptSelectionMenu({
   );
 
   const closeAction = useCallback(() => {
-    setAction(null);
-    setActionPoint(null);
+    dispatchActionOverlay({ type: "close" });
+  }, []);
+
+  const showAction = useCallback((nextAction: SelectionAction) => {
+    dispatchActionOverlay({ type: "show", action: nextAction });
+  }, []);
+
+  const resetAction = useCallback(() => {
+    dispatchActionOverlay({ type: "reset" });
   }, []);
 
   const reportCopyFailure = useCallback(() => {
@@ -75,10 +136,10 @@ export function TranscriptSelectionMenu({
     previousResetKeyRef.current = resetKey;
     dismissedRef.current = null;
     setMenu(null);
-    closeAction();
+    resetAction();
     document.getSelection()?.removeAllRanges();
     transcriptSelectionStore.clear("tab-switch");
-  }, [closeAction, resetKey]);
+  }, [resetAction, resetKey]);
 
   const resolveLogical = useCallback(async (selection: Extract<SelectionAction, { kind: "logical" }>) => {
     const text = await transcriptSelectionStore.resolveText(selection.snapshotId);
@@ -151,26 +212,28 @@ export function TranscriptSelectionMenu({
   );
 
   useLayoutEffect(() => {
-    if (!action) {
-      setActionPoint(null);
-      return;
-    }
+    if (actionOverlay.phase !== "positioning" || !action) return;
+    const revision = actionOverlay.revision;
     const rect = actionRef.current?.getBoundingClientRect();
     if (!rect) {
-      setActionPoint(action.point);
+      dispatchActionOverlay({ type: "positioned", point: action.point, revision });
       return;
     }
-    setActionPoint({
-      left: Math.min(
-        Math.max(ACTION_EDGE_GAP, action.point.left),
-        Math.max(ACTION_EDGE_GAP, window.innerWidth - rect.width - ACTION_EDGE_GAP),
-      ),
-      top: Math.min(
-        Math.max(ACTION_EDGE_GAP, action.point.top),
-        Math.max(ACTION_EDGE_GAP, window.innerHeight - rect.height - ACTION_EDGE_GAP),
-      ),
+    dispatchActionOverlay({
+      type: "positioned",
+      revision,
+      point: {
+        left: Math.min(
+          Math.max(ACTION_EDGE_GAP, action.point.left),
+          Math.max(ACTION_EDGE_GAP, window.innerWidth - rect.width - ACTION_EDGE_GAP),
+        ),
+        top: Math.min(
+          Math.max(ACTION_EDGE_GAP, action.point.top),
+          Math.max(ACTION_EDGE_GAP, window.innerHeight - rect.height - ACTION_EDGE_GAP),
+        ),
+      },
     });
-  }, [action]);
+  }, [action, actionOverlay.phase, actionOverlay.revision]);
 
   useEffect(() => {
     if (!enabled || !onAddToChat || logicalSnapshot.mode !== "logical-settled") {
@@ -180,13 +243,13 @@ export function TranscriptSelectionMenu({
     if (logicalSnapshot.tabId !== String(resetKey ?? "") || !logicalSnapshot.focus) return;
     if (dismissedRef.current === logicalSnapshot.id) return;
     const rect = transcriptSelectionPointClientRect(logicalSnapshot.focus);
-    setAction({
+    showAction({
       kind: "logical",
       snapshotId: logicalSnapshot.id,
       sourceTabId: logicalSnapshot.tabId,
       point: rect ? { left: rect.right, top: rect.bottom + 8 } : { left: 12, top: 12 },
     });
-  }, [action?.kind, closeAction, enabled, logicalSnapshot, onAddToChat, resetKey]);
+  }, [action?.kind, closeAction, enabled, logicalSnapshot, onAddToChat, resetKey, showAction]);
 
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
@@ -219,10 +282,10 @@ export function TranscriptSelectionMenu({
   useEffect(() => {
     if (enabled && onAddToChat) return;
     setMenu(null);
-    closeAction();
+    resetAction();
     document.getSelection()?.removeAllRanges();
     transcriptSelectionStore.clear("selection-actions-disabled");
-  }, [closeAction, enabled, onAddToChat]);
+  }, [enabled, onAddToChat, resetAction]);
 
   useEffect(() => {
     if (!enabled || !onAddToChat) return;
@@ -234,13 +297,13 @@ export function TranscriptSelectionMenu({
       const range = selection?.rangeCount ? selection.getRangeAt(selection.rangeCount - 1) : null;
       if (selected == null || !range) {
         dismissedRef.current = null;
-        if (action?.kind === "native") closeAction();
+        if (actionOverlayStateRef.current.action?.kind === "native") closeAction();
         return;
       }
       if (dismissedRef.current === selected) return;
       dismissedRef.current = null;
       const rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
-      setAction({
+      showAction({
         kind: "native",
         text: selected,
         point: rect && (rect.width > 0 || rect.height > 0)
@@ -285,17 +348,18 @@ export function TranscriptSelectionMenu({
       const selection = document.getSelection();
       if (!selection || selection.isCollapsed || selection.toString().trim() === "") {
         dismissedRef.current = null;
-        if (action?.kind === "native") closeAction();
+        if (actionOverlayStateRef.current.action?.kind === "native") closeAction();
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !action) return;
-      dismissedRef.current = action.kind === "native" ? action.text : action.snapshotId;
-      if (action.kind === "logical") transcriptSelectionStore.clear("escape");
+      const currentAction = actionOverlayStateRef.current.action;
+      if (event.key !== "Escape" || !currentAction) return;
+      dismissedRef.current = currentAction.kind === "native" ? currentAction.text : currentAction.snapshotId;
+      if (currentAction.kind === "logical") transcriptSelectionStore.clear("escape");
       closeAction();
     };
     const closeNative = () => {
-      if (action?.kind === "native") closeAction();
+      if (actionOverlayStateRef.current.action?.kind === "native") closeAction();
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("pointerup", onPointerUp);
@@ -314,7 +378,7 @@ export function TranscriptSelectionMenu({
       window.removeEventListener("resize", closeNative);
       window.removeEventListener("scroll", closeNative, true);
     };
-  }, [action, closeAction, enabled, onAddToChat]);
+  }, [closeAction, enabled, onAddToChat, showAction]);
 
   return <>
     <ContextMenu
@@ -336,20 +400,31 @@ export function TranscriptSelectionMenu({
       }]}
       onClose={() => setMenu(null)}
     />
-    {action && typeof document !== "undefined" && createPortal(
+    {typeof document !== "undefined" && createPortal(
       <div
         ref={actionRef}
         className="transcript-selection-action"
+        data-surface="transcript"
+        data-state={actionOverlay.phase}
         role="toolbar"
+        aria-hidden={actionOverlay.phase !== "open"}
         aria-label={t("selection.actions")}
         style={{
-          left: actionPoint?.left ?? action.point.left,
-          top: actionPoint?.top ?? action.point.top,
-          visibility: actionPoint ? "visible" : "hidden",
+          left: actionOverlay.point.left,
+          top: actionOverlay.point.top,
+          visibility: actionOverlay.phase === "open" ? "visible" : "hidden",
+          opacity: actionOverlay.phase === "open" ? 1 : 0,
+          pointerEvents: actionOverlay.phase === "open" ? "auto" : "none",
+          animation: actionOverlay.phase === "open" ? undefined : "none",
         }}
         onMouseDown={(event) => event.preventDefault()}
       >
-        <button type="button" onClick={() => void addSelectionToChat()}>
+        <button
+          type="button"
+          disabled={actionOverlay.phase !== "open"}
+          tabIndex={actionOverlay.phase === "open" ? 0 : -1}
+          onClick={() => void addSelectionToChat()}
+        >
           <MessageSquare size={14} aria-hidden="true" />
           <span>{t("selection.addToChat")}</span>
           <kbd>{addShortcut}</kbd>

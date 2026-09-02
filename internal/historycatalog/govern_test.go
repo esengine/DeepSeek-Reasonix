@@ -94,18 +94,6 @@ func sourceHealth(t *testing.T, catalog *Catalog, path string) string {
 	return health
 }
 
-func waitForCondition(t *testing.T, what string, ok func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("%s: condition not met within 5s", what)
-}
-
 // checkpoint folds the WAL so file-size-based caps are measured post-fold.
 func checkpoint(t *testing.T, catalog *Catalog) {
 	t.Helper()
@@ -304,25 +292,38 @@ func TestOpenTriggersBackgroundWipeWhenFarOverCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	size := historyDBFileSize(dbPath)
-	reopened, err := Open(ctx, Options{Path: dbPath, MaxBytes: size / 4})
+	rebuildDone := make(chan struct{}, 1)
+	reopened, err := Open(ctx, Options{Path: dbPath, MaxBytes: size / 4, OnRevision: func(_ Status, _ []string, reason string) {
+		if reason == "rebuild-oversize" {
+			select {
+			case rebuildDone <- struct{}{}:
+			default:
+			}
+		}
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close(context.Background()) })
-	waitForCondition(t, "background wipe", func() bool {
-		var count int
-		if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM history_documents`).Scan(&count); err != nil {
-			return false
-		}
-		return count == 0
-	})
+	select {
+	case <-rebuildDone:
+	case <-time.After(20 * time.Second):
+		t.Fatal("background wipe did not publish rebuild completion within 20s")
+	}
 	// The wipe must be followed by a rescan that rebuilds the index (now with
 	// truncated tool payloads) without blocking startup.
-	reopened.RegisterRoot(Root{Path: root, Scope: "global"})
-	waitForCondition(t, "rebuild rescan", func() bool {
-		result, err := reopened.Search(ctx, SearchRequest{Query: "alphamarker", Kinds: []string{"tool_output"}, Roots: []string{root}})
-		return err == nil && len(result.Items) == 1
-	})
+	if !reopened.RegisterRoot(Root{Path: root, Scope: "global"}) {
+		t.Fatal("register rebuilt root was not queued")
+	}
+	flushCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := reopened.Flush(flushCtx); err != nil {
+		t.Fatalf("flush rebuilt root: %v", err)
+	}
+	result, err := reopened.Search(ctx, SearchRequest{Query: "alphamarker", Kinds: []string{"tool_output"}, Roots: []string{root}})
+	if err != nil || len(result.Items) != 1 {
+		t.Fatalf("rebuild rescan result=%#v err=%v", result, err)
+	}
 }
 
 func TestEvictedSessionStaysEvictedWhenUnchangedAndReindexesOnChange(t *testing.T) {

@@ -4,7 +4,7 @@ import type { HistoryServerSearch } from "./searchSources";
 import type { Todo } from "./tools";
 import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 import type { WireApproval } from "./approvalTypes";
-import type { RemoteTabRefView } from "./remoteTypes";
+import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
 export * from "./remoteTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
@@ -17,7 +17,8 @@ export type EventKind =
   | "tool_result"
   | "tool_result_preview"
   | "turn_status"
-  | "prompt_answered"
+  | "prompt_answered" | "session_changed"
+  | "mcp_interaction"
   | "tool_progress"
   | "usage"
   | "notice"
@@ -37,7 +38,8 @@ export type EventKind =
   | "context_maintenance"
   | "workspace_changed"
   | "turn_phase"
-  | "completion_summary";
+  | "completion_summary"
+  | "provider_unreachable";
 export type StreamAttemptAction = "begin" | "discard" | "commit";
 export type TurnStatus = "queued" | "in_progress" | "waiting_user" | "cancelling" | "completed" | "interrupted" | "failed" | "protocol_failed";
 export interface TurnEventEnvelope {
@@ -256,6 +258,20 @@ export interface WireAsk {
   questions: WireAskQuestion[];
 }
 
+export type { MCPAppInstanceView, MCPAppPresentation } from "./mcpAppProtocol";
+
+// One server-initiated MCP elicitation awaiting accept/decline/cancel. Form
+// mode carries a flat primitive JSON schema; url mode a credential-free target.
+export interface WireMCPInteraction {
+  id: string;
+  server: string;
+  mode: "form" | "url";
+  message: string;
+  requestedSchema?: unknown;
+  url?: string;
+  elicitationId?: string;
+}
+
 // Extension UI surfaces (stage 8a) — structured-only documents published by
 // extension sidecars through the host UI hub. Exactly one sub-struct is set,
 // selected by `kind`.
@@ -359,6 +375,7 @@ export interface WireEvent {
   usage?: WireUsage;
   approval?: WireApproval;
   ask?: WireAsk;
+  mcpInteraction?: WireMCPInteraction;
   compaction?: WireCompaction;
   maintenance?: WireContextMaintenance;
   guardian?: WireGuardian;
@@ -367,7 +384,7 @@ export interface WireEvent {
   err?: string;
   checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
-  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused";
+  outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused" | "completion_uncertain";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
@@ -376,6 +393,7 @@ export interface WireEvent {
   streamAttempt?: WireStreamAttempt;
   /** Durable session-inbox item id for steer / TurnDone correlation. */
   itemId?: string;
+  sessionPath?: string; // Serve multi-session routing tag; absent locally.
   workspace?: WireWorkspaceChanged;
   /** turn_phase: working | checking | verifying | reviewing */
   phase?: string;
@@ -457,7 +475,7 @@ export interface WireFinalReadiness {
 }
 
 // Tab management types (desktop/tabs.go).
-export interface TabMeta {
+export interface TabMeta extends RemoteTabMetaFields {
   id: string;
   tabType?: "session" | "file";
   scope: string;
@@ -530,7 +548,7 @@ export interface TerminalWorkspaceView {
   shells: TerminalShellView[];
 }
 
-export interface ProjectNode {
+export interface ProjectNode extends RemoteProjectNodeFields {
   key: string;
   kind: "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session";
   label: string;
@@ -557,31 +575,13 @@ export interface ProjectNode {
   recoveryBranchCount?: number;
   recoveryUnresolvedCount?: number;
   recoveryCleanupEligibleCount?: number;
-  recoveryCopyCount?: number; // folded recovery copies behind this row (badge only)
+  recoveryCopyCount?: number; // Deprecated: ordinary trees hide physical copies.
   isolatedWorktree?: boolean;
   runtimeOnly?: boolean;
-  /** Present ⇒ remote project group; drives the cloud badge on the folder row. */
-  remote?: RemoteTabRefView;
   children?: ProjectNode[];
 }
 
-export interface RecoveryLineageMember {
-  path: string;
-  role: "normal" | "covered_copy" | "adopted" | "preferred" | "diverged" | string;
-  canonical: boolean;
-  turns: number;
-  open: boolean;
-  running: boolean;
-}
-
-export interface RecoveryLineageView {
-  groupId: string;
-  state: string;
-  branchCount: number;
-  unresolved: number;
-  cleanupEligible: number;
-  members: RecoveryLineageMember[];
-}
+export type { RecoveryLineageMember, RecoveryLineageView } from "./sessionRecoveryTypes";
 
 export interface RecoveryCleanupRequest {
   scope: string;
@@ -946,7 +946,7 @@ export interface ContextInfo {
   contextBudget?: ContextBudgetInfo;
 }
 
-export interface Meta {
+export interface Meta extends RemoteSessionMetaFields {
   label: string;
   ready: boolean;
   runtime?: SessionRuntimeView;
@@ -1683,6 +1683,7 @@ export interface ProviderView {
   headers?: Record<string, string> | null; // optional extra request headers for compatible gateways
   extraBody?: Record<string, unknown> | null; // optional extra top-level request body fields for compatible gateways
   authHeader?: boolean; // Anthropic-compatible: send Authorization: Bearer instead of x-api-key
+  noProxy?: boolean; // reach this provider's endpoint directly, bypassing the configured/system proxy
   keySet: boolean; // the env var currently resolves to a value
   requiresKey?: boolean; // false for explicit no-auth providers
   configured?: boolean; // selectable: key is set or no key is required
@@ -1875,7 +1876,37 @@ export interface SandboxView {
   effectiveWorkspaceRoot: string;
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
-  effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  effectiveShell?: string; // bound shell: "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
+  resolvedShell?: string; // shell a reload would pick now
+  shellReloadRequired?: boolean;
+  shellCapabilities: ShellCapabilityView[];
+  gitCapability?: ShellCapabilityView | null;
+  shellInstallAction?: ShellInstallActionView | null;
+  shellRepairGuidance?: { manager: string; command?: string } | null;
+  gitRepairGuidance?: { manager: string; command?: string } | null;
+}
+// One discovered interpreter: usable on this host, where, and why not.
+export interface ShellCapabilityView {
+  id: string; // "bash" | "zsh" | "sh" | "git-bash" | "powershell" | "pwsh"
+  variant?: string;
+  available: boolean;
+  path?: string;
+  source?: string;
+  reason?: string;
+}
+// Optional manual repair action the sandbox section may offer (Windows only).
+export interface ShellInstallActionView {
+  id: string; // "git-for-windows"
+  mode: string; // "manual"
+  available: boolean;
+  manualUrl?: string;
+}
+// Structured outcome of InstallShellSupport.
+export interface ShellInstallResult {
+  status: string; // "manual_required" | "unsupported_platform"
+  path?: string;
+  reason?: string;
+  manualUrl?: string;
 }
 
 export interface ReferenceSettingsView {

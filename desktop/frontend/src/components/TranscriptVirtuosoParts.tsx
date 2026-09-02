@@ -33,7 +33,9 @@ export type TranscriptVirtuosoContext = {
     rows: readonly TranscriptRow[];
     renderRow: (row: TranscriptRow) => ReactNode;
     showStatus: boolean;
+    overlay: boolean;
     turnStartAt?: number;
+    minHeight?: number;
     onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
   };
   olderHistory: null | {
@@ -85,7 +87,6 @@ export const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<Trans
     useEffect(() => {
       if (entryId) getTranscriptStore().requestEntryFullContent(context.tabId, entryId);
     }, [context.tabId, entryId]);
-    const knownSize = Number.parseFloat(String(props["data-known-size"] ?? ""));
     const rowIndex = context.rowGeometry.rowIndexByKey.get(String(item.key)) ?? Number.NaN;
     const estimatedSize = Number.isInteger(rowIndex) && rowIndex >= 0 ? context.rowGeometry.heightEstimates[rowIndex] : undefined;
     const estimateSource = Number.isInteger(rowIndex) && rowIndex >= 0 ? context.rowGeometry.estimateSources[rowIndex] : undefined;
@@ -100,18 +101,16 @@ export const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<Trans
           "data-estimate-source": estimateSource,
         }
       : {};
-    const frozenStyle = context.nativeScrollbarDragging && Number.isFinite(knownSize) && knownSize > 0
-      ? { ...style, boxSizing: "border-box" as const, height: knownSize, overflow: "hidden" as const }
-      : style;
     const geometryStyle = Number.isFinite(rowEstimate) && (rowEstimate ?? 0) > 0
-      ? { ...frozenStyle, "--transcript-row-estimate": `${rowEstimate}px` } as CSSProperties
-      : frozenStyle;
+      ? { ...style, "--transcript-row-estimate": `${rowEstimate}px` } as CSSProperties
+      : style;
     return (
       <div
         {...props}
         ref={ref}
         style={geometryStyle}
         data-row-key={String(item.key)}
+        data-transcript-last-row={rowIndex === context.rowGeometry.heightEstimates.length - 1 ? "true" : undefined}
         data-row-kind={item.kind}
         data-layout-version={transcriptRowMeasurementVersion(item)}
         data-transcript-layout-variant={layoutVariant}
@@ -148,7 +147,7 @@ function TranscriptVirtuosoHeader({ context }: { context: TranscriptVirtuosoCont
 function TranscriptVirtuosoFooter({ context }: { context: TranscriptVirtuosoContext }) {
   const live = context.liveRegion;
   if (!live || (live.rows.length === 0 && !live.showStatus)) return null;
-  return <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} />;
+  return <LiveTurnRegion rows={live.rows} renderRow={live.renderRow} showStatus={live.showStatus} overlay={live.overlay} turnStartAt={live.turnStartAt} tabId={context.tabId} scrollElement={context.scrollElement} onPointerDownCapture={live.onPointerDownCapture} minHeight={live.minHeight} />;
 }
 
 export const TRANSCRIPT_VIRTUOSO_COMPONENTS: Components<TranscriptRow, TranscriptVirtuosoContext> = {

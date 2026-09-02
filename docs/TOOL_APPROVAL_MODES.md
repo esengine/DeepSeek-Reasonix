@@ -90,6 +90,10 @@ requirement and explicit interactive memory `ask` rules. Auto also skips the
 default memory fallback prompt, but preserves explicit `ask` rules. Neither mode
 bypasses explicit `deny` rules, the sandbox, plan confirmation, or managed config writes.
 
+Because Yolo already opts out of confirmations, the CLI `/clear` command clears
+the session immediately in Yolo mode instead of opening its confirmation
+overlay; Ask, Auto, and Plan keep the confirmation.
+
 ### How to enable
 
 - Select Yolo directly under the composer, choose it as the new-session default,

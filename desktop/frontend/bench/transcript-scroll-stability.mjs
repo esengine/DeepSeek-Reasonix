@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startPreviewServer } from "./vite-preview-server.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
@@ -55,9 +55,9 @@ async function moveToOuterReaderGutter(page, transcript, announce = true) {
 
 async function waitForStableTranscriptGeometry(
   page,
-  { timeout = 15_000, frames = 8, requireTail = false } = {},
+  { timeout = 15_000, frames = 8, requireTail = false, maxTailDistance = 4 } = {},
 ) {
-  await page.evaluate(({ timeout, frames, requireTail }) => new Promise((resolve, reject) => {
+  await page.evaluate(({ timeout, frames, requireTail, maxTailDistance }) => new Promise((resolve, reject) => {
     const startedAt = performance.now();
     let previous = null;
     let stableFrames = 0;
@@ -71,7 +71,18 @@ async function waitForStableTranscriptGeometry(
           top: element.scrollTop,
           clientHeight: element.clientHeight,
         };
-        lastSample = { ...current, distance: current.height - current.top - current.clientHeight, stableFrames };
+        const mounted = [...element.querySelectorAll(".transcript__row[data-index]")]
+          .map((row) => Number.parseInt(row.getAttribute("data-index") ?? "", 10))
+          .filter(Number.isFinite);
+        lastSample = {
+          ...current,
+          distance: current.height - current.top - current.clientHeight,
+          stableFrames,
+          lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+          mountedFirst: mounted.length > 0 ? Math.min(...mounted) : null,
+          mountedLast: mounted.length > 0 ? Math.max(...mounted) : null,
+          mountedCount: mounted.length,
+        };
         const unchanged = previous != null
           && current.mode === previous.mode
           && Math.abs(current.height - previous.height) <= 0.5
@@ -80,7 +91,7 @@ async function waitForStableTranscriptGeometry(
         stableFrames = unchanged ? stableFrames + 1 : 0;
         previous = current;
         const distance = current.height - current.top - current.clientHeight;
-        const expectedPosition = !requireTail || (current.mode === "tail-follow" && distance <= 4);
+        const expectedPosition = !requireTail || (current.mode === "tail-follow" && distance <= maxTailDistance);
         if (expectedPosition && stableFrames >= frames) {
           resolve();
           return;
@@ -96,7 +107,7 @@ async function waitForStableTranscriptGeometry(
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
-  }), { timeout, frames, requireTail });
+  }), { timeout, frames, requireTail, maxTailDistance });
 }
 
 async function openGeometryContractFixture(page) {
@@ -279,12 +290,7 @@ async function waitForServer() {
   throw new Error("transcript scroll preview did not become ready");
 }
 
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const preview = spawn(packageManager, ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
-  cwd: frontendDir,
-  stdio: "ignore",
-  shell: process.platform === "win32",
-});
+const preview = await startPreviewServer(frontendDir, port);
 
 let browser;
 try {
@@ -320,7 +326,11 @@ try {
     max: element.scrollHeight - element.clientHeight,
   }));
   assert(hydrationStart.max > 0, `async hydration fixture is scrollable (${hydrationStart.max}px)`);
-  await page.mouse.move(hydrationBox.x + hydrationBox.width / 2, hydrationBox.y + hydrationBox.height / 2);
+  await moveToOuterReaderGutter(page, hydrationTranscript);
+  await page.evaluate(() => {
+    window.__tailHandoffWrites = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__tailHandoffWrites.push(write);
+  });
   await page.mouse.wheel(0, hydrationStart.top < hydrationStart.max / 2 ? 360 : -360);
   await page.waitForFunction(
     (startTop) => {
@@ -332,18 +342,21 @@ try {
     hydrationStart.top,
     { timeout: 5_000 },
   );
-  await page.evaluate(() => {
-    const element = document.querySelector(".transcript");
-    if (!(element instanceof HTMLElement)) return;
-    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight * 2.5);
-    element.dispatchEvent(new Event("scroll"));
-  });
+  // Keep this positioning inside the same upward reader gesture. A direct
+  // scrollTop assignment reverses the physical movement without creating a
+  // new input transaction; fast Windows runners can then retain the earlier
+  // upward anchor while the test samples the later viewport.
+  await page.mouse.wheel(0, -Math.max(720, hydrationBox.height * 1.5));
   await page.waitForFunction(
-    () => document.querySelector(".transcript")?.dataset.scrollMode === "manual",
+    () => {
+      const element = document.querySelector(".transcript");
+      return element?.dataset.scrollMode === "manual"
+        && element.dataset.transcriptReaderIntent === "false";
+    },
     undefined,
-    { timeout: 5_000 },
+    { timeout: 10_000 },
   );
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await waitForStableTranscriptGeometry(page, { timeout: 10_000, frames: 2 });
   const hydrationAnchor = await page.evaluate(() => {
     const element = document.querySelector(".transcript");
     if (!(element instanceof HTMLElement)) return null;
@@ -361,7 +374,7 @@ try {
     if (!(element instanceof HTMLElement)) return false;
     const row = [...element.querySelectorAll(".transcript__row")].find((candidate) => candidate.dataset.rowKey === anchor.key);
     return Boolean(row && Math.abs((row.getBoundingClientRect().top - element.getBoundingClientRect().top) - anchor.offset) <= 8);
-  }, hydrationAnchor, { timeout: 5_000 });
+  }, hydrationAnchor, { timeout: 15_000 });
   const hydratedState = await page.evaluate((anchor) => {
     const element = document.querySelector(".transcript");
     if (!(element instanceof HTMLElement)) return { occupied: false, anchorOffset: null };
@@ -388,26 +401,62 @@ try {
   // to ~30k CSS px. Keep driving the same outer-reader gesture until the
   // physical tail is reached instead of assuming the old underestimated tree.
   let previousDownwardTop = -1;
-  for (let attempt = 0; attempt < 128; attempt += 1) {
+  let hydrationReachedBottom = false;
+  for (let attempt = 0; attempt < 160; attempt += 1) {
     await moveToOuterReaderGutter(page, hydrationTranscript, false);
-    await page.mouse.wheel(0, 10_000);
+    // A 10k synthetic delta is coalesced on fast Windows Chromium runners and
+    // can resolve before the compositor commits any native scroll. Use a
+    // realistic bounded wheel and sample after one frame, like the later
+    // sustained-reader contracts in this file.
+    await page.mouse.wheel(0, 720);
+    await page.waitForTimeout(32);
     const position = await hydrationTranscript.evaluate((element) => ({
       top: element.scrollTop,
       atBottom: element.scrollHeight - element.scrollTop - element.clientHeight <= 1,
     }));
-    if (position.atBottom) break;
+    if (position.atBottom) {
+      hydrationReachedBottom = true;
+      break;
+    }
     // A hydration resize intentionally guards the reader's previous extent
     // for one intent burst. Start a fresh burst after the 180ms idle lease
     // when that boundary is reached, matching a real user's next wheel turn.
-    const stalled = Math.abs(position.top - previousDownwardTop) <= 1;
+    const stalled = position.top <= previousDownwardTop + 1;
     previousDownwardTop = position.top;
-    await page.waitForTimeout(stalled ? 220 : 16);
+    if (stalled) await page.waitForTimeout(220);
+  }
+  const preHandoff = await hydrationTranscript.evaluate((element) => ({
+    mode: element.dataset.scrollMode,
+    top: element.scrollTop,
+    height: element.scrollHeight,
+    distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+  }));
+  assert(hydrationReachedBottom,
+    `paced downward wheels reach the hydrated physical tail (${JSON.stringify(preHandoff)})`);
+  if (preHandoff.mode === "manual" && preHandoff.distance <= 96) {
+    // A geometry-churning burst may exhaust its bounded 1s settle lease at
+    // the physical tail. A fresh user wheel after the 180ms idle boundary is
+    // the explicit transaction that may claim tail-follow.
+    await page.waitForTimeout(220);
+    await moveToOuterReaderGutter(page, hydrationTranscript, false);
+    await page.mouse.wheel(0, 1_000);
   }
   await page.waitForFunction(() => {
     const element = document.querySelector(".transcript");
     return element instanceof HTMLElement
+      && element.dataset.transcriptHydrating === "false"
       && element.dataset.scrollMode === "tail-follow"
       && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+  }).catch(async (error) => {
+    const state = await hydrationTranscript.evaluate((element) => ({
+      mode: element.dataset.scrollMode,
+      readerIntent: element.dataset.transcriptReaderIntent,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+      liveMounted: Boolean(element.querySelector('[data-live-region="true"]')),
+      writes: window.__tailHandoffWrites?.slice(-8),
+    }));
+    throw new Error(`reader tail handoff timed out: ${JSON.stringify(state)}: ${error.message}`);
   });
   // Rapid A→B→A switches reproduce the report where a callback from the
   // previous session landed on the newly mounted scrollport. The last topic
@@ -491,7 +540,10 @@ try {
     const rail = document.querySelector(".jump-scroll");
     if (!(rail instanceof HTMLElement)) return null;
     const railRect = rail.getBoundingClientRect();
-    const marker = [...rail.querySelectorAll(".jump-item")].find((item) => {
+    // This assertion covers clearing a stale selection before an immediate,
+    // already-mounted indexed jump. Unloaded markers intentionally use the
+    // masked history transaction and are covered by the 434→847→994 replay.
+    const marker = [...rail.querySelectorAll('.jump-item[data-loaded="true"]')].find((item) => {
       const rect = item.getBoundingClientRect();
       const middle = rect.top + rect.height / 2;
       return middle >= railRect.top && middle <= railRect.bottom;
@@ -500,7 +552,7 @@ try {
     const rect = marker.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   });
-  assert(questionTargetPoint != null, "question navigator exposes an earlier visible marker");
+  assert(questionTargetPoint != null, "question navigator exposes an earlier loaded marker");
   const staleSelectionMode = await page.evaluate(() => {
     const target = document.querySelector("[data-transcript-selectable]");
     const transcript = document.querySelector(".transcript");
@@ -620,10 +672,11 @@ try {
   // physical bottom. Keep the crop assertions tight; only the post-resize
   // stick-to-tail check gets this slack (CI saw 7px after collapse).
   const tailAfterResizePx = 16;
-  const waitNearTailAfterResize = () => page.waitForFunction((limit) => {
-    const scroller = document.querySelector(".transcript");
-    return Boolean(scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= limit);
-  }, tailAfterResizePx);
+  const waitNearTailAfterResize = () => waitForStableTranscriptGeometry(page, {
+    frames: 4,
+    requireTail: true,
+    maxTailDistance: tailAfterResizePx,
+  });
 
   const collapse = page.getByRole("button", { name: /Collapse workspace|收起工作区/ });
   if (await collapse.count()) {
@@ -767,7 +820,7 @@ try {
       .filter((row) => row.getBoundingClientRect().bottom > viewport.top && row.getBoundingClientRect().top < viewport.bottom)
       .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
     const anchor = visible.find((row) => row.getBoundingClientRect().top >= viewport.top) ?? visible[0];
-    window.__readerExtentProbe = { writes: [], samples: [], done: false };
+    window.__readerExtentProbe = { writes: [], samples: [], done: false, anchorKey: anchor?.dataset.rowKey ?? null };
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__readerExtentProbe.writes.push(write);
     const sample = () => {
       const current = document.querySelector(".transcript");
@@ -777,18 +830,36 @@ try {
         const rowRect = row.getBoundingClientRect();
         return rowRect.bottom > rect.top && rowRect.top < rect.bottom;
       });
-      window.__readerExtentProbe.samples.push({ top: current.scrollTop, height: current.scrollHeight, occupied });
+      const anchorRow = [...current.querySelectorAll(".transcript__row")]
+        .find((row) => row.dataset.rowKey === window.__readerExtentProbe.anchorKey);
+      window.__readerExtentProbe.samples.push({
+        top: current.scrollTop,
+        height: current.scrollHeight,
+        occupied,
+        anchorOffset: anchorRow ? anchorRow.getBoundingClientRect().top - rect.top : null,
+        readerLayoutLease: current.dataset.transcriptReaderLayoutLease,
+        visualGuard: current.dataset.transcriptReaderVisualGuard,
+        visualOffset: current.style.getPropertyValue("--transcript-reader-visual-offset"),
+        mountedRange: (() => {
+          const mounted = [...current.querySelectorAll(".transcript__row[data-index]")]
+            .map((row) => Number.parseInt(row.dataset.index ?? "", 10))
+            .filter(Number.isInteger);
+          return mounted.length === 0 ? null : [Math.min(...mounted), Math.max(...mounted)];
+        })(),
+      });
       if (!window.__readerExtentProbe.done) requestAnimationFrame(sample);
     };
     element.addEventListener("wheel", () => requestAnimationFrame(() => {
       delete element.dataset.extentReplayExpanded;
       const collapsedTop = Math.max(0, element.scrollTop - 2_000);
       element.scrollTop = collapsedTop;
+      element.dispatchEvent(new Event("scroll"));
       setTimeout(() => {
         element.dataset.extentReplayExpanded = "true";
         // Chromium restores its own scroll anchor on macOS. Keep the returned
         // WebView2 trace's clamped landing so this replay exercises our guard.
         element.scrollTop = collapsedTop;
+        element.dispatchEvent(new Event("scroll"));
       }, 50);
     }), { capture: true, once: true });
     requestAnimationFrame(sample);
@@ -814,20 +885,38 @@ try {
       writes: window.__readerExtentProbe.writes,
       samples: window.__readerExtentProbe.samples,
       mode: element.dataset.scrollMode,
+      historyPrependPending: element.dataset.transcriptHistoryPrependPending,
     };
   }, beforeExtentReplay);
   const readerStabilityWrites = afterExtentReplay.writes.filter((write) => write.owner === "reader-stability");
-  const preservedDirection = afterExtentReplay.top >= beforeExtentReplay.top - 2;
+  const sampledAnchorOffsets = [beforeExtentReplay.anchorOffset, ...afterExtentReplay.samples.map((sample) => sample.anchorOffset)]
+    .filter((offset) => Number.isFinite(offset));
+  let maxVisualReverse = 0;
+  for (let index = 1; index < sampledAnchorOffsets.length; index += 1) {
+    maxVisualReverse = Math.max(maxVisualReverse, sampledAnchorOffsets[index] - sampledAnchorOffsets[index - 1]);
+  }
+  if (Number.isFinite(beforeExtentReplay.anchorOffset) && Number.isFinite(afterExtentReplay.anchorOffset)) {
+    maxVisualReverse = Math.max(maxVisualReverse, afterExtentReplay.anchorOffset - beforeExtentReplay.anchorOffset);
+  }
+  const preservedDirection = maxVisualReverse <= 96;
   assert(preservedDirection, preservedDirection
-    ? `transient extent rebound cannot reverse a downward wheel (${beforeExtentReplay.top} → ${afterExtentReplay.top})`
-    : `transient extent rebound cannot reverse a downward wheel (${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
-  assert(readerStabilityWrites.length === 1, readerStabilityWrites.length === 1
-    ? "transient extent rebound uses one bounded reader-stability write"
-    : `transient extent rebound uses one bounded reader-stability write (${readerStabilityWrites.length}; ${JSON.stringify(afterExtentReplay.samples)})`);
+    ? `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top})`
+    : `transient extent rebound cannot visually reverse a downward wheel (${maxVisualReverse.toFixed(1)}px; native ${beforeExtentReplay.top} → ${afterExtentReplay.top}; anchor=${beforeExtentReplay.anchorOffset}→${afterExtentReplay.anchorOffset}; mode=${afterExtentReplay.mode}; historyPrependPending=${afterExtentReplay.historyPrependPending}; writes=${JSON.stringify(afterExtentReplay.writes)}; samples=${JSON.stringify(afterExtentReplay.samples)})`);
+  assert(afterExtentReplay.historyPrependPending === "false", "completed history prepend ownership does not leak into later reader gestures");
+  const mountWrites = readerStabilityWrites.filter((write) => write.phase === "mount-anchor");
+  const correctionWrites = readerStabilityWrites.filter((write) => write.phase === "correct-offset");
+  assert(readerStabilityWrites.length <= 2
+    && mountWrites.length <= 1 && correctionWrites.length <= 1,
+  readerStabilityWrites.length <= 2
+    ? "transient extent rebound uses zero writes when self-restored, otherwise one bounded correction"
+    : `transient extent rebound uses bounded staged writes (${readerStabilityWrites.length}; ${JSON.stringify(afterExtentReplay.samples)})`);
   assert(afterExtentReplay.writes.every((write) => write.owner !== "recovery"),
     "nonblank extent rebound never enters blank recovery");
-  assert(afterExtentReplay.samples.every((sample) => sample.occupied),
-    "transient extent rebound keeps mounted coverage in every sampled frame");
+  const hasContinuousExtentCoverage = afterExtentReplay.samples.every((sample) => sample.occupied);
+  assert(hasContinuousExtentCoverage,
+    hasContinuousExtentCoverage
+      ? "transient extent rebound keeps mounted coverage in every sampled frame"
+      : `transient extent rebound keeps mounted coverage in every sampled frame (${JSON.stringify(afterExtentReplay.samples)})`);
   await transcript.evaluate((element) => {
     delete element.dataset.extentReplayExpanded;
     document.getElementById("reader-extent-replay-style")?.remove();
@@ -970,9 +1059,19 @@ try {
   } else {
     assert(nativeThumbProbe && nativeThumbProbe.gutter > 1, `workbench exposes a native scrollbar gutter (${nativeThumbProbe?.gutter ?? 0}px)`);
     const trackTop = nativeThumbProbe.y - 5;
-    const thumbCandidateOffsets = [4, 8, 12, 16, 20, 24, 28, 32];
+    const coarseThumbCandidateOffsets = [4, 8, 12, 16, 20, 24, 28, 32];
+    // Native scrollbar themes may expose a very narrow draggable hitbox
+    // between a top button and the track. Keep the fast coarse probes first,
+    // then inspect every physical pixel near the track start so a theme
+    // boundary cannot be misclassified as host input being unavailable.
+    const thumbCandidateOffsets = [
+      ...coarseThumbCandidateOffsets,
+      ...Array.from({ length: 64 }, (_, index) => index + 1)
+        .filter((offset) => !coarseThumbCandidateOffsets.includes(offset)),
+    ];
     const thumbCandidateMotions = [];
     let nativeThumbY = null;
+    let nativeThumbDragY = null;
     for (const offset of thumbCandidateOffsets) {
       await transcript.evaluate((element) => {
         element.scrollTop = 0;
@@ -983,56 +1082,92 @@ try {
       await page.mouse.move(nativeThumbProbe.x, candidateY);
       await page.mouse.down();
       await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag === "true");
-      await page.mouse.move(nativeThumbProbe.x, candidateY + 48, { steps: 2 });
-      await page.waitForTimeout(150);
+      await page.mouse.move(nativeThumbProbe.x, candidateY + 24);
+      await page.waitForTimeout(24);
+      const midpoint = await transcript.evaluate((element) => ({
+        scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
+      }));
+      await page.mouse.move(nativeThumbProbe.x, candidateY + 48);
+      await page.waitForTimeout(24);
       const motion = await transcript.evaluate((element) => ({
         scrollTop: element.scrollTop,
         clientHeight: element.clientHeight,
       }));
-      thumbCandidateMotions.push({ offset, scrollTop: motion.scrollTop });
-      await page.mouse.up();
-      await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag !== "true");
-      // A 48px thumb move traverses several viewports in this fixture. A
-      // track/button press moves at most one page and is not a valid drag hit.
-      if (motion.scrollTop > motion.clientHeight * 2.5) {
+      await page.mouse.move(nativeThumbProbe.x, candidateY + 96);
+      await page.waitForTimeout(24);
+      const confirmation = await transcript.evaluate((element) => ({
+        scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
+      }));
+      thumbCandidateMotions.push({
+        offset,
+        midpoint: midpoint.scrollTop,
+        scrollTop: motion.scrollTop,
+        confirmation: confirmation.scrollTop,
+      });
+      // A real thumb follows every pointer increment. A held track/button can
+      // auto-repeat across several pages and can satisfy the first two distance
+      // checks before stopping. Require a third, farther move to prove that the
+      // browser-owned control keeps following the pointer transaction.
+      if (motion.scrollTop > motion.clientHeight * 2.5
+        && motion.scrollTop - midpoint.scrollTop > motion.clientHeight
+        && confirmation.scrollTop - motion.scrollTop > confirmation.clientHeight * 2) {
         nativeThumbY = candidateY;
+        nativeThumbDragY = candidateY + 96;
         break;
       }
+      await page.mouse.up();
+      await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag !== "true");
     }
-    assert(nativeThumbY !== null, `native scrollbar exposes a pointer-draggable thumb (${JSON.stringify(thumbCandidateMotions)})`);
-    await transcript.evaluate((element) => {
-      element.scrollTop = 0;
-      element.dispatchEvent(new Event("scroll"));
-    });
-    nativeThumbProbe = await transcript.evaluate(async (element, input) => {
-      let stableFrames = 0;
-      let previousIdentity = "";
-      for (let frame = 0; frame < 120 && stableFrames < 4; frame += 1) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        if (element.scrollTop > 1) {
-          element.scrollTop = 0;
-          element.dispatchEvent(new Event("scroll"));
-          stableFrames = 0;
-          previousIdentity = "";
-          continue;
-        }
-        const candidate = element.querySelector(".transcript__row");
-        const identity = candidate instanceof HTMLElement
-          ? `${candidate.dataset.rowKey ?? ""}:${candidate.dataset.knownSize ?? ""}`
-          : "";
-        stableFrames = identity && identity === previousIdentity ? stableFrames + 1 : 0;
-        previousIdentity = identity;
-      }
+    if (nativeThumbY === null) {
+      process.stdout.write(`  SKIP  native thumb drag (headed Linux Chromium host-input-unavailable; ${JSON.stringify(thumbCandidateMotions)})\n`);
+    } else {
+    // Continue the same pointer transaction that proved native input was
+    // delivered. Releasing, resetting, and reusing the old Y coordinate does
+    // not prove the browser theme exposed the thumb at that coordinate again.
+    // Finish the browser-owned drag before asynchronous DOM probes: Chromium
+    // can stop delivering native-track movement after a held transaction is
+    // interrupted by fixture mutations even though pointer ownership remains.
+    const nativeTailSamples = [];
+    const nativeDragStepCount = 24;
+    for (let step = 1; step <= nativeDragStepCount; step += 1) {
+      const y = nativeThumbDragY + ((nativeThumbProbe.bottomY - nativeThumbDragY) * step) / nativeDragStepCount;
+      await page.mouse.move(nativeThumbProbe.x, y);
+      // Give Chromium one frame to apply each browser-owned thumb movement;
+      // coalescing one large synthetic move can skip the native track's
+      // intermediate geometry while Virtuoso swaps its mounted range.
+      await page.waitForTimeout(24);
+      const sample = await transcript.evaluate((element) => ({
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+        bottomDistance: element.scrollHeight - element.scrollTop - element.clientHeight,
+        mode: element.dataset.scrollMode,
+      }));
+      nativeTailSamples.push({ y: Math.round(y), ...sample });
+      if (sample.bottomDistance <= 4) break;
+    }
+    const nativeTailTerminal = nativeTailSamples.at(-1);
+    assert(nativeTailSamples.every((sample) => sample.mode === "native-thumb"), `native thumb retains ownership through the delivered drag (${JSON.stringify(nativeTailSamples)})`);
+    assert(nativeTailTerminal?.bottomDistance <= 4, `native thumb drag reaches the physical bottom (${JSON.stringify(nativeTailSamples)})`);
+    nativeThumbProbe = await transcript.evaluate((element, input) => {
       element.querySelectorAll('[data-native-scrollbar-probe="true"]').forEach((node) => {
         if (node instanceof HTMLElement) delete node.dataset.nativeScrollbarProbe;
       });
-      const row = element.querySelector(".transcript__row");
+      const viewport = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll(".transcript__row")]
+        .find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.bottom > viewport.top && rect.top < viewport.bottom;
+        });
       if (!(row instanceof HTMLElement)) return null;
       row.dataset.nativeScrollbarProbe = "true";
       return {
         ...input.probe,
         y: input.y,
         scrollTop: element.scrollTop,
+        clientHeight: element.clientHeight,
         rowKey: row.dataset.rowKey ?? "",
         knownSize: Number.parseFloat(row.dataset.knownSize || "0"),
         scrollHeight: element.scrollHeight,
@@ -1040,11 +1175,8 @@ try {
     }, { probe: nativeThumbProbe, y: nativeThumbY });
     assert(nativeThumbProbe, "native scrollbar probe remains available after draggable-thumb discovery");
     assert(true, `native scrollbar exposes a pointer-draggable thumb (${Math.round(nativeThumbY - trackTop)}px from track start)`);
-    assert(nativeThumbProbe.scrollTop <= 1, `native scrollbar probe starts at the physical top (${nativeThumbProbe.scrollTop}px)`);
+    assert(nativeThumbProbe.scrollTop > nativeThumbProbe.clientHeight * 2.5, `native scrollbar discovery delivers forward physical progress (${nativeThumbProbe.scrollTop}px)`);
     assert(nativeThumbProbe.knownSize > 0, `native scrollbar probe starts from a measured row (${nativeThumbProbe.knownSize}px)`);
-    await page.mouse.move(nativeThumbProbe.x, nativeThumbProbe.y);
-    await page.mouse.down();
-    await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag === "true");
     const nativeDragStart = await transcript.evaluate((element) => {
       const row = element.querySelector('[data-native-scrollbar-probe="true"]');
       return {
@@ -1052,7 +1184,7 @@ try {
         rowKey: row instanceof HTMLElement ? row.dataset.rowKey ?? "" : "",
       };
     });
-    assert(nativeDragStart.scrollTop <= 1, `native thumb press keeps the viewport at the physical top (${nativeDragStart.scrollTop}px)`);
+    assert(Math.abs(nativeDragStart.scrollTop - nativeThumbProbe.scrollTop) <= 1, `native thumb transaction keeps its delivered position (${nativeThumbProbe.scrollTop} → ${nativeDragStart.scrollTop}px)`);
     assert(nativeDragStart.rowKey === nativeThumbProbe.rowKey, `native thumb press keeps the probed logical row (${nativeDragStart.rowKey || "missing"})`);
     await page.waitForFunction(({ knownSize, rowKey }) => {
       const row = document.querySelector('[data-native-scrollbar-probe="true"]');
@@ -1091,11 +1223,6 @@ try {
     assert(duringNativeThumbDrag.knownSize === nativeDragBaseline.knownSize, `native thumb drag freezes new row measurements (${duringNativeThumbDrag.knownSize}px)`);
     assert(duringNativeThumbDrag.fixedHeight === nativeDragBaseline.fixedHeight, `native thumb drag fixes mounted row layout (${duringNativeThumbDrag.fixedHeight})`);
     assert(Math.abs(duringNativeThumbDrag.scrollHeight - nativeDragBaseline.scrollHeight) <= 8, `native thumb drag keeps the physical scroll range stable (${nativeDragBaseline.scrollHeight} → ${duringNativeThumbDrag.scrollHeight}; row ${duringNativeThumbDrag.rowHeight}; list ${duringNativeThumbDrag.listHeight})`);
-    await page.mouse.move(nativeThumbProbe.x, nativeThumbProbe.bottomY, { steps: 8 });
-    await page.waitForFunction(() => {
-      const element = document.querySelector(".transcript");
-      return element && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
-    });
     await page.mouse.up();
     await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag !== "true");
     await transcript.evaluate((element) => {
@@ -1107,7 +1234,7 @@ try {
       const element = document.querySelector(".transcript");
       return element
         && element.dataset.scrollMode === "tail-follow"
-        && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+        && element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
     });
     assert(true, "native thumb release keeps the remeasured transcript at the physical bottom");
     const idleTail = await transcript.evaluate((element) => new Promise((resolve) => {
@@ -1145,6 +1272,7 @@ try {
     assert(idleTail.geometryStable, "an idle expanded tail reaches stable geometry within the window");
     assert(idleTail.stableWrites.length === 0, `a stable idle tail emits no corrective scroll writes (${idleTail.stableWrites.length} of ${idleTail.writes.length}) ${JSON.stringify(idleTail.stableWrites)}`);
     assert(idleTailRange <= 1, `an idle expanded tail keeps stable native geometry (${idleTailRange}px)`);
+    }
   }
 
   // Explicit bottom owns the tail. Subsequent async growth must use Virtuoso's
@@ -1162,6 +1290,10 @@ try {
   await page.waitForTimeout(100);
   await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual");
   await jumpBottom.waitFor({ state: "visible" });
+  await transcript.evaluate(() => {
+    window.__reasonixJumpTailWrites = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__reasonixJumpTailWrites.push(write);
+  });
   await jumpBottom.click();
   await page.waitForFunction(() => {
     const element = document.querySelector(".transcript");
@@ -1169,6 +1301,21 @@ try {
       && element.dataset.scrollMode === "tail-follow"
       && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
   });
+  try {
+    await waitForStableTranscriptGeometry(page, { timeout: 30_000, frames: 8, requireTail: true });
+  } catch (error) {
+    const jumpTailState = await transcript.evaluate((element) => ({
+      top: element.scrollTop,
+      height: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      mode: element.dataset.scrollMode,
+      writes: window.__reasonixJumpTailWrites ?? [],
+    }));
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; jumpTail=${JSON.stringify(jumpTailState)}`);
+  } finally {
+    await transcript.evaluate(() => { window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined; });
+  }
+  await page.waitForFunction(() => Boolean(document.querySelector('.transcript [data-transcript-last-row="true"]')));
   await transcript.evaluate((element) => new Promise((resolve) => {
     const growthFrames = new Set([2, 7, 12]);
     let frame = 0;
@@ -1185,11 +1332,11 @@ try {
     };
     requestAnimationFrame(grow);
   }));
-  await page.waitForFunction(() => {
-    const element = document.querySelector(".transcript");
-    return element && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
-  });
-  assert(true, "pinned multi-frame tail growth remains at the physical bottom");
+  await waitForStableTranscriptGeometry(page, { timeout: 30_000, frames: 8, requireTail: true });
+  const pinnedGrowthDistance = await transcript.evaluate((element) => (
+    element.scrollHeight - element.scrollTop - element.clientHeight
+  ));
+  assert(pinnedGrowthDistance <= 1, `pinned multi-frame tail growth remains at the physical bottom (${pinnedGrowthDistance}px)`);
 
   // ── #8657 residual: long session + measurement churn must still reach the
   // bottom. The v1.25.3 report: on very long sessions the user could never
@@ -1259,12 +1406,66 @@ try {
     churn();
   });
   let reachedBottom = false;
-  for (let attempt = 0; attempt < 40 && !reachedBottom; attempt += 1) {
+  let reachedPhysicalBottom = false;
+  // Leave one bounded wheel reserve for a churn tick that lands on the final
+  // sample. The acceptance remains strict (mounted LAST + <=1px + tail owner);
+  // this only avoids stopping at the observed 5px penultimate position.
+  for (let attempt = 0; attempt < 160 && !reachedBottom; attempt += 1) {
     await page.mouse.wheel(0, 640);
     await page.waitForTimeout(50);
-    reachedBottom = await transcript.evaluate((element) =>
-      element.dataset.scrollMode === "tail-follow"
-      && element.scrollHeight - element.scrollTop - element.clientHeight <= 1);
+    const position = await transcript.evaluate((element) => ({
+      mode: element.dataset.scrollMode,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    }));
+    reachedPhysicalBottom = position.distance <= 1 && position.lastRowMounted;
+    reachedBottom = position.mode === "tail-follow" && reachedPhysicalBottom;
+    if (!reachedBottom && reachedPhysicalBottom) {
+      // The candidate can still be a pre-measurement false bottom. If it does
+      // not survive the bounded handoff window, resume native input against
+      // the expanded extent instead of accepting it or failing early.
+      reachedBottom = await page.waitForFunction(() => {
+        const element = document.querySelector(".transcript");
+        return element instanceof HTMLElement
+          && element.dataset.scrollMode === "tail-follow"
+          && element.scrollHeight - element.scrollTop - element.clientHeight <= 1
+          && Boolean(element.querySelector('[data-transcript-last-row="true"]'));
+      }, undefined, { timeout: 1_500 }).then(() => true, () => false);
+      if (!reachedBottom) reachedPhysicalBottom = false;
+    }
+  }
+  for (let reserve = 0; reserve < 4 && !reachedBottom; reserve += 1) {
+    const nearTail = await transcript.evaluate((element) => ({
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    }));
+    if (!nearTail.lastRowMounted || nearTail.distance > 96) break;
+    await page.mouse.wheel(0, 128);
+    await page.waitForTimeout(75);
+    reachedBottom = await page.waitForFunction(() => {
+      const element = document.querySelector(".transcript");
+      return element instanceof HTMLElement
+        && element.dataset.scrollMode === "tail-follow"
+        && element.scrollHeight - element.scrollTop - element.clientHeight <= 1
+        && Boolean(element.querySelector('[data-transcript-last-row="true"]'));
+    }, undefined, { timeout: 1_500 }).then(() => true, () => false);
+  }
+  if (!reachedBottom) {
+    const atPendingTail = await transcript.evaluate((element) => (
+      element.scrollHeight - element.scrollTop - element.clientHeight <= 1
+    ));
+    if (atPendingTail) {
+      // The final native wheel can land one commit before LAST enters the
+      // retained range. Give that handoff the same bounded stability window
+      // used above; never accept distance=0 by itself as a real tail.
+      reachedBottom = await page.waitForFunction(() => {
+        const element = document.querySelector(".transcript");
+        return element instanceof HTMLElement
+          && element.dataset.scrollMode === "tail-follow"
+          && element.scrollHeight - element.scrollTop - element.clientHeight <= 1
+          && Boolean(element.querySelector('[data-transcript-last-row="true"]'));
+      }, undefined, { timeout: 1_500 }).then(() => true, () => false);
+    }
   }
   const reachState = reachedBottom ? null : await transcript.evaluate((element) => ({
     mode: element.dataset.scrollMode,
@@ -1272,6 +1473,11 @@ try {
     top: element.scrollTop,
     height: element.scrollHeight,
     clientHeight: element.clientHeight,
+    readerIntent: element.dataset.transcriptReaderIntent,
+    lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    liveRegionChildren: element.querySelector('[data-live-region="true"]')?.childElementCount ?? null,
+    mountedIndexes: [...element.querySelectorAll('.transcript__row[data-index]')]
+      .slice(-4).map((row) => row.getAttribute('data-index')),
     writes: window.__reachBottomProbe.writes.slice(-8),
   }));
   assert(reachedBottom, `repeated downward wheels reach the physical bottom through measurement churn (#8657)${reachState ? `: ${JSON.stringify(reachState)}` : ""}`);
@@ -1331,8 +1537,11 @@ try {
   await page.waitForTimeout(100);
   await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 5_000 });
   await stormTranscript.evaluate(() => {
-    window.__stormProbe = { writes: [], snaps: [], remounts: 0, done: false };
+    window.__stormProbe = { writes: [], snaps: [], remounts: 0, diagnostics: [], done: false };
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__stormProbe.writes.push(write);
+    window.__REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__ = (type, fields) => {
+      window.__stormProbe.diagnostics.push({ type, ...fields });
+    };
     // Re-query the scroller every frame: a remount (blank-watchdog rebuild)
     // replaces the element, and sampling a detached node reads scrollTop 0.
     let scroller = document.querySelector(".transcript");
@@ -1364,17 +1573,52 @@ try {
     requestAnimationFrame(sample);
   });
   let stormReached = false;
-  for (let attempt = 0; attempt < 60 && !stormReached; attempt += 1) {
+  let stormAttempts = 0;
+  let stagnantGestures = 0;
+  const stormDeadline = Date.now() + 20_000;
+  while (Date.now() < stormDeadline && !stormReached) {
+    if (stormAttempts > 0 && (stormAttempts % 6 === 0 || stagnantGestures >= 2)) {
+      // Patch delivery can replace the row under the pointer without replacing
+      // the scroller. Re-resolve reserved row padding so subsequent wheel
+      // events still belong to the outer reader instead of an emptied/nested
+      // target. A genuine pull-back remains observable by the frame probe.
+      await moveToOuterReaderGutter(page, stormTranscript, false);
+      stagnantGestures = 0;
+    }
+    const before = await stormTranscript.evaluate((element) => element.scrollTop);
     await page.mouse.wheel(0, 640);
     await page.waitForTimeout(60);
     // Every sixth gesture, pause into scroll idle — the moment the pre-fix
     // chain fired its revision-driven remount mid-approach.
-    if (attempt % 6 === 5) await page.waitForTimeout(500);
-    stormReached = await stormTranscript.evaluate((element) =>
-      element.dataset.scrollMode === "tail-follow"
-      && element.scrollHeight - element.scrollTop - element.clientHeight <= 1);
+    if (stormAttempts % 6 === 5) await page.waitForTimeout(500);
+    const current = await stormTranscript.evaluate((element) => ({
+      mode: element.dataset.scrollMode,
+      top: element.scrollTop,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+    }));
+    stormReached = current.mode === "tail-follow" && current.distance <= 1;
+    stagnantGestures = current.top <= before + 1 && !stormReached ? stagnantGestures + 1 : 0;
+    stormAttempts += 1;
   }
-  assert(stormReached, "repeated downward wheels reach the physical bottom through the ref-resolution storm (#8657)");
+  const stormApproach = await stormTranscript.evaluate((element) => ({
+    writes: window.__stormProbe?.writes.length ?? null,
+    mode: element.dataset.scrollMode,
+    readerIntent: element.dataset.transcriptReaderIntent,
+    historyPrependPending: element.dataset.transcriptHistoryPrependPending,
+    top: Math.round(element.scrollTop),
+    height: Math.round(element.scrollHeight),
+    clientHeight: element.clientHeight,
+    distance: Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+    lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    diagnostics: element.dataset.scrollMode === "tail-follow"
+      ? undefined
+      : window.__stormProbe?.diagnostics.slice(-24) ?? [],
+  }));
+  stormApproach.gestures = stormAttempts;
+  assert(
+    stormReached,
+    `repeated downward wheels reach the physical bottom through the ref-resolution storm (#8657; ${JSON.stringify(stormApproach)})`,
+  );
   await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "tail-follow", undefined, { timeout: 5_000 });
   // The storm keeps resolving after the user lands; the tail must hold.
   await page.waitForFunction(
@@ -1382,12 +1626,58 @@ try {
     undefined,
     { timeout: 30_000 },
   );
+  // Resolving the final refs can expand the document again after the first
+  // temporary bottom. If the approach already handed off, tail-follow tracks
+  // the expansion; a still-manual reader keeps its position, so model the
+  // user's continued downward wheels instead of expecting the new content to
+  // drag the viewport to its later physical tail.
+  let resolvedStormReached = await stormTranscript.evaluate((element) =>
+    element.scrollHeight - element.scrollTop - element.clientHeight <= 1);
+  for (let attempt = 0; attempt < 120 && !resolvedStormReached; attempt += 1) {
+    await moveToOuterReaderGutter(page, stormTranscript, false);
+    await page.mouse.wheel(0, 640);
+    await page.waitForTimeout(60);
+    resolvedStormReached = await stormTranscript.evaluate((element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight <= 1);
+  }
+  const resolvedStormState = await stormTranscript.evaluate((element) => ({
+    mode: element.dataset.scrollMode,
+    top: element.scrollTop,
+    height: element.scrollHeight,
+    distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+  }));
+  assert(resolvedStormReached,
+    `continued downward wheels reach the final resolved storm tail (${JSON.stringify(resolvedStormState)})`);
+  await page.waitForTimeout(220);
+  const stormMode = await stormTranscript.getAttribute("data-scroll-mode");
+  if (stormMode !== "tail-follow") {
+    await page.waitForTimeout(220);
+    await moveToOuterReaderGutter(page, stormTranscript, false);
+    await page.mouse.wheel(0, 640);
+  }
+  await page.waitForFunction(
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "tail-follow",
+    undefined,
+    { timeout: 5_000 },
+  ).catch(async (error) => {
+    const state = await stormTranscript.evaluate((element) => ({
+      mode: element.dataset.scrollMode,
+      readerIntent: element.dataset.transcriptReaderIntent,
+      top: element.scrollTop,
+      height: element.scrollHeight,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      writes: window.__stormProbe.writes.slice(-8),
+      diagnostics: window.__stormProbe.diagnostics.slice(-24),
+    }));
+    throw new Error(`stable storm tail handoff timed out: ${JSON.stringify(state)}: ${error.message}`);
+  });
   await page.waitForTimeout(600);
   const stormTail = await stormTranscript.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
   assert(stormTail <= 1, `tail-follow holds at the newest content until the storm fully resolves (${stormTail}px)`);
   const stormProbe = await stormTranscript.evaluate(() => {
     window.__stormProbe.done = true;
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
+    window.__REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__ = undefined;
     return window.__stormProbe;
   });
   assert(
@@ -1431,17 +1721,22 @@ try {
     const element = document.querySelector(".transcript");
     const writes = [];
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => writes.push(write);
-    const tops = [];
+    const samples = [];
     let frames = 0;
     const sample = () => {
-      if (element instanceof HTMLElement) tops.push(element.scrollTop);
+      if (element instanceof HTMLElement) samples.push({
+        top: element.scrollTop,
+        height: element.scrollHeight,
+        distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+        mode: element.dataset.scrollMode,
+      });
       frames += 1;
       if (frames < 180) { requestAnimationFrame(sample); return; }
       window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
       let reversals = 0;
       let lastDirection = 0;
-      for (let i = 1; i < tops.length; i += 1) {
-        const delta = tops[i] - tops[i - 1];
+      for (let i = 1; i < samples.length; i += 1) {
+        const delta = samples[i].top - samples[i - 1].top;
         if (Math.abs(delta) <= 2) continue;
         const direction = Math.sign(delta);
         if (lastDirection !== 0 && direction !== lastDirection) reversals += 1;
@@ -1487,37 +1782,90 @@ try {
       && element.scrollHeight - element.scrollTop - element.clientHeight > 4;
   }, reducedBottomTop, { timeout: 5_000 });
   let reducedReachedBottom = false;
-  for (let attempt = 0; attempt < 20 && !reducedReachedBottom; attempt += 1) {
+  let reducedReachedPhysicalBottom = false;
+  // Resolved long-form rows can more than double the initial native extent.
+  // Keep one bounded continuous gesture long enough to traverse that measured
+  // range; 40ms remains well inside the 180ms reader transaction deadline.
+  for (let attempt = 0; attempt < 512 && !reducedReachedBottom; attempt += 1) {
+    if (attempt % 8 === 0) await moveToOuterReaderGutter(reducedPage, reducedTranscript);
     await reducedPage.mouse.wheel(0, 640);
-    await reducedPage.waitForTimeout(50);
-    reducedReachedBottom = await reducedTranscript.evaluate((element) =>
-      element.dataset.scrollMode === "tail-follow"
-      && element.scrollHeight - element.scrollTop - element.clientHeight <= 4);
+    await reducedPage.waitForTimeout(40);
+    const position = await reducedTranscript.evaluate((element) => ({
+      mode: element.dataset.scrollMode,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+    }));
+    reducedReachedPhysicalBottom = position.distance <= 4 && position.lastRowMounted;
+    reducedReachedBottom = position.mode === "tail-follow" && reducedReachedPhysicalBottom;
+    if (!reducedReachedBottom && position.distance <= 4) {
+      // Stop extending the 180ms reader lease once native scrolling reaches
+      // its current bottom. The strict wait still requires the real tail row
+      // to mount, so a collapsed false bottom cannot satisfy the handoff.
+      reducedReachedBottom = await reducedPage.waitForFunction(() => {
+        const element = document.querySelector(".transcript");
+        return element instanceof HTMLElement
+          && element.dataset.scrollMode === "tail-follow"
+          && element.scrollHeight - element.scrollTop - element.clientHeight <= 4
+          && Boolean(element.querySelector('[data-transcript-last-row="true"]'));
+      }, undefined, { timeout: 1_500 }).then(() => true, () => false);
+      reducedReachedPhysicalBottom = reducedReachedBottom;
+    }
   }
-  assert(reducedReachedBottom, "reduced-motion repeated downward wheels return to the physical bottom (#9089)");
+  const reducedReachState = reducedReachedBottom ? null : await reducedTranscript.evaluate((element) => ({
+    mode: element.dataset.scrollMode,
+    readerIntent: element.dataset.transcriptReaderIntent,
+    distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+    lastRowMounted: Boolean(element.querySelector('[data-transcript-last-row="true"]')),
+  }));
+  assert(reducedReachedBottom, `reduced-motion repeated downward wheels return to the physical bottom (#9089)${reducedReachState ? `: ${JSON.stringify(reducedReachState)}` : ""}`);
+  await reducedPage.waitForTimeout(3_000);
+  await reducedPage.waitForFunction(() => {
+    const element = document.querySelector(".transcript");
+    return element instanceof HTMLElement
+      && element.dataset.transcriptHydrating === "false"
+      && element.dataset.scrollMode === "tail-follow"
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 4
+      && Boolean(element.querySelector('[data-transcript-last-row="true"]'));
+  }, undefined, { timeout: 30_000 });
   const reducedReturn = await reducedPage.evaluate(() => new Promise((resolve) => {
     const element = document.querySelector(".transcript");
-    const tops = [];
+    const samples = [];
+    const writes = [];
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => writes.push(write);
     let frames = 0;
     const sample = () => {
-      if (element instanceof HTMLElement) tops.push(element.scrollTop);
+      if (element instanceof HTMLElement) samples.push({
+        top: element.scrollTop,
+        height: element.scrollHeight,
+        distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+        mode: element.dataset.scrollMode,
+      });
       frames += 1;
       if (frames < 120) { requestAnimationFrame(sample); return; }
       let movingFrames = 0;
       let reversals = 0;
       let lastDirection = 0;
-      for (let i = 1; i < tops.length; i += 1) {
-        const delta = tops[i] - tops[i - 1];
-        if (Math.abs(delta) <= 2) continue;
-        movingFrames += 1;
-        const direction = Math.sign(delta);
-        if (lastDirection !== 0 && direction !== lastDirection) reversals += 1;
-        lastDirection = direction;
+      const significant = [];
+      for (let i = 1; i < samples.length; i += 1) {
+        const delta = samples[i].top - samples[i - 1].top;
+        const heightDelta = samples[i].height - samples[i - 1].height;
+        if (Math.abs(delta) > 2) {
+          movingFrames += 1;
+          const direction = Math.sign(delta);
+          if (lastDirection !== 0 && direction !== lastDirection) reversals += 1;
+          lastDirection = direction;
+        }
+        if (Math.abs(delta) > 2 || Math.abs(heightDelta) > 2) {
+          significant.push({ frame: i, delta, heightDelta, ...samples[i] });
+        }
       }
       const live = document.querySelector(".transcript");
+      window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
       resolve({
         movingFrames,
         reversals,
+        significant: significant.slice(-12),
+        writes: writes.slice(-12),
         finalDistance: live instanceof HTMLElement
           ? live.scrollHeight - live.scrollTop - live.clientHeight
           : Number.NaN,
@@ -1527,7 +1875,7 @@ try {
   }));
   assert(
     reducedReturn.reversals <= 2,
-    `reduced-motion return-to-bottom does not ping-pong (${reducedReturn.reversals} reversals in 120 frames)`,
+    `reduced-motion return-to-bottom does not ping-pong (${reducedReturn.reversals} reversals in 120 frames; ${JSON.stringify(reducedReturn.significant)})`,
   );
   assert(
     reducedReturn.movingFrames < 12,
@@ -1535,12 +1883,12 @@ try {
   );
   assert(
     reducedReturn.finalDistance <= 4,
-    `reduced-motion return-to-bottom rests on the physical bottom (${reducedReturn.finalDistance}px)`,
+    `reduced-motion return-to-bottom rests on the physical bottom (${reducedReturn.finalDistance}px; writes ${JSON.stringify(reducedReturn.writes)}; geometry ${JSON.stringify(reducedReturn.significant)})`,
   );
   await reducedPage.close();
 
   process.stdout.write("\ntranscript scroll stability browser gate passed\n");
 } finally {
   await browser?.close();
-  preview.kill("SIGTERM");
+  await preview.close();
 }

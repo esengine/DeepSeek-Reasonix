@@ -19,6 +19,20 @@ func testSessionPath(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "session.jsonl")
 }
 
+func openTestLedger(t *testing.T, sessionPath, sessionID string) *Ledger {
+	t.Helper()
+	ledger, err := Open(sessionPath, sessionID)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ledger.Close(); err != nil {
+			t.Errorf("Close test ledger: %v", err)
+		}
+	})
+	return ledger
+}
+
 func TestLedgerPersistsMonotonicEventsAndExactlyOneTerminal(t *testing.T) {
 	path := testSessionPath(t)
 	l, err := Open(path, "session")
@@ -62,10 +76,7 @@ func TestLedgerPersistsMonotonicEventsAndExactlyOneTerminal(t *testing.T) {
 
 func TestLedgerProjectionCursorReplaysOnlyActiveTurn(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin first: %v", err)
 	}
@@ -88,10 +99,7 @@ func TestLedgerProjectionCursorReplaysOnlyActiveTurn(t *testing.T) {
 
 func TestLedgerSubmissionReceiptSurvivesCompletionAndIsOneShot(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	l.SetRoutingMetadata("epoch-1", "submission-1")
 	first, err := l.Begin()
 	if err != nil {
@@ -127,10 +135,7 @@ func TestLedgerSubmissionReceiptSurvivesCompletionAndIsOneShot(t *testing.T) {
 }
 
 func TestLedgerRejectsStatusRegressionAndKeepsCancellationSticky(t *testing.T) {
-	l, err := Open(testSessionPath(t), "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, testSessionPath(t), "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -151,10 +156,7 @@ func TestLedgerRejectsStatusRegressionAndKeepsCancellationSticky(t *testing.T) {
 
 func TestLedgerRepairsTornTailAndKeepsValidPrefix(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -171,10 +173,7 @@ func TestLedgerRepairsTornTailAndKeepsValidPrefix(t *testing.T) {
 	}
 	_ = f.Close()
 
-	reopened, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	reopened := openTestLedger(t, path, "session")
 	recs, err := reopened.EventsAfter(0)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
@@ -193,10 +192,7 @@ func TestLedgerRepairsTornTailAndKeepsValidPrefix(t *testing.T) {
 
 func TestLedgerIsolatesNonMonotonicTail(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -213,10 +209,7 @@ func TestLedgerIsolatesNonMonotonicTail(t *testing.T) {
 	}
 	_ = f.Close()
 
-	reopened, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	reopened := openTestLedger(t, path, "session")
 	recs, err := reopened.EventsAfter(0)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
@@ -232,10 +225,7 @@ func TestLedgerIsolatesNonMonotonicTail(t *testing.T) {
 
 func TestLedgerRecoveryClosesRunningToolsWithoutReplay(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -248,10 +238,7 @@ func TestLedgerRecoveryClosesRunningToolsWithoutReplay(t *testing.T) {
 		t.Fatalf("append dispatch: ok=%v err=%v", ok, err)
 	}
 
-	reopened, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	reopened := openTestLedger(t, path, "session")
 	recs, err := reopened.EventsAfter(0)
 	if err != nil {
 		t.Fatalf("EventsAfter: %v", err)
@@ -302,10 +289,7 @@ func TestLedgerBootstrapsLegacyTranscriptWithoutRewritingIt(t *testing.T) {
 
 func TestLedgerReplayEmptyArrayAndUnknownFields(t *testing.T) {
 	path := testSessionPath(t)
-	l, err := Open(path, "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, path, "session")
 	recs, err := l.EventsAfter(99)
 	if err != nil {
 		t.Fatalf("EventsAfter empty: %v", err)
@@ -328,10 +312,7 @@ func TestLedgerReplayEmptyArrayAndUnknownFields(t *testing.T) {
 	if err := os.WriteFile(ledgerPath, data, 0o600); err != nil {
 		t.Fatalf("rewrite with unknown field: %v", err)
 	}
-	_, err = Open(path, "session")
-	if err != nil {
-		t.Fatalf("unknown fields must be ignored: %v", err)
-	}
+	openTestLedger(t, path, "session")
 }
 
 func TestLedgerPersistentHandleTerminalSyncAndProjectionAckOpenCounts(t *testing.T) {
@@ -428,10 +409,7 @@ func TestLedgerCompactionWaitsForProjectionAckAndReplayResetsAtCheckpoint(t *tes
 }
 
 func TestLedgerReplayPaginationAndOutOfRangeCursor(t *testing.T) {
-	l, err := Open(testSessionPath(t), "session")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	l := openTestLedger(t, testSessionPath(t), "session")
 	if _, err := l.Begin(); err != nil {
 		t.Fatalf("Begin: %v", err)
 	}

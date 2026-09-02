@@ -129,7 +129,8 @@ type Contract struct {
 	Checks       []Check
 	Obligations  []Obligation
 
-	epoch uint64
+	epoch              uint64
+	independentReviews int
 }
 
 // New returns an empty contract. Callers that still pass historical input

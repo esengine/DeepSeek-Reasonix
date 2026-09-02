@@ -384,13 +384,16 @@ export const Markdown = memo(function Markdown({
   text,
   plainStatusBlocks = false,
   streaming = false,
-  entryId,
+  cacheKey,
+  wasStreamed,
 }: {
   text: string;
   plainStatusBlocks?: boolean;
   streaming?: boolean;
-  /** History entry id (`he:<entryId>` rows) — enables the parsed-block cache. */
-  entryId?: string;
+  /** Stable transcript item key shared by live-footer and virtualized hosts. */
+  cacheKey?: string;
+  /** The item originated in the live renderer, even if this is a remount. */
+  wasStreamed?: boolean;
 }) {
   // legacyMode: the worker/inline pipeline failed (Worker unavailable AND the
   // in-process parse threw) — fall back to the pre-Phase-E behavior:
@@ -408,9 +411,8 @@ export const Markdown = memo(function Markdown({
   // A row that ever streamed keeps its already-parsed committed sections as
   // the parse-in-flight fallback; a fresh history mount shows the full text
   // as plain first (never truncated) until worker blocks swap in.
-  const wasStreamingRef = useRef(false);
+  const wasStreamingRef = useRef(Boolean(wasStreamed));
   if (streaming) wasStreamingRef.current = true;
-
   // Finalize timing parity with the old idle path: measure from stream
   // completion (or mount, for history) to the worker blocks swapping in.
   const finalizeStartRef = useRef(0);
@@ -451,15 +453,16 @@ export const Markdown = memo(function Markdown({
 
   if (streaming || legacyMode) return committedView;
 
+  const historyFallback = wasStreamingRef.current
+    ? committedView
+    : <div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>;
   return (
-    <Suspense fallback={<div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>}>
+    <Suspense fallback={historyFallback}>
       <MarkdownHistory
         text={text}
         plainStatusBlocks={plainStatusBlocks}
-        entryId={entryId}
-        fallback={wasStreamingRef.current
-          ? committedView
-          : <div className="md" data-transcript-geometry-pending data-transcript-selection-source-fallback>{text}</div>}
+        cacheKey={cacheKey}
+        fallback={historyFallback}
         onParsed={handleWorkerParsed}
         onError={handleWorkerError}
       />

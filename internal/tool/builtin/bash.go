@@ -548,7 +548,7 @@ func shouldReapAfterRun(ctx context.Context, sh sandbox.Shell, command string, p
 	if preserveBackgroundProcesses {
 		return false
 	}
-	return sh.Kind != sandbox.ShellBash || !hasExplicitBackgroundKeepalive(command)
+	return !sh.Kind.IsPOSIX() || !hasExplicitBackgroundKeepalive(command)
 }
 
 // hasExplicitBackgroundKeepalive detects common shell-level daemonization intent
@@ -596,7 +596,7 @@ func shouldTrackShellProcess(wrapped bool, sh sandbox.Shell, command string, pre
 	if runtime.GOOS == "windows" && wrapped {
 		return false
 	}
-	return sh.Kind != sandbox.ShellBash || !hasExplicitBackgroundKeepalive(command)
+	return !sh.Kind.IsPOSIX() || !hasExplicitBackgroundKeepalive(command)
 }
 
 func runShellProcess(ctx context.Context, cmd *exec.Cmd, sh sandbox.Shell, command string, track bool) (*proc.TrackedCommand, error) {

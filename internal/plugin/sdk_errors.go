@@ -6,8 +6,91 @@ import (
 	"io"
 	"strings"
 
+	mcpjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func isExplicitMCPSessionMissing(err error) bool {
+	if errors.Is(err, mcpsdk.ErrSessionMissing) {
+		return true
+	}
+	if !isMCPHTTPNotFound(err) || !hasMCPTransportRejection(err) {
+		return false
+	}
+	found := false
+	visitMCPRPCErrors(err, func(rpcErr *mcpjsonrpc.Error) {
+		message := strings.ToLower(strings.TrimSpace(rpcErr.Message))
+		for _, marker := range []string{
+			"session not found",
+			"session missing",
+			"session expired",
+			"invalid session",
+			"unknown session",
+		} {
+			if strings.Contains(message, marker) {
+				found = true
+			}
+		}
+	})
+	return found
+}
+
+// isMCPHTTPNotFound recognizes the status-only error emitted by newer Go MCP
+// SDKs for a plain HTTP 404 when no session ID exists. It intentionally does
+// not match arbitrary "not found" prose so a tool-level domain error cannot be
+// mistaken for an endpoint or protocol mismatch.
+func isMCPHTTPNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	hasRPCError := false
+	visitMCPRPCErrors(err, func(*mcpjsonrpc.Error) {
+		hasRPCError = true
+	})
+	if hasRPCError && !hasMCPTransportRejection(err) {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return message == "not found" ||
+		strings.HasSuffix(message, ": not found") ||
+		strings.Contains(message, "http 404") ||
+		strings.Contains(message, "status 404")
+}
+
+func hasMCPTransportRejection(err error) bool {
+	found := false
+	visitMCPRPCErrors(err, func(rpcErr *mcpjsonrpc.Error) {
+		if rpcErr.Code == -32005 && strings.EqualFold(strings.TrimSpace(rpcErr.Message), "rejected by transport") {
+			found = true
+		}
+	})
+	return found
+}
+
+// visitMCPRPCErrors walks every concrete error-tree node because errors.As
+// returns only the first matching RPC error and would hide transport evidence.
+//
+//nolint:errorlint // Direct inspection distinguishes server errors from the SDK transport sentinel.
+func visitMCPRPCErrors(err error, visit func(*mcpjsonrpc.Error)) {
+	if err == nil {
+		return
+	}
+	if rpcErr, ok := err.(*mcpjsonrpc.Error); ok && rpcErr != nil {
+		visit(rpcErr)
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, child := range wrapped.Unwrap() {
+			visitMCPRPCErrors(child, visit)
+		}
+	case interface{ Unwrap() error }:
+		visitMCPRPCErrors(wrapped.Unwrap(), visit)
+	}
+}
+
+func (t *sdkSessionTransport) isStreamableHTTPNotFound(err error) bool {
+	return canonicalMCPRuntimeTransport(t.spec.Type) == "streamable-http" && isMCPHTTPNotFound(err)
+}
 
 func isTerminalSDKError(err error) bool {
 	return errors.Is(err, mcpsdk.ErrConnectionClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
@@ -31,7 +114,7 @@ func classifySessionError(err error) SessionErrorKind {
 		return SessionErrorNone
 	}
 	switch {
-	case errors.Is(err, mcpsdk.ErrSessionMissing):
+	case isExplicitMCPSessionMissing(err):
 		return SessionErrorSessionMissing
 	case errors.Is(err, context.DeadlineExceeded):
 		return SessionErrorTimeout

@@ -72,6 +72,16 @@ eq(
   "min(30vh, 160px) !important",
   "hero input cap is min(30vh, 160px) instead of the 96px hard clip",
 );
+eq(
+  finalDeclaration(".composer__input.composer__input--measure", "position"),
+  "absolute",
+  "autosize mirror stays outside the composer layout flow",
+);
+eq(
+  finalDeclaration(".composer__input.composer__input--measure", "visibility"),
+  "hidden",
+  "autosize mirror is never visible to the user",
+);
 
 ok(
   /composerAutoOverflow = composerHeight === null && textareaAutoOverflow/.test(composerSource)
@@ -81,6 +91,15 @@ ok(
 ok(
   /Math\.min\(Math\.floor\(window\.innerHeight \* 0\.3\), 160\)/.test(composerSource),
   "hero input JS cap is min(30vh, 160px)",
+);
+ok(
+  /const measureTaRef = useRef<HTMLTextAreaElement>\(null\)/.test(composerSource)
+    && /ref=\{measureTaRef\}[\s\S]*?value=\{text\}[\s\S]*?aria-hidden="true"/.test(composerSource),
+  "Composer renders a text-synchronized, accessibility-hidden measurement mirror",
+);
+ok(
+  !/\.style\.height\s*=\s*"auto"/.test(composerSource),
+  "autosize measurement never collapses the live textarea",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

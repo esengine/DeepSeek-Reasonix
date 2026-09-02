@@ -12,6 +12,8 @@
 package event
 
 import (
+	"encoding/json"
+
 	"reasonix/internal/billing"
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
@@ -126,10 +128,14 @@ const (
 	// TurnStatusChanged is a content-free lifecycle transition such as
 	// waiting_user, cancelling, or returning to in_progress after an answer.
 	TurnStatusChanged
-	// PromptAnswered records that a durable Ask/approval item was answered and
-	// the same turn resumed. ItemID carries the stable prompt id; answer content
-	// remains in its purpose-built decision receipt rather than diagnostics.
+	// PromptAnswered records that a durable Ask/approval item was answered and the same turn resumed; ItemID carries the stable prompt id and answer content remains in its purpose-built decision receipt.
 	PromptAnswered
+	// MCPInteractionRequest carries a server-initiated MCP elicitation (form
+	// or URL) for the frontend to answer via the MCP interaction resolve call.
+	// Appended last to keep the Kind values before it wire-stable.
+	MCPInteractionRequest
+	// SessionChanged is a content-free Serve routing barrier for all-session clients.
+	SessionChanged
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -329,6 +335,20 @@ type Ask struct {
 	Questions []AskQuestion
 }
 
+// MCPInteraction carries one MCPInteractionRequest: a server-initiated
+// elicitation the frontend must answer with accept/decline/cancel. Mode is
+// "form" (RequestedSchema is a flat primitive JSON schema) or "url" (URL is a
+// credential-free HTTP(S) target the user opens explicitly).
+type MCPInteraction struct {
+	ID              string
+	Server          string
+	Mode            string
+	Message         string
+	RequestedSchema json.RawMessage
+	URL             string
+	ElicitationID   string
+}
+
 // Extension surface kind values carried by ExtensionSurfacePayload.Kind. They
 // mirror the extension protocol's structured surface kinds; "request" is
 // reserved for stage-8b request surfaces (stage 8a routes blocking prompts
@@ -505,32 +525,6 @@ const (
 
 // Event is one increment in a turn's event stream. Read the field(s) documented
 // for Kind; the others are zero.
-// Notice codes are stable machine-readable identifiers for known notices.
-// Frontends localize a notice's main copy by Code and fall back to matching
-// the English Text (or showing it raw) when Code is empty or unknown, so
-// wording edits in Go no longer silently break localization. Values are
-// wire-stable: never rename or reuse one once shipped.
-const (
-	NoticeCodeFinalReadiness                                    = "final_readiness"
-	NoticeCodeEmptyFinal                                        = "empty_final"
-	NoticeCodeExecutorHandoff                                   = "executor_handoff"
-	NoticeCodeToolBudget                                        = "tool_budget"
-	NoticeCodePromptQueued                                      = "prompt_queued"
-	NoticeCodeLoopGuard                                         = "loop_guard"
-	NoticeCodeProgressGuard                                     = "progress_guard"
-	NoticeCodeEvidenceNudge                                     = "evidence_nudge"
-	NoticeCodeReasoningGovernor                                 = "reasoning_governor"
-	NoticeCodeWorkspaceLease                                    = "workspace_lease"
-	NoticeCodeCancelledTurn                                     = "cancelled_turn_display"
-	NoticeCodeUnappliedSteer                                    = "unapplied_steer"
-	NoticeCodeSessionRecoveryForked                             = "session_recovery_forked"
-	NoticeCodeSessionRecoveryAdopted                            = "session_recovery_adopted"
-	NoticeCodeSessionRecoveryAdoptedCovered                     = "session_recovery_adopted_covered"
-	NoticeCodeSessionRecoveryDepthCap                           = "session_recovery_depth_cap"
-	NoticeCodeSessionShutdownRecoveryForked                     = "session_shutdown_recovery_forked"
-	NoticeCodeDecisionReceipt, NoticeCodeContextEditingFallback = "decision_receipt", "context_editing_fallback"
-)
-
 type Event struct {
 	Kind             Kind
 	TurnID           string                    // stable id of the owning top-level turn
@@ -559,6 +553,7 @@ type Event struct {
 	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
 	Approval        Approval                 // ApprovalRequest
 	Ask             Ask                      // AskRequest
+	MCPInteraction  MCPInteraction           // MCPInteractionRequest
 	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
 	Err             error                    // TurnDone: non-nil on failure
 	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
@@ -574,10 +569,10 @@ type Event struct {
 	RetryMax        int                       // Retrying: total attempts before giving up
 	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
 	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
-	// ItemID correlates Steer / unapplied-steer / TurnDone with a durable
-	// session-inbox entry. Empty for legacy callers that still use text only.
-	ItemID    string
-	Workspace *WorkspaceChangedPayload // WorkspaceChanged (host-local)
+	ItemID          string                    // correlates durable inbox events
+	SessionPath     string                    // routes Serve frames
+	SessionReset    bool                      // SessionChanged came from /new or /clear, not resume/recovery
+	Workspace       *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
 	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
 	PhaseName TurnPhaseName
 	// Completion is set on CompletionSummary events.

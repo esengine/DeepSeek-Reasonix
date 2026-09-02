@@ -38,7 +38,8 @@ ok(
   "App keeps session export code out of the initial chunk",
 );
 ok(
-  appSource.includes('import("./lib/sessionExport")'),
+  appSource.includes('import("./lib/sessionExportData")') &&
+    appSource.includes('import("./lib/sessionExport")'),
   "App loads session export code on demand",
 );
 ok(

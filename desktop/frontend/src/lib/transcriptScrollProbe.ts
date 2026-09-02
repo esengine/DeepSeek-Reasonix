@@ -14,16 +14,22 @@ export type TranscriptScrollWriteRecord = {
   /** Logical writer, e.g. "tail-follow", "jump", "recovery", or a
    *  TranscriptScrollOwner such as "selection-edge-scroll". */
   owner: string;
-  kind: "scrollTo" | "scrollBy" | "scrollToIndex";
+  kind: "scrollTo" | "scrollBy" | "scrollToIndex" | "pinTail";
   top?: number;
   index?: number | "LAST";
   source?: string;
-  phase?: "initial" | "settle";
+  phase?: "mount-anchor" | "correct-offset" | "initial" | "settle";
   scrollTop?: number;
   scrollHeight?: number;
   clientHeight?: number;
   bottomDistance?: number;
   mode?: string;
+  sequence?: number;
+  generation?: number;
+  ownershipEpoch?: number;
+  geometryRevision?: number;
+  transactionId?: number;
+  rejectedReason?: string;
   settleFrame?: number;
   offBottomFrames?: number;
   stagnantFrames?: number;
@@ -49,11 +55,15 @@ export function recordTranscriptScrollDiagnostic(type: string, fields: Record<st
   // Keep the legacy scroll trace intact while forwarding the same content-free
   // geometry into the broader frontend interaction timeline.
   recordFrontendDiagnostic("transcript", `transcript.${type}`, fields);
+  // The bench harness (desktop/frontend/bench) installs this page-side hook to
+  // attach the diagnostic stream to replay failure output.
+  if (typeof window !== "undefined") window.__REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__?.(type, fields);
 }
 
 declare global {
   interface Window {
     __REASONIX_TRANSCRIPT_SCROLL_WRITE__?: (write: TranscriptScrollWriteRecord) => void;
+    __REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__?: (type: string, fields: Record<string, unknown>) => void;
   }
 }
 
@@ -71,6 +81,12 @@ export function noteTranscriptScrollWrite(write: TranscriptScrollWriteRecord): v
       clientHeight: write.clientHeight,
       bottomDistance: write.bottomDistance,
       mode: write.mode,
+      sequence: write.sequence,
+      generation: write.generation,
+      ownershipEpoch: write.ownershipEpoch,
+      geometryRevision: write.geometryRevision,
+      transactionId: write.transactionId,
+      rejectedReason: write.rejectedReason,
       settleFrame: write.settleFrame,
       offBottomFrames: write.offBottomFrames,
       stagnantFrames: write.stagnantFrames,

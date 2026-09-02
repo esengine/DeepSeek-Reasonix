@@ -64,6 +64,17 @@ func TestClassifyEffectFileAndMCP(t *testing.T) {
 	}
 }
 
+func TestClassifyEffectKillShellIsHostStateOnly(t *testing.T) {
+	profile := ClassifyEffect(EffectInput{ToolName: "kill_shell", Args: json.RawMessage(`{"job_id":"task-1"}`)})
+	if !profile.Known || profile.ReadOnly || !profile.HostState || profile.WorkspaceWrite || profile.RepoMetadata || profile.ExternalState {
+		t.Fatalf("kill_shell profile = %+v, want host-state-only mutation", profile)
+	}
+	effects := profile.ToolEffects()
+	if !effects.StateMutation || effects.WorkspaceMutation || effects.ContentMutation || effects.RepositoryMutation {
+		t.Fatalf("kill_shell effects = %+v, want state mutation without workspace mutation", effects)
+	}
+}
+
 func TestClassifyWriteScopeScratchWriteFile(t *testing.T) {
 	workspace := t.TempDir()
 	scratchPath := filepath.Join(os.TempDir(), "reasonix-scope-probe.py")

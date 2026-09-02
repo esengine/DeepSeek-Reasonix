@@ -234,7 +234,8 @@ func (a *Agent) interceptProviderResponse(ctx context.Context, text, reasoning, 
 	return text, reasoning, signature, calls, usage, nil
 }
 
-// interceptToolBefore runs tool.before right after the call parsed. A block
+// interceptToolBefore runs tool.before after the host resolved and validated
+// the concrete target. A block
 // fails the call with the reason as the tool-result error (mirroring a
 // PreToolUse hook block). A replacement substitutes the provider-visible name
 // and arguments, but only after host revalidation — the arguments must decode
@@ -276,9 +277,6 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 	}
 	plan.call.Name = payload.Name
 	plan.call.Arguments = payload.Arguments
-	if blocked, early := a.parseToolCall(ctx, plan); early {
-		return blocked, true
-	}
 	return toolOutcome{}, false
 }
 
