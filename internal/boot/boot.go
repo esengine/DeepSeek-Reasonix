@@ -633,6 +633,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	mem := memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir()})
 	projectChecks := instruction.ExtractHostChecks(mem.Docs)
+	// sysPromptBase is the assembled prefix up to (but not including) the memory
+	// region: base prompt + core policies + workspace + environment. A
+	// post-compaction memory reload reuses it so only the # Memory region is
+	// regenerated from the latest on-disk memory.
+	sysPromptBase := sysPrompt
 	sysPrompt = memory.Compose(sysPrompt, mem)
 
 	implicitSkillInvocation := cfg.ImplicitSkillInvocationEnabled()
@@ -667,6 +672,22 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 	}
 	sysPrompt = config.ApplyOfficialDeepSeekV4ProPersona(sysPrompt, entry)
+
+	// memoryReload regenerates only the memory (# Memory) region of the system
+	// prompt from the latest on-disk memory, keeping the assembled prefix
+	// (base + policies + workspace + environment), the skills index, and the
+	// model persona identical to boot time. The controller invokes it after a
+	// compaction — a low-frequency cache-reset point — so a long-running
+	// session does not keep serving stale memory in its system prefix.
+	var memoryReload = func() string {
+		rebuilt := memory.Compose(sysPromptBase, memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir()}))
+		// Re-apply the skills index and persona onto the freshly composed
+		// memory region, mirroring the boot-time assembly exactly.
+		if implicitSkillInvocation {
+			rebuilt = skill.ApplyIndex(rebuilt, skills)
+		}
+		return config.ApplyOfficialDeepSeekV4ProPersona(rebuilt, entry)
+	}
 
 	reg := tool.NewRegistry()
 	writeRoots := cfg.WriteRootsForRoot(root)
@@ -1774,6 +1795,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		VisionProviderResolver:         visionProviderResolver,
 		VisionModelSelector:            visionModelSelector,
 		SystemPrompt:                   sysPrompt,
+		MemorySystemReload:             memoryReload,
 		SessionDir:                     sessionDir,
 		Host:                           pluginHost,
 		Commands:                       cmds,

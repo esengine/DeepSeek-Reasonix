@@ -126,7 +126,14 @@ type Controller struct {
 	visionProviderResolver func(string) (provider.Provider, error)
 	visionModelSelector    func(string, string) (string, bool)
 	systemPrompt           string
-	sessionDir             string
+	// memorySystemReload, when set, regenerates just the memory (# Memory)
+	// region of the system prompt from the latest on-disk memory. The
+	// controller invokes it after a compaction — a low-frequency cache-reset
+	// point where refreshing durable memory costs no extra prefix invalidation
+	// — and swaps the result into the executor session's leading system
+	// message without disturbing conversation history.
+	memorySystemReload func() string
+	sessionDir          string
 	commands               atomic.Pointer[[]command.Command]
 	// skills owns the session's discovered skills (enabled subset, full set, and
 	// the reloadable stores) — the skills slice of the Capabilities concern. See
@@ -481,7 +488,13 @@ type Options struct {
 	VisionProviderResolver func(string) (provider.Provider, error)
 	VisionModelSelector    func(string, string) (string, bool)
 	SystemPrompt           string
-	SessionDir             string
+	// MemorySystemReload regenerates only the memory (# Memory) region of the
+	// system prompt from the latest on-disk memory. When set, the controller
+	// calls it after each compaction and replaces the executor session's
+	// leading system message, so a low-frequency cache-reset point also
+	// refreshes durable memory. nil disables the behavior.
+	MemorySystemReload func() string
+	SessionDir         string
 	SessionPath            string
 	Host                   *plugin.Host
 	// MCPHostProfile is the surface lazily created hosts declare; injected
@@ -657,6 +670,7 @@ func New(opts Options) *Controller {
 		visionProviderResolver:            opts.VisionProviderResolver,
 		visionModelSelector:               opts.VisionModelSelector,
 		systemPrompt:                      opts.SystemPrompt,
+		memorySystemReload:                opts.MemorySystemReload,
 		sessionDir:                        opts.SessionDir,
 		sessionPath:                       opts.SessionPath,
 		commands:                          atomic.Pointer[[]command.Command]{},
@@ -2956,7 +2970,40 @@ func (c *Controller) Compact(ctx context.Context, instructions string) error {
 		return err
 	}
 	defer c.endRotation()
-	return c.executor.CompactNow(ctx, instructions)
+	if err := c.executor.CompactNow(ctx, instructions); err != nil {
+		return err
+	}
+	c.refreshMemorySystemPrompt()
+	return nil
+}
+
+// refreshMemorySystemPrompt regenerates the memory (# Memory) region of the
+// system prompt from the latest on-disk memory and swaps it into the executor
+// session's leading system message. It is intended to run right after a
+// compaction, which is a low-frequency cache-reset point: refreshing durable
+// memory there costs no prefix invalidation beyond what compaction already
+// paid, and keeps long-running sessions from serving stale memory. It is a
+// no-op when no reloader is installed or the session cannot carry it.
+func (c *Controller) refreshMemorySystemPrompt() {
+	if c == nil || c.executor == nil || c.memorySystemReload == nil {
+		return
+	}
+	prompt := strings.TrimSpace(c.memorySystemReload())
+	if prompt == "" {
+		return
+	}
+	c.executor.Session().ReplaceSystemMessage(prompt)
+}
+
+// MemorySystemReload returns the installed post-compaction memory system-prompt
+// reloader, or nil when none is wired. Hosts can invoke it to refresh the
+// system prompt's memory region (for example an explicit "refresh memory"
+// surface) and verify its effect.
+func (c *Controller) MemorySystemReload() func() string {
+	if c == nil {
+		return nil
+	}
+	return c.memorySystemReload
 }
 
 // maybeSessionStart fires the SessionStart hook exactly once per session, lazily

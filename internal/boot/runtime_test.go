@@ -395,3 +395,36 @@ func TestSpliceFreshSystemPrompt(t *testing.T) {
 		}
 	})
 }
+
+
+func TestBuildWiresMemorySystemReload(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+
+	res := buildRuntimeFixture(t)
+	reload := res.Controller.MemorySystemReload()
+	if reload == nil {
+		t.Fatal("build should wire a post-compaction memory system-prompt reloader")
+	}
+	if got := reload(); strings.TrimSpace(got) == "" {
+		t.Fatal("memory reloader produced an empty system prompt")
+	}
+	// With memory unchanged, the reloader must reproduce the same system
+	// message the controller is already carrying — proving the reloader
+	// regenerates the identical stable prefix from the same inputs.
+	if got, want := reload(), systemMessage(res.Controller.History()); strings.TrimSpace(got) != strings.TrimSpace(want) {
+		t.Fatalf("memory reloader diverged from the controller system message\n got: %.200q...\nwant: %.200q...", got, strings.TrimSpace(want))
+	}
+	// Simulate another session writing a memory document into the workspace:
+	// the reloader must pick it up on the next call even though the controller
+	// session was built before the document existed.
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("## Test memory note\n\nThis project prefers TAB indentation for tests.\n"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	refreshed := reload()
+	if !strings.Contains(refreshed, "prefers TAB indentation") {
+		t.Fatalf("memory reloader did not pick up the newly written memory document\n got: %.200q...", refreshed)
+	}
+}

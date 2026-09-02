@@ -695,3 +695,43 @@ func TestPersistedStateTracksBaseline(t *testing.T) {
 		t.Fatal("after rewrite: AppendOnlyTail should be false")
 	}
 }
+
+func TestReplaceSystemMessageUpdatesLeadingSystemInPlace(t *testing.T) {
+	s := NewSession("old system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first user"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "first answer"})
+	before := len(s.Messages)
+
+	if !s.ReplaceSystemMessage("new system with latest memory") {
+		t.Fatal("ReplaceSystemMessage should report a change")
+	}
+	if len(s.Messages) != before {
+		t.Fatalf("ReplaceSystemMessage should not change message count: got %d want %d", len(s.Messages), before)
+	}
+	if s.Messages[0].Role != provider.RoleSystem || s.Messages[0].Content != "new system with latest memory" {
+		t.Fatalf("system message not replaced: %+v", s.Messages[0])
+	}
+	// History beyond the system message must be untouched.
+	if s.Messages[1].Content != "first user" || s.Messages[2].Content != "first answer" {
+		t.Fatalf("history was disturbed by system replacement: %+v", s.Messages)
+	}
+}
+
+func TestReplaceSystemMessageNoopSameContentAndNoSystem(t *testing.T) {
+	s := NewSession("stable")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "u"})
+	if s.ReplaceSystemMessage("stable") {
+		t.Error("ReplaceSystemMessage should be a no-op when content is identical")
+	}
+
+	noSys := &Session{}
+	if noSys.ReplaceSystemMessage("x") {
+		t.Error("ReplaceSystemMessage should be a no-op on a session without a leading system message")
+	}
+
+	userOnly := NewSession("")
+	userOnly.Add(provider.Message{Role: provider.RoleUser, Content: "u"})
+	if userOnly.ReplaceSystemMessage("x") {
+		t.Error("ReplaceSystemMessage should be a no-op when the first message is not system")
+	}
+}

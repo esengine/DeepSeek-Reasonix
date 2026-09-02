@@ -5415,3 +5415,56 @@ func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
 		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
 	}
 }
+
+func TestRefreshMemorySystemPromptReplacesLeadingSystem(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("base + policies + [oldMemory] + skills")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "history one"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "history two"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+
+	var called int
+	c := New(Options{
+		Executor:   exec,
+		SessionDir: dir,
+		Label:      "test",
+		MemorySystemReload: func() string {
+			called++
+			return "base + policies + [new memory loaded from disk] + skills"
+		},
+	})
+
+	c.refreshMemorySystemPrompt()
+
+	if called == 0 {
+		t.Fatal("memorySystemReload should be invoked")
+	}
+	msgs := exec.Session().Snapshot()
+	if len(msgs) != 3 {
+		t.Fatalf("message count changed: got %d want 3", len(msgs))
+	}
+	if msgs[0].Role != provider.RoleSystem || !strings.Contains(msgs[0].Content, "new memory loaded from disk") {
+		t.Fatalf("system message not refreshed: %+v", msgs[0])
+	}
+	if msgs[1].Content != "history one" || msgs[2].Content != "history two" {
+		t.Fatalf("history was disturbed: %+v", msgs)
+	}
+}
+
+func TestRefreshMemorySystemPromptNoopWithoutReloaderOrSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+
+	// No reloader installed → no-op, session untouched.
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.refreshMemorySystemPrompt()
+	if got := exec.Session().Snapshot()[0].Content; got != "sys" {
+		t.Fatalf("system changed without reloader: %q", got)
+	}
+
+	// Reloader present but no executor → no panic.
+	c2 := New(Options{SessionDir: dir, Label: "test", MemorySystemReload: func() string { return "x" }})
+	c2.executor = nil
+	c2.refreshMemorySystemPrompt()
+}

@@ -522,3 +522,28 @@ func (s *Session) HasSystemMessage() bool {
 	defer s.mu.RUnlock()
 	return len(s.Messages) > 0 && s.Messages[0].Role == provider.RoleSystem
 }
+
+// ReplaceSystemMessage swaps the leading system message's content in place,
+// preserving the rest of the conversation so history stays continuous (as on a
+// post-compaction memory refresh). It bumps the session version (dirty/save
+// tracking) but not the rewrite version — it must not be persisted as a content
+// rewrite since it does not touch provider-visible user/tool bytes beyond the
+// system message itself (which is never compacted away). Returns true when a
+// change was applied. It is a no-op when the session does not start with a
+// system message or the content is already up to date.
+func (s *Session) ReplaceSystemMessage(content string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Messages) == 0 || s.Messages[0].Role != provider.RoleSystem {
+		return false
+	}
+	if s.Messages[0].Content == content {
+		return false
+	}
+	s.Messages[0].Content = content
+	s.version++
+	return true
+}
