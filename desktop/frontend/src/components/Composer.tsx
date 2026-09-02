@@ -4278,6 +4278,7 @@ export function Composer({
                     {dirEntryMenuLabel(it.entry)}
                     {it.entry.isDir ? "/" : ""}
                   </span>
+                  {it.entry.hidden && <span className="filemenu__hidden">{t("fileReference.hidden")}</span>}
                 </button>
               )
             }

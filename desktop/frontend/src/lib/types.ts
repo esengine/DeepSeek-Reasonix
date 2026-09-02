@@ -1099,6 +1099,7 @@ export interface DirEntry {
   isDir: boolean;
   displayName?: string;
   displayPath?: string;
+  hidden?: boolean;
 }
 
 export interface DroppedItem {

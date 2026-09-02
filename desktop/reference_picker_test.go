@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,4 +42,47 @@ func TestReferenceRelativeSelection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSearchFileRefsSurfacesExactlyTypedHiddenEntry(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := robustTempDir(t)
+	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Thumbs.db"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Thumbs.db.bak"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{}
+	got := app.SearchFileRefs("Thumbs.db")
+	if !hiddenDirEntry(got, "Thumbs.db") {
+		t.Fatalf("exactly typed hidden file should surface marked Hidden, got %+v", got)
+	}
+	if hasDirEntry(app.SearchFileRefs("Thumbs.db.bak"), "Thumbs.db") {
+		t.Fatalf("non-exact query must not surface hidden file, got %+v", app.SearchFileRefs("Thumbs.db.bak"))
+	}
+	if hasDirEntry(app.ListDir(""), "dist") {
+		t.Fatalf("ListDir must keep omitting hidden dir, got %+v", app.ListDir(""))
+	}
+	if !hiddenDirEntry(app.SearchFileRefs("dist"), "dist") {
+		t.Fatalf("exactly typed built-in hidden dir should be marked Hidden, got %+v", app.SearchFileRefs("dist"))
+	}
+}
+
+func hiddenDirEntry(entries []DirEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry.Hidden
+		}
+	}
+	return false
 }

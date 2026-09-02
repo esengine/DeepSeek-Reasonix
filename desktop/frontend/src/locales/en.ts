@@ -292,6 +292,7 @@ export const en = {
   "workspace.addSelectionToChat": "Add to Chat",
   "workspace.addFileReferenceToChat": "Add file reference",
   "workspace.addFolderReferenceToChat": "Add folder reference",
+  "fileReference.hidden": "hidden",
   "workspace.addFileContentToChat": "Add file contents",
   "workspace.copyRelativePath": "Copy relative path",
   "workspace.copyAbsolutePath": "Copy absolute path",

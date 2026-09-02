@@ -7081,6 +7081,13 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
   flex-shrink: 0;
 }
+.filemenu__hidden {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
 .composer {
   display: flex;
   flex-direction: column;

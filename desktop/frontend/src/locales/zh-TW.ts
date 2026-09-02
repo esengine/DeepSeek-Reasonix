@@ -213,6 +213,7 @@ export const zhTW: Record<DictKey, string> = {
   "workspace.addSelectionToChat": "新增到聊天",
   "workspace.addFileReferenceToChat": "新增檔案引用",
   "workspace.addFolderReferenceToChat": "新增資料夾引用",
+  "fileReference.hidden": "已隱藏",
   "workspace.addFileContentToChat": "新增檔案內容",
   "workspace.copyRelativePath": "複製相對路徑",
   "workspace.copyAbsolutePath": "複製絕對路徑",

@@ -10156,6 +10156,7 @@ type DirEntry struct {
 	IsDir       bool   `json:"isDir"`
 	DisplayName string `json:"displayName,omitempty"`
 	DisplayPath string `json:"displayPath,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
 }
 
 // FilePreview is a bounded, read-only file payload for the workspace side panel.
@@ -10394,7 +10395,7 @@ func (a *App) SearchFileRefsForTab(tabID, query string) []DirEntry {
 	results := fileref.SearchWithFilter(base, query, fileRefSearchLimit, filter)
 	out := make([]DirEntry, 0, len(results))
 	for _, r := range results {
-		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir})
+		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir, Hidden: r.Hidden})
 	}
 	if browser := externalFolderRefBrowserFromController(ctrl); browser != nil {
 		out = append(out, externalFolderDirEntries(browser.SearchExternalFolderRefs(query, fileRefSearchLimit))...)
