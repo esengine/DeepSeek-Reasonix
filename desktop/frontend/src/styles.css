@@ -11262,6 +11262,59 @@ body > .mermaid-diagram--fullscreen {
   outline: 2px solid color-mix(in srgb, var(--danger) 24%, transparent);
   outline-offset: 2px;
 }
+.workspace-change-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.workspace-change-tree__folder,
+.workspace-change-tree__children {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.workspace-change-folder {
+  --wails-draggable: no-drag;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 5px;
+  padding-right: 8px;
+  padding-bottom: 5px;
+  border: 0;
+  border-radius: var(--tree-row-radius);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  text-align: left;
+}
+.workspace-change-folder:hover {
+  background: var(--tree-row-hover-bg);
+  color: var(--fg);
+}
+.workspace-change-folder__chev {
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+.workspace-change-folder__chev--open {
+  transform: rotate(90deg);
+}
+.workspace-change-folder__icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.workspace-change-folder__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
 .workspace-change--disabled {
   cursor: default;
 }
@@ -35249,6 +35302,30 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active),
 :root[data-theme-style] .app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active) {
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+}
+.app--creation .workbench-dock .workspace-change-folder,
+::root[data-theme-style] .app--creation .workbench-dock .workspace-change-folder {
+  min-height: 34px;
+  color: color-mix(in srgb, var(--fg-dim) 88%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-change-folder:hover,
+::root[data-theme-style] .app--creation .workbench-dock .workspace-change-folder:hover {
+  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-change-folder__name,
+::root[data-theme-style] .app--creation .workbench-dock .workspace-change-folder__name {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 560;
+}
+
+.app--creation .workbench-dock .workspace-change--active,
+.app--creation .workbench-dock .workspace-change--active:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active:hover {
   background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
 }
 .app--creation .workbench-dock .workspace-change-row:has(.workspace-change--active) .workspace-change,

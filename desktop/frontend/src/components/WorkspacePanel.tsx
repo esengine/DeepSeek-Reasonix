@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   CSSProperties,
@@ -6,11 +6,13 @@ import type {
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactElement,
 } from "react";
 import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Folder,
   FolderTree,
   FolderX,
   GitBranch,
@@ -47,6 +49,8 @@ import {
 import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 import { mergeWorkspaceSearchResults } from "../lib/workspaceTreeSearch";
 import { useWorkspaceTreeScrollPersistence } from "../lib/useWorkspaceTreeScrollPersistence";
+import { buildWorkspaceChangeTree, type WorkspaceChangeTreeInput, type WorkspaceChangeTreeNode } from "../lib/workspaceChangeTree";
+import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
 import {
   readWorkspaceTreeMemory,
   rememberWorkspaceTreeOpenDirs,
@@ -255,6 +259,7 @@ export function WorkspacePanel({
   const [codeSearchRequestPath, setCodeSearchRequestPath] = useState<string | null>(null);
   /** Changes overview: commit history is secondary and starts collapsed. */
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false);
+  const [collapsedChangeDirs, setCollapsedChangeDirs] = useState<Set<string>>(() => new Set());
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
   const lastRevealRequestIdRef = useRef<number | null>(null);
   const dismissedRevealRequestIdRef = useRef<number | null>(null);
@@ -560,6 +565,7 @@ export function WorkspacePanel({
     setExpandedCommit(null);
     setCommitDetail(null);
     setScopedChangeRows(null);
+    setCollapsedChangeDirs(new Set());
     lastChangeRevealRequestIdRef.current = null;
     dismissedChangeRevealRequestIdRef.current = null;
     lastChangeListRequestIdRef.current = null;
@@ -916,6 +922,53 @@ export function WorkspacePanel({
     ? t("workspace.gitUnavailable")
     : null;
 
+  const toggleChangeDir = useCallback((path: string) => {
+    setCollapsedChangeDirs((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  function renderChangeTree<T extends WorkspaceChangeTreeInput>(
+    changes: readonly T[],
+    renderFile: (change: T, depth: number) => ReactElement,
+  ): ReactElement {
+    const tree = buildWorkspaceChangeTree(changes);
+
+    const renderNodes = (nodes: WorkspaceChangeTreeNode<T>[], depth: number): ReactElement[] =>
+      nodes.map((node) => {
+        if (node.kind === "folder") {
+          const collapsed = collapsedChangeDirs.has(node.path);
+          return (
+            <div key={node.key} className="workspace-change-tree__folder">
+              <button
+                type="button"
+                className="workspace-change-folder"
+                data-workspace-change-folder={node.path}
+                aria-expanded={!collapsed}
+                onClick={() => toggleChangeDir(node.path)}
+                style={{ paddingLeft: 8 + depth * 14 }}
+              >
+                <ChevronRight
+                  size={13}
+                  aria-hidden="true"
+                  className={`workspace-change-folder__chev${collapsed ? "" : " workspace-change-folder__chev--open"}`}
+                />
+                <Folder size={14} aria-hidden="true" className="workspace-change-folder__icon" />
+                <span className="workspace-change-folder__name">{node.name}</span>
+              </button>
+              {!collapsed && <div className="workspace-change-tree__children">{renderNodes(node.children, depth + 1)}</div>}
+            </div>
+          );
+        }
+        return <Fragment key={node.key}>{renderFile(node.change, depth)}</Fragment>;
+      });
+
+    return <div className="workspace-change-tree">{renderNodes(tree, 0)}</div>;
+  }
+
   const renderChangeScope = (title: string, changes: typeof sessionChanges) => (
     <div className="workspace-change-scope">
       <div className="workspace-change-scope__head">
@@ -923,16 +976,17 @@ export function WorkspacePanel({
         <span className="workspace-change-scope__meta">{t("context.changedMeta", { count: changes.length })}</span>
       </div>
       <div className="workspace-change-scope__list">
-        {changes.map((change) => {
+        {renderChangeTree(changes, (change, depth) => {
           const dir = parentPath(change.path);
           return (
-            <div key={change.path} className="workspace-change-row">
+            <div className="workspace-change-row">
               <button
                 className="workspace-change"
                 type="button"
                 onClick={() => selectFile(change.path)}
+                style={{ paddingLeft: 8 + depth * 14 }}
               >
-                <FileText size={14} />
+                <WorkspaceFileIcon fileName={basename(change.path)} />
                 <span className="workspace-change__body">
                   <span className="workspace-change__name">{basename(change.path)}</span>
                   {dir && <span className="workspace-change__path">{dir}</span>}
@@ -1650,13 +1704,13 @@ export function WorkspacePanel({
                 </Tooltip>
               </div>
               <div className="workspace-change-scope__list">
-                {scopedChangeRows.map((change) => {
+                {renderChangeTree(scopedChangeRows, (change, depth) => {
                   const dir = parentPath(change.path);
                   return (
                     <button
-                      key={change.key}
                       className="workspace-change"
                       type="button"
+                      style={{ paddingLeft: 8 + depth * 14 }}
                       onClick={() => {
                         dismissedChangeListRequestIdRef.current = lastChangeListRequestIdRef.current;
                         setScopedChangeRows(null);
