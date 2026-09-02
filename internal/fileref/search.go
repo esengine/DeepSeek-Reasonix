@@ -62,10 +62,14 @@ const (
 
 // SearchResult is a single entry returned by Search. It carries the relative
 // path (slash-normalized) and whether the entry is a directory, so callers
-// can present the correct icon and append "/" vs " " on selection.
+// can present the correct icon and append "/" vs " " on selection. Hidden is
+// true only when the entry matched the exact query but is suppressed by the
+// filter; callers should still surface it with a "hidden" hint so a manually
+// typed @path remains resolvable.
 type SearchResult struct {
-	Path  string
-	IsDir bool
+	Path   string
+	IsDir  bool
+	Hidden bool
 }
 
 // Search finds entries under root whose path matches query. A match is
@@ -75,6 +79,16 @@ type SearchResult struct {
 // generated/vendor directories so interactive completion stays responsive on
 // large workspaces.
 func Search(root, query string, limit int) []SearchResult {
+	filter, err := NewFilter(root, FilterOptions{})
+	if err != nil {
+		return nil
+	}
+	return SearchWithFilter(root, query, limit, filter)
+}
+
+// SearchWithFilter applies the directory browser's candidate filter to Search.
+// This keeps browsing and bare @ search consistent.
+func SearchWithFilter(root, query string, limit int, filter Filter) []SearchResult {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if len(query) < minQueryLen || strings.ContainsAny(query, `/\`) || limit <= 0 {
 		return nil
@@ -107,7 +121,13 @@ func Search(root, query string, limit int) []SearchResult {
 				return filepath.SkipDir
 			}
 			rel = filepath.ToSlash(rel)
-			if SkipEntry(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
+			if filter.Skip(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
+				// Keep a directory the user typed exactly so the @-menu can
+				// still surface it with a hidden hint instead of silently
+				// dropping the typed path.
+				if strings.EqualFold(name, query) {
+					dirHits = append(dirHits, SearchResult{Path: rel, IsDir: true, Hidden: true})
+				}
 				return filepath.SkipDir
 			}
 			// Allow matching directory names so the user can select a
@@ -117,20 +137,23 @@ func Search(root, query string, limit int) []SearchResult {
 			}
 			return nil
 		}
-		if skipEntryNames[name] {
-			return nil
-		}
-		if !showHidden && strings.HasPrefix(name, ".") {
-			return nil
-		}
-		if info, err := d.Info(); err != nil || !info.Mode().IsRegular() {
-			return nil
-		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		hidden := filter.Skip(rel, name, false) || (!showHidden && strings.HasPrefix(name, "."))
+		if hidden {
+			// Surface an exactly typed file with a hidden hint so a manually
+			// entered @path is not silently dropped.
+			if strings.EqualFold(name, query) {
+				basenameHits = append(basenameHits, SearchResult{Path: rel, Hidden: true})
+			}
+			return nil
+		}
+		if info, err := d.Info(); err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
 		nameLower := strings.ToLower(name)
 		switch {
 		case strings.Contains(nameLower, query):
@@ -140,9 +163,11 @@ func Search(root, query string, limit int) []SearchResult {
 		}
 		return nil
 	})
-	sort.Slice(basenameHits, func(i, j int) bool { return basenameHits[i].Path < basenameHits[j].Path })
+	// Hidden exact hits lead their tier so a manually typed @path survives
+	// the dirQuota/limit truncation; then plain lexicographic order.
+	sort.Slice(basenameHits, func(i, j int) bool { return searchResultLess(basenameHits[i], basenameHits[j]) })
 	sort.Slice(segmentHits, func(i, j int) bool { return segmentHits[i].Path < segmentHits[j].Path })
-	sort.Slice(dirHits, func(i, j int) bool { return dirHits[i].Path < dirHits[j].Path })
+	sort.Slice(dirHits, func(i, j int) bool { return searchResultLess(dirHits[i], dirHits[j]) })
 	// Directories first so the user can navigate into them; then basename
 	// hits (most relevant file matches); then path-segment hits. We reserve
 	// up to dirQuota slots for directories so they are never fully crowded
@@ -166,6 +191,16 @@ func Search(root, query string, limit int) []SearchResult {
 		out = append(out, segmentHits...)
 	}
 	return out
+}
+
+// searchResultLess orders a hit tier with hidden (exactly typed, filtered)
+// entries first so truncation never drops the manually typed @path, then
+// plain lexicographic order on the slash-normalized relative path.
+func searchResultLess(a, b SearchResult) bool {
+	if a.Hidden != b.Hidden {
+		return a.Hidden
+	}
+	return a.Path < b.Path
 }
 
 // pathSegmentContains reports whether query appears in any slash-separated

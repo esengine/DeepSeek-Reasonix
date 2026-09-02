@@ -1,6 +1,7 @@
 package fileref
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -150,5 +151,82 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 	}
 	if !containsPath(got, "src/planind/index.tsx") {
 		t.Fatalf("Search should still return legitimate hit, got %v", resultPaths(got))
+	}
+}
+
+func TestSearchSurfacesExactlyTypedHiddenEntry(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "secret.txt"))
+	writeFile(t, filepath.Join(root, "src", "secret.go"))
+	writeFile(t, filepath.Join(root, "src", "visible.go"))
+	os.MkdirAll(filepath.Join(root, "secret-dir"), 0o755)
+
+	filter, err := NewFilter(root, FilterOptions{ExcludePatterns: []string{"secret.txt"}})
+	if err != nil {
+		t.Fatalf("NewFilter: %v", err)
+	}
+
+	got := SearchWithFilter(root, "secret.txt", 50, filter)
+	if !containsPath(got, "secret.txt") {
+		t.Fatalf("exact-name hidden file should be surfaced, got %v", resultPaths(got))
+	}
+	for _, r := range got {
+		if r.Path == "secret.txt" && !r.Hidden {
+			t.Fatalf("secret.txt should be marked Hidden, got %+v", r)
+		}
+		if r.Path == "src/secret.go" && r.Hidden {
+			t.Fatalf("src/secret.go is not filtered and must not be Hidden, got %+v", r)
+		}
+	}
+
+	filterDir, err := NewFilter(root, FilterOptions{ExcludePatterns: []string{"secret-dir"}})
+	if err != nil {
+		t.Fatalf("NewFilter: %v", err)
+	}
+	dirGot := SearchWithFilter(root, "secret-dir", 50, filterDir)
+	if !containsDirHit(dirGot, "secret-dir") {
+		t.Fatalf("exactly typed excluded dir should be surfaced, got %v", resultPaths(dirGot))
+	}
+	for _, r := range dirGot {
+		if r.Path == "secret-dir" && !r.Hidden {
+			t.Fatalf("secret-dir should be marked Hidden, got %+v", r)
+		}
+	}
+
+	partial := SearchWithFilter(root, "secret.tx", 50, filter)
+	if containsPath(partial, "secret.txt") {
+		t.Fatalf("partial query must not surface hidden entry, got %v", resultPaths(partial))
+	}
+}
+
+// TestSearchHiddenExactSurvivesTruncation verifies that an exactly typed
+// hidden entry is not crowded out by the dirQuota or limit truncation: hidden
+// hits sort ahead of ordinary ones in their tier, so the picker can still
+// surface a manually typed @path even under heavy competition.
+func TestSearchHiddenExactSurvivesTruncation(t *testing.T) {
+	root := t.TempDir()
+	// Hidden exact target plus many lexicographically-earlier visible files.
+	writeFile(t, filepath.Join(root, "secret.txt"))
+	for i := 0; i < 30; i++ {
+		writeFile(t, filepath.Join(root, "a-secret-file-000", fmt.Sprintf("f%02d", i)))
+		os.MkdirAll(filepath.Join(root, "a-secret-dir-000", "sub"), 0o755)
+	}
+	os.MkdirAll(filepath.Join(root, "secret-dir"), 0o755)
+
+	filter, err := NewFilter(root, FilterOptions{ExcludePatterns: []string{"secret.txt", "secret-dir"}})
+	if err != nil {
+		t.Fatalf("NewFilter: %v", err)
+	}
+
+	// Small limit forces basename truncation; hidden file must stay first.
+	got := SearchWithFilter(root, "secret.txt", 5, filter)
+	if len(got) == 0 || got[0].Path != "secret.txt" || !got[0].Hidden {
+		t.Fatalf("hidden exact file should lead results, got %v", resultPaths(got))
+	}
+
+	// Directory quota: hidden dir must survive even with 5+ other dir hits.
+	dirGot := SearchWithFilter(root, "secret-dir", 50, filter)
+	if len(dirGot) == 0 || dirGot[0].Path != "secret-dir" || !dirGot[0].Hidden {
+		t.Fatalf("hidden exact dir should lead dir results, got %v", resultPaths(dirGot))
 	}
 }

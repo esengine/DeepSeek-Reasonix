@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"runtime"
 
 	"reasonix/internal/agent"
@@ -46,6 +47,7 @@ func (a *App) defaultSettingsView() SettingsView {
 			ShellInstallAction:  shellInstallActionViewForGOOS(runtime.GOOS),
 			ShellRepairGuidance: shellRepairGuidanceForGOOS(runtime.GOOS),
 			GitRepairGuidance:   gitRepairGuidanceForGOOS(runtime.GOOS)},
+		Reference: ReferenceSettingsView{ExcludePatterns: []string{}, WorkspaceRoot: a.activeWorkspaceRoot(), ConfigPath: filepath.Join(a.activeWorkspaceRoot(), "reasonix.toml")},
 		Agent: AgentView{
 			PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth,
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,

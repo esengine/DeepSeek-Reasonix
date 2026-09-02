@@ -10145,6 +10145,7 @@ type DirEntry struct {
 	IsDir       bool   `json:"isDir"`
 	DisplayName string `json:"displayName,omitempty"`
 	DisplayPath string `json:"displayPath,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
 }
 
 // FilePreview is a bounded, read-only file payload for the workspace side panel.
@@ -10243,6 +10244,22 @@ func skipWorkspaceEntry(rel, name string, isDir bool) bool {
 	return fileref.SkipEntry(workspaceEntryRel(rel, name), name, isDir)
 }
 
+func fileRefFilterForRoot(root string) fileref.Filter {
+	cfg, err := config.LoadForRootReadOnly(root)
+	if err != nil || cfg == nil {
+		filter, _ := fileref.NewFilter(root, fileref.FilterOptions{})
+		return filter
+	}
+	filter, err := fileref.NewFilter(root, fileref.FilterOptions{
+		FollowGitignore: cfg.Reference.FollowGitignore,
+		ExcludePatterns: cfg.Reference.ExcludePatterns,
+	})
+	if err != nil {
+		filter, _ = fileref.NewFilter(root, fileref.FilterOptions{})
+	}
+	return filter
+}
+
 func (a *App) activeWorkspaceBase() (string, error) {
 	return workspaceBaseFromRoot(a.activeWorkspaceRoot())
 }
@@ -10314,6 +10331,7 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	if err != nil {
 		return []DirEntry{}
 	}
+	filter := fileRefFilterForRoot(base)
 	dir := base
 	if rel != "" {
 		path, ok, err := workspacePathForBase(base, rel)
@@ -10329,7 +10347,7 @@ func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
 	dirs, files := []DirEntry{}, []DirEntry{}
 	for _, e := range es {
 		name := e.Name()
-		if skipWorkspaceEntry(rel, name, e.IsDir()) {
+		if filter.Skip(workspaceEntryRel(rel, name), name, e.IsDir()) {
 			continue
 		}
 		if e.IsDir() {
@@ -10362,10 +10380,11 @@ func (a *App) SearchFileRefsForTab(tabID, query string) []DirEntry {
 	if err != nil {
 		return []DirEntry{}
 	}
-	results := fileref.Search(base, query, fileRefSearchLimit)
+	filter := fileRefFilterForRoot(base)
+	results := fileref.SearchWithFilter(base, query, fileRefSearchLimit, filter)
 	out := make([]DirEntry, 0, len(results))
 	for _, r := range results {
-		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir})
+		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir, Hidden: r.Hidden})
 	}
 	if browser := externalFolderRefBrowserFromController(ctrl); browser != nil {
 		out = append(out, externalFolderDirEntries(browser.SearchExternalFolderRefs(query, fileRefSearchLimit))...)

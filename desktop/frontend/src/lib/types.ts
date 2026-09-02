@@ -1101,6 +1101,7 @@ export interface DirEntry {
   isDir: boolean;
   displayName?: string;
   displayPath?: string;
+  hidden?: boolean;
 }
 
 export interface DroppedItem {
@@ -1550,7 +1551,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "reference" | "network" | "appearance" | "storage" | "updates";
 
 /** Extension runtime doctor report from App.RuntimeDoctor. */
 export interface RuntimeDoctorReport {
@@ -1910,6 +1911,13 @@ export interface ShellInstallResult {
   manualUrl?: string;
 }
 
+export interface ReferenceSettingsView {
+  followGitignore: boolean;
+  excludePatterns: string[];
+  workspaceRoot: string;
+  configPath: string;
+}
+
 export interface NetworkProxyView {
   type: string;
   server: string;
@@ -2179,6 +2187,7 @@ export interface SettingsView {
   providerPresets: ProviderPresetView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
+  reference: ReferenceSettingsView;
   network: NetworkView;
   agent: AgentView;
   bot: BotSettingsView;

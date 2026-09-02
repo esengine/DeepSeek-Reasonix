@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
+import { ArrowRight, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, FileText, FolderOpen, KeyRound, Languages, ListChecks, Loader2, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { ShellInterpreterFields } from "./SettingsShellSupport";
 import { CHANNEL_ICONS } from "./channelIcons";
@@ -66,7 +66,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, ReferenceSettingsView, SettingsTab, SettingsView } from "../lib/types";
 import { AppearanceOverview } from "./AppearanceOverview";
 import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -308,7 +308,7 @@ export function SettingsPanel({
   }, [requestClose]);
 
   // These pages need SettingsView; capability pages load their own data.
-  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
+  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "reference" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
   const settingsNavigationItems = useMemo(() => SETTINGS_NAV_TABS.map((id) => ({
     id,
@@ -361,6 +361,7 @@ export function SettingsPanel({
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
+                {tab === "reference" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ReferenceSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
@@ -610,6 +611,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.permissions");
     case "sandbox":
       return t("settings.tab.sandbox");
+    case "reference":
+      return t("settings.tab.reference");
     case "appearance": return t("settings.tab.appearance");
     case "storage": return t("settings.tab.storage");
     case "updates":
@@ -651,6 +654,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return permissionModeLabel(s.permissions.mode, t);
     case "sandbox":
       return sandboxModeLabel(s.sandbox.bash, t);
+    case "reference":
+      return t("settings.referenceTitle");
     case "appearance": return t("settings.appearanceMeta");
     case "storage": return t("settings.storageMeta");
     case "updates":
@@ -1433,6 +1438,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
   const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "", effectiveWriteRoots: [], shell: "auto", effectiveShell: "" };
+  const reference = view.reference ?? { followGitignore: false, excludePatterns: [], workspaceRoot: "", configPath: "" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
@@ -1467,6 +1473,13 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
       effectiveWorkspaceRoot: String(sandbox.effectiveWorkspaceRoot ?? ""),
       effectiveWriteRoots: asArray(sandbox.effectiveWriteRoots),
       effectiveShell: String(sandbox.effectiveShell ?? sandbox.shell ?? ""),
+    },
+    reference: {
+      ...reference,
+      followGitignore: Boolean(reference.followGitignore),
+      excludePatterns: asArray(reference.excludePatterns),
+      workspaceRoot: String(reference.workspaceRoot ?? ""),
+      configPath: String(reference.configPath ?? ""),
     },
     network: {
       ...network,
@@ -7433,6 +7446,92 @@ function ruleListHint(list: string, t: ReturnType<typeof useT>): string {
 }
 
 type HookScope = "global" | "project";
+
+function ReferenceSection({ s, busy, apply }: SectionProps) {
+  const t = useT();
+  const reference = s.reference;
+
+  const save = (next: Partial<ReferenceSettingsView>) =>
+    apply(() => app.SetReferenceSettings({ ...reference, ...next }));
+
+  const addPicked = (kind: "file" | "folder") => {
+    void apply(async () => {
+      const picked = kind === "folder"
+        ? await app.PickReferenceFolder()
+        : await app.PickReferenceFile();
+      const path = picked.trim().replaceAll("\\", "/");
+      if (!path) return;
+      const value = kind === "folder" ? `${path.replace(/\/+$/u, "")}/**` : path;
+      if (reference.excludePatterns.includes(value)) return;
+      await app.SetReferenceSettings({
+        ...reference,
+        excludePatterns: [...reference.excludePatterns, value],
+      });
+    });
+  };
+
+  const remove = (pattern: string) =>
+    void save({ excludePatterns: reference.excludePatterns.filter((item) => item !== pattern) });
+
+  return (
+    <>
+      <SettingsSection title={t("settings.referenceTitle")} description={t("settings.referenceHint")}>
+        <SettingsField label={t("settings.referenceFollowGitignore")} hint={t("settings.referenceFollowGitignoreHint")}>
+          <button
+            className={`cap-switch reference-toggle${reference.followGitignore ? " reference-toggle--on" : ""}`}
+            type="button"
+            role="switch"
+            aria-label={t("settings.referenceFollowGitignore")}
+            aria-checked={reference.followGitignore}
+            disabled={busy}
+            onClick={() => void save({ followGitignore: !reference.followGitignore })}
+          >
+            <span className="cap-switch__track" aria-hidden="true" />
+            <span className="reference-toggle__state">{t(reference.followGitignore ? "settings.toggleOn" : "settings.toggleOff")}</span>
+          </button>
+        </SettingsField>
+        <SettingsField label={t("settings.referenceWorkspace")}>
+          <div className="settings-readonly-field" title={reference.workspaceRoot}>{reference.workspaceRoot || t("common.none")}</div>
+        </SettingsField>
+        <SettingsField label={t("settings.referenceConfigPath")}>
+          <div className="settings-readonly-field" title={reference.configPath}>{reference.configPath || t("common.none")}</div>
+        </SettingsField>
+      </SettingsSection>
+      <SettingsSection title={t("settings.referenceCustomTitle")} description={t("settings.referenceCustomHint")}>
+        <div className="reference-filter-editor">
+          <div className="reference-filter-editor__list" role="list" aria-label={t("settings.referenceAddedTitle")}>
+            {reference.excludePatterns.length === 0 && <span className="mem-empty">{t("common.none")}</span>}
+            {reference.excludePatterns.map((pattern) => {
+              const isFolder = pattern.endsWith("/**");
+              const displayPath = isFolder ? pattern.slice(0, -3) || "." : pattern;
+              return (
+                <span className="set-rule reference-filter-rule" key={pattern} role="listitem">
+                  {isFolder ? <FolderOpen size={13} aria-hidden="true" /> : <FileText size={13} aria-hidden="true" />}
+                  <span className="set-rule__text" title={pattern}>{displayPath}</span>
+                  <Tooltip label={t("common.delete")}>
+                    <button className="set-rule__x" type="button" aria-label={t("common.delete")} disabled={busy} onClick={() => remove(pattern)}>
+                      <X size={13} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                </span>
+              );
+            })}
+          </div>
+          <div className="reference-filter-editor__actions">
+            <button className="btn btn--small" type="button" disabled={busy} onClick={() => addPicked("folder")}>
+              <FolderOpen size={14} aria-hidden="true" />
+              {t("settings.referenceAddFolder")}
+            </button>
+            <button className="btn btn--small" type="button" disabled={busy} onClick={() => addPicked("file")}>
+              <FileText size={14} aria-hidden="true" />
+              {t("settings.referenceAddFile")}
+            </button>
+          </div>
+        </div>
+      </SettingsSection>
+    </>
+  );
+}
 
 function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | null) => void }) {
   const t = useT();

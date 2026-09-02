@@ -113,6 +113,7 @@ import type {
   ProviderModelCatalogUpdate,
   ProviderPresetView,
   ProviderView,
+  ReferenceSettingsView,
   QuestionAnswer,
   ServerView,
   SessionMeta,
@@ -441,6 +442,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   PickPluginFolder(): Promise<string>;
+  PickReferenceFolder(): Promise<string>;
+  PickReferenceFile(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
   SetSkillPathEnabled(path: string, enabled: boolean): Promise<void>;
@@ -567,6 +570,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   InstallShellSupport(id: string): Promise<ShellInstallResult>;
   CancelShellInstall(): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
+  SetReferenceSettings(view: ReferenceSettingsView): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   SetBotConnectionToolApprovalMode(connID: string, mode: string): Promise<void>;
@@ -1720,6 +1724,7 @@ function makeMockApp(): AppBindings {
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), resolvedShell: browserPreviewEffectiveShell("auto"), shellReloadRequired: false, ...browserPreviewShellSupport(browserPlatformOverride()) },
+    reference: { followGitignore: false, excludePatterns: [], workspaceRoot: cwd, configPath: `${cwd}/reasonix.toml` },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -3930,6 +3935,12 @@ function makeMockApp(): AppBindings {
     async PickPluginFolder() {
       return "~/plugins/superpowers";
     },
+    async PickReferenceFolder() {
+      return "node_modules";
+    },
+    async PickReferenceFile() {
+      return "package-lock.json";
+    },
     async AddSkillPath(path: string) {
       const dir = path.trim() || "~/my-skills";
       if (!capSkillRoots.some((r) => r.scope === "custom" && r.dir === dir)) {
@@ -4699,38 +4710,41 @@ function makeMockApp(): AppBindings {
       const k = list as "allow" | "ask" | "deny";
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
-        async ReloadSettings() {},
-        async SetShellPreference(prefer: string) {
-          const sb = settings.sandbox;
-          if (!sb) return;
-          sb.shell = prefer;
-          sb.resolvedShell = browserPreviewEffectiveShell(prefer);
-          sb.shellReloadRequired = sb.resolvedShell !== sb.effectiveShell;
-        },
-        async InstallShellSupport(id: string): Promise<ShellInstallResult> {
-          if (id !== "git-for-windows") throw new Error(`unknown shell support action ${id}`);
-          if (browserPlatformOverride() !== "windows") return { status: "unsupported_platform", reason: "shell helper install is only available on Windows" };
-          return {
-            status: "manual_required",
-            reason: "automatic installation is disabled because Git for Windows cannot reliably honor user scope",
-            manualUrl: "https://git-scm.com/download/win",
-          };
-        },
-        async CancelShellInstall() {},
-        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
-          const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          const prev = settings.sandbox;
-          const effectiveShell = browserPreviewEffectiveShell(shell);
-          const shellSupport = browserPreviewShellSupport(browserPlatformOverride());
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell,
-            resolvedShell: effectiveShell, shellReloadRequired: false,
-            shellCapabilities: prev?.shellCapabilities ?? shellSupport.shellCapabilities, shellInstallAction: prev?.shellInstallAction ?? shellSupport.shellInstallAction,
-            shellRepairGuidance: prev?.shellRepairGuidance ?? shellSupport.shellRepairGuidance,
-            gitCapability: prev?.gitCapability ?? shellSupport.gitCapability, gitRepairGuidance: prev?.gitRepairGuidance ?? shellSupport.gitRepairGuidance };
-        },
-        async SetNetwork(n: NetworkView) {
-          settings.network = n;
-        },
+    async ReloadSettings() {},
+    async SetShellPreference(prefer: string) {
+      const sb = settings.sandbox;
+      if (!sb) return;
+      sb.shell = prefer;
+      sb.resolvedShell = browserPreviewEffectiveShell(prefer);
+      sb.shellReloadRequired = sb.resolvedShell !== sb.effectiveShell;
+    },
+    async InstallShellSupport(id: string): Promise<ShellInstallResult> {
+      if (id !== "git-for-windows") throw new Error(`unknown shell support action ${id}`);
+      if (browserPlatformOverride() !== "windows") return { status: "unsupported_platform", reason: "shell helper install is only available on Windows" };
+      return {
+        status: "manual_required",
+        reason: "automatic installation is disabled because Git for Windows cannot reliably honor user scope",
+        manualUrl: "https://git-scm.com/download/win",
+      };
+    },
+    async CancelShellInstall() {},
+    async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
+      const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
+      const prev = settings.sandbox;
+      const effectiveShell = browserPreviewEffectiveShell(shell);
+      const shellSupport = browserPreviewShellSupport(browserPlatformOverride());
+      settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell,
+        resolvedShell: effectiveShell, shellReloadRequired: false,
+        shellCapabilities: prev?.shellCapabilities ?? shellSupport.shellCapabilities, shellInstallAction: prev?.shellInstallAction ?? shellSupport.shellInstallAction,
+        shellRepairGuidance: prev?.shellRepairGuidance ?? shellSupport.shellRepairGuidance,
+        gitCapability: prev?.gitCapability ?? shellSupport.gitCapability, gitRepairGuidance: prev?.gitRepairGuidance ?? shellSupport.gitRepairGuidance };
+    },
+    async SetReferenceSettings(view: ReferenceSettingsView) {
+      settings.reference = JSON.parse(JSON.stringify(view)) as ReferenceSettingsView;
+    },
+    async SetNetwork(n: NetworkView) {
+      settings.network = n;
+    },
         async SetBotSettings(b: BotSettingsView) {
           settings.bot = JSON.parse(JSON.stringify(b)) as BotSettingsView;
         },

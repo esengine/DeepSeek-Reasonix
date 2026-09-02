@@ -2633,6 +2633,36 @@ func TestLoadDesktopUserConfigForRootDoesNotFollowActiveTab(t *testing.T) {
 	}
 }
 
+func TestLoadDesktopUserConfigForRootIncludesProjectReferenceSettings(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("default_model = \"local/m1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	projectBody := "[reference]\nfollow_gitignore = true\nexclude_patterns = [\"local_npm/**\", \"config.local.json\"]\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(projectBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	cfg, _, err := app.loadDesktopUserConfigForViewForRoot(projectRoot)
+	if err != nil {
+		t.Fatalf("loadDesktopUserConfigForViewForRoot: %v", err)
+	}
+	if !cfg.Reference.FollowGitignore {
+		t.Fatal("project reference settings should preserve follow_gitignore")
+	}
+	want := []string{"local_npm/**", "config.local.json"}
+	if !reflect.DeepEqual(cfg.Reference.ExcludePatterns, want) {
+		t.Fatalf("project reference exclude_patterns = %v, want %v", cfg.Reference.ExcludePatterns, want)
+	}
+}
+
 func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	root := t.TempDir()
@@ -2652,5 +2682,72 @@ func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
 	got := config.LoadForEditWithoutCredentials(config.UserConfigPath())
 	if !reflect.DeepEqual(got.Bot.Feishu.OutboundMediaRoots, []string{root}) {
 		t.Fatalf("outbound media roots = %v, want preserved %q", got.Bot.Feishu.OutboundMediaRoots, root)
+	}
+}
+
+func TestSetReferenceSettingsRefreshesAndReloadsProjectConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("default_model = \"local/m1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	projectPath := filepath.Join(root, "reasonix.toml")
+	projectBody := "[bot]\nenabled = true\nmodel = \"project-model\"\n"
+	if err := os.WriteFile(projectPath, []byte(projectBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"project": {ID: "project", Scope: "project", WorkspaceRoot: root, Ready: true},
+	}
+	app.activeTabID = "project"
+
+	first := ReferenceSettingsView{
+		FollowGitignore: true,
+		ExcludePatterns: []string{"local_npm/**"},
+	}
+	if err := app.SetReferenceSettings(first); err != nil {
+		t.Fatalf("SetReferenceSettings: %v", err)
+	}
+
+	raw, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config after SetReferenceSettings: %v", err)
+	}
+	if !strings.Contains(string(raw), "[reference]") || !strings.Contains(string(raw), "local_npm/**") {
+		t.Fatalf("project config missing saved reference settings:\n%s", raw)
+	}
+
+	view := app.Settings()
+	if !view.Reference.FollowGitignore || !reflect.DeepEqual(view.Reference.ExcludePatterns, first.ExcludePatterns) {
+		t.Fatalf("Settings did not reload saved reference settings: %+v", view.Reference)
+	}
+	if view.Reference.ConfigPath != projectPath {
+		t.Fatalf("reference config path = %q, want %q", view.Reference.ConfigPath, projectPath)
+	}
+
+	second := view.Reference
+	second.ExcludePatterns = append(second.ExcludePatterns, "config.local.json")
+	if err := app.SetReferenceSettings(second); err != nil {
+		t.Fatalf("SetReferenceSettings second update: %v", err)
+	}
+	refreshed := app.Settings()
+	wantPatterns := []string{"local_npm/**", "config.local.json"}
+	if !reflect.DeepEqual(refreshed.Reference.ExcludePatterns, wantPatterns) {
+		t.Fatalf("Settings after refresh = %v, want %v", refreshed.Reference.ExcludePatterns, wantPatterns)
+	}
+
+	projectCfg, err := config.LoadForEditWithoutCredentialsReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("reload project config: %v", err)
+	}
+	if !projectCfg.Bot.Enabled || projectCfg.Bot.Model != "project-model" {
+		t.Fatalf("SetReferenceSettings overwrote existing project settings: bot = %+v", projectCfg.Bot)
 	}
 }

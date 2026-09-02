@@ -3,6 +3,7 @@ import { FileText, Folder } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { app } from "../lib/bridge";
+import { useT } from "../lib/i18n";
 import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToken";
 import type { DirEntry } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
@@ -182,6 +183,7 @@ export function FileReferenceMenu({
   onPick: (entry: DirEntry) => void;
   onHover: (index: number) => void;
 }) {
+  const t = useT();
   const renderEntry = (entry: DirEntry, index: number) => (
     <button
       role="option"
@@ -202,6 +204,7 @@ export function FileReferenceMenu({
         {dirEntryMenuLabel(entry)}
         {entry.isDir ? "/" : ""}
       </span>
+      {entry.hidden && <span className="filemenu__hidden">{t("fileReference.hidden")}</span>}
     </button>
   );
 

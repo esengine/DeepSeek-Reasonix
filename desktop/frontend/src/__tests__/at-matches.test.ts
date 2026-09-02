@@ -117,5 +117,14 @@ console.log("\nat-matches filter");
   eq(got.length, 1, "external entries with the same submitted path dedup to one");
 }
 
+// 8. A hidden search hit keeps its marker through the merge so the @-menu can
+// render the "hidden" hint next to the entry.
+{
+  const entries: DirEntry[] = [];
+  const searchEntries = [{ name: "secret.txt", hidden: true, isDir: false }];
+  const got = filterAtMatches(entries, searchEntries, "secret.txt");
+  eq(got[0]?.hidden, true, "hidden marker survives the merge");
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

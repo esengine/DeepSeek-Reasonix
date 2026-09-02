@@ -194,9 +194,9 @@ if (initialCSS.length > 0) {
 // Navigation overlay styles add a bounded 0.1 KiB to the deferred shell.
 // The cleaned source panel adds 0.1 KiB gzip to the deferred shell on top of
 // the retained-transcript navigation allowance; keep the ratchet explicit.
-// The navigation mask's stable composer footprint and remote tab/surface
-// states bring the merged shell to roughly 115.7 KiB gzip.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
+// The merged shell measures 116.003 KiB gzip; retain the smallest one-decimal
+// ceiling for the combined upstream and reference-filter changes.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.1 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -316,7 +316,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Merge-Back's startup ownership and failure-atomic navigation fence add the
 // remaining bounded payload. The retained recovery receipt makes the stable
 // path 2465.105 KiB raw; the merged test channel measures 2464.979 KiB.
-// Retain only each channel's exact one-decimal ceiling.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_465.0 : 2_465.2;
+// The reference-filter UI adds the remaining bounded payload; retain only
+// each channel's exact one-decimal ceiling after merging both changes.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_468.0 : 2_468.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

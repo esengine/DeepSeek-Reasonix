@@ -1634,13 +1634,14 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
 	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
+	removeReference := !c.Reference.FollowGitignore && len(c.Reference.ExcludePatterns) == 0 && tomlBodyHasSection(body, "reference")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
 	removeSkills := projectSkillsKeysToRemove(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")
 	removeRetiredAutoGuard := hasLegacyDesktopAutoGuard || hasRetiredAgentAutoGuard
 	writeProviderAccess := c.Desktop.ProviderAccess != nil
-	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeSkills && !removeRetiredAutoGuard && !writeProviderAccess {
+	if strings.TrimSpace(delta) == "" && !removePlugins && !removeReference && !removeSandboxBash && !removeSkills && !removeRetiredAutoGuard && !writeProviderAccess {
 		return nil // no changes to write
 	}
 
@@ -1650,6 +1651,9 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	}
 	if removePlugins {
 		body = removeTOMLSection(body, "plugins")
+	}
+	if removeReference {
+		body = removeTOMLSection(body, "reference")
 	}
 	if removeSandboxBash {
 		body = removeTOMLSectionKey(body, "sandbox", "bash")
