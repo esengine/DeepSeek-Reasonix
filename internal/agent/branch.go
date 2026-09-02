@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
@@ -235,18 +235,6 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	})
 }
 
-// saveBranchMetaKeepInFlightTurn keeps any existing in-flight turn on rewrite.
-func saveBranchMetaKeepInFlightTurn(sessionPath string, m BranchMeta) error {
-	return UpdateBranchMeta(sessionPath, true, func(current *BranchMeta) error {
-		if m.InFlightTurn == nil {
-			m.InFlightTurn = current.InFlightTurn
-		}
-		preserveBranchMetaPersistence(&m, *current)
-		*current = m
-		return nil
-	})
-}
-
 func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 	return UpdateBranchMeta(sessionPath, false, func(current *BranchMeta) error {
 		preserveBranchMetaPersistence(&m, *current)
@@ -262,6 +250,10 @@ func SaveBranchMetaPreserveUpdatedLocked(sessionPath string, m BranchMeta) error
 }
 
 func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
+	return saveBranchMetaContext(context.Background(), sessionPath, m, touchUpdated)
+}
+
+func saveBranchMetaContext(ctx context.Context, sessionPath string, m BranchMeta, touchUpdated bool) error {
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
 		return fmt.Errorf("empty session path")
@@ -285,34 +277,15 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	if existing, ok, err := LoadBranchMeta(sessionPath); err == nil && ok {
 		preserveBranchMetaPersistence(&m, existing)
 	}
-	fileutil.Crash("branch-meta", metaPath)
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := marshalJSONIndentContext(ctx, m)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(metaPath), ".branch.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := fileutil.ReplaceFile(tmpPath, metaPath); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return atomicWriteFileContext(ctx, metaPath, ".branch.*.tmp", "branch-meta", b, 0o600, false)
 }
 
 func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {

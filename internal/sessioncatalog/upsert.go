@@ -139,9 +139,34 @@ const sessionInsertSQL = `INSERT INTO catalog_sessions(
     created_at,last_activity_at,preview,turns,turns_state,recovered,
     recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
     recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
-    meta_fingerprint,health,missing_since,seen_generation
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	meta_fingerprint,health,missing_since,seen_generation
+	,repair_state,repair_attempts,repair_retry_at,repair_error_kind,repair_source_fingerprint,repair_engine_version
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(path_key) DO UPDATE SET `
+
+const repairScheduleUpdateSQL = `
+    repair_state=CASE
+        WHEN excluded.turns_state<>'unknown' THEN 'complete'
+        WHEN catalog_sessions.repair_source_fingerprint<>excluded.repair_source_fingerprint
+          OR catalog_sessions.repair_engine_version<>excluded.repair_engine_version THEN 'pending'
+        ELSE catalog_sessions.repair_state END,
+    repair_attempts=CASE
+        WHEN excluded.turns_state<>'unknown'
+          OR catalog_sessions.repair_source_fingerprint<>excluded.repair_source_fingerprint
+          OR catalog_sessions.repair_engine_version<>excluded.repair_engine_version THEN 0
+        ELSE catalog_sessions.repair_attempts END,
+    repair_retry_at=CASE
+        WHEN excluded.turns_state<>'unknown'
+          OR catalog_sessions.repair_source_fingerprint<>excluded.repair_source_fingerprint
+          OR catalog_sessions.repair_engine_version<>excluded.repair_engine_version THEN 0
+        ELSE catalog_sessions.repair_retry_at END,
+    repair_error_kind=CASE
+        WHEN excluded.turns_state<>'unknown'
+          OR catalog_sessions.repair_source_fingerprint<>excluded.repair_source_fingerprint
+          OR catalog_sessions.repair_engine_version<>excluded.repair_engine_version THEN ''
+        ELSE catalog_sessions.repair_error_kind END,
+    repair_source_fingerprint=excluded.repair_source_fingerprint,
+    repair_engine_version=excluded.repair_engine_version`
 
 const directoryProjectionUpdateSQL = `
     path=excluded.path, directory=excluded.directory, directory_key=excluded.directory_key, scope=excluded.scope,
@@ -160,7 +185,7 @@ const directoryProjectionUpdateSQL = `
     ordinary_visible=excluded.ordinary_visible,
     content_fingerprint=excluded.content_fingerprint,
     meta_fingerprint=excluded.meta_fingerprint, health=excluded.health,
-    missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation)`
+    missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation),` + repairScheduleUpdateSQL
 
 const exactSourceUpdateSQL = `
     path=excluded.path, directory=excluded.directory, directory_key=excluded.directory_key, scope=excluded.scope,
@@ -185,7 +210,7 @@ const exactSourceUpdateSQL = `
     ordinary_visible=catalog_sessions.ordinary_visible,
     content_fingerprint=excluded.content_fingerprint,
     meta_fingerprint=excluded.meta_fingerprint, health=excluded.health,
-    missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation)`
+    missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation),` + repairScheduleUpdateSQL
 
 func (c *Catalog) upsertSessionRow(ctx context.Context, tx *sql.Tx, record SessionRecord, pathKey, directoryKey string, generation int64, mode sessionUpsertMode) error {
 	updateSQL := directoryProjectionUpdateSQL
@@ -197,6 +222,10 @@ func (c *Catalog) upsertSessionRow(ctx context.Context, tx *sql.Tx, record Sessi
 }
 
 func (c *Catalog) sessionRowValues(record SessionRecord, pathKey, directoryKey string, generation int64) []any {
+	repairState := "complete"
+	if record.TurnsState == TurnsUnknown {
+		repairState = "pending"
+	}
 	return []any{
 		record.Path, pathKey, record.Directory, directoryKey, record.Scope, record.WorkspaceRoot,
 		c.workspaceRootKey(record.Scope, record.WorkspaceRoot), record.TopicID, record.TopicTitle, record.CustomTitle, record.CreatedAt,
@@ -207,5 +236,10 @@ func (c *Catalog) sessionRowValues(record SessionRecord, pathKey, directoryKey s
 		record.LogicalTopicID, boolToInt(record.OrdinaryVisible),
 		record.ContentFingerprint, record.MetaFingerprint,
 		record.Health, 0, generation,
+		repairState, 0, 0, "", repairSourceFingerprint(record), repairEngineVersion,
 	}
+}
+
+func repairSourceFingerprint(record SessionRecord) string {
+	return record.ContentFingerprint + "\x00" + record.MetaFingerprint
 }

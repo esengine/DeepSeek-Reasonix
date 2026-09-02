@@ -118,6 +118,7 @@ func RecoveryPreferenceCurrent(path string, meta BranchMeta) bool {
 // a classification read as a mutable Session.
 type SessionContentSnapshot struct {
 	messages []provider.Message
+	digest   string
 }
 
 // LoadSessionContentSnapshot loads one transcript once for lineage analysis.
@@ -128,11 +129,21 @@ func LoadSessionContentSnapshot(path string) (SessionContentSnapshot, bool) {
 	if err != nil || session == nil || session.normalizedDirty || session.eventLogDamaged {
 		return SessionContentSnapshot{}, false
 	}
-	return SessionContentSnapshot{messages: session.Snapshot()}, true
+	messages := session.Snapshot()
+	digest, err := digestSessionMessages(messages)
+	if err != nil {
+		return SessionContentSnapshot{}, false
+	}
+	return SessionContentSnapshot{messages: messages, digest: digestString(digest)}, true
 }
 
 // Len is used only to discard candidates that cannot cover the longest member.
 func (s SessionContentSnapshot) Len() int { return len(s.messages) }
+
+// MatchesDigest binds catalog lineage decisions to the recovery ledger.
+func (s SessionContentSnapshot) MatchesDigest(digest string) bool {
+	return strings.TrimSpace(digest) != "" && s.digest == strings.TrimSpace(digest)
+}
 
 // Covers reports whether s contains all content in covered as a compatible
 // prefix. Both snapshots have already passed the conservative load checks.

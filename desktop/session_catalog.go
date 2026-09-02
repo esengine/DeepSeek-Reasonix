@@ -55,6 +55,10 @@ type SessionCatalogStatus struct {
 	Indexed         int64  `json:"indexed"`
 	Total           int64  `json:"total"`
 	RepairPending   int64  `json:"repairPending"`
+	RepairActive    int64  `json:"repairActive"`
+	RepairDeferred  int64  `json:"repairDeferred"`
+	RepairBlocked   int64  `json:"repairBlocked"`
+	NextRepairAt    int64  `json:"nextRepairAt,omitempty"`
 	CanRebuild      bool   `json:"canRebuild"`
 	LastError       string `json:"lastError,omitempty"`
 	QuarantinedPath string `json:"quarantinedPath,omitempty"`
@@ -143,13 +147,17 @@ func flushDesktopDerivedCatalogs(ctx context.Context) error {
 
 func sessionCatalogStatus(status sessioncatalog.Status) SessionCatalogStatus {
 	return SessionCatalogStatus{
-		State:         string(status.State),
-		Mode:          string(status.Mode),
-		Revision:      status.Revision,
-		Indexed:       status.Indexed,
-		Total:         status.Total,
-		RepairPending: status.RepairPending,
-		CanRebuild: status.RepairPending == 0 && (status.State == sessioncatalog.StateDegraded ||
+		State:          string(status.State),
+		Mode:           string(status.Mode),
+		Revision:       status.Revision,
+		Indexed:        status.Indexed,
+		Total:          status.Total,
+		RepairPending:  status.RepairPending,
+		RepairActive:   status.RepairActive,
+		RepairDeferred: status.RepairDeferred,
+		RepairBlocked:  status.RepairBlocked,
+		NextRepairAt:   status.NextRepairAt,
+		CanRebuild: status.RepairActive == 0 && (status.State == sessioncatalog.StateDegraded ||
 			(status.State == sessioncatalog.StateReady && strings.TrimSpace(status.LastError) != "")),
 		LastError:       status.LastError,
 		QuarantinedPath: status.QuarantinedPath,
@@ -643,7 +651,7 @@ func (a *App) pinnedTopicShells(scope, workspaceRoot string, topicIDs, pinnedIDs
 }
 
 func (a *App) catalogIndexingDone(status SessionCatalogStatus) bool {
-	if status.State != string(sessioncatalog.StateReady) || status.RepairPending > 0 {
+	if status.State != string(sessioncatalog.StateReady) || status.RepairActive > 0 {
 		return false
 	}
 	catalog := a.sessionCatalog.Load()

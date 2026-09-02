@@ -34,6 +34,10 @@ type SessionOrderInfo struct {
 	ListingContentDigest string
 }
 
+// RecoveryPreferenceResolver validates one explicit recovery preference while
+// ListSessionOrder is assembling its metadata-only result.
+type RecoveryPreferenceResolver func(path string, meta BranchMeta) bool
+
 // ListingProjectionFresh reports whether Turns/Preview describe this record's
 // current transcript generation. Legacy sidecars that predate the content
 // ledger remain usable until their first revisioned save.

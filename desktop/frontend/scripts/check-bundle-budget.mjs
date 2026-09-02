@@ -172,13 +172,12 @@ console.log("\nbundle budgets");
 // Transactional Ask resolution and authoritative rejected-submit recovery add
 // 0.3 KiB gzip to the initial controller path. Retain the exact turn fence,
 // bounded ListTabs retry, and stale-prompt guard with a 0.1 KiB headroom.
-// Merge-Back then adds identity-bound inspection, navigation, and cleanup
-// orchestration. Failure-atomic completion extends the shared navigation-intent
-// fence to every local and remote switch path. The latest-base production build
-// measures within the exact 461.1 KiB ceil(actualKiB * 10) / 10 ratchet.
-// Registered recovery retention and its copyable receipt measure 461.337 KiB;
-// retain the exact 461.4 KiB decimal ceiling and leave test-channel unchanged.
-const initialJSBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 461.1 : 461.4;
+// Session-catalog repair presentation stays in the lazy project-tree chunk;
+// compact shared helpers keep the combined initial path within the same gate.
+// Merge-Back adds identity-bound inspection, navigation, and retained-recovery
+// orchestration on top. The merged stable build measures 461.338 KiB and the
+// test channel measures 461.323 KiB; retain each exact one-decimal ceiling.
+const initialJSBudgetKiB = 461.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -236,8 +235,9 @@ for (const path of localeChunks) {
   // Merge-Back lifecycle and recovery guidance measure 59.819 KiB zh and
   // 60.612 KiB zh-TW; retain only the next one-decimal ceiling for each.
   // The retained-recovery receipt and copy action move zh to 59.911 KiB;
-  // ratchet only that dialect to its exact one-decimal ceiling.
-  const budget = name.startsWith("zh-TW-") ? 60.7 * 1024 : 60.0 * 1024;
+  // session-catalog recovery guidance on the merged base moves zh-TW to
+  // 60.757 KiB; retain only its exact one-decimal ceiling.
+  const budget = name.startsWith("zh-TW-") ? 60.8 * 1024 : 60.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -315,8 +315,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // notice measure 2456.044 KiB raw; retain 0.056 KiB of one-decimal headroom.
 // Merge-Back's startup ownership and failure-atomic navigation fence add the
 // remaining bounded payload. The retained recovery receipt makes the stable
-// path 2465.105 KiB raw; retain its exact decimal ceiling without changing the
-// test-channel budget.
-const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_464.5 : 2_465.2;
+// path 2465.105 KiB raw; the merged test channel measures 2464.979 KiB.
+// Retain only each channel's exact one-decimal ceiling.
+const rawInitialBudgetKiB = process.env.REASONIX_CHANNEL === "test" ? 2_465.0 : 2_465.2;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -98,6 +98,7 @@ func TestGetRecoveryLineageBindsRequestedPhysicalGroup(t *testing.T) {
 	copyA := filepath.Join(dir, "copy-a.jsonl")
 	rootB := filepath.Join(dir, "root-b.jsonl")
 	forkB := filepath.Join(dir, "fork-b.jsonl")
+	digests := map[string]string{}
 	save := func(path string, messages ...string) {
 		t.Helper()
 		session := agent.NewSession("system")
@@ -111,6 +112,11 @@ func TestGetRecoveryLineageBindsRequestedPhysicalGroup(t *testing.T) {
 		if err := session.Save(path); err != nil {
 			t.Fatal(err)
 		}
+		digest, err := agent.ContentDigestForMessages(session.Snapshot())
+		if err != nil {
+			t.Fatal(err)
+		}
+		digests[path] = digest
 	}
 	save(rootA, "shared question", "shared answer")
 	save(copyA, "shared question", "shared answer", "leaf-a extra", "leaf-a answer")
@@ -119,9 +125,9 @@ func TestGetRecoveryLineageBindsRequestedPhysicalGroup(t *testing.T) {
 	created := time.UnixMilli(100)
 	metas := map[string]agent.BranchMeta{
 		rootA: {ID: "root-a", Scope: "global", TopicID: "topic", TopicTitle: "Topic", CreatedAt: created, UpdatedAt: created.Add(4 * time.Second)},
-		copyA: {ID: "copy-a", Scope: "global", TopicID: "topic", TopicTitle: "Topic", Recovered: true, ParentID: "root-a", RecoveryDepth: 1, CreatedAt: created.Add(time.Second), UpdatedAt: created.Add(3 * time.Second)},
+		copyA: {ID: "copy-a", Scope: "global", TopicID: "topic", TopicTitle: "Topic", Recovered: true, ParentID: "root-a", RecoveryDepth: 1, Revision: 1, ContentDigest: digests[copyA], RecoveryDigest: digests[copyA], CreatedAt: created.Add(time.Second), UpdatedAt: created.Add(3 * time.Second)},
 		rootB: {ID: "root-b", Scope: "global", TopicID: "topic", TopicTitle: "Topic", CreatedAt: created.Add(2 * time.Second), UpdatedAt: created.Add(2 * time.Second)},
-		forkB: {ID: "fork-b", Scope: "global", TopicID: "topic", TopicTitle: "Topic", Recovered: true, ParentID: "root-b", RecoveryDepth: 1, CreatedAt: created.Add(3 * time.Second), UpdatedAt: created.Add(time.Second)},
+		forkB: {ID: "fork-b", Scope: "global", TopicID: "topic", TopicTitle: "Topic", Recovered: true, ParentID: "root-b", RecoveryDepth: 1, Revision: 1, ContentDigest: digests[forkB], RecoveryDigest: digests[forkB], CreatedAt: created.Add(3 * time.Second), UpdatedAt: created.Add(time.Second)},
 	}
 	for path, meta := range metas {
 		if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {

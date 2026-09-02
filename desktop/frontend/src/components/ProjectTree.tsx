@@ -229,6 +229,7 @@ export function ProjectTree({
   const topicCompletePageRef = useRef<Record<string, { signature: string; revision: number }>>({});
   const [catalogStatus, setCatalogStatus] = useState<SessionCatalogStatus>({
     state: "opening", revision: 0, indexed: 0, total: 0, repairPending: 0,
+    repairActive: 0, repairDeferred: 0, repairBlocked: 0,
   });
   const catalogStatusGenerationRef = useRef(0), rebuildingCatalogRef = useRef(false), catalogRebuildFailedRef = useRef(false);
   const [topicPageState, setTopicPageState] = useState<Record<string, { nextCursor?: string; loading: boolean }>>({});
@@ -1070,7 +1071,7 @@ export function ProjectTree({
       queryActive: query.trim().length > 0,
       timeFilterActive: timeFilter !== "all",
       catalogPartial: catalogStatus.state !== "ready"
-        || catalogStatus.repairPending > 0
+        || (catalogStatus.repairActive ?? 0) > 0
         || (catalogStatus.unindexedTargetCount ?? 0) > 0
         || Boolean(catalogStatus.lastError),
       catalogRebuilding: catalogStatus.state === "rebuilding",
@@ -2157,6 +2158,16 @@ export function ProjectTree({
   topicIndexRef.current = 0;
   visibleTopicsCollectorRef.current = [];
   const catalogNotice = sessionCatalogNotice(catalogStatus);
+  const catalogNoticeText = catalogNotice === "indexing"
+    ? (catalogStatus.total <= 0 ? t("projectTree.indexing")
+      : t("projectTree.indexingProgress", { done: catalogStatus.indexed, total: catalogStatus.total }))
+    : catalogNotice === "repair-active"
+      ? t("projectTree.repairActive", { count: catalogStatus.repairActive ?? catalogStatus.repairPending })
+      : catalogNotice === "repair-deferred"
+        ? t("projectTree.repairDeferred")
+        : catalogNotice === "repair-blocked"
+          ? t("projectTree.repairBlocked", { count: catalogStatus.repairBlocked ?? catalogStatus.repairPending })
+          : `${t("projectTree.indexing")} — ${t("task.state.failed")}`;
 
   return (
     <div className="project-tree">
@@ -2173,8 +2184,7 @@ export function ProjectTree({
       )}
       {catalogNotice && (
         <div className="project-tree__catalog-progress" role="status">
-          <span>{catalogNotice !== "working" ? `${t("projectTree.indexing")} — ${t("task.state.failed")}` : catalogStatus.total <= 0 ? t("projectTree.indexing")
-              : t("projectTree.indexingProgress", { done: catalogStatus.indexed, total: catalogStatus.total })}</span>
+          <span>{catalogNoticeText}</span>
           {catalogNotice === "rebuild" && (
             <button type="button" className="project-tree__catalog-rebuild" onClick={() => void rebuildSessionCatalog()}>
               {t("projectTree.rebuildCatalog")}

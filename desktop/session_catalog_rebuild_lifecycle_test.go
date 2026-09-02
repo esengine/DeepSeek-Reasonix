@@ -96,7 +96,7 @@ func TestSessionCatalogStatusCanRebuildJSONContract(t *testing.T) {
 	failed := sessionCatalogStatus(sessioncatalog.Status{State: sessioncatalog.StateReady, LastError: "catalog unavailable"})
 	opening := sessionCatalogStatus(sessioncatalog.Status{State: sessioncatalog.StateOpening, LastError: "still opening"})
 	closed := sessionCatalogStatus(sessioncatalog.Status{State: sessioncatalog.StateClosed, LastError: "closed"})
-	repairing := sessionCatalogStatus(sessioncatalog.Status{State: sessioncatalog.StateDegraded, RepairPending: 1})
+	repairing := sessionCatalogStatus(sessioncatalog.Status{State: sessioncatalog.StateDegraded, RepairPending: 1, RepairActive: 1})
 	if ready.CanRebuild || !degraded.CanRebuild || !failed.CanRebuild || opening.CanRebuild || closed.CanRebuild || repairing.CanRebuild {
 		t.Fatalf("canRebuild policy ready/degraded/failed/opening/closed/repairing = %v/%v/%v/%v/%v/%v",
 			ready.CanRebuild, degraded.CanRebuild, failed.CanRebuild, opening.CanRebuild, closed.CanRebuild, repairing.CanRebuild)

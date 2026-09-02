@@ -53,7 +53,8 @@ func (c *Catalog) reconcileDirectory(ctx context.Context, target DirectoryTarget
 	if err != nil {
 		return err
 	}
-	ordered, err := agent.ListSessionOrder(target.Path)
+	content := newStrictRecoveryContentCache(c.testSessionContentLoadHook)
+	ordered, err := listSessionOrderWithContent(target.Path, content)
 	if err != nil {
 		c.failDirectoryScan(ctx, target.Path, err)
 		return err
@@ -77,13 +78,14 @@ func (c *Catalog) reconcileDirectory(ctx context.Context, target DirectoryTarget
 		return err
 	}
 	for i := range records {
-		records[i] = classifyRecoveryLineageFromContent(normalizeSessionRecord(records[i]))
+		records[i] = classifyRecoveryLineageWithContent(normalizeSessionRecord(records[i]), content)
 	}
-	records = promoteCanonicalLeaves(records)
+	records = promoteCanonicalLeavesWithContent(records, content)
 	if err := c.commitDirectoryProjection(ctx, target, signature, generation, now, records); err != nil {
 		c.failDirectoryScan(context.Background(), target.Path, err)
 		return err
 	}
+	c.markDirectoryVerifiedIfStable(ctx, target, signature)
 	for _, record := range records {
 		if record.TurnsState == TurnsUnknown {
 			c.enqueueRepair(record.Path)
@@ -134,78 +136,6 @@ func (c *Catalog) directoryLock(path string) *sync.Mutex {
 		c.directoryLocks[path] = lock
 	}
 	return lock
-}
-
-// RequestReconcile coalesces external writes by directory. The channel is
-// non-blocking so a session save never waits on catalog work; when the channel
-// is full the request is retained in reconcileDirty and drained by the worker.
-func (c *Catalog) RequestReconcile(target DirectoryTarget) bool {
-	if c == nil || strings.TrimSpace(target.Path) == "" {
-		return false
-	}
-	target.Path = cleanCatalogAccessPath(target.Path)
-	key := queuePathKey(target.Path)
-	if key == "" {
-		return false
-	}
-	target.mutationSeq = c.mutationSeq.Add(1)
-	if _, loaded := c.reconcileQueued.LoadOrStore(key, target); loaded {
-		c.markReconcileDirty(target)
-		return true
-	}
-	select {
-	case c.reconcileCh <- target:
-		return true
-	case <-c.stop:
-		c.reconcileQueued.Delete(key)
-		return false
-	default:
-		c.reconcileQueued.Delete(key)
-		c.markReconcileDirty(target)
-		return false
-	}
-}
-
-func (c *Catalog) markReconcileDirty(target DirectoryTarget) {
-	c.reconcileDirtyMu.Lock()
-	c.reconcileDirty[queuePathKey(target.Path)] = target
-	c.reconcileDirtyMu.Unlock()
-}
-
-func (c *Catalog) takeReconcileDirty() (DirectoryTarget, bool) {
-	c.reconcileDirtyMu.Lock()
-	defer c.reconcileDirtyMu.Unlock()
-	for path, target := range c.reconcileDirty {
-		delete(c.reconcileDirty, path)
-		return target, true
-	}
-	return DirectoryTarget{}, false
-}
-
-func (c *Catalog) reconcileLoop() {
-	defer c.workers.Done()
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if target, ok := c.takeReconcileDirty(); ok {
-			c.reconcileQueued.Delete(queuePathKey(target.Path))
-			ctx, cancel := context.WithTimeout(c.workerCtx, 2*time.Minute)
-			_ = c.reconcileDirectory(ctx, target, target.mutationSeq)
-			cancel()
-			continue
-		}
-		select {
-		case target := <-c.reconcileCh:
-			c.reconcileQueued.Delete(queuePathKey(target.Path))
-			ctx, cancel := context.WithTimeout(c.workerCtx, 2*time.Minute)
-			_ = c.reconcileDirectory(ctx, target, target.mutationSeq)
-			cancel()
-		case <-ticker.C:
-			// Drain dirty map on the next loop iteration.
-		case <-c.stop:
-			return
-		}
-	}
 }
 
 // IndexSessionPath indexes one session without walking its directory.
@@ -303,7 +233,7 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 	if !info.ListingProjectionFresh() {
 		turnsState, info.Preview, info.Turns = TurnsUnknown, "", 0
 	}
-	contentFingerprint := fileFingerprint(info.Path)
+	contentFingerprint := sessionContentFingerprint(info.Path)
 	metaFingerprint := fileFingerprint(agent.BranchMetaPath(info.Path))
 	createdAt := unixMilli(info.CreatedAt)
 	lastActivityAt := unixMilli(info.LastActivityAt)
@@ -318,8 +248,6 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 			lastActivityAt = fileMS
 		}
 	}
-	// Real content only; failure/missing parent leaves RecoveryCopy false.
-	recoveryCopy := info.Recovered && agent.RecoveryBranchCoveredByParent(info.Path, target.Path)
 	return normalizeSessionRecord(SessionRecord{
 		Path:               info.Path,
 		Directory:          target.Path,
@@ -338,7 +266,7 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 		RecoveryDigest:     info.RecoveryDigest,
 		ParentID:           info.ParentID,
 		RecoveryPreferred:  info.RecoveryPreferred,
-		RecoveryCopy:       recoveryCopy,
+		RecoveryCopy:       false,
 		ContentFingerprint: contentFingerprint,
 		MetaFingerprint:    metaFingerprint,
 		Health:             HealthOK,
@@ -358,6 +286,10 @@ func fileFingerprint(path string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
+func sessionContentFingerprint(path string) string {
+	return fileFingerprint(path) + "|" + fileFingerprint(agent.SessionEventLogPath(path))
 }
 
 // beginDirectoryScan starts or resumes a directory scan. When the previous
@@ -747,6 +679,23 @@ func Inspect(ctx context.Context, path string) (Status, error) {
 	_ = db.QueryRowContext(ctx, `SELECT revision FROM catalog_state WHERE id=1`).Scan(&status.Revision)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions`).Scan(&status.Indexed)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown'`).Scan(&status.RepairPending)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown' AND repair_state IN ('pending','active')`).Scan(&status.RepairActive)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown' AND repair_state='deferred'`).Scan(&status.RepairDeferred)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown' AND repair_state='blocked'`).Scan(&status.RepairBlocked)
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MIN(repair_retry_at),0) FROM catalog_sessions WHERE turns_state='unknown' AND repair_state='deferred'`).Scan(&status.NextRepairAt)
+	rows, queryErr := db.QueryContext(ctx, `SELECT repair_error_kind,COUNT(*) FROM catalog_sessions
+		WHERE turns_state='unknown' AND repair_error_kind<>'' GROUP BY repair_error_kind`)
+	if queryErr == nil {
+		status.RepairErrorKinds = map[string]int64{}
+		for rows.Next() {
+			var kind string
+			var count int64
+			if rows.Scan(&kind, &count) == nil {
+				status.RepairErrorKinds[kind] = count
+			}
+		}
+		_ = rows.Close()
+	}
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE missing_since=0`).Scan(&status.PhysicalSessions)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_topics`).Scan(&status.LogicalSessions)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT recovery_group_id) FROM catalog_sessions WHERE recovered=1 AND recovery_group_id<>'' AND missing_since=0`).Scan(&status.RecoveryGroups)

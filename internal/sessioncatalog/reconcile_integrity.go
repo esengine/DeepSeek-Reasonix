@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
-	"reasonix/internal/agent"
 )
 
 const (
@@ -22,6 +20,9 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 	path := target.Path
 	directoryKey := c.pathKey(path)
 	target.Scope, target.WorkspaceRoot = normalizeScope(target.Scope, target.WorkspaceRoot)
+	if c.directoryVerified(target, signature) {
+		return true, nil
+	}
 	var expectedTotal, present, unprojected, missing int
 	var storedScope, storedRoot string
 	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,total,
@@ -47,7 +48,8 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		c.markRepair(repairReasonScopeMismatch, c.opts.Now().UnixMilli())
 		return false, nil
 	}
-	ordered, err := agent.ListSessionOrder(path)
+	content := newStrictRecoveryContentCache(c.testSessionContentLoadHook)
+	ordered, err := listSessionOrderWithContent(path, content)
 	if err != nil {
 		return false, err
 	}
@@ -60,9 +62,9 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		return false, err
 	}
 	for i := range expectedRecords {
-		expectedRecords[i] = classifyRecoveryLineageFromContent(expectedRecords[i])
+		expectedRecords[i] = classifyRecoveryLineageWithContent(expectedRecords[i], content)
 	}
-	expectedRecords = promoteCanonicalLeaves(expectedRecords)
+	expectedRecords = promoteCanonicalLeavesWithContent(expectedRecords, content)
 	expected := make(map[string]SessionRecord, len(expectedRecords))
 	for _, record := range expectedRecords {
 		expected[c.pathKey(record.Path)] = record
@@ -127,7 +129,38 @@ func (c *Catalog) directoryScanCanSkip(ctx context.Context, target DirectoryTarg
 		c.markRepair(repairReasonTopicMismatch, c.opts.Now().UnixMilli())
 		return false, nil
 	}
+	c.markDirectoryVerified(target, signature)
 	return true, nil
+}
+
+func (c *Catalog) directoryVerified(target DirectoryTarget, signature string) bool {
+	key := c.verifiedDirectoryKey(target)
+	c.verifiedDirsMu.RLock()
+	verified := c.verifiedDirs[key] == signature
+	c.verifiedDirsMu.RUnlock()
+	return verified
+}
+
+func (c *Catalog) markDirectoryVerified(target DirectoryTarget, signature string) {
+	c.verifiedDirsMu.Lock()
+	if c.verifiedDirs == nil {
+		c.verifiedDirs = map[string]string{}
+	}
+	c.verifiedDirs[c.verifiedDirectoryKey(target)] = signature
+	c.verifiedDirsMu.Unlock()
+}
+
+func (c *Catalog) markDirectoryVerifiedIfStable(ctx context.Context, target DirectoryTarget, signature string) {
+	var missing int
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE directory_key=? AND missing_since>0`,
+		c.pathKey(target.Path)).Scan(&missing); err == nil && missing == 0 {
+		c.markDirectoryVerified(target, signature)
+	}
+}
+
+func (c *Catalog) verifiedDirectoryKey(target DirectoryTarget) string {
+	scope, root := normalizeScope(target.Scope, target.WorkspaceRoot)
+	return c.pathKey(target.Path) + "\x00" + scope + "\x00" + c.workspaceRootKey(scope, root)
 }
 
 func sameSessionProjection(got, want SessionRecord) bool {

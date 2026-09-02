@@ -110,9 +110,11 @@ func (s *Session) rotateRecoveryLane(current string) {
 
 // writeRecoveryEventLog writes a recovery event log. Isolated writer lanes
 // compact so repeated in-place rewrites stay bounded.
-func writeRecoveryEventLog(path string, msgs []provider.Message, digest [sha256.Size]byte, isolated bool) error {
+
+func writeRecoveryEventLog(path string, msgs []provider.Message, digest [sha256.Size]byte, revision int64, isolated bool) error {
+	baseRevision := max(int64(0), revision-1)
 	if isolated {
-		return compactSessionEventLog(path, msgs, digest, 0, "recovery")
+		return compactSessionEventLog(path, msgs, digest, baseRevision, "recovery")
 	}
-	return appendSessionReplaceEvent(path, msgs, digest, 0, "recovery")
+	return appendSessionReplaceEvent(path, msgs, digest, baseRevision, "recovery")
 }

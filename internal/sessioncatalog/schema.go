@@ -196,6 +196,22 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_workspace_ordinary
 ON catalog_sessions(scope, workspace_root_key, ordinary_visible, last_activity_at DESC);
 `
 
+// v11 persists repair scheduling in the disposable projection. A source or
+// engine generation change resets a deferred/blocked row through the normal
+// upsert path; otherwise restart preserves its retry budget.
+const migrationV11 = `
+ALTER TABLE catalog_sessions ADD COLUMN repair_state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE catalog_sessions ADD COLUMN repair_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_sessions ADD COLUMN repair_retry_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_sessions ADD COLUMN repair_error_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN repair_source_fingerprint TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN repair_engine_version INTEGER NOT NULL DEFAULT 0;
+
+UPDATE catalog_sessions SET repair_state=CASE WHEN turns_state='unknown' THEN 'pending' ELSE 'complete' END;
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_repair_due
+ON catalog_sessions(repair_state, repair_retry_at, last_activity_at DESC, path_key);
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -236,6 +252,10 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 10, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV10)
+			return err
+		}},
+		{Version: 11, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV11)
 			return err
 		}},
 	}
