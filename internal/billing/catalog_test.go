@@ -38,6 +38,63 @@ func TestResolveDeepSeekScheduledRateBoundaries(t *testing.T) {
 	}
 }
 
+func TestDeepSeekRateBandWeekendOffPeak(t *testing.T) {
+	tests := []struct {
+		name string
+		at   string
+		want string
+	}{
+		// Rule not yet in force: a Beijing Saturday still bills peak by the hour.
+		{name: "saturday before rule takes effect", at: "2026-08-22T06:00:00Z", want: RateBandPeak},
+		// First window the old hour-only logic gets wrong: Beijing Sunday 09:00.
+		{name: "first sunday morning peak hour after rule", at: "2026-08-23T01:00:00Z", want: RateBandOffPeak},
+		{name: "first sunday afternoon peak hour after rule", at: "2026-08-23T09:59:59Z", want: RateBandOffPeak},
+		// Beijing Monday 09:00 is a weekday again.
+		{name: "monday after that weekend", at: "2026-08-24T01:00:00Z", want: RateBandPeak},
+		{name: "later friday peak hour", at: "2026-08-28T06:00:00Z", want: RateBandPeak},
+		{name: "later saturday peak hour", at: "2026-08-29T06:00:00Z", want: RateBandOffPeak},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			at, err := time.Parse(time.RFC3339, tc.at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := DeepSeekRateBand(at); got != tc.want {
+				t.Fatalf("DeepSeekRateBand(%s) = %q, want %q", tc.at, got, tc.want)
+			}
+		})
+	}
+}
+
+// The weekend is bounded in Beijing time, so it starts and ends at 16:00Z. These
+// four instants are all off-peak by the hour, so DeepSeekRateBand cannot tell
+// them apart today; pinning the predicate keeps the boundary right if the peak
+// windows ever move into the hours where UTC and Beijing weekdays disagree.
+func TestDeepSeekWeekendOffPeakEdgesAreBeijingBounded(t *testing.T) {
+	tests := []struct {
+		name string
+		at   string
+		want bool
+	}{
+		{name: "one second before beijing saturday", at: "2026-08-28T15:59:59Z", want: false},
+		{name: "beijing saturday begins", at: "2026-08-28T16:00:00Z", want: true},
+		{name: "beijing sunday ends", at: "2026-08-30T15:59:59Z", want: true},
+		{name: "beijing monday begins", at: "2026-08-30T16:00:00Z", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			at, err := time.Parse(time.RFC3339, tc.at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := deepSeekWeekendOffPeak(at); got != tc.want {
+				t.Fatalf("deepSeekWeekendOffPeak(%s) = %v, want %v", tc.at, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildQuoteScheduledRateUsesMatchingPeerBand(t *testing.T) {
 	at := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
 	q := BuildQuote(QuoteInput{
