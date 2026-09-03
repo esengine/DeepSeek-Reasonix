@@ -48,14 +48,16 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 				}
 				plan.permName = "bash"
 				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-			case "write":
-				var prefix string
-				if a.svc.pty != nil {
-					prefix = a.svc.pty.PendingInput(p.SessionID)
+			case "write_line":
+				cmd := strings.TrimSpace(p.Command)
+				if cmd == "" {
+					cmd = strings.TrimSpace(p.Input)
 				}
-				fullCmd := strings.TrimSpace(prefix + p.Input)
 				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": fullCmd})
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
+			case "write":
+				plan.permName = "pty"
+				plan.permArgs = normalized
 			}
 		}
 	}

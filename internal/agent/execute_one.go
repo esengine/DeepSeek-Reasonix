@@ -144,20 +144,22 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 				}
 				plan.permName = "bash"
 				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-			case "write":
-				var prefix string
-				if a.svc.pty != nil {
-					prefix = a.svc.pty.PendingInput(p.SessionID)
+			case "write_line":
+				cmd := strings.TrimSpace(p.Command)
+				if cmd == "" {
+					cmd = strings.TrimSpace(p.Input)
 				}
-				fullCmd := strings.TrimSpace(prefix + p.Input)
 				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": fullCmd})
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
 				var permissionReader bool
 				plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.permArgs)
 				if permissionReader {
 					plan.readOnly = true
 					plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
 				}
+			case "write":
+				plan.permName = "pty"
+				plan.permArgs = plan.execArgs
 			}
 		}
 	} else {
@@ -571,10 +573,14 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 		if !allow {
 			if plan.canonicalName == "pty" && a.svc.pty != nil {
 				var p struct {
+					Action    string `json:"action"`
 					SessionID string `json:"session_id"`
 				}
 				_ = json.Unmarshal(plan.execArgs, &p)
-				a.svc.pty.ResetPendingInput(p.SessionID, true)
+				action := strings.ToLower(strings.TrimSpace(p.Action))
+				if (action == "write" || action == "write_line") && a.svc.pty.PendingInput(p.SessionID) != "" {
+					a.svc.pty.ResetPendingInput(p.SessionID, true)
+				}
 			}
 			return toolOutcome{
 				output:  "blocked: " + reason,

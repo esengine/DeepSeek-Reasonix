@@ -48,18 +48,18 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("unexpected start output: %q", startRes)
 	}
 
-	// 2. Action: write (export environment variable and write a file)
+	// 2. Action: write_line (export environment variable and write a file)
 	writeArgs, _ := json.Marshal(map[string]any{
-		"action":     "write",
+		"action":     "write_line",
 		"session_id": "repl-1",
-		"input":      "export HELLO_PTY=WORLD\necho $HELLO_PTY > pty_out.txt\ncat pty_out.txt\n",
+		"command":    "export HELLO_PTY=WORLD && echo $HELLO_PTY > pty_out.txt && cat pty_out.txt",
 		"wait_ms":    800,
 	})
 	writeRes, err := tool.Execute(ctx, writeArgs)
 	if err != nil {
-		t.Fatalf("write failed: %v", err)
+		t.Fatalf("write_line failed: %v", err)
 	}
-	t.Logf("Write response:\n%s", writeRes)
+	t.Logf("Write_line response:\n%s", writeRes)
 
 	// Verify file was written in the cwd
 	time.Sleep(200 * time.Millisecond)
@@ -100,7 +100,7 @@ func TestPTYToolLifecycle(t *testing.T) {
 		"input":      "rm -rf / --no-preserve-root\n",
 	})
 	_, dangerErr := tool.Execute(ctx, dangerousArgs)
-	if dangerErr == nil || !strings.Contains(dangerErr.Error(), "blocked: dangerous command") {
+	if dangerErr == nil || !strings.Contains(dangerErr.Error(), "blocked: dangerous") {
 		t.Fatalf("expected dangerous command to be blocked, got err: %v", dangerErr)
 	}
 

@@ -23,7 +23,7 @@ func (ptyTool) Name() string { return "pty" }
 func (ptyTool) Description() string {
 	return "Control a persistent interactive pseudo-terminal session (PTY) across turns. " +
 		"Use for REPLs (Python, Node.js), interactive debuggers (gdb, lldb, pdb), maintaining shell state (cd, venv, export), or managing dev servers. " +
-		"Actions: 'start' (spawn session), 'write' (send input/commands and auto-capture output), 'read' (read new unread output), 'list' (list active PTY sessions), 'close' (terminate session), 'resize' (change terminal size)."
+		"Actions: 'start' (spawn session), 'write_line' (execute a shell command line with newline and auto-capture output; governed by Bash permission policies), 'write' (send raw interactive keystrokes/control characters to REPLs/programs), 'read' (read new unread output), 'list' (list active PTY sessions), 'close' (terminate session), 'resize' (change terminal size)."
 }
 
 func (ptyTool) Schema() json.RawMessage {
@@ -33,7 +33,7 @@ func (ptyTool) Schema() json.RawMessage {
   "properties": {
     "action": {
       "type": "string",
-      "enum": ["start", "write", "read", "list", "close", "resize"],
+      "enum": ["start", "write_line", "write", "read", "list", "close", "resize"],
       "description": "The PTY action to perform."
     },
     "session_id": {
@@ -42,11 +42,11 @@ func (ptyTool) Schema() json.RawMessage {
     },
     "command": {
       "type": "string",
-      "description": "Initial shell or command to spawn on 'start' (e.g. 'bash', 'zsh', 'python3', 'node'). If omitted, uses user's default login shell."
+      "description": "Command to run: on 'start', initial shell/program (e.g. 'bash', 'python3'); on 'write_line', full shell command line to execute."
     },
     "input": {
       "type": "string",
-      "description": "Text or keystrokes to send on 'write'. Special keystrokes: \\n (enter), \\x03 (Ctrl+C), \\x04 (Ctrl+D), \\x1a (Ctrl+Z)."
+      "description": "Text or keystrokes to send: on 'write_line', shell command; on 'write', raw keystrokes/control characters (\\n, \\x03 Ctrl+C, \\x04 Ctrl+D, \\x1a Ctrl+Z, arrow keys)."
     },
     "wait_ms": {
       "type": "integer",
@@ -97,7 +97,6 @@ func isDangerousPTYInput(input string) bool {
 	if trimmed == "" {
 		return false
 	}
-	// Direct string patterns for catastrophic root destruction
 	dangerousPatterns := []string{
 		"rm -rf /",
 		"rm -fr /",
@@ -114,7 +113,6 @@ func isDangerousPTYInput(input string) bool {
 			return true
 		}
 	}
-	// Parse fields if static
 	if fields, _ := shellparse.StaticFields(trimmed); len(fields) >= 2 {
 		if (fields[0] == "rm" || strings.HasSuffix(fields[0], "/rm")) &&
 			(fields[1] == "-rf" || fields[1] == "-fr" || fields[1] == "-r") {
@@ -165,10 +163,50 @@ func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error
 		}
 		return strings.TrimRight(msg, "\n"), nil
 
+	case "write_line":
+		cmdToRun := strings.TrimSpace(p.Command)
+		if cmdToRun == "" {
+			cmdToRun = strings.TrimSpace(p.Input)
+		}
+		if isDangerousPTYInput(cmdToRun) {
+			return "", fmt.Errorf("blocked: dangerous command execution denied by security policy: %s", cmdToRun)
+		}
+
+		sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
+		if err != nil {
+			return "", err
+		}
+
+		waitBudget := 500 * time.Millisecond
+		if p.WaitMs != nil {
+			if *p.WaitMs <= 0 {
+				waitBudget = 0
+			} else if *p.WaitMs > 10000 {
+				waitBudget = 10000 * time.Millisecond
+			} else {
+				waitBudget = time.Duration(*p.WaitMs) * time.Millisecond
+			}
+		}
+
+		toSend := cmdToRun + "\n"
+		out, err := sess.Write(ctx, toSend, waitBudget)
+		if err != nil && !sess.IsRunning() {
+			return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(out) == "" {
+			if waitBudget == 0 {
+				return "Command line written (non-blocking).", nil
+			}
+			return "Command line written (no new output).", nil
+		}
+		return out, nil
+
 	case "write":
-		// Security guard: verify input doesn't bypass system safety
 		if isDangerousPTYInput(p.Input) {
-			return "", fmt.Errorf("blocked: dangerous command execution denied by security policy: %s", strings.TrimSpace(p.Input))
+			return "", fmt.Errorf("blocked: dangerous keystroke input denied by security policy: %s", strings.TrimSpace(p.Input))
 		}
 
 		sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
@@ -254,6 +292,6 @@ func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error
 		return fmt.Sprintf("Resized PTY session %q to %dx%d.", sessionID, cols, rows), nil
 
 	default:
-		return "", fmt.Errorf("unknown pty action %q (supported: start, write, read, list, close, resize)", p.Action)
+		return "", fmt.Errorf("unknown pty action %q (supported: start, write_line, write, read, list, close, resize)", p.Action)
 	}
 }
