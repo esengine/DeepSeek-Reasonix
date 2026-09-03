@@ -94,4 +94,23 @@ assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime({ running: false }
   assert.equal(loads, 2, "a mutation queues one authoritative trailing refresh");
 }
 
+{
+  const pending = deferred<BackgroundRuntimeView[]>();
+  let applied = 0;
+  let scheduled = 0;
+  const coordinator = createBackgroundRuntimeRefreshCoordinator(
+    () => pending.promise,
+    () => { applied += 1; },
+    () => { scheduled += 1; return scheduled; },
+    () => undefined,
+  );
+  const request = coordinator.refresh();
+  coordinator.dispose();
+  pending.resolve([runtime()]);
+  await request;
+  await flushPromises();
+  assert.equal(applied, 0, "disposed coordinators must ignore late bridge results");
+  assert.equal(scheduled, 0, "disposed coordinators must not schedule fallback polling");
+}
+
 console.log("background runtime refresh tests passed");
