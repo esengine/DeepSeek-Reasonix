@@ -15,7 +15,7 @@ func TestPTYSessionStateTransitions(t *testing.T) {
 	}
 
 	// 2. BeginCommand moves to CommandRunning
-	if err := sm.BeginCommand(); err != nil {
+	if err := sm.BeginCommand("req-123"); err != nil {
 		t.Fatalf("BeginCommand failed: %v", err)
 	}
 	if got := sm.Current(); got != StateCommandRunning {
@@ -26,26 +26,27 @@ func TestPTYSessionStateTransitions(t *testing.T) {
 	if err := sm.CanWriteLine(); err == nil {
 		t.Fatalf("expected CanWriteLine to be rejected during CommandRunning")
 	}
-	if err := sm.BeginCommand(); err == nil {
+	if err := sm.BeginCommand("req-456"); err == nil {
 		t.Fatalf("expected BeginCommand to fail during CommandRunning")
 	}
 
-	// 4. EndCommand restores ShellReady
-	sm.EndCommand()
-	if got := sm.Current(); got != StateShellReady {
-		t.Fatalf("expected EndCommand to restore ShellReady, got: %s", got)
+	// 4. Complete with non-matching reqID does not restore ShellReady
+	if sm.Complete("wrong-req") {
+		t.Fatalf("Complete should return false for mismatched reqID")
 	}
-	if err := sm.CanWriteLine(); err != nil {
-		t.Fatalf("expected CanWriteLine to succeed after EndCommand: %v", err)
+	if got := sm.Current(); got != StateCommandRunning {
+		t.Fatalf("expected state to remain CommandRunning, got: %s", got)
 	}
 
-	// 5. Ctrl+C interruption restores ShellReady
-	_ = sm.BeginCommand()
-	if !sm.InterruptIfRunning() {
-		t.Fatalf("expected InterruptIfRunning to return true when CommandRunning")
+	// 5. Complete with matching reqID restores ShellReady
+	if !sm.Complete("req-123") {
+		t.Fatalf("Complete failed for matching reqID")
 	}
 	if got := sm.Current(); got != StateShellReady {
-		t.Fatalf("expected Ctrl+C to restore ShellReady, got: %s", got)
+		t.Fatalf("expected Complete to restore ShellReady, got: %s", got)
+	}
+	if err := sm.CanWriteLine(); err != nil {
+		t.Fatalf("expected CanWriteLine to succeed after Complete: %v", err)
 	}
 
 	// 6. MarkClosed transitions to Closed and rejects all commands

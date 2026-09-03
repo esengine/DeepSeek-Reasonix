@@ -70,27 +70,30 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("file content = %q, want 'WORLD'", string(content))
 	}
 
-	// 3. Action: write in separate turn to verify persistent environment
+	// 3. Action: write_line in separate turn to verify persistent environment
 	write2Args, _ := json.Marshal(map[string]any{
-		"action":     "write",
+		"action":     "write_line",
 		"session_id": "repl-1",
-		"input":      "echo HELLO_AGAIN_$HELLO_PTY\n",
+		"command":    "echo HELLO_AGAIN_$HELLO_PTY",
 		"wait_ms":    800,
 	})
 	write2Res, err := tool.Execute(ctx, write2Args)
 	if err != nil {
-		t.Fatalf("write 2 failed: %v", err)
+		t.Fatalf("write_line 2 failed: %v", err)
 	}
 	if !strings.Contains(write2Res, "HELLO_AGAIN_WORLD") {
-		// Read buffer if prompt output arrived
-		readArgs, _ := json.Marshal(map[string]any{
-			"action":     "read",
-			"session_id": "repl-1",
-		})
-		readRes, _ := tool.Execute(ctx, readArgs)
-		if !strings.Contains(write2Res+readRes, "HELLO_AGAIN_WORLD") {
-			t.Fatalf("expected persistent var in output: %q + %q", write2Res, readRes)
-		}
+		t.Fatalf("expected persistent var in output: %q", write2Res)
+	}
+
+	// 3b. Verify raw write with newline is strictly blocked in ShellReady mode
+	rawWriteArgs, _ := json.Marshal(map[string]any{
+		"action":     "write",
+		"session_id": "repl-1",
+		"input":      "echo CANNOT_USE_RAW_WRITE\n",
+	})
+	_, rawErr := tool.Execute(ctx, rawWriteArgs)
+	if rawErr == nil || !strings.Contains(rawErr.Error(), "submitting shell commands via raw write is not allowed") {
+		t.Fatalf("expected raw write with newline to be blocked in ShellReady, got: %v", rawErr)
 	}
 
 	// 4. Test security policy blocks catastrophic dangerous command
@@ -363,6 +366,82 @@ func TestPTYRejectWriteLineWhileCommandRunning(t *testing.T) {
 		t.Fatalf("expected output after Ctrl+C recovery, got: %q", thirdRes)
 	}
 }
+
+func TestPTYWriteLineInteractivePythonSentinelIsolation(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	// Start bash session
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "py-iso-sess",
+	})
+	if _, err := tool.Execute(ctx, startArgs); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// Launch python3 -i via write_line with wait_ms: 0 (non-blocking)
+	waitZero := 0
+	pyLaunchArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "py-iso-sess",
+		"command":    "python3 -i",
+		"wait_ms":    &waitZero,
+	})
+	if _, err := tool.Execute(ctx, pyLaunchArgs); err != nil {
+		t.Fatalf("launch python failed: %v", err)
+	}
+
+	// Allow python to start
+	time.Sleep(300 * time.Millisecond)
+
+	// Send code into interactive Python via action=write (which is allowed while CommandRunning)
+	writeCodeArgs, _ := json.Marshal(map[string]any{
+		"action":     "write",
+		"session_id": "py-iso-sess",
+		"input":      "print('MATH_RESULT=' + str(21 * 2))\n",
+		"wait_ms":    500,
+	})
+	codeRes, err := tool.Execute(ctx, writeCodeArgs)
+	if err != nil {
+		t.Fatalf("write code to python failed: %v", err)
+	}
+
+	// Read output to verify Python evaluated it without syntax errors from leaked sentinels
+	readArgs, _ := json.Marshal(map[string]any{
+		"action":     "read",
+		"session_id": "py-iso-sess",
+	})
+	readRes, _ := tool.Execute(ctx, readArgs)
+	allOut := codeRes + readRes
+	if strings.Contains(allOut, "SyntaxError") {
+		t.Fatalf("sentinel leaked into python stdin causing SyntaxError: %s", allOut)
+	}
+	if !strings.Contains(allOut, "MATH_RESULT=42") {
+		t.Fatalf("expected python output MATH_RESULT=42, got: %s", allOut)
+	}
+
+	// Exit Python
+	exitPyArgs, _ := json.Marshal(map[string]any{
+		"action":     "write",
+		"session_id": "py-iso-sess",
+		"input":      "exit()\n",
+		"wait_ms":    500,
+	})
+	_, _ = tool.Execute(ctx, exitPyArgs)
+	time.Sleep(400 * time.Millisecond)
+
+	// After Python exits, session must have automatically returned to ShellReady!
+	sess, _ := mgr.Get("py-iso-sess")
+	if got := sess.State(); got != pty.StateShellReady {
+		t.Fatalf("expected session to auto-restore to ShellReady after python exit, got: %s", got)
+	}
+}
+
 
 
 

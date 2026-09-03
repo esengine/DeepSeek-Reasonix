@@ -274,6 +274,13 @@ func execPTYWrite(ctx context.Context, mgr *pty.Manager, sessionID string, p pty
 	if err != nil {
 		return "", err
 	}
+
+	// In ShellReady mode, raw write must not submit shell commands via newline or carriage return.
+	// Commands must be submitted through write_line so they are audited, wrapped, and tracked.
+	if sess.State() == pty.StateShellReady && strings.ContainsAny(p.Input, "\r\n") {
+		return "", fmt.Errorf("blocked: submitting shell commands via raw write is not allowed while shell is idle (state: shell_ready); use pty action=write_line to execute shell commands")
+	}
+
 	waitBudget := parsePTYWaitBudget(p.WaitMs)
 	out, err := sess.Write(ctx, p.Input, waitBudget)
 	if err != nil && !sess.IsRunning() {

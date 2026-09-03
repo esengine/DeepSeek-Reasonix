@@ -126,9 +126,10 @@ type Session struct {
 	writeMu   sync.Mutex
 	closeOnce sync.Once
 
-	driver ShellDriver
-	state  *StateMachine
-	parser *CompletionParser
+	driver       ShellDriver
+	state        *StateMachine
+	parser       *CompletionParser
+	activeMarker string
 
 	// pendingInput accumulates raw interactive write() bytes that have not yet
 	// been submitted (i.e. no \n seen).
@@ -207,8 +208,8 @@ func (s *Session) Info() SessionInfo {
 	}
 }
 
-// startOutputPump reads raw bytes from the low-level PTY into both the user ring buffer
-// and the decoupled CompletionParser.
+// startOutputPump reads raw bytes from the low-level PTY, feeds CompletionParser for state
+// detection, and writes filtered user-visible output to the ring buffer.
 func (s *Session) startOutputPump() {
 	buf := make([]byte, 4096)
 	for {
@@ -219,15 +220,17 @@ func (s *Session) startOutputPump() {
 			s.mu.Unlock()
 
 			chunk := buf[:n]
-			_, _ = s.buffer.Write(chunk)
+			userBytes := chunk
 			if s.parser != nil {
-				s.parser.Feed(chunk)
+				userBytes = s.parser.Feed(chunk)
 			}
-
-			// Non-blocking notification to silence detectors
-			select {
-			case s.onOutput <- struct{}{}:
-			default:
+			if len(userBytes) > 0 {
+				_, _ = s.buffer.Write(userBytes)
+				// Non-blocking notification to silence detectors
+				select {
+				case s.onOutput <- struct{}{}:
+				default:
+				}
 			}
 		}
 		if err != nil {
@@ -278,18 +281,19 @@ func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Du
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	if s.state != nil {
-		if err := s.state.BeginCommand(); err != nil {
-			return CommandResult{Status: StatusRunning}, err
-		}
-	}
+	requestID := newRequestID()
+	marker := markerPrefix + requestID + "__"
 
 	s.mu.Lock()
 	s.lastActive = time.Now()
+	s.activeMarker = marker
 	s.mu.Unlock()
 
-	requestID := newRequestID()
-	marker := markerPrefix + requestID + "__"
+	if s.state != nil {
+		if err := s.state.BeginCommand(requestID); err != nil {
+			return CommandResult{Status: StatusRunning}, err
+		}
+	}
 
 	driver := s.driver
 	if driver == nil {
@@ -299,7 +303,7 @@ func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Du
 	payload := driver.FormatCommand(cmd, marker)
 	var notifyCh <-chan struct{}
 	if s.parser != nil {
-		notifyCh = s.parser.Arm(marker, driver)
+		notifyCh = s.parser.Arm(requestID, marker, driver)
 	}
 
 	if _, err := s.lowPTY.Write([]byte(payload)); err != nil {
@@ -401,19 +405,20 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 	s.lastActive = time.Now()
 	s.mu.Unlock()
 
-	// Handle Ctrl+C or Ctrl+U interrupts: restore state machine to ready if interrupted
-	if strings.ContainsAny(input, "\x03\x15") {
-		if s.state != nil {
-			s.state.InterruptIfRunning()
-		}
-		if s.parser != nil {
-			s.parser.Disarm()
-		}
-	}
-
 	// 1. Send input to the PTY device; commit to pending buffer only upon successful write
 	if len(input) > 0 {
-		if _, err := s.lowPTY.Write([]byte(input)); err != nil {
+		payload := []byte(input)
+		if strings.Contains(input, "\x03") && s.state != nil && s.state.Current() == StateCommandRunning {
+			s.mu.RLock()
+			marker := s.activeMarker
+			s.mu.RUnlock()
+			if marker != "" {
+				probe := fmt.Sprintf("\nprintf '\\n%s:130\\n'\n", marker)
+				payload = append(payload, []byte(probe)...)
+			}
+		}
+
+		if _, err := s.lowPTY.Write(payload); err != nil {
 			return "", fmt.Errorf("pty write failed: %w", err)
 		}
 		s.CommitRawInput(input)

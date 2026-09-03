@@ -127,3 +127,92 @@ func TestPTYManagerConcurrentGetOrCreate(t *testing.T) {
 		t.Fatalf("expected exactly 1 session in manager, got: %d", len(list))
 	}
 }
+
+func TestPTYAsyncCompletionRestoresShellReady(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	sess, err := mgr.Start(context.Background(), StartOptions{
+		ID:  "async-completion-sess",
+		Cwd: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	// 1. Launch command non-blocking (waitBudget = 0)
+	res, err := sess.RunCommand(context.Background(), "sleep 0.4 && echo ASYNC_SUCCESS", 0)
+	if err != nil {
+		t.Fatalf("non-blocking RunCommand failed: %v", err)
+	}
+	if res.Status != StatusRunning {
+		t.Fatalf("expected StatusRunning on 0 wait budget, got: %s", res.Status)
+	}
+
+	// 2. State must immediately be StateCommandRunning
+	if got := sess.State(); got != StateCommandRunning {
+		t.Fatalf("expected state to be CommandRunning, got: %s", got)
+	}
+
+	// 3. Wait 800ms for command to complete in the background and parser to capture sentinel
+	time.Sleep(800 * time.Millisecond)
+
+	// 4. State must automatically have transitioned to StateShellReady!
+	if got := sess.State(); got != StateShellReady {
+		t.Fatalf("expected state to auto-restore to ShellReady via async completion, got: %s", got)
+	}
+
+	// 5. Subsequent write_line should work cleanly without being rejected as busy
+	res2, err := sess.RunCommand(context.Background(), "echo NEXT_COMMAND_OK", 2*time.Second)
+	if err != nil {
+		t.Fatalf("subsequent command failed: %v", err)
+	}
+	if !strings.Contains(res2.Output, "NEXT_COMMAND_OK") {
+		t.Fatalf("expected output from subsequent command, got: %q", res2.Output)
+	}
+}
+
+func TestCompletionParserLineBufferCapped(t *testing.T) {
+	cp := NewCompletionParser(nil)
+	driver := &PosixShellDriver{}
+	_ = cp.Arm("test-req", "__DONE__", driver)
+
+	// Feed 200 KiB of continuous bytes without any newline
+	chunk := strings.Repeat("A", 200*1024)
+	cp.Feed([]byte(chunk))
+
+	// lineBuf must be capped around MaxLineBufferBytes (64 KiB), not 200 KiB
+	if cp.lineBuf.Len() > MaxLineBufferBytes {
+		t.Fatalf("lineBuf grew beyond cap: %d bytes (cap: %d)", cp.lineBuf.Len(), MaxLineBufferBytes)
+	}
+}
+
+func TestUserBufferFreeOfSentinelNoise(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr := NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	sess, err := mgr.Start(context.Background(), StartOptions{
+		ID:  "clean-buffer-sess",
+		Cwd: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to start session: %v", err)
+	}
+
+	res, err := sess.RunCommand(context.Background(), "echo USER_VISIBLE_TEXT", 2*time.Second)
+	if err != nil {
+		t.Fatalf("RunCommand failed: %v", err)
+	}
+	if !strings.Contains(res.Output, "USER_VISIBLE_TEXT") {
+		t.Fatalf("expected output to contain USER_VISIBLE_TEXT, got: %q", res.Output)
+	}
+
+	// Read from User RingBuffer: it must NOT contain the internal __REASONIX_DONE_ marker line!
+	tail := sess.Read(32 * 1024)
+	if strings.Contains(tail, markerPrefix) {
+		t.Fatalf("User RingBuffer contains internal sentinel marker noise: %q", tail)
+	}
+}
+

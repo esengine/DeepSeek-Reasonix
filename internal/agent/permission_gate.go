@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/evidence"
@@ -20,10 +21,11 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 		return
 	}
 	var p struct {
-		Action    string `json:"action"`
-		Command   string `json:"command"`
-		Input     string `json:"input"`
-		SessionID string `json:"session_id"`
+		Action    string   `json:"action"`
+		Command   string   `json:"command"`
+		Args      []string `json:"args"`
+		Input     string   `json:"input"`
+		SessionID string   `json:"session_id"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return
@@ -35,11 +37,19 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 		plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
 	case "start":
 		cmd := strings.TrimSpace(p.Command)
+		if len(p.Args) > 0 {
+			if cmd == "" {
+				cmd = strings.Join(p.Args, " ")
+			} else {
+				cmd = cmd + " " + shellQuoteArgs(p.Args)
+			}
+		}
 		if cmd == "" {
 			cmd = "bash"
 		}
 		plan.commandPermName = "bash"
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 	case "write_line":
 		cmd := strings.TrimSpace(p.Command)
 		if cmd == "" {
@@ -115,6 +125,18 @@ func mergeToolEffects(a, b evidence.ToolEffects) evidence.ToolEffects {
 		Known:              a.Known && b.Known,
 		Reason:             strings.Trim(a.Reason+"; "+b.Reason, "; "),
 	}
+}
+
+func shellQuoteArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		if strings.ContainsAny(arg, " \t\n'\"\\$`!*?()[]{}|&;<>~#") || arg == "" {
+			quoted[i] = strconv.Quote(arg)
+		} else {
+			quoted[i] = arg
+		}
+	}
+	return strings.Join(quoted, " ")
 }
 
 func (a *Agent) applyStandardGate(ctx context.Context, plan *toolCallPlan, gate Gate) (toolOutcome, bool) {

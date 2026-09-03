@@ -23,8 +23,10 @@ func (d *PosixShellDriver) Name() string { return "posix" }
 func (d *PosixShellDriver) IsShell() bool { return true }
 
 func (d *PosixShellDriver) FormatCommand(cmd string, marker string) string {
-	sentinel := fmt.Sprintf("printf '\\n%s:%%s\\n' \"$?\"", marker)
-	return cmd + "\n" + sentinel + "\n"
+	trimmed := strings.TrimRight(cmd, "\r\n")
+	// Wrap in a compound group to keep sentinels out of child stdin,
+	// preserve shell environment changes, and capture exit codes including SIGINT.
+	return fmt.Sprintf("{ %s; __reasonix_ret=$?; } || __reasonix_ret=$?; printf '\\n%s:%%d\\n' \"$__reasonix_ret\"\n", trimmed, marker)
 }
 
 func (d *PosixShellDriver) ParseSentinel(line string, marker string) (int, bool) {

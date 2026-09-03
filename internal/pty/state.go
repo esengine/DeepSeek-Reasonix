@@ -33,9 +33,10 @@ var (
 
 // StateMachine manages thread-safe transitions for a Session.
 type StateMachine struct {
-	mu      sync.RWMutex
-	current SessionState
-	isShell bool
+	mu           sync.RWMutex
+	current      SessionState
+	isShell      bool
+	currentReqID string
 }
 
 // NewStateMachine creates a state machine initialized to ShellReady or RawInteractive.
@@ -77,7 +78,7 @@ func (sm *StateMachine) CanWriteLine() error {
 }
 
 // BeginCommand attempts to transition from ShellReady to CommandRunning atomically.
-func (sm *StateMachine) BeginCommand() error {
+func (sm *StateMachine) BeginCommand(reqID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -92,22 +93,35 @@ func (sm *StateMachine) BeginCommand() error {
 	}
 
 	sm.current = StateCommandRunning
+	sm.currentReqID = reqID
 	return nil
 }
 
-// EndCommand transitions back from CommandRunning to ShellReady (if not closed).
-func (sm *StateMachine) EndCommand() {
+// Complete is called when a completion sentinel for reqID arrives, restoring
+// ShellReady regardless of whether a waiter is synchronously blocked, timed out,
+// or running non-blocking (wait_ms=0).
+func (sm *StateMachine) Complete(reqID string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if sm.current == StateClosed {
-		return
+		return false
 	}
-	if sm.isShell {
-		sm.current = StateShellReady
-	} else {
-		sm.current = StateRawInteractive
+	if sm.current == StateCommandRunning && (reqID == "" || sm.currentReqID == "" || sm.currentReqID == reqID) {
+		if sm.isShell {
+			sm.current = StateShellReady
+		} else {
+			sm.current = StateRawInteractive
+		}
+		sm.currentReqID = ""
+		return true
 	}
+	return false
+}
+
+// EndCommand transitions back from CommandRunning to ShellReady (if not closed).
+func (sm *StateMachine) EndCommand() {
+	sm.Complete("")
 }
 
 // MarkClosed transitions to Closed.
@@ -115,20 +129,5 @@ func (sm *StateMachine) MarkClosed() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.current = StateClosed
-}
-
-// InterruptIfRunning transitions from CommandRunning to ShellReady if interrupted by Ctrl+C.
-func (sm *StateMachine) InterruptIfRunning() bool {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if sm.current == StateCommandRunning {
-		if sm.isShell {
-			sm.current = StateShellReady
-		} else {
-			sm.current = StateRawInteractive
-		}
-		return true
-	}
-	return false
+	sm.currentReqID = ""
 }

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,32 +118,14 @@ func (m *Manager) startLocked(ctx context.Context, opts StartOptions) (*Session,
 		rows = DefaultTerminalRows
 	}
 
-	// Prepare safe base environment (redacting credentials if configured)
-	baseEnv := secrets.ProcessEnv()
-	envMap := make(map[string]string)
-	for _, envStr := range baseEnv {
-		parts := strings.SplitN(envStr, "=", 2)
-		if len(parts) == 2 {
-			envMap[parts[0]] = parts[1]
-		}
-	}
-	// Terminal capability overrides
-	envMap["TERM"] = "xterm-256color"
-	envMap["COLORTERM"] = "truecolor"
-	for k, v := range opts.Env {
-		envMap[k] = v
-	}
-	cmdEnv := make([]string, 0, len(envMap))
-	for k, v := range envMap {
-		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
-	}
+	cmdEnv := buildPTYEnv(opts.Env)
 
 	var cmd *exec.Cmd
 	if m.spec.Enforce() {
 		sh := sandbox.ResolveShell("", "", nil)
 		shellCmd := cmdPath
 		if len(args) > 0 {
-			shellCmd += " " + strings.Join(args, " ")
+			shellCmd += " " + shellQuoteArgs(args)
 		}
 		argv, wrapped := sandbox.Command(m.spec, sh, shellCmd)
 		if wrapped && len(argv) > 0 {
@@ -163,6 +146,7 @@ func (m *Manager) startLocked(ctx context.Context, opts StartOptions) (*Session,
 
 	driver := DetectDriver(cmdPath)
 	now := time.Now()
+	state := NewStateMachine(driver.IsShell())
 	sess := &Session{
 		id:         id,
 		command:    cmdPath,
@@ -177,9 +161,11 @@ func (m *Manager) startLocked(ctx context.Context, opts StartOptions) (*Session,
 		done:       make(chan struct{}),
 		onOutput:   make(chan struct{}, 64),
 		driver:     driver,
-		state:      NewStateMachine(driver.IsShell()),
-		parser:     NewCompletionParser(),
+		state:      state,
 	}
+	sess.parser = NewCompletionParser(func(reqID string, exitCode int) {
+		sess.state.Complete(reqID)
+	})
 	sess.running.Store(true)
 
 	go sess.startOutputPump()
@@ -319,4 +305,38 @@ func (m *Manager) Resize(id string, cols, rows uint16) error {
 		return err
 	}
 	return sess.Resize(cols, rows)
+}
+
+// shellQuoteArgs quotes command arguments to preserve argv boundaries in shell commands.
+func shellQuoteArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		if strings.ContainsAny(arg, " \t\n'\"\\$`!*?()[]{}|&;<>~#") || arg == "" {
+			quoted[i] = strconv.Quote(arg)
+		} else {
+			quoted[i] = arg
+		}
+	}
+	return strings.Join(quoted, " ")
+}
+
+func buildPTYEnv(customEnv map[string]string) []string {
+	baseEnv := secrets.ProcessEnv()
+	envMap := make(map[string]string)
+	for _, envStr := range baseEnv {
+		parts := strings.SplitN(envStr, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	envMap["TERM"] = "xterm-256color"
+	envMap["COLORTERM"] = "truecolor"
+	for k, v := range customEnv {
+		envMap[k] = v
+	}
+	cmdEnv := make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+	return cmdEnv
 }

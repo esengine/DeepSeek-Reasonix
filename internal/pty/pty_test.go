@@ -181,8 +181,8 @@ func TestMarkerLinePresentDiscrimination(t *testing.T) {
 	}
 
 	// 4. CompletionParser cleans out sentinel and cmdEcho matching this specific marker
-	cp := NewCompletionParser()
-	notifyCh := cp.Arm(marker, driver)
+	cp := NewCompletionParser(nil)
+	notifyCh := cp.Arm("req-1", marker, driver)
 	combinedOutput := "line 1\nline 2\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
 	cp.Feed([]byte(combinedOutput))
 
@@ -201,8 +201,8 @@ func TestMarkerLinePresentDiscrimination(t *testing.T) {
 	}
 
 	// 5. User grep output containing __REASONIX_DONE_ (with different text) must NOT be truncated
-	cp2 := NewCompletionParser()
-	_ = cp2.Arm(marker, driver)
+	cp2 := NewCompletionParser(nil)
+	_ = cp2.Arm("req-2", marker, driver)
 	grepOutput := "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:42\n"
 	cp2.Feed([]byte(grepOutput))
 	out2, code2, matched2 := cp2.Result()

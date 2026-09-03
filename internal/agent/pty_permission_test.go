@@ -734,6 +734,52 @@ func TestPTYMultiCommandMergesWorkspaceMutation(t *testing.T) {
 	}
 }
 
+func TestPTYStartArgsRespectsBashPermissionDeny(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	// Deny git push commands via Bash policy
+	policy := permission.New("allow", nil, nil, []string{"Bash(git push*)"})
+	gate := permission.NewGate(policy, nil)
+
+	opts := Options{
+		Gate: gate,
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Attempt to start PTY session with command="git" and args=["push", "origin", "main"]
+	call := provider.ToolCall{
+		ID:   "call-start-git-push",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "denied-start-sess",
+				"command":    "git",
+				"args":       []string{"push", "origin", "main"},
+			})
+			return string(b)
+		}(),
+	}
+
+	out := ag.executeOne(context.Background(), &turnRuntime{}, call)
+	if !out.blocked {
+		t.Fatalf("expected pty start with command=git args=['push', ...] to be blocked by bash deny rule, got: %+v", out)
+	}
+	if !strings.Contains(out.output, "blocked") {
+		t.Fatalf("expected blocked message in output, got: %q", out.output)
+	}
+}
+
+
 
 
 
