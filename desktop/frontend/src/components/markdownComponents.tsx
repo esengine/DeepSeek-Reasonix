@@ -59,6 +59,7 @@ function splitPlainBlock(text: string): { preText: string; statusItems: string[]
 }
 
 function PlainMarkdownBlock({ text }: { text: string }) {
+  if (text.trim() === "") return null;
   const { preText, statusItems } = splitPlainBlock(text);
   const asList = statusItems.length >= 2;
   return (
@@ -97,6 +98,11 @@ export function createComponents(plainStatusBlocks: boolean): Components {
       const isBlock = match !== null || text.includes("\n");
       if (isBlock) {
         const value = text.replace(/\n$/, "");
+        // Empty fenced blocks are formatting placeholders, not useful
+        // transcript content. Omitting them prevents a bordered one-line
+        // CodeViewer from becoming a phantom row/height in every Markdown
+        // surface while preserving comments and other non-empty code.
+        if (value.trim() === "") return null;
         if (lang === "mermaid") {
           return (
             <Suspense fallback={<CodeViewer value={value} language="mermaid" scrollMode="bounded" maxHeight="min(60vh, 28rem)" />}>

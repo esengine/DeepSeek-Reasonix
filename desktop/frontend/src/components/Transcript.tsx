@@ -55,7 +55,6 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
 import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptScrollArbiter } from "../lib/useTranscriptScrollArbiter";
-import { TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT } from "../lib/transcriptHistoryPrependLease";
 import { useTranscriptLayoutIntegrity } from "../lib/useTranscriptLayoutIntegrity";
 import { TranscriptLayoutIntentProvider, TranscriptScrollWriteProvider } from "./TranscriptLayoutIntentContext";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
@@ -89,7 +88,7 @@ const FrontendDiagnosticsPanel = SHOW_FRONTEND_DIAGNOSTICS
   ? lazy(() => import("./FrontendDiagnosticsPanel"))
   : null;
 const VIRTUAL_OVERSCAN_ROWS = 8;
-const READER_MOUNT_CORRIDOR_ROWS = 112;
+const READER_MOUNT_CORRIDOR_ROWS = 256;
 const READER_MOUNT_CORRIDOR_VIEWPORTS = 7;
 // Keep paged history measured during manual reading so WKWebView cannot replace
 // non-overlapping ranges without an anchor; large sessions keep a bounded corridor.
@@ -606,7 +605,7 @@ export function Transcript({
   const [handleJumpToQuestion, handleEarlierHistoryReached, retryOlderHistory, questionJumpSurface] = useTranscriptQuestionJump({
     questions, loadedByTurn, layoutSurfaceKey, rowIndexByKey,
     hasOlderHistory, loadingOlderHistory, olderHistoryError, running, scrollElement, scheduleRecovery: scheduleBlankViewportCheck,
-    onLoadOlderHistory, clearTranscriptSelection, invalidateAnchors,
+    onLoadOlderHistory, clearTranscriptSelection, invalidateAnchors, writeOffset,
     beginQuestionJump, finishQuestionJump, scrollToDataIndex, setActiveQuestion, rewindSignal,
   });
   const handleViewportEarlierHistoryReached = useCallback(() => {
@@ -853,9 +852,10 @@ export function Transcript({
   }, [contentRevision, holdingLiveRegion, scrollRef, virtualRows.length]);
   const heldLiveRows = heldSurfaceRef.current === layoutSurfaceKey ? heldLiveRowsRef.current : NO_HELD_ROWS;
   const showLiveRegion = liveSplit.liveActive || (holdingLiveRegion && heldLiveRows.length > 0);
-  const readerMountCorridorRows = readerTransactionActive && virtualRows.length <= TRANSCRIPT_READER_FULL_MOUNT_ROW_LIMIT
-    ? Math.max(READER_MOUNT_CORRIDOR_ROWS, virtualRows.length)
-    : READER_MOUNT_CORRIDOR_ROWS;
+  // Keep a bounded corridor for every reader transaction. Full-mounting small
+  // sessions makes every Markdown row measure during one wheel gesture and can
+  // recreate the extent-collapse/anchor jump seen in field diagnostics.
+  const readerMountCorridorRows = READER_MOUNT_CORRIDOR_ROWS;
   const { handleItemsRendered, handleTotalListHeightChanged } = useTranscriptGeometryLifecycle({
     virtualRowCount: virtualRows.length, hydrating, readerTransactionActive, historyMutation, historyPrependLease, scrollModeRef,
     followGrowingTail, revalidateTail,

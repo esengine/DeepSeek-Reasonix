@@ -163,6 +163,7 @@ export function useTranscriptReaderExtentStability({
   // cancel(). A new reader epoch must inherit the same lease without toggling
   // the Virtuoso range in between.
   const [readerLayoutLease, setReaderLayoutLease] = useState(false);
+  const readerLayoutLeaseRef = useRef(false);
   const callbacksRef = useRef({ onStart, onIdleDeadline, onStabilitySample, onTailHandoff, onGeometryCommitReady, onEnd });
   callbacksRef.current = { onStart, onIdleDeadline, onStabilitySample, onTailHandoff, onGeometryCommitReady, onEnd };
   const finish = useCallback((transaction: ActiveReaderTransaction, reason: "stable-manual" | "timeout" | "cancelled", notify = true) => {
@@ -185,6 +186,7 @@ export function useTranscriptReaderExtentStability({
   }, [stableAnchorRequiredRef]);
 
   const cancel = useCallback((notify = true) => {
+    readerLayoutLeaseRef.current = false;
     setReaderLayoutLease(false);
     const transaction = transactionRef.current;
     if (transaction) finish(transaction, "cancelled", notify);
@@ -195,6 +197,10 @@ export function useTranscriptReaderExtentStability({
     const transaction = transactionRef.current;
     return !transaction || Boolean(rowForAnchor(transaction.element, transaction.anchor, true));
   }, []);
+  const currentAnchor = useCallback((): TranscriptReaderTransaction["anchor"] => (
+    transactionRef.current?.anchor
+  ), []);
+  const layoutLeaseIsActive = useCallback(() => readerLayoutLeaseRef.current, []);
 
   const observe = useCallback((element = scrollRef.current) => {
     const transaction = transactionRef.current;
@@ -227,6 +233,10 @@ export function useTranscriptReaderExtentStability({
     const renderedAnchorDrift = anchorRow && transaction.anchor
       ? anchorRow.getBoundingClientRect().top - viewport.top - transaction.anchor.offset
       : 0;
+    const anchorOutsideViewport = Boolean(anchorRow && (
+      anchorRow.getBoundingClientRect().bottom <= viewport.top
+      || anchorRow.getBoundingClientRect().top >= viewport.top + element.clientHeight
+    ));
     // The row rect includes the current visual guard. Remove it so a stable
     // guard does not look like a fresh displacement on every observation.
     const physicalAnchorDrift = renderedAnchorDrift - transaction.visualOffset;
@@ -238,7 +248,12 @@ export function useTranscriptReaderExtentStability({
       Math.abs(element.scrollHeight - transaction.lastHeight) > GEOMETRY_EPSILON_PX || anchorDisplaced
     ) geometryCommitReadyRef.current = false;
     if (anchorRow) transaction.anchorDisplacementObserved = anchorDisplaced;
-    const rejected = (extentCollapsed && reverse >= threshold) || anchorDisplaced;
+    // A bounded Virtuoso range can collapse the native extent while the
+    // logical anchor is temporarily outside the mounted viewport. Treat that
+    // as the same transient geometry fault as a physical rebound; otherwise
+    // the guard is cleared for a downward gesture and the next paint exposes
+    // an empty range (the field #9711 failure shape).
+    const rejected = (extentCollapsed && (reverse >= threshold || anchorOutsideViewport)) || anchorDisplaced;
     const remainsCollapsed = extentCollapsed
       && element.scrollHeight < transaction.baselineHeight - Math.max(8, element.clientHeight * 0.5);
     if (remainsCollapsed) {
@@ -270,6 +285,17 @@ export function useTranscriptReaderExtentStability({
         transaction.visualOffset = -physicalAnchorDrift;
         element.dataset.transcriptReaderVisualGuard = "true";
         element.style.setProperty("--transcript-reader-visual-offset", `${transaction.visualOffset}px`);
+      } else if (transcriptElementViewportIsBlank(element)) {
+        // A WebKit range replacement can briefly unmount the logical anchor
+        // before the corridor remounts it. Keep the last accepted viewport
+        // visually fixed from the native scroll delta instead of allowing a
+        // blank frame while there is no row rect from which to derive drift.
+        const fallbackOffset = element.scrollTop - transaction.lastAcceptedTop;
+        if (Math.abs(fallbackOffset) > GEOMETRY_EPSILON_PX) {
+          transaction.visualOffset = fallbackOffset;
+          element.dataset.transcriptReaderVisualGuard = "true";
+          element.style.setProperty("--transcript-reader-visual-offset", `${transaction.visualOffset}px`);
+        }
       }
       recordTranscriptScrollDiagnostic("scroll-anomaly", {
         transactionId: transaction.id,
@@ -596,6 +622,7 @@ export function useTranscriptReaderExtentStability({
     if (!element || !Number.isFinite(deltaY) || deltaY === 0) return { started: false as const };
     const direction = transcriptReaderDirection(deltaY);
     if (direction === undefined) return { started: false as const };
+    readerLayoutLeaseRef.current = true;
     setReaderLayoutLease(true);
     const current = transactionRef.current;
     const now = Date.now();
@@ -702,7 +729,9 @@ export function useTranscriptReaderExtentStability({
     observe,
     holdGeometryCommit,
     anchorIsMounted,
+    currentAnchor,
+    layoutLeaseIsActive,
     isActive,
     active: active || readerLayoutLease,
-  }), [active, anchorIsMounted, arm, cancel, holdGeometryCommit, readerLayoutLease, observe, isActive]);
+  }), [active, anchorIsMounted, arm, cancel, currentAnchor, holdGeometryCommit, layoutLeaseIsActive, readerLayoutLease, observe, isActive]);
 }

@@ -62,6 +62,7 @@ export function createTranscriptScrollWriter({
     let rejectedReason: string | undefined;
     if (!handle || !element) rejectedReason = "surface-unavailable";
     else if (modeRef.current === "native-thumb") rejectedReason = "native-thumb-owner";
+    else if (request.owner === "anchor-compensation" && element.dataset.transcriptReaderIntent === "true") rejectedReason = "reader-intent-owner";
     else if (request.expectedSurfaceGeneration !== generation) rejectedReason = "stale-surface-generation";
     else if (request.expectedOwnershipEpoch !== epoch) rejectedReason = "stale-ownership-epoch";
     else if (request.expectedGeometryRevision !== revision) rejectedReason = "stale-geometry-revision";

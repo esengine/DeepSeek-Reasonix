@@ -13,6 +13,7 @@ import {
   type QuestionAnchorPosition,
 } from "./transcriptGrouping";
 import { userRowKey } from "./transcriptRows";
+import { recordTranscriptScrollDiagnostic } from "./transcriptScrollProbe";
 
 type PendingQuestionJump = {
   surfaceKey: string;
@@ -135,6 +136,7 @@ export function useTranscriptQuestionJump({
   beginQuestionJump,
   finishQuestionJump,
   scrollToDataIndex,
+  writeOffset,
   setActiveQuestion,
   rewindSignal,
 }: {
@@ -154,6 +156,7 @@ export function useTranscriptQuestionJump({
   beginQuestionJump: (token: number) => void;
   finishQuestionJump: (token: number) => boolean;
   scrollToDataIndex: (index: number, behavior?: "auto" | "smooth") => void;
+  writeOffset: (owner: "anchor-compensation", top: number, behavior?: ScrollBehavior) => boolean;
   setActiveQuestion: (turn: number | null) => void;
   rewindSignal: number;
 }) {
@@ -172,6 +175,14 @@ export function useTranscriptQuestionJump({
     pendingQuestionRef.current = next;
     setPendingQuestion((value) => settleQuestionJumpSurfaceState(value, token, next));
     finishQuestionJump(token);
+    recordTranscriptScrollDiagnostic("surface-transaction", {
+      transactionId: token,
+      source: "question-jump",
+      transactionKind: "question-jump",
+      phase: outcome === "failed" ? "cancelled" : "committed",
+      result: outcome,
+      targetTurn: current.turn,
+    });
     recordFrontendDiagnostic("transcript", "transcript.question-jump-terminal", { intent: token, outcome });
   }, [finishQuestionJump]);
   const requestOlderHistory = useCallback(async (targetTurn?: number, retry = false, trigger: HistoryLoadTrigger = "retry"): Promise<boolean> => {
@@ -231,6 +242,14 @@ export function useTranscriptQuestionJump({
     // detail of one surface transaction.
     flushSync(() => replacePendingQuestion(pending));
     recordFrontendDiagnostic("transcript", "transcript.question-jump-begin", { intent: pending.token });
+    recordTranscriptScrollDiagnostic("surface-transaction", {
+      transactionId: pending.token,
+      source: "question-jump",
+      transactionKind: "question-jump",
+      phase: pending.phase === "loading" ? "loading" : "mounting",
+      result: "begin",
+      targetTurn: pending.turn,
+    });
     beginQuestionJump(pending.token);
     if (loaded) jumpToLoadedQuestion(question, "auto");
     else requestQuestionHistory(pending, true, "question-jump");
@@ -262,6 +281,7 @@ export function useTranscriptQuestionJump({
     const { anchorId, token } = pendingQuestion;
     let frame: number | null = null;
     let cancelled = false;
+    let landingCorrectionWritten = false;
     let progress: SurfacePaintProgress = { attempts: 0, stableFrames: 0 };
     const tick = () => {
       frame = null;
@@ -287,6 +307,18 @@ export function useTranscriptQuestionJump({
       });
       progress = decision.progress;
       if (decision.outcome) {
+        if (decision.outcome === "ready" && !landingCorrectionWritten && scrollElement && target) {
+          const scrollerRect = scrollElement.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          const top = Math.max(0, Math.min(
+            Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
+            scrollElement.scrollTop + targetRect.top - scrollerRect.top - 16,
+          ));
+          // The indexed jump remains the sole jump writer. The small final
+          // top-margin correction is a steady offset adjustment so it cannot
+          // reopen or duplicate the masked jump transaction.
+          landingCorrectionWritten = writeOffset("anchor-compensation", top, "auto");
+        }
         settlePendingQuestion(token, decision.outcome);
         return;
       }
@@ -298,7 +330,7 @@ export function useTranscriptQuestionJump({
       cancelled = true;
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [layoutSurfaceKey, loadingOlderHistory, pendingQuestion, scheduleRecovery, scrollElement, settlePendingQuestion]);
+  }, [layoutSurfaceKey, loadingOlderHistory, pendingQuestion, scheduleRecovery, scrollElement, settlePendingQuestion, writeOffset]);
 
   useEffect(() => {
     const stale = pendingQuestionRef.current;

@@ -40,7 +40,6 @@ import { createTranscriptHistoryPrependCoordinator, type TranscriptHistoryPrepen
 import { createTranscriptReaderCorrectionWriter, type TranscriptReaderCorrectionWriter } from "./transcriptReaderCorrection";
 export type { TranscriptRecoveryRequestSpec, TranscriptRecoveryTerminal, TranscriptScrollArbiterRecoveryApi } from "./transcriptScrollRecovery";
 export { hasTranscriptScrollableRange, nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX };
-
 // Slow WebView2 rows use a wall-clock mount budget, then retry after a bounded quiet window.
 const ANCHOR_RESTORE_BUDGET_MS = 1_000;
 const RECOVERY_MAX_RETRIES = 2;
@@ -118,6 +117,8 @@ export function useTranscriptScrollArbiter({
     observe: observeReaderTransaction,
     holdGeometryCommit: holdReaderGeometryCommit,
     anchorIsMounted: readerAnchorIsMounted,
+    currentAnchor: readerCurrentAnchor,
+    layoutLeaseIsActive: readerLayoutLeaseIsActive,
     isActive: readerTransactionIsActive,
     active: readerTransactionActive,
   } = useTranscriptReaderExtentStability({
@@ -150,7 +151,6 @@ export function useTranscriptScrollArbiter({
       dispatchRef.current({ type: "READER_TRANSACTION_END" });
     },
   });
-
   // The tail writer and its bounded settle loop live in their own controller
   // (file-size budget); all inputs are stable refs, so it is created once.
   const tailSettleRef = useRef<TranscriptTailSettle | null>(null);
@@ -164,7 +164,12 @@ export function useTranscriptScrollArbiter({
     scrollRef, pinnedRef, generationRef, geometryRevisionRef, tailSettle,
     observeReader: observeReaderTransaction,
     dispatch: (event) => dispatchRef.current(event),
-    scheduleAnchor: () => anchorCompensationRef.current?.schedule(),
+    // The reader layout lease owns delayed range commits after a gesture. Do
+    // not let the generic geometry lane start a second compensation writer
+    // while that lease is still guarding the logical anchor.
+    scheduleAnchor: () => {
+      if (!readerLayoutLeaseIsActive()) anchorCompensationRef.current?.schedule();
+    },
   });
   const geometryController = geometryControllerRef.current;
   historyPrependCoordinator.bind({
@@ -172,9 +177,19 @@ export function useTranscriptScrollArbiter({
     publishPending: (pending) => { if (scrollRef.current) scrollRef.current.dataset.transcriptHistoryPrependPending = String(pending); },
     holdReaderGeometryCommit, readerAnchorIsMounted, readerTransactionIsActive,
     commitGeometry: () => geometryController.note("items-rendered"),
+    transactionContext: () => ({
+      surfaceGeneration: generationRef.current,
+      ownershipEpoch: ownershipEpochRef.current,
+      geometryRevision: geometryRevisionRef.current,
+    }),
+    captureAnchor: () => {
+      const anchor = readerCurrentAnchor();
+      return anchor?.key
+        ? { rowKey: anchor.key, logicalIndex: anchor.index, viewportOffset: anchor.offset }
+        : undefined;
+    },
   });
   const historyPrependLease = historyPrependCoordinator.lease;
-
   const invalidateAsyncFrames = useCallback(() => {
     // Generations may advance without replacing the scroller; end the old
     // browser-owned transaction before its frozen geometry can leak across.
@@ -190,7 +205,6 @@ export function useTranscriptScrollArbiter({
     anchorCompensationRef.current?.reset();
     cancelReaderTransaction(false);
   }, [cancelReaderTransaction, geometryController, historyPrependCoordinator, tailSettle]);
-
   // Executes the reducer's CANCEL_RECOVERY command. The cancelling event
   // already cleared recoveryId in the published state, so no RECOVERY_END
   // dispatch is needed here; this only runs the explicit onCancel transition.
@@ -210,7 +224,6 @@ export function useTranscriptScrollArbiter({
     if (CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS) recordTranscriptScrollDiagnostic("recovery", { state: "cancelled", reason });
     onRecoveryTerminalRef.current?.({ id, outcome: "cancelled", reason });
   }, []);
-
   const publishState = useCallback((state: TranscriptScrollState) => {
     stateRef.current = state;
     modeRef.current = state.mode;
@@ -222,7 +235,6 @@ export function useTranscriptScrollArbiter({
       scrollRef.current.dataset.transcriptReaderIntent = state.readerIntent ? "true" : "false";
     }
   }, []);
-
   const runCommand = useCallback((command: TranscriptScrollCommand, source?: TranscriptScrollDiagnosticSource) => {
     const writeSource = source ?? command.type.toLowerCase();
     switch (command.type) {
@@ -249,7 +261,6 @@ export function useTranscriptScrollArbiter({
         cancelInFlightRecovery(command.id, command.reason);
     }
   }, [cancelInFlightRecovery, tailSettle, writer]);
-
   const dispatch = useCallback((event: TranscriptScrollEvent) => {
     if (
       event.type === "MANUAL_READING"
@@ -301,7 +312,6 @@ export function useTranscriptScrollArbiter({
     return result;
   }, [cancelReaderTransaction, historyPrependCoordinator, publishState, runCommand, tailSettle]);
   dispatchRef.current = dispatch;
-
   // All controller inputs are stable refs plus dispatch (itself stable: every
   // dep is a ref-closing useCallback), so this runs once per hook instance.
   anchorCompensationRef.current ??= createTranscriptAnchorCompensation({
@@ -309,11 +319,9 @@ export function useTranscriptScrollArbiter({
     readerExtentIsActive: readerTransactionIsActive,
   });
   const anchorCompensation = anchorCompensationRef.current;
-
   const endReaderIntent = useCallback(() => cancelReaderTransaction(), [cancelReaderTransaction]);
   questionJumpOwnershipRef.current ??= createTranscriptQuestionJumpOwnership({ invalidateAsyncFrames, endReaderIntent, dispatch });
   const questionJumpOwnership = questionJumpOwnershipRef.current;
-
   const deliverScroll = useCallback((element = scrollRef.current) => {
     if (!element) return;
     nativeScrollbarOwnershipRef.current?.observe(element);
@@ -332,14 +340,11 @@ export function useTranscriptScrollArbiter({
     });
   }, [dispatch, observeReaderTransaction]);
   deliverScrollRef.current = deliverScroll;
-
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     if (isTranscriptSelectionMode(modeRef.current)) return;
     dispatch({ type: "JUMP_TO_BOTTOM", behavior });
   }, [dispatch]);
-
   const pinLiveTailBeforePaint = useCallback(() => tailSettle.pinLiveTailBeforePaint(), [tailSettle]);
-
   // Reaches a terminal state for a recovery the arbiter itself ends (done /
   // expired / scroller gone). Preemption cancels go through
   // cancelInFlightRecovery instead, driven by the reducer's CANCEL command.
@@ -368,7 +373,6 @@ export function useTranscriptScrollArbiter({
     }
     onRecoveryTerminalRef.current?.({ id: recovery.id, ...terminal });
   }, [dispatch]);
-
   const launchRecovery = useCallback((recovery: ActiveTranscriptRecovery) => {
     const tick = () => {
       recovery.frame = null;
@@ -508,7 +512,7 @@ export function useTranscriptScrollArbiter({
 
   const cancelReaderTransactionSilently = useCallback(() => cancelReaderTransaction(false), [cancelReaderTransaction]);
   const nativeScrollbarOwnership = useTranscriptNativeScrollbarOwnership({
-    scrollRef, modeRef, cancelReaderTransaction: cancelReaderTransactionSilently, deliverScroll, dispatch, tailSettle,
+    scrollRef, modeRef, cancelReaderTransaction: cancelReaderTransactionSilently, deliverScroll, dispatch, tailSettle, generationRef,
   });
   nativeScrollbarOwnershipRef.current = nativeScrollbarOwnership;
   const { begin: beginNativeScrollbarDrag, cancel: cancelNativeScrollbarDrag,

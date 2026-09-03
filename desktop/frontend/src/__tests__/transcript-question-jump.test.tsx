@@ -139,6 +139,10 @@ ok(newestSurface === null, "only C's own terminal releases the latest surface");
         rowTop >= el.scrollTop - 100 && rowTop <= el.scrollTop + el.clientHeight,
         `jump to question ${targetIndex + 1} lands its row inside the viewport (rowTop ${rowTop}, scrollTop ${el.scrollTop})`,
       );
+      if (targetIndex > 0 && targetIndex < 39 && rowTop !== null) {
+        ok(Math.abs(rowTop - el.scrollTop - 16) <= 1,
+          `jump to question ${targetIndex + 1} keeps the selected row near the 16px top margin`);
+      }
       const expectedText = `question ${targetIndex}`;
       ok(anchor.textContent?.includes(expectedText) ?? false, `jump to question ${targetIndex + 1} mounts the selected question content`);
     }

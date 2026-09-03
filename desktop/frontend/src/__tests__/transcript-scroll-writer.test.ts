@@ -106,6 +106,19 @@ equal(writer.write({
 equal(records[4]?.rejectedReason, "duplicate-revision-phase", "duplicate phases are diagnosable");
 
 geometryRevisionRef.current = 10;
+element.dataset.transcriptReaderIntent = "true";
+geometryRevisionRef.current = 12;
+equal(writer.write({
+  owner: "anchor-compensation",
+  operation: "scrollTo",
+  top: 300,
+  reason: "reader-intent-guard",
+  expectedSurfaceGeneration: 4,
+  expectedOwnershipEpoch: 7,
+  expectedGeometryRevision: 12,
+}), false, "anchor compensation cannot write while reader intent owns the viewport");
+equal(records[5]?.rejectedReason, "reader-intent-owner", "reader-intent suppression is diagnosable");
+delete element.dataset.transcriptReaderIntent;
 
 modeRef.current = "native-thumb";
 equal(writer.write({

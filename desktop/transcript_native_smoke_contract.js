@@ -570,17 +570,15 @@
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }));
     await waitFor(() => element.dataset.scrollMode === "reader-gesture" || element.dataset.scrollMode === "manual", 5000);
     state.phase = "waiting-reader-geometry";
-    // A bounded manual-reading window may deliberately mount every row in the
-    // current history page. Do not classify that first estimate-to-measurement
-    // pass as a stable native extent: wait until the whole bounded page is
-    // mounted and the painted extent is quiet before establishing the smoke
-    // baseline. Pending Markdown remains part of the streamed test itself; a
-    // later collapse during native input still fails against the unchanged
-    // max-extent gate.
-    const logicalRows = Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10);
-    await waitFor(() => (
-      element.querySelectorAll(".transcript__row[data-index]").length >= logicalRows
-    ), 30000);
+    // Reader mode intentionally mounts a bounded corridor instead of every
+    // logical row. Establish the native baseline once the corridor has a
+    // painted row intersecting the viewport; later asynchronous geometry
+    // changes remain part of the streamed test and are checked by the
+    // unchanged max-extent/blank-frame gates below.
+    await waitFor(() => {
+      const mountedRows = element.querySelectorAll(".transcript__row[data-index]");
+      return mountedRows.length > 0 && visibleRows(element).length > 0;
+    }, 30000);
     await waitForStableViewport(element, 8, 15000);
     const virtualList = element.querySelector(".transcript__virtual-sizer");
     const footer = virtualList?.nextElementSibling;

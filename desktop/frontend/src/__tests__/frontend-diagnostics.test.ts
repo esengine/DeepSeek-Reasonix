@@ -154,5 +154,11 @@ assert.deepEqual(analyzeFrontendDiagnosticAnomalies([
   { t: 0, type: "navigation.begin", intent: 9 },
   { t: 1, type: "navigation.settle", intent: 9, outcome: "failed" },
 ]), [], "a failed data terminal may release its mask without a paint-ready false positive");
+assert.deepEqual(analyzeFrontendDiagnosticAnomalies([
+  { t: 0, type: "transcript.scroll-anomaly", transactionId: 40, result: "restore-anchor", reverseDisplacement: 2.01 },
+  { t: 1, type: "transcript.scroll-anomaly", transactionId: 40, result: "restore-anchor", reverseDisplacement: 27_104.41 },
+]), [
+  { code: "unauthorized-scroll-reversal", transactionId: 40, maxReverseDisplacement: 27_104.41 },
+], "large reader reversals are surfaced in the diagnostic summary");
 
 console.log("frontend diagnostics tests passed");

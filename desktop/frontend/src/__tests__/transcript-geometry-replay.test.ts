@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSupportedFrontendDiagnosticSchemaVersion } from "../lib/frontendDiagnostics";
+import { field9711ScrollReplay } from "./transcript-diagnostic-replay.fixtures";
 
 type Fixture = {
   schemaVersion: number;
@@ -30,3 +31,8 @@ for (const name of names) {
 }
 
 console.log("transcript anonymous geometry replay fixtures passed");
+
+assert.equal(field9711ScrollReplay.buildCommit, "d9cd713", "field replay is tied to the reported main-v2 build");
+assert.equal(field9711ScrollReplay.transactions.length, 9, "field replay retains every unauthorized reversal transaction");
+assert.equal(Math.max(...field9711ScrollReplay.transactions.map((entry) => entry.maxReverse)), 27_104.41, "field replay retains the largest reported reversal");
+assert.ok(field9711ScrollReplay.transactions.every((entry) => entry.maxReverse > 2 && entry.extentDelta > 0), "field replay keeps only geometry reversals beyond tolerance");

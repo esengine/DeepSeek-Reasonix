@@ -84,6 +84,10 @@ export type FrontendDiagnosticEvent = {
   ownershipEpoch?: number;
   geometryRevision?: number;
   transactionId?: number;
+  transactionKind?: string;
+  targetTurn?: number;
+  anchorIndex?: number;
+  anchorOffset?: number;
   footerHeight?: number;
   viewport?: number;
   mounted?: number;
@@ -159,9 +163,11 @@ export type FrontendDiagnosticEvent = {
 };
 
 export type FrontendDiagnosticAnomaly = {
-  code: "settle-before-paint-ready" | "viewport-older-without-user-input" | "navigation-session-count-changed" | "unknown-scroll-writer" | "target-empty-sequence";
+  code: "settle-before-paint-ready" | "viewport-older-without-user-input" | "navigation-session-count-changed" | "unknown-scroll-writer" | "target-empty-sequence" | "unauthorized-scroll-reversal";
   intent?: number;
   count?: number;
+  transactionId?: number;
+  maxReverseDisplacement?: number;
 };
 
 export type FrontendDiagnosticEnvironment = {
@@ -207,7 +213,8 @@ const NUMBER_FIELDS = [
   "width", "height", "x", "y", "deltaX", "deltaY", "targetTop", "listHeight", "durationMs", "scrollTop", "scrollHeight",
   "clientHeight", "bottomDistance", "mountedRows", "totalRows", "firstVisibleIndex", "firstVisibleTop",
   "rowIndex", "estimatedSize", "previousSize", "measuredSize", "sizeDelta", "relativeError", "disclosureCount", "contentRevision", "tabCount", "patchCount", "button", "modifiers", "intent",
-  "sequence", "generation", "surfaceGeneration", "ownershipEpoch", "geometryRevision", "transactionId", "footerHeight", "viewport", "mounted", "total", "reverseDisplacement", "extentDelta", "stableFrames", "direction",
+  "sequence", "generation", "surfaceGeneration", "ownershipEpoch", "geometryRevision", "transactionId", "targetTurn", "footerHeight", "viewport", "mounted", "total", "reverseDisplacement", "extentDelta", "stableFrames", "direction",
+  "anchorIndex", "anchorOffset",
   "workspaceSessions", "visibleSessions", "hiddenSessions", "hiddenByFilter", "hiddenByCollapsed", "hiddenByTruncation", "runtimeSessions", "runtimeOnlySessions", "recoveryOnlySessions", "recoveryCopySessions", "recoveryCopies", "runningSessions", "unreadSessions", "pinnedSessions", "activeSessions", "activeVisibleSessions", "folderCount", "expandedFolders", "showAllFolders", "catalogRevision", "catalogIndexed", "catalogTotal", "repairPending", "treeRevision", "organizationRevision", "unloadedSessions", "deltaWorkspaceSessions", "deltaVisibleSessions", "deltaHiddenSessions", "deltaRecoveryCopies", "deltaRuntimeOnlySessions",
 ] as const;
 const BOOLEAN_FIELDS = [
@@ -218,6 +225,7 @@ const STRING_FIELDS = [
   "source", "eventSource", "action", "target", "targetRole", "targetTag", "keyClass", "pointerType", "inputType", "visibility", "phase",
   "reason", "rejectedReason", "result", "status", "mode", "previousMode", "owner", "writeKind", "rowKind", "layoutVersion", "layoutVariant", "estimateSource", "foldState", "state", "errorName", "errorCode",
   "directoryState", "changeReason", "outcome", "trigger", "scope", "variant", "timeFilter",
+  "transactionKind",
 ] as const;
 const GEOMETRY_SOURCES = new Set([
   "footer-resize", "row-measure", "data-change", "viewport-resize", "fold-change", "typography-change", "items-rendered",
@@ -234,6 +242,7 @@ export function analyzeFrontendDiagnosticAnomalies(events: readonly FrontendDiag
   let viewportPermit = 0;
   let unknownWriters = 0;
   let unpermittedOlder = 0;
+  const scrollReversals = new Map<number, number>();
   for (const event of events) {
     if (event.type === "history.viewport-permit") viewportPermit = 1;
     if (event.type === "navigation.begin" && event.intent !== undefined) {
@@ -249,6 +258,10 @@ export function analyzeFrontendDiagnosticAnomalies(events: readonly FrontendDiag
       else unpermittedOlder += 1;
     }
     if (event.type === "transcript.scroll-write" && event.owner && !knownScrollWriters.has(event.owner)) unknownWriters += 1;
+    if (event.type === "transcript.scroll-anomaly" && event.result === "restore-anchor" && (event.reverseDisplacement ?? 0) > 2) {
+      const transactionId = event.transactionId ?? -1;
+      scrollReversals.set(transactionId, Math.max(scrollReversals.get(transactionId) ?? 0, event.reverseDisplacement ?? 0));
+    }
     for (const [intent, state] of navigation) {
       if (painted.has(intent)) continue;
       if (event.workspaceSessions !== undefined) state.counts.add(event.workspaceSessions);
@@ -273,6 +286,9 @@ export function analyzeFrontendDiagnosticAnomalies(events: readonly FrontendDiag
   }
   if (unpermittedOlder > 0) anomalies.push({ code: "viewport-older-without-user-input", count: unpermittedOlder });
   if (unknownWriters > 0) anomalies.push({ code: "unknown-scroll-writer", count: unknownWriters });
+  for (const [transactionId, maxReverseDisplacement] of scrollReversals) {
+    anomalies.push({ code: "unauthorized-scroll-reversal", transactionId: transactionId >= 0 ? transactionId : undefined, maxReverseDisplacement });
+  }
   return anomalies;
 }
 

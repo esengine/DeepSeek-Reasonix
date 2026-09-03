@@ -61,7 +61,7 @@ export function useTranscriptGeometryLifecycle({
     if (ownsRequest
       && existing.targetRowCount === virtualRowCount
       && existing.mutationSeq === historyMutation.seq) return existing;
-    historyPrependLease.noteMutation(generation);
+    historyPrependLease.noteMutation(generation, historyMutation.seq);
     const active = { generation, request, targetRowCount: virtualRowCount, mutationSeq: historyMutation.seq };
     activePrependRef.current = active;
     return active;
