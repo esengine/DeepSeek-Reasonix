@@ -52,6 +52,7 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sessioninbox"
@@ -175,6 +176,8 @@ type Controller struct {
 	// tools spawn into it; Compose drains its completion notes into the next turn;
 	// Close cancels its still-running jobs.
 	jobs *jobs.Manager
+	// pty is the session-scoped persistent PTY terminal manager.
+	pty *pty.Manager
 	// workspaceLease is the Delivery writer owner shared with the executor.
 	// It is exposed only through a sanitized state snapshot for Desktop recovery.
 	workspaceLease *workspacelease.Owner
@@ -517,6 +520,8 @@ type Options struct {
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
+	// PTY is the session-scoped persistent PTY terminal manager.
+	PTY *pty.Manager
 	// TaskStore remains a FileStore-compatible authority. Desktop injects one
 	// observed instance so recorder and task-control APIs share post-commit
 	// projection hints; nil preserves the ordinary FileStore.
@@ -687,6 +692,7 @@ func New(opts Options) *Controller {
 		balanceKey:                        opts.BalanceKey,
 		balanceClient:                     opts.BalanceClient,
 		jobs:                              opts.Jobs,
+		pty:                               opts.PTY,
 		workspaceLease:                    opts.WorkspaceLease,
 		mcp:                               newMcpManager(opts.Host, opts.Registry, pluginCtx, opts.MCPHostProfile),
 		mcpDefaultCallTimeout:             opts.MCPDefaultCallTimeout,
@@ -5500,6 +5506,9 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 			default:
 				c.jobs.Close() // cancel any still-running background jobs
 			}
+		}
+		if c.pty != nil {
+			_ = c.pty.CloseAll()
 		}
 		if ledger := c.turnEventLedger(); ledger != nil {
 			if err := ledger.Close(); err != nil {

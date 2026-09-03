@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -608,6 +609,9 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	if a.svc.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.svc.jobs)
+	}
+	if a.svc.pty != nil {
+		cctx = pty.WithManager(cctx, a.svc.pty)
 	}
 	if a.svc.sandboxEscape != nil {
 		cctx = sandbox.WithEscapeApprover(cctx, a.svc.sandboxEscape)

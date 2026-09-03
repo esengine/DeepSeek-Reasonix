@@ -56,6 +56,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/productdocs"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
@@ -551,6 +552,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	jobOptions = append(jobOptions, jobs.WithJobStartObserver(workspaceLease.RetainUntil))
 	jm := jobs.NewManager(sink, jobOptions...)
+	ptyManager := pty.NewManager(root)
 	sessionDir := opts.SessionDir
 	if sessionDir == "" {
 		sessionDir = config.SessionDir()
@@ -1628,6 +1630,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Gate:         headlessGate,
 		Hooks:        hookRunner,
 		Jobs:         jm,
+		PTY:          ptyManager,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
@@ -1713,6 +1716,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				ReasoningLanguage:            config.ReasoningLanguageForEntry(pe, cfg.ReasoningLanguage()),
 				PlanModeReadOnlyCommands:     cfg.Agent.PlanModeReadOnlyCommands,
 				CapabilityLedger:             plannerLedger,
+				PTY:                          ptyManager,
 				CapabilityAudit:              plannerAudit,
 				MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
 				WriteRoots:                   writeRootSet,
@@ -1795,6 +1799,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		BalanceKey:            entry.APIKey(),
 		BalanceClient:         balanceClient,
 		Jobs:                  jm,
+		PTY:                   ptyManager,
 		TaskStore:             opts.TaskStore,
 		WorkspaceLease:        workspaceLease,
 		Registry:              reg,
