@@ -98,6 +98,28 @@ try {
 
 ok(!threw, "model picker can render after async model fetch returns candidates");
 ok(rootEl.textContent?.includes("zen-v1") === true, "model picker shows fetched custom provider models");
+const modelName = rootEl.querySelector<HTMLElement>(".provider-model-draft__model-name");
+ok(modelName?.textContent === "zen-v1", "model picker keeps the model ID in a dedicated name slot");
+ok(modelName?.parentElement?.classList.contains("provider-model-draft__model-name-tooltip") === true, "model name slot reuses the shared tooltip trigger");
+
+const layoutModelNames = [
+  "gpt-5",
+  "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash-vision-exp",
+  "provider/organization/really-really-really-long-model-name-with-thinking-vision-preview-2026-09-03-experimental",
+];
+await act(async () => {
+  root.render(renderPicker(layoutModelNames));
+  await flushPromises();
+});
+const layoutOptions = [...rootEl.querySelectorAll<HTMLElement>(".provider-model-draft__option")];
+const extremeLayoutOption = layoutOptions.find((option) => option.textContent?.includes(layoutModelNames[3]));
+ok(layoutOptions.length === layoutModelNames.length, "model picker renders short, regular, two-line, and extreme model IDs");
+ok(
+  layoutOptions.every((option, index) => option.querySelector<HTMLElement>(".provider-model-draft__model-name")?.textContent === layoutModelNames[index]),
+  "model IDs stay inside their dedicated name slots in source order",
+);
+ok(Boolean(extremeLayoutOption?.querySelector(".provider-model-draft__context-input")), "extreme model IDs keep their context input in the same card");
 
 await act(async () => {
   root.render(renderPicker(["deepseek-v4-flash"], "unsupported"));

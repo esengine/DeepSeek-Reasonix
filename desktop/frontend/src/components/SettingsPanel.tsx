@@ -6293,7 +6293,7 @@ function ProviderModelDraftPicker({
         {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem">
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -6301,7 +6301,7 @@ function ProviderModelDraftPicker({
                   disabled={disabled}
                   onChange={() => onToggle(model)}
                 />
-                <span>{model}</span>
+                <ProviderModelName model={model} />
               </label>
               {draft.visionCapability === "configurable" ? (
                 <label className="provider-model-draft__vision">
@@ -6602,6 +6602,14 @@ function parseBotListInput(value: string): string[] {
     .filter(Boolean));
 }
 
+function ProviderModelName({ model }: { model: string }) {
+  return (
+    <Tooltip label={model} className="provider-model-draft__model-name-tooltip">
+      <span className="provider-model-draft__model-name">{model}</span>
+    </Tooltip>
+  );
+}
+
 export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   candidates,
   selectedModels,
@@ -6672,7 +6680,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
         {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem">
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -6680,7 +6688,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
                   disabled={disabled}
                   onChange={() => onToggleModel(model)}
                 />
-                <span>{model}</span>
+                <ProviderModelName model={model} />
               </label>
               {visionCapability === "configurable" ? (
                 <label className="provider-model-draft__vision">
