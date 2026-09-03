@@ -132,8 +132,8 @@ export interface WireCacheDiagnostics {
   toolSchemaTokens: number;
   cacheMissTokens: number;
   cacheHitTokens: number;
+  sessionContext?: import("./sessionContextTypes").WireSessionContextDiagnostics;
 }
-
 export interface WireUsage {
   promptTokens: number;
   completionTokens: number;

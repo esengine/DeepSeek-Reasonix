@@ -14,19 +14,15 @@ import (
 	"reasonix/internal/tool"
 )
 
-// Golden baseline for the unified extension kernel / Extension Protocol v2
-// refactor. The kernel rebuilds runtime assembly (tools, skills, commands,
-// hooks, MCP, providers) behind a Builder that freezes an immutable
-// RuntimeSnapshot. The hard product contract is: with no v1 extension
-// installed, the system prompt, provider-visible tool schemas, provider
-// request serialization, and the prompt-cache prefix hash must stay
-// byte-identical to the pre-refactor runtime, because every byte of drift
-// cold-starts the provider prompt cache for every session on the machine.
+// Golden baseline for the current cache-stable provider contract. The hard
+// product contract is: absent a deliberate migration, the stable system prompt,
+// provider-visible tool schemas, provider request serialization, and cache
+// prefix hash remain byte-identical. Dynamic workspace, environment, memory,
+// and skill catalog data are exercised separately through session-context tests.
 //
-// These goldens are recorded from the pre-refactor runtime. Later refactor
-// stages must keep this test green without regenerating the files. If a
-// deliberate, reviewed change to the provider-visible contract ever happens,
-// regenerate with:
+// The stable-prefix/session-context migration intentionally updates the system
+// and prefix goldens once while leaving tool_schemas.json byte-identical. Future
+// reviewed provider-visible changes must regenerate with:
 //
 //	REASONIX_UPDATE_GOLDEN=1 go test ./internal/boot -run TestGoldenBaseline -count=1
 //
@@ -244,7 +240,7 @@ func TestGoldenBaselineNoExtensions(t *testing.T) {
 			t.Fatalf("read golden %s: %v (record it with REASONIX_UPDATE_GOLDEN=1)", name, err)
 		}
 		if string(got) != string(want) {
-			t.Fatalf("golden %s drifted from the pre-refactor baseline (%d bytes golden, %d bytes actual); first diff: %q\n"+
+			t.Fatalf("golden %s drifted from the committed cache-contract baseline (%d bytes golden, %d bytes actual); first diff: %q\n"+
 				"If this drift is deliberate, regenerate with REASONIX_UPDATE_GOLDEN=1 and document the cache impact.",
 				name, len(got), len(want), firstDivergence(string(got), string(want)))
 		}

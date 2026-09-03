@@ -651,7 +651,8 @@ resolved and prepended to the message as a tagged block the model can read.
 A subagent profile is a Skill with `runAs: subagent` and, for profiles managed
 by the desktop or CLI editors, `invocation: manual`. Profiles reuse the existing
 project/global Skill files; they do not introduce another state format or
-database. Manual invocation excludes a profile from the pinned Skill index so
+database. Manual invocation excludes a profile from the `session-context`
+Skills catalog so
 the model cannot discover it implicitly, while explicit `/<name> <task>`
 invocation remains available.
 

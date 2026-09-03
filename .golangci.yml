@@ -19,6 +19,12 @@ linters:
       # extension protocol, not a refactor, so it lands on its own.
       disable:
         - omitzero
+        # Go 1.26 makes these suggestions available, but adopting them would
+        # rewrite unrelated production and test code across the repository.
+        # Keep the security-only module upgrade focused and revisit these in
+        # a dedicated modernization change.
+        - newexpr
+        - stditerators
     errcheck:
       check-type-assertions: false
       exclude-functions:

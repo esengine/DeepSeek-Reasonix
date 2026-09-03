@@ -223,7 +223,10 @@ func TestMergeBackReportsRecoveryRequiredWhenPreparedSourceDrifts(t *testing.T) 
 	inspection := inspectMergeTest(t, created.WorkspaceRoot, managed)
 	mergeStepHook = func(step string) {
 		if step == "after_merge_prepare" {
-			gitTest(t, repo, "merge", "--abort")
+			// Preserve the prepared index and worktree while clearing merge
+			// metadata so switching branches deterministically simulates source
+			// identity drift on every supported Git platform.
+			gitTest(t, repo, "merge", "--quit")
 			gitTest(t, repo, "switch", "-c", "prepared-drift")
 		}
 	}

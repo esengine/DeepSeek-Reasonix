@@ -7,19 +7,19 @@ package provider
 // ModelMessages removes durable display-only records before a request is
 // handed to any provider. Healthy sessions without such records keep their
 // original backing slice, preserving the allocation and prompt-cache fast path.
-func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false) }
+func ModelMessages(msgs []Message) []Message { return projectMessages(msgs, false, false) }
 
 // ProjectionMessages is ModelMessages for a stored projection, except that
-// ToolExecution survives: a projection is also the next compaction's input, and
-// only that record says a tool call failed. Stripping it here would leave the
-// pass after next unable to classify the failure, so the strip belongs at the
-// provider boundary, which every request path already crosses.
-func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true) }
+// ToolExecution and Origin survive: a projection is also the next compaction's
+// input, and those records classify tool failures and host-authored protocol
+// messages. Stripping belongs at the provider boundary, which every request
+// path already crosses.
+func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs, true, true) }
 
-func projectMessages(msgs []Message, keepExecution bool) []Message {
+func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly || m.Origin != "" || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || (m.ToolExecution != nil && !keepExecution) {
+		if m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || (m.ToolExecution != nil && !keepExecution) {
 			needsCopy = true
 			break
 		}
@@ -37,7 +37,9 @@ func projectMessages(msgs []Message, keepExecution bool) []Message {
 			candidate.ProviderContent = ""
 		}
 		candidate.RawContent = ""
-		candidate.Origin = ""
+		if !keepOrigin {
+			candidate.Origin = ""
+		}
 		candidate.DecisionReceipt = nil
 		candidate.DecisionReceipts = nil
 		candidate.VisionSummary = nil

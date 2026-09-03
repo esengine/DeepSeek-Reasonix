@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+// @ts-expect-error Node types are intentionally not part of the Worker build.
+import { DatabaseSync } from "node:sqlite";
 import type { PackageRow, RegistryUser } from "../types";
 import { PublishSchema } from "../lib/validation";
 import { PackageRepo } from "./packages";
+import registrySchema from "../../../registry-schema.sql?raw";
 
 const now = "2026-07-22T00:00:00.000Z";
 const user: RegistryUser = {
@@ -278,5 +281,94 @@ describe("PackageRepo.setStatusIfCurrent", () => {
 
     expect(row).toBeNull();
     expect(statements).toHaveLength(1);
+  });
+});
+
+describe("PackageRepo.versions", () => {
+  it("returns a bounded page and a stable cursor for older versions", async () => {
+    let sql = "";
+    const rows = [
+      { id: 3, version: "0.3.0", source: "s3", content_hash: "h3", risk_level: "", created_at: "2026-07-24T00:00:00.000Z" },
+      { id: 2, version: "0.2.0", source: "s2", content_hash: "h2", risk_level: "", created_at: "2026-07-23T00:00:00.000Z" },
+      { id: 1, version: "0.1.0", source: "s1", content_hash: "h1", risk_level: "", created_at: "2026-07-22T00:00:00.000Z" },
+    ];
+    const db = {
+      prepare(query: string) {
+        sql = query;
+        const statement = {
+          bind() { return statement; },
+          async all<T>() { return { results: rows as T[] }; },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+    const result = await new PackageRepo(db).versions(7, { limit: 2, before: "2026-07-25T00:00:00.000Z", beforeId: 4 });
+    expect(result.versions).toHaveLength(2);
+    expect(result.pageInfo).toEqual({ limit: 2, hasMore: true, nextBefore: rows[1].created_at, nextBeforeId: rows[1].id });
+    expect(sql).toContain("created_at < ?2");
+    expect(sql).toContain("ORDER BY created_at DESC, id DESC LIMIT ?4");
+  });
+});
+
+describe("PackageRepo.list", () => {
+  it("uses the daily install rollup for trending", async () => {
+    let sql = "";
+    const db = {
+      prepare(query: string) {
+        sql = query;
+        const statement = {
+          bind() { return statement; },
+          async all() { return { results: [] }; },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+    await new PackageRepo(db).list({ kind: "all", q: "", sort: "trending", limit: 24, offset: 0, now });
+    expect(sql).toContain("FROM package_install_daily");
+    expect(sql).not.toContain("FROM events");
+    expect(sql).toContain("SUM(count)");
+  });
+});
+
+describe("PackageRepo.recordInstall", () => {
+  it("increments the package and a daily rollup without writing a raw install event", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(registrySchema);
+    sqlite.prepare(
+      `INSERT INTO packages (kind, scope_handle, name, slug, source, latest_version, status, publisher_id, created_at, updated_at)
+       VALUES ('skill', 'publisher', 'devkit', 'publisher/devkit', 'https://github.com/o/r', '0.1.0', 'active', 7, ?1, ?1)`,
+    ).run(now);
+    const db = {
+      prepare(sql: string) {
+        const statement = sqlite.prepare(sql);
+        const wrapper: any = {
+          bind(...values: unknown[]) { wrapper.values = values; return wrapper; },
+          values: [] as unknown[],
+          async first() { return statement.get(...wrapper.values); },
+          async all() { return { results: statement.all(...wrapper.values) }; },
+          async run() { return { meta: { changes: Number(statement.run(...wrapper.values).changes) } }; },
+        };
+        return wrapper;
+      },
+      async batch(statements: Array<{ values?: unknown[]; first?: () => Promise<unknown>; run?: () => Promise<unknown> }>) {
+        const results = [] as Array<{ results: unknown[] }>;
+        for (const statement of statements) {
+          if (statement.first) results.push({ results: [await statement.first()] });
+          else {
+            await statement.run?.();
+            results.push({ results: [] });
+          }
+        }
+        return results;
+      },
+    } as unknown as D1Database;
+    try {
+      const result = await new PackageRepo(db).recordInstall("publisher/devkit", now);
+      expect(result).toMatchObject({ count: 1, scopeHandle: "publisher" });
+      expect(sqlite.prepare("SELECT count FROM package_install_daily").get()).toEqual({ count: 1 });
+      expect(sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'install'").get()).toEqual({ count: 0 });
+    } finally {
+      sqlite.close();
+    }
   });
 });

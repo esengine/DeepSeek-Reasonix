@@ -31,6 +31,15 @@ CREATE INDEX IF NOT EXISTS packages_kind ON packages (kind, status);
 CREATE INDEX IF NOT EXISTS packages_installs ON packages (install_count DESC);
 CREATE INDEX IF NOT EXISTS packages_created ON packages (created_at DESC);
 CREATE INDEX IF NOT EXISTS packages_publisher ON packages (publisher_id);
+CREATE INDEX IF NOT EXISTS packages_active_created
+  ON packages (created_at DESC)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS packages_active_kind_created
+  ON packages (kind, created_at DESC)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS packages_active_installs
+  ON packages (install_count DESC, created_at DESC)
+  WHERE status = 'active';
 
 -- Immutable version history: one row per published version, carrying the source
 -- snapshot and content hash so a consumer can audit provenance before install.
@@ -66,3 +75,18 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_created ON events (created_at DESC);
 CREATE INDEX IF NOT EXISTS events_trending ON events (type, created_at);
+
+-- Daily install counts replace one-row-per-install events for trending. Legacy
+-- install events remain readable for audit/backfill compatibility; new writes
+-- go to this bounded aggregate instead.
+CREATE TABLE IF NOT EXISTS package_install_daily (
+  date       TEXT NOT NULL,
+  package_id INTEGER NOT NULL,
+  count      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, package_id)
+);
+
+CREATE TABLE IF NOT EXISTS registry_migration_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

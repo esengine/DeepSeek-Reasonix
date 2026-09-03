@@ -488,21 +488,6 @@ type AskAnswer struct {
 	Selected   []string
 }
 
-// CacheDiagnostics describes whether and why the cacheable prefix changed since
-// the last turn. It rides on the Usage event so every frontend can show
-// cache-churn attribution.
-type CacheDiagnostics struct {
-	PrefixHash          string
-	PrefixChanged       bool
-	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
-	SystemHash          string
-	ToolsHash           string
-	LogRewriteVersion   int
-	ToolSchemaTokens    int
-	CacheMissTokens     int
-	CacheHitTokens      int
-}
-
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.
 // Missing values are stable category ids; user-facing detail stays localized in
 // the frontend instead of scraping the diagnostic error string.

@@ -140,7 +140,7 @@ ${webRuntime ? `<details class="sample-nested"><summary>Web Runtime</summary><pr
 </div></details>`;
 }
 
-function sampleReports(reports: ReportSample[], options: { limit?: number } = {}): string {
+function sampleReports(reports: ReportSample[], options: { limit?: number; truncated?: boolean } = {}): string {
   if (!reports.length) return `<div class="empty">${i18n("No raw samples stored for this group", "这个分组没有保存原始样本")}</div>`;
   const limit = options.limit ?? 10;
   const visible = reports.slice(0, limit);
@@ -150,7 +150,10 @@ function sampleReports(reports: ReportSample[], options: { limit?: number } = {}
   const history = hidden.length > 0
     ? `<details class="sample-more"><summary>${i18nHTML(`Historical samples ${hidden.length}`, `历史样本 ${hidden.length}`)}</summary><div class="sample-more-list">${hiddenSamples}</div></details>`
     : "";
-  return `<div class="sample-list">${visibleSamples}${history}</div>`;
+  const boundary = options.truncated
+    ? `<p class="group-note sample-boundary">${i18n("Showing the first retained sample and the latest 5 samples; older raw samples are omitted to keep this page responsive.", "当前展示首个保留样本和最近 5 个样本；更早的原始样本已省略，以保证页面稳定。")}</p>`
+    : "";
+  return `${boundary}<div class="sample-list">${visibleSamples}${history}</div>`;
 }
 
 export function renderGroup(
@@ -159,8 +162,9 @@ export function renderGroup(
   user: User,
   diagnostics?: GroupDiagnosticSummary,
   lifecycle?: { state: "active" | "compacted" | "archiving" | "archived"; epoch: number },
+  warnings: { samplesUnavailable?: boolean; diagnosticsUnavailable?: boolean } = {},
 ): string {
-  const samples = sampleReports(reports);
+  const samples = sampleReports(reports, { truncated: group.count > reports.length });
   const platform = [group.last_os, group.last_arch].filter(Boolean).join("/");
   const status = statusPill(group.status) || `<span class="pill open">${i18n("open", "未处理")}</span>`;
   const tags = [
@@ -199,6 +203,15 @@ export function renderGroup(
         : lifecycle && lifecycle.epoch > 1
           ? `<div class="card full"><p>${i18nHTML(`Samples belong to retained cycle ${lifecycle.epoch}; Lifetime First Seen remains the D1 value above.`, `样本属于第 ${lifecycle.epoch} 个保留周期；Lifetime First Seen 仍以上方 D1 值为准。`)}</p></div>`
           : "";
+  const englishDetails = [warnings.samplesUnavailable && "raw samples", warnings.diagnosticsUnavailable && "technical distributions"]
+    .filter(Boolean)
+    .join(", ");
+  const chineseDetails = [warnings.samplesUnavailable && "原始样本", warnings.diagnosticsUnavailable && "技术分布"]
+    .filter(Boolean)
+    .join("、");
+  const degradedNotice = englishDetails
+    ? `<div class="card full notice warn"><p>${i18nHTML(`Some ${englishDetails} could not be loaded. Core group aggregates remain available.`, `部分${chineseDetails}暂时无法加载，分组核心汇总仍可用。`)}</p></div>`
+    : "";
   return page(
     `Reasonix · ${group.fingerprint.slice(0, 8)}`,
     `stats / ${group.fingerprint.slice(0, 8)}`,
@@ -208,6 +221,7 @@ ${group.title ? `<p class="summary group-summary">${esc(group.title)}</p>` : ""}
 <div class="group-tags">${tags}</div>
 <div class="group-metrics">${metrics}</div>
 ${group.note ? `<p class="group-note">${i18n("Note", "备注")}: ${esc(group.note)}</p>` : ""}</section>
+${degradedNotice}
 ${lifecycleNotice}
 <div class="card full sample-card"><h2>${i18nHTML("Samples <b>— newest first, retained-cycle first plus latest 5 kept</b>", "样本 <b>— 最新优先，保留当前周期首个样本和最近 5 个</b>")}</h2>${samples}</div>
 ${distributions}

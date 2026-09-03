@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { TranscriptScrollMode } from "./transcriptScrollArbiter";
-import { MIN_REVERSE_JUMP_PX, TRANSCRIPT_READER_IDLE_MS, TRANSCRIPT_READER_SETTLE_MS, transcriptReaderDirection } from "./transcriptReaderExtentStability";
+import { MIN_REVERSE_JUMP_PX, TRANSCRIPT_READER_IDLE_MS, TRANSCRIPT_READER_SETTLE_MS, transcriptAppliedVisualOffset, transcriptReaderDirection } from "./transcriptReaderExtentStability";
 import { nativeTranscriptBottomTop, nativeTranscriptDistanceFromBottom, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX } from "./transcriptScrollGeometry";
 import { recordTranscriptScrollDiagnostic, type TranscriptScrollWriteRecord } from "./transcriptScrollProbe";
 import { transcriptElementViewportIsBlank } from "./transcriptVirtuosoRecovery";
@@ -227,9 +227,11 @@ export function useTranscriptReaderExtentStability({
     const renderedAnchorDrift = anchorRow && transaction.anchor
       ? anchorRow.getBoundingClientRect().top - viewport.top - transaction.anchor.offset
       : 0;
-    // The row rect includes the current visual guard. Remove it so a stable
-    // guard does not look like a fresh displacement on every observation.
-    const physicalAnchorDrift = renderedAnchorDrift - transaction.visualOffset;
+    // The row rect includes whatever visual guard the browser has applied so
+    // far. Remove that, not the remembered offset, so a guard that has not
+    // landed yet cannot look like a fresh displacement and compound itself.
+    const appliedVisualOffset = transcriptAppliedVisualOffset(element, transaction.visualOffset);
+    const physicalAnchorDrift = renderedAnchorDrift - appliedVisualOffset;
     const reverseAnchorDisplacement = transaction.direction * physicalAnchorDrift;
     // Extent collapse needs the half-viewport transient threshold, but the
     // user-visible screen anchor has the stricter 96px acceptance contract.
@@ -264,9 +266,6 @@ export function useTranscriptReaderExtentStability({
         );
       }
       if (anchorRow && transaction.anchor) {
-        // DOM geometry includes the transform already applied by a previous
-        // observation. Subtract it before deriving the next absolute guard so
-        // repeated scroll events cannot compound the visual compensation.
         transaction.visualOffset = -physicalAnchorDrift;
         element.dataset.transcriptReaderVisualGuard = "true";
         element.style.setProperty("--transcript-reader-visual-offset", `${transaction.visualOffset}px`);
@@ -449,10 +448,10 @@ export function useTranscriptReaderExtentStability({
         }
         const viewportTop = element.getBoundingClientRect().top;
         const targetTop = anchorRow && transaction.anchor
-          // getBoundingClientRect includes the temporary list transform. Use
+          // getBoundingClientRect includes the applied list transform. Use
           // the unguarded row position to derive the physical scrollTop that
           // can replace that transform without a visual jump.
-          ? element.scrollTop + anchorRow.getBoundingClientRect().top - transaction.visualOffset - viewportTop - transaction.anchor.offset
+          ? element.scrollTop + anchorRow.getBoundingClientRect().top - transcriptAppliedVisualOffset(element, transaction.visualOffset) - viewportTop - transaction.anchor.offset
           : transaction.expectedTop;
         const correction = Math.max(0, Math.min(nativeTranscriptBottomTop(element), targetTop)) - element.scrollTop;
         if ((transaction.mountAnchorWritten ? Math.abs(correction) : transaction.direction * correction) > 1) {
@@ -591,6 +590,37 @@ export function useTranscriptReaderExtentStability({
     schedule(transaction);
   }, [geometryCommitReadyRef, schedule]);
 
+  /**
+   * A content-preserving offset write (an in-row block-window prepend that
+   * grows the row above the reader's view and compensates scrollTop by the
+   * same amount) moves the native scrollTop and the anchor row's top edge
+   * without moving anything the reader sees. Re-baseline the transaction to
+   * the compensated position so neither shows up as a reverse displacement.
+   */
+  const absorbOffsetWrite = useCallback((element: HTMLDivElement, delta: number) => {
+    const transaction = transactionRef.current;
+    if (!transaction || transaction.element !== element || delta === 0) return;
+    transaction.baselineTop += delta;
+    transaction.lastAcceptedTop += delta;
+    transaction.expectedTop = Math.max(0, Math.min(nativeTranscriptBottomTop(element), transaction.expectedTop + delta));
+    if (transaction.anchor) transaction.anchor.offset -= delta;
+    transaction.baselineHeight = element.scrollHeight;
+    transaction.minimumHeight = element.scrollHeight;
+    transaction.lastHeight = element.scrollHeight;
+    transaction.correctionHeight = element.scrollHeight;
+    transaction.transientCandidateHeight = element.scrollHeight;
+    transaction.transientStableFrames = 0;
+    transaction.lastBottomDistance = nativeTranscriptDistanceFromBottom(element);
+    recordTranscriptScrollDiagnostic("reader-transaction", {
+      transactionId: transaction.id,
+      ownershipEpoch: transaction.ownershipEpoch,
+      direction: transaction.direction,
+      phase: transaction.phase,
+      result: "absorbed-offset",
+      extentDelta: delta,
+    });
+  }, []);
+
   const arm = useCallback((deltaY: number, canClaimTail: boolean) => {
     const element = scrollRef.current;
     if (!element || !Number.isFinite(deltaY) || deltaY === 0) return { started: false as const };
@@ -701,8 +731,9 @@ export function useTranscriptReaderExtentStability({
     cancel,
     observe,
     holdGeometryCommit,
+    absorbOffsetWrite,
     anchorIsMounted,
     isActive,
     active: active || readerLayoutLease,
-  }), [active, anchorIsMounted, arm, cancel, holdGeometryCommit, readerLayoutLease, observe, isActive]);
+  }), [absorbOffsetWrite, active, anchorIsMounted, arm, cancel, holdGeometryCommit, readerLayoutLease, observe, isActive]);
 }

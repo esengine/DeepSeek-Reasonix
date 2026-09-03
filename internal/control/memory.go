@@ -12,7 +12,7 @@ import (
 )
 
 // memoryManager owns the session's loaded memory snapshot, the queue of pending
-// turn-tail notes, and the serialization of memory writes — behind its own locks
+// standing-document notes, and the serialization of memory writes — behind its own locks
 // and off the controller's c.mu. Like goalMachine it is a strict leaf: its
 // methods only touch its own state and never call back into the Controller, so a
 // memory-panel save can't stall an approval or status poll on c.mu.
@@ -21,20 +21,20 @@ import (
 // Writes are serialized by writeMu and do their disk I/O (the doc/store write
 // plus the memory.Load re-discovery) OFF mu, taking mu only to swap the freshly
 // discovered snapshot in and queue the turn-tail note — so a write never holds a
-// lock across a filesystem walk. A turn-tail note is queued for each write so the
-// change applies this session without disturbing the cache-stable system prefix
-// (it folds into the prefix on the next session). All write methods are no-ops
-// returning "" when memory is disabled (set == nil).
+// lock across a filesystem walk. Standing-document edits queue a compatibility
+// note because their authoritative copy remains in system until reload. Background
+// fact writes only refresh set; the next real user turn publishes the replacement
+// session-context snapshot. All write methods are no-ops returning "" when memory
+// is disabled (set == nil).
 type memoryManager struct {
 	// mu guards set (the snapshot pointer) and pending (the turn-tail queue);
 	// every critical section under it is short and non-blocking.
 	mu  sync.Mutex
 	set *memory.Set
-	// pending holds memory notes added mid-session (via "#" quick-add or a memory
-	// edit) that haven't yet been folded into a turn. Compose drains it onto the
-	// next outgoing turn — never into the cache-stable system prefix — so a fresh
-	// memory takes effect this session without busting the prompt cache; it joins
-	// the prefix naturally on the next session.
+	// pending holds standing-document notes added mid-session (via "#" quick-add
+	// or a doc edit). Compose drains them onto the next outgoing turn. Background
+	// facts never enter this queue; their live replacement snapshot is injected by
+	// the turn-context path.
 	pending    []string
 	lastRecall memory.RecallResult
 	autoWrites map[[32]byte]int
@@ -158,6 +158,13 @@ func (m *memoryManager) applyWrite(mem *memory.Set, note string) {
 	m.mu.Unlock()
 }
 
+// applyBackgroundWrite refreshes the live background-memory snapshot without
+// generating a legacy <memory-update>. The next real user turn observes the new
+// BackgroundDataBlock and appends one complete replacement session-context.
+func (m *memoryManager) applyBackgroundWrite(mem *memory.Set) {
+	m.applyWrite(mem, "")
+}
+
 // quickAdd appends a one-line note to the doc-memory file for scope (project
 // REASONIX.md by default) — the write side of "#<note>". Returns the file written.
 func (m *memoryManager) quickAdd(scope memory.Scope, note string) (string, error) {
@@ -214,16 +221,13 @@ func (m *memoryManager) saveMemory(fact memory.Memory) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m.applyWrite(mem,
-		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " ")+"\n"+strings.TrimSpace(fact.Body))
+	m.applyBackgroundWrite(mem)
 	return path, nil
 }
 
 // forget removes a saved auto-memory by name — the panel/TUI forget action, the
-// manual counterpart to the model's `forget` tool. It queues a turn-tail note so
-// the removal applies this session (the cached prefix still lists the fact until
-// the next session re-folds the index). The file is archived for traceability by
-// Store.Delete.
+// manual counterpart to the model's `forget` tool. The file is archived for
+// traceability by Store.Delete; the next real turn publishes the new snapshot.
 func (m *memoryManager) forget(name string) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
@@ -234,8 +238,7 @@ func (m *memoryManager) forget(name string) error {
 	if err := mem.Store.Delete(name); err != nil {
 		return err
 	}
-	m.applyWrite(mem,
-		"Forgot memory \""+name+"\" — disregard its loaded guidance and background-index entry for the rest of this session.")
+	m.applyBackgroundWrite(mem)
 	return nil
 }
 
@@ -258,8 +261,7 @@ func (m *memoryManager) restore(ref string, revision int) (memory.Memory, error)
 	if err != nil {
 		return memory.Memory{}, err
 	}
-	m.applyWrite(mem, fmt.Sprintf("Restored memory %q as revision %d: %s\n%s",
-		result.Memory.Name, result.Memory.Revision, strings.Join(strings.Fields(result.Memory.Description), " "), strings.TrimSpace(result.Memory.Body)))
+	m.applyBackgroundWrite(mem)
 	return result.Memory, nil
 }
 
@@ -274,23 +276,17 @@ func (m *memoryManager) restoreArchived(archivePath string) (memory.Memory, erro
 	if err != nil {
 		return memory.Memory{}, err
 	}
-	m.applyWrite(mem, fmt.Sprintf("Recovered archived memory %q as revision %d: %s\n%s",
-		result.Memory.Name, result.Memory.Revision, strings.Join(strings.Fields(result.Memory.Description), " "), strings.TrimSpace(result.Memory.Body)))
+	m.applyBackgroundWrite(mem)
 	return result.Memory, nil
 }
 
-// queue rides a note on the next turn — the model's remember/forget tool path
-// (memory.Queue). It refreshes the snapshot a memory panel reads when memory is
-// enabled, and still queues the turn-tail note when it isn't (there's no snapshot
-// to re-discover).
-func (m *memoryManager) queue(note string) {
+// queue is the model remember/forget tool callback. The tool result already
+// reports the mutation inside the current loop; only the refreshed background
+// snapshot is needed for the next real user turn.
+func (m *memoryManager) queue(_ string) {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 	if mem := m.current(); mem != nil {
-		m.applyWrite(mem, note)
-		return
+		m.applyBackgroundWrite(mem)
 	}
-	m.mu.Lock()
-	m.pending = append(m.pending, note)
-	m.mu.Unlock()
 }

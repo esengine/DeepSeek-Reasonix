@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -245,7 +244,7 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 	}
 }
 
-func TestEnsureBlankTabStartsProjectRuntimeWithCurrentWorkspacePrompt(t *testing.T) {
+func TestEnsureBlankTabStartsProjectRuntimeWithCurrentWorkspaceContext(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectA := robustTempDir(t)
@@ -289,12 +288,12 @@ func TestEnsureBlankTabStartsProjectRuntimeWithCurrentWorkspacePrompt(t *testing
 		t.Fatalf("project B controller session path = %q, want under %q", tabB.Ctrl.SessionPath(), desktopSessionDir(projectB))
 	}
 	sys := systemPromptFrom(tabB.Ctrl.History())
-	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
-		t.Fatalf("project B system prompt missing current workspace %q:\n%s", projectB, sys)
+	if strings.Contains(sys, "Current workspace:") {
+		t.Fatalf("dynamic workspace leaked into project B system prompt:\n%s", sys)
 	}
-	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
-		t.Fatalf("project B system prompt retained project A workspace %q:\n%s", projectA, sys)
-	}
+	ctrl := installStubControllerWithCurrentPrompt(t, app, tabB)
+	submitStubTurnAndWaitForCheckpoint(t, ctrl, "project B context turn")
+	assertWorkspaceSessionContext(t, ctrl.History(), projectB, projectA)
 }
 
 func TestBlankTabSessionPathRejectsOtherProjectWorkspace(t *testing.T) {
@@ -318,7 +317,7 @@ func TestBlankTabSessionPathRejectsOtherProjectWorkspace(t *testing.T) {
 	}
 }
 
-func TestForkKeepsProjectWorkspacePrompt(t *testing.T) {
+func TestForkKeepsProjectWorkspaceContext(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectA := robustTempDir(t)
@@ -360,15 +359,15 @@ func TestForkKeepsProjectWorkspacePrompt(t *testing.T) {
 		t.Fatalf("fork controller workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
 	}
 	sys := systemPromptFrom(forkTab.Ctrl.History())
-	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
-		t.Fatalf("fork system prompt missing project B workspace %q:\n%s", projectB, sys)
+	if strings.Contains(sys, "Current workspace:") {
+		t.Fatalf("fork system prompt contains dynamic workspace:\n%s", sys)
 	}
-	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
-		t.Fatalf("fork system prompt retained project A workspace %q:\n%s", projectA, sys)
-	}
+	forkCtrl := installStubControllerWithCurrentPrompt(t, app, forkTab)
+	submitStubTurnAndWaitForCheckpoint(t, forkCtrl, "project B after fork")
+	assertWorkspaceSessionContext(t, forkCtrl.History(), projectB, projectA)
 }
 
-func TestRewindKeepsProjectWorkspacePrompt(t *testing.T) {
+func TestRewindReinjectsProjectWorkspaceContext(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectA := robustTempDir(t)
@@ -402,44 +401,14 @@ func TestRewindKeepsProjectWorkspacePrompt(t *testing.T) {
 		t.Fatalf("rewound controller workspace root = %q, want %q", got, normalizeProjectRoot(projectB))
 	}
 	sys := systemPromptFrom(tabB.Ctrl.History())
-	if !strings.Contains(sys, "Current workspace: "+strconv.Quote(projectB)) {
-		t.Fatalf("rewound system prompt missing project B workspace %q:\n%s", projectB, sys)
+	if strings.Contains(sys, "Current workspace:") {
+		t.Fatalf("rewound system prompt contains dynamic workspace:\n%s", sys)
 	}
-	if strings.Contains(sys, "Current workspace: "+strconv.Quote(projectA)) {
-		t.Fatalf("rewound system prompt retained project A workspace %q:\n%s", projectA, sys)
-	}
-}
-
-func installStubControllerWithCurrentPrompt(t *testing.T, app *App, tab *WorkspaceTab) *control.Controller {
-	t.Helper()
-	if tab == nil || tab.Ctrl == nil {
-		t.Fatal("tab controller is required")
-	}
-	sys := systemPromptFrom(tab.Ctrl.History())
-	if strings.TrimSpace(sys) == "" {
-		t.Fatal("tab controller did not expose a system prompt")
-	}
-	sessionDir := tab.Ctrl.SessionDir()
-	sessionPath := tab.Ctrl.SessionPath()
-	workspaceRoot := tab.Ctrl.WorkspaceRoot()
-	label := tab.Ctrl.Label()
-	tab.Ctrl.Close()
-
-	sess := agent.NewSession(sys)
-	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
-	ctrl := control.New(control.Options{
-		Runner:        ag,
-		Executor:      ag,
-		SessionDir:    sessionDir,
-		SessionPath:   sessionPath,
-		WorkspaceRoot: workspaceRoot,
-		Label:         label,
-		SystemPrompt:  sys,
-		Sink:          event.Discard,
-	})
-	tab.Ctrl = ctrl
-	app.bindControllerDisplayRecorder(ctrl)
-	return ctrl
+	tabB = waitForTabReady(t, app, second.ID)
+	ctrl = installStubControllerWithCurrentPrompt(t, app, tabB)
+	ctrl.SubmitUserTurn("project B after rewind", "project B after rewind")
+	waitNotRunning(t, ctrl)
+	assertWorkspaceSessionContext(t, ctrl.History(), projectB, projectA)
 }
 
 func submitStubTurnAndWaitForCheckpoint(t *testing.T, ctrl control.SessionAPI, input string) int {

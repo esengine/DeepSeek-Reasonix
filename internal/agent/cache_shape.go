@@ -14,11 +14,12 @@ import (
 // provider-side prompt-cache reuse. Comparing snapshots across turns
 // lets us explain *why* a cache miss happened.
 type PrefixShape struct {
-	SystemHash        string
-	ToolsHash         string
-	PrefixHash        string
-	LogRewriteVersion int
-	ToolSchemaTokens  int
+	SystemHash           string
+	ToolsHash            string
+	PrefixHash           string
+	LogRewriteVersion    int
+	ToolSchemaTokens     int
+	SessionContextDigest string
 }
 
 // CacheDiagnostics is a type alias for event.CacheDiagnostics so the agent
@@ -78,6 +79,9 @@ func CompareShape(prev, cur PrefixShape, usage *provider.Usage, contentReasons [
 	}
 	if prev.ToolsHash != "" && prev.ToolsHash != cur.ToolsHash {
 		reasons = append(reasons, "tools")
+	}
+	if prev.SessionContextDigest != cur.SessionContextDigest {
+		reasons = append(reasons, "session_context")
 	}
 	reasons = append(reasons, contentReasons...)
 	var miss, hit int

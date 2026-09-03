@@ -12,6 +12,11 @@ import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptSc
 
 const HOT_ZONE_PX = 18;
 const MIN_THUMB_PX = 28;
+// A rail click lands while rows may still be measuring. Wait for quiet
+// geometry before releasing programmatic ownership, but never past the same
+// wall-clock budget the arbiter grants slow WebView2 row mounts.
+const RAIL_SETTLE_STABLE_FRAMES = 2;
+const RAIL_SETTLE_BUDGET_MS = 1_000;
 
 type ScrollbarState = {
   visible: boolean;
@@ -23,6 +28,7 @@ type ScrollbarState = {
 type DragGeometry = {
   pointerId: number;
   startY: number;
+  lastClientY: number;
   startThumbTop: number;
   overflow: number;
   maxThumbTop: number;
@@ -50,6 +56,25 @@ export function mapFrozenScrollbarDrag(
   const thumbTop = Math.min(drag.maxThumbTop, Math.max(0, drag.startThumbTop + clientY - drag.startY));
   const scrollTop = drag.maxThumbTop > 0 ? (thumbTop / drag.maxThumbTop) * drag.overflow : 0;
   return { thumbTop, scrollTop };
+}
+
+/** Rebase an active drag after a content/viewport geometry revision. */
+export function rebaseFrozenScrollbarDrag(
+  drag: Pick<DragGeometry, "startY" | "startThumbTop" | "overflow" | "maxThumbTop">,
+  geometry: Pick<DragGeometry, "overflow" | "maxThumbTop">,
+  scrollTop: number,
+  clientY: number,
+) {
+  const ratio = geometry.overflow > 0
+    ? Math.max(0, Math.min(1, scrollTop / geometry.overflow))
+    : 0;
+  return {
+    ...drag,
+    startY: clientY,
+    startThumbTop: Math.round(ratio * geometry.maxThumbTop),
+    overflow: geometry.overflow,
+    maxThumbTop: geometry.maxThumbTop,
+  };
 }
 
 /** Creation-mode scrollbar with a pointerdown-frozen drag mapping. */
@@ -90,6 +115,14 @@ export function useCreationTranscriptScrollbar({
       return;
     }
     const drag = dragRef.current;
+    if (drag && (drag.overflow !== geometry.overflow || drag.maxThumbTop !== geometry.maxThumbTop || drag.thumbHeight !== geometry.thumbHeight)) {
+      const rebased = rebaseFrozenScrollbarDrag(drag, geometry, element.scrollTop, drag.lastClientY);
+      drag.startY = rebased.startY;
+      drag.startThumbTop = rebased.startThumbTop;
+      drag.overflow = rebased.overflow;
+      drag.maxThumbTop = rebased.maxThumbTop;
+      drag.thumbHeight = geometry.thumbHeight;
+    }
     const overflow = drag?.overflow ?? geometry.overflow;
     const maxThumbTop = drag?.maxThumbTop ?? geometry.maxThumbTop;
     const thumbHeight = drag?.thumbHeight ?? geometry.thumbHeight;
@@ -130,6 +163,7 @@ export function useCreationTranscriptScrollbar({
       const element = scrollRef.current;
       if (drag && element && event.pointerId === drag.pointerId) {
         const { thumbTop, scrollTop } = mapFrozenScrollbarDrag(drag, event.clientY);
+        drag.lastClientY = event.clientY;
         writeOffset("custom-scrollbar", scrollTop);
         setState({ visible: true, hot: true, thumbTop: Math.round(thumbTop), thumbHeight: drag.thumbHeight });
         setHot(true);
@@ -187,7 +221,7 @@ export function useCreationTranscriptScrollbar({
     event.preventDefault();
     event.stopPropagation();
     const startThumbTop = (element.scrollTop / geometry.overflow) * geometry.maxThumbTop;
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startThumbTop, ...geometry };
+    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, lastClientY: event.clientY, startThumbTop, ...geometry };
     setScrollMode("restoring", "custom-scrollbar-drag");
     event.currentTarget.setPointerCapture(event.pointerId);
     setHot(true);
@@ -205,11 +239,26 @@ export function useCreationTranscriptScrollbar({
     setState({ visible: true, hot: true, thumbTop: Math.round(thumbTop), thumbHeight: geometry.thumbHeight });
     setHot(true);
     if (settleFrameRef.current !== null) cancelAnimationFrame(settleFrameRef.current);
-    settleFrameRef.current = requestAnimationFrame(() => {
+    let stableFrames = 0;
+    let previousGeometry = "";
+    const deadline = Date.now() + RAIL_SETTLE_BUDGET_MS;
+    const settle = () => {
       settleFrameRef.current = null;
+      const current = scrollRef.current;
+      syncMetrics();
+      const geometryKey = current
+        ? `${Math.round(current.scrollHeight)}:${Math.round(current.clientHeight)}:${Math.round(current.scrollTop)}`
+        : "";
+      stableFrames = geometryKey !== "" && geometryKey === previousGeometry ? stableFrames + 1 : 0;
+      previousGeometry = geometryKey;
+      if (stableFrames < RAIL_SETTLE_STABLE_FRAMES && Date.now() < deadline) {
+        settleFrameRef.current = requestAnimationFrame(settle);
+        return;
+      }
       finishProgrammaticScroll();
       syncMetrics();
-    });
+    };
+    settleFrameRef.current = requestAnimationFrame(settle);
   }, [enabled, finishProgrammaticScroll, scrollRef, setHot, setScrollMode, syncMetrics, writeOffset]);
 
   return { state, handleScroll, onThumbPointerDown, onRailPointerDown };

@@ -117,6 +117,7 @@ export function useTranscriptScrollArbiter({
     cancel: cancelReaderTransaction,
     observe: observeReaderTransaction,
     holdGeometryCommit: holdReaderGeometryCommit,
+    absorbOffsetWrite: absorbReaderOffsetWrite,
     anchorIsMounted: readerAnchorIsMounted,
     isActive: readerTransactionIsActive,
     active: readerTransactionActive,
@@ -242,13 +243,16 @@ export function useTranscriptScrollArbiter({
       case "SCROLL_TO_INDEX":
         writer.write({ owner: "jump", operation: "scrollToIndex", index: command.index, behavior: command.behavior, reason: writeSource, phase: "mount-anchor", expectedSurfaceGeneration: generationRef.current, expectedOwnershipEpoch: ownershipEpochRef.current, expectedGeometryRevision: geometryRevisionRef.current });
         return;
-      case "SCROLL_TO_OFFSET":
-        writer.write({ owner: command.owner, operation: "scrollTo", top: command.top, behavior: command.behavior, reason: writeSource, expectedSurfaceGeneration: generationRef.current, expectedOwnershipEpoch: ownershipEpochRef.current, expectedGeometryRevision: geometryRevisionRef.current });
+      case "SCROLL_TO_OFFSET": {
+        const before = scrollRef.current?.scrollTop ?? 0;
+        const written = writer.write({ owner: command.owner, operation: "scrollTo", top: command.top, behavior: command.behavior, reason: writeSource, expectedSurfaceGeneration: generationRef.current, expectedOwnershipEpoch: ownershipEpochRef.current, expectedGeometryRevision: geometryRevisionRef.current });
+        if (written && scrollRef.current && command.owner === "block-window-prepend") absorbReaderOffsetWrite(scrollRef.current, scrollRef.current.scrollTop - before);
         return;
+      }
       case "CANCEL_RECOVERY":
         cancelInFlightRecovery(command.id, command.reason);
     }
-  }, [cancelInFlightRecovery, tailSettle, writer]);
+  }, [absorbReaderOffsetWrite, cancelInFlightRecovery, tailSettle, writer]);
 
   const dispatch = useCallback((event: TranscriptScrollEvent) => {
     if (
@@ -508,7 +512,7 @@ export function useTranscriptScrollArbiter({
 
   const cancelReaderTransactionSilently = useCallback(() => cancelReaderTransaction(false), [cancelReaderTransaction]);
   const nativeScrollbarOwnership = useTranscriptNativeScrollbarOwnership({
-    scrollRef, modeRef, cancelReaderTransaction: cancelReaderTransactionSilently, deliverScroll, dispatch, tailSettle,
+    scrollRef, modeRef, cancelReaderTransaction: cancelReaderTransactionSilently, deliverScroll, dispatch, tailSettle, generationRef,
   });
   nativeScrollbarOwnershipRef.current = nativeScrollbarOwnership;
   const { begin: beginNativeScrollbarDrag, cancel: cancelNativeScrollbarDrag,

@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS topics (
 );
 CREATE INDEX IF NOT EXISTS topics_category ON topics (category_id, pinned DESC, last_post_at DESC);
 CREATE INDEX IF NOT EXISTS topics_recent ON topics (last_post_at DESC);
+CREATE INDEX IF NOT EXISTS topics_visible_latest
+  ON topics (pinned DESC, last_post_at DESC)
+  WHERE status <> 'hidden';
+CREATE INDEX IF NOT EXISTS topics_visible_top
+  ON topics (reply_count DESC, last_post_at DESC)
+  WHERE status <> 'hidden';
 
 CREATE TABLE IF NOT EXISTS posts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +62,10 @@ CREATE TABLE IF NOT EXISTS posts (
   edited_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS posts_topic ON posts (topic_id, created_at);
+CREATE INDEX IF NOT EXISTS posts_author_created_at ON posts (author, created_at);
+CREATE INDEX IF NOT EXISTS posts_visible_topic
+  ON posts (topic_id, created_at)
+  WHERE status = 'visible';
 
 CREATE TABLE IF NOT EXISTS reactions (
   post_id    INTEGER NOT NULL,

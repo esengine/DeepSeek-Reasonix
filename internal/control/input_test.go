@@ -137,7 +137,7 @@ func TestSubmitSlashSubagentRunsIsolatedAndPersistsDistilledAnswer(t *testing.T)
 		t.Fatalf("runner context parent=%q call=%q plan=%v hostInitiated=%v", gotParent, gotCallID, gotPlanMode, gotHostInitiated)
 	}
 	msgs := c.History()
-	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || msgs[2].Role != provider.RoleAssistant {
+	if len(msgs) != 3 || !agent.IsUserAuthoredTurnMessage(msgs[1]) || msgs[2].Role != provider.RoleAssistant {
 		t.Fatalf("parent history = %+v, want system/user/assistant", msgs)
 	}
 	if !strings.Contains(msgs[1].Content, "inspect auth") || strings.Contains(msgs[1].Content, gotSkill.Body) {
@@ -215,7 +215,8 @@ func TestSubmitInvocationDisplayExecutesStructuredEntitiesInVisualOrder(t *testi
 		t.Fatalf("main runner received structured subagent turn: %q", mainRunner.inputs)
 	}
 	msgs := c.History()
-	if len(msgs) != 4 || msgs[1].Role != provider.RoleUser || msgs[2].Content != "first answer" || msgs[3].Content != "second answer" {
+	if len(msgs) != 5 || msgs[1].Origin != provider.MessageOriginHost ||
+		!agent.IsUserAuthoredTurnMessage(msgs[2]) || msgs[3].Content != "first answer" || msgs[4].Content != "second answer" {
 		t.Fatalf("parent history = %+v", msgs)
 	}
 }
@@ -527,7 +528,7 @@ func TestCancelSlashSubagentStopsChildAndKeepsParentSessionUsable(t *testing.T) 
 		t.Fatal("controller still running after cancelling slash subagent")
 	}
 	msgs := c.History()
-	if len(msgs) != 2 || msgs[1].Role != provider.RoleUser {
+	if len(msgs) != 2 || !agent.IsUserAuthoredTurnMessage(msgs[1]) {
 		t.Fatalf("cancelled slash history = %+v, want system + preserved user task", msgs)
 	}
 	for _, e := range gotEvents {
@@ -951,19 +952,13 @@ func TestParseGoalCommandStrictOnlyConsumesLeadingFlags(t *testing.T) {
 	}
 }
 
-func TestComposeDrainsQueuedMemory(t *testing.T) {
-	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
+func TestQueueMemoryDoesNotCreateLegacyMemoryUpdate(t *testing.T) {
+	c := New(Options{})
 
 	c.QueueMemory("Saved memory \"rmb\": user's balance is in RMB")
 	got := c.Compose("hello")
-	if !strings.Contains(got, "<memory-update>") || !strings.Contains(got, "user's balance is in RMB") {
-		t.Fatalf("queued memory should ride the turn: %q", got)
-	}
-	if !strings.HasSuffix(got, "hello") {
-		t.Fatalf("user text should follow the memory block: %q", got)
-	}
-	if got2 := c.Compose("again"); got2 != "again" {
-		t.Fatalf("pendingMemory should drain after one turn, got %q", got2)
+	if got != "hello" {
+		t.Fatalf("background write must not create a legacy memory update: %q", got)
 	}
 }
 

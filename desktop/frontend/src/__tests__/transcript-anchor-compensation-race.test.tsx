@@ -305,6 +305,43 @@ check(
   "user scroll intent cancels a pending anchor compensation",
 );
 
+// WebView2 may commit a delayed Virtuoso range immediately after the active
+// reader transaction ends. Keep the reader's last logical anchor passive so
+// that commit cannot become a new (already-jumped) resting position.
+await act(async () => arbiter?.reset());
+scrollExtent = 20_000;
+scrollElement.scrollTop = 8_000;
+rowElement.getBoundingClientRect = () => rectAt(20 + (Number.parseFloat(
+  scrollElement.style.getPropertyValue("--transcript-reader-visual-offset"),
+) || 0));
+await act(async () => arbiter?.deliverScroll());
+await act(async () => arbiter?.setMode("manual", "test-passive-reader-anchor"));
+await act(async () => arbiter?.onWheelIntent({
+  ctrlKey: false,
+  deltaX: 0,
+  deltaY: 120,
+  target: scrollElement,
+} as React.WheelEvent<HTMLElement>));
+scrollElement.scrollTop = 8_120;
+await act(async () => arbiter?.deliverScroll());
+clockNow += 1_201;
+for (let frame = 0; frame < 6; frame += 1) await flushFrames();
+check(arbiter?.readerTransactionActive === true, "reader anchor lease remains passive after active transaction end");
+scrollWrites.length = 0;
+// Delayed range replacement parks the native scroller above the user's
+// position while the logical row moves down by the same amount.
+scrollElement.scrollTop = 7_620;
+rowElement.getBoundingClientRect = () => rectAt(520 + (Number.parseFloat(
+  scrollElement.style.getPropertyValue("--transcript-reader-visual-offset"),
+) || 0));
+await act(async () => arbiter?.deliverScroll());
+await flushFrames();
+check(
+  scrollWrites.some((write) => write.owner === "anchor-compensation" && !write.rejectedReason),
+  "late range replacement is corrected against the passive reader anchor",
+);
+check(scrollElement.scrollTop === 8_120, "late range replacement restores the pre-commit reader offset");
+
 await act(async () => root.unmount());
 Date.now = originalDateNow;
 dom.window.setTimeout = originalSetTimeout;

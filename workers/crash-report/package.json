@@ -7,6 +7,8 @@
     "deploy": "wrangler deploy",
     "migrate:diagnostics-v2": "node scripts/apply-diagnostics-v2.mjs",
     "migrate:firebase-crash": "node scripts/apply-firebase-crash.mjs",
+    "migrate:dashboard-indexes": "wrangler d1 execute reasonix-crash --remote --file=migrate-dashboard-indexes.sql",
+    "migrate:registry-indexes": "wrangler d1 execute reasonix-registry --remote --file=registry-migrate-performance-indexes.sql",
     "migrate:firebase-data": "node scripts/migrate-firebase-data.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

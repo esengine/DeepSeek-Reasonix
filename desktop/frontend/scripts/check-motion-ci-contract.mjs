@@ -148,6 +148,7 @@ if (!packageJSON.scripts?.["test:motion-browser"]?.includes("approval-animation.
 const transcriptScript = packageJSON.scripts?.["test:transcript"] ?? "";
 for (const required of [
   "transcript-virtuoso-index.test.ts",
+  "transcript-reader-visual-guard-race.test.tsx",
   "transcript-scroll-release.test.ts",
   "nested-scroll-handoff.test.ts",
   "creation-transcript-scrollbar.test.ts",
@@ -173,6 +174,23 @@ for (const required of ["transcript-selection.mjs", "transcript-scroll-stability
   if (!transcriptBrowserScript.includes(required)) {
     throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
   }
+}
+
+// A near-zero `transition: all` still starts from the old value, so same-frame
+// geometry reads miss transform/padding writes and the transcript guards
+// compound. The global reduced-motion reset must remove transitions outright.
+const stylesSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/styles.css"), "utf8");
+const globalReducedMotion = stylesSource.match(
+  /@media \(prefers-reduced-motion: reduce\) \{\s*\*,\s*\*::before,\s*\*::after \{([^}]*)\}/,
+);
+if (!globalReducedMotion) {
+  throw new Error("motion-ci-contract: styles.css must keep the global universal prefers-reduced-motion reset");
+}
+if (!globalReducedMotion[1].includes("transition: none !important")) {
+  throw new Error("motion-ci-contract: the global reduced-motion reset must use `transition: none !important`");
+}
+if (/transition-duration/.test(globalReducedMotion[1])) {
+  throw new Error("motion-ci-contract: the global reduced-motion reset must not shorten transitions (same-frame geometry reads would lag)");
 }
 
 const transcriptCommand = "pnpm --dir frontend test:transcript";

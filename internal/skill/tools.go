@@ -631,7 +631,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		"scope": string(scope),
 		"path":  path,
 		"runAs": string(runAs),
-		"note":  "Callable now via run_skill({name}) or /" + name + ". Appears in the pinned Skills index on the next launch.",
+		"note":  "Callable immediately in this tool loop via run_skill({name}) or /" + name + ". It will appear in session-context on the next real user turn.",
 	})
 	return string(res), nil
 }
@@ -653,8 +653,8 @@ type SkillFileOptions struct {
 	// writable default for older profiles.
 	ReadOnly bool
 	Color    string // optional display tag; emitted regardless of RunAs
-	// Invocation, when "manual", keeps the written skill out of the pinned
-	// Skills index (see index.go) — invocable by name only, never
+	// Invocation, when "manual", keeps the written skill out of automatic
+	// session-context discovery — invocable by name only, never
 	// model-discovered. Anything else (including empty) is the default "auto".
 	Invocation string
 }

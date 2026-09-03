@@ -360,7 +360,7 @@ func (c *client) buildRequest(ctx context.Context, req provider.Request) anthReq
 			}
 		case provider.RoleUser:
 			if m.Content != "" {
-				appendBlocks("user", contentBlock{Type: "text", Text: m.Content})
+				appendBlocks("user", sessionContextTextBlocks(m.Content)...)
 			}
 			if c.vision {
 				for _, ref := range m.Images {
@@ -407,28 +407,8 @@ func (c *client) buildRequest(ctx context.Context, req provider.Request) anthReq
 	}
 
 	tools := encodeAnthTools(c, req)
-
-	// Prompt-cache breakpoints (ephemeral, prefix-match). DeepSeek ignores
-	// cache_control and manages prefix caching automatically, so keep those fields
-	// off its wire entirely. Render order for native Anthropic is
-	// tools → system → messages, so a marker on the last system block caches
-	// tools+system together; with no system, mark the last tool. A marker on the
-	// last block of the last message caches the conversation prefix, accruing hits
-	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2. Keep
-	// Anthropic's default 5m TTL by omitting the ttl field. Besides being cheaper
-	// than the opt-in 1h write, this keeps provider-visible request bytes stable
-	// across turns, retries, and wall-clock timing.
 	if !c.deepseek {
-		if n := len(system); n > 0 {
-			system[n-1].CacheControl = ephemeral()
-		} else if n := len(tools); n > 0 {
-			tools[n-1].CacheControl = ephemeral()
-		}
-		if n := len(msgs); n > 0 {
-			if k := len(msgs[n-1].Content); k > 0 {
-				msgs[n-1].Content[k-1].CacheControl = ephemeral()
-			}
-		}
+		markPromptCacheBreakpoints(system, tools, msgs)
 	}
 
 	maxTokens := req.MaxTokens

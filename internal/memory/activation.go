@@ -1,17 +1,17 @@
-// Activation: whether a fact's body rides the stable session prefix (pinned)
-// or stays retrieval-only (relevant), and the legacy-aware default resolution.
+// Activation: whether a fact's body rides the session-context background
+// snapshot (pinned) or stays retrieval-only (relevant), plus legacy defaults.
 package memory
 
 import "strings"
 
 // Activation controls how a fact reaches the model, orthogonal to Scope:
 // scope says where a fact may be used, activation says whether its body rides
-// the stable prefix every session (pinned) or is retrieval-only (relevant).
+// the current session-context snapshot (pinned) or is retrieval-only (relevant).
 type Activation string
 
 const (
 	ActivationRelevant Activation = "relevant" // retrieval-only: index + recall
-	ActivationPinned   Activation = "pinned"   // body loads into the stable session prefix
+	ActivationPinned   Activation = "pinned"   // body loads into session-context
 )
 
 // NormalizeActivation validates a persisted or requested activation. Empty and

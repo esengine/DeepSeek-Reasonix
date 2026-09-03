@@ -7,6 +7,7 @@ import type { TranscriptTailSettle } from "./transcriptTailSettle";
 type NativeScrollbarTransaction = {
   pointerId: number;
   element: HTMLDivElement;
+  generation: number;
   lastTop: number;
   observedForwardProgress: boolean;
 };
@@ -19,6 +20,7 @@ export function useTranscriptNativeScrollbarOwnership({
   deliverScroll,
   dispatch,
   tailSettle,
+  generationRef,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   modeRef: RefObject<TranscriptScrollMode>;
@@ -26,6 +28,7 @@ export function useTranscriptNativeScrollbarOwnership({
   deliverScroll: (element?: HTMLDivElement) => void;
   dispatch: (event: TranscriptScrollEvent) => unknown;
   tailSettle: TranscriptTailSettle;
+  generationRef: RefObject<number>;
 }) {
   const transactionRef = useRef<NativeScrollbarTransaction | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -33,15 +36,22 @@ export function useTranscriptNativeScrollbarOwnership({
   const observe = useCallback((element: HTMLDivElement) => {
     const transaction = transactionRef.current;
     if (transaction?.element !== element) return;
+    if (transaction.generation !== generationRef.current) {
+      transactionRef.current = null;
+      delete element.dataset.nativeScrollbarDrag;
+      setDragging(false);
+      dispatch({ type: "NATIVE_SCROLLBAR_END", claimTail: false });
+      return;
+    }
     if (element.scrollTop > transaction.lastTop + 1) transaction.observedForwardProgress = true;
     transaction.lastTop = element.scrollTop;
-  }, []);
+  }, [dispatch, generationRef]);
 
   const begin = useCallback((pointerId: number, element: HTMLDivElement) => {
     const displaced = transactionRef.current;
     if (displaced?.element !== element) delete displaced?.element.dataset.nativeScrollbarDrag;
     cancelReaderTransaction();
-    transactionRef.current = { pointerId, element, lastTop: element.scrollTop, observedForwardProgress: false };
+    transactionRef.current = { pointerId, element, generation: generationRef.current, lastTop: element.scrollTop, observedForwardProgress: false };
     element.dataset.nativeScrollbarDrag = "true";
     setDragging(true);
     dispatch({ type: "NATIVE_SCROLLBAR_BEGIN" });
@@ -50,6 +60,12 @@ export function useTranscriptNativeScrollbarOwnership({
   const finish = useCallback((pointerId?: number) => {
     const transaction = transactionRef.current;
     if (!transaction || (pointerId !== undefined && transaction.pointerId !== pointerId)) return false;
+    if (transaction.generation !== generationRef.current) {
+      transactionRef.current = null;
+      delete transaction.element.dataset.nativeScrollbarDrag;
+      setDragging(false);
+      return false;
+    }
     const currentElement = scrollRef.current === transaction.element;
     if (currentElement) deliverScroll(transaction.element);
     const claimTail = currentElement
@@ -63,7 +79,7 @@ export function useTranscriptNativeScrollbarOwnership({
       tailSettle.schedule(false, CAPTURE_TRANSCRIPT_SCROLL_DIAGNOSTICS ? "native-scrollbar-release" : undefined);
     }
     return true;
-  }, [deliverScroll, dispatch, modeRef, scrollRef, tailSettle]);
+  }, [deliverScroll, dispatch, generationRef, modeRef, scrollRef, tailSettle]);
   const cancel = useCallback(() => {
     const transaction = transactionRef.current;
     if (!transaction) return false;
@@ -73,7 +89,10 @@ export function useTranscriptNativeScrollbarOwnership({
     dispatch({ type: "NATIVE_SCROLLBAR_END", claimTail: false });
     return true;
   }, [dispatch]);
-  const isActive = useCallback(() => transactionRef.current !== null, []);
+  const isActive = useCallback(() => {
+    const transaction = transactionRef.current;
+    return transaction !== null && transaction.generation === generationRef.current;
+  }, [generationRef]);
 
   return { begin, cancel, finish, observe, isActive, dragging };
 }

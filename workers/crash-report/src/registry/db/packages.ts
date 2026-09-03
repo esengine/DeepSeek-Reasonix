@@ -2,8 +2,6 @@ import type { PackageKind, PackageRow, VersionRow, RegistryUser } from "../types
 import type { PublishInput } from "../lib/validation";
 import { ApiError } from "../http/errors";
 
-const TRENDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
 export interface ListParams {
   kind: PackageKind | "all";
   q: string;
@@ -17,6 +15,28 @@ export interface PublishResult {
   row: PackageRow;
   created: boolean;
   version: string;
+}
+
+export interface InstallResult {
+  count: number;
+  packageId: number;
+  scopeHandle: string;
+}
+
+export interface VersionListParams {
+  limit: number;
+  before?: string;
+  beforeId?: number;
+}
+
+export interface VersionListResult {
+  versions: VersionRow[];
+  pageInfo: {
+    limit: number;
+    hasMore: boolean;
+    nextBefore: string | null;
+    nextBeforeId: number | null;
+  };
 }
 
 export class PackageRepo {
@@ -40,14 +60,13 @@ export class PackageRepo {
     let select = "SELECT p.* FROM packages p";
     let order: string;
     if (p.sort === "trending") {
-      const windowStart = new Date(new Date(p.now).getTime() - TRENDING_WINDOW_MS).toISOString();
       select = `SELECT p.*, COALESCE(e.c, 0) AS trend FROM packages p
         LEFT JOIN (
-          SELECT package_id, COUNT(*) AS c FROM events
-          WHERE type = 'install' AND created_at > ?${binds.length + 1}
+          SELECT package_id, SUM(count) AS c FROM package_install_daily
+          WHERE date >= date(?${binds.length + 1}, '-6 day')
           GROUP BY package_id
         ) e ON e.package_id = p.id`;
-      binds.push(windowStart);
+      binds.push(p.now);
       order = "ORDER BY trend DESC, p.install_count DESC, p.created_at DESC";
     } else if (p.sort === "installs") {
       order = "ORDER BY p.install_count DESC, p.created_at DESC";
@@ -66,15 +85,29 @@ export class PackageRepo {
     return this.db.prepare("SELECT * FROM packages WHERE slug = ?1").bind(slug).first<PackageRow>();
   }
 
-  async versions(packageId: number): Promise<VersionRow[]> {
+  async versions(packageId: number, page: VersionListParams = { limit: 50 }): Promise<VersionListResult> {
+    const cursor = page.before !== undefined && page.beforeId !== undefined;
+    const sql = `SELECT id, version, source, content_hash, risk_level, created_at
+         FROM package_versions WHERE package_id = ?1
+         ${cursor ? "AND (created_at < ?2 OR (created_at = ?2 AND id < ?3))" : ""}
+         ORDER BY created_at DESC, id DESC LIMIT ?${cursor ? "4" : "2"}`;
     const res = await this.db
-      .prepare(
-        `SELECT version, source, content_hash, risk_level, created_at
-         FROM package_versions WHERE package_id = ?1 ORDER BY created_at DESC`,
-      )
-      .bind(packageId)
+      .prepare(sql)
+      .bind(...(cursor ? [packageId, page.before, page.beforeId, page.limit + 1] : [packageId, page.limit + 1]))
       .all<VersionRow>();
-    return res.results ?? [];
+    const rows = res.results ?? [];
+    const hasMore = rows.length > page.limit;
+    const versions = hasMore ? rows.slice(0, page.limit) : rows;
+    const last = versions.at(-1);
+    return {
+      versions,
+      pageInfo: {
+        limit: page.limit,
+        hasMore,
+        nextBefore: hasMore ? last?.created_at ?? null : null,
+        nextBeforeId: hasMore ? last?.id ?? null : null,
+      },
+    };
   }
 
   // Create a new package or append a version to an owned one. New packages and
@@ -177,14 +210,28 @@ export class PackageRepo {
 
   // Best-effort install tally. Returns the new count, or null when no active
   // package matches the slug.
-  async recordInstall(slug: string): Promise<number | null> {
-    const res = await this.db
-      .prepare("UPDATE packages SET install_count = install_count + 1 WHERE slug = ?1 AND status = 'active'")
-      .bind(slug)
-      .run();
-    if ((res.meta.changes ?? 0) === 0) return null;
-    const row = await this.bySlug(slug);
-    return row?.install_count ?? null;
+  async recordInstall(slug: string, now: string): Promise<InstallResult | null> {
+    const [updated] = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE packages SET install_count = install_count + 1
+           WHERE slug = ?1 AND status = 'active'
+           RETURNING id, install_count, scope_handle`,
+        )
+        .bind(slug),
+      this.db
+        .prepare(
+          `INSERT INTO package_install_daily (date, package_id, count)
+           SELECT substr(?2, 1, 10), id, 1 FROM packages
+           WHERE slug = ?1 AND status = 'active'
+           ON CONFLICT (date, package_id) DO UPDATE
+           SET count = package_install_daily.count + excluded.count`,
+        )
+        .bind(slug, now),
+    ]);
+    const row = updated?.results?.[0] as { id?: number; install_count?: number; scope_handle?: string } | undefined;
+    if (!row?.id || typeof row.install_count !== "number" || !row.scope_handle) return null;
+    return { count: row.install_count, packageId: row.id, scopeHandle: row.scope_handle };
   }
 
   // Toggle a star. Returns the resulting state, or null when the slug is unknown.

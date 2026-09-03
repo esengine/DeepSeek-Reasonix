@@ -11,6 +11,7 @@ import {
   transcriptReaderIdleDeadlineReached,
   transcriptReaderTransactionCanReuse,
   transcriptReaderExtentCanCorrect,
+  transcriptTransformTranslateY,
 } from "../lib/transcriptReaderExtentStability";
 
 console.log("\ntranscript reader extent stability");
@@ -162,5 +163,17 @@ for (const event of observingEvents) {
   assert.equal(transcriptScrollEventCancelsReaderExtentGuard(event), false,
     `${event} leaves rebound observation active`);
 }
+
+assert.equal(transcriptTransformTranslateY("none"), 0, "an unset transform applies no visual offset");
+assert.equal(transcriptTransformTranslateY(""), 0, "an empty computed transform applies no visual offset");
+assert.equal(transcriptTransformTranslateY("matrix(1, 0, 0, 1, 0, 7088.5)"), 7088.5, "a 2D matrix exposes its translateY");
+assert.equal(transcriptTransformTranslateY("matrix(1, 0, 0, 1, 0, -12)"), -12, "a negative translateY survives parsing");
+assert.equal(
+  transcriptTransformTranslateY("matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 96, 0, 1)"),
+  96,
+  "a 3D matrix exposes its translateY component",
+);
+assert.equal(transcriptTransformTranslateY("translateY(12px)"), undefined, "an unserialized transform yields no measurement");
+assert.equal(transcriptTransformTranslateY("rotate(45deg)"), undefined, "an unrelated transform yields no measurement");
 
 console.log("transcript reader extent stability tests passed");

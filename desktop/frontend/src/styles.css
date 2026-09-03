@@ -244,8 +244,8 @@
   /* motion — shared timing + easing tokens. Durations mirror the values
    * already used across the app (0.12 / 0.18 / 0.34 / 0.42s); easings reuse the
    * existing curves. The global prefers-reduced-motion block at EOF collapses
-   * every animation/transition to ~0ms, so these tokens are safe to reuse
-   * freely without per-rule reduce overrides. */
+   * every animation to ~0ms and removes transitions, so these tokens are safe
+   * to reuse freely without per-rule reduce overrides. */
   --dur-fast: 120ms; /* color/border hovers, tooltips */
   --dur-base: 180ms; /* popovers, menus, small enters */
   --dur-slow: 340ms; /* drawers, modals, panel slides */
@@ -27449,15 +27449,17 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* Respect the OS reduced-motion preference: squash all animations and force
-/* Respect the OS reduced-motion preference: squash all animations and force
-   instant scrolling so the UI feels immediate rather than web-like. */
+   instant scrolling so the UI feels immediate rather than web-like. Transitions
+   go to `none`, not 0.01ms: a near-zero `transition: all` still starts from the
+   old value, so transform/padding writes stay invisible to same-frame geometry
+   reads and the transcript scroll guards compound their compensation. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }

@@ -20,6 +20,28 @@ export function transcriptReaderDirection(deltaY: number): -1 | 1 | undefined {
 export function transcriptReaderTransactionCanReuse(direction: -1 | 1, deltaY: number): boolean {
   return transcriptReaderDirection(deltaY) === direction;
 }
+
+export function transcriptTransformTranslateY(transform: string): number | undefined {
+  if (transform === "" || transform === "none") return 0;
+  const match = /^matrix(3d)?\((.*)\)$/.exec(transform);
+  if (!match) return undefined;
+  const value = Number(match[2].split(",")[match[1] ? 13 : 5]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * The visual-guard offset the browser has actually applied to the item list.
+ * A guard written by a previous observation may not be reflected in row
+ * geometry yet (or any more): a same-frame read under a reduced-motion
+ * transition, or another owner clearing the shared attribute. Deriving the
+ * physical drift from the remembered offset would compound the guard on every
+ * observation, so measure the applied transform; `remembered` is the fallback.
+ */
+export function transcriptAppliedVisualOffset(element: HTMLElement, remembered: number): number {
+  const list = element.querySelector<HTMLElement>('[data-testid="virtuoso-item-list"]');
+  const view = element.ownerDocument.defaultView;
+  return (list && view && transcriptTransformTranslateY(view.getComputedStyle(list).transform)) ?? remembered;
+}
 const REVERSE_JUMP_VIEWPORT_RATIO = 0.5;
 const EXTENT_REBOUND_VIEWPORT_RATIO = 0.5;
 

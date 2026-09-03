@@ -78,6 +78,20 @@ app.get("/categories", async (c) => {
 });
 
 const TopicList = z.object({ category: z.string().optional(), sort: z.enum(["latest", "top"]).optional() });
+// Topic detail responses are keyset-paginated. `after` and `afterId` together
+// identify the last row returned, so equal timestamps cannot duplicate or skip
+// posts when a topic receives concurrent replies.
+const TopicPostsQuery = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    after: z.string().trim().min(1).max(64).optional(),
+    afterId: z.coerce.number().int().positive().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.after === undefined) !== (value.afterId === undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["after"], message: "after and afterId must be provided together" });
+    }
+  });
 app.get("/topics", async (c) => {
   const q = TopicList.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const order = q.sort === "top" ? "t.reply_count DESC, t.last_post_at DESC" : "t.pinned DESC, t.last_post_at DESC";
@@ -96,6 +110,7 @@ app.get("/topics", async (c) => {
 app.get("/topics/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const viewer = c.get("member")?.email ?? "";
+  const page = TopicPostsQuery.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const topic = await c.env.DB.prepare(
     `SELECT t.id, t.title, t.slug, t.status, t.pinned, COALESCE(m.handle, 'deleted') AS author,
             t.accepted_post_id AS acceptedPostId,
@@ -104,17 +119,37 @@ app.get("/topics/:id", async (c) => {
      LEFT JOIN members m ON m.email = t.author WHERE t.id = ?1 AND t.status != 'hidden'`,
   ).bind(id).first();
   if (!topic) throw new HttpError(404, "not_found", "That topic doesn't exist.");
-  await c.env.DB.prepare("UPDATE topics SET view_count = view_count + 1 WHERE id = ?1").bind(id).run();
-  const posts = await c.env.DB.prepare(
+  if (!page.after) {
+    await c.env.DB.prepare("UPDATE topics SET view_count = view_count + 1 WHERE id = ?1").bind(id).run();
+  }
+  const cursor = page.after !== undefined && page.afterId !== undefined;
+  const postsSql =
     `SELECT p.id, COALESCE(m.handle, 'deleted') AS author, p.body, p.status, p.like_count AS likeCount,
             p.created_at AS createdAt, p.edited_at AS editedAt, COALESCE(m.handle, 'deleted') AS handle, m.trust, m.role,
             CASE WHEN ?2 != '' AND EXISTS (
               SELECT 1 FROM reactions r WHERE r.post_id = p.id AND r.member = ?2 AND r.emoji = 'like'
             ) THEN 1 ELSE 0 END AS liked
      FROM posts p LEFT JOIN members m ON m.email = p.author
-     WHERE p.topic_id = ?1 AND p.status IN ('visible') ORDER BY p.created_at`,
-  ).bind(id, viewer).all();
-  return c.json({ topic, posts: posts.results });
+     WHERE p.topic_id = ?1 AND p.status = 'visible'${cursor ? " AND (p.created_at > ?3 OR (p.created_at = ?3 AND p.id > ?4))" : ""}
+     ORDER BY p.created_at, p.id LIMIT ?${cursor ? "5" : "3"}`;
+  const posts = await (cursor
+    ? c.env.DB.prepare(postsSql).bind(id, viewer, page.after, page.afterId, page.limit + 1)
+    : c.env.DB.prepare(postsSql).bind(id, viewer, page.limit + 1)
+  ).all();
+  const rows = posts.results ?? [];
+  const hasMore = rows.length > page.limit;
+  const visible = hasMore ? rows.slice(0, page.limit) : rows;
+  const last = visible.at(-1) as { createdAt?: string; id?: number } | undefined;
+  return c.json({
+    topic,
+    posts: visible,
+    pageInfo: {
+      limit: page.limit,
+      hasMore,
+      nextAfter: hasMore ? last?.createdAt ?? null : null,
+      nextAfterId: hasMore ? last?.id ?? null : null,
+    },
+  });
 });
 
 const NewTopic = z.object({

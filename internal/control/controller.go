@@ -55,6 +55,7 @@ import (
 	"reasonix/internal/pty"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessioncontext"
 	"reasonix/internal/sessioninbox"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/shellrun"
@@ -128,6 +129,7 @@ type Controller struct {
 	visionModelSelector    func(string, string) (string, bool)
 	prompt                 controllerPromptState
 	pinnedContextLoader    PinnedContextLoader
+	sessionContextStatic   sessioncontext.Sections
 	sessionDir             string
 	commands               atomic.Pointer[[]command.Command]
 	// skills owns the session's discovered skills (enabled subset, full set, and
@@ -558,6 +560,10 @@ type Options struct {
 	// means no transient injection because the stable language policy already
 	// follows the conversation language.
 	ReasoningLanguage string
+	// SessionContextStatic carries boot-observed runtime facts that belong in a
+	// host user-turn snapshot rather than the cache-stable system prompt. Only
+	// Environment and Workspace are consumed; memory and skills stay live.
+	SessionContextStatic sessioncontext.Sections
 	// DisableColdResumePrune suppresses the cold-resume cache-state notice.
 	// Resume never rewrites history regardless of this flag.
 	DisableColdResumePrune bool
@@ -667,6 +673,7 @@ func New(opts Options) *Controller {
 		visionModelSelector:               opts.VisionModelSelector,
 		prompt:                            newControllerPromptState(opts.SystemPrompt, opts.Executor),
 		pinnedContextLoader:               opts.PinnedContextLoader,
+		sessionContextStatic:              opts.SessionContextStatic,
 		sessionDir:                        opts.SessionDir,
 		sessionPath:                       opts.SessionPath,
 		commands:                          atomic.Pointer[[]command.Command]{},
@@ -741,7 +748,6 @@ func New(opts Options) *Controller {
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.
 	c.initRecoveryGate(opts.RecoveryReviewer, opts.RecoveryHeadless)
-
 	// Task monitoring: record background-job lifecycle into the project-local
 	// task store so CLI, Desktop, scripts, and future clients observe the same
 	// state/event evidence. The recorder swallows its own failures — monitoring
@@ -2036,6 +2042,7 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
 	marker = c.markInFlightTurn(startMessages, true)
+	ctx = c.withTurnContext(ctx, true)
 	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false, startMessages)
 	modelInput := c.withCapabilityRoute(ctx, input, rawInput)
 	modelInput, ctx, err = c.prepareVisionTurn(ctx, modelInput, agent.SubagentImageCandidates(ctx))
@@ -5003,10 +5010,9 @@ func (c *Controller) SetSkillEnabled(name string, enabled bool) error {
 
 // CreateSkill writes a new skill file at the given scope and returns its
 // path. Skills()/AllSkills()/RunSkill() read the live store on demand, so the
-// new skill is usable (by name) immediately with no rebuild; the caller
-// should still rebuild the controller for the pinned Skills index and tool
-// registry to reflect it on the model's next turn, mirroring how
-// SetSkillEnabled's callers already rebuild after a config change.
+// new skill is usable (by name) immediately with no rebuild and appears in the
+// next real user turn's live session-context catalog. Rebuilds remain necessary
+// when the tool registry or enabled-skill configuration changes.
 func (c *Controller) CreateSkill(name string, scope skill.Scope, content string) (string, error) {
 	w := c.skills.writer()
 	if w == nil {
@@ -5401,10 +5407,7 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 	started := prev.startedOnce
 	turn := prev.turn
 	if prev.pty != nil && (c.pty == prev.pty || c.pty == nil) {
-		if c.pty == nil {
-			c.pty = prev.pty
-		}
-		prev.pty = nil
+		c.pty, prev.pty = prev.pty, nil
 	}
 	prev.mu.Unlock()
 
@@ -5541,16 +5544,6 @@ func (c *Controller) SessionTemp() *sessiontemp.Manager {
 		return nil
 	}
 	return c.sessionTemp
-}
-
-// PTY returns the persistent PTY terminal manager.
-// Hot rebuilds pass this to the replacement Controller so running interactive
-// sessions survive model/settings swaps. Nil only when constructed without one.
-func (c *Controller) PTY() *pty.Manager {
-	if c == nil {
-		return nil
-	}
-	return c.pty
 }
 
 // rotateSessionTemp advances the private temporary generation so a new logical
@@ -5733,7 +5726,7 @@ func (c *Controller) Bypass() bool {
 
 // memory
 //
-// The memory snapshot, the pending turn-tail notes queue, and write serialization
+// The memory snapshot, pending standing-doc notes, and write serialization
 // live in c.memory (a memoryManager) behind its own locks, off c.mu — so a
 // memory-panel save never stalls an approval or status poll. These methods are
 // the SessionAPI surface; each is a thin delegation. See memory.go.
@@ -5763,10 +5756,9 @@ func (c *Controller) ForgetMemory(name string) error {
 	return c.memory.forget(name)
 }
 
-// QueueMemory implements memory.Queue: when the model runs the remember/forget
-// tool, the tool calls this with a note that rides the next turn so the change
-// applies this session without touching the cache-stable prefix. It also
-// refreshes the snapshot a memory panel reads.
+// QueueMemory implements memory.Queue: model remember/forget tool results are
+// already visible in the current loop, so this refreshes the background snapshot
+// that will be published in session-context on the next real user turn.
 func (c *Controller) QueueMemory(note string) {
 	c.memory.queue(note)
 }

@@ -37,7 +37,7 @@ func (s *scriptedTurns) Stream(_ context.Context, _ provider.Request) (<-chan pr
 
 func firstUserMessage(msgs []provider.Message) string {
 	for _, m := range msgs {
-		if m.Role == provider.RoleUser {
+		if agent.IsUserAuthoredTurnMessage(m) {
 			if m.ProviderContent != "" {
 				return m.ProviderContent
 			}

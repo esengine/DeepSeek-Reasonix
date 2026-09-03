@@ -70,12 +70,6 @@ func (s *skillSet) render(sk skill.Skill, args string) string {
 	return skill.Render(sk, args)
 }
 
-// discovered returns the construction-time enabled snapshot (not the live store),
-// for the /skills listing which reflects what was discovered at boot.
-func (s *skillSet) discovered() []skill.Skill {
-	return s.enabled
-}
-
 // writer returns the live store to use for authoring (create/delete), preferring
 // allStore since management surfaces must resolve disabled and builtin skills
 // too (e.g. a create-time name-collision check). nil when this session has no

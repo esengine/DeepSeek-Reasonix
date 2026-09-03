@@ -2,6 +2,460 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.36.0",
+      "date": "2026-09-02",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.36: Sticky context pinning, session takeover, and long-file read enforcement",
+        "zh": "Reasonix 1.36：粘性上下文固定、会话接管与长文件读取强制"
+      },
+      "summary": {
+        "en": "This release adds sticky context file pinning to Desktop, cooperative session takeover across Desktop and CLI, and enforced complete long-file reads. It also brings numerous stability and performance fixes for the CLI and Desktop.",
+        "zh": "此版本为桌面端新增粘性上下文文件固定，为桌面端与 CLI 新增协作式会话接管，并强制完成长文件读取。同时带来大量 CLI 与桌面端的稳定性与性能修复。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Session Ownership",
+            "zh": "会话所有权"
+          },
+          "body": {
+            "en": "Learn how cooperative session takeover and reclaim work across Desktop and CLI.",
+            "zh": "了解协作式会话接管与取回如何在桌面端与 CLI 之间工作。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/403acc1128a3367108d8c8f7d0ace54c83f368b2/docs/SESSION_OWNERSHIP.md"
+        },
+        {
+          "title": {
+            "en": "Session Ownership (Chinese)",
+            "zh": "会话所有权（中文）"
+          },
+          "body": {
+            "en": "Chinese guide to cooperative session takeover and reclaim across Desktop and CLI.",
+            "zh": "协作式会话接管与取回在桌面端和 CLI 中工作方式的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/403acc1128a3367108d8c8f7d0ace54c83f368b2/docs/SESSION_OWNERSHIP.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Sticky context file pinning",
+            "zh": "粘性上下文文件固定"
+          },
+          "body": {
+            "en": "Pin workspace files to a session so they remain available verbatim after context compaction. Pinned files are delivered as append-only user-role revisions before the next accepted turn, without rewriting the system prompt or invalidating the prompt cache.",
+            "zh": "将会话中的工作区文件固定，使其在上下文压缩后仍可逐字保留。固定文件在下一次接受的轮次前以仅追加的用户角色修订形式传递，不会重写系统提示或使提示缓存失效。"
+          },
+          "refs": [
+            9689
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Cooperative session takeover",
+            "zh": "协作式会话接管"
+          },
+          "body": {
+            "en": "Take over a session from another client with a cooperative handoff. Exactly one writer owns a session at a time; the other side stays attached as a read-only spectator and can reclaim ownership cooperatively.",
+            "zh": "通过协作式移交从另一个客户端接管会话。同一时间只有一个写入者拥有会话；另一方保持只读旁观状态，并可协作式取回所有权。"
+          },
+          "refs": [
+            9692
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Enforced complete long-file reads",
+            "zh": "强制完成长文件读取"
+          },
+          "body": {
+            "en": "Long read_file results now use a dynamic budget and block mutations, finalizers, and final answers until every incomplete read is resolved. This prevents the model from silently missing rules near the end of a file.",
+            "zh": "长 read_file 结果现在使用动态预算，并阻止变更、终结器和最终答案，直到所有不完整读取得到解决。这可以防止模型静默遗漏文件末尾附近的规则。"
+          },
+          "refs": [
+            9708
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "cli"
+          ],
+          "title": {
+            "en": "Graceful watchdog exit and clock-jump tolerance",
+            "zh": "watchdog 优雅退出与时钟跳变容忍"
+          },
+          "body": {
+            "en": "The interactive TUI no longer hard-kills on recoverable stalls and tolerates wall-clock jumps after suspend/resume, preventing false 'program was killed' errors on Windows.",
+            "zh": "交互式 TUI 不再在可恢复的停滞时硬杀进程，并容忍挂起/恢复后的时钟跳变，防止 Windows 上出现错误的“程序被杀死”错误。"
+          },
+          "refs": [
+            9639
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Ask prompt replay loops prevented",
+            "zh": "防止 Ask 提示循环"
+          },
+          "body": {
+            "en": "Resolve missing local turn IDs from authoritative state before answering an Ask prompt, and fence cleanup by prompt ID and controller epoch so late completions cannot clear a newer prompt.",
+            "zh": "在回答 Ask 提示前从权威状态解析缺失的本地轮次 ID，并通过提示 ID 和控制器纪元隔离清理，使迟到的完成不会清除更新的提示。"
+          },
+          "refs": [
+            9693
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Sticky context file pinning",
+              "zh": "粘性上下文文件固定"
+            },
+            "body": {
+              "en": "Pin workspace files to a session so they remain available verbatim after context compaction.",
+              "zh": "将会话中的工作区文件固定，使其在上下文压缩后仍可逐字保留。"
+            },
+            "refs": [
+              9689
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Cooperative session takeover",
+              "zh": "协作式会话接管"
+            },
+            "body": {
+              "en": "Take over a session from another client with a cooperative handoff and reclaim ownership cooperatively.",
+              "zh": "通过协作式移交从另一个客户端接管会话，并协作式取回所有权。"
+            },
+            "refs": [
+              9692
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Enforced complete long-file reads",
+              "zh": "强制完成长文件读取"
+            },
+            "body": {
+              "en": "Long read_file results now use a dynamic budget and block mutations, finalizers, and final answers until every incomplete read is resolved.",
+              "zh": "长 read_file 结果现在使用动态预算，并阻止变更、终结器和最终答案，直到所有不完整读取得到解决。"
+            },
+            "refs": [
+              9708
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Semantic completion validation",
+              "zh": "语义完成校验"
+            },
+            "body": {
+              "en": "Completion validation now defaults to enforce mode, using a model-based semantic check instead of keyword matching to prevent incomplete turns from being accepted.",
+              "zh": "完成校验现在默认使用 enforce 模式，采用基于模型的语义检查而非关键词匹配，防止接受不完整的轮次。"
+            },
+            "refs": [
+              9654
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Idle CPU repair loops stopped",
+              "zh": "停止空闲 CPU 修复循环"
+            },
+            "body": {
+              "en": "The session catalog no longer replays recovery transcripts after strict verification, preventing idle CPU repair loops.",
+              "zh": "会话目录在严格验证后不再重放恢复转录，防止空闲 CPU 修复循环。"
+            },
+            "refs": [
+              9697
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Slash arg-completion caching",
+              "zh": "斜杠参数补全缓存"
+            },
+            "body": {
+              "en": "Slash argument completion data is now cached across keystrokes, eliminating input lag when a completion popup is open.",
+              "zh": "斜杠参数补全数据现在在按键间缓存，消除补全弹窗打开时的输入卡顿。"
+            },
+            "refs": [
+              9636
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Worktree merge-back",
+              "zh": "Worktree 合并回主分支"
+            },
+            "body": {
+              "en": "Isolated worktrees now support one-click diff, conflict precheck, and merge-back to the main branch with failure-atomic safety.",
+              "zh": "隔离工作树现在支持一键差异对比、冲突预检与合并回主分支，并具备失败原子安全性。"
+            },
+            "refs": [
+              9650
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Graceful watchdog exit and clock-jump tolerance",
+              "zh": "watchdog 优雅退出与时钟跳变容忍"
+            },
+            "body": {
+              "en": "The interactive TUI no longer hard-kills on recoverable stalls and tolerates wall-clock jumps after suspend/resume.",
+              "zh": "交互式 TUI 不再在可恢复的停滞时硬杀进程，并容忍挂起/恢复后的时钟跳变。"
+            },
+            "refs": [
+              9639
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Ask prompt replay loops prevented",
+              "zh": "防止 Ask 提示循环"
+            },
+            "body": {
+              "en": "Resolve missing local turn IDs from authoritative state before answering an Ask prompt, and fence cleanup by prompt ID and controller epoch.",
+              "zh": "在回答 Ask 提示前从权威状态解析缺失的本地轮次 ID，并通过提示 ID 和控制器纪元隔离清理。"
+            },
+            "refs": [
+              9693
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Clipboard image paste negotiation",
+              "zh": "剪贴板图片粘贴协商"
+            },
+            "body": {
+              "en": "On Wayland and X11, image paste now negotiates supported MIME types and falls back to text instead of silently failing.",
+              "zh": "在 Wayland 和 X11 上，图片粘贴现在协商支持的 MIME 类型，并在失败时回退到文本，而不是静默失败。"
+            },
+            "refs": [
+              9635
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Synchronized output over SSH",
+              "zh": "SSH 会话强制同步输出"
+            },
+            "body": {
+              "en": "The TUI now forces synchronized output over SSH to eliminate flicker when typing in remote sessions.",
+              "zh": "TUI 现在在 SSH 会话中强制同步输出，消除远程会话中输入时的闪烁。"
+            },
+            "refs": [
+              9641
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Native mouse default over SSH",
+              "zh": "SSH 会话默认原生鼠标"
+            },
+            "body": {
+              "en": "SSH sessions now start with native mouse selection enabled by default, so users can select and copy terminal output.",
+              "zh": "SSH 会话现在默认启用原生鼠标选择，使用户可以选择和复制终端输出。"
+            },
+            "refs": [
+              9634
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Running state on controller-dispatched turns",
+              "zh": "控制器派发轮次时进入运行态"
+            },
+            "body": {
+              "en": "The TUI now enters running state when the controller auto-dispatches a queued follow-up, preventing input races and silent drops.",
+              "zh": "当控制器自动派发排队的后续任务时，TUI 现在进入运行状态，防止输入竞争和静默丢弃。"
+            },
+            "refs": [
+              9638
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Strip block gutters from selection copy",
+              "zh": "应用内选区复制剥离装饰竖线"
+            },
+            "body": {
+              "en": "Copying rendered TUI output no longer includes application-owned gutters, while preserving literal glyphs and indentation.",
+              "zh": "复制渲染的 TUI 输出不再包含应用拥有的装饰竖线，同时保留字面字形和缩进。"
+            },
+            "refs": [
+              9640
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Retain transcript anchor on plain click",
+              "zh": "修复普通点击触发会话回跳"
+            },
+            "body": {
+              "en": "Plain clicks on transcript content no longer cause the viewport to jump after manual scrolling.",
+              "zh": "手动滚动后，普通点击转录内容不再导致视口跳动。"
+            },
+            "refs": [
+              9721
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Ask session activation race fixed",
+              "zh": "修复 Ask 会话首次切换失败"
+            },
+            "body": {
+              "en": "An Ask prompt that arrives between topic activation ticketing and terminal readiness is now preserved.",
+              "zh": "在主题激活票据与终端就绪之间到达的 Ask 提示现在会被保留。"
+            },
+            "refs": [
+              9724
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Surface /preset in completion, help, and status line",
+              "zh": "让 /preset 在 TUI 完成列表、帮助与状态栏可见"
+            },
+            "body": {
+              "en": "The /preset command now appears in slash completion, help, and the status line, with argument completion for standard and delivery.",
+              "zh": "/preset 命令现在出现在斜杠补全、帮助和状态栏中，并提供 standard 和 delivery 的参数补全。"
+            },
+            "refs": [
+              9633
+            ]
+          },
+          {
+            "targets": [
+              "cli"
+            ],
+            "title": {
+              "en": "Name valid operations on unknown command",
+              "zh": "未知操作时列出有效操作"
+            },
+            "body": {
+              "en": "When rejecting an unknown operation, hook, session, and task now list the valid operations and echo the rejected name.",
+              "zh": "当拒绝未知操作时，hook、session 和 task 现在会列出有效操作并回显被拒绝的名称。"
+            },
+            "refs": [
+              9700
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "mchenziyi",
+        "XTLine",
+        "dadgrand"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.36.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.35.0...desktop-v1.36.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.36.0",
+      "baseVersion": "1.36.0",
+      "status": "reviewed",
+      "previousRelease": "1.35.0",
+      "builds": {
+        "cli": "v1.36.0",
+        "desktop": "v1.36.0",
+        "npm": "1.36.0"
+      }
+    },
+    {
       "version": "1.35.0",
       "date": "2026-08-31",
       "channel": "stable",

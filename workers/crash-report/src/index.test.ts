@@ -460,4 +460,83 @@ describe("diagnostics dashboard lanes", () => {
     expect(html).toContain('href="/stats"');
   });
 
+  it("makes triage priorities scannable with labeled metrics and explicit status", () => {
+    type StatsData = Parameters<typeof renderStats>[0];
+    const row = {
+      fingerprint: "a".repeat(64),
+      kind: "crash",
+      count: 102373,
+      first_version: "v1.24.0",
+      last_version: "v1.36.0",
+      seen: "2026-09-03",
+      status: "open",
+      title: "A long lifecycle failure summary that should remain available to assistive technology",
+      source: "native.lifecycle",
+      label: "",
+      error_type: "Error",
+      top_frame: "at render",
+      severity: "high",
+      last_os: "windows",
+      last_arch: "amd64",
+      last_channel: "stable",
+      regressed_at: "",
+      affected_installs: 16406,
+      window_events: 34941,
+      identified_events: 34941,
+      identity_coverage: 1,
+      dimension_coverage: 1,
+      impact_rate: 0.137,
+    };
+    const data: StatsData = {
+      daily: [],
+      versions: [],
+      platforms: [],
+      crashes: [row, { ...row, fingerprint: "b".repeat(64), status: "resolved" }, { ...row, fingerprint: "c".repeat(64), status: "ignored" }],
+      metrics: [],
+      previousMetrics: [],
+      sources: [],
+      overview: { latestAdoptionPct: null, openReports: 3, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
+      latestVersion: "v1.36.0",
+      filters: {
+        surface: "desktop",
+        status: "",
+        source: "",
+        version: "",
+        os: "",
+        platform: "",
+        newLatest: false,
+        regressed: false,
+        windowDays: 30,
+      },
+    };
+
+    const html = renderStats(
+      data,
+      { id: 1, email: "admin@example.com", role: "admin", created_at: "", approved_at: "" },
+      "diagnostics",
+    );
+
+    expect(html).toContain("Past 30 days");
+    expect(html).toContain("ranked by affected installs");
+    expect(html).toContain("受影响安装");
+    expect(html).toContain("受影响安装（30天）");
+    expect(html).toContain("影响率");
+    expect(html).toContain("窗口事件");
+    expect(html).toContain("身份覆盖率");
+    expect(html).toContain("累计");
+    expect(html).toContain('aria-label="A long lifecycle failure summary that should remain available to assistive technology"');
+    expect(html).toContain("status-open");
+    expect(html).toContain("status-resolved");
+    expect(html).toContain("status-ignored");
+    expect(html).toContain(":focus-visible");
+
+    const sevenDayHtml = renderStats(
+      { ...data, filters: { ...data.filters, windowDays: 7 } },
+      { id: 1, email: "admin@example.com", role: "admin", created_at: "", approved_at: "" },
+      "diagnostics",
+    );
+    expect(sevenDayHtml).toContain("受影响安装（7天）");
+    expect(sevenDayHtml).not.toContain("受影响安装（30天）");
+  });
+
 });

@@ -1,6 +1,6 @@
 module reasonix
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.26.6
 
@@ -37,7 +37,7 @@ require (
 	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/goleak v1.3.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/net v0.58.0

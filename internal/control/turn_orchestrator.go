@@ -75,6 +75,7 @@ func (o *turnOrchestrator) runComposedSyntheticTurn(ctx context.Context, text st
 	c := o.c
 	ctx = agent.WithRawUserInput(ctx, text)
 	ctx = withTurnInputOrigin(ctx, true)
+	ctx = c.withTurnContext(ctx, false)
 	ctx = c.withPlannerTurnMetadata(ctx, text, true, c.messageCount())
 	return c.runModelTurn(ctx, c.ComposeSynthetic(text))
 }
@@ -130,6 +131,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	ctx = agent.WithSubagentImageCandidates(ctx, imageCandidates)
 	ctx = agent.WithResponseLanguagePreference(ctx, c.responseLanguage)
 	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
+	ctx = c.withTurnContext(ctx, true)
 
 	input := c.compose(task, raw, true)
 	startMessages := c.messageCount()
@@ -160,7 +162,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-	c.executor.Session().Add(persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli()))
+	c.executor.AppendTurnContextAndUser(ctx, persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli()))
 
 	for _, sk := range skills {
 		sk = c.skills.prepare(sk)
@@ -280,7 +282,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	}
 	// Goal turns bind a scope+epoch recorder for update_goal and observational
 	// usage. It stays active through FSM/evaluator work; error paths clear it.
-	ctx = c.bindTurnScope(ctx, continuation)
+	ctx = c.withTurnContext(c.bindTurnScope(ctx, continuation), !turn.synthetic)
 	ctx = c.withPlannerTurnMetadata(ctx, turn.raw, turn.synthetic, startMessages)
 	modelInput := input
 	if !turn.synthetic {

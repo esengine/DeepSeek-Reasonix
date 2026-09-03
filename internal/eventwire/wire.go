@@ -493,15 +493,16 @@ type Usage struct {
 
 // CacheDiagnostics is the JSON form of cache prefix diagnostics.
 type CacheDiagnostics struct {
-	PrefixHash          string   `json:"prefixHash"`
-	PrefixChanged       bool     `json:"prefixChanged"`
-	PrefixChangeReasons []string `json:"prefixChangeReasons,omitempty"`
-	SystemHash          string   `json:"systemHash"`
-	ToolsHash           string   `json:"toolsHash"`
-	LogRewriteVersion   int      `json:"logRewriteVersion"`
-	ToolSchemaTokens    int      `json:"toolSchemaTokens"`
-	CacheMissTokens     int      `json:"cacheMissTokens"`
-	CacheHitTokens      int      `json:"cacheHitTokens"`
+	PrefixHash          string                     `json:"prefixHash"`
+	PrefixChanged       bool                       `json:"prefixChanged"`
+	PrefixChangeReasons []string                   `json:"prefixChangeReasons,omitempty"`
+	SystemHash          string                     `json:"systemHash"`
+	ToolsHash           string                     `json:"toolsHash"`
+	LogRewriteVersion   int                        `json:"logRewriteVersion"`
+	ToolSchemaTokens    int                        `json:"toolSchemaTokens"`
+	CacheMissTokens     int                        `json:"cacheMissTokens"`
+	CacheHitTokens      int                        `json:"cacheHitTokens"`
+	SessionContext      *SessionContextDiagnostics `json:"sessionContext,omitempty"`
 }
 
 // Guardian is the JSON form of an event.GuardianResult.
@@ -565,7 +566,7 @@ func ToWireAsk(a event.Ask) *Ask {
 
 // ToWireCacheDiagnostics converts cache diagnostics into their JSON wire form.
 func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
-	return &CacheDiagnostics{
+	out := &CacheDiagnostics{
 		PrefixHash:          d.PrefixHash,
 		PrefixChanged:       d.PrefixChanged,
 		PrefixChangeReasons: append([]string(nil), d.PrefixChangeReasons...),
@@ -576,6 +577,18 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 		CacheMissTokens:     d.CacheMissTokens,
 		CacheHitTokens:      d.CacheHitTokens,
 	}
+	if sc := d.SessionContext; sc != nil {
+		section := func(in event.SessionContextSectionDiagnostics) SessionContextSectionDiagnostics {
+			return SessionContextSectionDiagnostics{Digest: in.Digest, Chars: in.Chars}
+		}
+		out.SessionContext = &SessionContextDiagnostics{
+			Version: sc.Version, Digest: sc.Digest, TargetRole: sc.TargetRole,
+			Reasons:     append([]string(nil), sc.Reasons...),
+			Environment: section(sc.Environment), Workspace: section(sc.Workspace),
+			BackgroundMemory: section(sc.BackgroundMemory), SkillsCatalog: section(sc.SkillsCatalog),
+		}
+	}
+	return out
 }
 
 // KindNames returns every stable frontend event kind in event.Kind order. It is

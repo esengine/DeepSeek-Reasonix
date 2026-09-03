@@ -114,17 +114,18 @@ override explained instead of deleting or hiding either source.
 
 A third dimension, `activation`, is orthogonal to both: `relevant` (the
 default) keeps a fact retrieval-only, while `pinned` snapshots its body into a
-lower-priority stable-guidance section at session start. Pinning is an
+lower-priority `session-context` section before the next real user turn. Pinning
+is an
 explicit user choice (`/memory pin <id-or-name>`, or asking the assistant),
 and total pinned bodies are capped at 1,500 characters — enforced when
 pinning, with overflow directed to REASONIX.md/AGENTS.md instructions, where
-always-binding rules belong. A fact is either pinned (in the prefix) or
+always-binding rules belong. A fact is either pinned (in `session-context`) or
 relevant (recallable): never both, never neither.
 
 For compatibility, legacy globally scoped `user` and `feedback` facts that
 predate the field stay pinned until explicitly unpinned. When an equivalent
-project fact exists, it suppresses pinned global guidance before the stable
-prefix is built, so project-over-global precedence does not depend on a later
+project fact exists, it suppresses pinned global guidance before the background
+snapshot is built, so project-over-global precedence does not depend on a later
 recall match.
 
 ## Automatic recall
@@ -246,8 +247,8 @@ path escapes, refuses ID/name collisions, and never overwrites an active file:
 ```
 
 Recovered content also becomes a new monotonic revision. Restore and recovery
-apply to the current session through a one-turn tail note, then join the stable
-prefix naturally on the next session.
+mark the background snapshot dirty; one complete replacement `session-context`
+is appended before the next real user turn.
 
 ## Zero-configuration suggestions
 
@@ -303,8 +304,9 @@ required.
 
 ## Cache and privacy contract
 
-- Standing instructions and the derived memory index join the stable prefix at
-  session start.
+- Standing instructions join the stable system prefix at session start. The
+  derived index and pinned guidance live in the versioned `session-context`
+  snapshot and refresh before the next real user turn when their digest changes.
 - Provider-visible instruction provenance uses stable `workspace/...` and
   `user/...` labels; absolute source and store paths stay in local diagnostics.
 - Provider-visible memory tool results use stable `project/<name>.md` and
@@ -312,8 +314,7 @@ required.
   read, update, revision, and archive operations, including when both scopes
   contain the same name; Context Center and local recovery diagnostics retain
   the real storage paths.
-- Dynamic recall and mid-session changes are appended only to the current user
-  turn.
+- Dynamic recall is appended only to the current user turn.
 - Diagnostics never enter provider requests.
 - Automatic recall omits fact storage paths and redacts home-directory prefixes
   in snippets.

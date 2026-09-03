@@ -1596,6 +1596,7 @@ e2e_workflow="$repo_root/.github/workflows/e2e-bot.yml"
 grep -Fq 'REASONIX_HOME: ${{ runner.temp }}/reasonix-e2e-home' "$e2e_workflow"
 grep -Fq 'cp /tmp/reasonix-e2e.toml "$REASONIX_HOME/config.toml"' "$e2e_workflow"
 grep -Fq "printf 'DEEPSEEK_API_KEY=%s\\n' \"\$DEEPSEEK_API_KEY\" > \"\$REASONIX_HOME/.env\"" "$e2e_workflow"
+grep -Fq -- '-task "compaction,fix-add-bug,fizzbuzz,palindrome,subagent-delegation"' "$e2e_workflow"
 grep -Fq 'const unsuccessful = results.filter((result) => !result.Passed || result.Skipped);' "$e2e_workflow"
 grep -Fq "if: always() && hashFiles('report.md') != ''" "$e2e_workflow"
 if grep -A2 -F 'missing DEEPSEEK_API_KEY secret' "$e2e_workflow" | grep -Fq 'exit 0'; then

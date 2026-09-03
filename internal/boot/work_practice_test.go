@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/agent/testutil"
 	"reasonix/internal/config"
 )
 
@@ -52,10 +53,13 @@ func TestWorkPracticePolicyCarriesNoEnvironmentSpecificClaims(t *testing.T) {
 }
 
 func TestBuildInjectsOfflineNoteOnlyWhenEnvironmentDeclaresIt(t *testing.T) {
-	build := func(t *testing.T, environmentSection string) string {
+	build := func(t *testing.T, environmentSection string) (string, string) {
 		t.Helper()
 		dir := robustTempDir(t)
 		t.Chdir(dir)
+		registerBootTokenProfileTestProvider()
+		prov := testutil.NewMock("offline-context", testutil.Turn{Text: "done"})
+		setBootTokenProfileTestProvider(t, prov)
 		writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
@@ -64,10 +68,8 @@ system_prompt = "BASE"
 
 [[providers]]
 name = "test-model"
-kind = "openai"
-base_url = "https://example.invalid"
+kind = "boot-token-profile-test"
 model = "x"
-api_key_env = "REASONIX_TEST_KEY_UNSET"
 `+environmentSection)
 
 		ctrl, err := Build(context.Background(), Options{})
@@ -75,20 +77,24 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 			t.Fatalf("Build: %v", err)
 		}
 		defer ctrl.Close()
-		return systemMessage(ctrl.History())
+		_ = ctrl.Run(context.Background(), "capture request prefix")
+		if prov.LastRequest() == nil {
+			t.Fatal("provider received no request")
+		}
+		return systemMessage(ctrl.History()), sessionContextMessage(ctrl.History())
 	}
 
-	if sys := build(t, ""); strings.Contains(sys, config.OfflineEnvironmentNote) {
-		t.Fatalf("undeclared environment includes offline note:\n%s", sys)
+	if sys, session := build(t, ""); strings.Contains(sys, config.OfflineEnvironmentNote) || strings.Contains(session, config.OfflineEnvironmentNote) {
+		t.Fatalf("undeclared environment includes offline note:\nsystem=%s\ncontext=%s", sys, session)
 	}
-	if sys := build(t, "\n[environment]\noffline = true\n"); !strings.Contains(sys, config.OfflineEnvironmentNote) {
-		t.Fatalf("declared offline environment missing note:\n%s", sys)
+	if sys, session := build(t, "\n[environment]\noffline = true\n"); strings.Contains(sys, config.OfflineEnvironmentNote) || !strings.Contains(session, config.OfflineEnvironmentNote) {
+		t.Fatalf("declared offline note must live only in session context:\nsystem=%s\ncontext=%s", sys, session)
 	}
-	sys := build(t, "\n[environment]\nenabled = false\noffline = true\n")
-	if !strings.Contains(sys, config.OfflineEnvironmentNote) {
+	sys, session := build(t, "\n[environment]\nenabled = false\noffline = true\n")
+	if !strings.Contains(session, config.OfflineEnvironmentNote) {
 		t.Fatal("offline declaration must survive disabled probing")
 	}
-	if strings.Contains(sys, "## Environment") {
-		t.Fatal("disabled probing must suppress the environment section")
+	if strings.Contains(sys, config.OfflineEnvironmentNote) || strings.Contains(session, "- OS:") {
+		t.Fatal("disabled probing must suppress probed environment details and keep offline note out of system")
 	}
 }

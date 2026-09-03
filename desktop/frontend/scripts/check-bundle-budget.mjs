@@ -182,7 +182,15 @@ console.log("\nbundle budgets");
 // bring the merged stable path to 462.587 KiB. Windows' embedded build metadata
 // lands just above the rounded 462.6 KiB boundary; retain one cross-platform
 // decimal step without widening any chunk or raw gate.
-const initialJSBudgetKiB = 462.7;
+// Reading the applied item-list transform (instead of the remembered offset)
+// keeps the reader/anchor visual guards from compounding under reduced-motion
+// WebView2; the merged path measures 462.827 KiB. Retain one decimal step.
+// Generation-bound native-thumb transactions and the rebased custom-scrollbar
+// drag add 0.3 KiB gzip; the merged path measures 463.102 KiB.
+// Absorbing content-preserving block-window prepends into the active reader
+// transaction adds 0.2 KiB gzip on top; the merged path measures 463.292 KiB,
+// 8 bytes under the next decimal. Retain one cross-platform decimal step.
+const initialJSBudgetKiB = 463.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -325,6 +333,15 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Session takeover banners and #9703/#9711's provisional-selection handoff
 // combine with Sticky Context's pinned-file state at 2469.125 KiB raw on the
 // merged stable path. Retain only the next one-decimal ceiling.
-const rawInitialBudgetKiB = 2_469.2;
+// The passive reader-anchor lease for delayed WebView2 range commits measures
+// 2469.347 KiB raw (+0.222 KiB, +0.009%). Retain only the next one-decimal
+// ceiling; gzip and largest-chunk budgets remain unchanged.
+// Reading the applied item-list transform for the reader/anchor visual guards
+// adds 0.5 KiB raw on top; the merged path measures 2469.815 KiB.
+// The scrollbar generation fence and drag rebase add 1.1 KiB raw; the merged
+// path measures 2470.932 KiB.
+// The reader-transaction offset absorption adds 0.8 KiB raw on top; the merged
+// path measures 2471.741 KiB.
+const rawInitialBudgetKiB = 2_471.8;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

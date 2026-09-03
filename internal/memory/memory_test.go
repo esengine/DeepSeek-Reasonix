@@ -45,7 +45,7 @@ func TestBlockSeparatesStandingInstructionsFromBackgroundMemory(t *testing.T) {
 		Store: Store{Dir: "/memory/project"},
 	}
 	block := set.Block()
-	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "## Background memory index", "background, not standing instructions"} {
+	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "### Background memory index", "background rather than standing instructions"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("Block() missing %q:\n%s", want, block)
 		}

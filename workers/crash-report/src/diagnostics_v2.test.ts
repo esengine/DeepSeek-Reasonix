@@ -9,7 +9,9 @@ import worker, {
 } from "./index";
 import {
   crashGroups,
+  diagnosticFacets,
   diagnosticWindowWhere,
+  groupDiagnosticSummary,
   reportAggregateStatements,
 } from "./diagnostics_v2";
 import type { Env } from "./env";
@@ -400,8 +402,168 @@ describe("diagnostics v2 storage consistency", () => {
       runtimeVersion: "", failureKind: "", failureReason: "", recovery: "", gpu: "",
       newLatest: false, regressed: false, windowDays: 7,
     }, "");
-    expect(querySQL).toContain("FROM report_event_dimensions");
+    expect(querySQL).toContain("FROM report_daily");
     expect(querySQL.indexOf("affected_installs DESC")).toBeLessThan(querySQL.indexOf("CASE WHEN status = 'open'"));
     expect(result.results.map((group) => group.fingerprint)).toEqual(["a".repeat(64), "b".repeat(64)]);
+  });
+
+  it("qualifies the development fingerprint in the joined diagnostics query", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(freshSchemaSQL);
+      const db = {
+        prepare(sql: string) {
+          const statement = sqlite.prepare(sql);
+          return { async all() { return { results: statement.all() }; } };
+        },
+      } as unknown as D1Database;
+      await expect(crashGroups({ DB: db } as unknown as Env, {
+        status: "", source: "", version: "", os: "", platform: "", osBuild: "", arch: "", channel: "",
+        runtimeVersion: "", failureKind: "", failureReason: "", recovery: "", gpu: "",
+        newLatest: false, regressed: false, windowDays: 30,
+      }, "")).resolves.toMatchObject({ results: [] });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("shares the unfiltered ping denominator across diagnostics metrics", async () => {
+    let querySQL = "";
+    const db = {
+      prepare(sql: string) {
+        querySQL = sql;
+        return { async all() { return { results: [] }; } };
+      },
+    } as unknown as D1Database;
+    await crashGroups({ DB: db } as unknown as Env, {
+      status: "", source: "", version: "", os: "", platform: "", osBuild: "", arch: "", channel: "",
+      runtimeVersion: "", failureKind: "", failureReason: "", recovery: "", gpu: "",
+      newLatest: false, regressed: false, windowDays: 30,
+    }, "");
+    expect(querySQL.match(/FROM pings WHERE/g)).toHaveLength(1);
+    expect(querySQL).toContain("CROSS JOIN (SELECT COUNT(DISTINCT install_id) AS installs FROM pings");
+  });
+
+  it("caches diagnostic facets per D1 binding and reports query timing labels", async () => {
+    let prepareCalls = 0;
+    const observations: string[] = [];
+    const db = {
+      prepare() {
+        prepareCalls++;
+        return { async all() { return { results: [] }; } };
+      },
+    } as unknown as D1Database;
+    const env = { DB: db } as unknown as Env;
+    await diagnosticFacets(env, 30, (label) => observations.push(label));
+    const firstCallCount = prepareCalls;
+    await diagnosticFacets(env, 30, (label) => observations.push(label));
+    expect(firstCallCount).toBe(17);
+    expect(prepareCalls).toBe(firstCallCount);
+    expect(observations).toContain("diagnostic_facets.cache");
+  });
+
+  it("uses daily crash rollups when no diagnostic dimensions are filtered", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(freshSchemaSQL);
+    const fingerprint = "a".repeat(64);
+    sqlite.prepare(
+      `INSERT INTO groups (fingerprint, kind, count, first_seen, last_seen, first_version, last_version, title)
+       VALUES (?1, 'crash', 4, datetime('now'), datetime('now'), 'v1.0.0', 'v1.0.0', 'boom')`,
+    ).run(fingerprint);
+    sqlite.prepare(
+      `INSERT INTO report_daily (date, fingerprint, events, identified_events)
+       VALUES (date('now'), ?1, 4, 3)`,
+    ).run(fingerprint);
+    sqlite.prepare(
+      `INSERT INTO report_installations (date, fingerprint, install_id, version, os, arch)
+       VALUES (date('now'), ?1, 'install-1', 'v1.0.0', 'windows', 'amd64')`,
+    ).run(fingerprint);
+    const d1 = {
+      prepare(sql: string) {
+        const statement = sqlite.prepare(sql);
+        const wrapper: any = {
+          bind(...values: unknown[]) { wrapper.values = values; return wrapper; },
+          values: [] as unknown[],
+          async all() { return { results: statement.all(...wrapper.values) }; },
+        };
+        return wrapper;
+      },
+    } as unknown as D1Database;
+    try {
+      const result = await crashGroups({ DB: d1 } as unknown as Env, {
+        status: "", source: "", version: "", os: "", platform: "", osBuild: "", arch: "", channel: "",
+        runtimeVersion: "", failureKind: "", failureReason: "", recovery: "", gpu: "",
+        newLatest: false, regressed: false, windowDays: 30,
+      }, "");
+      expect(result.results[0]).toMatchObject({
+        fingerprint, affected_installs: 1, window_events: 4, identified_events: 3,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("materializes one group detail window for all diagnostic distributions", async () => {
+    let distributionSQL = "";
+    const db = {
+      prepare(sql: string) {
+        distributionSQL = sql;
+        const statement = {
+          bind() { return statement; },
+          async first() { return { window_events: 1, identified_events: 1, affected_installs: 1 }; },
+          async all() { return { results: [] }; },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+    await groupDiagnosticSummary({ DB: db } as unknown as Env, "b".repeat(64));
+    expect(distributionSQL).toContain("WITH window AS MATERIALIZED");
+    expect(distributionSQL.match(/FROM report_event_dimensions/g)).toHaveLength(1);
+    expect(distributionSQL).toContain("ROW_NUMBER() OVER (PARTITION BY facet");
+    expect(distributionSQL).toContain("WHERE rank <= 20");
+  });
+
+  it("bounds each group facet and reads totals from the daily rollups", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(freshSchemaSQL);
+    const fingerprint = "c".repeat(64);
+    sqlite.prepare(
+      `INSERT INTO report_daily (date, fingerprint, events, identified_events)
+       VALUES (date('now'), ?1, 40, 40)`,
+    ).run(fingerprint);
+    sqlite.prepare(
+      `INSERT INTO report_installations (date, fingerprint, install_id, version, os, arch)
+       VALUES (date('now'), ?1, 'install-1', 'v1.0.0', 'windows', 'amd64')`,
+    ).run(fingerprint);
+    const fact = sqlite.prepare(
+      `INSERT INTO report_event_dimensions
+       (date, fingerprint, install_id, version, os, arch, os_build, os_revision,
+        distro_id, distro_version, kernel_version, session_type, channel,
+        runtime_engine, runtime_version, failure_kind, failure_reason, exit_code, recovery, gpu_mode, events)
+       VALUES (date('now'), ?1, ?2, 'v1.0.0', 'windows', 'amd64', 1, 1, '', '', '', '', 'stable',
+               'webview2', ?3, 'browser_process_exited', 'unexpected', '1', '', 'unknown', 1)`,
+    );
+    for (let i = 0; i < 40; i++) fact.run(fingerprint, `install-${i}`, `runtime-${i}`);
+    const db = {
+      prepare(sql: string) {
+        const statement = sqlite.prepare(sql);
+        const wrapper: any = {
+          values: [] as unknown[],
+          bind(...values: unknown[]) { wrapper.values = values; return wrapper; },
+          async first() { return statement.get(...wrapper.values); },
+          async all() { return { results: statement.all(...wrapper.values) }; },
+        };
+        return wrapper;
+      },
+    } as unknown as D1Database;
+    try {
+      const result = await groupDiagnosticSummary({ DB: db } as unknown as Env, fingerprint);
+      expect(result).toMatchObject({ windowEvents: 40, identifiedEvents: 40, affectedInstalls: 1 });
+      const byFacet = new Map<string, number>();
+      for (const row of result.distributions) byFacet.set(row.facet, (byFacet.get(row.facet) ?? 0) + 1);
+      expect(Math.max(...byFacet.values())).toBeLessThanOrEqual(20);
+    } finally {
+      sqlite.close();
+    }
   });
 });

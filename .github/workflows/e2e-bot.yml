@@ -164,7 +164,9 @@ jobs:
           else
             # The current five-task baseline can exceed 400k after only three
             # successful tasks. Keep bounded headroom so every scenario is graded.
-            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 800000
+            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" \
+              -task "compaction,fix-add-bug,fizzbuzz,palindrome,subagent-delegation" \
+              -model e2e -out report.md -json report.json -budget 800000
             node -e '
               const results = require("./report.json");
               const unsuccessful = results.filter((result) => !result.Passed || result.Skipped);

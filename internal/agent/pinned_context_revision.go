@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
@@ -628,12 +629,16 @@ func (a *Agent) commitPinnedRevisionPlan(plan pinnedRevisionPlan) {
 	a.pinned.mu.Unlock()
 }
 
-func (a *Agent) appendPinnedRevisionAndUser(plan pinnedRevisionPlan, user provider.Message) {
-	if plan.message != nil {
-		a.sess.conversation.AddBatch(*plan.message, user)
-	} else {
-		a.sess.conversation.AddBatch(user)
+func (a *Agent) appendPinnedRevisionAndUser(ctx context.Context, plan pinnedRevisionPlan, user provider.Message) {
+	batch := make([]provider.Message, 0, 3)
+	if contextMessage, ok := a.prepareTurnContext(ctx); ok {
+		batch = append(batch, contextMessage)
 	}
+	if plan.message != nil {
+		batch = append(batch, *plan.message)
+	}
+	batch = append(batch, user)
+	a.sess.conversation.AddBatch(batch...)
 	a.commitPinnedRevisionPlan(plan)
 }
 
@@ -700,9 +705,10 @@ func withoutPinnedContextRevisions(messages []provider.Message) ([]provider.Mess
 }
 
 // projectionMessagesPreservingPinnedContext performs the ordinary projection
-// metadata scrub while retaining explicit host provenance only for trusted
-// pinned revision messages. That provenance is required for safe checkpoint
-// rebasing; ModelMessages still strips it from the provider request copy.
+// metadata scrub while retaining host provenance. Pinned revisions need that
+// provenance for safe checkpoint rebasing, and session-context snapshots need
+// it for validation and digest deduplication. ModelMessages still strips all
+// provenance from the provider request copy.
 func projectionMessagesPreservingPinnedContext(messages []provider.Message) []provider.Message {
 	trusted := make([]bool, 0, len(messages))
 	for _, message := range messages {

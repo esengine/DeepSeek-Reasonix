@@ -630,7 +630,7 @@ func (c *Controller) providerSwitchText(name string) string {
 }
 
 func (c *Controller) skillListText() string {
-	skills := c.skills.discovered()
+	skills := c.skills.list()
 	if len(skills) == 0 {
 		return i18n.M.ListSkillsNone
 	}

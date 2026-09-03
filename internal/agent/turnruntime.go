@@ -103,6 +103,10 @@ type turnRuntime struct {
 	incompleteReads incompleteReadState
 
 	phase phaseClock
+
+	// sessionContext is the content-free diagnostic for the snapshot selected
+	// before this real user turn. It is attached to Usage events only.
+	sessionContext turnContextDiagnostics
 }
 
 // completionPhase bounds the completion-validation protocol: a candidate
