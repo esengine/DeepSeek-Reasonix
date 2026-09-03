@@ -83,16 +83,16 @@ type Session struct {
 	cols       uint16
 	rows       uint16
 
-	cmd        *exec.Cmd
-	lowPTY     LowLevelPTY
-	buffer     *RingBuffer
-	done       chan struct{}
-	onOutput   chan struct{} // Notified whenever new bytes land in buffer
-	exitCode   int
-	exitErr    error
-	running    atomic.Bool
-	mu         sync.RWMutex
-	closeOnce  sync.Once
+	cmd       *exec.Cmd
+	lowPTY    LowLevelPTY
+	buffer    *RingBuffer
+	done      chan struct{}
+	onOutput  chan struct{} // Notified whenever new bytes land in buffer
+	exitCode  int
+	exitErr   error
+	running   atomic.Bool
+	mu        sync.RWMutex
+	closeOnce sync.Once
 }
 
 // ID returns the unique session identifier.
@@ -292,17 +292,14 @@ func (s *Session) Close() error {
 	s.closeOnce.Do(func() {
 		s.running.Store(false)
 		if s.cmd != nil && s.cmd.Process != nil && s.cmd.Process.Pid > 0 {
-			// 1. Stage 1: Send SIGINT to give child chance to save state
 			signalSIGINT(s.cmd)
 			select {
 			case <-s.done:
 			case <-time.After(200 * time.Millisecond):
-				// 2. Stage 2: Send SIGTERM to process group
 				signalSIGTERM(s.cmd)
 				select {
 				case <-s.done:
 				case <-time.After(250 * time.Millisecond):
-					// 3. Stage 3: Force kill entire process tree
 					proc.KillTree(s.cmd)
 				}
 			}

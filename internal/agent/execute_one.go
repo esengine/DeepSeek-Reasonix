@@ -132,43 +132,6 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 	return toolOutcome{}, false
 }
 
-// classifyPTYToolCallPlan sets up PTY base permission, read-only resolution,
-// and command-level secondary Bash permission for start and write_line.
-func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
-	if plan == nil || plan.canonicalName != "pty" {
-		return
-	}
-	var p struct {
-		Action  string `json:"action"`
-		Command string `json:"command"`
-		Input   string `json:"input"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return
-	}
-	action := strings.ToLower(strings.TrimSpace(p.Action))
-	switch action {
-	case "read", "list":
-		plan.readOnly = true
-		plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
-	case "start":
-		cmd := strings.TrimSpace(p.Command)
-		if cmd == "" {
-			cmd = "bash"
-		}
-		plan.commandPermName = "bash"
-		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
-	case "write_line":
-		cmd := strings.TrimSpace(p.Command)
-		if cmd == "" {
-			cmd = strings.TrimSpace(p.Input)
-		}
-		plan.commandPermName = "bash"
-		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
-		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
-	}
-}
-
 // resolveToolPolicy applies Plan mode, proxy resolution, delivery gates, Auto
 // Guard, and permission checks. Permission must complete before any write lease.
 func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
@@ -558,43 +521,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 			}, true
 		}
 	} else if gate != nil && !plan.skipOrdinaryGate {
-		// 1. Primary Gate: evaluates base tool permission (e.g. PTY base session permission or direct tool permissions)
-		allow, reason, err := gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
-		if err != nil {
-			return toolOutcome{
-				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
-				blocked: true,
-				errMsg:  fmt.Sprintf("blocked: %v", err),
-			}, true
-		}
-		// 2. Secondary Command Gate: if an interactive tool runs a specific shell command (pty start/write_line),
-		// evaluate the concrete command against the Bash permission policy as an additional command-level gate.
-		if allow && plan.commandPermName != "" && len(plan.commandPermArgs) > 0 {
-			cmdAllow, cmdReason, cmdErr := gate.Check(ctx, plan.commandPermName, plan.commandPermArgs, plan.readOnly)
-			if cmdErr != nil {
-				return toolOutcome{
-					output:  fmt.Sprintf("blocked: %s (%v)", cmdReason, cmdErr),
-					blocked: true,
-					errMsg:  fmt.Sprintf("blocked: %v", cmdErr),
-				}, true
-			}
-			if !cmdAllow {
-				allow = false
-				reason = cmdReason
-			}
-		}
-		// permission.decision: the host verdict is computed first; the extension ruling may override it in either direction
-		// (an allow overriding a host deny is the full-trust contract and is audited).
-		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
-			return blocked, true
-		}
-		if !allow {
-			return toolOutcome{
-				output:  "blocked: " + reason,
-				blocked: true,
-				errMsg:  "blocked by permission policy",
-			}, true
-		}
+		return a.applyStandardGate(ctx, plan, gate)
 	}
 	return toolOutcome{}, false
 }

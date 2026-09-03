@@ -126,6 +126,19 @@ func isDangerousPTYInput(input string) bool {
 	return false
 }
 
+func parsePTYWaitBudget(waitMs *int) time.Duration {
+	if waitMs == nil {
+		return 500 * time.Millisecond
+	}
+	if *waitMs <= 0 {
+		return 0
+	}
+	if *waitMs > 10000 {
+		return 10000 * time.Millisecond
+	}
+	return time.Duration(*waitMs) * time.Millisecond
+}
+
 func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p ptyParams
 	if err := json.Unmarshal(args, &p); err != nil {
@@ -144,154 +157,147 @@ func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error
 
 	switch strings.ToLower(strings.TrimSpace(p.Action)) {
 	case "start":
-		sess, err := mgr.Start(ctx, pty.StartOptions{
-			ID:      sessionID,
-			Command: p.Command,
-			Cwd:     p.Cwd,
-			Cols:    p.Cols,
-			Rows:    p.Rows,
-		})
-		if err != nil {
-			return "", err
-		}
-		// Settle initial shell prompt
-		initialOut, _ := sess.Write(ctx, "", 250*time.Millisecond)
-		info := sess.Info()
-		msg := fmt.Sprintf("Started PTY session %q (pid: %d, cmd: %s, cwd: %s)\n", info.ID, info.PID, info.Command, info.Cwd)
-		if initialOut != "" {
-			msg += "\n" + initialOut
-		}
-		return strings.TrimRight(msg, "\n"), nil
-
+		return execPTYStart(ctx, mgr, sessionID, p)
 	case "write_line":
-		cmdToRun := strings.TrimSpace(p.Command)
-		if cmdToRun == "" {
-			cmdToRun = strings.TrimSpace(p.Input)
-		}
-		if isDangerousPTYInput(cmdToRun) {
-			return "", fmt.Errorf("blocked: dangerous command execution denied by security policy: %s", cmdToRun)
-		}
-
-		sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
-		if err != nil {
-			return "", err
-		}
-
-		waitBudget := 500 * time.Millisecond
-		if p.WaitMs != nil {
-			if *p.WaitMs <= 0 {
-				waitBudget = 0
-			} else if *p.WaitMs > 10000 {
-				waitBudget = 10000 * time.Millisecond
-			} else {
-				waitBudget = time.Duration(*p.WaitMs) * time.Millisecond
-			}
-		}
-
-		toSend := cmdToRun + "\n"
-		out, err := sess.Write(ctx, toSend, waitBudget)
-		if err != nil && !sess.IsRunning() {
-			return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(out) == "" {
-			if waitBudget == 0 {
-				return "Command line written (non-blocking).", nil
-			}
-			return "Command line written (no new output).", nil
-		}
-		return out, nil
-
+		return execPTYWriteLine(ctx, mgr, sessionID, p)
 	case "write":
-		if isDangerousPTYInput(p.Input) {
-			return "", fmt.Errorf("blocked: dangerous keystroke input denied by security policy: %s", strings.TrimSpace(p.Input))
-		}
-
-		sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
-		if err != nil {
-			return "", err
-		}
-
-		waitBudget := 500 * time.Millisecond
-		if p.WaitMs != nil {
-			if *p.WaitMs <= 0 {
-				waitBudget = 0
-			} else if *p.WaitMs > 10000 {
-				waitBudget = 10000 * time.Millisecond
-			} else {
-				waitBudget = time.Duration(*p.WaitMs) * time.Millisecond
-			}
-		}
-
-		out, err := sess.Write(ctx, p.Input, waitBudget)
-		if err != nil && !sess.IsRunning() {
-			return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(out) == "" {
-			if waitBudget == 0 {
-				return "Input written (non-blocking).", nil
-			}
-			return "Input written (no new output).", nil
-		}
-		return out, nil
-
+		return execPTYWrite(ctx, mgr, sessionID, p)
 	case "read":
-		sess, err := mgr.Get(sessionID)
-		if err != nil {
-			return "", err
-		}
-		out := sess.Read(p.MaxBytes)
-		if strings.TrimSpace(out) == "" {
-			if !sess.IsRunning() {
-				return fmt.Sprintf("(session exited with code %d, no unread output)", sess.Info().ExitCode), nil
-			}
-			return "(no new output)", nil
-		}
-		return out, nil
-
+		return execPTYRead(mgr, sessionID, p.MaxBytes)
 	case "list":
-		sessions := mgr.List()
-		if len(sessions) == 0 {
-			return "No active PTY sessions.", nil
-		}
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Active PTY Sessions (%d):\n", len(sessions)))
-		for _, s := range sessions {
-			status := "running"
-			if !s.Running {
-				status = fmt.Sprintf("exited(%d)", s.ExitCode)
-			}
-			b.WriteString(fmt.Sprintf("- [%s] id=%q pid=%d cmd=%q cwd=%q (size: %dx%d, uptime: %s)\n",
-				status, s.ID, s.PID, s.Command, s.Cwd, s.Cols, s.Rows, time.Since(s.StartedAt).Round(time.Second)))
-		}
-		return strings.TrimRight(b.String(), "\n"), nil
-
+		return execPTYList(mgr)
 	case "close":
-		if err := mgr.Close(sessionID); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Closed PTY session %q.", sessionID), nil
-
+		return execPTYClose(mgr, sessionID)
 	case "resize":
-		cols := p.Cols
-		if cols == 0 {
-			cols = pty.DefaultTerminalCols
-		}
-		rows := p.Rows
-		if rows == 0 {
-			rows = pty.DefaultTerminalRows
-		}
-		if err := mgr.Resize(sessionID, cols, rows); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Resized PTY session %q to %dx%d.", sessionID, cols, rows), nil
-
+		return execPTYResize(mgr, sessionID, p.Cols, p.Rows)
 	default:
 		return "", fmt.Errorf("unknown pty action %q (supported: start, write_line, write, read, list, close, resize)", p.Action)
 	}
+}
+
+func execPTYStart(ctx context.Context, mgr *pty.Manager, sessionID string, p ptyParams) (string, error) {
+	sess, err := mgr.Start(ctx, pty.StartOptions{
+		ID:      sessionID,
+		Command: p.Command,
+		Cwd:     p.Cwd,
+		Cols:    p.Cols,
+		Rows:    p.Rows,
+	})
+	if err != nil {
+		return "", err
+	}
+	initialOut, _ := sess.Write(ctx, "", 250*time.Millisecond)
+	info := sess.Info()
+	msg := fmt.Sprintf("Started PTY session %q (pid: %d, cmd: %s, cwd: %s)\n", info.ID, info.PID, info.Command, info.Cwd)
+	if initialOut != "" {
+		msg += "\n" + initialOut
+	}
+	return strings.TrimRight(msg, "\n"), nil
+}
+
+func execPTYWriteLine(ctx context.Context, mgr *pty.Manager, sessionID string, p ptyParams) (string, error) {
+	cmdToRun := strings.TrimSpace(p.Command)
+	if cmdToRun == "" {
+		cmdToRun = strings.TrimSpace(p.Input)
+	}
+	if isDangerousPTYInput(cmdToRun) {
+		return "", fmt.Errorf("blocked: dangerous command execution denied by security policy: %s", cmdToRun)
+	}
+	sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
+	if err != nil {
+		return "", err
+	}
+	waitBudget := parsePTYWaitBudget(p.WaitMs)
+	out, err := sess.Write(ctx, cmdToRun+"\n", waitBudget)
+	if err != nil && !sess.IsRunning() {
+		return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		if waitBudget == 0 {
+			return "Command line written (non-blocking).", nil
+		}
+		return "Command line written (no new output).", nil
+	}
+	return out, nil
+}
+
+func execPTYWrite(ctx context.Context, mgr *pty.Manager, sessionID string, p ptyParams) (string, error) {
+	if isDangerousPTYInput(p.Input) {
+		return "", fmt.Errorf("blocked: dangerous keystroke input denied by security policy: %s", strings.TrimSpace(p.Input))
+	}
+	sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
+	if err != nil {
+		return "", err
+	}
+	waitBudget := parsePTYWaitBudget(p.WaitMs)
+	out, err := sess.Write(ctx, p.Input, waitBudget)
+	if err != nil && !sess.IsRunning() {
+		return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		if waitBudget == 0 {
+			return "Input written (non-blocking).", nil
+		}
+		return "Input written (no new output).", nil
+	}
+	return out, nil
+}
+
+func execPTYRead(mgr *pty.Manager, sessionID string, maxBytes int) (string, error) {
+	sess, err := mgr.Get(sessionID)
+	if err != nil {
+		return "", err
+	}
+	out := sess.Read(maxBytes)
+	if strings.TrimSpace(out) == "" {
+		if !sess.IsRunning() {
+			return fmt.Sprintf("(session exited with code %d, no unread output)", sess.Info().ExitCode), nil
+		}
+		return "(no new output)", nil
+	}
+	return out, nil
+}
+
+func execPTYList(mgr *pty.Manager) (string, error) {
+	sessions := mgr.List()
+	if len(sessions) == 0 {
+		return "No active PTY sessions.", nil
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Active PTY Sessions (%d):\n", len(sessions)))
+	for _, s := range sessions {
+		status := "running"
+		if !s.Running {
+			status = fmt.Sprintf("exited(%d)", s.ExitCode)
+		}
+		b.WriteString(fmt.Sprintf("- [%s] id=%q pid=%d cmd=%q cwd=%q (size: %dx%d, uptime: %s)\n",
+			status, s.ID, s.PID, s.Command, s.Cwd, s.Cols, s.Rows, time.Since(s.StartedAt).Round(time.Second)))
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+func execPTYClose(mgr *pty.Manager, sessionID string) (string, error) {
+	if err := mgr.Close(sessionID); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Closed PTY session %q.", sessionID), nil
+}
+
+func execPTYResize(mgr *pty.Manager, sessionID string, cols, rows uint16) (string, error) {
+	if cols == 0 {
+		cols = pty.DefaultTerminalCols
+	}
+	if rows == 0 {
+		rows = pty.DefaultTerminalRows
+	}
+	if err := mgr.Resize(sessionID, cols, rows); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Resized PTY session %q to %dx%d.", sessionID, cols, rows), nil
 }
