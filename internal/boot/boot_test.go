@@ -2900,6 +2900,9 @@ func systemMessage(msgs []provider.Message) string {
 func stripLanguagePolicy(s string) string {
 	s = strings.TrimSpace(s)
 	for _, policy := range []string{
+		// Reverse append order (see appendCorePolicies): the #9520 static
+		// context-management contract is appended last, so it peels first.
+		config.ContextManagementPolicy,
 		config.LanguagePolicy, config.WorkPracticePolicy,
 		config.UserDecisionPolicy,
 	} {
