@@ -202,17 +202,6 @@ func ProviderEntriesConfigEqual(a, b ProviderEntry) bool {
 	return reflect.DeepEqual(ProviderEntryConfigSnapshot(a), ProviderEntryConfigSnapshot(b))
 }
 
-// SetProviderEffort updates a provider's provider-specific thinking effort knob.
-func (c *Config) SetProviderEffort(name, effort string) error {
-	for i := range c.Providers {
-		if c.Providers[i].Name == name {
-			c.Providers[i].Effort = normalizeStoredEffort(effort)
-			return nil
-		}
-	}
-	return fmt.Errorf("set provider effort: no provider %q", name)
-}
-
 // SetLanguage pins the CLI UI/model language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.
 func (c *Config) SetLanguage(lang string) error {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
@@ -1575,6 +1564,9 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("save config loaded from %q: %w", path, c.editLoadErr)
 	}
 	scope := renderScopeForPath(path)
+	if scope != RenderScopeProject {
+		c.prepareUserPersist()
+	}
 	if scope == RenderScopeUser {
 		if err := currentUserConfigEditLockError(); err != nil {
 			return fmt.Errorf("save user config: %w", err)

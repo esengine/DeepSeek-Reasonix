@@ -165,16 +165,40 @@ func modelRefs() []string {
 		return nil
 	}
 	var out []string
+	seen := map[string]bool{}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		if !p.Configured() {
 			continue
 		}
+		if account, ok := config.ProviderAccountForEntry(cfg, *p); ok && !account.IsEnabled() {
+			continue
+		}
+		if account, ok := config.ProviderAccountForEntry(cfg, *p); ok && !selectableAccountRoute(account, p.AccountRouteID) {
+			continue
+		}
 		for _, model := range p.ChatModelList() {
-			out = append(out, p.Name+"/"+model)
+			ref := p.Name + "/" + model
+			if selection, ok := cfg.SelectionForProviderModel(*p, model); ok {
+				ref = selection.Ref()
+			}
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			out = append(out, ref)
 		}
 	}
 	return out
+}
+
+func selectableAccountRoute(account config.ProviderAccount, routeID string) bool {
+	for _, disabled := range account.DisabledRoutes {
+		if strings.TrimSpace(disabled) == strings.TrimSpace(routeID) {
+			return false
+		}
+	}
+	return true
 }
 
 // mergeExtensionModelRefs folds the session's extension provider catalog into

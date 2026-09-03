@@ -37,7 +37,11 @@
 `~/.reasonix/config.toml`，Windows 为 `%AppData%\reasonix\config.toml`；迁移和相关数据路径见
 [配置路径](./CONFIG_PATHS.zh-CN.md)。标注为“仅用户/全局”的字段（包括 agent 轮数上限）不会被 `./reasonix.toml` 覆盖。
 Provider 通过 `api_key_env` 命名密钥，真实密钥值保存在 CLI 与桌面端共用的
-Reasonix 全局 `<Reasonix home>/.env`。项目 `.env`、home `.env`、继承的 shell 环境变量、旧 credentials 和系统 keyring 都不再作为 provider key 的运行时 fallback；旧凭据只作为迁移来源读取。项目 `.env` 仍会作为当前 workspace 范围内的 MCP/plugin 非 provider `${VAR}` 展开来源，但不会导入 provider key 或 Reasonix 控制变量。全局 `config.toml` 和 `.env` 的完整结构见
+Reasonix 全局 `<Reasonix home>/.env`。`[[provider_accounts]]` 只存在于用户全局配置。OpenCode Go
+一个账号对应 Chat、Anthropic、Responses 三条协议路由并共用一把 Key。旧 provider
+名在迁移为 `main` 账号后仍可用。账号切换是手动选择，不是轮询；停用账号不会出现在
+新模型选择器中，已有会话继续使用已绑定的 provider。不同 Key 可能导致服务商侧缓存
+按租户分裂。新模型选择使用 `family/account/model`（例如 `deepseek/team/deepseek-v4-flash`）；旧的 `provider/model` 和生成 provider 名仍可兼容使用。项目 `.env`、home `.env`、继承的 shell 环境变量、旧 credentials 和系统 keyring 都不再作为 provider key 的运行时 fallback；旧凭据只作为迁移来源读取。项目 `.env` 仍会作为当前 workspace 范围内的 MCP/plugin 非 provider `${VAR}` 展开来源，但不会导入 provider key 或 Reasonix 控制变量。全局 `config.toml` 和 `.env` 的完整结构见
 [配置路径](./CONFIG_PATHS.zh-CN.md)。
 
 桌面端和 CLI 端的可见思考语言设置，见 [思考语言](./REASONING_LANGUAGE.zh-CN.md)。

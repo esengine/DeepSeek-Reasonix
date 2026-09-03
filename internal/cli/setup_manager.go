@@ -27,6 +27,7 @@ type providerSetupSession struct {
 	projectScoped      bool
 	declaredProviders  []string
 	operations         []providerSetupOperation
+	originalAccounts   map[string]config.ProviderAccount
 }
 
 const setupManagerContinue = 2
@@ -39,19 +40,30 @@ const (
 	setupOpLanguage
 	setupOpMaterializeAccess
 	setupOpAccessMembership
+	setupOpProviderAccount
 )
 
 type providerSetupOperation struct {
-	kind           providerSetupOperationKind
-	providerName   string
-	beforeProvider *config.ProviderEntry
-	afterProvider  *config.ProviderEntry
-	beforeString   string
-	afterString    string
-	accessName     string
-	projectScoped  bool
-	beforeBool     bool
-	afterBool      bool
+	kind                       providerSetupOperationKind
+	providerName               string
+	beforeProvider             *config.ProviderEntry
+	afterProvider              *config.ProviderEntry
+	beforeString               string
+	afterString                string
+	accessName                 string
+	projectScoped              bool
+	beforeBool                 bool
+	afterBool                  bool
+	providerID                 string
+	accountID                  string
+	beforeAccount              *config.ProviderAccount
+	afterAccount               *config.ProviderAccount
+	routeID                    string
+	beforeRoute                *bool
+	afterRoute                 *bool
+	beforeAccounts             []config.ProviderAccount
+	afterAccounts              []config.ProviderAccount
+	accountDefaultModelChanged bool
 }
 
 type providerSetupConflictError struct {
@@ -94,9 +106,13 @@ func newProviderSetupSession(cfg *config.Config) *providerSetupSession {
 		originalDefault:    cfg.DefaultModel,
 		pendingCredentials: map[string]string{},
 		removed:            map[string]bool{},
+		originalAccounts:   make(map[string]config.ProviderAccount, len(cfg.ProviderAccounts)),
 	}
 	for _, p := range cfg.Providers {
 		s.originalProviders[p.Name] = p
+	}
+	for _, account := range cfg.ProviderAccounts {
+		s.originalAccounts[providerSetupAccountKey(account.ProviderID, account.ID)] = cloneProviderSetupAccount(account)
 	}
 	return s
 }
@@ -416,44 +432,6 @@ func (s *providerSetupSession) credentialLines() []string {
 	return lines
 }
 
-func (s *providerSetupSession) summary() []string {
-	var added, edited []string
-	for _, p := range s.cfg.Providers {
-		old, existed := s.originalProviders[p.Name]
-		switch {
-		case !existed:
-			added = append(added, p.Name)
-		case !providerSetupEqual(old, p):
-			edited = append(edited, p.Name)
-		}
-	}
-	var out []string
-	if len(added) > 0 {
-		out = append(out, fmt.Sprintf(i18n.M.SetupSummaryAddedFmt, strings.Join(added, ", ")))
-	}
-	if len(edited) > 0 {
-		out = append(out, fmt.Sprintf(i18n.M.SetupSummaryEditedFmt, strings.Join(edited, ", ")))
-	}
-	if len(s.removed) > 0 {
-		names := make([]string, 0, len(s.removed))
-		for name := range s.removed {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		out = append(out, fmt.Sprintf(i18n.M.SetupSummaryRemovedFmt, strings.Join(names, ", ")))
-	}
-	if s.cfg.DefaultModel != s.originalDefault {
-		out = append(out, fmt.Sprintf(i18n.M.SetupSummaryDefaultFmt, s.cfg.DefaultModel))
-	}
-	if len(s.pendingCredentials) > 0 {
-		out = append(out, fmt.Sprintf(i18n.M.SetupSummaryKeysFmt, len(s.pendingCredentials)))
-	}
-	if len(out) == 0 {
-		out = append(out, i18n.M.SetupSummaryNoChanges)
-	}
-	return out
-}
-
 func providerSetupEqual(a, b config.ProviderEntry) bool {
 	// Render-level equality is unnecessary here: the manager only changes these
 	// fields, while advanced provider fields are preserved by editing a copy.
@@ -477,58 +455,41 @@ func runProviderSetupManager(s *providerSetupSession, configPath, envPath string
 		fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.RepairedAPIKeyEnvFmt, repair.provider, repair.old, repair.new)))
 	}
 	for {
-		items := providerManagerItems(s)
+		items, actions := providerManagerMenu(s)
 		idx, err := selectOne(i18n.M.SetupManagerTitle, items)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "\n"+i18n.M.SetupCancelled)
 			return 1
 		}
-		providerCount := len(cfg.Providers)
-		switch idx {
-		case providerCount:
+		if idx < 0 || idx >= len(actions) {
+			continue
+		}
+		switch actions[idx].kind {
+		case setupMenuAddOpenAI:
 			if !addProviderToSession(s, false) {
 				continue
 			}
-		case providerCount + 1:
+		case setupMenuAddAnthropic:
 			if !addProviderToSession(s, true) {
 				continue
 			}
-		case providerCount + 2:
+		case setupMenuAddAccount:
+			_ = addProviderAccountToSession(s)
+		case setupMenuSave:
 			rc := saveProviderSetupSession(s, configPath, envPath)
 			if rc == setupManagerContinue {
 				continue
 			}
 			return rc
-		case providerCount + 3:
+		case setupMenuCancel:
 			fmt.Println(i18n.M.SetupCancelled)
 			return 1
+		case setupMenuAccount:
+			manageProviderAccount(s, actions[idx].providerID, actions[idx].accountID)
 		default:
-			manageProvider(s, idx)
+			manageProvider(s, actions[idx].provider)
 		}
 	}
-}
-
-func providerManagerItems(s *providerSetupSession) []menuItem {
-	cfg := s.cfg
-	items := make([]menuItem, 0, len(cfg.Providers)+4)
-	for _, p := range cfg.Providers {
-		models := p.ModelList()
-		keyStatus := i18n.M.SetupKeyMissing
-		if p.APIKeyEnv == "" || config.CredentialIsSet(p.APIKeyEnv) || s.pendingCredentials[p.APIKeyEnv] != "" {
-			keyStatus = i18n.M.SetupKeySet
-		}
-		desc := fmt.Sprintf("%s · %d %s · %s", p.Kind, len(models), i18n.M.SetupModelsUnit, keyStatus)
-		if cfg.DefaultModel == p.Name || config.ModelRefsProvider(cfg.DefaultModel, p.Name) {
-			desc += " · " + i18n.M.SetupDefaultBadge
-		}
-		items = append(items, menuItem{name: p.Name, desc: desc})
-	}
-	return append(items,
-		menuItem{name: i18n.M.SetupAddOpenAI, desc: i18n.M.CustomProviderDesc},
-		menuItem{name: i18n.M.SetupAddAnthropic, desc: i18n.M.AnthropicProviderDesc},
-		menuItem{name: i18n.M.SetupSaveExit, desc: i18n.M.SetupSaveExitDesc},
-		menuItem{name: i18n.M.SetupCancel, desc: i18n.M.SetupCancelDesc},
-	)
 }
 
 func addProviderToSession(s *providerSetupSession, anthropic bool) bool {
@@ -839,21 +800,15 @@ func (s *providerSetupSession) replayOperations(cfg *config.Config, accessDeclar
 				}
 				cfg.Desktop.ProviderAccess = out
 			}
+		case setupOpProviderAccount:
+			if err := replayProviderAccountOperation(cfg, operation); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown provider setup operation %d", operation.kind)
 		}
 	}
 	return nil
-}
-
-func providerSetupAccessContains(names []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, name := range names {
-		if strings.TrimSpace(name) == want {
-			return true
-		}
-	}
-	return false
 }
 
 func commitProviderSetupSession(s *providerSetupSession, configPath string) (bool, error) {

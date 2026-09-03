@@ -53,6 +53,16 @@ compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (r
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 
+# Provider accounts are user-global. Project reasonix.toml may reference
+# generated provider names but must not declare accounts or API keys.
+# OpenCode Go one account expands Chat, Anthropic, and Responses routes.
+# Account switching is manual, not polling. Different keys may split vendor cache.
+# [[provider_accounts]]
+# provider_id = "deepseek"
+# id = "team"
+# label = "Team"
+# api_key_env = "DEEPSEEK_API_KEY_TEAM"
+#
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
 # models reuses the same connection; no need to re-declare base_url/api_key.

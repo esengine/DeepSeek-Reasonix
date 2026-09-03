@@ -31,11 +31,55 @@ func (m *chatTUI) openProviderPicker() {
 		return
 	}
 	curProvider := strings.SplitN(m.modelRef, "/", 2)[0]
+	curSelection, _ := config.ParseProviderSelection(cfg, m.modelRef)
 	var items []quickPickerItem
 	selected := 0
+	seen := map[string]bool{}
+	for _, account := range cfg.ProviderAccounts {
+		if !account.IsEnabled() {
+			continue
+		}
+		entries, ok := cfg.ResolveAccountProvider(account.ProviderID, account.ID)
+		if !ok {
+			continue
+		}
+		entries = selectableAccountEntries(account, entries)
+		if len(entries) == 0 {
+			continue
+		}
+		usable := false
+		for i := range entries {
+			if entries[i].Configured() {
+				usable = true
+			}
+			seen[entries[i].Name] = true
+		}
+		if !usable {
+			continue
+		}
+		status := ""
+		for i := range entries {
+			if entries[i].Name == curProvider || (curSelection.FamilyID == account.ProviderID && curSelection.AccountID == account.ID) {
+				status = "active"
+				selected = len(items)
+			}
+		}
+		modelNames := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			models := entry.ChatModelList()
+			if len(models) == 0 {
+				models = entry.ModelList()
+			}
+			modelNames = append(modelNames, models...)
+		}
+		items = append(items, quickPickerItem{
+			ID: account.ProviderID + "/" + account.ID, Label: account.Label,
+			Description: fmt.Sprintf("%s · %d route(s) · %s", account.ProviderID, len(entries), strings.Join(modelNames, ", ")), Status: status,
+		})
+	}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if seen[p.Name] || !p.Configured() {
 			continue
 		}
 		models := p.ChatModelList()
@@ -70,11 +114,23 @@ func (m *chatTUI) switchToProvider(name string) {
 		return
 	}
 	var entry *config.ProviderEntry
+	entry = providerEntryForAccountSelection(cfg, name)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if p.Name == name && p.Configured() {
+		if p.Name == name && p.Configured() && providerEntrySelectable(cfg, *p) {
 			entry = p
 			break
+		}
+	}
+	if entry == nil {
+		if account, ok := cfg.DefaultAccount(name); ok {
+			for _, candidate := range selectableAccountEntries(account, mustResolveAccountProvider(cfg, account.ProviderID, account.ID)) {
+				if candidate.Configured() && len(candidate.ChatModelList()) > 0 {
+					copy := candidate
+					entry = &copy
+					break
+				}
+			}
 		}
 	}
 	if entry == nil {
@@ -100,6 +156,9 @@ func (m *chatTUI) switchToProvider(name string) {
 	// If only one model, switch directly.
 	if len(models) == 1 {
 		ref := entry.Name + "/" + models[0]
+		if selection, ok := cfg.SelectionForProviderModel(*entry, models[0]); ok {
+			ref = selection.Ref()
+		}
 		if entry.Name == curProvider && models[0] == "" {
 			m.notice(fmt.Sprintf(i18n.M.ProviderAlreadyOnFmt, name))
 			return
@@ -110,10 +169,14 @@ func (m *chatTUI) switchToProvider(name string) {
 
 	items := make([]quickPickerItem, 0, len(models))
 	selected := 0
+	currentSelection, _ := config.ParseProviderSelection(cfg, m.modelRef)
 	for _, model := range models {
 		ref := entry.Name + "/" + model
+		if selection, ok := cfg.SelectionForProviderModel(*entry, model); ok {
+			ref = selection.Ref()
+		}
 		status := ""
-		if ref == m.modelRef {
+		if ref == m.modelRef || (currentSelection.Model == model && currentSelection.FamilyID == entry.AccountProviderID && currentSelection.AccountID == entry.AccountID) {
 			status = "active"
 			selected = len(items)
 		}
@@ -123,6 +186,53 @@ func (m *chatTUI) switchToProvider(name string) {
 		kind: quickPickerProviderModel, title: fmt.Sprintf(i18n.M.ProviderPickLabel, name),
 		items: items, selected: selected,
 	}
+}
+
+func mustResolveAccountProvider(cfg *config.Config, providerID, accountID string) []config.ProviderEntry {
+	entries, _ := cfg.ResolveAccountProvider(providerID, accountID)
+	return entries
+}
+
+func providerEntryForAccountSelection(cfg *config.Config, name string) *config.ProviderEntry {
+	family, accountID, ok := strings.Cut(strings.TrimSpace(name), "/")
+	if !ok || !config.IsProviderAccountID(accountID) {
+		return nil
+	}
+	for _, account := range cfg.ProviderAccounts {
+		if account.ProviderID != family || account.ID != accountID || !account.IsEnabled() {
+			continue
+		}
+		for _, candidate := range selectableAccountEntries(account, mustResolveAccountProvider(cfg, family, accountID)) {
+			if candidate.Configured() && len(candidate.ChatModelList()) > 0 {
+				copy := candidate
+				return &copy
+			}
+		}
+	}
+	return nil
+}
+
+func selectableAccountEntries(account config.ProviderAccount, entries []config.ProviderEntry) []config.ProviderEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	disabled := make(map[string]bool, len(account.DisabledRoutes))
+	for _, route := range account.DisabledRoutes {
+		disabled[strings.TrimSpace(route)] = true
+	}
+	out := make([]config.ProviderEntry, 0, len(entries))
+	for _, entry := range entries {
+		if disabled[strings.TrimSpace(entry.AccountRouteID)] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func providerEntrySelectable(cfg *config.Config, entry config.ProviderEntry) bool {
+	account, ok := config.ProviderAccountForEntry(cfg, entry)
+	return !ok || account.IsEnabled()
 }
 
 func (m chatTUI) handleQuickPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

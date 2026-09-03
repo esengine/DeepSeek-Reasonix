@@ -250,6 +250,7 @@ const (
 	retiredAutoPlanConfigVersion           = 5
 	billingSplitConfigVersion              = 6
 	deepSeekScheduledPricingConfigVersion  = 7
+	providerAccountsUpgradeConfigVersion   = providerAccountsConfigVersion
 )
 
 // ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
@@ -308,6 +309,10 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		migrateDeepSeekScheduledPricingDefaults(cfg)
 		// Mark every older config, including custom-price configs, so their values
 		// remain user-owned on later startups instead of being reconsidered.
+		changed = true
+	}
+	if header.ConfigVersion < providerAccountsUpgradeConfigVersion {
+		ensureProviderAccounts(cfg)
 		changed = true
 	}
 	if !changed {

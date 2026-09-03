@@ -66,7 +66,9 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderAccountView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import { ProviderAccountManager, accountsForProviderGroup, normalizeProviderAccountView } from "./ProviderAccountSettings";
+import { canonicalOfficialProviderName, providerGroupID } from "../lib/providerAccessIdentity";
 import { AppearanceOverview } from "./AppearanceOverview";
 import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -1395,6 +1397,11 @@ export function normalizeProviderView(p: ProviderView): ProviderView {
     keySource: p.keySource ?? "",
     keySourcePath: p.keySourcePath ?? "",
     modelCatalogFingerprint: p.modelCatalogFingerprint ?? "",
+    providerId: String(p.providerId ?? ""),
+    accountId: String(p.accountId ?? ""),
+    accountLabel: String(p.accountLabel ?? ""),
+    accountEnabled: p.accountEnabled !== false,
+    accountDefault: Boolean(p.accountDefault),
   };
 }
 
@@ -1426,6 +1433,10 @@ function normalizeProviderPresetView(p: ProviderPresetView): ProviderPresetView 
     configured,
     keySource: p.keySource ?? "",
     keySourcePath: p.keySourcePath ?? "",
+    accountGroupId: String(p.accountGroupId ?? ""),
+    accounts: asArray(p.accounts).map(normalizeProviderAccountView),
+    canAddAccount: Boolean(p.canAddAccount),
+    availableRoutes: asArray(p.availableRoutes),
   };
 }
 
@@ -1454,6 +1465,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     providers: asArray(view.providers).map(normalizeProviderView),
     officialProviders: asArray(view.officialProviders).map(normalizeProviderView),
     providerPresets: asArray(view.providerPresets).map(normalizeProviderPresetView).filter((p) => p.id),
+    providerAccounts: asArray(view.providerAccounts).map(normalizeProviderAccountView),
     providerKinds: asArray(view.providerKinds),
     permissions: {
       ...permissions,
@@ -5257,6 +5269,9 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           <ProviderAccessCard
             key={group.id}
             group={group}
+            accounts={accountsForProviderGroup(group, asArray(s.providerAccounts))}
+            providerPresets={s.providerPresets}
+            apply={apply}
             busy={busy}
             fetching={fetchingProviders.has(group.id)}
             fetchResult={fetchResults[group.id]}
@@ -5332,6 +5347,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
 
 export type ProviderAccessGroup = {
   id: string;
+  providerGroup: string;
   label: string;
   description: string;
   builtIn: boolean;
@@ -5866,6 +5882,9 @@ export function AddProviderPanel({
 
 export function ProviderAccessCard({
   group,
+  accounts = [],
+  providerPresets,
+  apply,
   busy,
   fetching,
   fetchResult,
@@ -5889,6 +5908,9 @@ export function ProviderAccessCard({
   onDelete,
 }: {
   group: ProviderAccessGroup;
+  accounts?: ProviderAccountView[];
+  providerPresets?: ProviderPresetView[];
+  apply: (fn: () => Promise<unknown>) => Promise<unknown>;
   busy: boolean;
   fetching: boolean;
   fetchResult?: ProviderFetchResult;
@@ -5954,6 +5976,7 @@ export function ProviderAccessCard({
   );
   return (
     <article className={`provider-access-card${group.builtIn ? " provider-access-card--builtin" : ""}`}>
+      <ProviderAccountManager group={group} accounts={accounts} providerPresets={providerPresets ?? []} availableRoutes={providerPresets?.find((p) => p.accountGroupId === group.providerGroup)?.availableRoutes ?? []} busy={busy} apply={apply} />
       <div className="provider-access-card__head">
         <div className="provider-access-card__identity">
           <div className="provider-access-card__title">
@@ -6412,10 +6435,12 @@ export function providerAccessGroups(providers: ProviderView[], t: ReturnType<ty
       if (!existing.keySource && p.keySource) existing.keySource = p.keySource;
       if (!existing.keySourcePath && p.keySourcePath) existing.keySourcePath = p.keySourcePath;
       existing.models = uniqueStrings([...existing.models, ...p.models]);
+      if (!existing.providerGroup && p.providerId) existing.providerGroup = p.providerId;
       continue;
     }
     groups.set(id, {
       id,
+      providerGroup: String(p.providerId ?? "").trim(),
       label: providerGroupLabel(p, t),
       description: providerGroupDescription(p, t),
       builtIn,
@@ -6489,30 +6514,11 @@ export function providerVisionCapabilityForView(
   return "configurable";
 }
 
-function canonicalOfficialProviderName(name: string): string {
-  switch (name.trim()) {
-    case "deepseek-flash":
-    case "deepseek-pro":
-      return "deepseek";
-    default:
-      return name.trim();
-  }
-}
-
 function officialProviderKind(p: ProviderView): string {
   if (!p.builtIn) return "";
-  const name = canonicalOfficialProviderName(p.name);
   const host = providerBaseHost(p.baseUrl);
-  if (name === "deepseek" && host === "api.deepseek.com") return "deepseek";
+  if ((p.name === "deepseek" || p.name === "deepseek-flash" || p.name === "deepseek-pro") && host === "api.deepseek.com") return "deepseek";
   return "";
-}
-
-function providerGroupID(p: ProviderView): string {
-  const official = officialProviderKind(p);
-  if (official) return `builtin:${official}`;
-  if (isOpenCodeGoProviderName(p.name)) return "custom:opencode-go";
-  if (p.name === "opencode-zen-anthropic") return "custom:opencode-zen";
-  return `custom:${p.name}`;
 }
 
 function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {
@@ -6531,19 +6537,6 @@ function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): 
   if (id === "custom:opencode-go") return t("settings.providerDesc.opencodeGo");
   if (id === "custom:opencode-zen") return t("settings.providerDesc.opencodeZen");
   return "";
-}
-
-function isOpenCodeGoProviderName(name: string): boolean {
-  switch (name.trim()) {
-    case "opencode-go":
-    case "opencode-go-anthropic":
-    case "opencode-go-responses":
-    case "opencode-go-deepseek-anthropic":
-    case "opencode-go-deepseek-responses":
-      return true;
-    default:
-      return false;
-  }
 }
 
 function uniqueStrings(values: string[]): string[] {

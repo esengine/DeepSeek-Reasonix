@@ -5,8 +5,8 @@ import type { Todo } from "./tools";
 import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 import type { WireApproval } from "./approvalTypes";
 import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
-import type { PinnedFileInfo } from "./pinnedContextBridge";
-export * from "./remoteTypes";
+import type { PinnedFileInfo } from "./pinnedContextBridge"; import type { ProviderAccountView } from "./providerAccountTypes";
+export * from "./remoteTypes"; export * from "./providerAccountTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
 export type EventKind =
@@ -1423,7 +1423,7 @@ export interface ModelInfo {
   ref: string; // "provider/model" — pass to SetModel
   provider: string;
   model: string;
-  current: boolean;
+  current: boolean; providerGroup?: string; accountId?: string; accountLabel?: string; accountDefault?: boolean;
 }
 
 export interface EffortInfo {
@@ -1715,7 +1715,7 @@ export interface ProviderView {
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
   recommendedUpgradeAvailable?: boolean; // official legacy OpenAI entry can switch to recommended Anthropic access
-  modelCatalogFingerprint?: string; // opaque compare-and-apply token for background model discovery
+  modelCatalogFingerprint?: string; providerId?: string; accountId?: string; accountLabel?: string; accountEnabled?: boolean; accountDefault?: boolean; // catalog fingerprint is opaque compare-and-apply token
 }
 
 export interface ProviderModelCatalogUpdate {
@@ -1749,7 +1749,7 @@ export interface ProviderPresetView {
   requiresKey?: boolean;
   configured?: boolean;
   keySource?: string;
-  keySourcePath?: string;
+  keySourcePath?: string; accountGroupId?: string; accounts?: ProviderAccountView[]; canAddAccount?: boolean; availableRoutes?: string[];
 }
 
 export interface ProviderModelOverrideView {
@@ -2191,7 +2191,7 @@ export interface SettingsView {
   autoPlan: string;
   providers: ProviderView[];
   officialProviders: ProviderView[];
-  providerPresets: ProviderPresetView[];
+  providerPresets: ProviderPresetView[]; providerAccounts: ProviderAccountView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
   network: NetworkView;

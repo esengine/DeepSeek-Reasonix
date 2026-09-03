@@ -9208,10 +9208,14 @@ func removeServerOrder(order []string, name string) []string {
 // ModelInfo is one (provider, model) the bottom switcher can pick. Ref ("provider/
 // model") is what SetModel takes; Provider/Model are for display.
 type ModelInfo struct {
-	Ref      string `json:"ref"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Current  bool   `json:"current"`
+	Ref            string `json:"ref"`
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	Current        bool   `json:"current"`
+	ProviderGroup  string `json:"providerGroup,omitempty"`
+	AccountID      string `json:"accountId,omitempty"`
+	AccountLabel   string `json:"accountLabel,omitempty"`
+	AccountDefault bool   `json:"accountDefault,omitempty"`
 }
 
 type EffortInfo struct {
@@ -9624,7 +9628,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	if err != nil {
 		return err
 	}
-	entry, ok := cfg.ResolveModel(name)
+	entry, ok, name := resolveDesktopModelSelection(cfg, name)
 	pluginRef := false
 	if !ok {
 		// Plugin-namespaced refs belong to extension sidecars: validate them

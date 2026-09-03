@@ -26,5 +26,6 @@ func normalizeLoadedConfig(cfg *Config) error {
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
+	ensureProviderAccounts(cfg)
 	return nil
 }

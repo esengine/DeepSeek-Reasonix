@@ -83,6 +83,14 @@ show_turn_usage = false       # 隐藏 TUI 每轮 token/费用回执；默认 tr
 [desktop]
 provider_access = ["deepseek"]
 
+# provider_accounts 只允许写在用户全局配置中。
+# [[provider_accounts]]
+# provider_id = "deepseek"
+# id = "main"
+# label = "主账号"
+# api_key_env = "DEEPSEEK_API_KEY"
+# default = true
+
 [[providers]]
 name        = "deepseek"
 kind        = "anthropic"

@@ -39,8 +39,16 @@ built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
 Fields marked user/global only are not overridden by `./reasonix.toml`.
 Provider entries name secrets with `api_key_env`, while the secret values live in
-Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
-`.env`, home `.env`, inherited shell environment variables, legacy credentials,
+Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop.
+`[[provider_accounts]]` live only in the user-global config. One OpenCode Go
+account expands Chat, Anthropic, and Responses routes that share a key. Old
+provider names stay valid after migration to a `main` account. Account switching
+is manual, not polling; a disabled account leaves the new-model picker while
+existing sessions keep their bound provider. Different keys may split vendor-side
+prefix cache. New model selections use `family/account/model` (for example,
+`deepseek/team/deepseek-v4-flash`); older `provider/model` and generated provider
+names remain valid for compatibility. Project `.env`, home `.env`, inherited shell
+environment variables, legacy credentials,
 and the OS keyring are not provider-key runtime fallbacks; legacy credentials are
 only migration sources. Project `.env` still feeds workspace-scoped,
 non-provider `${VAR}` expansion for MCP/plugin settings without importing

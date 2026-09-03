@@ -71,7 +71,7 @@ func New(kind string, cfg Config) (Provider, error)
 
 - `openai` kind 实现 OpenAI-compatible `/chat/completions`。
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
-- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
+- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。预设供应商还可以在用户全局配置中声明多个 `[[provider_accounts]]`，每个账号有独立 `api_key_env`、启用/默认标记，以及如 `deepseek--team/deepseek-v4-flash` 这样的生成兼容身份。新选择器使用稳定的 `deepseek/team/deepseek-v4-flash` 形式；裸家族名如 `deepseek` 解析到该族默认账号。账号切换是手动选择，不做轮询或故障切换。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名、`provider/model` 或 `family/account/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
 - `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。`0` 是 Provider 自动值（官方 DeepSeek 384K / OpenCode 元数据），不再表示跳过本地检查；空间充足时官方 DeepSeek 仍省略字段，临界时裁剪。正数为用户显式控费上限。负数为明确省略；安全不足时压缩。`budget_tokens` 在官方 Anthropic 兼容层会被忽略。混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。
@@ -391,7 +391,7 @@ provider 层的核心类型包括 `Role`、`Message`、`ToolCall`、`ToolSchema`
 flag > ./reasonix.toml > 用户 config.toml > 内置默认值
 ```
 
-从 v1.8.1 起，用户配置位于 macOS/Linux 的 `~/.reasonix/config.toml` 或 Windows 的 `%AppData%\reasonix\config.toml`。provider key 保存在 Reasonix home 的 `.env`；项目 `.env` 只用于 workspace 范围的非 provider 变量展开。完整路径见[配置路径](./CONFIG_PATHS.zh-CN.md)。
+从 v1.8.1 起，用户配置位于 macOS/Linux 的 `~/.reasonix/config.toml` 或 Windows 的 `%AppData%\reasonix\config.toml`。provider key 保存在 Reasonix home 的 `.env`；项目 `.env` 只用于 workspace 范围的非 provider 变量展开。`[[provider_accounts]]` 只允许写在用户全局配置中；项目 `reasonix.toml` 可以引用已展开的 provider 名，但不能定义账号或写入凭据。旧配置会在内存中迁移为 `main` 账号并保留原 provider 名。新账号使用 `<route>--<account-id>`。停用账号不再出现在新模型选择器中；退休账号保留已生成的 provider entry，以便旧会话解析。不同 API Key 可能导致服务商侧缓存按租户分裂。账号切换是手动选择，不是轮询。完整路径见[配置路径](./CONFIG_PATHS.zh-CN.md)。
 
 ```toml
 default_model = "deepseek"

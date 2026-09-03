@@ -97,10 +97,20 @@ type Config struct {
   `chat_url` retains its historical OpenAI-only behavior; other legacy entries
   derive the protocol path from `base_url`. An entry declares either a single `model = "..."` or a
   `models = ["...", "..."]` list (with an optional `default`); the list form lets
-  one vendor expose several models without re-declaring the endpoint/key. A
+  one vendor expose several models without re-declaring the endpoint/key.
+  Curated families can also declare multiple `[[provider_accounts]]` in the
+  user-global config. Each account has its own `api_key_env`, enable/default
+  flags, and generated compatibility identities such as `deepseek--team/deepseek-v4-flash`.
+  New selectors use the stable `family/account/model` form, for example
+  `deepseek/team/deepseek-v4-flash`; generated provider names remain accepted
+  for existing sessions and project references.
+  A bare family name such as `deepseek` resolves to that family's default account.
+  Account switching is manual; Reasonix does not poll, load-balance, or fail over
+  across keys. A
   **model reference** (`default_model`, the `--model` flag, the desktop switcher)
   resolves via `Config.ResolveModel`, which accepts a provider name (→ its default
-  model), a bare model name, or an explicit `provider/model`. `context_window` is
+  model), a bare model name, an explicit `provider/model`, or a curated
+  `family/account/model` selection. `context_window` is
   the provider-wide fallback; `model_overrides.<model>.context_window` can replace
   it for one model. Per-model `prices` use model IDs as keys.
 - Streaming tool-call deltas are accumulated by index inside the provider; only
@@ -1007,7 +1017,15 @@ at `~/.reasonix/config.toml` on macOS/Linux and
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
 Fields marked user/global only are not overridden by project `reasonix.toml`.
 Provider entries name secrets with `api_key_env`; saved key values live in
-Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
+Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop.
+`[[provider_accounts]]` are user-global only: project `reasonix.toml` may
+reference generated provider names but must not declare accounts or store keys.
+Older configs without accounts migrate in memory to a `main` account and keep
+existing provider names (`deepseek-flash`, `opencode-go`, …). New accounts use
+`<route>--<account-id>` names. Disabled accounts leave the model picker;
+retired accounts keep generated provider entries so old sessions can still
+resolve. Different API keys may split a vendor's prefix cache by tenant.
+Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
 and the OS keyring are not provider-key runtime fallbacks. Project `.env` still
 feeds workspace-scoped, non-provider `${VAR}` expansion for MCP/plugin settings
@@ -1034,6 +1052,11 @@ reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # subagent_efforts = { review = "max", security_review = "high" }
 
 # A vendor endpoint exposing several models under one base_url/key.
+# [[provider_accounts]]  # user-global only; one family can have main + team keys
+# provider_id = "deepseek"
+# id = "team"
+# label = "Team"
+# api_key_env = "DEEPSEEK_API_KEY_TEAM"
 [[providers]]
 name           = "deepseek"
 kind           = "anthropic"

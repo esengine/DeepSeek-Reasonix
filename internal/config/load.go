@@ -145,13 +145,7 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 		cfg.systemPromptFileSource = promptFileSourceUser
 	}
 	userDefaultModel := cfg.DefaultModel
-	globalCLI := cfg.CLI
-	globalSecrets := cfg.Secrets
-	globalRemote := cfg.Remote.Clone()
-	globalDesktopLanguage := cfg.Desktop.Language
-	globalPricingCurrency := cfg.Desktop.Currency
-	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
-	globalTelemetry, globalLegacyAnchorSafetyGate := cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate
+	pins := captureUserGlobalPins(cfg)
 
 	tomlSources = append(tomlSources, projectTOML)
 	projectMeta, err := mergeTOML(cfg, projectTOML)
@@ -168,25 +162,7 @@ func loadForRoot(root string, opts loadForRootOptions) (*Config, error) {
 	} else if projectMeta.IsDefined("agent", "system_prompt_file") {
 		cfg.systemPromptFileSource = promptFileSourceProject
 	}
-	// The native CLI update channel controls the one user-installed binary.
-	// A repository-local reasonix.toml must never switch that global choice.
-	cfg.CLI = globalCLI
-	// Secret protection is a user-global security control: a cloned repo's
-	// reasonix.toml must not be able to flip on the workflow-breaking env/path
-	// protections.
-	cfg.Secrets = globalSecrets
-	// Remote SSH hosts are equally user-global: a cloned repo's reasonix.toml
-	// must not be able to inject hosts, jump chains, or port forwards that
-	// steer where Reasonix opens connections.
-	cfg.Remote = globalRemote
-	// Desktop language and pricing currency are user-level regional preferences.
-	// A repository must not be able to alter how the user's spend is shown.
-	cfg.Desktop.Language = globalDesktopLanguage
-	cfg.Desktop.Currency = globalPricingCurrency
-	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
-	// CLI telemetry is an explicit user-global privacy choice. Project config
-	// cannot opt a user in or out, including when the global value is absent.
-	cfg.Telemetry, cfg.Agent.LegacyAnchorSafetyGate = globalTelemetry, globalLegacyAnchorSafetyGate
+	applyUserGlobalPins(cfg, pins, projectTOML, err == nil && projectMeta.IsDefined("provider_accounts"))
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -820,6 +796,7 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
+	ensureProviderAccounts(cfg)
 	return changed
 }
 

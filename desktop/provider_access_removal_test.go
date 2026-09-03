@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -41,7 +42,6 @@ func TestRemoveProviderAccessesRemovesGroupedOfficialAliasesAtomically(t *testin
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
 	app := NewApp()
 	flashTab := &WorkspaceTab{ID: "flash", Scope: "global", model: "deepseek-flash/deepseek-v4-flash"}
 	proTab := &WorkspaceTab{ID: "pro", Scope: "global", model: "deepseek-pro/deepseek-v4-pro"}
@@ -251,7 +251,6 @@ func TestDeleteProviderRebuildsEveryVisibleRuntimeUsingAuxiliaryProvider(t *test
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
@@ -376,7 +375,6 @@ func TestDeleteProviderRejectsDetachedRuntimeUsingAuxiliaryProvider(t *testing.T
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
 	app := NewApp()
 	app.ctx = context.Background()
 	detachedCtrl := control.New(control.Options{Label: cfg.DefaultModel, Sink: event.Discard})
@@ -481,7 +479,7 @@ func TestRemoveProviderAccessRejectsDetachedRuntimeBeforeMutation(t *testing.T) 
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
+	beforeAccess := providerAccessSet(config.LoadForEdit(config.UserConfigPath()).Desktop.ProviderAccess)
 	app := NewApp()
 	detachedCtrl := control.New(control.Options{Label: "deepseek"})
 	detached := &WorkspaceTab{
@@ -496,7 +494,7 @@ func TestRemoveProviderAccessRejectsDetachedRuntimeBeforeMutation(t *testing.T) 
 		t.Fatalf("RemoveProviderAccess error = %v, want detached-runtime guard", err)
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
-	if !providerAccessSet(got.Desktop.ProviderAccess)["deepseek"] {
+	if !reflect.DeepEqual(providerAccessSet(got.Desktop.ProviderAccess), beforeAccess) {
 		t.Fatalf("provider access changed after detached-runtime rejection: %+v", got.Desktop.ProviderAccess)
 	}
 	if detached.Ctrl != detachedCtrl || detached.model != "deepseek/deepseek-v4-flash" {
@@ -515,7 +513,6 @@ func TestRemoveProviderAccessesRejectsMixedGroupBeforeMutation(t *testing.T) {
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
 	if err := NewApp().RemoveProviderAccesses([]string{"deepseek", "custom"}); err == nil {
 		t.Fatal("RemoveProviderAccesses accepted mixed official and custom providers")
 	}
@@ -653,7 +650,7 @@ func TestRemoveProviderAccessesRejectsInUseProviderWithoutConfiguredFallback(t *
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
+	beforeAccess := providerAccessSet(config.LoadForEdit(config.UserConfigPath()).Desktop.ProviderAccess)
 	app := NewApp()
 	tab := &WorkspaceTab{ID: "deepseek", Scope: "global", model: cfg.DefaultModel}
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
@@ -666,7 +663,7 @@ func TestRemoveProviderAccessesRejectsInUseProviderWithoutConfiguredFallback(t *
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)
-	if !access["deepseek"] || !access["mimo-pro"] {
+	if !reflect.DeepEqual(access, beforeAccess) {
 		t.Fatalf("provider access changed after rejected removal: %+v", got.Desktop.ProviderAccess)
 	}
 	if got.DefaultModel != cfg.DefaultModel || tab.model != cfg.DefaultModel {
@@ -685,7 +682,6 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
 	app := NewApp()
 	ctrl := newBlockingSnapshotCtrl(control.New(control.Options{Label: "deepseek"}))
 	tab := &WorkspaceTab{ID: "deepseek", Scope: "global", model: cfg.DefaultModel, Ctrl: ctrl}
@@ -701,8 +697,11 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 	changed := config.LoadForEdit(config.UserConfigPath())
 	provider, ok := changed.Provider("deepseek")
 	if !ok {
+		provider, ok = changed.Provider("deepseek-flash")
+	}
+	if !ok {
 		unlock()
-		t.Fatal("deepseek provider missing")
+		t.Fatal("DeepSeek provider route missing")
 	}
 	provider.BaseURL = "https://proxy.example/v1"
 	if err := changed.SaveTo(config.UserConfigPath()); err != nil {
@@ -717,7 +716,8 @@ func TestRemoveProviderAccessesRejectsOfficialProviderChangedDuringSnapshot(t *t
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)
-	if !access["deepseek"] || !access["mimo-pro"] {
+	deepseekAccess := access["deepseek"] || access["deepseek-flash"] || access["deepseek-pro"]
+	if !deepseekAccess || !access["mimo-pro"] {
 		t.Fatalf("provider access changed after rejected overlap: %+v", got.Desktop.ProviderAccess)
 	}
 	if ctrl.closeCount.Load() != 0 || tab.Ctrl != ctrl || tab.model != cfg.DefaultModel {
@@ -736,7 +736,7 @@ func TestRemoveProviderAccessesRejectsCredentialChangeDuringSnapshot(t *testing.
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-
+	beforeAccess := providerAccessSet(config.LoadForEdit(config.UserConfigPath()).Desktop.ProviderAccess)
 	app := NewApp()
 	ctrl := newBlockingSnapshotCtrl(control.New(control.Options{Label: "deepseek"}))
 	tab := &WorkspaceTab{ID: "deepseek", Scope: "global", model: cfg.DefaultModel, Ctrl: ctrl}
@@ -755,7 +755,7 @@ func TestRemoveProviderAccessesRejectsCredentialChangeDuringSnapshot(t *testing.
 	}
 	got := config.LoadForEdit(config.UserConfigPath())
 	access := providerAccessSet(got.Desktop.ProviderAccess)
-	if !access["deepseek"] || !access["mimo-pro"] {
+	if !reflect.DeepEqual(access, beforeAccess) {
 		t.Fatalf("provider access changed after rejected credential overlap: %+v", got.Desktop.ProviderAccess)
 	}
 	if ctrl.closeCount.Load() != 0 || tab.Ctrl != ctrl || tab.model != cfg.DefaultModel {

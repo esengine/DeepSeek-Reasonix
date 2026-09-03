@@ -17894,6 +17894,59 @@ body > .mermaid-diagram--fullscreen {
 .provider-access-card__actions .btn {
   white-space: nowrap;
 }
+.provider-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+}
+.provider-account-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 0;
+}
+.provider-account-row > strong {
+  min-width: 8rem;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-account-row > span:not(.badge) {
+  color: var(--fg-dim);
+  font-size: var(--text-2xs);
+}
+.provider-account-row .input {
+  min-width: 10rem;
+  flex: 1 1 12rem;
+}
+.provider-account-add {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 4px;
+}
+.provider-account-add .input {
+  min-width: 10rem;
+  flex: 1 1 12rem;
+}
+.provider-account-routes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+@media (max-width: 620px) {
+  .provider-account-row > strong { flex-basis: 100%; max-width: 100%; }
+  .provider-account-row .btn, .provider-account-add .btn { min-height: 28px; }
+}
 .provider-model-chips {
   display: flex;
   flex-wrap: wrap;

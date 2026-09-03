@@ -35,9 +35,10 @@ func (a *App) defaultSettingsView() SettingsView {
 	defaults := config.Default()
 	return SettingsView{
 		Providers: []ProviderView{}, OfficialProviders: officialProviderViews(map[string]bool{}, ""),
-		ProviderPresets: providerPresetViewsForRootWithResolver(nil, a.activeWorkspaceRoot(), nil),
-		ProviderKinds:   nonNil(provider.Kinds()),
-		Permissions:     PermissionsView{Mode: "ask", Allow: []string{}, Ask: []string{}, Deny: []string{}},
+		ProviderPresets:  providerPresetViewsForRootWithResolver(nil, a.activeWorkspaceRoot(), nil),
+		ProviderAccounts: []ProviderAccountView{},
+		ProviderKinds:    nonNil(provider.Kinds()),
+		Permissions:      PermissionsView{Mode: "ask", Allow: []string{}, Ask: []string{}, Deny: []string{}},
 		Sandbox: SandboxView{Bash: defaults.BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto",
 			EffectiveShell:      sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),
 			ResolvedShell:       sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)),

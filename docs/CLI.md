@@ -28,7 +28,7 @@ Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 
 | Flag | Purpose |
 | --- | --- |
-| `--model NAME` | Select a configured provider or `provider/model` reference. |
+| `--model NAME` | Select a configured provider, `provider/model`, or curated `family/account/model` reference. |
 | `--effort LEVEL` | Override reasoning effort for this session. |
 | `--max-steps N` | Set a one-off maximum tool-call round budget; `0` uses automatic execution. |
 | `--dir PATH` | Change the workspace root before loading config and tools. |
@@ -66,13 +66,17 @@ reasonix setup /path/to/config.toml
 ```
 
 In an interactive terminal, `reasonix setup` is a staged provider manager. It
-lists configured providers and lets you:
+lists provider families with account sub-items and lets you:
 
 - add OpenAI-compatible or Anthropic-compatible providers;
+- add, rename, enable/disable, or retire a curated-provider account;
 - edit endpoints and model lists;
 - update API keys or test the connection and refresh models;
 - choose the default model; and
 - remove providers.
+
+Project-level setup (`--local`) can select existing global accounts but cannot
+create accounts or write credentials into the project.
 
 Choose **Save and exit** to review and confirm the pending operations. Canceling
 discards them. Setup reloads the latest config while saving: unrelated desktop
@@ -451,7 +455,7 @@ the displayed list matches the commands the TUI accepts.
 | --- | --- |
 | `/continue-checks [guidance]` | Resume the immediately preceding paused task-completion check while preserving its verified tool evidence. The command is one-shot and refuses stale cards after another user turn. |
 | `/model` | Search configured models and switch the active model. |
-| `/provider` | Choose a provider, then choose one of its configured models. |
+| `/provider` | Choose a provider family/account, then one of its models. `/provider <family>/<account>` selects an account; generated provider names remain accepted. |
 | `/resume` | Search recent sessions and switch to one. |
 | `/status` | Show model, effort, cache, Git, background jobs, and balance details. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |

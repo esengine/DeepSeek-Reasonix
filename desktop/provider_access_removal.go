@@ -28,6 +28,15 @@ type providerRemovalTab struct {
 	retargetModel bool
 }
 
+func officialProviderKindFromName(name string) string {
+	switch strings.TrimSpace(name) {
+	case "deepseek", "deepseek-flash", "deepseek-pro", "deepseek-anthropic", "deepseek-responses":
+		return "deepseek"
+	default:
+		return ""
+	}
+}
+
 // DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
 	return a.deleteProviderAndRetargetTabs(name)
@@ -55,7 +64,26 @@ func (a *App) RemoveProviderAccesses(rawNames []string) error {
 	for _, name := range names {
 		p, ok := cfg.Provider(name)
 		if !ok {
-			return fmt.Errorf("remove provider access: provider %q not found", name)
+			// Family cards may be represented by generated official routes.
+			kind := officialProviderKindFromName(name)
+			if kind == "" {
+				return fmt.Errorf("remove provider access: provider %q not found", name)
+			}
+			found := false
+			for _, candidate := range cfg.Providers {
+				if officialProviderKindFromEntry(candidate) == kind {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("remove provider access: provider %q not found", name)
+			}
+			if officialKind != "" && officialKind != kind {
+				return fmt.Errorf("remove provider access: providers do not belong to one official group")
+			}
+			officialKind = kind
+			continue
 		}
 		kind := officialProviderKindFromEntry(*p)
 		if kind == "" {
@@ -111,7 +139,26 @@ func validateOfficialProviderRemoval(c *config.Config, names []string) error {
 	for _, name := range names {
 		p, ok := c.Provider(name)
 		if !ok {
-			return fmt.Errorf("remove provider access: provider %q not found", name)
+			// Accept generated legacy routes when the canonical family alias is absent.
+			kind := officialProviderKindFromName(name)
+			if kind == "" {
+				return fmt.Errorf("remove provider access: provider %q not found", name)
+			}
+			found := false
+			for _, candidate := range c.Providers {
+				if officialProviderKindFromEntry(candidate) == kind {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("remove provider access: provider %q not found", name)
+			}
+			if officialKind != "" && officialKind != kind {
+				return fmt.Errorf("remove provider access: providers do not belong to one official group")
+			}
+			officialKind = kind
+			continue
 		}
 		kind := officialProviderKindFromEntry(*p)
 		if kind == "" {
@@ -224,11 +271,67 @@ func providerAccessFallbackRef(c *config.Config, names []string) string {
 			continue
 		}
 		p, ok := c.Provider(candidate)
-		if ok && p.Configured() && len(p.ModelList()) > 0 {
+		if ok && p.Configured() && len(p.ModelList()) > 0 && (strings.TrimSpace(p.AccountID) == "" || c.AccountEnabled(p.AccountProviderID, p.AccountID)) {
 			return p.Name + "/" + p.DefaultModel()
 		}
 	}
 	return ""
+}
+
+// disableAccountRoutesForProviders preserves account-owned provider entries so
+// historical session references continue to resolve while removing them from
+// desktop access and future model catalogs. Accounts with no remaining enabled
+// routes are retired after config references have been retargeted.
+func disableAccountRoutesForProviders(c *config.Config, names []string) error {
+	if c == nil {
+		return nil
+	}
+	retire := map[string][2]string{}
+	for _, name := range names {
+		p, ok := c.Provider(name)
+		if !ok || strings.TrimSpace(p.AccountID) == "" || strings.TrimSpace(p.AccountProviderID) == "" {
+			continue
+		}
+		if err := c.SetProviderAccountRouteEnabled(p.AccountProviderID, p.AccountID, p.AccountRouteID, false); err != nil {
+			return err
+		}
+		key := p.AccountProviderID + "\x00" + p.AccountID
+		retire[key] = [2]string{p.AccountProviderID, p.AccountID}
+	}
+	for _, pair := range retire {
+		entries, _ := c.ResolveAccountProvider(pair[0], pair[1])
+		var account config.ProviderAccount
+		foundAccount := false
+		for _, candidate := range c.ProviderAccounts {
+			if candidate.ProviderID == pair[0] && candidate.ID == pair[1] {
+				account, foundAccount = candidate, true
+				break
+			}
+		}
+		if !foundAccount {
+			continue
+		}
+		enabled := false
+		for _, entry := range entries {
+			disabled := false
+			for _, route := range account.DisabledRoutes {
+				if strings.TrimSpace(route) == strings.TrimSpace(entry.AccountRouteID) {
+					disabled = true
+					break
+				}
+			}
+			if account.IsEnabled() && !disabled {
+				enabled = true
+				break
+			}
+		}
+		if !enabled {
+			if err := c.RetireProviderAccount(pair[0], pair[1]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func providerRefMatchesAny(c *config.Config, ref string, names []string) bool {
@@ -453,6 +556,9 @@ func (a *App) commitOfficialProviderRemoval(plan providerRemovalPlan, names []st
 	}
 	fallbackRef := providerAccessFallbackRef(fresh, plan.targets)
 	retargetProviderReferences(fresh, plan.targets, fallbackRef)
+	if err := disableAccountRoutesForProviders(fresh, plan.targets); err != nil {
+		return "", err
+	}
 	removeProviderAccess(fresh, plan.targets...)
 	return fallbackRef, fresh.SaveTo(path)
 }
@@ -480,21 +586,22 @@ func (a *App) commitCustomProviderRemovals(plan providerRemovalPlan) (string, er
 		return "", err
 	}
 	fallbackRef := providerAccessFallbackRef(fresh, plan.targets)
-	// Config.RemoveProvider has a compatibility fallback across every configured
-	// provider. Settings access removal is narrower: hidden providers must not
-	// silently become the new default after restart. Retarget first so the
-	// persisted config and every rebuilt tab use the same visible provider. Keep
-	// the historical provider-only persisted form while the runtime uses the
-	// exact provider/model reference returned below.
+	// Persist a provider-only fallback while runtimes use the exact model ref.
 	persistedFallback := fallbackRef
 	if providerName, _, ok := strings.Cut(fallbackRef, "/"); ok {
 		persistedFallback = providerName
 	}
 	retargetProviderReferences(fresh, plan.targets, persistedFallback)
 	for _, name := range plan.targets {
+		if p, ok := fresh.Provider(name); ok && strings.TrimSpace(p.AccountID) != "" && strings.TrimSpace(p.AccountProviderID) != "" {
+			continue
+		}
 		if err := fresh.RemoveProvider(name); err != nil {
 			return "", err
 		}
+	}
+	if err := disableAccountRoutesForProviders(fresh, plan.targets); err != nil {
+		return "", err
 	}
 	removeProviderAccess(fresh, plan.targets...)
 	return fallbackRef, fresh.SaveTo(path)
@@ -522,10 +629,7 @@ func (a *App) applyProviderRemovalRuntime(affected []providerRemovalTab, fallbac
 				reset = append(reset, item)
 				continue
 			}
-			// lockRuntimeTurnGates already holds this tab's turnStartMu, and the
-			// outer runtime mutation owns runtimeRebuildMu plus admission. Reuse
-			// the settings build-and-swap core without reacquiring either lock so
-			// the old controller remains usable if replacement construction fails.
+			// Reuse the locked settings build-and-swap core without reacquiring locks.
 			modelOverride := ""
 			if item.retargetModel {
 				modelOverride = fallbackRef

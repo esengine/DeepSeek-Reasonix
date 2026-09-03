@@ -54,6 +54,7 @@ type Config struct {
 	Notifications    NotificationsConfig `toml:"notifications"`
 	Agent            AgentConfig         `toml:"agent"`
 	Providers        []ProviderEntry     `toml:"providers"`
+	ProviderAccounts []ProviderAccount   `toml:"provider_accounts"`
 	Tools            ToolsConfig         `toml:"tools"`
 	Permissions      PermissionsConfig   `toml:"permissions"`
 	Sandbox          SandboxConfig       `toml:"sandbox"`
@@ -1364,21 +1365,25 @@ type AgentConfig struct {
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name          string            `toml:"name"`
-	Kind          string            `toml:"kind"`
-	BaseURL       string            `toml:"base_url"`
-	ChatURL       string            `toml:"chat_url"`    // legacy OpenAI chat endpoint override; retained with its historical semantics
-	RequestURL    string            `toml:"request_url"` // exact provider request URL written by current settings UI
-	Model         string            `toml:"model"`       // a single model (back-compat)
-	Models        []string          `toml:"models"`      // a vendor's model list (one base_url/key, many models)
-	ModelsURL     string            `toml:"models_url"`  // auto-fetch models from this URL on startup
-	Default       string            `toml:"default"`     // default model when Models is set (else Models[0])
-	APIKeyEnv     string            `toml:"api_key_env"`
-	PresetID      string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
-	PresetVersion int               `toml:"preset_version"` // curated preset schema version for future migrations.
-	Headers       map[string]string `toml:"headers"`        // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.
-	ExtraBody     map[string]any    `toml:"extra_body"`     // optional extra top-level JSON request body fields for OpenAI-compatible gateways.
-	AuthHeader    bool              `toml:"auth_header"`    // for Anthropic-compatible gateways that expect Authorization: Bearer instead of x-api-key.
+	Name              string            `toml:"name"`
+	Kind              string            `toml:"kind"`
+	BaseURL           string            `toml:"base_url"`
+	ChatURL           string            `toml:"chat_url"`    // legacy OpenAI chat endpoint override; retained with its historical semantics
+	RequestURL        string            `toml:"request_url"` // exact provider request URL written by current settings UI
+	Model             string            `toml:"model"`       // a single model (back-compat)
+	Models            []string          `toml:"models"`      // a vendor's model list (one base_url/key, many models)
+	ModelsURL         string            `toml:"models_url"`  // auto-fetch models from this URL on startup
+	Default           string            `toml:"default"`     // default model when Models is set (else Models[0])
+	APIKeyEnv         string            `toml:"api_key_env"`
+	PresetID          string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
+	PresetVersion     int               `toml:"preset_version"` // curated preset schema version for future migrations.
+	AccountProviderID string            `toml:"account_provider_id,omitempty"`
+	AccountID         string            `toml:"account_id,omitempty"`
+	AccountRouteID    string            `toml:"account_route_id,omitempty"`
+	AccountLabel      string            `toml:"account_label,omitempty"`
+	Headers           map[string]string `toml:"headers"`     // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.
+	ExtraBody         map[string]any    `toml:"extra_body"`  // optional extra top-level JSON request body fields for OpenAI-compatible gateways.
+	AuthHeader        bool              `toml:"auth_header"` // for Anthropic-compatible gateways that expect Authorization: Bearer instead of x-api-key.
 	// ResponsesMode selects the Responses API context strategy. Empty preserves
 	// vendor detection; DeepSeek is stateless while compatible endpoints may use
 	// stateful previous_response_id continuation.
@@ -1857,7 +1862,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    7,
+		ConfigVersion:    8,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
@@ -1944,183 +1949,10 @@ func Default() *Config {
 // main config into an unparseable state that leaves the app with no usable
 // models (#4615, #4708).
 func (c *Config) WriteFile(path string) error {
+	if renderScopeForPath(path) != RenderScopeProject {
+		c.prepareUserPersist()
+	}
 	return atomicWriteToConfigFile(path, RenderTOMLForScope(c, renderScopeForPath(path)), configFilePerm(path))
-}
-
-// Provider returns the named provider entry.
-func (c *Config) Provider(name string) (*ProviderEntry, bool) {
-	for i := range c.Providers {
-		if c.Providers[i].Name == name {
-			return &c.Providers[i], true
-		}
-	}
-	return nil, false
-}
-
-// ResolveModel resolves a model reference to a provider entry whose Model is the
-// selected model string (a copy, so the config's lists stay intact). It accepts:
-//   - "provider/model" — that exact model under that provider;
-//   - a provider name   — the provider's default model;
-//   - a bare model name — the (first) provider that lists it.
-//
-// The returned entry is ready to build a provider from (NewProvider reads .Model),
-// so a single "vendor with many models" entry yields one instance per model
-// without duplicating base_url/api_key_env. Single-`model` entries still resolve
-// by provider name, keeping older configs working unchanged.
-func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
-	if ref == "" {
-		return nil, false
-	}
-	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
-		if access["deepseek"] && !canCanonicalizeLegacyDeepSeekProviders(c) {
-			delete(access, "deepseek")
-		}
-		ref = retargetDesktopOfficialRef(ref, access)
-	}
-	// "provider/model"
-	if prov, model, ok := strings.Cut(ref, "/"); ok {
-		if e, found := c.Provider(prov); found && e.HasModel(model) {
-			cp := *e
-			cp.Model = model
-			cp.applyModelPrice()
-			cp.applyModelOverride()
-			return &cp, true
-		}
-	}
-	// a provider name → its default model
-	if e, found := c.Provider(ref); found {
-		cp := *e
-		cp.Model = e.DefaultModel()
-		cp.applyModelPrice()
-		cp.applyModelOverride()
-		return &cp, true
-	}
-	// a bare model name → the provider that lists it
-	for i := range c.Providers {
-		if c.Providers[i].HasModel(ref) {
-			cp := c.Providers[i]
-			cp.Model = ref
-			cp.applyModelPrice()
-			cp.applyModelOverride()
-			return &cp, true
-		}
-	}
-	return nil, false
-}
-
-// ResolveModelWithFallback resolves a model reference to the canonical
-// "provider/model" form used by the desktop runtime. If ref is stale or empty,
-// it tries the user's configured default_model before falling back to the first
-// configured provider — so preference isn't overwritten by iteration order.
-func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
-	ref = strings.TrimSpace(ref)
-	if ref != "" {
-		if e, found := c.ResolveModel(ref); found {
-			return e.Name + "/" + e.Model, false, true
-		}
-	}
-	// Before falling back to the first configured provider (which may not be the
-	// user's preferred choice), try the configured default_model.  Skip when ref
-	// already WAS the DefaultModel (it already failed above, so retrying won't
-	// help) or when the default provider has no API key configured.
-	if ref != c.DefaultModel && c.DefaultModel != "" {
-		if e, found := c.ResolveModel(c.DefaultModel); found && e.Configured() {
-			return e.Name + "/" + e.Model, true, true
-		}
-	}
-	for i := range c.Providers {
-		p := &c.Providers[i]
-		// Skip providers with no models or no API key: falling back onto a keyless
-		// provider just boots the tab onto something that fails on first use. Mirrors
-		// the Configured() gate the provider-removal/selection paths already apply.
-		if len(p.ModelList()) == 0 || !p.Configured() {
-			continue
-		}
-		return p.Name + "/" + p.DefaultModel(), true, true
-	}
-	return "", false, false
-}
-
-// ResolveNewSessionChatModel selects the model for a newly-created chat
-// session. Configured candidates win; if every chat candidate is keyless, the
-// valid default (or first chat model) is preserved so callers can surface their
-// existing missing-key recovery UI. An unknown default is also preserved for
-// the CLI's actionable configuration error. Provider order is otherwise stable.
-func (c *Config) ResolveNewSessionChatModel() (resolvedRef string, fallback bool, ok bool) {
-	return c.resolveNewSessionChatModel(nil, true)
-}
-
-func (c *Config) resolveNewSessionChatModel(providerAllowed func(string) bool, preserveUnknownDefault bool) (resolvedRef string, fallback bool, ok bool) {
-	if c == nil {
-		return "", false, false
-	}
-	if providerAllowed == nil {
-		providerAllowed = func(string) bool { return true }
-	}
-
-	def := strings.TrimSpace(c.DefaultModel)
-	keylessDefault := ""
-	if def != "" {
-		if entry, found := c.ResolveModel(def); found {
-			if providerAllowed(entry.Name) && IsLikelyChatModel(entry.Model) {
-				if entry.Configured() {
-					return def, false, true
-				}
-				keylessDefault = def
-			}
-		} else if preserveUnknownDefault {
-			// CLI/boot callers need the stale value intact so their existing
-			// unknown-model error can name it and explain the providers that
-			// replaced it. Desktop uses its recovery UI and does not preserve it.
-			return def, false, true
-		}
-	}
-
-	keylessFallback := ""
-	for i := range c.Providers {
-		p := &c.Providers[i]
-		if !providerAllowed(p.Name) {
-			continue
-		}
-		chatModels := p.ChatModelList()
-		if len(chatModels) == 0 {
-			continue
-		}
-		model := chatModels[0]
-		for _, candidate := range chatModels {
-			if candidate == p.DefaultModel() {
-				model = candidate
-				break
-			}
-		}
-		resolved := p.Name + "/" + model
-		if p.Configured() {
-			return resolved, true, true
-		}
-		if keylessFallback == "" {
-			keylessFallback = resolved
-		}
-	}
-	if keylessDefault != "" {
-		return keylessDefault, false, true
-	}
-	if keylessFallback != "" {
-		return keylessFallback, true, true
-	}
-	return "", false, false
-}
-
-// ResolveDesktopNewSessionModel selects the model for a newly-created desktop
-// session. It shares the chat-model fallback policy with other frontends while
-// limiting candidates to providers exposed by the desktop access catalog.
-func (c *Config) ResolveDesktopNewSessionModel() (resolvedRef string, fallback bool, ok bool) {
-	if c == nil {
-		return "", false, false
-	}
-	access := desktopProviderAccessMap(c.Desktop.ProviderAccess)
-	return c.resolveNewSessionChatModel(func(name string) bool {
-		return c.Desktop.ProviderAccess == nil || access[strings.TrimSpace(name)]
-	}, false)
 }
 
 // APIKey resolves the entry's API key from its api_key_env.

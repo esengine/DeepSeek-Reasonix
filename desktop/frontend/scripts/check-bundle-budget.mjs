@@ -180,14 +180,10 @@ console.log("\nbundle budgets");
 // move the combined path to 462.2 KiB. Local spectator reclaim adds the
 // desktop-vs-remote command branch. Sticky Context's session-scoped file chips
 // bring the merged stable path to 462.587 KiB. Windows' embedded build metadata
-// lands just above the rounded 462.6 KiB boundary; retain one cross-platform
-// decimal step without widening any chunk or raw gate.
-// Reading the applied item-list transform (instead of the remembered offset)
-// keeps the reader/anchor visual guards from compounding under reduced-motion
-// WebView2; the merged path measures 462.827 KiB. Retain one decimal step.
-// Generation-bound native-thumb transactions and the rebased custom-scrollbar
-// drag add 0.3 KiB gzip; the merged path measures 463.102 KiB.
-const initialJSBudgetKiB = 463.2;
+// and generic provider-account controls land at 463.414 KiB gzip. Keep this
+// narrow one-decimal ratchet scoped to the initial shell; all other chunk
+// budgets remain unchanged.
+const initialJSBudgetKiB = 463.5;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -251,7 +247,9 @@ for (const path of localeChunks) {
   // reclaim), while Sticky Context adds file-state and limit diagnostics. The
   // merged stable chunks measure 60.395 KiB zh and 61.232 KiB zh-TW; retain
   // only the next one-decimal ceiling for each dialect.
-  const budget = name.startsWith("zh-TW-") ? 61.3 * 1024 : 60.4 * 1024;
+  // Account retirement/restore copy adds a bounded locale payload increase.
+  // Keep per-locale ceilings narrow and leave all other bundle budgets intact.
+  const budget = name.startsWith("zh-TW-") ? 61.4 * 1024 : 60.6 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -329,14 +327,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // path 2465.105 KiB raw; the merged test channel measures 2464.979 KiB.
 // Session takeover banners and #9703/#9711's provisional-selection handoff
 // combine with Sticky Context's pinned-file state at 2469.125 KiB raw on the
-// merged stable path. Retain only the next one-decimal ceiling.
-// The passive reader-anchor lease for delayed WebView2 range commits measures
-// 2469.347 KiB raw (+0.222 KiB, +0.009%). Retain only the next one-decimal
-// ceiling; gzip and largest-chunk budgets remain unchanged.
-// Reading the applied item-list transform for the reader/anchor visual guards
-// adds 0.5 KiB raw on top; the merged path measures 2469.815 KiB.
-// The scrollbar generation fence and drag rebase add 1.1 KiB raw; the merged
-// path measures 2470.932 KiB.
-const rawInitialBudgetKiB = 2_471.0;
+// merged stable path. Account route controls and canonical selection payload
+// add 4.25 KiB raw to the initial graph; retain a narrow one-decimal ceiling.
+const rawInitialBudgetKiB = 2_473.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

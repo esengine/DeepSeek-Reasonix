@@ -41,6 +41,7 @@ export function baseSettings(displayMode: "standard" | "compact" = "standard"): 
     providers: [],
     officialProviders: [],
     providerPresets: [],
+    providerAccounts: [],
     permissions: { mode: "ask", allow: [], ask: [], deny: [] },
     sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto", shellCapabilities: [{ id: "bash", variant: "system", available: true, path: "/bin/bash", source: "path" }] },
     network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },

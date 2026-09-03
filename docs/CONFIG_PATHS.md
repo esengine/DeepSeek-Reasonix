@@ -102,6 +102,14 @@ show_turn_usage = false       # hide per-request token/cost receipts in the TUI;
 [desktop]
 provider_access = ["deepseek"]
 
+# provider_accounts are user-global only. Project reasonix.toml cannot define them.
+# [[provider_accounts]]
+# provider_id = "deepseek"
+# id = "main"
+# label = "Main"
+# api_key_env = "DEEPSEEK_API_KEY"
+# default = true
+
 [[providers]]
 name        = "deepseek"
 kind        = "anthropic"

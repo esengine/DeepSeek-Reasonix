@@ -79,6 +79,11 @@ type ProviderView struct {
 	// current model selection. Background discovery must compare it while holding
 	// the config edit lock before applying a narrow catalog-only update.
 	ModelCatalogFingerprint string `json:"modelCatalogFingerprint"`
+	ProviderID              string `json:"providerId,omitempty"`
+	AccountID               string `json:"accountId,omitempty"`
+	AccountLabel            string `json:"accountLabel,omitempty"`
+	AccountEnabled          bool   `json:"accountEnabled,omitempty"`
+	AccountDefault          bool   `json:"accountDefault,omitempty"`
 }
 
 type ProviderModelCatalogUpdate struct {
@@ -90,29 +95,33 @@ type ProviderModelCatalogUpdate struct {
 }
 
 type ProviderPresetView struct {
-	ID                   string   `json:"id"`
-	Label                string   `json:"label"`
-	Description          string   `json:"description"`
-	KeyEnv               string   `json:"keyEnv"`
-	Recommended          bool     `json:"recommended,omitempty"`
-	BillingMode          string   `json:"billingMode,omitempty"`
-	DisplayGroup         string   `json:"displayGroup,omitempty"`
-	DisplaySection       string   `json:"displaySection,omitempty"`
-	DisplayTier          string   `json:"displayTier,omitempty"`
-	RouteKind            string   `json:"routeKind,omitempty"`
-	Optional             bool     `json:"optional,omitempty"`
-	DisplayOrder         int      `json:"displayOrder,omitempty"`
-	ProviderNames        []string `json:"providerNames"`
-	Models               []string `json:"models"`
-	Added                bool     `json:"added"`
-	Status               string   `json:"status"`
-	StatusProviderNames  []string `json:"statusProviderNames"`
-	MissingProviderNames []string `json:"missingProviderNames,omitempty"`
-	KeySet               bool     `json:"keySet"`
-	RequiresKey          bool     `json:"requiresKey"`
-	Configured           bool     `json:"configured"`
-	KeySource            string   `json:"keySource,omitempty"`
-	KeySourcePath        string   `json:"keySourcePath,omitempty"`
+	ID                   string                `json:"id"`
+	Label                string                `json:"label"`
+	Description          string                `json:"description"`
+	KeyEnv               string                `json:"keyEnv"`
+	Recommended          bool                  `json:"recommended,omitempty"`
+	BillingMode          string                `json:"billingMode,omitempty"`
+	DisplayGroup         string                `json:"displayGroup,omitempty"`
+	DisplaySection       string                `json:"displaySection,omitempty"`
+	DisplayTier          string                `json:"displayTier,omitempty"`
+	RouteKind            string                `json:"routeKind,omitempty"`
+	Optional             bool                  `json:"optional,omitempty"`
+	DisplayOrder         int                   `json:"displayOrder,omitempty"`
+	ProviderNames        []string              `json:"providerNames"`
+	Models               []string              `json:"models"`
+	Added                bool                  `json:"added"`
+	Status               string                `json:"status"`
+	StatusProviderNames  []string              `json:"statusProviderNames"`
+	MissingProviderNames []string              `json:"missingProviderNames,omitempty"`
+	KeySet               bool                  `json:"keySet"`
+	RequiresKey          bool                  `json:"requiresKey"`
+	Configured           bool                  `json:"configured"`
+	KeySource            string                `json:"keySource,omitempty"`
+	KeySourcePath        string                `json:"keySourcePath,omitempty"`
+	AccountGroupID       string                `json:"accountGroupId,omitempty"`
+	Accounts             []ProviderAccountView `json:"accounts"`
+	CanAddAccount        bool                  `json:"canAddAccount,omitempty"`
+	AvailableRoutes      []string              `json:"availableRoutes"`
 }
 
 const (
@@ -302,33 +311,34 @@ type BotSettingsView struct {
 
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
-	DefaultModel                 string               `json:"defaultModel"`
-	PlannerModel                 string               `json:"plannerModel"`
-	VisionModel                  string               `json:"visionModel"`
-	SubagentModel                string               `json:"subagentModel"`
-	SubagentEffort               string               `json:"subagentEffort"`
-	AutoPlan                     string               `json:"autoPlan"`
-	Providers                    []ProviderView       `json:"providers"`
-	OfficialProviders            []ProviderView       `json:"officialProviders"`
-	ProviderPresets              []ProviderPresetView `json:"providerPresets"`
-	Permissions                  PermissionsView      `json:"permissions"`
-	Sandbox                      SandboxView          `json:"sandbox"`
-	Network                      NetworkView          `json:"network"`
-	Agent                        AgentView            `json:"agent"`
-	Bot                          BotSettingsView      `json:"bot"`
-	DesktopLanguage              string               `json:"desktopLanguage"`
-	DesktopCurrency              string               `json:"desktopCurrency"`
-	DesktopLayoutStyle           string               `json:"desktopLayoutStyle"`
-	DesktopTheme                 string               `json:"desktopTheme"`
-	DesktopThemeStyle            string               `json:"desktopThemeStyle"`
-	DesktopTerminalTheme         string               `json:"desktopTerminalTheme,omitempty"`
-	CloseBehavior                string               `json:"closeBehavior"`
-	DisplayMode                  string               `json:"displayMode"`
-	ReasoningDisplayMode         string               `json:"reasoningDisplayMode"`
-	ReasoningDisplayModeExplicit bool                 `json:"reasoningDisplayModeExplicit"`
-	StatusBarStyle               string               `json:"statusBarStyle"`
-	StatusBarItems               []string             `json:"statusBarItems"`
-	DefaultToolApprovalMode      string               `json:"defaultToolApprovalMode"`
+	DefaultModel                 string                `json:"defaultModel"`
+	PlannerModel                 string                `json:"plannerModel"`
+	VisionModel                  string                `json:"visionModel"`
+	SubagentModel                string                `json:"subagentModel"`
+	SubagentEffort               string                `json:"subagentEffort"`
+	AutoPlan                     string                `json:"autoPlan"`
+	Providers                    []ProviderView        `json:"providers"`
+	OfficialProviders            []ProviderView        `json:"officialProviders"`
+	ProviderPresets              []ProviderPresetView  `json:"providerPresets"`
+	ProviderAccounts             []ProviderAccountView `json:"providerAccounts"`
+	Permissions                  PermissionsView       `json:"permissions"`
+	Sandbox                      SandboxView           `json:"sandbox"`
+	Network                      NetworkView           `json:"network"`
+	Agent                        AgentView             `json:"agent"`
+	Bot                          BotSettingsView       `json:"bot"`
+	DesktopLanguage              string                `json:"desktopLanguage"`
+	DesktopCurrency              string                `json:"desktopCurrency"`
+	DesktopLayoutStyle           string                `json:"desktopLayoutStyle"`
+	DesktopTheme                 string                `json:"desktopTheme"`
+	DesktopThemeStyle            string                `json:"desktopThemeStyle"`
+	DesktopTerminalTheme         string                `json:"desktopTerminalTheme,omitempty"`
+	CloseBehavior                string                `json:"closeBehavior"`
+	DisplayMode                  string                `json:"displayMode"`
+	ReasoningDisplayMode         string                `json:"reasoningDisplayMode"`
+	ReasoningDisplayModeExplicit bool                  `json:"reasoningDisplayModeExplicit"`
+	StatusBarStyle               string                `json:"statusBarStyle"`
+	StatusBarItems               []string              `json:"statusBarItems"`
+	DefaultToolApprovalMode      string                `json:"defaultToolApprovalMode"`
 
 	CheckUpdates      bool   `json:"checkUpdates"`
 	UpdateChannel     string `json:"updateChannel"`
@@ -685,16 +695,9 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		ModelOverrides:              providerModelOverridesForView(p.ModelOverrides, models),
 		RecommendedUpgradeAvailable: config.CanUpgradeDeepSeekProviderProtocol(&p),
 		ModelCatalogFingerprint:     providerModelCatalogFingerprintForCredentials(p, credentialsRevision),
-	}
-}
-
-func providerThinkingForSettings(thinking string) string {
-	normalized := strings.ToLower(strings.TrimSpace(thinking))
-	switch normalized {
-	case "enabled", "disabled", "adaptive":
-		return normalized
-	default:
-		return ""
+		ProviderID:                  p.AccountProviderID,
+		AccountID:                   p.AccountID,
+		AccountLabel:                p.AccountLabel,
 	}
 }
 
@@ -720,72 +723,6 @@ func officialProviderViewsForRootWithResolver(added map[string]bool, pricingLang
 		for _, entry := range entries {
 			out = append(out, providerViewFromEntryForRootWithResolverAndCredentials(entry, true, added[entry.Name], root, resolver, credentialsRevision))
 		}
-	}
-	return out
-}
-
-func providerPresetViewsForRootWithResolver(cfg *config.Config, root string, resolver *config.CredentialResolver) []ProviderPresetView {
-	if resolver == nil {
-		resolver = config.NewCredentialResolverForRoot(root)
-	}
-	presets := config.CuratedProviderPresets()
-	out := make([]ProviderPresetView, 0, len(presets))
-	for _, preset := range presets {
-		keyEnv := strings.TrimSpace(preset.KeyEnv)
-		names := make([]string, 0, len(preset.Entries))
-		models := make([]string, 0)
-		modelSeen := map[string]bool{}
-		requiresKey := false
-		for _, entry := range preset.Entries {
-			if keyEnv == "" {
-				keyEnv = strings.TrimSpace(entry.APIKeyEnv)
-			}
-			if entry.RequiresAPIKey() {
-				requiresKey = true
-			}
-			name := strings.TrimSpace(entry.Name)
-			if name != "" {
-				names = append(names, name)
-			}
-			for _, model := range chatProviderModels(entry.ChatModelList()) {
-				if modelSeen[model] {
-					continue
-				}
-				modelSeen[model] = true
-				models = append(models, model)
-			}
-		}
-		key := config.CredentialResolution{}
-		if keyEnv != "" {
-			key = resolver.ResolveGlobalFirst(keyEnv)
-		}
-		status, statusNames, missingNames := classifyProviderPresetStatus(cfg, preset)
-		added := status == providerPresetStatusInstalled || status == providerPresetStatusInstalledModified || status == providerPresetStatusNameConflict
-		out = append(out, ProviderPresetView{
-			ID:                   preset.ID,
-			Label:                preset.Label,
-			Description:          preset.Description,
-			KeyEnv:               keyEnv,
-			Recommended:          preset.Recommended,
-			BillingMode:          preset.BillingMode,
-			DisplayGroup:         preset.DisplayGroup,
-			DisplaySection:       preset.DisplaySection,
-			DisplayTier:          preset.DisplayTier,
-			RouteKind:            preset.RouteKind,
-			Optional:             preset.Optional,
-			DisplayOrder:         preset.DisplayOrder,
-			ProviderNames:        nonNil(names),
-			Models:               nonNil(models),
-			Added:                added,
-			Status:               status,
-			StatusProviderNames:  nonNil(statusNames),
-			MissingProviderNames: nonNil(missingNames),
-			KeySet:               key.Set,
-			RequiresKey:          requiresKey,
-			Configured:           !requiresKey || key.Set,
-			KeySource:            key.Source.Label,
-			KeySourcePath:        key.Source.Path,
-		})
 	}
 	return out
 }
@@ -1005,6 +942,7 @@ func (a *App) Settings() SettingsView {
 		Providers:         []ProviderView{},
 		OfficialProviders: []ProviderView{},
 		ProviderPresets:   []ProviderPresetView{},
+		ProviderAccounts:  []ProviderAccountView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),
@@ -1077,8 +1015,11 @@ func (a *App) Settings() SettingsView {
 		p := &cfg.Providers[i]
 		providerView := providerViewFromEntryForRootWithResolverAndCredentials(*p, isOfficialBuiltInProvider(*p), added[p.Name], root, resolver, credentialsRevision)
 		providerView.RecommendedUpgradeAvailable = providerView.RecommendedUpgradeAvailable && config.CanUpgradeDeepSeekProviderProtocolUserConfig(p.Name)
+		applyAccountMetadataToProviderView(&providerView, *p, cfg)
 		v.Providers = append(v.Providers, providerView)
 	}
+	appendLegacyAccountFamilyViews(&v.Providers, cfg, added, root, resolver, credentialsRevision)
+	v.ProviderAccounts = providerAccountViewsForRoot(cfg, root, resolver)
 	return v
 }
 
@@ -1333,8 +1274,32 @@ func (a *App) applySkillConfigChangeForFields(fields []string, setting string, m
 }
 
 func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.Config) error) (string, error) {
+	result, err := a.applyConfigChangeResult(setting, mutate)
+	return result.Warning, err
+}
+
+func (a *App) applyConfigChangeWithRuntimeMutation(setting string, mutate func(*config.Config) error) (configChangeResult, error) {
+	defer a.lockRuntimeMutation(setting)()
+	result, err := a.applyConfigChangeResultInternal(setting, mutate, true)
+	return result, err
+}
+
+// configChangeResult records whether the user config reached disk before a
+// runtime rebuild or subsequent credential operation failed. Callers that
+// create credentials must only roll them back while Committed is false.
+type configChangeResult struct {
+	Warning   string
+	Committed bool
+}
+
+func (a *App) applyConfigChangeResult(setting string, mutate func(*config.Config) error) (configChangeResult, error) {
+	return a.applyConfigChangeResultInternal(setting, mutate, false)
+}
+
+func (a *App) applyConfigChangeResultInternal(setting string, mutate func(*config.Config) error, runtimeHeld bool) (configChangeResult, error) {
+	var result configChangeResult
 	if err := a.ensureActiveTabRebuildAllowed(setting); err != nil {
-		return "", err
+		return result, err
 	}
 	if err := func() error {
 		// Serialize the load-modify-save against other in-process config editors
@@ -1352,17 +1317,25 @@ func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.C
 		}
 		return cfg.SaveTo(path)
 	}(); err != nil {
-		return "", err
+		return result, err
 	}
-	if err := a.rebuildSetting(setting); err != nil {
+	result.Committed = true
+	var rebuildErr error
+	if runtimeHeld {
+		rebuildErr = a.rebuildSettingLocked(setting)
+	} else {
+		rebuildErr = a.rebuildSetting(setting)
+	}
+	if err := rebuildErr; err != nil {
 		if warning, ok := a.deferredRebuildWarning(setting, err); ok {
 			a.refreshActiveTabMetaExtras()
-			return warning, nil
+			result.Warning = warning
+			return result, nil
 		}
-		return "", err
+		return result, err
 	}
 	a.refreshActiveTabMetaExtras()
-	return "", nil
+	return result, nil
 }
 
 // refreshActiveTabMetaExtras invalidates the cached model capability snapshot

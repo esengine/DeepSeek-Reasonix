@@ -138,6 +138,7 @@ function renderCard(
     <LocaleProvider>
       <ProviderAccessCard
         group={providerGroup}
+        apply={async () => undefined}
         busy={false}
         fetching={false}
         editing={null}

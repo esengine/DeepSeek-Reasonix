@@ -436,6 +436,13 @@ type Messages struct {
 	SetupManagerTitle        string
 	SetupAddOpenAI           string
 	SetupAddAnthropic        string
+	SetupAddAccount          string
+	SetupAddAccountDesc      string
+	SetupAccountLabel        string
+	SetupAccountRename       string
+	SetupAccountToggle       string
+	SetupAccountRetire       string
+	SetupProjectNoAccounts   string
 	SetupProviderExistsFmt   string
 	SetupSaveExit            string
 	SetupSaveExitDesc        string
