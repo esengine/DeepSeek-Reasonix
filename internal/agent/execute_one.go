@@ -655,6 +655,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.capabilityAudit != nil {
 		cctx = tool.WithRemoteDispatchObserver(cctx, a.capabilityAudit.RecordRemoteDispatch)
 	}
+	if a.svc.pty != nil {
+		cctx = pty.WithManager(cctx, a.svc.pty)
+	}
 	plan.cctx = cctx
 	var execution *tool.ShellExecution
 	result, images, execution, err = a.dispatchResolvedTool(cctx, plan)

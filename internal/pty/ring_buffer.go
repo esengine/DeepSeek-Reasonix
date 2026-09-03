@@ -76,6 +76,27 @@ func (rb *RingBuffer) ReadUnread(maxBytes int) []byte {
 	return result
 }
 
+// PeekUnread returns a copy of unread bytes without advancing the unread cursor.
+func (rb *RingBuffer) PeekUnread(maxBytes int) []byte {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	unreadCount := rb.size - rb.cursor
+	if unreadCount <= 0 {
+		return nil
+	}
+	if maxBytes > 0 && unreadCount > maxBytes {
+		unreadCount = maxBytes
+	}
+
+	result := make([]byte, unreadCount)
+	startPos := (rb.tail + rb.cursor) % rb.capacity
+	for i := 0; i < unreadCount; i++ {
+		result[i] = rb.buf[(startPos+i)%rb.capacity]
+	}
+	return result
+}
+
 // ReadTail reads up to maxBytes of the most recent output without advancing the unread cursor.
 func (rb *RingBuffer) ReadTail(maxBytes int) []byte {
 	rb.mu.RLock()

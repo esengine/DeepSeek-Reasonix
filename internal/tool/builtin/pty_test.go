@@ -27,11 +27,11 @@ func TestPTYToolLifecycle(t *testing.T) {
 	if tool.Name() != "pty" {
 		t.Fatalf("tool.Name() = %q, want 'pty'", tool.Name())
 	}
-	if !tool.ProviderVisible(ctx) {
-		t.Fatalf("tool.ProviderVisible should be true when manager is in context")
+	if tool.ReadOnly() {
+		t.Fatalf("tool.ReadOnly() should be false")
 	}
-	if tool.ProviderVisible(context.Background()) {
-		t.Fatalf("tool.ProviderVisible should be false when manager is absent")
+	if hint := tool.SnipHint(); hint.Head != 40 || hint.Tail != 40 {
+		t.Fatalf("unexpected SnipHint: %+v", hint)
 	}
 
 	// 1. Action: start

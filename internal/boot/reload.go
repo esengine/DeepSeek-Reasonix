@@ -101,6 +101,9 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	if opts.SessionTemp == nil {
 		opts.SessionTemp = old.SessionTemp()
 	}
+	if opts.PTY == nil {
+		opts.PTY = old.PTY()
+	}
 
 	home := config.ReasonixHomeDir()
 	// fromGraph must be the PREVIOUS generation's graph when available.

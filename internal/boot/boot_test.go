@@ -2283,6 +2283,7 @@ func unifiedBootToolNames() []string {
 		"compress",
 		"edit_file",
 		"kill_shell",
+		"pty",
 		"read_file",
 		"todo_write",
 		"update_goal",

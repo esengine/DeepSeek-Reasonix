@@ -137,6 +137,24 @@ func TestPTYWriteRespectsBashPermissionDeny(t *testing.T) {
 		t.Fatalf("expected raw write to be allowed, got blocked: %+v", outcomeWriteRaw)
 	}
 
+	// 5b. Test pty.write with denied command containing newline is blocked (cannot bypass Bash deny)
+	callWriteDeny := provider.ToolCall{
+		ID:   "call-write-deny",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "interactive-sess",
+				"input":      "git push origin main\n",
+			})
+			return string(b)
+		}(),
+	}
+	outcomeWriteDeny := ag.executeOne(context.Background(), &turnRuntime{}, callWriteDeny)
+	if !outcomeWriteDeny.blocked {
+		t.Fatalf("expected pty.write with git push to be blocked by permission policy, got: %+v", outcomeWriteDeny)
+	}
+
 	// 6. Test pty.read — should be read-only and allowed
 	callRead := provider.ToolCall{
 		ID:   "call-read",

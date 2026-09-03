@@ -44,6 +44,15 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
 		plan.commandPermName = "bash"
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
 		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
+	case "write":
+		if strings.Contains(p.Input, "\n") {
+			cmd := strings.TrimSpace(p.Input)
+			if cmd != "" {
+				plan.commandPermName = "bash"
+				plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+				plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
+			}
+		}
 	}
 }
 

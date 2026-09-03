@@ -200,6 +200,7 @@ type Options struct {
 	WorkspaceOnly          bool
 	PinnedContextLoader    control.PinnedContextLoader
 	SessionTemp            *sessiontemp.Manager // session-private temp manager; Rebuild reuses old's
+	PTY                    *pty.Manager         // persistent PTY session manager; Rebuild reuses old's
 	RuntimeReload
 	// deferPublish keeps a replacement generation private until migration and
 	// commit succeed. Cold BuildRuntime leaves this false and publishes at boot.
@@ -705,7 +706,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: "+sandbox.UnavailableMessage())
 	}
-	ptyManager := pty.NewManager(root, bashSpec)
+	ptyManager := opts.PTY
+	if ptyManager == nil {
+		ptyManager = pty.NewManager(root, bashSpec)
+	}
 	if autoShellPrefer(cfg.Tools.Shell.Prefer) && shell.Kind == sandbox.ShellPowerShell {
 		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer=\"powershell\" to silence this.")
 	}

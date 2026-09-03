@@ -2,15 +2,15 @@
   "limits": {
     "banner": 13,
     "commented-code": 0,
-    "complexity": 1976,
+    "complexity": 1977,
     "essay": 1989,
-    "file-size": 108680,
-    "function-size": 8540,
+    "file-size": 108700,
+    "function-size": 8543,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
     "struct-state": 115,
-    "test-file-size": 69805
+    "test-file-size": 69806
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -571,15 +571,15 @@
       "test-file-size": 994
     },
     "internal/boot/boot.go": {
-      "complexity": 263,
+      "complexity": 264,
       "essay": 81,
-      "file-size": 2079,
-      "function-size": 1726,
+      "file-size": 2083,
+      "function-size": 1729,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
       "essay": 3,
-      "test-file-size": 3773
+      "test-file-size": 3774
     },
     "internal/boot/extension_dispatch_test.go": {
       "essay": 3,
@@ -895,7 +895,7 @@
     "internal/control/controller.go": {
       "complexity": 11,
       "essay": 91,
-      "file-size": 5483,
+      "file-size": 5499,
       "function-size": 78,
       "narrative": 4,
       "struct-state": 16

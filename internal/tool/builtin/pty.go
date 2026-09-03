@@ -74,9 +74,8 @@ func (ptyTool) Schema() json.RawMessage {
 
 func (ptyTool) ReadOnly() bool { return false }
 
-func (ptyTool) ProviderVisible(ctx context.Context) bool {
-	_, ok := pty.FromContext(ctx)
-	return ok
+func (ptyTool) SnipHint() tool.SnipHint {
+	return tool.SnipHint{Head: 40, Tail: 40, HeadChars: 8000, TailChars: 8000}
 }
 
 type ptyParams struct {

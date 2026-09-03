@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,6 +93,7 @@ type Session struct {
 	exitErr   error
 	running   atomic.Bool
 	mu        sync.RWMutex
+	writeMu   sync.Mutex
 	closeOnce sync.Once
 }
 
@@ -180,6 +182,9 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 		return "", ErrSessionClosed
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	s.lastActive = time.Now()
 	s.mu.Unlock()
@@ -197,16 +202,18 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 	}
 
 	// 3. Wait for output to settle using silence detection
-	return s.waitForOutput(ctx, waitBudget)
+	return s.waitForOutput(ctx, input, waitBudget)
 }
 
 // waitForOutput monitors the stream until output is quiet for DefaultSilenceWindow or timeout expires.
-func (s *Session) waitForOutput(ctx context.Context, waitBudget time.Duration) (string, error) {
+func (s *Session) waitForOutput(ctx context.Context, input string, waitBudget time.Duration) (string, error) {
 	deadline := time.Now().Add(waitBudget)
 	silenceTimer := time.NewTimer(DefaultSilenceWindow)
 	defer silenceTimer.Stop()
 
 	hasReceivedOutput := false
+	inputClean := strings.TrimSpace(CleanBytes([]byte(input)))
+	isSubmittingCmd := strings.Contains(input, "\n")
 
 	for {
 		select {
@@ -231,6 +238,15 @@ func (s *Session) waitForOutput(ctx context.Context, waitBudget time.Duration) (
 			silenceTimer.Reset(DefaultSilenceWindow)
 
 		case <-silenceTimer.C:
+			// If submitting a command line, do not treat the terminal's local echo of the input as output completion
+			if isSubmittingCmd && time.Now().Before(deadline) {
+				peeked := strings.TrimSpace(CleanBytes(s.buffer.PeekUnread(MaxReadBytes)))
+				if peeked == inputClean || peeked == "" {
+					silenceTimer.Reset(DefaultSilenceWindow)
+					continue
+				}
+			}
+
 			// Silence window expired — output stream has settled
 			if hasReceivedOutput || time.Now().After(deadline) {
 				return CleanBytes(s.buffer.ReadUnread(MaxReadBytes)), nil

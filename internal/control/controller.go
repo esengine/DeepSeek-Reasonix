@@ -5400,6 +5400,12 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 	prev.mu.Lock()
 	started := prev.startedOnce
 	turn := prev.turn
+	if prev.pty != nil && (c.pty == prev.pty || c.pty == nil) {
+		if c.pty == nil {
+			c.pty = prev.pty
+		}
+		prev.pty = nil
+	}
 	prev.mu.Unlock()
 
 	c.mu.Lock()
@@ -5535,6 +5541,16 @@ func (c *Controller) SessionTemp() *sessiontemp.Manager {
 		return nil
 	}
 	return c.sessionTemp
+}
+
+// PTY returns the persistent PTY terminal manager.
+// Hot rebuilds pass this to the replacement Controller so running interactive
+// sessions survive model/settings swaps. Nil only when constructed without one.
+func (c *Controller) PTY() *pty.Manager {
+	if c == nil {
+		return nil
+	}
+	return c.pty
 }
 
 // rotateSessionTemp advances the private temporary generation so a new logical
