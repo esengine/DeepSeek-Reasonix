@@ -447,4 +447,83 @@ func TestPTYWriteDeniedCompletionPreservesPendingInput(t *testing.T) {
 	}
 }
 
+// TestPTYWriteMultiCommandRespectsBashPermissionDeny verifies that sending multiple
+// newline-terminated commands in a single write call (e.g. "echo ok\ngit push origin main\n")
+// checks EVERY command against the Bash gate. If any command is denied (such as git push),
+// the entire call is blocked, and no commands are written to the PTY.
+func TestPTYWriteMultiCommandRespectsBashPermissionDeny(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	policy := permission.New("allow", nil, nil, []string{"Bash(git push*)"})
+	gate := permission.NewGate(policy, nil)
+
+	opts := Options{
+		Gate: gate,
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Start session
+	callStart := provider.ToolCall{
+		ID:   "call-multi-start",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "multi-cmd-sess",
+			})
+			return string(b)
+		}(),
+	}
+	if out := ag.executeOne(context.Background(), &turnRuntime{}, callStart); out.blocked {
+		t.Fatalf("expected start to succeed: %+v", out)
+	}
+
+	sess, err := mgr.Get("multi-cmd-sess")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+
+	// Drain initial prompt output
+	_ = sess.Read(4096)
+
+	// Attempt multi-command write: "echo ok\ngit push origin main\n"
+	// Line 1 is harmless "echo ok", Line 2 is forbidden "git push origin main"
+	callMulti := provider.ToolCall{
+		ID:   "call-multi-write",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "multi-cmd-sess",
+				"input":      "echo ok\ngit push origin main\n",
+			})
+			return string(b)
+		}(),
+	}
+	outMulti := ag.executeOne(context.Background(), &turnRuntime{}, callMulti)
+	if !outMulti.blocked {
+		t.Fatalf("expected multi-command write containing git push to be blocked, got: %+v", outMulti)
+	}
+	if !strings.Contains(outMulti.output, "blocked") {
+		t.Fatalf("expected blocked message in output, got: %q", outMulti.output)
+	}
+
+	// Verify nothing was written to PTY (the harmless 'echo ok' must NOT have been executed either)
+	time.Sleep(50 * time.Millisecond)
+	unread := sess.Read(4096)
+	if strings.Contains(unread, "echo ok") || strings.Contains(unread, "git push") {
+		t.Fatalf("expected PTY to receive no commands from a blocked multi-command write, got output: %q", unread)
+	}
+}
+
+
 

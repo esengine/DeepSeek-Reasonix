@@ -49,39 +49,39 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
 		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 	case "write":
-		// Preview accumulated input without resetting the buffer. The permission
-		// gate may deny the write; we must not clear the pending prefix in that
-		// case so a follow-up call cannot reassemble the same command from scratch.
-		// CommitRawInput / RollbackRawInput are called by applyStandardGate after
-		// the allow/deny decision (see below in the gate helper).
+		// Multi-command support: when a write contains one or more newlines,
+		// EVERY newline-terminated command line must be evaluated against the
+		// Bash permission gate. If any command is denied, the entire write is blocked.
+		// We read pending input without mutating the session (commit happens on
+		// actual successful write in Session.Write).
+		var combined string
 		if mgr != nil {
 			sessionID := strings.TrimSpace(p.SessionID)
 			if sessionID == "" {
 				sessionID = pty.DefaultSessionID
 			}
 			if sess, err := mgr.Get(sessionID); err == nil {
-				pending := sess.PendingInput()
-				combined := pending + p.Input
-				inputToCommit := p.Input
-				plan.ptyPendingCommit = func() { sess.CommitRawInput(inputToCommit) }
-				if strings.Contains(combined, "\n") {
-					cmd := strings.TrimSpace(combined[:strings.Index(combined, "\n")])
-					if cmd != "" {
-						plan.commandPermName = "bash"
-						plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
-						plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
-					}
-				}
-				return
+				combined = sess.PendingInput() + p.Input
+			} else {
+				combined = p.Input
 			}
+		} else {
+			combined = p.Input
 		}
-		// Fallback (no manager or session not yet started): single-call evaluation.
-		// Do not overwrite a commandPermName already set by the preview path.
-		if plan.commandPermName == "" && strings.Contains(p.Input, "\n") {
-			cmd := strings.TrimSpace(p.Input)
-			if cmd != "" {
+
+		if strings.Contains(combined, "\n") {
+			lines := strings.Split(combined, "\n")
+			// All segments before the final \n are complete commands to be evaluated.
+			for i := 0; i < len(lines)-1; i++ {
+				cmd := strings.TrimSpace(lines[i])
+				if cmd != "" {
+					cmdArgs, _ := json.Marshal(map[string]string{"command": cmd})
+					plan.commandPermCalls = append(plan.commandPermCalls, cmdArgs)
+				}
+			}
+			if len(plan.commandPermCalls) > 0 {
 				plan.commandPermName = "bash"
-				plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+				plan.commandPermArgs = plan.commandPermCalls[0]
 				plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 			}
 		}
@@ -97,18 +97,36 @@ func (a *Agent) applyStandardGate(ctx context.Context, plan *toolCallPlan, gate 
 			errMsg:  fmt.Sprintf("blocked: %v", err),
 		}, true
 	}
-	if allow && plan.commandPermName != "" && len(plan.commandPermArgs) > 0 {
-		cmdAllow, cmdReason, cmdErr := gate.Check(ctx, plan.commandPermName, plan.commandPermArgs, plan.readOnly)
-		if cmdErr != nil {
-			return toolOutcome{
-				output:  fmt.Sprintf("blocked: %s (%v)", cmdReason, cmdErr),
-				blocked: true,
-				errMsg:  fmt.Sprintf("blocked: %v", cmdErr),
-			}, true
-		}
-		if !cmdAllow {
-			allow = false
-			reason = cmdReason
+	if allow {
+		if len(plan.commandPermCalls) > 0 {
+			for _, cmdArgs := range plan.commandPermCalls {
+				cmdAllow, cmdReason, cmdErr := gate.Check(ctx, "bash", cmdArgs, plan.readOnly)
+				if cmdErr != nil {
+					return toolOutcome{
+						output:  fmt.Sprintf("blocked: %s (%v)", cmdReason, cmdErr),
+						blocked: true,
+						errMsg:  fmt.Sprintf("blocked: %v", cmdErr),
+					}, true
+				}
+				if !cmdAllow {
+					allow = false
+					reason = cmdReason
+					break
+				}
+			}
+		} else if plan.commandPermName != "" && len(plan.commandPermArgs) > 0 {
+			cmdAllow, cmdReason, cmdErr := gate.Check(ctx, plan.commandPermName, plan.commandPermArgs, plan.readOnly)
+			if cmdErr != nil {
+				return toolOutcome{
+					output:  fmt.Sprintf("blocked: %s (%v)", cmdReason, cmdErr),
+					blocked: true,
+					errMsg:  fmt.Sprintf("blocked: %v", cmdErr),
+				}, true
+			}
+			if !cmdAllow {
+				allow = false
+				reason = cmdReason
+			}
 		}
 	}
 	if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
@@ -120,10 +138,6 @@ func (a *Agent) applyStandardGate(ctx context.Context, plan *toolCallPlan, gate 
 			blocked: true,
 			errMsg:  "blocked by permission policy",
 		}, true
-	}
-	// Permission allowed: commit the write to update the session's pending line buffer.
-	if plan.ptyPendingCommit != nil {
-		plan.ptyPendingCommit()
 	}
 	return toolOutcome{}, false
 }

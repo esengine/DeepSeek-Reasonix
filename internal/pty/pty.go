@@ -257,6 +257,7 @@ func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Du
 	if _, err := s.lowPTY.Write([]byte(payload)); err != nil {
 		return "", fmt.Errorf("pty write failed: %w", err)
 	}
+	s.CommitRawInput(payload)
 
 	return s.waitForMarker(ctx, marker, waitBudget)
 }
@@ -276,11 +277,12 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 	s.lastActive = time.Now()
 	s.mu.Unlock()
 
-	// 1. Send input to the PTY device
+	// 1. Send input to the PTY device; commit to pending buffer only upon successful write
 	if len(input) > 0 {
 		if _, err := s.lowPTY.Write([]byte(input)); err != nil {
 			return "", fmt.Errorf("pty write failed: %w", err)
 		}
+		s.CommitRawInput(input)
 	}
 
 	// 2. If no wait requested, return immediately without reading
@@ -441,12 +443,13 @@ func markerLinePresent(output, marker string) bool {
 
 // stripMarker removes the sentinel line and any preceding echo of the sentinel command
 // from the captured output. It is called only after markerLinePresent has confirmed that
-// the completion sentinel was actually emitted.
+// the completion sentinel was actually emitted, and matches this specific request's marker
+// so unrelated output (e.g. grep __REASONIX_DONE_) is not inadvertently truncated.
 func stripMarker(output, marker string) string {
 	lines := strings.Split(output, "\n")
 	var kept []string
 	for _, line := range lines {
-		if strings.Contains(line, markerPrefix) {
+		if strings.Contains(line, marker) {
 			break
 		}
 		kept = append(kept, line)

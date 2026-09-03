@@ -176,11 +176,18 @@ func TestMarkerLinePresentDiscrimination(t *testing.T) {
 		}
 	}
 
-	// 4. stripMarker cleans out markerPrefix and everything after it
+	// 4. stripMarker cleans out sentinel and cmdEcho matching this specific marker
 	combinedOutput := "line 1\nline 2\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
 	stripped := stripMarker(combinedOutput, marker)
 	if stripped != "line 1\nline 2" {
 		t.Fatalf("stripMarker output = %q, want 'line 1\\nline 2'", stripped)
+	}
+
+	// 5. User grep output containing __REASONIX_DONE_ (with different or generic text) must NOT be truncated
+	grepOutput := "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
+	strippedGrep := stripMarker(grepOutput, marker)
+	if strippedGrep != "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"" {
+		t.Fatalf("stripMarker incorrectly stripped user grep output: %q", strippedGrep)
 	}
 }
 

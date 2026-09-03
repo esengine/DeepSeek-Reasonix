@@ -3,7 +3,7 @@
     "banner": 13,
     "commented-code": 0,
     "complexity": 1977,
-    "essay": 1993,
+    "essay": 1991,
     "file-size": 108700,
     "function-size": 8543,
     "layering": 1,
@@ -473,9 +473,6 @@
     "internal/agent/parallel_tasks.go": {
       "essay": 3,
       "function-size": 73
-    },
-    "internal/agent/permission_gate.go": {
-      "essay": 2
     },
     "internal/agent/reasoning_language.go": {
       "essay": 1
