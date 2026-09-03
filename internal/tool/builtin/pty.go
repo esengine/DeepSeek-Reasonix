@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/pty"
+	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
 
@@ -73,6 +74,21 @@ func (ptyTool) Schema() json.RawMessage {
 
 func (ptyTool) ReadOnly() bool { return false }
 
+// EffectHint provides per-call effect classification so read/list actions
+// remain read-only without requiring writer coordination or permission barriers.
+func (ptyTool) EffectHint(args json.RawMessage) tool.EffectHint {
+	var p ptyParams
+	_ = json.Unmarshal(args, &p)
+	switch strings.ToLower(strings.TrimSpace(p.Action)) {
+	case "read", "list":
+		return tool.EffectHint{Known: true, ReadOnly: true, Destructive: false}
+	case "write":
+		return tool.EffectHint{Known: true, ReadOnly: false, Destructive: false, ExecutesCode: true}
+	default:
+		return tool.EffectHint{Known: true, ReadOnly: false}
+	}
+}
+
 func (ptyTool) ProviderVisible(ctx context.Context) bool {
 	_, ok := pty.FromContext(ctx)
 	return ok
@@ -88,6 +104,43 @@ type ptyParams struct {
 	Cwd       string `json:"cwd,omitempty"`
 	Cols      uint16 `json:"cols,omitempty"`
 	Rows      uint16 `json:"rows,omitempty"`
+}
+
+// isDangerousPTYInput scans raw terminal input for catastrophic root wipe or fork-bomb patterns.
+func isDangerousPTYInput(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return false
+	}
+	// Direct string patterns for catastrophic root destruction
+	dangerousPatterns := []string{
+		"rm -rf /",
+		"rm -fr /",
+		"rm -rf /*",
+		"rm -fr /*",
+		"rm -rf --no-preserve-root",
+		":(){ :|:& };:",
+		"mkfs.",
+		"> /dev/sda",
+		"> /dev/nvme",
+	}
+	for _, pat := range dangerousPatterns {
+		if strings.Contains(trimmed, pat) {
+			return true
+		}
+	}
+	// Parse fields if static
+	if fields, _ := shellparse.StaticFields(trimmed); len(fields) >= 2 {
+		if (fields[0] == "rm" || strings.HasSuffix(fields[0], "/rm")) &&
+			(fields[1] == "-rf" || fields[1] == "-fr" || fields[1] == "-r") {
+			for _, arg := range fields[2:] {
+				if arg == "/" || arg == "/*" || arg == "~" || arg == "$HOME" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -128,6 +181,11 @@ func (ptyTool) Execute(ctx context.Context, args json.RawMessage) (string, error
 		return strings.TrimRight(msg, "\n"), nil
 
 	case "write":
+		// Security guard: verify input doesn't bypass system safety
+		if isDangerousPTYInput(p.Input) {
+			return "", fmt.Errorf("blocked: dangerous command execution denied by security policy: %s", strings.TrimSpace(p.Input))
+		}
+
 		sess, err := mgr.GetOrCreate(ctx, sessionID, p.Cwd)
 		if err != nil {
 			return "", err

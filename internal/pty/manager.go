@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 )
 
 // DefaultSessionID is used when no session_id is explicitly provided.
@@ -39,17 +42,23 @@ type Manager struct {
 	mu         sync.RWMutex
 	sessions   map[string]*Session
 	defaultCwd string
+	spec       sandbox.Spec
 	closed     bool
 }
 
-// NewManager creates a new PTY session manager with the specified default working directory.
-func NewManager(defaultCwd string) *Manager {
+// NewManager creates a new PTY session manager with the specified default working directory and optional sandbox spec.
+func NewManager(defaultCwd string, spec ...sandbox.Spec) *Manager {
 	if defaultCwd == "" {
 		defaultCwd, _ = os.Getwd()
+	}
+	var sb sandbox.Spec
+	if len(spec) > 0 {
+		sb = spec[0]
 	}
 	return &Manager{
 		sessions:   make(map[string]*Session),
 		defaultCwd: defaultCwd,
+		spec:       sb,
 	}
 }
 
@@ -102,12 +111,10 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 		rows = DefaultTerminalRows
 	}
 
-	cmd := exec.CommandContext(context.Background(), cmdPath, args...)
-	cmd.Dir = cwd
-
-	// Prepare environment
+	// Prepare safe base environment (redacting credentials if configured)
+	baseEnv := secrets.ProcessEnv()
 	envMap := make(map[string]string)
-	for _, envStr := range os.Environ() {
+	for _, envStr := range baseEnv {
 		parts := strings.SplitN(envStr, "=", 2)
 		if len(parts) == 2 {
 			envMap[parts[0]] = parts[1]
@@ -123,6 +130,24 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 	for k, v := range envMap {
 		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
 	}
+
+	var cmd *exec.Cmd
+	if m.spec.Enforce() {
+		sh := sandbox.ResolveShell("", "", nil)
+		shellCmd := cmdPath
+		if len(args) > 0 {
+			shellCmd += " " + strings.Join(args, " ")
+		}
+		argv, wrapped := sandbox.Command(m.spec, sh, shellCmd)
+		if wrapped && len(argv) > 0 {
+			cmd = exec.Command(argv[0], argv[1:]...)
+		} else {
+			cmd = exec.Command(cmdPath, args...)
+		}
+	} else {
+		cmd = exec.Command(cmdPath, args...)
+	}
+	cmd.Dir = cwd
 	cmd.Env = cmdEnv
 
 	lowPTY, err := spawnOSPTY(cmd, cols, rows)

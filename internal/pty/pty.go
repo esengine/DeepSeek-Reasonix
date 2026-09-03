@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 var (
@@ -285,19 +286,25 @@ func (s *Session) Resize(cols, rows uint16) error {
 	return nil
 }
 
-// Close gracefully terminates the PTY session.
+// Close gracefully terminates the PTY session and reaps its entire process tree.
 func (s *Session) Close() error {
 	var err error
 	s.closeOnce.Do(func() {
 		s.running.Store(false)
-		if s.cmd != nil && s.cmd.Process != nil {
-			// 1. Try graceful interrupt (SIGINT/SIGTERM)
-			_ = s.cmd.Process.Signal(os.Interrupt)
+		if s.cmd != nil && s.cmd.Process != nil && s.cmd.Process.Pid > 0 {
+			// 1. Stage 1: Send SIGINT to give child chance to save state
+			signalSIGINT(s.cmd)
 			select {
 			case <-s.done:
-			case <-time.After(500 * time.Millisecond):
-				// 2. Force kill if not exited within 500ms
-				_ = s.cmd.Process.Kill()
+			case <-time.After(200 * time.Millisecond):
+				// 2. Stage 2: Send SIGTERM to process group
+				signalSIGTERM(s.cmd)
+				select {
+				case <-s.done:
+				case <-time.After(250 * time.Millisecond):
+					// 3. Stage 3: Force kill entire process tree
+					proc.KillTree(s.cmd)
+				}
 			}
 		}
 		if s.lowPTY != nil {

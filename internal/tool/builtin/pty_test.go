@@ -34,6 +34,20 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("tool.ProviderVisible should be false when manager is absent")
 	}
 
+	// 0. Test EffectHint classification
+	readHint := tool.EffectHint(json.RawMessage(`{"action":"read"}`))
+	if !readHint.ReadOnly {
+		t.Fatalf("read action must be ReadOnly=true, got %+v", readHint)
+	}
+	listHint := tool.EffectHint(json.RawMessage(`{"action":"list"}`))
+	if !listHint.ReadOnly {
+		t.Fatalf("list action must be ReadOnly=true, got %+v", listHint)
+	}
+	writeHint := tool.EffectHint(json.RawMessage(`{"action":"write"}`))
+	if writeHint.ReadOnly || !writeHint.ExecutesCode {
+		t.Fatalf("write action must be ReadOnly=false and ExecutesCode=true, got %+v", writeHint)
+	}
+
 	// 1. Action: start
 	startArgs, _ := json.Marshal(map[string]any{
 		"action":     "start",
@@ -93,7 +107,18 @@ func TestPTYToolLifecycle(t *testing.T) {
 		}
 	}
 
-	// 4. Action: list
+	// 4. Test security policy blocks catastrophic dangerous command
+	dangerousArgs, _ := json.Marshal(map[string]any{
+		"action":     "write",
+		"session_id": "repl-1",
+		"input":      "rm -rf / --no-preserve-root\n",
+	})
+	_, dangerErr := tool.Execute(ctx, dangerousArgs)
+	if dangerErr == nil || !strings.Contains(dangerErr.Error(), "blocked: dangerous command") {
+		t.Fatalf("expected dangerous command to be blocked, got err: %v", dangerErr)
+	}
+
+	// 5. Action: list
 	listArgs, _ := json.Marshal(map[string]any{
 		"action": "list",
 	})
@@ -105,7 +130,7 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("list output missing repl-1: %q", listRes)
 	}
 
-	// 5. Action: resize
+	// 6. Action: resize
 	resizeArgs, _ := json.Marshal(map[string]any{
 		"action":     "resize",
 		"session_id": "repl-1",
@@ -120,7 +145,7 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("unexpected resize response: %q", resizeRes)
 	}
 
-	// 6. Action: close
+	// 7. Action: close
 	closeArgs, _ := json.Marshal(map[string]any{
 		"action":     "close",
 		"session_id": "repl-1",
