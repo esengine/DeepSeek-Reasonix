@@ -308,6 +308,70 @@
       }
     },
     {
+      "name": "pty",
+      "description": "Control a persistent interactive pseudo-terminal session (PTY) across turns. Use for REPLs (Python, Node.js), interactive debuggers (gdb, lldb, pdb), maintaining shell state (cd, venv, export), or managing dev servers. Actions: 'start' (spawn session), 'write_line' (execute a shell command line with newline and auto-capture output; governed by Bash permission policies), 'write' (send raw interactive keystrokes/control characters to REPLs/programs), 'read' (read new unread output), 'list' (list active PTY sessions), 'close' (terminate session), 'resize' (change terminal size).",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "The PTY action to perform.",
+            "enum": [
+              "start",
+              "write_line",
+              "write",
+              "read",
+              "list",
+              "close",
+              "resize"
+            ],
+            "type": "string"
+          },
+          "args": {
+            "description": "Arguments for command on 'start' (e.g. ['-lc', 'python3 -i']).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cols": {
+            "description": "Terminal column width for 'resize' or 'start' (default: 120).",
+            "type": "integer"
+          },
+          "command": {
+            "description": "Command to run: on 'start', initial shell/program (e.g. 'bash', 'python3'); on 'write_line', full shell command line to execute.",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "Working directory when starting the PTY session.",
+            "type": "string"
+          },
+          "input": {
+            "description": "Text or keystrokes to send: on 'write_line', shell command; on 'write', raw keystrokes/control characters (\\n, \\x03 Ctrl+C, \\x04 Ctrl+D, \\x1a Ctrl+Z, arrow keys).",
+            "type": "string"
+          },
+          "max_bytes": {
+            "description": "Maximum bytes to read from buffer on 'read' (default: 32768, max: 131072).",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Terminal row height for 'resize' or 'start' (default: 40).",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Identifier for the PTY session (defaults to 'default' if omitted).",
+            "type": "string"
+          },
+          "wait_ms": {
+            "description": "Milliseconds to wait for output to settle after writing (default: 500ms, 0 means non-blocking fire-and-forget, max: 10000ms).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "read_file",
       "description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. Independent reads with no data dependency should be issued in the same round.",
       "parameters": {

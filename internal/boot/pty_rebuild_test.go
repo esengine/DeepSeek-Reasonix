@@ -76,3 +76,48 @@ func TestRebuildReusesPTYManager(t *testing.T) {
 		t.Fatalf("expected PTY session to terminate when active controller closes")
 	}
 }
+
+func TestRebuildUpdatesSandboxPolicy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+
+	workspace := t.TempDir()
+	fenceBootTestHistoryCatalog(t)
+
+	mgr := pty.NewManager(workspace)
+	old := control.New(control.Options{
+		PTY:   mgr,
+		Sink:  event.Discard,
+		Label: "test-pty-policy-update",
+	})
+
+	newWorkspace := t.TempDir()
+	res, err := Rebuild(context.Background(), old, Options{
+		WorkspaceRoot: newWorkspace,
+		Sink:          event.Discard,
+		RequireKey:    false,
+		Stderr:        os.Stderr,
+	})
+	if err != nil {
+		t.Fatalf("rebuild failed: %v", err)
+	}
+	defer res.Controller.Close()
+	old.Close()
+
+	// Verify that the manager's default cwd has been updated to newWorkspace
+	sess, err := res.Controller.PTY().Start(context.Background(), pty.StartOptions{
+		ID: "new-workspace-sess",
+	})
+	if err != nil {
+		t.Fatalf("failed to start session on updated controller: %v", err)
+	}
+	defer sess.Close()
+
+	if sess.Info().Cwd != newWorkspace {
+		t.Fatalf("expected session cwd to inherit rebuilt workspace %q, got: %q", newWorkspace, sess.Info().Cwd)
+	}
+}
+

@@ -227,4 +227,142 @@ func TestPTYWriteLineNonBlockingZeroWaitMs(t *testing.T) {
 	}
 }
 
+func TestPTYWriteLineNonZeroExitCode(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	// Start a session
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "exit-code-sess",
+	})
+	if _, err := tool.Execute(ctx, startArgs); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// Run command with non-zero exit code that does not terminate the shell
+	subshellArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "exit-code-sess",
+		"command":    "echo FAILED_OUTPUT && (exit 42)",
+		"wait_ms":    1500,
+	})
+	res, err := tool.Execute(ctx, subshellArgs)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if !strings.Contains(res, "(command exited with code 42)") {
+		t.Fatalf("expected '(command exited with code 42)', got: %q", res)
+	}
+
+	// Run command that exits the shell process itself
+	exitArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "exit-code-sess",
+		"command":    "echo EXITING_NOW && exit 7",
+		"wait_ms":    1500,
+	})
+	exitRes, err := tool.Execute(ctx, exitArgs)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if !strings.Contains(exitRes, "(session terminated with exit code 7)") {
+		t.Fatalf("expected '(session terminated with exit code 7)', got: %q", exitRes)
+	}
+}
+
+func TestPTYStartExplicitArgs(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	// Start with explicit args array containing spaces
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "explicit-args-sess",
+		"command":    "bash",
+		"args":       []string{"-c", "echo 'HELLO FROM EXPLICIT ARGS'"},
+	})
+	res, err := tool.Execute(ctx, startArgs)
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	t.Logf("Start result: %s", res)
+}
+
+func TestPTYRejectWriteLineWhileCommandRunning(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "busy-sess",
+	})
+	if _, err := tool.Execute(ctx, startArgs); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// Launch a long sleep command non-blocking (wait_ms: 0)
+	waitZero := 0
+	sleepArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "busy-sess",
+		"command":    "sleep 5",
+		"wait_ms":    &waitZero,
+	})
+	if _, err := tool.Execute(ctx, sleepArgs); err != nil {
+		t.Fatalf("non-blocking execute failed: %v", err)
+	}
+
+	// Immediately attempting another write_line must be rejected by state machine
+	secondArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "busy-sess",
+		"command":    "echo SHOULD_BE_REJECTED",
+	})
+	_, secondErr := tool.Execute(ctx, secondArgs)
+	if secondErr == nil || !strings.Contains(secondErr.Error(), "command_running") {
+		t.Fatalf("expected command_running error, got: %v", secondErr)
+	}
+
+	// Interrupt with Ctrl+C
+	ctrlCArgs, _ := json.Marshal(map[string]any{
+		"action":     "write",
+		"session_id": "busy-sess",
+		"input":      "\x03",
+	})
+	if _, err := tool.Execute(ctx, ctrlCArgs); err != nil {
+		t.Fatalf("interrupt failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Now write_line should succeed again!
+	thirdArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "busy-sess",
+		"command":    "echo RECOVERED_AFTER_CTRL_C",
+		"wait_ms":    1000,
+	})
+	thirdRes, err := tool.Execute(ctx, thirdArgs)
+	if err != nil {
+		t.Fatalf("write_line after Ctrl+C failed: %v", err)
+	}
+	if !strings.Contains(thirdRes, "RECOVERED_AFTER_CTRL_C") {
+		t.Fatalf("expected output after Ctrl+C recovery, got: %q", thirdRes)
+	}
+}
+
+
 

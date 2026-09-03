@@ -66,7 +66,10 @@ func NewManager(defaultCwd string, spec ...sandbox.Spec) *Manager {
 func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.startLocked(ctx, opts)
+}
 
+func (m *Manager) startLocked(ctx context.Context, opts StartOptions) (*Session, error) {
 	if m.closed {
 		return nil, ErrSessionClosed
 	}
@@ -90,15 +93,18 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 
 	cmdPath := strings.TrimSpace(opts.Command)
 	var args []string
-	if cmdPath == "" {
+	if len(opts.Args) > 0 {
+		if cmdPath == "" {
+			cmdPath = defaultShellPath()
+		}
+		args = opts.Args
+	} else if cmdPath == "" {
 		cmdPath = defaultShellPath()
 	} else {
 		fields := strings.Fields(cmdPath)
 		cmdPath = fields[0]
 		if len(fields) > 1 {
-			args = append(fields[1:], opts.Args...)
-		} else {
-			args = opts.Args
+			args = fields[1:]
 		}
 	}
 
@@ -155,6 +161,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 		return nil, fmt.Errorf("pty spawn failed: %w", err)
 	}
 
+	driver := DetectDriver(cmdPath)
 	now := time.Now()
 	sess := &Session{
 		id:         id,
@@ -169,6 +176,9 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 		buffer:     NewRingBuffer(DefaultBufferSize),
 		done:       make(chan struct{}),
 		onOutput:   make(chan struct{}, 64),
+		driver:     driver,
+		state:      NewStateMachine(driver.IsShell()),
+		parser:     NewCompletionParser(),
 	}
 	sess.running.Store(true)
 
@@ -177,6 +187,25 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Session, error
 
 	m.sessions[id] = sess
 	return sess, nil
+}
+
+// TransferOwnership updates the manager's default working directory and sandbox spec
+// across controller rebuilds, ensuring newly spawned sessions inherit the updated policy.
+func (m *Manager) TransferOwnership(defaultCwd string, spec sandbox.Spec) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = false
+	if defaultCwd != "" {
+		m.defaultCwd = defaultCwd
+	}
+	m.spec = spec
+}
+
+// SandboxSpec returns a snapshot of the active sandbox spec configured on the manager.
+func (m *Manager) SandboxSpec() sandbox.Spec {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.spec
 }
 
 // Get returns the session matching id, or ErrSessionNotFound.
@@ -195,21 +224,20 @@ func (m *Manager) Get(id string) (*Session, error) {
 }
 
 // GetOrCreate returns an existing running session or starts a new default one.
+// It is protected by manager mutex so concurrent callers for the same ID never race.
 func (m *Manager) GetOrCreate(ctx context.Context, id string, cwd string) (*Session, error) {
 	if id == "" {
 		id = DefaultSessionID
 	}
 
-	m.mu.RLock()
-	sess, ok := m.sessions[id]
-	running := ok && sess.IsRunning()
-	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if running {
+	if sess, ok := m.sessions[id]; ok && sess.IsRunning() {
 		return sess, nil
 	}
 
-	return m.Start(ctx, StartOptions{
+	return m.startLocked(ctx, StartOptions{
 		ID:  id,
 		Cwd: cwd,
 	})

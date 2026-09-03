@@ -678,6 +678,63 @@ func TestPTYWriteLineRejectsPendingRawInput(t *testing.T) {
 	}
 }
 
+// TestPTYMultiCommandMergesWorkspaceMutation verifies that if any subcommand
+// in a multi-command write touches the workspace (e.g. touch, rm, git),
+// the merged ToolEffects accurately sets WorkspaceMutation = true.
+func TestPTYMultiCommandMergesWorkspaceMutation(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	opts := Options{
+		Gate: permission.NewGate(permission.New("allow", nil, nil, nil), nil),
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Start session
+	callStart := provider.ToolCall{
+		ID:   "call-mut-start",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "mut-test-sess",
+			})
+			return string(b)
+		}(),
+	}
+	_ = ag.executeOne(context.Background(), &turnRuntime{}, callStart)
+
+	// Multi-command write: first command is harmless 'echo ok', second command is mutating 'touch file.txt'
+	callMulti := provider.ToolCall{
+		ID:   "call-mut-write",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "mut-test-sess",
+				"input":      "echo ok\ntouch file.txt\n",
+			})
+			return string(b)
+		}(),
+	}
+	out := ag.executeOne(context.Background(), &turnRuntime{}, callMulti)
+	if out.blocked {
+		t.Fatalf("expected call to succeed, got blocked: %+v", out)
+	}
+	if out.workspaceMutation == nil {
+		t.Fatalf("expected workspaceMutation to be recorded because 'touch file.txt' mutates workspace")
+	}
+}
+
+
 
 
 

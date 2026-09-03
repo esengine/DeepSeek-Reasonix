@@ -56,18 +56,35 @@ type Size struct {
 	Y    uint16 `json:"y,omitempty"`
 }
 
+// CommandStatus indicates the execution disposition of a write_line command.
+type CommandStatus string
+
+const (
+	StatusCompleted  CommandStatus = "completed"
+	StatusRunning    CommandStatus = "running"
+	StatusTerminated CommandStatus = "terminated"
+)
+
+// CommandResult represents the outcome of a structured shell command execution.
+type CommandResult struct {
+	Output   string        `json:"output"`
+	ExitCode int           `json:"exit_code"`
+	Status   CommandStatus `json:"status"`
+}
+
 // SessionInfo is the read-only summary of an active or recent PTY session.
 type SessionInfo struct {
-	ID         string    `json:"id"`
-	Command    string    `json:"command"`
-	Cwd        string    `json:"cwd"`
-	PID        int       `json:"pid"`
-	Running    bool      `json:"running"`
-	ExitCode   int       `json:"exit_code,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	LastActive time.Time `json:"last_active"`
-	Cols       uint16    `json:"cols"`
-	Rows       uint16    `json:"rows"`
+	ID         string       `json:"id"`
+	Command    string       `json:"command"`
+	Cwd        string       `json:"cwd"`
+	PID        int          `json:"pid"`
+	Running    bool         `json:"running"`
+	State      SessionState `json:"state,omitempty"`
+	ExitCode   int          `json:"exit_code,omitempty"`
+	StartedAt  time.Time    `json:"started_at"`
+	LastActive time.Time    `json:"last_active"`
+	Cols       uint16       `json:"cols"`
+	Rows       uint16       `json:"rows"`
 }
 
 // StartOptions configures the initialization of a new PTY session.
@@ -109,12 +126,25 @@ type Session struct {
 	writeMu   sync.Mutex
 	closeOnce sync.Once
 
+	driver ShellDriver
+	state  *StateMachine
+	parser *CompletionParser
+
 	// pendingInput accumulates raw interactive write() bytes that have not yet
-	// been submitted (i.e. no \n seen). Once a \n-terminated write arrives the
-	// accumulated string is prepended to form the full command for permission
-	// evaluation, then the buffer is cleared.
+	// been submitted (i.e. no \n seen).
 	pendingInputMu sync.Mutex
 	pendingInput   strings.Builder
+}
+
+// State returns the current session operational state.
+func (s *Session) State() SessionState {
+	if s.state == nil {
+		if s.running.Load() {
+			return StateShellReady
+		}
+		return StateClosed
+	}
+	return s.state.Current()
 }
 
 // PendingInput returns the current uncommitted input accumulated in the PTY line buffer.
@@ -168,6 +198,7 @@ func (s *Session) Info() SessionInfo {
 		Cwd:        s.cwd,
 		PID:        s.PID(),
 		Running:    s.running.Load(),
+		State:      s.State(),
 		ExitCode:   s.exitCode,
 		StartedAt:  s.startedAt,
 		LastActive: s.lastActive,
@@ -176,7 +207,8 @@ func (s *Session) Info() SessionInfo {
 	}
 }
 
-// startOutputPump reads raw bytes from the low-level PTY into the ring buffer.
+// startOutputPump reads raw bytes from the low-level PTY into both the user ring buffer
+// and the decoupled CompletionParser.
 func (s *Session) startOutputPump() {
 	buf := make([]byte, 4096)
 	for {
@@ -186,7 +218,11 @@ func (s *Session) startOutputPump() {
 			s.lastActive = time.Now()
 			s.mu.Unlock()
 
-			_, _ = s.buffer.Write(buf[:n])
+			chunk := buf[:n]
+			_, _ = s.buffer.Write(chunk)
+			if s.parser != nil {
+				s.parser.Feed(chunk)
+			}
 
 			// Non-blocking notification to silence detectors
 			select {
@@ -219,24 +255,34 @@ func (s *Session) monitorProcess() {
 	}
 	s.mu.Unlock()
 
+	if s.state != nil {
+		s.state.MarkClosed()
+	}
 	close(s.done)
 	_ = s.lowPTY.Close()
 }
 
 // RunCommand sends a complete shell command line and waits for its output using a
 // deterministic request-id completion marker rather than a silence window.
-// The shell is instructed to print a sentinel after the command finishes, so the
-// caller does not need to rely on any timing heuristic.
-// The returned string contains only the output between the command echo and the
-// sentinel line; exit code is available as the second value of the marker.
-// This is the recommended path for write_line (structured shell command execution).
-func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Duration) (string, error) {
+func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Duration) (CommandResult, error) {
 	if !s.running.Load() {
-		return "", ErrSessionClosed
+		return CommandResult{Status: StatusTerminated}, ErrSessionClosed
+	}
+
+	if s.state != nil {
+		if err := s.state.CanWriteLine(); err != nil {
+			return CommandResult{Status: StatusRunning}, err
+		}
 	}
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+
+	if s.state != nil {
+		if err := s.state.BeginCommand(); err != nil {
+			return CommandResult{Status: StatusRunning}, err
+		}
+	}
 
 	s.mu.Lock()
 	s.lastActive = time.Now()
@@ -244,26 +290,96 @@ func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Du
 
 	requestID := newRequestID()
 	marker := markerPrefix + requestID + "__"
-	// The marker line printed to the terminal is: __REASONIX_DONE_<id>__:<exit_code>
-	markerPayload := fmt.Sprintf("printf '\\n%s:%s\\n' \"$?\"", markerPrefix+requestID+"__", "%d")
-	_ = markerPayload // constructed below via sentinel
 
-	// We send:
-	//   <cmd>\n
-	//   printf '\n__REASONIX_DONE_<id>__:%s\n' "$?"\n
-	sentinel := fmt.Sprintf("printf '\\n%s:%%s\\n' \"$?\"", marker)
-	payload := cmd + "\n" + sentinel + "\n"
+	driver := s.driver
+	if driver == nil {
+		driver = &PosixShellDriver{}
+	}
+
+	payload := driver.FormatCommand(cmd, marker)
+	var notifyCh <-chan struct{}
+	if s.parser != nil {
+		notifyCh = s.parser.Arm(marker, driver)
+	}
 
 	if _, err := s.lowPTY.Write([]byte(payload)); err != nil {
-		return "", fmt.Errorf("pty write failed: %w", err)
+		if s.state != nil {
+			s.state.EndCommand()
+		}
+		if s.parser != nil {
+			s.parser.Disarm()
+		}
+		return CommandResult{}, fmt.Errorf("pty write failed: %w", err)
 	}
 	s.CommitRawInput(payload)
 
 	if waitBudget <= 0 {
-		return "", nil
+		return CommandResult{Status: StatusRunning}, nil
 	}
 
-	return s.waitForMarker(ctx, marker, waitBudget)
+	return s.waitForCompletion(ctx, notifyCh, marker, waitBudget)
+}
+
+// waitForCompletion awaits the sentinel notification from CompletionParser or budget expiry.
+func (s *Session) waitForCompletion(ctx context.Context, notifyCh <-chan struct{}, marker string, waitBudget time.Duration) (CommandResult, error) {
+	timer := time.NewTimer(waitBudget)
+	defer timer.Stop()
+
+	select {
+	case <-notifyCh:
+		if s.state != nil {
+			s.state.EndCommand()
+		}
+		out, exitCode, _ := s.parser.Result()
+		return CommandResult{
+			Output:   out,
+			ExitCode: exitCode,
+			Status:   StatusCompleted,
+		}, nil
+
+	case <-timer.C:
+		// Budget expired: command is still running
+		var out string
+		if s.parser != nil {
+			out, _, _ = s.parser.Result()
+		}
+		return CommandResult{
+			Output: out,
+			Status: StatusRunning,
+		}, ErrCommandRunning
+
+	case <-ctx.Done():
+		if s.parser != nil {
+			out, exitCode, matched := s.parser.Result()
+			if matched {
+				if s.state != nil {
+					s.state.EndCommand()
+				}
+				return CommandResult{Output: out, ExitCode: exitCode, Status: StatusCompleted}, nil
+			}
+			return CommandResult{Output: out, Status: StatusRunning}, ctx.Err()
+		}
+		return CommandResult{Status: StatusRunning}, ctx.Err()
+
+	case <-s.done:
+		if s.state != nil {
+			s.state.MarkClosed()
+		}
+		var out string
+		var exitCode int
+		var matched bool
+		if s.parser != nil {
+			out, exitCode, matched = s.parser.Result()
+		}
+		if matched {
+			return CommandResult{Output: out, ExitCode: exitCode, Status: StatusCompleted}, nil
+		}
+		return CommandResult{
+			Output:   out,
+			ExitCode: s.exitCode,
+			Status:   StatusTerminated,
+		}, nil
+	}
 }
 
 // Write sends input bytes to the PTY stdin and optionally waits for output to settle.
@@ -274,12 +390,26 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 		return "", ErrSessionClosed
 	}
 
+	if s.state != nil && s.state.Current() == StateClosed {
+		return "", ErrSessionClosed
+	}
+
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
 	s.mu.Lock()
 	s.lastActive = time.Now()
 	s.mu.Unlock()
+
+	// Handle Ctrl+C or Ctrl+U interrupts: restore state machine to ready if interrupted
+	if strings.ContainsAny(input, "\x03\x15") {
+		if s.state != nil {
+			s.state.InterruptIfRunning()
+		}
+		if s.parser != nil {
+			s.parser.Disarm()
+		}
+	}
 
 	// 1. Send input to the PTY device; commit to pending buffer only upon successful write
 	if len(input) > 0 {
@@ -352,113 +482,6 @@ func (s *Session) waitForOutput(ctx context.Context, input string, waitBudget ti
 			return CleanBytes(s.buffer.ReadUnread(MaxReadBytes)), nil
 		}
 	}
-}
-
-// waitForMarker reads PTY output until the completion sentinel line is found.
-// It strips the marker line itself and leading/trailing blank lines from the result.
-// The marker is only recognised on a complete output line (not in an echo of the
-// printf command itself), preventing false positives from terminal input-echo.
-func (s *Session) waitForMarker(ctx context.Context, marker string, waitBudget time.Duration) (string, error) {
-	deadline := time.Now().Add(waitBudget)
-	silenceTimer := time.NewTimer(DefaultSilenceWindow)
-	defer silenceTimer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return CleanBytes(s.buffer.ReadUnread(MaxReadBytes)), ctx.Err()
-
-		case <-s.done:
-			time.Sleep(50 * time.Millisecond)
-			raw := CleanBytes(s.buffer.ReadUnread(MaxReadBytes))
-			return stripMarker(raw, marker), nil
-
-		case <-s.onOutput:
-			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
-			if markerLinePresent(peeked, marker) {
-				_ = s.buffer.ReadUnread(MaxReadBytes)
-				return stripMarker(peeked, marker), nil
-			}
-			// Reset silence guard.
-			if !silenceTimer.Stop() {
-				select {
-				case <-silenceTimer.C:
-				default:
-				}
-			}
-			silenceTimer.Reset(DefaultSilenceWindow)
-
-		case <-silenceTimer.C:
-			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
-			if markerLinePresent(peeked, marker) {
-				_ = s.buffer.ReadUnread(MaxReadBytes)
-				return stripMarker(peeked, marker), nil
-			}
-			if time.Now().After(deadline) {
-				// Deadline exhausted without seeing the marker: the command is
-				// still running. Return partial output and a sentinel error so
-				// callers can surface a clear "still running" message instead of
-				// silently treating truncated output as a completed result.
-				_ = s.buffer.ReadUnread(MaxReadBytes)
-				return strings.TrimSpace(peeked), ErrCommandRunning
-			}
-			silenceTimer.Reset(DefaultSilenceWindow)
-		}
-
-		if time.Now().After(deadline) {
-			raw := CleanBytes(s.buffer.ReadUnread(MaxReadBytes))
-			if markerLinePresent(raw, marker) {
-				return stripMarker(raw, marker), nil
-			}
-			return strings.TrimSpace(raw), ErrCommandRunning
-		}
-	}
-}
-
-// markerLinePresent reports whether output contains the marker as a complete
-// output line (i.e. __REASONIX_DONE_<id>__:<digits> on its own line).
-// This prevents the echo of the printf command itself (which also contains the
-// marker string) from being mistaken for a completion sentinel.
-func markerLinePresent(output, marker string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		// A valid sentinel line is: __REASONIX_DONE_<id>__:<digits>
-		if !strings.HasPrefix(trimmed, marker) {
-			continue
-		}
-		suffix := trimmed[len(marker):]
-		// suffix must be ":<one-or-more-digits>" only — no other characters.
-		if len(suffix) < 2 || suffix[0] != ':' {
-			continue
-		}
-		allDigits := true
-		for _, ch := range suffix[1:] {
-			if ch < '0' || ch > '9' {
-				allDigits = false
-				break
-			}
-		}
-		if allDigits {
-			return true
-		}
-	}
-	return false
-}
-
-// stripMarker removes the sentinel line and any preceding echo of the sentinel command
-// from the captured output. It is called only after markerLinePresent has confirmed that
-// the completion sentinel was actually emitted, and matches this specific request's marker
-// so unrelated output (e.g. grep __REASONIX_DONE_) is not inadvertently truncated.
-func stripMarker(output, marker string) string {
-	lines := strings.Split(output, "\n")
-	var kept []string
-	for _, line := range lines {
-		if strings.Contains(line, marker) {
-			break
-		}
-		kept = append(kept, line)
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 // Read reads unread output from the buffer, or up to maxBytes.

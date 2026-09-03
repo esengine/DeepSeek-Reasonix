@@ -10,6 +10,8 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/extension"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
+	"reasonix/internal/sandbox"
 )
 
 // RebuildFrom is Rebuild using previous BuildResult for incremental sidecars
@@ -229,4 +231,12 @@ func spliceFreshSystemPrompt(carried, fresh []provider.Message) []provider.Messa
 		}
 	}
 	return append([]provider.Message{*system}, out...)
+}
+
+func initPTYManager(existing *pty.Manager, root string, bashSpec sandbox.Spec) *pty.Manager {
+	if existing == nil {
+		return pty.NewManager(root, bashSpec)
+	}
+	existing.TransferOwnership(root, bashSpec)
+	return existing
 }

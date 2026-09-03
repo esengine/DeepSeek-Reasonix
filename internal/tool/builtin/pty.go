@@ -45,6 +45,11 @@ func (ptyTool) Schema() json.RawMessage {
       "type": "string",
       "description": "Command to run: on 'start', initial shell/program (e.g. 'bash', 'python3'); on 'write_line', full shell command line to execute."
     },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Arguments for command on 'start' (e.g. ['-lc', 'python3 -i'])."
+    },
     "input": {
       "type": "string",
       "description": "Text or keystrokes to send: on 'write_line', shell command; on 'write', raw keystrokes/control characters (\\n, \\x03 Ctrl+C, \\x04 Ctrl+D, \\x1a Ctrl+Z, arrow keys)."
@@ -80,15 +85,16 @@ func (ptyTool) SnipHint() tool.SnipHint {
 }
 
 type ptyParams struct {
-	Action    string `json:"action"`
-	SessionID string `json:"session_id,omitempty"`
-	Command   string `json:"command,omitempty"`
-	Input     string `json:"input,omitempty"`
-	WaitMs    *int   `json:"wait_ms,omitempty"`
-	MaxBytes  int    `json:"max_bytes,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	Cols      uint16 `json:"cols,omitempty"`
-	Rows      uint16 `json:"rows,omitempty"`
+	Action    string   `json:"action"`
+	SessionID string   `json:"session_id,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	Input     string   `json:"input,omitempty"`
+	WaitMs    *int     `json:"wait_ms,omitempty"`
+	MaxBytes  int      `json:"max_bytes,omitempty"`
+	Cwd       string   `json:"cwd,omitempty"`
+	Cols      uint16   `json:"cols,omitempty"`
+	Rows      uint16   `json:"rows,omitempty"`
 }
 
 // isDangerousPTYInput scans raw terminal input for catastrophic root wipe or fork-bomb patterns.
@@ -179,6 +185,7 @@ func execPTYStart(ctx context.Context, mgr *pty.Manager, sessionID string, p pty
 	sess, err := mgr.Start(ctx, pty.StartOptions{
 		ID:      sessionID,
 		Command: p.Command,
+		Args:    p.Args,
 		Cwd:     p.Cwd,
 		Cols:    p.Cols,
 		Rows:    p.Rows,
@@ -212,29 +219,51 @@ func execPTYWriteLine(ctx context.Context, mgr *pty.Manager, sessionID string, p
 	}
 	waitBudget := parsePTYWaitBudget(p.WaitMs)
 	// Use deterministic marker-based completion instead of silence window.
-	out, err := sess.RunCommand(ctx, cmdToRun, waitBudget)
-	if err != nil && !sess.IsRunning() {
-		return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
-	}
-	if errors.Is(err, pty.ErrCommandRunning) {
-		// The command is still running; return partial output with a clear notice
-		// so the model knows to poll with pty(read) rather than treat this as done.
-		msg := "(command still running — use pty action=read to poll for more output)"
-		if strings.TrimSpace(out) != "" {
-			return out + "\n" + msg, nil
-		}
-		return msg, nil
-	}
-	if err != nil {
+	res, err := sess.RunCommand(ctx, cmdToRun, waitBudget)
+	if err != nil && !errors.Is(err, pty.ErrCommandRunning) {
 		return "", err
 	}
-	if strings.TrimSpace(out) == "" {
-		if waitBudget == 0 {
-			return "Command line written (non-blocking).", nil
-		}
-		return "Command line written (no new output).", nil
+
+	if waitBudget == 0 {
+		return "Command line written (non-blocking).", nil
 	}
-	return out, nil
+
+	switch res.Status {
+	case pty.StatusCompleted:
+		msg := res.Output
+		if res.ExitCode != 0 {
+			codeMsg := fmt.Sprintf("(command exited with code %d)", res.ExitCode)
+			if strings.TrimSpace(msg) != "" {
+				msg += "\n" + codeMsg
+			} else {
+				msg = codeMsg
+			}
+		}
+		if strings.TrimSpace(msg) == "" {
+			return "Command line written (no new output).", nil
+		}
+		return msg, nil
+
+	case pty.StatusRunning:
+		msg := "(command still running — use pty action=read to poll for more output)"
+		if strings.TrimSpace(res.Output) != "" {
+			return res.Output + "\n" + msg, nil
+		}
+		return msg, nil
+
+	case pty.StatusTerminated:
+		msg := fmt.Sprintf("(session terminated with exit code %d)", res.ExitCode)
+		if strings.TrimSpace(res.Output) != "" {
+			return res.Output + "\n" + msg, nil
+		}
+		return msg, nil
+
+	default:
+		if strings.TrimSpace(res.Output) == "" {
+			return "Command line written (no new output).", nil
+		}
+		return res.Output, nil
+	}
 }
 
 func execPTYWrite(ctx context.Context, mgr *pty.Manager, sessionID string, p ptyParams) (string, error) {

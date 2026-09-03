@@ -91,9 +91,29 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 			if len(plan.commandPermCalls) > 0 {
 				plan.commandPermName = "bash"
 				plan.commandPermArgs = plan.commandPermCalls[0]
-				plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
+				var merged evidence.ToolEffects
+				for i, callArgs := range plan.commandPermCalls {
+					eff, _ := evidence.ClassifyBashToolCall(callArgs)
+					if i == 0 {
+						merged = eff
+					} else {
+						merged = mergeToolEffects(merged, eff)
+					}
+				}
+				plan.effects = merged
 			}
 		}
+	}
+}
+
+func mergeToolEffects(a, b evidence.ToolEffects) evidence.ToolEffects {
+	return evidence.ToolEffects{
+		StateMutation:      a.StateMutation || b.StateMutation,
+		WorkspaceMutation:  a.WorkspaceMutation || b.WorkspaceMutation,
+		ContentMutation:    a.ContentMutation || b.ContentMutation,
+		RepositoryMutation: a.RepositoryMutation || b.RepositoryMutation,
+		Known:              a.Known && b.Known,
+		Reason:             strings.Trim(a.Reason+"; "+b.Reason, "; "),
 	}
 }
 

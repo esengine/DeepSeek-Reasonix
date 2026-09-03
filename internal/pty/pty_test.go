@@ -142,10 +142,11 @@ func TestPTYManagerLifecycle(t *testing.T) {
 
 func TestMarkerLinePresentDiscrimination(t *testing.T) {
 	marker := markerPrefix + "testtag123__"
+	driver := &PosixShellDriver{}
 
 	// 1. Terminal input echo of the command itself must NOT match
 	cmdEcho := "printf '\\n__REASONIX_DONE_testtag123__:%s\\n' \"$?\""
-	if markerLinePresent(cmdEcho, marker) {
+	if _, ok := driver.ParseSentinel(cmdEcho, marker); ok {
 		t.Fatalf("command echo was mistaken for a valid sentinel line: %q", cmdEcho)
 	}
 
@@ -157,37 +158,59 @@ func TestMarkerLinePresentDiscrimination(t *testing.T) {
 		"echo __REASONIX_DONE_testtag123__:0",
 	}
 	for _, p := range partials {
-		if markerLinePresent(p, marker) {
+		if _, ok := driver.ParseSentinel(p, marker); ok {
 			t.Fatalf("partial/invalid line %q matched sentinel pattern", p)
 		}
 	}
 
-	// 3. Genuine sentinel line MUST match
-	valids := []string{
-		"__REASONIX_DONE_testtag123__:0",
-		"__REASONIX_DONE_testtag123__:1",
-		"__REASONIX_DONE_testtag123__:127",
-		"  __REASONIX_DONE_testtag123__:0\r\n",
-		"previous output\n__REASONIX_DONE_testtag123__:0\n",
+	// 3. Genuine sentinel line MUST match and extract exit code
+	valids := map[string]int{
+		"__REASONIX_DONE_testtag123__:0":      0,
+		"__REASONIX_DONE_testtag123__:1":      1,
+		"__REASONIX_DONE_testtag123__:127":    127,
+		"  __REASONIX_DONE_testtag123__:0\r\n": 0,
 	}
-	for _, v := range valids {
-		if !markerLinePresent(v, marker) {
+	for v, wantCode := range valids {
+		code, ok := driver.ParseSentinel(v, marker)
+		if !ok {
 			t.Fatalf("valid sentinel line %q was not recognized", v)
+		}
+		if code != wantCode {
+			t.Fatalf("ParseSentinel(%q) = %d, want %d", v, code, wantCode)
 		}
 	}
 
-	// 4. stripMarker cleans out sentinel and cmdEcho matching this specific marker
+	// 4. CompletionParser cleans out sentinel and cmdEcho matching this specific marker
+	cp := NewCompletionParser()
+	notifyCh := cp.Arm(marker, driver)
 	combinedOutput := "line 1\nline 2\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
-	stripped := stripMarker(combinedOutput, marker)
-	if stripped != "line 1\nline 2" {
-		t.Fatalf("stripMarker output = %q, want 'line 1\\nline 2'", stripped)
+	cp.Feed([]byte(combinedOutput))
+
+	select {
+	case <-notifyCh:
+	default:
+		t.Fatalf("expected notifyCh to fire on sentinel match")
 	}
 
-	// 5. User grep output containing __REASONIX_DONE_ (with different or generic text) must NOT be truncated
-	grepOutput := "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
-	strippedGrep := stripMarker(grepOutput, marker)
-	if strippedGrep != "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"" {
-		t.Fatalf("stripMarker incorrectly stripped user grep output: %q", strippedGrep)
+	out, code, matched := cp.Result()
+	if !matched || code != 0 {
+		t.Fatalf("expected matched=true, code=0, got matched=%v, code=%d", matched, code)
+	}
+	if out != "line 1\nline 2" {
+		t.Fatalf("CompletionParser result output = %q, want 'line 1\\nline 2'", out)
+	}
+
+	// 5. User grep output containing __REASONIX_DONE_ (with different text) must NOT be truncated
+	cp2 := NewCompletionParser()
+	_ = cp2.Arm(marker, driver)
+	grepOutput := "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:42\n"
+	cp2.Feed([]byte(grepOutput))
+	out2, code2, matched2 := cp2.Result()
+	if !matched2 || code2 != 42 {
+		t.Fatalf("expected matched=true, code=42, got matched=%v, code=%d", matched2, code2)
+	}
+	if out2 != "line 1\npty.go: const markerPrefix = \"__REASONIX_DONE_\"" {
+		t.Fatalf("user grep output was incorrectly truncated: %q", out2)
 	}
 }
 
