@@ -292,30 +292,3 @@ func (m *Manager) Resize(id string, cols, rows uint16) error {
 	}
 	return sess.Resize(cols, rows)
 }
-
-// PendingInput returns any partially typed unsubmitted command line in the specified session.
-func (m *Manager) PendingInput(id string) string {
-	if id == "" {
-		id = DefaultSessionID
-	}
-	m.mu.RLock()
-	sess := m.sessions[id]
-	m.mu.RUnlock()
-	if sess != nil {
-		return sess.PendingInput()
-	}
-	return ""
-}
-
-// ResetPendingInput discards any pending input and optionally cancels the line in the specified session.
-func (m *Manager) ResetPendingInput(id string, sendCancel bool) {
-	if id == "" {
-		id = DefaultSessionID
-	}
-	m.mu.RLock()
-	sess := m.sessions[id]
-	m.mu.RUnlock()
-	if sess != nil {
-		sess.ResetPendingInput(sendCancel)
-	}
-}

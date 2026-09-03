@@ -571,17 +571,6 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 			return blocked, true
 		}
 		if !allow {
-			if plan.canonicalName == "pty" && a.svc.pty != nil {
-				var p struct {
-					Action    string `json:"action"`
-					SessionID string `json:"session_id"`
-				}
-				_ = json.Unmarshal(plan.execArgs, &p)
-				action := strings.ToLower(strings.TrimSpace(p.Action))
-				if (action == "write" || action == "write_line") && a.svc.pty.PendingInput(p.SessionID) != "" {
-					a.svc.pty.ResetPendingInput(p.SessionID, true)
-				}
-			}
 			return toolOutcome{
 				output:  "blocked: " + reason,
 				blocked: true,

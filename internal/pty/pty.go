@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,39 +83,20 @@ type Session struct {
 	cols       uint16
 	rows       uint16
 
-	cmd          *exec.Cmd
-	lowPTY       LowLevelPTY
-	buffer       *RingBuffer
-	done         chan struct{}
-	onOutput     chan struct{} // Notified whenever new bytes land in buffer
-	exitCode     int
-	exitErr      error
-	running      atomic.Bool
-	mu           sync.RWMutex
-	inputMu      sync.Mutex
-	pendingInput string
-	closeOnce    sync.Once
+	cmd        *exec.Cmd
+	lowPTY     LowLevelPTY
+	buffer     *RingBuffer
+	done       chan struct{}
+	onOutput   chan struct{} // Notified whenever new bytes land in buffer
+	exitCode   int
+	exitErr    error
+	running    atomic.Bool
+	mu         sync.RWMutex
+	closeOnce  sync.Once
 }
 
 // ID returns the unique session identifier.
 func (s *Session) ID() string { return s.id }
-
-// PendingInput returns any partially typed unsubmitted command line in this session.
-func (s *Session) PendingInput() string {
-	s.inputMu.Lock()
-	defer s.inputMu.Unlock()
-	return s.pendingInput
-}
-
-// ResetPendingInput discards any pending input and optionally sends Ctrl+C (\x03) to cancel the half-typed line.
-func (s *Session) ResetPendingInput(sendCancel bool) {
-	s.inputMu.Lock()
-	s.pendingInput = ""
-	s.inputMu.Unlock()
-	if sendCancel && s.running.Load() && s.lowPTY != nil {
-		_, _ = s.lowPTY.Write([]byte("\x03"))
-	}
-}
 
 // IsRunning reports whether the underlying process is alive.
 func (s *Session) IsRunning() bool { return s.running.Load() }
@@ -204,19 +184,8 @@ func (s *Session) Write(ctx context.Context, input string, waitBudget time.Durat
 	s.lastActive = time.Now()
 	s.mu.Unlock()
 
-	// 1. Send input to the PTY device & update command line accumulator
+	// 1. Send input to the PTY device
 	if len(input) > 0 {
-		s.inputMu.Lock()
-		if strings.Contains(input, "\x03") { // Ctrl+C cancels current line
-			s.pendingInput = ""
-		} else {
-			s.pendingInput += input
-			if idx := strings.LastIndexAny(s.pendingInput, "\r\n"); idx >= 0 {
-				s.pendingInput = s.pendingInput[idx+1:]
-			}
-		}
-		s.inputMu.Unlock()
-
 		if _, err := s.lowPTY.Write([]byte(input)); err != nil {
 			return "", fmt.Errorf("pty write failed: %w", err)
 		}
