@@ -112,7 +112,7 @@ registry 中供调度，但不会展开到 top-level provider schema；模型通
 每个任务共享同一套精简的 provider 可见核心：直接编码工具、后台 shell 生命周期工具，
 以及稳定的能力代理：
 
-`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`,
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `pty`, `read_file`,
 `wait`, `write_file`, `compress`（若注册），以及 `use_capability`。
 
 可选工具（`glob`、`grep`、`ls`、`web_fetch`、MCP、skills、subagents、docs、会话历史、

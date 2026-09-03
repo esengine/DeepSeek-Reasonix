@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os/exec"
 	"strings"
 	"sync"
@@ -13,6 +14,14 @@ import (
 
 	"reasonix/internal/proc"
 )
+
+// markerPrefix is embedded in the completion sentinel printed after every RunCommand.
+const markerPrefix = "__REASONIX_DONE_"
+
+// newRequestID generates a compact random hex tag for one command boundary.
+func newRequestID() string {
+	return fmt.Sprintf("%08x", rand.Uint32()) //nolint:gosec // non-crypto token
+}
 
 var (
 	ErrSessionNotFound = errors.New("pty: session not found")
@@ -95,6 +104,30 @@ type Session struct {
 	mu        sync.RWMutex
 	writeMu   sync.Mutex
 	closeOnce sync.Once
+
+	// pendingInput accumulates raw interactive write() bytes that have not yet
+	// been submitted (i.e. no \n seen). Once a \n-terminated write arrives the
+	// accumulated string is prepended to form the full command for permission
+	// evaluation, then the buffer is cleared.
+	pendingInputMu sync.Mutex
+	pendingInput   strings.Builder
+}
+
+// AccumulateAndFlushRawInput appends raw to the per-session pending buffer.
+// If raw contains a newline the method returns the accumulated full string
+// (prefix + raw) and resets the buffer; otherwise it returns ("", false).
+// Callers use the returned string for permission evaluation before deciding
+// whether to forward the bytes to the PTY device.
+func (s *Session) AccumulateAndFlushRawInput(raw string) (fullLine string, complete bool) {
+	s.pendingInputMu.Lock()
+	defer s.pendingInputMu.Unlock()
+	s.pendingInput.WriteString(raw)
+	combined := s.pendingInput.String()
+	if strings.Contains(combined, "\n") {
+		s.pendingInput.Reset()
+		return combined, true
+	}
+	return "", false
 }
 
 // ID returns the unique session identifier.
@@ -176,7 +209,47 @@ func (s *Session) monitorProcess() {
 	_ = s.lowPTY.Close()
 }
 
+// RunCommand sends a complete shell command line and waits for its output using a
+// deterministic request-id completion marker rather than a silence window.
+// The shell is instructed to print a sentinel after the command finishes, so the
+// caller does not need to rely on any timing heuristic.
+// The returned string contains only the output between the command echo and the
+// sentinel line; exit code is available as the second value of the marker.
+// This is the recommended path for write_line (structured shell command execution).
+func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Duration) (string, error) {
+	if !s.running.Load() {
+		return "", ErrSessionClosed
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	s.lastActive = time.Now()
+	s.mu.Unlock()
+
+	requestID := newRequestID()
+	marker := markerPrefix + requestID + "__"
+	// The marker line printed to the terminal is: __REASONIX_DONE_<id>__:<exit_code>
+	markerPayload := fmt.Sprintf("printf '\\n%s:%s\\n' \"$?\"", markerPrefix+requestID+"__", "%d")
+	_ = markerPayload // constructed below via sentinel
+
+	// We send:
+	//   <cmd>\n
+	//   printf '\n__REASONIX_DONE_<id>__:%s\n' "$?"\n
+	sentinel := fmt.Sprintf("printf '\\n%s:%%s\\n' \"$?\"", marker)
+	payload := cmd + "\n" + sentinel + "\n"
+
+	if _, err := s.lowPTY.Write([]byte(payload)); err != nil {
+		return "", fmt.Errorf("pty write failed: %w", err)
+	}
+
+	return s.waitForMarker(ctx, marker, waitBudget)
+}
+
 // Write sends input bytes to the PTY stdin and optionally waits for output to settle.
+// Use this for raw interactive input (REPL prompts, gdb, Ctrl+C, etc.) where
+// there is no "command completion" concept; silence-window settling is appropriate.
 func (s *Session) Write(ctx context.Context, input string, waitBudget time.Duration) (string, error) {
 	if !s.running.Load() {
 		return "", ErrSessionClosed
@@ -259,6 +332,76 @@ func (s *Session) waitForOutput(ctx context.Context, input string, waitBudget ti
 			return CleanBytes(s.buffer.ReadUnread(MaxReadBytes)), nil
 		}
 	}
+}
+
+// waitForMarker reads PTY output until the completion sentinel line is found.
+// It strips the marker line itself and leading/trailing blank lines from the result.
+func (s *Session) waitForMarker(ctx context.Context, marker string, waitBudget time.Duration) (string, error) {
+	deadline := time.Now().Add(waitBudget)
+	silenceTimer := time.NewTimer(DefaultSilenceWindow)
+	defer silenceTimer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return CleanBytes(s.buffer.ReadUnread(MaxReadBytes)), ctx.Err()
+
+		case <-s.done:
+			time.Sleep(50 * time.Millisecond)
+			raw := CleanBytes(s.buffer.ReadUnread(MaxReadBytes))
+			return stripMarker(raw, marker), nil
+
+		case <-s.onOutput:
+			// Check whether the marker has arrived in the unread region.
+			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
+			if strings.Contains(peeked, marker) {
+				// Consume and return output up to (not including) the marker line.
+				_ = s.buffer.ReadUnread(MaxReadBytes)
+				return stripMarker(peeked, marker), nil
+			}
+			// Reset silence guard (keeps the loop responsive).
+			if !silenceTimer.Stop() {
+				select {
+				case <-silenceTimer.C:
+				default:
+				}
+			}
+			silenceTimer.Reset(DefaultSilenceWindow)
+
+		case <-silenceTimer.C:
+			// Fallback: marker not seen yet but time budget allows another attempt.
+			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
+			if strings.Contains(peeked, marker) {
+				_ = s.buffer.ReadUnread(MaxReadBytes)
+				return stripMarker(peeked, marker), nil
+			}
+			if time.Now().After(deadline) {
+				// Deadline exhausted — return what we have.
+				_ = s.buffer.ReadUnread(MaxReadBytes)
+				return strings.TrimSpace(peeked), nil
+			}
+			silenceTimer.Reset(DefaultSilenceWindow)
+		}
+
+		if time.Now().After(deadline) {
+			raw := CleanBytes(s.buffer.ReadUnread(MaxReadBytes))
+			return stripMarker(raw, marker), nil
+		}
+	}
+}
+
+// stripMarker removes the sentinel line (and everything after it) from output,
+// then trims leading/trailing blank lines for a clean caller-facing result.
+func stripMarker(output, marker string) string {
+	lines := strings.Split(output, "\n")
+	var kept []string
+	for _, line := range lines {
+		if strings.Contains(line, marker) {
+			break
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 // Read reads unread output from the buffer, or up to maxBytes.

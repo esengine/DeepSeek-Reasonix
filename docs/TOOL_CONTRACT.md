@@ -147,7 +147,7 @@ flags and canonical schemas.
 Every task starts with the same lean provider-visible core: direct
 coding tools, background-shell lifecycle tools, and the stable capability proxy:
 
-`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`,
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `pty`, `read_file`,
 `wait`, `write_file`, `compress` (when registered), and `use_capability`.
 
 Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs,

@@ -125,7 +125,7 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
 		}
 	} else if canonicalName == "pty" {
-		classifyPTYToolCallPlan(plan, plan.execArgs)
+		classifyPTYToolCallPlan(plan, plan.execArgs, a.svc.pty)
 	} else {
 		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	}

@@ -207,7 +207,8 @@ func execPTYWriteLine(ctx context.Context, mgr *pty.Manager, sessionID string, p
 		return "", err
 	}
 	waitBudget := parsePTYWaitBudget(p.WaitMs)
-	out, err := sess.Write(ctx, cmdToRun+"\n", waitBudget)
+	// Use deterministic marker-based completion instead of silence window.
+	out, err := sess.RunCommand(ctx, cmdToRun, waitBudget)
 	if err != nil && !sess.IsRunning() {
 		return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
 	}

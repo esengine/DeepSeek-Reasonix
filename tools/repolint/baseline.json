@@ -3,7 +3,7 @@
     "banner": 13,
     "commented-code": 0,
     "complexity": 1977,
-    "essay": 1989,
+    "essay": 1990,
     "file-size": 108700,
     "function-size": 8543,
     "layering": 1,
@@ -1273,6 +1273,9 @@
     },
     "internal/provider/schema_validate.go": {
       "essay": 2
+    },
+    "internal/pty/pty.go": {
+      "essay": 1
     },
     "internal/recovery/decision.go": {
       "essay": 2

@@ -228,3 +228,87 @@ func TestPTYBasePermissionDeny(t *testing.T) {
 		t.Fatalf("expected pty.write_line to be blocked by PTY base deny rule, got: %+v", outcomeWriteLine)
 	}
 }
+
+// TestPTYWriteSplitCommandRespectsBashPermissionDeny verifies that splitting a
+// denied shell command across two consecutive pty.write tool calls cannot bypass
+// the Bash permission gate.  The first call ("git ") carries no newline and must
+// pass through (it is just raw interactive text).  The second call
+// ("push origin main\n") completes the command line with a trailing newline, so
+// the gate must classify it as "bash: git push origin main" and deny it.
+func TestPTYWriteSplitCommandRespectsBashPermissionDeny(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	policy := permission.New("allow", nil, nil, []string{"Bash(git push*)"})
+	gate := permission.NewGate(policy, nil)
+
+	opts := Options{
+		Gate: gate,
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Start a harmless session first.
+	callStart := provider.ToolCall{
+		ID:   "call-split-start",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "split-test",
+			})
+			return string(b)
+		}(),
+	}
+	if out := ag.executeOne(context.Background(), &turnRuntime{}, callStart); out.blocked {
+		t.Fatalf("expected legitimate start to succeed, got blocked: %+v", out)
+	}
+
+	// First fragment: "git " — no newline, should be allowed (raw text, not a complete command).
+	callWritePart1 := provider.ToolCall{
+		ID:   "call-split-write-1",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "split-test",
+				"input":      "git ",
+			})
+			return string(b)
+		}(),
+	}
+	out1 := ag.executeOne(context.Background(), &turnRuntime{}, callWritePart1)
+	if out1.blocked {
+		t.Fatalf("first fragment 'git ' without newline should be allowed, got blocked: %+v", out1)
+	}
+
+	// Second fragment: "push origin main\n" — contains newline, completes the command.
+	// Gate must now classify the command as "bash: push origin main" and deny it.
+	callWritePart2 := provider.ToolCall{
+		ID:   "call-split-write-2",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "split-test",
+				"input":      "push origin main\n",
+			})
+			return string(b)
+		}(),
+	}
+	out2 := ag.executeOne(context.Background(), &turnRuntime{}, callWritePart2)
+	if !out2.blocked {
+		t.Fatalf("second fragment 'push origin main\\n' should be blocked by Bash deny rule, got: %+v", out2)
+	}
+	if !strings.Contains(out2.output, "blocked") {
+		t.Fatalf("expected blocked message in output, got: %q", out2.output)
+	}
+}
+

@@ -7,19 +7,23 @@ import (
 	"strings"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/pty"
 	"reasonix/internal/tool"
 )
 
 // classifyPTYToolCallPlan sets up PTY base permission, read-only resolution,
 // and command-level secondary Bash permission for start and write_line.
-func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
+// mgr is optional: when non-nil and action=="write", the session's pending-input
+// buffer is consulted so split-across-calls commands are evaluated as a whole.
+func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.Manager) {
 	if plan == nil || plan.canonicalName != "pty" {
 		return
 	}
 	var p struct {
-		Action  string `json:"action"`
-		Command string `json:"command"`
-		Input   string `json:"input"`
+		Action    string `json:"action"`
+		Command   string `json:"command"`
+		Input     string `json:"input"`
+		SessionID string `json:"session_id"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return
@@ -45,7 +49,29 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
 		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 	case "write":
-		if strings.Contains(p.Input, "\n") {
+		// Accumulate raw input fragments across Tool Calls. Only when a \n arrives
+		// do we have a complete command line to evaluate against Bash deny rules.
+		if mgr != nil {
+			sessionID := strings.TrimSpace(p.SessionID)
+			if sessionID == "" {
+				sessionID = pty.DefaultSessionID
+			}
+			if sess, err := mgr.Get(sessionID); err == nil {
+				fullLine, complete := sess.AccumulateAndFlushRawInput(p.Input)
+				if complete {
+					cmd := strings.TrimSpace(fullLine)
+					if cmd != "" {
+						plan.commandPermName = "bash"
+						plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+						plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
+					}
+				}
+				return
+			}
+		}
+		// Fallback (no manager or session not yet started): single-call evaluation.
+		// Do not overwrite a commandPermName already set by the accumulate path.
+		if plan.commandPermName == "" && strings.Contains(p.Input, "\n") {
 			cmd := strings.TrimSpace(p.Input)
 			if cmd != "" {
 				plan.commandPermName = "bash"
