@@ -124,6 +124,27 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 			plan.readOnly = true
 			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
 		}
+	} else if canonicalName == "pty" {
+		var p struct {
+			Action string `json:"action"`
+			Input  string `json:"input"`
+		}
+		if err := json.Unmarshal(plan.execArgs, &p); err == nil {
+			action := strings.ToLower(strings.TrimSpace(p.Action))
+			if action == "read" || action == "list" {
+				plan.readOnly = true
+				plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
+			} else if action == "write" && strings.TrimSpace(p.Input) != "" {
+				plan.permName = "bash"
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": strings.TrimSpace(p.Input)})
+				var permissionReader bool
+				plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.permArgs)
+				if permissionReader {
+					plan.readOnly = true
+					plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
+				}
+			}
+		}
 	} else {
 		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	}

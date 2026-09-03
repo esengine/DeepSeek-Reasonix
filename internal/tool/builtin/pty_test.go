@@ -34,20 +34,6 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("tool.ProviderVisible should be false when manager is absent")
 	}
 
-	// 0. Test EffectHint classification
-	readHint := tool.EffectHint(json.RawMessage(`{"action":"read"}`))
-	if !readHint.ReadOnly {
-		t.Fatalf("read action must be ReadOnly=true, got %+v", readHint)
-	}
-	listHint := tool.EffectHint(json.RawMessage(`{"action":"list"}`))
-	if !listHint.ReadOnly {
-		t.Fatalf("list action must be ReadOnly=true, got %+v", listHint)
-	}
-	writeHint := tool.EffectHint(json.RawMessage(`{"action":"write"}`))
-	if writeHint.ReadOnly || !writeHint.ExecutesCode {
-		t.Fatalf("write action must be ReadOnly=false and ExecutesCode=true, got %+v", writeHint)
-	}
-
 	// 1. Action: start
 	startArgs, _ := json.Marshal(map[string]any{
 		"action":     "start",

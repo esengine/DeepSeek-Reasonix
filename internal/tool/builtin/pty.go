@@ -74,21 +74,6 @@ func (ptyTool) Schema() json.RawMessage {
 
 func (ptyTool) ReadOnly() bool { return false }
 
-// EffectHint provides per-call effect classification so read/list actions
-// remain read-only without requiring writer coordination or permission barriers.
-func (ptyTool) EffectHint(args json.RawMessage) tool.EffectHint {
-	var p ptyParams
-	_ = json.Unmarshal(args, &p)
-	switch strings.ToLower(strings.TrimSpace(p.Action)) {
-	case "read", "list":
-		return tool.EffectHint{Known: true, ReadOnly: true, Destructive: false}
-	case "write":
-		return tool.EffectHint{Known: true, ReadOnly: false, Destructive: false, ExecutesCode: true}
-	default:
-		return tool.EffectHint{Known: true, ReadOnly: false}
-	}
-}
-
 func (ptyTool) ProviderVisible(ctx context.Context) bool {
 	_, ok := pty.FromContext(ctx)
 	return ok

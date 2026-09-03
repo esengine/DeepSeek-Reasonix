@@ -28,6 +28,22 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 	plan.execArgs = normalized
 	plan.permArgs = normalized
 	plan.evidenceArgs = normalized
+	if plan.canonicalName == "pty" {
+		var p struct {
+			Action string `json:"action"`
+			Input  string `json:"input"`
+		}
+		if err := json.Unmarshal(normalized, &p); err == nil {
+			action := strings.ToLower(strings.TrimSpace(p.Action))
+			if action == "read" || action == "list" {
+				plan.readOnly = true
+				plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
+			} else if action == "write" && strings.TrimSpace(p.Input) != "" {
+				plan.permName = "bash"
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": strings.TrimSpace(p.Input)})
+			}
+		}
+	}
 	result := tool.ValidateArguments(plan.execTool, normalized)
 	failed := result.CompileErr != nil || len(result.Violations) > 0
 	if a.capabilityAudit != nil {
