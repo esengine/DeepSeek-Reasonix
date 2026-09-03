@@ -259,6 +259,10 @@ func (s *Session) RunCommand(ctx context.Context, cmd string, waitBudget time.Du
 	}
 	s.CommitRawInput(payload)
 
+	if waitBudget <= 0 {
+		return "", nil
+	}
+
 	return s.waitForMarker(ctx, marker, waitBudget)
 }
 

@@ -45,6 +45,15 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 		if cmd == "" {
 			cmd = strings.TrimSpace(p.Input)
 		}
+		if mgr != nil {
+			sessionID := strings.TrimSpace(p.SessionID)
+			if sessionID == "" {
+				sessionID = pty.DefaultSessionID
+			}
+			if sess, err := mgr.Get(sessionID); err == nil && sess.PendingInput() != "" {
+				cmd = strings.TrimSpace(sess.PendingInput() + cmd)
+			}
+		}
 		plan.commandPermName = "bash"
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
 		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)

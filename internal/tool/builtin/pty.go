@@ -207,6 +207,9 @@ func execPTYWriteLine(ctx context.Context, mgr *pty.Manager, sessionID string, p
 	if err != nil {
 		return "", err
 	}
+	if pending := sess.PendingInput(); pending != "" {
+		return "", fmt.Errorf("blocked: pty session %q has pending unsubmitted raw input (%q); finish or cancel it with pty write (e.g. input=\"\\x03\") before using write_line", sessionID, pending)
+	}
 	waitBudget := parsePTYWaitBudget(p.WaitMs)
 	// Use deterministic marker-based completion instead of silence window.
 	out, err := sess.RunCommand(ctx, cmdToRun, waitBudget)

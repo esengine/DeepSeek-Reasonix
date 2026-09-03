@@ -193,3 +193,38 @@ func TestPTYWriteLineTimeoutNotice(t *testing.T) {
 	}
 }
 
+func TestPTYWriteLineNonBlockingZeroWaitMs(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	// Start a session
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "nonblock-sess",
+	})
+	if _, err := tool.Execute(ctx, startArgs); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// Run write_line with wait_ms: 0
+	waitZero := 0
+	nbArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "nonblock-sess",
+		"command":    "echo NON_BLOCKING_OK",
+		"wait_ms":    &waitZero,
+	})
+	res, err := tool.Execute(ctx, nbArgs)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if !strings.Contains(res, "Command line written (non-blocking).") {
+		t.Fatalf("expected non-blocking message, got: %q", res)
+	}
+}
+
+

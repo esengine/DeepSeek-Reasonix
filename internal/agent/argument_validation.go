@@ -29,9 +29,7 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 	plan.permArgs = normalized
 	plan.evidenceArgs = normalized
 	if plan.canonicalName == "pty" {
-		// mgr=nil: accumulation is done by the earlier resolveToolCanonicalArgs call in execute_one.go;
-		// this invocation only re-normalizes the args representation for schema validation.
-		classifyPTYToolCallPlan(plan, normalized, nil)
+		classifyPTYToolCallPlan(plan, normalized, a.svc.pty)
 	}
 	result := tool.ValidateArguments(plan.execTool, normalized)
 	failed := result.CompileErr != nil || len(result.Violations) > 0

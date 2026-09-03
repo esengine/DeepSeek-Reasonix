@@ -525,5 +525,159 @@ func TestPTYWriteMultiCommandRespectsBashPermissionDeny(t *testing.T) {
 	}
 }
 
+// TestPTYWriteLineRejectsPendingRawInput verifies that an attacker cannot bypass
+// Bash permission rules by splitting across different actions:
+//  1. pty.write("git ") leaves uncommitted "git " sitting on the terminal prompt.
+//  2. pty.write_line("push origin main") attempts to complete and submit it.
+//
+// Both the Gate (evaluating pendingInput + command) and the execution layer
+// (enforcing clean-line invariant) block this attempt, preventing git push from executing.
+func TestPTYWriteLineRejectsPendingRawInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	policy := permission.New("allow", nil, nil, []string{"Bash(git push*)"})
+	gate := permission.NewGate(policy, nil)
+
+	opts := Options{
+		Gate: gate,
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Start session
+	callStart := provider.ToolCall{
+		ID:   "call-cross-start",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "cross-action-sess",
+			})
+			return string(b)
+		}(),
+	}
+	if out := ag.executeOne(context.Background(), &turnRuntime{}, callStart); out.blocked {
+		t.Fatalf("expected start to succeed: %+v", out)
+	}
+
+	sess, err := mgr.Get("cross-action-sess")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	_ = sess.Read(4096)
+
+	// 1. Step 1: write("git ") — allowed, leaves "git " in pending buffer
+	call1 := provider.ToolCall{
+		ID:   "call-cross-write",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "cross-action-sess",
+				"input":      "git ",
+			})
+			return string(b)
+		}(),
+	}
+	out1 := ag.executeOne(context.Background(), &turnRuntime{}, call1)
+	if out1.blocked {
+		t.Fatalf("step 1 write('git ') should be allowed: %+v", out1)
+	}
+	if got := sess.PendingInput(); got != "git " {
+		t.Fatalf("expected pending input to be 'git ', got: %q", got)
+	}
+
+	// 2. Step 2: write_line("push origin main") — MUST BE BLOCKED!
+	call2 := provider.ToolCall{
+		ID:   "call-cross-write-line",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write_line",
+				"session_id": "cross-action-sess",
+				"command":    "push origin main",
+			})
+			return string(b)
+		}(),
+	}
+	out2 := ag.executeOne(context.Background(), &turnRuntime{}, call2)
+	if !out2.blocked {
+		t.Fatalf("expected cross-action write_line completing git push to be blocked, got: %+v", out2)
+	}
+	if !strings.Contains(out2.output, "blocked") {
+		t.Fatalf("expected blocked message in output, got: %q", out2.output)
+	}
+
+	// 3. Step 3: Harmless write_line("echo hello") must ALSO be rejected because pending raw input exists
+	call3 := provider.ToolCall{
+		ID:   "call-cross-harmless-line",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write_line",
+				"session_id": "cross-action-sess",
+				"command":    "echo hello",
+			})
+			return string(b)
+		}(),
+	}
+	out3 := ag.executeOne(context.Background(), &turnRuntime{}, call3)
+	// Either blocked by gate or execution rejected due to pending input
+	if !out3.blocked && !strings.Contains(out3.output, "pending unsubmitted raw input") && !strings.Contains(out3.output, "blocked") {
+		t.Fatalf("write_line on dirty prompt with pending input must be rejected, got: %+v", out3)
+	}
+
+	// 4. Step 4: write("\x03") (Ctrl+C) cancels the line
+	callClear := provider.ToolCall{
+		ID:   "call-cross-clear",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "cross-action-sess",
+				"input":      "\x03",
+			})
+			return string(b)
+		}(),
+	}
+	outClear := ag.executeOne(context.Background(), &turnRuntime{}, callClear)
+	if outClear.blocked {
+		t.Fatalf("Ctrl+C clear should be allowed: %+v", outClear)
+	}
+	if got := sess.PendingInput(); got != "" {
+		t.Fatalf("expected pending input to be empty after Ctrl+C, got: %q", got)
+	}
+
+	// 5. Step 5: Now write_line on clean prompt succeeds normally
+	call5 := provider.ToolCall{
+		ID:   "call-cross-clean-line",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write_line",
+				"session_id": "cross-action-sess",
+				"command":    "echo CLEAN_LINE_OK",
+			})
+			return string(b)
+		}(),
+	}
+	out5 := ag.executeOne(context.Background(), &turnRuntime{}, call5)
+	if out5.blocked {
+		t.Fatalf("write_line on clean prompt should succeed, got blocked: %+v", out5)
+	}
+	if !strings.Contains(out5.output, "CLEAN_LINE_OK") {
+		t.Fatalf("expected output to contain CLEAN_LINE_OK, got: %q", out5.output)
+	}
+}
+
+
 
 
