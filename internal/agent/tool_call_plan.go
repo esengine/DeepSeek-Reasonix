@@ -46,6 +46,10 @@ type toolCallPlan struct {
 	// the read chain it advances. Empty means an independent tool call.
 	incompleteReadRoot   string
 	incompleteReadAction incompleteReadAction
+	// ptyPendingCommit is set by classifyPTYToolCallPlan when action=="write".
+	// It is called by applyStandardGate when and only when the permission gate
+	// allows the tool call, updating the session's pending line buffer.
+	ptyPendingCommit func()
 }
 
 func (p *toolCallPlan) classifyEffects() {

@@ -312,3 +312,139 @@ func TestPTYWriteSplitCommandRespectsBashPermissionDeny(t *testing.T) {
 	}
 }
 
+// TestPTYWriteDeniedCompletionPreservesPendingInput specifically tests against the
+// secondary bypass attack where:
+//  1. write("git ") is allowed and lands in PTY (pending = "git ")
+//  2. write("push origin main\n") is denied by Bash(git push*)
+//  3. A naive accumulator might reset on deny, leaving PTY with "git " but
+//     pending = "". Then a subsequent write("push origin main\n") would only
+//     see "push origin main" at the gate (not matching git push*), successfully
+//     bypassing the deny rule!
+//
+// With the non-destructive preview + commit-on-allow architecture, the pending
+// prefix is strictly preserved across denials, blocking any subsequent attempts.
+func TestPTYWriteDeniedCompletionPreservesPendingInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tool.NewRegistry()
+	for _, b := range tool.Builtins() {
+		reg.Add(b)
+	}
+
+	mgr := pty.NewManager(tmpDir)
+	defer mgr.CloseAll()
+
+	policy := permission.New("allow", nil, nil, []string{"Bash(git push*)"})
+	gate := permission.NewGate(policy, nil)
+
+	opts := Options{
+		Gate: gate,
+		PTY:  mgr,
+	}
+
+	ag := New(&fakeProvider{}, reg, NewSession("sys"), opts, event.Discard)
+
+	// Start session
+	callStart := provider.ToolCall{
+		ID:   "call-sec-start",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "start",
+				"session_id": "sec-attack-sess",
+			})
+			return string(b)
+		}(),
+	}
+	if out := ag.executeOne(context.Background(), &turnRuntime{}, callStart); out.blocked {
+		t.Fatalf("expected start to succeed, got blocked: %+v", out)
+	}
+
+	sess, err := mgr.Get("sec-attack-sess")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+
+	// 1. Step 1: write("git ") — allowed, lands in PTY
+	call1 := provider.ToolCall{
+		ID:   "call-step-1",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "sec-attack-sess",
+				"input":      "git ",
+			})
+			return string(b)
+		}(),
+	}
+	out1 := ag.executeOne(context.Background(), &turnRuntime{}, call1)
+	if out1.blocked {
+		t.Fatalf("step 1 write('git ') should be allowed: %+v", out1)
+	}
+	if got := sess.PendingInput(); got != "git " {
+		t.Fatalf("expected pending input to be 'git ', got: %q", got)
+	}
+
+	// 2. Step 2: write("push origin main\n") — DENIED
+	call2 := provider.ToolCall{
+		ID:   "call-step-2",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "sec-attack-sess",
+				"input":      "push origin main\n",
+			})
+			return string(b)
+		}(),
+	}
+	out2 := ag.executeOne(context.Background(), &turnRuntime{}, call2)
+	if !out2.blocked {
+		t.Fatalf("step 2 write('push origin main\\n') must be blocked by Bash(git push*): %+v", out2)
+	}
+	// CRITICAL ASSERTION: The pending buffer must STILL be "git "! Deny must NOT reset it.
+	if got := sess.PendingInput(); got != "git " {
+		t.Fatalf("denial must NOT reset pending input! Expected 'git ', got: %q", got)
+	}
+
+	// 3. Step 3: Attacker retries write("push origin main\n") — MUST STILL BE DENIED!
+	call3 := provider.ToolCall{
+		ID:   "call-step-3-attack-retry",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "sec-attack-sess",
+				"input":      "push origin main\n",
+			})
+			return string(b)
+		}(),
+	}
+	out3 := ag.executeOne(context.Background(), &turnRuntime{}, call3)
+	if !out3.blocked {
+		t.Fatalf("step 3 secondary bypass attempt must be BLOCKED by preserved 'git ' prefix: %+v", out3)
+	}
+
+	// 4. Step 4: write("\x03") (Ctrl+C) cancels the unsubmitted line in PTY
+	callCancel := provider.ToolCall{
+		ID:   "call-step-4-ctrl-c",
+		Name: "pty",
+		Arguments: func() string {
+			b, _ := json.Marshal(map[string]any{
+				"action":     "write",
+				"session_id": "sec-attack-sess",
+				"input":      "\x03",
+			})
+			return string(b)
+		}(),
+	}
+	outCancel := ag.executeOne(context.Background(), &turnRuntime{}, callCancel)
+	if outCancel.blocked {
+		t.Fatalf("Ctrl+C must be allowed: %+v", outCancel)
+	}
+	if got := sess.PendingInput(); got != "" {
+		t.Fatalf("Ctrl+C must clear pending line buffer, got: %q", got)
+	}
+}
+
+

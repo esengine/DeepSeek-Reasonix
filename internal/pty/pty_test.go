@@ -139,3 +139,48 @@ func TestPTYManagerLifecycle(t *testing.T) {
 		t.Fatalf("List() after close = %d, want 0", len(mgr.List()))
 	}
 }
+
+func TestMarkerLinePresentDiscrimination(t *testing.T) {
+	marker := markerPrefix + "testtag123__"
+
+	// 1. Terminal input echo of the command itself must NOT match
+	cmdEcho := "printf '\\n__REASONIX_DONE_testtag123__:%s\\n' \"$?\""
+	if markerLinePresent(cmdEcho, marker) {
+		t.Fatalf("command echo was mistaken for a valid sentinel line: %q", cmdEcho)
+	}
+
+	// 2. Fragmentary or partial matches must NOT match
+	partials := []string{
+		"__REASONIX_DONE_testtag123__",
+		"__REASONIX_DONE_testtag123__:",
+		"__REASONIX_DONE_testtag123__:abc",
+		"echo __REASONIX_DONE_testtag123__:0",
+	}
+	for _, p := range partials {
+		if markerLinePresent(p, marker) {
+			t.Fatalf("partial/invalid line %q matched sentinel pattern", p)
+		}
+	}
+
+	// 3. Genuine sentinel line MUST match
+	valids := []string{
+		"__REASONIX_DONE_testtag123__:0",
+		"__REASONIX_DONE_testtag123__:1",
+		"__REASONIX_DONE_testtag123__:127",
+		"  __REASONIX_DONE_testtag123__:0\r\n",
+		"previous output\n__REASONIX_DONE_testtag123__:0\n",
+	}
+	for _, v := range valids {
+		if !markerLinePresent(v, marker) {
+			t.Fatalf("valid sentinel line %q was not recognized", v)
+		}
+	}
+
+	// 4. stripMarker cleans out markerPrefix and everything after it
+	combinedOutput := "line 1\nline 2\n" + cmdEcho + "\n__REASONIX_DONE_testtag123__:0\n"
+	stripped := stripMarker(combinedOutput, marker)
+	if stripped != "line 1\nline 2" {
+		t.Fatalf("stripMarker output = %q, want 'line 1\\nline 2'", stripped)
+	}
+}
+

@@ -27,6 +27,10 @@ var (
 	ErrSessionNotFound = errors.New("pty: session not found")
 	ErrSessionClosed   = errors.New("pty: session is closed")
 	ErrSessionExists   = errors.New("pty: session already exists")
+	// ErrCommandRunning is returned by RunCommand when the wait budget expires
+	// before the completion marker is received. The command is still running in
+	// the PTY; the caller should poll with Read or wait with a longer budget.
+	ErrCommandRunning = errors.New("pty: command still running (marker not received within wait budget)")
 )
 
 // DefaultTerminalCols is the default width in characters.
@@ -113,21 +117,31 @@ type Session struct {
 	pendingInput   strings.Builder
 }
 
-// AccumulateAndFlushRawInput appends raw to the per-session pending buffer.
-// If raw contains a newline the method returns the accumulated full string
-// (prefix + raw) and resets the buffer; otherwise it returns ("", false).
-// Callers use the returned string for permission evaluation before deciding
-// whether to forward the bytes to the PTY device.
-func (s *Session) AccumulateAndFlushRawInput(raw string) (fullLine string, complete bool) {
+// PendingInput returns the current uncommitted input accumulated in the PTY line buffer.
+func (s *Session) PendingInput() string {
 	s.pendingInputMu.Lock()
 	defer s.pendingInputMu.Unlock()
-	s.pendingInput.WriteString(raw)
-	combined := s.pendingInput.String()
-	if strings.Contains(combined, "\n") {
+	return s.pendingInput.String()
+}
+
+// CommitRawInput is called AFTER a write is allowed and sent to the PTY.
+// If raw contains control characters that abort the line (\x03 for Ctrl+C, \x15 for Ctrl+U),
+// the pending line buffer is cleared.
+// Otherwise, any text up to the last newline has been submitted to the shell, and
+// any characters after the last newline become the new pending line buffer.
+func (s *Session) CommitRawInput(raw string) {
+	s.pendingInputMu.Lock()
+	defer s.pendingInputMu.Unlock()
+	if strings.ContainsAny(raw, "\x03\x15") {
 		s.pendingInput.Reset()
-		return combined, true
+		return
 	}
-	return "", false
+	s.pendingInput.WriteString(raw)
+	current := s.pendingInput.String()
+	if idx := strings.LastIndex(current, "\n"); idx >= 0 {
+		s.pendingInput.Reset()
+		s.pendingInput.WriteString(current[idx+1:])
+	}
 }
 
 // ID returns the unique session identifier.
@@ -336,6 +350,8 @@ func (s *Session) waitForOutput(ctx context.Context, input string, waitBudget ti
 
 // waitForMarker reads PTY output until the completion sentinel line is found.
 // It strips the marker line itself and leading/trailing blank lines from the result.
+// The marker is only recognised on a complete output line (not in an echo of the
+// printf command itself), preventing false positives from terminal input-echo.
 func (s *Session) waitForMarker(ctx context.Context, marker string, waitBudget time.Duration) (string, error) {
 	deadline := time.Now().Add(waitBudget)
 	silenceTimer := time.NewTimer(DefaultSilenceWindow)
@@ -352,14 +368,12 @@ func (s *Session) waitForMarker(ctx context.Context, marker string, waitBudget t
 			return stripMarker(raw, marker), nil
 
 		case <-s.onOutput:
-			// Check whether the marker has arrived in the unread region.
 			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
-			if strings.Contains(peeked, marker) {
-				// Consume and return output up to (not including) the marker line.
+			if markerLinePresent(peeked, marker) {
 				_ = s.buffer.ReadUnread(MaxReadBytes)
 				return stripMarker(peeked, marker), nil
 			}
-			// Reset silence guard (keeps the loop responsive).
+			// Reset silence guard.
 			if !silenceTimer.Stop() {
 				select {
 				case <-silenceTimer.C:
@@ -369,34 +383,70 @@ func (s *Session) waitForMarker(ctx context.Context, marker string, waitBudget t
 			silenceTimer.Reset(DefaultSilenceWindow)
 
 		case <-silenceTimer.C:
-			// Fallback: marker not seen yet but time budget allows another attempt.
 			peeked := CleanBytes(s.buffer.PeekUnread(MaxReadBytes))
-			if strings.Contains(peeked, marker) {
+			if markerLinePresent(peeked, marker) {
 				_ = s.buffer.ReadUnread(MaxReadBytes)
 				return stripMarker(peeked, marker), nil
 			}
 			if time.Now().After(deadline) {
-				// Deadline exhausted — return what we have.
+				// Deadline exhausted without seeing the marker: the command is
+				// still running. Return partial output and a sentinel error so
+				// callers can surface a clear "still running" message instead of
+				// silently treating truncated output as a completed result.
 				_ = s.buffer.ReadUnread(MaxReadBytes)
-				return strings.TrimSpace(peeked), nil
+				return strings.TrimSpace(peeked), ErrCommandRunning
 			}
 			silenceTimer.Reset(DefaultSilenceWindow)
 		}
 
 		if time.Now().After(deadline) {
 			raw := CleanBytes(s.buffer.ReadUnread(MaxReadBytes))
-			return stripMarker(raw, marker), nil
+			if markerLinePresent(raw, marker) {
+				return stripMarker(raw, marker), nil
+			}
+			return strings.TrimSpace(raw), ErrCommandRunning
 		}
 	}
 }
 
-// stripMarker removes the sentinel line (and everything after it) from output,
-// then trims leading/trailing blank lines for a clean caller-facing result.
+// markerLinePresent reports whether output contains the marker as a complete
+// output line (i.e. __REASONIX_DONE_<id>__:<digits> on its own line).
+// This prevents the echo of the printf command itself (which also contains the
+// marker string) from being mistaken for a completion sentinel.
+func markerLinePresent(output, marker string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// A valid sentinel line is: __REASONIX_DONE_<id>__:<digits>
+		if !strings.HasPrefix(trimmed, marker) {
+			continue
+		}
+		suffix := trimmed[len(marker):]
+		// suffix must be ":<one-or-more-digits>" only — no other characters.
+		if len(suffix) < 2 || suffix[0] != ':' {
+			continue
+		}
+		allDigits := true
+		for _, ch := range suffix[1:] {
+			if ch < '0' || ch > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return true
+		}
+	}
+	return false
+}
+
+// stripMarker removes the sentinel line and any preceding echo of the sentinel command
+// from the captured output. It is called only after markerLinePresent has confirmed that
+// the completion sentinel was actually emitted.
 func stripMarker(output, marker string) string {
 	lines := strings.Split(output, "\n")
 	var kept []string
 	for _, line := range lines {
-		if strings.Contains(line, marker) {
+		if strings.Contains(line, markerPrefix) {
 			break
 		}
 		kept = append(kept, line)

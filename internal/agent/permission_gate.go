@@ -49,17 +49,23 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
 		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 	case "write":
-		// Accumulate raw input fragments across Tool Calls. Only when a \n arrives
-		// do we have a complete command line to evaluate against Bash deny rules.
+		// Preview accumulated input without resetting the buffer. The permission
+		// gate may deny the write; we must not clear the pending prefix in that
+		// case so a follow-up call cannot reassemble the same command from scratch.
+		// CommitRawInput / RollbackRawInput are called by applyStandardGate after
+		// the allow/deny decision (see below in the gate helper).
 		if mgr != nil {
 			sessionID := strings.TrimSpace(p.SessionID)
 			if sessionID == "" {
 				sessionID = pty.DefaultSessionID
 			}
 			if sess, err := mgr.Get(sessionID); err == nil {
-				fullLine, complete := sess.AccumulateAndFlushRawInput(p.Input)
-				if complete {
-					cmd := strings.TrimSpace(fullLine)
+				pending := sess.PendingInput()
+				combined := pending + p.Input
+				inputToCommit := p.Input
+				plan.ptyPendingCommit = func() { sess.CommitRawInput(inputToCommit) }
+				if strings.Contains(combined, "\n") {
+					cmd := strings.TrimSpace(combined[:strings.Index(combined, "\n")])
 					if cmd != "" {
 						plan.commandPermName = "bash"
 						plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
@@ -70,7 +76,7 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage, mgr *pty.
 			}
 		}
 		// Fallback (no manager or session not yet started): single-call evaluation.
-		// Do not overwrite a commandPermName already set by the accumulate path.
+		// Do not overwrite a commandPermName already set by the preview path.
 		if plan.commandPermName == "" && strings.Contains(p.Input, "\n") {
 			cmd := strings.TrimSpace(p.Input)
 			if cmd != "" {
@@ -114,6 +120,10 @@ func (a *Agent) applyStandardGate(ctx context.Context, plan *toolCallPlan, gate 
 			blocked: true,
 			errMsg:  "blocked by permission policy",
 		}, true
+	}
+	// Permission allowed: commit the write to update the session's pending line buffer.
+	if plan.ptyPendingCommit != nil {
+		plan.ptyPendingCommit()
 	}
 	return toolOutcome{}, false
 }

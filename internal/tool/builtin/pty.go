@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -211,6 +212,15 @@ func execPTYWriteLine(ctx context.Context, mgr *pty.Manager, sessionID string, p
 	out, err := sess.RunCommand(ctx, cmdToRun, waitBudget)
 	if err != nil && !sess.IsRunning() {
 		return fmt.Sprintf("Session exited (code %d).\n%s", sess.Info().ExitCode, out), nil
+	}
+	if errors.Is(err, pty.ErrCommandRunning) {
+		// The command is still running; return partial output with a clear notice
+		// so the model knows to poll with pty(read) rather than treat this as done.
+		msg := "(command still running — use pty action=read to poll for more output)"
+		if strings.TrimSpace(out) != "" {
+			return out + "\n" + msg, nil
+		}
+		return msg, nil
 	}
 	if err != nil {
 		return "", err

@@ -144,3 +144,52 @@ func TestPTYToolLifecycle(t *testing.T) {
 		t.Fatalf("unexpected close response: %q", closeRes)
 	}
 }
+
+func TestPTYWriteLineTimeoutNotice(t *testing.T) {
+	workspace := t.TempDir()
+	mgr := pty.NewManager(workspace)
+	defer mgr.CloseAll()
+
+	ctx := pty.WithManager(context.Background(), mgr)
+	tool := ptyTool{}
+
+	// Start a session
+	startArgs, _ := json.Marshal(map[string]any{
+		"action":     "start",
+		"session_id": "timeout-sess",
+	})
+	if _, err := tool.Execute(ctx, startArgs); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	// Run a command that takes 2s, but wait_ms is only 200ms
+	waitMs := 200
+	slowArgs, _ := json.Marshal(map[string]any{
+		"action":     "write_line",
+		"session_id": "timeout-sess",
+		"command":    "sleep 2 && echo DONE_AFTER_SLEEP",
+		"wait_ms":    &waitMs,
+	})
+	res, err := tool.Execute(ctx, slowArgs)
+	if err != nil {
+		t.Fatalf("execute should succeed with running notice, got error: %v", err)
+	}
+	if !strings.Contains(res, "command still running") {
+		t.Fatalf("expected running notice for timed-out command, got: %q", res)
+	}
+
+	// Wait 2.2s for command to actually finish, then read
+	time.Sleep(2200 * time.Millisecond)
+	readArgs, _ := json.Marshal(map[string]any{
+		"action":     "read",
+		"session_id": "timeout-sess",
+	})
+	readRes, err := tool.Execute(ctx, readArgs)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if !strings.Contains(readRes, "DONE_AFTER_SLEEP") {
+		t.Fatalf("expected read to capture completed output, got: %q", readRes)
+	}
+}
+
