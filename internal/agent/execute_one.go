@@ -165,12 +165,7 @@ func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
 		}
 		plan.commandPermName = "bash"
 		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
-		var permissionReader bool
-		plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.commandPermArgs)
-		if permissionReader {
-			plan.readOnly = true
-			plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
-		}
+		plan.effects, _ = evidence.ClassifyBashToolCall(plan.commandPermArgs)
 	}
 }
 
