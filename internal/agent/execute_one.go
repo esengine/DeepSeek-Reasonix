@@ -126,17 +126,32 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 		}
 	} else if canonicalName == "pty" {
 		var p struct {
-			Action string `json:"action"`
-			Input  string `json:"input"`
+			Action    string `json:"action"`
+			Command   string `json:"command"`
+			SessionID string `json:"session_id"`
+			Input     string `json:"input"`
 		}
 		if err := json.Unmarshal(plan.execArgs, &p); err == nil {
 			action := strings.ToLower(strings.TrimSpace(p.Action))
-			if action == "read" || action == "list" {
+			switch action {
+			case "read", "list":
 				plan.readOnly = true
 				plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
-			} else if action == "write" && strings.TrimSpace(p.Input) != "" {
+			case "start":
+				cmd := strings.TrimSpace(p.Command)
+				if cmd == "" {
+					cmd = "bash"
+				}
 				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": strings.TrimSpace(p.Input)})
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
+			case "write":
+				var prefix string
+				if a.svc.pty != nil {
+					prefix = a.svc.pty.PendingInput(p.SessionID)
+				}
+				fullCmd := strings.TrimSpace(prefix + p.Input)
+				plan.permName = "bash"
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": fullCmd})
 				var permissionReader bool
 				plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.permArgs)
 				if permissionReader {
@@ -554,6 +569,13 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 			return blocked, true
 		}
 		if !allow {
+			if plan.canonicalName == "pty" && a.svc.pty != nil {
+				var p struct {
+					SessionID string `json:"session_id"`
+				}
+				_ = json.Unmarshal(plan.execArgs, &p)
+				a.svc.pty.ResetPendingInput(p.SessionID, true)
+			}
 			return toolOutcome{
 				output:  "blocked: " + reason,
 				blocked: true,
@@ -595,7 +617,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
 	if a.svc.hooks != nil {
-		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.evidenceName, plan.evidenceArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -671,7 +693,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	t := plan.tool
 	readOnly := plan.readOnly
 	permName := plan.permName
-	permArgs := plan.permArgs
 	evidenceName := plan.evidenceName
 	evidenceArgs := plan.evidenceArgs
 	mutates := plan.effects.StateMutation
@@ -711,9 +732,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// Success and failure hooks observe the result after the tool ran. Use thereal target name for proxiedtools.
 	if a.svc.hooks != nil {
 		if err != nil {
-			a.svc.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
+			a.svc.hooks.PostToolUseFailure(ctx, evidenceName, evidenceArgs, result, err)
 		} else {
-			a.svc.hooks.PostToolUse(ctx, permName, permArgs, result)
+			a.svc.hooks.PostToolUse(ctx, evidenceName, evidenceArgs, result)
 		}
 	}
 	// Always re-read after post hooks —

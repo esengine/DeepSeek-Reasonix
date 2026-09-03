@@ -30,17 +30,32 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 	plan.evidenceArgs = normalized
 	if plan.canonicalName == "pty" {
 		var p struct {
-			Action string `json:"action"`
-			Input  string `json:"input"`
+			Action    string `json:"action"`
+			Command   string `json:"command"`
+			SessionID string `json:"session_id"`
+			Input     string `json:"input"`
 		}
 		if err := json.Unmarshal(normalized, &p); err == nil {
 			action := strings.ToLower(strings.TrimSpace(p.Action))
-			if action == "read" || action == "list" {
+			switch action {
+			case "read", "list":
 				plan.readOnly = true
 				plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
-			} else if action == "write" && strings.TrimSpace(p.Input) != "" {
+			case "start":
+				cmd := strings.TrimSpace(p.Command)
+				if cmd == "" {
+					cmd = "bash"
+				}
 				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": strings.TrimSpace(p.Input)})
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
+			case "write":
+				var prefix string
+				if a.svc.pty != nil {
+					prefix = a.svc.pty.PendingInput(p.SessionID)
+				}
+				fullCmd := strings.TrimSpace(prefix + p.Input)
+				plan.permName = "bash"
+				plan.permArgs, _ = json.Marshal(map[string]string{"command": fullCmd})
 			}
 		}
 	}
@@ -53,9 +68,9 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 		return toolOutcome{}, false
 	}
 	if result.CompileErr != nil {
-		msg := fmt.Sprintf("host configuration error: tool %q has an invalid argument schema (schema fingerprint %s); execution was not dispatched", plan.permName, shortSchemaFingerprint(result.Fingerprint))
+		msg := fmt.Sprintf("host configuration error: tool %q has an invalid argument schema (schema fingerprint %s); execution was not dispatched", plan.canonicalName, shortSchemaFingerprint(result.Fingerprint))
 		a.noteCapabilityInvocation(plan.call.Name, json.RawMessage(plan.call.Arguments), errors.New(msg))
-		return toolOutcome{output: "error: " + msg, errMsg: argumentValidationSignature(plan.permName, result.Fingerprint, "schema")}, true
+		return toolOutcome{output: "error: " + msg, errMsg: argumentValidationSignature(plan.canonicalName, result.Fingerprint, "schema")}, true
 	}
 	if len(result.Violations) == 0 {
 		a.clearSchemaError(plan.permName, result.Fingerprint)
