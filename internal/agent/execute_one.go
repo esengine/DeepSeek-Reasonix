@@ -125,47 +125,53 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
 		}
 	} else if canonicalName == "pty" {
-		var p struct {
-			Action    string `json:"action"`
-			Command   string `json:"command"`
-			SessionID string `json:"session_id"`
-			Input     string `json:"input"`
-		}
-		if err := json.Unmarshal(plan.execArgs, &p); err == nil {
-			action := strings.ToLower(strings.TrimSpace(p.Action))
-			switch action {
-			case "read", "list":
-				plan.readOnly = true
-				plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
-			case "start":
-				cmd := strings.TrimSpace(p.Command)
-				if cmd == "" {
-					cmd = "bash"
-				}
-				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-			case "write_line":
-				cmd := strings.TrimSpace(p.Command)
-				if cmd == "" {
-					cmd = strings.TrimSpace(p.Input)
-				}
-				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-				var permissionReader bool
-				plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.permArgs)
-				if permissionReader {
-					plan.readOnly = true
-					plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
-				}
-			case "write":
-				plan.permName = "pty"
-				plan.permArgs = plan.execArgs
-			}
-		}
+		classifyPTYToolCallPlan(plan, plan.execArgs)
 	} else {
 		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	}
 	return toolOutcome{}, false
+}
+
+// classifyPTYToolCallPlan sets up PTY base permission, read-only resolution,
+// and command-level secondary Bash permission for start and write_line.
+func classifyPTYToolCallPlan(plan *toolCallPlan, args json.RawMessage) {
+	if plan == nil || plan.canonicalName != "pty" {
+		return
+	}
+	var p struct {
+		Action  string `json:"action"`
+		Command string `json:"command"`
+		Input   string `json:"input"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(p.Action))
+	switch action {
+	case "read", "list":
+		plan.readOnly = true
+		plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
+	case "start":
+		cmd := strings.TrimSpace(p.Command)
+		if cmd == "" {
+			cmd = "bash"
+		}
+		plan.commandPermName = "bash"
+		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+	case "write_line":
+		cmd := strings.TrimSpace(p.Command)
+		if cmd == "" {
+			cmd = strings.TrimSpace(p.Input)
+		}
+		plan.commandPermName = "bash"
+		plan.commandPermArgs, _ = json.Marshal(map[string]string{"command": cmd})
+		var permissionReader bool
+		plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.commandPermArgs)
+		if permissionReader {
+			plan.readOnly = true
+			plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
+		}
+	}
 }
 
 // resolveToolPolicy applies Plan mode, proxy resolution, delivery gates, Auto
@@ -557,6 +563,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 			}, true
 		}
 	} else if gate != nil && !plan.skipOrdinaryGate {
+		// 1. Primary Gate: evaluates base tool permission (e.g. PTY base session permission or direct tool permissions)
 		allow, reason, err := gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
 		if err != nil {
 			return toolOutcome{
@@ -565,8 +572,24 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				errMsg:  fmt.Sprintf("blocked: %v", err),
 			}, true
 		}
-		// permission.decision: the host verdict is computed first; theextension rulingmayoverrideitineitherdirection
-		// (an allowoverriding a host deny is the full-trust contract and is audited).
+		// 2. Secondary Command Gate: if an interactive tool runs a specific shell command (pty start/write_line),
+		// evaluate the concrete command against the Bash permission policy as an additional command-level gate.
+		if allow && plan.commandPermName != "" && len(plan.commandPermArgs) > 0 {
+			cmdAllow, cmdReason, cmdErr := gate.Check(ctx, plan.commandPermName, plan.commandPermArgs, plan.readOnly)
+			if cmdErr != nil {
+				return toolOutcome{
+					output:  fmt.Sprintf("blocked: %s (%v)", cmdReason, cmdErr),
+					blocked: true,
+					errMsg:  fmt.Sprintf("blocked: %v", cmdErr),
+				}, true
+			}
+			if !cmdAllow {
+				allow = false
+				reason = cmdReason
+			}
+		}
+		// permission.decision: the host verdict is computed first; the extension ruling may override it in either direction
+		// (an allow overriding a host deny is the full-trust contract and is audited).
 		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
 			return blocked, true
 		}

@@ -29,37 +29,7 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 	plan.permArgs = normalized
 	plan.evidenceArgs = normalized
 	if plan.canonicalName == "pty" {
-		var p struct {
-			Action    string `json:"action"`
-			Command   string `json:"command"`
-			SessionID string `json:"session_id"`
-			Input     string `json:"input"`
-		}
-		if err := json.Unmarshal(normalized, &p); err == nil {
-			action := strings.ToLower(strings.TrimSpace(p.Action))
-			switch action {
-			case "read", "list":
-				plan.readOnly = true
-				plan.resolvedMeta = &tool.ResolvedCall{TargetName: plan.canonicalName, ReadOnly: true}
-			case "start":
-				cmd := strings.TrimSpace(p.Command)
-				if cmd == "" {
-					cmd = "bash"
-				}
-				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-			case "write_line":
-				cmd := strings.TrimSpace(p.Command)
-				if cmd == "" {
-					cmd = strings.TrimSpace(p.Input)
-				}
-				plan.permName = "bash"
-				plan.permArgs, _ = json.Marshal(map[string]string{"command": cmd})
-			case "write":
-				plan.permName = "pty"
-				plan.permArgs = normalized
-			}
-		}
+		classifyPTYToolCallPlan(plan, normalized)
 	}
 	result := tool.ValidateArguments(plan.execTool, normalized)
 	failed := result.CompileErr != nil || len(result.Violations) > 0
