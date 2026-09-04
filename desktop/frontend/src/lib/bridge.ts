@@ -211,7 +211,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitToTabWithID(tabID: string, input: string, submissionID: string): Promise<void>;
-  StartTurnForTab?(tabID: string, input: string, submissionID: string): Promise<{ turnId: string; status: string; runtimeEpoch?: string; submissionId?: string }>;
+  StartTurnForTab?(tabID: string, input: string, submissionID: string): Promise<{ turnId: string; status: string; disposition?: "turn_started" | "management_handled"; runtimeEpoch?: string; submissionId?: string }>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   SubmitDisplayToTabWithID(tabID: string, display: string, input: string, submissionID: string): Promise<void>;

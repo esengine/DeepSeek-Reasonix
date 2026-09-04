@@ -1014,6 +1014,7 @@ export default function App() {
     clearGoal: clearControllerGoal,
     clearGoalForTab: clearControllerGoalForTab,
     clearSession,
+    newSession,
     listSessions,
     listTrashedSessions,
     resumeSession,
@@ -2205,13 +2206,7 @@ export default function App() {
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
-
-  // handleSend intercepts slash commands that need a desktop-native action before
-  // they reach the backend: "/model <ref>" rebuilds on that model, "/memory"
-  // opens Settings, and "/clear" shows an in-app confirmation card. Everything else — skills (/init, …),
-  // custom commands, bare /model and the other read-only management verbs
-  // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
-  // resolves (a turn, or a listing Notice).
+  // handleSend reserves only commands that need a desktop-native UI action.
   const handleSend = useCallback(
     async (displayText: string, submitText = displayText, requestedTabId = activeTabId, structured?: StructuredInvocationSubmit) => {
       const sourceTabId = requestedTabId || activeTabId;
@@ -2241,6 +2236,11 @@ export default function App() {
       if (trimmed === "/clear") {
         if (activeTabIdRef.current !== sourceTabId) return;
         setClearContextPending(true);
+        return;
+      }
+      if (trimmed === "/new") {
+        if (activeTabIdRef.current !== sourceTabId) return;
+        await newSession();
         return;
       }
       const decisionMock = typeof window !== "undefined" && !window.runtime
@@ -2281,7 +2281,7 @@ export default function App() {
       if (goalCommand) {
         const arg = (goalCommand[1] ?? "").trim();
         const displayGoal = stripLegacyGoalBudgetFlags(arg);
-        if (displayGoal && !["status", "clear", "off", "stop", "done"].includes(displayGoal.toLowerCase())) {
+        if (displayGoal && !["status", "clear", "off", "stop", "done", "pause", "resume"].includes(displayGoal.toLowerCase())) {
           if (hasLegacyGoalBudgetFlag(arg)) {
             userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, activeTabId, false);
             patchActiveComposerProfile({

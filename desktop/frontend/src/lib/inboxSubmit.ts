@@ -21,12 +21,6 @@ export function normalizeTurnSubmit(displayText: string, submitText: string) {
   return { display, submit };
 }
 
-// Host-only commands do not create an agent turn or receive a turn id.
-export function isLocalRuntimeCommand(input: string): boolean {
-  const trimmed = input.trim();
-  return trimmed === "/reload" || trimmed === "/effort" || trimmed.startsWith("/effort ");
-}
-
 export async function answerPromptForActiveTurn(
   binding: AskAnswerBindings,
   tabId: string,

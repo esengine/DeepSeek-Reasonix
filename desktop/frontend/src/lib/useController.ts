@@ -12,8 +12,8 @@ import { settleForkConversationForTab } from "./forkWorktree";
 import type { MessageActionScope, MessageActionState } from "./messageActions";
 import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
-import { answerPromptForActiveTurn, isLocalRuntimeCommand, normalizeTurnSubmit, resolveActiveTurnId } from "./inboxSubmit";
-import { findTabAfterSubmitFailure, reduceSubmitFailure } from "./turnSubmissionFailure";
+import { answerPromptForActiveTurn, normalizeTurnSubmit, resolveActiveTurnId } from "./inboxSubmit";
+import { findTabAfterSubmitFailure, reduceManagementConfirmation, reduceSubmitFailure } from "./turnSubmissionFailure";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { completionSummaryPresentation, normalizeCompletionSummary, sessionQualityFloor } from "./completionSummary";
@@ -706,7 +706,7 @@ export function runtimeReadyForSubmit(meta?: Meta): boolean {
   return !meta.runtime || meta.runtime.phase === "ready";
 }
 
-export { isLocalRuntimeCommand, normalizeTurnSubmit } from "./inboxSubmit";
+export { normalizeTurnSubmit } from "./inboxSubmit";
 
 const frontendSubmissionEpoch = typeof globalThis.crypto?.randomUUID === "function"
   ? globalThis.crypto.randomUUID()
@@ -783,6 +783,7 @@ type Action =
   | { type: "user"; text: string; submitText?: string; seq: number; submissionId: string; deliveryRecovery?: boolean }
   | { type: "unsend" }
   | { type: "send_confirmed"; submissionId: string }
+  | { type: "management_confirmed"; submissionId: string }
   | { type: "turn_admitted"; turnId: string; submissionId: string }
   | { type: "turn_submit_rejected"; submissionId: string; error: string }
   | { type: "send_failed"; submissionId: string; error: string }
@@ -2067,6 +2068,7 @@ export function reducer(s: State, a: Action): State {
       });
     }
     case "send_confirmed": return confirmPendingUser(s, a.submissionId);
+    case "management_confirmed": return reduceManagementConfirmation(s, a.submissionId, promptEventClock());
     case "turn_admitted":
       return s.pendingSubmissionId === a.submissionId && a.turnId
         ? { ...s, activeTurnId: a.turnId }
@@ -3738,7 +3740,7 @@ export function useController() {
         ? app.SubmitEditedDisplayToTabWithID(tabId, display, submit, original, submissionId)
         : display !== submit
         ? app.SubmitDisplayToTabWithID(tabId, display, submit, submissionId)
-        : typeof app.StartTurnForTab === "function" && !isLocalRuntimeCommand(submit)
+        : typeof app.StartTurnForTab === "function"
         ? app.StartTurnForTab(tabId, submit, submissionId)
         : app.SubmitToTabWithID(tabId, submit, submissionId);
       if (initialGoal) {
@@ -3750,6 +3752,7 @@ export function useController() {
       }
       void submitPromise.then(
         (receipt) => {
+          if (receipt && typeof receipt === "object" && "disposition" in receipt && receipt.disposition === "management_handled") return void dispatchTo(tabId, { type: "management_confirmed", submissionId });
           if (receipt && typeof receipt === "object" && "turnId" in receipt && typeof receipt.turnId === "string") {
             dispatchTo(tabId, { type: "turn_admitted", turnId: receipt.turnId, submissionId });
           }

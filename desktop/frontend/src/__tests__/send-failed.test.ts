@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, isLocalRuntimeCommand, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
+import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
 import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
@@ -115,9 +115,11 @@ eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", r
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "failed", epoch: "e1" } }), false, "failed runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: true, eventChannel: "", cwd: "", runtime: { phase: "ready", epoch: "e1" } }), true, "ready runtime can submit");
 eq(normalizeTurnSubmit(" visible prompt ", " provider prompt ").submit, "provider prompt", "submit normalization trims provider input");
-eq(isLocalRuntimeCommand(" /reload "), true, "/reload remains a host-only command without a turn receipt");
-eq(isLocalRuntimeCommand("/effort max"), true, "/effort remains a host-only command without a turn receipt");
-eq(isLocalRuntimeCommand("/reload now"), false, "non-command /reload text still starts an agent turn");
+const managementPending = reducer(reducer(initialState, {
+  type: "user", text: "/context", seq: 0, submissionId: "management-1",
+}), { type: "management_confirmed", submissionId: "management-1" });
+eq(managementPending.items.some((item) => item.kind === "user" && item.text === "/context"), false, "handled management commands do not remain as conversation turns");
+eq(managementPending.running, false, "handled management commands release the composer");
 let rejectedVisibleOnlySubmit = false;
 try {
   normalizeTurnSubmit("visible prompt", "   ");
@@ -407,6 +409,11 @@ eq(
   /await \(trimmed \? setControllerGoalForTab\(tabId, trimmed\) : clearControllerGoalForTab\(tabId\)\);\s*patchActivatedGoalForTab\(tabId, trimmed\)/.test(appSource),
   true,
   "local Goal profile is patched only after backend activation succeeds",
+);
+eq(
+  /displayGoal && !\["status", "clear", "off", "stop", "done", "pause", "resume"\]\.includes/.test(appSource) && /else if \(\["clear", "off", "stop", "done"\]\.includes/.test(appSource),
+  true,
+  "Goal pause and resume do not clear the active Goal before lifecycle handling",
 );
 eq(
   controllerSource.includes("await app.SetGoalForTab(tabId, goal)") && !/SetGoalForTab\(tabId, goal\)\.catch\(\(\) => \{\}\)/.test(controllerSource),
