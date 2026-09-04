@@ -4018,18 +4018,46 @@ a[href] {
   z-index: var(--z-inline-sticky);
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  width: 56px;
+  align-items: center;
+  width: 48px;
   height: 240px;
-  padding: 0 12px;
+  max-height: min(240px, calc(100vh - 120px));
+  padding: 0;
   opacity: 0;
   pointer-events: none;
   animation: jump-bar-in 0.18s ease-out 0.08s forwards;
 }
+.jump-arrow {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.8;
+  transition:
+    color 120ms ease,
+    opacity 120ms ease;
+}
+.jump-arrow:hover:not(:disabled) {
+  color: var(--fg);
+  opacity: 1;
+}
+.jump-arrow:disabled {
+  cursor: default;
+  opacity: 0.25;
+}
 .jump-scroll {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 32px;
-  height: 100%;
   cursor: pointer;
   pointer-events: auto;
   outline: none;

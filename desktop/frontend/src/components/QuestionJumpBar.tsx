@@ -1,6 +1,7 @@
 // QuestionJumpBar: the question navigator rail along the transcript edge.
 
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnchor } from "../lib/transcriptGrouping";
 
@@ -99,6 +100,20 @@ export function QuestionJumpBar({
     onJump(question);
   };
 
+  // Arrow stepping around the current active question. When active is null
+  // (nothing tracked yet) the rail treats the tail as the current position.
+  // The arrows stay disabled at either end instead of wrapping around.
+  const activeIndex = active != null && active >= 0 && active < total ? active : null;
+  const step = (direction: -1 | 1) => {
+    if (total === 0) return;
+    const from = activeIndex ?? (total - 1);
+    const next = from + direction;
+    if (next < 0 || next >= total) return;
+    scrollTo(questionAt(next));
+  };
+  const canStepUp = activeIndex != null ? activeIndex > 0 : total > 1;
+  const canStepDown = activeIndex != null ? activeIndex < total - 1 : false;
+
   const onMove = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = questionFromY(event.clientY);
     if (!target) return;
@@ -167,6 +182,19 @@ export function QuestionJumpBar({
         setShowPreview(false);
       }}
     >
+      <button
+        type="button"
+        className="jump-arrow jump-arrow--up"
+        disabled={!canStepUp}
+        aria-label={t("questionNav.up")}
+        title={t("questionNav.up")}
+        onClick={(event) => {
+          event.stopPropagation();
+          step(-1);
+        }}
+      >
+        <ChevronUp size={14} strokeWidth={2.2} aria-hidden="true" />
+      </button>
       <div
         className="jump-scroll"
         ref={railRef}
@@ -196,6 +224,19 @@ export function QuestionJumpBar({
           </span>
         ))}
       </div>
+      <button
+        type="button"
+        className="jump-arrow jump-arrow--down"
+        disabled={!canStepDown}
+        aria-label={t("questionNav.down")}
+        title={t("questionNav.down")}
+        onClick={(event) => {
+          event.stopPropagation();
+          step(1);
+        }}
+      >
+        <ChevronDown size={14} strokeWidth={2.2} aria-hidden="true" />
+      </button>
       {showPreview && hoveredQuestion && (
         <div className="jump-preview" style={{ top: previewTop.current }} role="tooltip">
           <span className="jump-text">{hoveredQuestion.text}</span>
