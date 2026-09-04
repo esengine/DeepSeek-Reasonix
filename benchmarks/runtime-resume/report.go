@@ -34,13 +34,13 @@ type armResult struct {
 	Asks    string       `json:"asks"`
 	Invalid string       `json:"invalid,omitempty"`
 	Rows    []row        `json:"rows"`
-	Prefold *Observation `json:"prefold,omitempty"`
+	Extra   *Observation `json:"extra,omitempty"`
 	Before  Observation  `json:"before"`
 	After   Observation  `json:"after"`
 }
 
-func classify(a arm, prefold *Observation, before, after Observation) armResult {
-	res := armResult{Arm: a.name, Asks: a.asks, Prefold: prefold, Before: before, After: after}
+func classify(a arm, extra *Observation, before, after Observation) armResult {
+	res := armResult{Arm: a.name, Asks: a.asks, Extra: extra, Before: before, After: after}
 	prefix := prefixRow(before, after)
 	res.Rows = append(res.Rows, prefix)
 	if a.name == "system-swap" && prefix.Verdict != verdictChanged {
@@ -72,9 +72,7 @@ func classify(a arm, prefold *Observation, before, after Observation) armResult 
 		valueRow("compaction projection (stored)", "compaction sidecar",
 			"<stem>.context.json", "LoadProjectionSidecar on bind",
 			sidecarClaim(before), sidecarClaim(after), true),
-		valueRow("compaction projection (in use)", "projectionValid over the covered prefix",
-			"none: a judgement, not a stored value", "revalidated against the canonical prefix on every read",
-			projectionUse(before), projectionUse(after), false),
+		useRow("compaction projection (in use)", before, after),
 		valueRow("run graph nodes", "event sink (GraphDelta)",
 			"none observed", "fold GraphDelta events, if any survive",
 			graphNodes(before), graphNodes(after), false),
@@ -85,11 +83,14 @@ func classify(a arm, prefold *Observation, before, after Observation) armResult 
 			"none observed", "fold GraphDelta events, if any survive",
 			graphMap(before.Graph.Waits), graphMap(after.Graph.Waits), false),
 	)
-	if prefold != nil {
-		res.Rows = append(res.Rows, refoldRows(*prefold, before, after, probeTurns+refoldTurns)...)
-		if prefold.Sidecar.Messages == 0 {
+	switch {
+	case a.name == armRefoldIntoBody && extra != nil:
+		res.Rows = append(res.Rows, refoldRows(*extra, before, after, probeTurns+refoldTurns)...)
+		if extra.Sidecar.Messages == 0 {
 			res.Invalid = "the first fold stored no body, so the second had none to reach into"
 		}
+	case (a.name == armTailRewind || a.name == armCoveredRewind) && extra != nil:
+		res.Rows = append(res.Rows, useRow("projection across the rewind, same process", *extra, before))
 	}
 	return res
 }
@@ -152,6 +153,29 @@ func sidecarClaim(o Observation) string {
 	}
 	return fmt.Sprintf("v%d msgs=%d covered=%d hash=%s",
 		o.Sidecar.ProjectionVersion, o.Sidecar.Messages, o.Sidecar.CoveredCount, short(o.Sidecar.CoveredPrefixHash))
+}
+
+// useRow turns on whether the next request would ride the projection, not on
+// the token counts beside it: a tail edit legitimately moves those, and letting
+// them decide the verdict reported a surviving projection as a loss.
+func useRow(semantic string, before, after Observation) row {
+	r := valueRow(semantic, "projectionValid over the covered prefix",
+		"none: a judgement, not a stored value",
+		"revalidated against the canonical prefix on every read",
+		projectionState(before), projectionState(after), false)
+	r.Before, r.After = projectionUse(before), projectionUse(after)
+	return r
+}
+
+// projectionState is the compared value: in use, not in use, or never measured.
+func projectionState(o Observation) string {
+	switch o.Context.CheckpointState {
+	case "":
+		return ""
+	case "none":
+		return "NOT-in-use"
+	}
+	return "in-use"
 }
 
 // projectionUse reads the host's own judgement rather than the stored claim.

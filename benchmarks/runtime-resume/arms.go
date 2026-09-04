@@ -41,12 +41,30 @@ const armAppendAfterFold = "append-after-fold"
 // terms, which the body has no counterpart for.
 const armRefoldIntoBody = "refold-into-body"
 
+// The tail arms separate two ways the live tail can move. tail-edit and
+// tail-truncate change the transcript past the fold, where the covered hash
+// cannot notice; tail-rewind takes the path a person actually drives, which
+// throws the projection away without asking whether coverage still holds.
+const (
+	armTailEdit     = "tail-edit"
+	armTailTruncate = "tail-truncate"
+	armTailRewind   = "tail-rewind"
+	// armCoveredRewind is the negative control the rewind path will need before
+	// its invalidation can become conditional: rewinding below the fold removes
+	// history the digest folded, and no coverage check may excuse that.
+	armCoveredRewind = "covered-rewind"
+)
+
 func arms() []arm {
 	return []arm{
 		{name: "exact", asks: "nothing changed between the processes"},
 		{name: armAppendAfterFold, asks: "nothing changed, and one turn was appended after the fold"},
 		{name: armRefoldIntoBody, asks: "a second fold reaches into the body the first one stored"},
 		{name: "system-swap", asks: "only the stable prefix changed, against the surviving baseline", lever: swapSystemPrefix},
+		{name: armTailEdit, asks: "a message past the fold changed", lever: editTailRow},
+		{name: armTailTruncate, asks: "the messages past the fold were dropped", lever: truncateTail},
+		{name: armTailRewind, asks: "the same truncation, driven through the rewind a person uses"},
+		{name: armCoveredRewind, asks: "a rewind that lands below the fold boundary"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }
@@ -93,6 +111,48 @@ func mutateCoveredRow(_ armRoot, before Observation) error {
 	}
 	msgs[target].Content += "\n[probe: covered row mutated]"
 	session.Replace(msgs)
+	return session.SaveRewrite(before.SessionPath)
+}
+
+// editTailRow rewrites one message the projection does not claim to cover. The
+// covered hash cannot see it, so the projection should keep serving.
+func editTailRow(_ armRoot, before Observation) error {
+	return rewriteSession(before, func(msgs []provider.Message, covered int) ([]provider.Message, error) {
+		for i := covered; i < len(msgs); i++ {
+			if msgs[i].Role == provider.RoleUser || msgs[i].Role == provider.RoleAssistant {
+				msgs[i].Content += "\n[probe: tail row edited]"
+				return msgs, nil
+			}
+		}
+		return nil, errUnexpected("a live tail row to edit", covered)
+	})
+}
+
+// truncateTail drops everything past the fold boundary, leaving the covered
+// prefix exactly as the projection folded it.
+func truncateTail(_ armRoot, before Observation) error {
+	return rewriteSession(before, func(msgs []provider.Message, covered int) ([]provider.Message, error) {
+		return msgs[:covered], nil
+	})
+}
+
+// rewriteSession applies a transcript rewrite through the save a rewind or a
+// recovery branch uses, refusing an arm with no live tail to act on.
+func rewriteSession(before Observation, edit func([]provider.Message, int) ([]provider.Message, error)) error {
+	session, err := agent.LoadSession(before.SessionPath)
+	if err != nil {
+		return err
+	}
+	msgs := session.Snapshot()
+	covered := before.Sidecar.CoveredCount
+	if covered <= 0 || covered >= len(msgs) {
+		return errUnexpected("a live tail past the fold", covered)
+	}
+	next, err := edit(msgs, covered)
+	if err != nil {
+		return err
+	}
+	session.Replace(next)
 	return session.SaveRewrite(before.SessionPath)
 }
 
@@ -155,15 +215,15 @@ func runArm(self, work string, a arm) (armResult, error) {
 	if err != nil {
 		return armResult{}, err
 	}
-	var prefold *Observation
-	if a.name == armRefoldIntoBody {
-		obs, err := readObservation(root, "prefold")
+	var extra *Observation
+	if phase := extraPhase(a.name); phase != "" {
+		obs, err := readObservation(root, phase)
 		if err != nil {
 			return armResult{}, err
 		}
-		prefold = &obs
+		extra = &obs
 	}
-	return classify(a, prefold, before, after), nil
+	return classify(a, extra, before, after), nil
 }
 
 // spawn runs one phase as a real child process and waits for it to exit. The

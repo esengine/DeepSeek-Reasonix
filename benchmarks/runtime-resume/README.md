@@ -51,6 +51,10 @@ provider call*.
 | `system-swap` | fold, one more turn, die | save a **pinned** memory fact | does a changed stable prefix invalidate a projection that would otherwise survive? |
 | `covered-mutation` | fold, one more turn, die | rewrite a covered row via `SaveRewrite` | control: the digest's material changed, so it must not be reused |
 | `refold-into-body` | fold, grow, fold again, die | none | can a second fold, which reads the projected view, record its boundary without losing what it kept? |
+| `tail-edit` | fold, one more turn, die | `SaveRewrite` edits a row past the fold | a change the covered hash does not cover |
+| `tail-truncate` | fold, one more turn, die | `SaveRewrite` drops everything past the fold | the same, by removal |
+| `tail-rewind` | fold, one more turn, rewind, die | none | the same truncation through the rewind a person drives |
+| `covered-rewind` | fold, one more turn, rewind below the fold, die | none | negative control for making that rewind conditional |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -61,6 +65,17 @@ reads the provider-visible view — stored body plus live tail — and has to wr
 a boundary back in canonical terms, which the body has no counterpart for. What
 it can lose is the part of the body past the new boundary, so the arm carries an
 oracle rather than a comparison.
+
+The tail arms exist as a pair on purpose. A tail change reaching the
+transcript and the same change driven through `Controller.Rewind` are different
+paths, and only one of them consults coverage; separating them is what says
+whether a red belongs to the validity rule or to the caller that discards the
+projection before the rule is asked.
+
+`covered-rewind` targets a middle checkpoint rather than the first. Rewinding
+to the first empties the conversation, and a session holding only a system row
+is not persisted at all, so the restart would read back the transcript the arm
+had removed — a different rule answering instead of the one under test.
 
 `system-swap` pins its fact deliberately: only a **pinned body** rides the
 stable prefix. The saved-fact index is retrieval-only and reached through the

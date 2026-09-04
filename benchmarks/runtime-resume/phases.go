@@ -30,6 +30,43 @@ func runTurns(ctx context.Context, ctrl *control.Controller, from, count int) (i
 	return from + count, nil
 }
 
+// rewindTurn drives the rewind a person drives, recording the projection
+// before it: the tail arm takes back the turn appended after the fold, the
+// covered arm lands below the fold boundary and must lose the projection
+// whatever coverage says.
+func rewindTurn(root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink) error {
+	points := ctrl.Checkpoints()
+	if len(points) == 0 {
+		return errUnexpected("a checkpoint to rewind to", 0)
+	}
+	target := points[len(points)-1].Turn
+	if arm == armCoveredRewind {
+		// A middle checkpoint, not the first: rewinding to the first empties the
+		// conversation, and a session with only a system row is not persisted at
+		// all, so the restart would read back the transcript this arm removed.
+		target = points[len(points)/2].Turn
+	}
+	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink)); err != nil {
+		return err
+	}
+	if err := ctrl.Rewind(target, control.RewindConversation); err != nil {
+		return fmt.Errorf("rewind: %w", err)
+	}
+	return nil
+}
+
+// extraPhase names the in-process observation an arm records before its
+// process exits, empty when it records none.
+func extraPhase(arm string) string {
+	switch arm {
+	case armRefoldIntoBody:
+		return "prefold"
+	case armTailRewind, armCoveredRewind:
+		return "prerewind"
+	}
+	return ""
+}
+
 const probeGoal = "Prove which runtime semantics survive an OS process boundary."
 
 // runConstruct establishes host state through the same calls a frontend makes,
@@ -71,7 +108,7 @@ func runConstruct(dir, arm string) error {
 		if _, err = runTurns(ctx, ctrl, turn, refoldTurns); err != nil {
 			return err
 		}
-		if err := writeObservation(root, capture("prefold", arm, bootSystem, ctrl, sink)); err != nil {
+		if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink)); err != nil {
 			return err
 		}
 		if err := ctrl.Compact(ctx, "Fold again, into the stored body."); err != nil {
@@ -79,6 +116,11 @@ func runConstruct(dir, arm string) error {
 		}
 	} else if appendsAfterFold(arm) {
 		if _, err = runTurns(ctx, ctrl, turn, 1); err != nil {
+			return err
+		}
+	}
+	if arm == armTailRewind || arm == armCoveredRewind {
+		if err := rewindTurn(root, arm, bootSystem, ctrl, sink); err != nil {
 			return err
 		}
 	}
