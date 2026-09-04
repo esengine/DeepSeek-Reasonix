@@ -67,6 +67,9 @@ type Messages struct {
 	ResumeBadIndexFmt   string // shown when /resume gets an out-of-range index (one %d)
 	ResumeAlreadyActive string // shown when /resume targets the current session
 	ResumedTitle        string // banner title after a /resume switch
+	// InterruptedAdjudicationPrefix leads the notice that a previous run died
+	// waiting on a person. Provenance, not a prompt: it cannot be answered.
+	InterruptedAdjudicationPrefix string
 
 	RenameUsage            string // /rename with no args
 	RenameNoSession        string // /rename with no active session

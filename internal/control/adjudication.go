@@ -69,9 +69,20 @@ type InterruptedAdjudication struct {
 // is returned, not logged: the alternative is asking a person a question the
 // host has no record of owing.
 func (c *Controller) openBarrier(id, kind, summary string) error {
-	return appendBarrier(c.SessionPath(), barrierRecord{
+	err := appendBarrier(c.SessionPath(), barrierRecord{
 		Barrier: id, Kind: kind, Status: barrierOpen, Summary: summary, At: time.Now().UTC(),
 	})
+	c.noteAdjudicationsChanged()
+	return err
+}
+
+// noteAdjudicationsChanged tells clients the list moved without saying how:
+// they read it back, so one authority answers all of them.
+func (c *Controller) noteAdjudicationsChanged() {
+	if c == nil || c.sink == nil {
+		return
+	}
+	c.sink.Emit(event.Event{Kind: event.AdjudicationsChanged})
 }
 
 // closeBarrier records how a barrier ended. A best-effort write: the answer
@@ -80,6 +91,7 @@ func (c *Controller) closeBarrier(id, status string) {
 	_ = appendBarrier(c.SessionPath(), barrierRecord{
 		Barrier: id, Status: status, At: time.Now().UTC(),
 	})
+	c.noteAdjudicationsChanged()
 }
 
 func appendBarrier(sessionPath string, rec barrierRecord) error {
@@ -195,10 +207,14 @@ func (c *Controller) inheritInterruptions(successor string) {
 	if successor == "" {
 		return
 	}
-	for _, item := range c.InterruptedAdjudications() {
+	inherited := c.InterruptedAdjudications()
+	for _, item := range inherited {
 		_ = appendBarrier(c.SessionPath(), barrierRecord{
 			Barrier: item.ID, Status: barrierSuperseded, Successor: successor, At: time.Now().UTC(),
 		})
+	}
+	if len(inherited) > 0 {
+		c.noteAdjudicationsChanged()
 	}
 }
 
@@ -232,6 +248,26 @@ func runningTurnID(sessionPath string) string {
 	return meta.InFlightTurn.ID
 }
 
+// Adjudications splits the journal the way a reader needs it: what the user
+// still has to be told about, and what already ended. Active is derived, not
+// stored — a barrier with a live owner is a question being asked, not an
+// interruption — so no client can compute this set from the journal alone.
+func (c *Controller) Adjudications() (active, history []AdjudicationEntry) {
+	if c == nil {
+		return nil, nil
+	}
+	live := c.approval.liveBarrierIDs()
+	for _, e := range AdjudicationHistory(c.SessionPath()) {
+		switch {
+		case !e.Open():
+			history = append(history, e)
+		case !live[e.ID]:
+			active = append(active, e)
+		}
+	}
+	return active, history
+}
+
 // RequestContext is what the host owes the next request about work that did not
 // finish. It states provenance, not a continuation: there is no identity to
 // answer with, because no owner is left to answer to. Derived every request, so
@@ -255,4 +291,18 @@ func (c *Controller) RequestContext() []string {
 	b.WriteString("answer or work to continue: any action still wanted has to be proposed again.\n")
 	b.WriteString("</interrupted-adjudication>")
 	return []string{b.String()}
+}
+
+// OpenBarrierForTest and CloseBarrierForTest let a frontend-side test build a
+// journal without driving a real ask, which needs a blocking waiter. They write
+// exactly what the production paths write.
+func (c *Controller) OpenBarrierForTest(id, kind, summary string) {
+	_ = c.openBarrier(id, kind, summary)
+}
+
+func (c *Controller) CloseBarrierForTest(id, status, successor string) {
+	_ = appendBarrier(c.SessionPath(), barrierRecord{
+		Barrier: id, Status: status, Successor: successor, At: time.Now().UTC(),
+	})
+	c.noteAdjudicationsChanged()
 }

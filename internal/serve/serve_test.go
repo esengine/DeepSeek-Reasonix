@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1072,13 +1073,8 @@ func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
 		askDone <- err
 	}()
 
-	select {
-	case data := <-firstSub:
-		if !strings.Contains(string(data.Data), `"kind":"ask_request"`) {
-			t.Fatalf("initial subscriber got %s, want ask_request", data.Data)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for initial ask_request")
+	if err := awaitAskRequest(firstSub); err != nil {
+		t.Fatalf("initial subscriber: %v", err)
 	}
 
 	resp, err := http.Get(srv.URL + "/events")
@@ -1162,13 +1158,8 @@ func TestServeEventsReplayHandoffSerializesPromptEmission(t *testing.T) {
 	})
 	defer cancelSub()
 
-	select {
-	case data := <-sub:
-		if !strings.Contains(string(data.Data), `"kind":"ask_request"`) {
-			t.Fatalf("handoff subscriber got %s, want ask_request", data.Data)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("handoff subscriber never received ask_request")
+	if err := awaitAskRequest(sub); err != nil {
+		t.Fatalf("handoff subscriber: %v", err)
 	}
 	select {
 	case data := <-sub:
@@ -1290,5 +1281,26 @@ func TestServeEventsReplaysPendingApprovalOnAttach(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("executor did not finish after approval")
+	}
+}
+
+// awaitAskRequest reads until the question arrives, skipping the invalidation
+// frame that precedes it. The barrier is recorded — and its change announced —
+// before anyone can be asked, so "the first frame" stopped being the ask.
+func awaitAskRequest(sub <-chan Frame) error {
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case data := <-sub:
+			if strings.Contains(string(data.Data), `"kind":"adjudications_changed"`) {
+				continue
+			}
+			if !strings.Contains(string(data.Data), `"kind":"ask_request"`) {
+				return fmt.Errorf("got %s, want ask_request", data.Data)
+			}
+			return nil
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for ask_request")
+		}
 	}
 }

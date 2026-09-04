@@ -4,6 +4,8 @@ export { HttpError };
 export type { Attachment, DroppedRef };
 
 import type { AccountState, AccountUser, DeviceGrant } from "./account";
+import type { Adjudications } from "./adjudication";
+export type { AdjudicationEntry, AdjudicationState, Adjudications } from "./adjudication";
 import type { HookCatalog, HookDryRun, HookEntry, HookEventInfo, HookSource } from "./hook";
 import type { CapabilityScope, McpCatalog, McpDraft, McpDraftServer, McpEntry, McpInstallResult, McpInstallScope, McpRisk, McpTool, ScopeLayer } from "./mcp";
 import type { MemoryCatalog, MemoryEdit, MemoryEntry } from "./memory";
@@ -366,6 +368,10 @@ export interface AgentPort {
   // Installed theme packs and which one is active. The list carries every
   // pack's tokens so a picker can preview without a second request.
   context(): Promise<ContextBreakdown>;
+  // What the host asked a person and how it ended. Read whole on every
+  // adjudications_changed frame: "interrupted" is derived from an open record
+  // plus who is waiting, and only the kernel knows the second half.
+  adjudications(): Promise<Adjudications>;
   // Declares what the model this session runs on actually holds. Nothing can
   // probe it — a relay forwards a third party's model under its own name — so
   // it is written against that model and the runtime is rebuilt, which is what

@@ -139,6 +139,12 @@ const (
 	// adopted answer — arrives here instead of being re-derived from id
 	// prefixes. Appended last to keep earlier Kind values wire-stable.
 	GraphDelta
+	// AdjudicationsChanged reports that the session's adjudication journal or
+	// its derived active set moved. Content-free like InboxChanged: the list is
+	// read back from the kernel, so the fold rules and the live-owner knowledge
+	// behind "interrupted" stay in one place instead of being rebuilt from the
+	// frames a client happened to see.
+	AdjudicationsChanged
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount

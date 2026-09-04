@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 )
 
 // sessionLeaseResumeRefusal is the startup-time refusal for `reasonix
@@ -167,5 +169,22 @@ func bindRunSession(ctrl *control.Controller, leases *control.SessionLeaseKeeper
 		return err
 	}
 	reclaimCLIRecoveryBranches(ctrl.SessionDir())
+	reportInterruptedAdjudications(ctrl)
 	return nil
+}
+
+// reportInterruptedAdjudications says why a resumed session stops where it
+// does. A run that died waiting on a person leaves no sign in the transcript,
+// so without this the terminal shows a conversation that simply ends. It is
+// provenance, not a prompt: the question cannot be answered any more, and
+// nothing it was holding back was executed.
+func reportInterruptedAdjudications(ctrl *control.Controller) {
+	active, _ := ctrl.Adjudications()
+	for _, item := range active {
+		question := item.Summary
+		if question == "" {
+			question = item.Kind
+		}
+		fmt.Fprintf(os.Stderr, "%s %s\n", i18n.M.InterruptedAdjudicationPrefix, question)
+	}
 }

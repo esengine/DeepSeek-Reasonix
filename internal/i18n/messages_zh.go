@@ -41,10 +41,11 @@ var Chinese = Messages{
 	ResumeRequiresTTY: "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
 	PickSessionLabel:  "恢复哪个会话？",
 
-	ResumeBusy:          "请先完成或取消当前这一轮再恢复会话",
-	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
-	ResumeAlreadyActive: "已在该会话中",
-	ResumedTitle:        "已恢复会话",
+	ResumeBusy:                    "请先完成或取消当前这一轮再恢复会话",
+	ResumeBadIndexFmt:             "请选择 1–%d 的会话（用 /resume 查看列表）",
+	ResumeAlreadyActive:           "已在该会话中",
+	ResumedTitle:                  "已恢复会话",
+	InterruptedAdjudicationPrefix: "上一轮在等待你的回答时被中断，问题是：",
 
 	RenameUsage:            "用法：/rename <新名称>  或  /rename <序号> <新名称>",
 	RenameNoSession:        "当前没有活跃会话可重命名",

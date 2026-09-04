@@ -52,6 +52,9 @@ var wireLogSkipped = map[string]bool{
 	// Live surfaces a reopened window re-reads from the host rather than replays.
 	"mcp_surface_ready": true, "extension_surface": true, "extension_status": true,
 	"workspace_changed": true, "turn_phase": true, "inbox_changed": true,
+	// Content-free invalidation: a reopened window reads /adjudications, and
+	// replaying the notice would tell it to re-read something it just read.
+	"adjudications_changed": true,
 }
 
 type wireLog struct {

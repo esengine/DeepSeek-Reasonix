@@ -40,10 +40,11 @@ var English = Messages{
 	ResumeRequiresTTY: "--resume needs an interactive terminal; pass --continue for the most recent session",
 	PickSessionLabel:  "Resume which session?",
 
-	ResumeBusy:          "finish or cancel the current turn before resuming",
-	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",
-	ResumeAlreadyActive: "already in that session",
-	ResumedTitle:        "resumed session",
+	ResumeBusy:                    "finish or cancel the current turn before resuming",
+	ResumeBadIndexFmt:             "pick a session 1–%d (run /resume to list)",
+	ResumeAlreadyActive:           "already in that session",
+	ResumedTitle:                  "resumed session",
+	InterruptedAdjudicationPrefix: "a previous run was interrupted while waiting for your answer to:",
 
 	RenameUsage:            "usage: /rename <new title>  or  /rename <n> <new title>",
 	RenameNoSession:        "no active session to rename",

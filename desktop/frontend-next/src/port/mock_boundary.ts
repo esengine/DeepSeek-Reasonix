@@ -1,4 +1,4 @@
-import type { ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
+import type { Adjudications, ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./port";
 import { MockShell } from "./mock_shell";
 
 // The boundary half of the fixture: what the agent is refused outright, and how
@@ -14,6 +14,27 @@ function effectiveBash(s: SandboxSettings): string {
 }
 
 export class MockBoundary extends MockShell {
+  // One interrupted barrier and one that a later turn took over, so the card
+  // and the reason it disappears are both reachable without a crash.
+  private adjudicated: Adjudications = {
+    schema_version: 1,
+    active: [{
+      barrier_id: "7", kind: "ask", state: "interrupted",
+      question: "Should I replace the fixture with a generated one?",
+      opened_at: "2026-09-04T09:12:00Z",
+    }],
+    history: [{
+      barrier_id: "6", kind: "ask", state: "superseded",
+      question: "Which side of the fold should I measure?",
+      opened_at: "2026-09-04T08:55:00Z", settled_at: "2026-09-04T09:01:00Z",
+      superseded_by: "turn-41",
+    }],
+  };
+
+  async adjudications(): Promise<Adjudications> {
+    return this.adjudicated;
+  }
+
   private rules: PermissionRules = {
     mode: "ask",
     deny: ["bash(git push:*)", "file_mutation(*.env*)"],

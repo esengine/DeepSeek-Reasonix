@@ -708,6 +708,7 @@ var kindNames = map[event.Kind]string{
 	event.WorkspaceChanged:        "workspace_changed",
 	event.TurnPhase:               "turn_phase",
 	event.CompletionSummary:       "completion_summary",
+	event.AdjudicationsChanged:    "adjudications_changed",
 	event.InboxChanged:            "inbox_changed",
 	event.GraphDelta:              "graph_delta",
 }

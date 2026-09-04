@@ -130,6 +130,10 @@ type Goals interface {
 // SessionHistory covers checkpoint/rewind, branch/fork, and the log-restructuring
 // operations (compact, summarize).
 type SessionHistory interface {
+	// Adjudications is what the host asked a person and how it ended: an
+	// interruption still owed, and the resolved, cancelled or superseded
+	// record behind it. History, not a prompt — nothing here is answerable.
+	Adjudications() (active, history []AdjudicationEntry)
 	Checkpoints() []checkpoint.Meta
 	CheckpointFileState(path string) (checkpoint.FileState, bool)
 	CheckpointTurnsByMessageIndex() map[int]int

@@ -14,6 +14,7 @@ const ROUTES = [
   "/runtimes", "/tree", "/rt", "/remotes",
   "/appearance",
   "/events", "/history", "/status", "/balance", "/submit", "/cancel", "/approve", "/answer",
+  "/adjudications",
   "/plan", "/plan-decision", "/goal", "/resume", "/models", "/tool-approval-mode", "/preset",
   "/model", "/effort", "/new", "/sessions", "/delete-session", "/provider-setup",
   "/inbox", "/trajectory", "/mcp", "/skills", "/complete", "/workspace", "/capability-scope",

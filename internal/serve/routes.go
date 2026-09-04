@@ -19,6 +19,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /history", s.history)
 	mux.HandleFunc("GET /usage", s.usage)
 	mux.HandleFunc("GET /context", s.context)
+	mux.HandleFunc("GET /adjudications", s.adjudications)
 	mux.HandleFunc("POST /context/window", s.setContextWindow)
 	mux.HandleFunc("POST /submit", s.submit)
 	s.registerExtensionRoutes(mux)
