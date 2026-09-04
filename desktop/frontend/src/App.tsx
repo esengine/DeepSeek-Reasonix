@@ -1320,16 +1320,21 @@ export default function App() {
       return;
     }
     let disposed = false;
+    let inFlight = false;
     const inspect = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
       try {
         const conflict = await app.WorkspaceConflictForTab(activeTabId);
         if (!disposed) setWorkspaceConflict(conflict.state === "none" ? null : conflict);
       } catch {
         if (!disposed) setWorkspaceConflict(null);
+      } finally {
+        inFlight = false;
       }
     };
     void inspect();
-    const timer = window.setInterval(() => void inspect(), 500);
+    const timer = window.setInterval(() => void inspect(), 1_500);
     return () => {
       disposed = true;
       window.clearInterval(timer);

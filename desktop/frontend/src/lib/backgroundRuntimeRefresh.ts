@@ -1,6 +1,8 @@
 import type { BackgroundRuntimeView } from "./types";
 
 export const BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS = 5_000;
+export const BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS = 5_000;
+export const BACKGROUND_RUNTIME_ERROR_RETRY_MAX_MS = 60_000;
 
 export function sameBackgroundRuntimeLists(
   current: readonly BackgroundRuntimeView[],
@@ -26,6 +28,7 @@ export function createBackgroundRuntimeRefreshCoordinator(
   let inFlight: Promise<BackgroundRuntimeView[]> | null = null;
   let trailing = false;
   let timer: number | null = null;
+  let failureStreak = 0;
 
   const clearTimer = () => {
     if (timer === null) return;
@@ -33,25 +36,30 @@ export function createBackgroundRuntimeRefreshCoordinator(
     timer = null;
   };
 
-  const scheduleNext = (active: boolean) => {
+  const scheduleNext = (active: boolean, retry = false) => {
     clearTimer();
-    if (disposed || !active) return;
+    if (disposed || (!active && !retry)) return;
+    const delay = retry
+      ? Math.min(BACKGROUND_RUNTIME_ERROR_RETRY_MAX_MS, BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS * 2 ** Math.min(failureStreak - 1, 3))
+      : BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS;
     timer = schedule(() => {
       timer = null;
-      void refresh();
-    }, BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS);
+      void refresh().catch(() => undefined);
+    }, delay);
   };
 
   const start = (): Promise<BackgroundRuntimeView[]> => {
     const request = Promise.resolve().then(load);
     const settled = request.then(
       (runtimes) => {
+        failureStreak = 0;
         if (!disposed) apply(runtimes);
         scheduleNext(runtimes.length > 0);
         return runtimes;
       },
       (reason) => {
-        scheduleNext(false);
+        failureStreak += 1;
+        scheduleNext(false, true);
         throw reason;
       },
     ).finally(() => {
@@ -59,7 +67,7 @@ export function createBackgroundRuntimeRefreshCoordinator(
       if (!disposed && trailing) {
         trailing = false;
         clearTimer();
-        void start();
+        void start().catch(() => undefined);
       }
     });
     inFlight = settled;

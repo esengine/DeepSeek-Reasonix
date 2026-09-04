@@ -120,11 +120,13 @@ func TestStreamingDeltasDoNotPersist(t *testing.T) {
 	}
 }
 
-func TestTurnStartedCheckpointsSession(t *testing.T) {
+func TestCommittedTurnPhaseCheckpointsSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	_, tab := appWithTab(t, path)
 
-	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	// TurnPhaseWorking is emitted only after the controller has appended the
+	// user message; TurnStarted alone must not race a snapshot ahead of it.
+	tab.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: event.TurnPhaseWorking})
 
 	waitForFile(t, path, "remember this turn")
 	waitForAutosaveIdle(t, tab)

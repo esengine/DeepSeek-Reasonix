@@ -1768,7 +1768,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// one disk write per token; TurnDone remains the final forced flush.
 	if app != nil {
 		switch e.Kind {
-		case event.TurnStarted, event.Message, event.ToolResult, event.ApprovalRequest, event.AskRequest, event.CompactionDone:
+		case event.ToolResult, event.ApprovalRequest, event.AskRequest, event.CompactionDone, event.TurnPhase:
 			app.scheduleTabSnapshot(tabID)
 		case event.TurnDone:
 			app.scheduleTabSnapshot(tabID)

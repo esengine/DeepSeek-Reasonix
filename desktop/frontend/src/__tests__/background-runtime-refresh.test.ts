@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS,
+  BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS,
   createBackgroundRuntimeRefreshCoordinator,
   sameBackgroundRuntimeLists,
 } from "../lib/backgroundRuntimeRefresh";
@@ -25,6 +26,7 @@ const runtime = (overrides: Partial<BackgroundRuntimeView> = {}): BackgroundRunt
 });
 
 assert.equal(BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS, 5_000);
+assert.equal(BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS, 5_000);
 assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime()]), true);
 assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime({ running: false })]), false);
 
@@ -95,22 +97,41 @@ assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime({ running: false }
 }
 
 {
-  const pending = deferred<BackgroundRuntimeView[]>();
-  let applied = 0;
-  let scheduled = 0;
+  let calls = 0;
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
   const coordinator = createBackgroundRuntimeRefreshCoordinator(
-    () => pending.promise,
-    () => { applied += 1; },
-    () => { scheduled += 1; return scheduled; },
+    async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary bridge failure");
+      return [];
+    },
+    () => undefined,
+    (callback, delayMs) => { scheduled.push({ callback, delayMs }); return scheduled.length; },
     () => undefined,
   );
-  const request = coordinator.refresh();
-  coordinator.dispose();
+  await assert.rejects(coordinator.refresh());
+  assert.equal(scheduled.length, 1, "a failed active refresh must schedule a retry");
+  assert.equal(scheduled[0].delayMs, BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS);
+  scheduled[0].callback();
+  await flushPromises();
+  assert.equal(calls, 2);
+
+  const pending = deferred<BackgroundRuntimeView[]>();
+  let applied = 0;
+  let disposedSchedules = 0;
+  const disposedCoordinator = createBackgroundRuntimeRefreshCoordinator(
+    () => pending.promise,
+    () => { applied += 1; },
+    () => { disposedSchedules += 1; return disposedSchedules; },
+    () => undefined,
+  );
+  const request = disposedCoordinator.refresh();
+  disposedCoordinator.dispose();
   pending.resolve([runtime()]);
   await request;
   await flushPromises();
   assert.equal(applied, 0, "disposed coordinators must ignore late bridge results");
-  assert.equal(scheduled, 0, "disposed coordinators must not schedule fallback polling");
+  assert.equal(disposedSchedules, 0, "disposed coordinators must not schedule fallback polling");
 }
 
 console.log("background runtime refresh tests passed");
