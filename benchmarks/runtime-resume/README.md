@@ -60,7 +60,7 @@ provider call*.
 | `interrupted-idle` | that, then a restart that does nothing | none | does the interruption stay active with no work to settle it? |
 | `interrupted-unrelated` | that, then a turn about something else | none | does it stick to requests that have nothing to do with it? |
 | `interrupted-answered` | that, then a turn that reads like an answer to it | none | does context carry without execution continuing? |
-| `graph-completed` | a fan-out whose items all settled, then die | none | is a finished fan-out's provenance durable at all? |
+| `graph-completed` | a fan-out whose items all settled, then die | none | is a finished fan-out's provenance durable at all? — and does a settled item stay settled? |
 | `graph-running` | a fan-out with one item still executing, then die | none | what does a restart believe about work whose owner is gone? |
 | `graph-mixed` | completed, failed, adopted and running at once, then die | none | the same, with every reachable state and both grants in one death |
 
@@ -271,7 +271,30 @@ independently: the moment execution facts become durable, the cheap next step
 is to replay them, and that turns today's `LOST-SILENT` into the one outcome
 this matrix ranks as worse than losing the graph.
 
-The ghost row is where that invariant is enforced. It is green today because
-nothing is stored at all, which is safety by absence rather than by design; any
-persistence that makes it red has replayed something it should only have
-recorded.
+The ghost row is where that invariant is enforced. It was green before anything
+was stored, which is safety by absence rather than by design; it has to stay
+green now that a journal exists, and any persistence that makes it red has
+replayed something it should only have recorded.
+
+## What the execution journal moved, and what it did not
+
+The in-flight item was `LOST-SILENT` because a turn is appended when it ends:
+nothing on disk had heard of the fan-out. `<stem>.execution.jsonl` is written
+before the dispatch becomes observable, so that item now reads
+`interrupted-explicit`. Two rows report it — what the journal recorded, and what
+the next request is told about it — and the second one is a contract, not a
+description: one block while an interruption stands, none otherwise.
+
+Deliberately unmoved: settled items stay `reconstructed-lossy`. Their answers
+already live in the sub-agent store, and a second durable copy of "this child
+completed" would be a second authority to reconcile the moment the two files
+disagree. The journal records that a delegation entered the orchestration and
+that the orchestration let go of it, never how it ended.
+
+**An execution record proves that work entered orchestration; it does not prove
+that the work started, ran, or is resumable.** An item still waiting on a
+dependency is journalled the same way as one that reached a slot, so the mixed
+arm's restart inherits two interruptions where only one was executing. That is
+what the host can prove, and the block it writes says so rather than claiming
+both were running. Telling those two apart needs a durable STARTED, which this
+slice does not have.

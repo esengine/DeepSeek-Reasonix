@@ -79,6 +79,29 @@ type parallelTaskItem struct {
 // could still reserve unbounded memory and queue unbounded API work (#6933).
 const parallelTasksMaxTasks = 64
 
+// openFanOut records every item before the graph shows it. Durable before
+// observable: an item the journal could not record must not start, because the
+// record is the only thing that would survive to say it did.
+func (p *ParallelTasksTool) openFanOut(ctx context.Context, sink event.Sink, parentID string, items []parallelItem) error {
+	opening := parallelOpeningDelta(parentID, items)
+	if err := p.taskTool.openExecutions(ctx, parentID, fanOutOpenings(opening.Nodes)); err != nil {
+		return err
+	}
+	publishGraph(sink, opening)
+	return nil
+}
+
+// closeFanOut ends the group and releases every item the journal still holds,
+// including any the run never reached.
+func (p *ParallelTasksTool) closeFanOut(ctx context.Context, sink event.Sink, merger *subagentProgressMerger, parentID string, err error, statuses []agentgraph.NodeState, refs []string, taskErrs []error) {
+	state := groupTerminalState(ctx, err, statuses)
+	merger.directStatus(parentID, terminalProgressPhase(state))
+	for i := range statuses {
+		p.taskTool.settleExecution(ctx, parallelNodeID(parentID, i))
+	}
+	publishGraph(sink, parallelOutcomeDelta(parentID, state, statuses, refs, taskErrs))
+}
+
 func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
 	// Group lifecycle: the group card's terminal is an explicit event from
 	// the tool itself (running once children start, exactly one terminal at
@@ -96,11 +119,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	var statuses []agentgraph.NodeState
 	var refs []string
 	var taskErrs []error
-	defer func() {
-		state := groupTerminalState(ctx, err, statuses)
-		merger.directStatus(parentID, terminalProgressPhase(state))
-		publishGraph(sink, parallelOutcomeDelta(parentID, state, statuses, refs, taskErrs))
-	}()
+	defer func() { p.closeFanOut(ctx, sink, merger, parentID, err, statuses, refs, taskErrs) }()
 	ctx = withSubagentProgressMerger(ctx, merger)
 
 	tasks, err := parseParallelTasks(args)
@@ -147,7 +166,9 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		model, effort := p.taskTool.effectiveProfile(t.Model, t.Effort)
 		items[i] = parallelItem{Label: makeLabel(t, i), Model: model, Effort: effort}
 	}
-	publishGraph(sink, parallelOpeningDelta(parentID, items))
+	if err := p.openFanOut(ctx, sink, parentID, items); err != nil {
+		return "", err
+	}
 
 	startTask := func(idx int) {
 		t := tasks[idx]
@@ -239,6 +260,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		default:
 			statuses[r.index] = agentgraph.StateFailed
 		}
+		p.taskTool.settleExecution(ctx, parallelNodeID(parentID, r.index))
 		publishGraph(sink, fanOutItemSettledDelta(parallelNodeID(parentID, r.index), statuses[r.index], r.ref, r.err))
 	}
 	for completed < n {

@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/agentgraph"
 	"reasonix/internal/control"
 	"reasonix/internal/evidence"
+	"reasonix/internal/execjournal"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
@@ -58,8 +59,16 @@ type Observation struct {
 	// FanOutTurn is whether the dispatching turn is in this phase's transcript
 	// at all. A turn is appended when it ends, so a process that dies inside one
 	// leaves no record of the request, and a lost graph is the smaller half.
-	FanOutTurn bool          `json:"fan_out_turn"`
-	Artifacts  []ArtifactObs `json:"artifacts"`
+	FanOutTurn bool `json:"fan_out_turn"`
+	// Executions is the durable record of delegations this turn opened, and
+	// InterruptedExecutions the host's judgement over it: open, with no owner
+	// here. Written before the work starts, so it outlives an unfinished turn.
+	Executions            []execjournal.Entry `json:"executions,omitempty"`
+	InterruptedExecutions []execjournal.Entry `json:"interrupted_executions,omitempty"`
+	// ModelSeesInterruptedExecution counts the blocks the next request carries
+	// about them, which is a different surface from the fact behind them.
+	ModelSeesInterruptedExecution int           `json:"model_sees_interrupted_execution"`
+	Artifacts                     []ArtifactObs `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -294,6 +303,10 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		Graph:                 graphObs(graph, deltas),
 		Children:              childrenObs(root, path),
 		FanOutTurn:            fanOutTurnRecorded(history),
+		Executions:            control.ExecutionHistory(path),
+		InterruptedExecutions: ctrl.InterruptedExecutions(),
+		ModelSeesInterruptedExecution: countBlocks(
+			ctrl.ModelVisibleMessages(), "<interrupted-execution>"),
 		Deferred:              deferredObs(root.Workspace),
 		Obligation:            obligationObs(history),
 		Interrupted:           ctrl.InterruptedAdjudications(),

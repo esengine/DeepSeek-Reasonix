@@ -321,11 +321,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 	}
 	merger.directStatus(groupParentID, subagentPhaseRunning)
 	var results []fleetItemResult
-	defer func() {
-		state := groupTerminalState(ctx, err, fleetItemStates(results))
-		merger.directStatus(groupParentID, terminalProgressPhase(state))
-		publishGraph(sink, fleetOutcomeDelta(groupParentID, state, results))
-	}()
+	defer func() { f.closeFanOut(ctx, sink, merger, groupParentID, err, results) }()
 
 	n := len(specs)
 	results = make([]fleetItemResult, n)
@@ -338,7 +334,9 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 		}
 	}
 
-	publishGraph(sink, fleetOpeningDelta(groupParentID, plan, specs, adopted, results))
+	if err := f.openFanOut(ctx, sink, groupParentID, plan, specs, adopted, results); err != nil {
+		return "", err
+	}
 
 	var wg sync.WaitGroup
 	doneCh := make(chan fleetItemResult, n)
@@ -385,6 +383,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 				report.Output, report.Err = "", err.Error()
 			}
 			sink.Emit(event.Event{Kind: event.ToolResult, Tool: report})
+			f.taskTool.settleExecution(ctx, subID)
 			publishGraph(sink, fanOutItemSettledDelta(subID, res.status, res.ref, res.err))
 			doneCh <- res
 		})
@@ -407,6 +406,31 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 		return formatFleetAggregate(results, true), firstNonNilErr(ctx.Err(), context.Canceled)
 	}
 	return formatFleetAggregate(results, false), nil
+}
+
+// openFanOut records every item before the graph shows it. Durable before
+// observable: the journal is the only thing that survives to say these items
+// were opened, so an item it could not record must not start.
+func (f *FleetTool) openFanOut(ctx context.Context, sink event.Sink, groupParentID string, plan fleetPlan, specs []ProfileExecSpec, adopted map[int]adoptedItem, results []fleetItemResult) error {
+	opening := fleetOpeningDelta(groupParentID, plan, specs, adopted, results)
+	if err := f.taskTool.openExecutions(ctx, groupParentID, fanOutOpenings(opening.Nodes)); err != nil {
+		return err
+	}
+	publishGraph(sink, opening)
+	return nil
+}
+
+// closeFanOut ends the group. Items that never ran settle here and nowhere
+// else: a skipped branch has no result to report, and leaving it open would
+// make a later process read work that was cancelled upstream as work it
+// interrupted.
+func (f *FleetTool) closeFanOut(ctx context.Context, sink event.Sink, merger *subagentProgressMerger, groupParentID string, err error, results []fleetItemResult) {
+	state := groupTerminalState(ctx, err, fleetItemStates(results))
+	for i := range results {
+		f.taskTool.settleExecution(ctx, fleetNodeID(groupParentID, i))
+	}
+	merger.directStatus(groupParentID, terminalProgressPhase(state))
+	publishGraph(sink, fleetOutcomeDelta(groupParentID, state, results))
 }
 
 // upstreamFor is the plan's delivery with the measurement arm applied. The

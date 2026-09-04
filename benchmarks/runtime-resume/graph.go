@@ -37,6 +37,8 @@ func graphRows(before, after Observation) []row {
 		graphStructureRow(before, after),
 		graphSemanticsRow(before, after),
 		childProvenanceRow(before, after),
+		executionJournalRow(before, after),
+		executionContextRow(before, after),
 		graphObligationRow(before, after),
 	}
 }
@@ -167,6 +169,8 @@ func interruptedOutcome(before, after Observation) (string, string) {
 		return graphNotMeasured, verdictNotMeasured
 	case len(runningWorkers(after)) > 0 || len(childrenInState(after, string(agent.SubagentRunning))) > 0:
 		return graphGhost, verdictViolated
+	case len(after.InterruptedExecutions) > 0:
+		return graphInterrupted, verdictLossy
 	case len(childrenInState(after, string(agent.SubagentInterrupted))) > 0:
 		return graphInterrupted, verdictLossy
 	case len(after.Obligation.UnansweredCalls) > 0 || after.Obligation.InterruptionMarked > 0:
@@ -232,6 +236,57 @@ func graphObligationRow(before, after Observation) row {
 		Before: orNone(join(before.Obligation.UnansweredCalls)),
 		After:  orNone(join(after.Obligation.UnansweredCalls)), Verdict: verdictStable,
 	}
+}
+
+// executionJournalRow is the record written before the work started, which is
+// the only artifact here that can outlive an unfinished turn. It is what a
+// restart reads to say a delegation existed at all.
+func executionJournalRow(before, after Observation) row {
+	return valueRow("delegations the journal recorded", "execution journal, written before dispatch",
+		"<stem>.execution.jsonl", "folded from openings and settlings",
+		executionSummary(before), executionSummary(after), true)
+}
+
+// executionContextRow is the other side of that record: what the next request
+// is told. It must state provenance and never offer a continuation, so the
+// count is checked against the interruptions rather than against a fixed
+// number — a block with nothing behind it is a ghost in prose.
+func executionContextRow(before, after Observation) row {
+	verdict := verdictHolds
+	if blocksOwed(before) != before.ModelSeesInterruptedExecution ||
+		blocksOwed(after) != after.ModelSeesInterruptedExecution {
+		verdict = verdictViolated
+	}
+	return row{
+		Semantic: "what the next request says about them", Authority: "control, projected per request",
+		Artifact: "none: derived, never stored", Reconstruction: "one block while an interrupted execution stands, none otherwise",
+		Before: executionBlocks(before), After: executionBlocks(after), Verdict: verdict,
+	}
+}
+
+func blocksOwed(o Observation) int {
+	if len(o.InterruptedExecutions) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func executionBlocks(o Observation) string {
+	return fmt.Sprintf("%d block(s) for %d interrupted", o.ModelSeesInterruptedExecution, len(o.InterruptedExecutions))
+}
+
+func executionSummary(o Observation) string {
+	if len(o.Executions) == 0 {
+		return ""
+	}
+	open := 0
+	for _, e := range o.Executions {
+		if e.Open() {
+			open++
+		}
+	}
+	return fmt.Sprintf("%d opened, %d still open, %d with no owner here",
+		len(o.Executions), open, len(o.InterruptedExecutions))
 }
 
 func childrenInState(o Observation, status string) []string {

@@ -269,10 +269,15 @@ func (c *Controller) Adjudications() (active, history []AdjudicationEntry) {
 }
 
 // RequestContext is what the host owes the next request about work that did not
-// finish. It states provenance, not a continuation: there is no identity to
-// answer with, because no owner is left to answer to. Derived every request, so
-// nothing records having shown it.
+// finish: questions nobody is left to answer, and delegations nobody is left to
+// run. Both state provenance rather than a continuation, and both are derived
+// every request, so nothing records having shown them.
 func (c *Controller) RequestContext() []string {
+	return append(c.interruptedAdjudicationContext(), c.interruptedExecutionContext()...)
+}
+
+// interruptedAdjudicationContext names the barriers a dead run was waiting on.
+func (c *Controller) interruptedAdjudicationContext() []string {
 	interrupted := append(c.InterruptedAdjudications(), c.inheritedByRunningTurn()...)
 	if len(interrupted) == 0 {
 		return nil

@@ -138,7 +138,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
 
-	marker = c.markInFlightTurn(startMessages, true)
+	ctx, marker = c.beginTurn(ctx, startMessages, true)
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
@@ -245,7 +245,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		}
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
-	marker = c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
+	ctx, marker = c.beginTurn(ctx, startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
 	if continuation != nil {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{
 			ID:       continuation.scopeID,
@@ -361,7 +361,7 @@ func (o *turnOrchestrator) gatePlanApproval(ctx context.Context) error {
 	c.approval.setPlanAutoApprove(true)
 	defer c.approval.setPlanAutoApprove(false)
 	err = func() error {
-		marker := c.markInFlightTurn(execStart, false)
+		ctx, marker := c.beginTurn(ctx, execStart, false)
 		defer c.finishInFlightTurn(execStart, marker)
 		return o.runComposedSyntheticTurn(ctx, planApprovedMessage)
 	}()
