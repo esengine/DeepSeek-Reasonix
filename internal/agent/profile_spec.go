@@ -142,7 +142,9 @@ type SchedulerPolicy struct {
 	// than the session has slots. Zero means nothing waits.
 	Priority int
 	// OnStart fires once this run holds a slot: the wait before it is the cap.
-	OnStart func()
+	// It may refuse — the durable record of the start goes first, and a run
+	// whose start could not be recorded must not act.
+	OnStart func() error
 	// OnQueued fires with what held this run out of a slot, when something did.
 	OnQueued func(agentgraph.WaitCause)
 }

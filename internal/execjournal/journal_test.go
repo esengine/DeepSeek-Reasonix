@@ -156,3 +156,88 @@ func TestNoSessionPathRecordsNothing(t *testing.T) {
 		t.Fatalf("history = %+v, want nil", got)
 	}
 }
+
+// TestStartedTellsTheTwoInterruptionsApart is the whole point of the transition.
+// Before it existed, an item cut mid-execution and one still waiting on a
+// dependency reached the next process as the same fact.
+func TestStartedTellsTheTwoInterruptionsApart(t *testing.T) {
+	path := sessionPath(t)
+	for _, id := range []string{"call/ran", "call/waited"} {
+		if err := Open(path, Opening{ID: id}); err != nil {
+			t.Fatalf("open %s: %v", id, err)
+		}
+	}
+	if err := Start(path, "call/ran"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	Disown(path)
+
+	got := map[string]string{}
+	for _, e := range Interrupted(path) {
+		got[e.ID] = e.Interruption()
+	}
+	if got["call/ran"] != InterruptedDuringExecution {
+		t.Errorf("started item = %q, want %q", got["call/ran"], InterruptedDuringExecution)
+	}
+	if got["call/waited"] != InterruptedBeforeStart {
+		t.Errorf("unstarted item = %q, want %q", got["call/waited"], InterruptedBeforeStart)
+	}
+}
+
+// TestSettlingBeforeStartingIsOrdinary: a branch its dependency cut is opened,
+// never started, and released when the group ends. Treating that as corruption
+// would reject a path production reaches on every failed fan-out.
+func TestSettlingBeforeStartingIsOrdinary(t *testing.T) {
+	path := sessionPath(t)
+	if err := Open(path, Opening{ID: "call/skipped"}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	Settle(path, "call/skipped")
+	entries := History(path)
+	if len(entries) != 1 || entries[0].Started() || entries[0].Open() {
+		t.Fatalf("entries = %+v, want one settled entry that never started", entries)
+	}
+}
+
+// TestStartRecordsTheJournalRefuses covers the three shapes that would let a
+// replayed or torn log describe an execution that never happened that way.
+func TestStartRecordsTheJournalRefuses(t *testing.T) {
+	t.Run("without an opening", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Start(path, "call/ghost"); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if entries := History(path); len(entries) != 0 {
+			t.Fatalf("entries = %+v, want none from a start with no opening", entries)
+		}
+	})
+	t.Run("after settling", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/item"}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		Settle(path, "call/item")
+		if err := Start(path, "call/item"); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if entries := History(path); entries[0].Started() {
+			t.Fatal("an execution the orchestration released cannot begin afterwards")
+		}
+	})
+	t.Run("twice", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/item"}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if err := Start(path, "call/item"); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		first := History(path)[0].StartedAt
+		if err := Start(path, "call/item"); err != nil {
+			t.Fatalf("restart: %v", err)
+		}
+		if !History(path)[0].StartedAt.Equal(first) {
+			t.Fatal("startedAt moved; the first start must win")
+		}
+	})
+}

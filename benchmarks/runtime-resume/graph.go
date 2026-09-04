@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agentgraph"
+	"reasonix/internal/execjournal"
 )
 
 // How a run graph can stand after the process that built it exits. Three are
@@ -38,6 +40,7 @@ func graphRows(before, after Observation) []row {
 		graphSemanticsRow(before, after),
 		childProvenanceRow(before, after),
 		executionJournalRow(before, after),
+		executionKindRow(before, after),
 		executionContextRow(before, after),
 		graphObligationRow(before, after),
 	}
@@ -247,6 +250,44 @@ func executionJournalRow(before, after Observation) row {
 		executionSummary(before), executionSummary(after), true)
 }
 
+// executionKindRow holds the two interruptions apart against what the dying
+// process actually showed. The item the graph had running must come back as one
+// that reached a slot; the one its dependency blocked must come back as one
+// that did not. A classification agreeing with neither is a label, not a fact.
+func executionKindRow(before, after Observation) row {
+	running := runningWorkers(before)
+	verdict := verdictHolds
+	if len(after.InterruptedExecutions) == 0 {
+		verdict = verdictNotMeasured
+	}
+	for _, e := range after.InterruptedExecutions {
+		want := execjournal.InterruptedBeforeStart
+		if slices.Contains(running, e.ID) {
+			want = execjournal.InterruptedDuringExecution
+		}
+		if e.Interruption() != want {
+			verdict = verdictViolated
+		}
+	}
+	return row{
+		Semantic: "how each interruption is classified", Authority: "the execution journal's start records",
+		Artifact: "<stem>.execution.jsonl", Reconstruction: "started at death -> during-execution, never started -> before-start",
+		Before: orNone(join(running)) + " running at death", After: interruptionKinds(after), Verdict: verdict,
+	}
+}
+
+func interruptionKinds(o Observation) string {
+	if len(o.InterruptedExecutions) == 0 {
+		return "none"
+	}
+	out := make([]string, 0, len(o.InterruptedExecutions))
+	for _, e := range o.InterruptedExecutions {
+		out = append(out, e.ID+":"+e.Interruption())
+	}
+	sort.Strings(out)
+	return join(out)
+}
+
 // executionContextRow is the other side of that record: what the next request
 // is told. It must state provenance and never offer a continuation, so the
 // count is checked against the interruptions rather than against a fixed
@@ -279,14 +320,17 @@ func executionSummary(o Observation) string {
 	if len(o.Executions) == 0 {
 		return ""
 	}
-	open := 0
+	open, started := 0, 0
 	for _, e := range o.Executions {
 		if e.Open() {
 			open++
 		}
+		if e.Started() {
+			started++
+		}
 	}
-	return fmt.Sprintf("%d opened, %d still open, %d with no owner here",
-		len(o.Executions), open, len(o.InterruptedExecutions))
+	return fmt.Sprintf("%d opened, %d started, %d still open, %d with no owner here",
+		len(o.Executions), started, open, len(o.InterruptedExecutions))
 }
 
 func childrenInState(o Observation, status string) []string {

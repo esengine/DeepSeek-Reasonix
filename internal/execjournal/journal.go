@@ -15,7 +15,19 @@ import (
 // with no live owner, never written by the process that died.
 const (
 	statusOpen    = "open"
+	statusStarted = "started"
 	statusSettled = "settled"
+)
+
+// How an execution with no live owner was cut. Both are derived, never written:
+// the process that died had no chance to record either.
+const (
+	// InterruptedBeforeStart never reached a slot. Nothing it would have done
+	// was done, because it had not begun to do it.
+	InterruptedBeforeStart = "interrupted-before-start"
+	// InterruptedDuringExecution held a slot, so whatever it had already done
+	// stands and whatever it had not is simply undone.
+	InterruptedDuringExecution = "interrupted-during-execution"
 )
 
 // Dispositions an opening carries. They say what the orchestration intends to
@@ -78,6 +90,7 @@ type Entry struct {
 	Grant       string    `json:"grant,omitempty"`
 	Disposition string    `json:"disposition,omitempty"`
 	OpenedAt    time.Time `json:"openedAt"`
+	StartedAt   time.Time `json:"startedAt,omitempty"`
 	SettledAt   time.Time `json:"settledAt,omitempty"`
 }
 
@@ -85,6 +98,20 @@ type Entry struct {
 // journal was last written to.
 func (e Entry) Open() bool {
 	return e.SettledAt.IsZero() && e.Disposition != DispositionAdopted
+}
+
+// Started reports whether this execution was ever granted a slot. An opening
+// that settles without one is ordinary: a branch its dependency cut is opened,
+// never started, and released when the group ends.
+func (e Entry) Started() bool { return !e.StartedAt.IsZero() }
+
+// Interruption names how an execution with no live owner was cut. Neither
+// answer offers a continuation; they differ in what may already have happened.
+func (e Entry) Interruption() string {
+	if e.Started() {
+		return InterruptedDuringExecution
+	}
+	return InterruptedBeforeStart
 }
 
 // owned is what this process still holds. It is process-wide because that is
@@ -122,6 +149,17 @@ func Open(sessionPath string, o Opening) error {
 		owned.claim(sessionPath, o.ID, true)
 	}
 	return nil
+}
+
+// Start records that an opened execution was granted a slot, before anything
+// can observe it running and before the child can act. The write is returned
+// rather than logged for the same reason an opening's is: a run whose start
+// could not be recorded must not act, or the boundary loses it again.
+func Start(sessionPath, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return appendRecord(sessionPath, record{Execution: id, Status: statusStarted, At: time.Now().UTC()})
 }
 
 // Settle records that the orchestration has let go of an execution. Best-effort:
@@ -222,6 +260,14 @@ func History(sessionPath string) []Entry {
 			continue
 		}
 		if !seen || !out[at].Open() {
+			continue
+		}
+		if rec.Status == statusStarted {
+			// First start wins, and one arriving after the settling is refused:
+			// an execution the orchestration released cannot begin afterwards.
+			if !out[at].Started() {
+				out[at].StartedAt = rec.At
+			}
 			continue
 		}
 		out[at].SettledAt = rec.At

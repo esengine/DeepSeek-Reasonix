@@ -292,9 +292,18 @@ disagree. The journal records that a delegation entered the orchestration and
 that the orchestration let go of it, never how it ended.
 
 **An execution record proves that work entered orchestration; it does not prove
-that the work started, ran, or is resumable.** An item still waiting on a
-dependency is journalled the same way as one that reached a slot, so the mixed
-arm's restart inherits two interruptions where only one was executing. That is
-what the host can prove, and the block it writes says so rather than claiming
-both were running. Telling those two apart needs a durable STARTED, which this
-slice does not have.
+that the work is resumable.** Whether it *started* is a separate durable fact,
+recorded at the slot grant — before anything can observe the item running and
+before the child can act. A restart therefore inherits two kinds of
+interruption rather than one:
+
+| Journal | Restart reads |
+| --- | --- |
+| opened, never started, not settled, no owner | `interrupted-before-start` — it never reached a slot, so nothing it would have done was done |
+| opened, started, not settled, no owner | `interrupted-during-execution` — whatever it had written stands, whatever it had not is undone |
+
+Neither is resumable, and neither is ever written down: both are derived from
+an open entry with no live owner, because the process that died had no chance
+to record either. The mixed arm is the acceptance test — it dies holding an
+item its dependency blocked and an item that was executing, and the two must
+come back classified differently.

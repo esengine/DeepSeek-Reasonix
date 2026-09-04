@@ -85,10 +85,11 @@ func fanOutItemWaitDelta(id string, cause agentgraph.WaitCause) agentgraph.Delta
 }
 
 // fanOutItemHooks are the two moments of an item's wait that only the scheduler
-// can report: what held it out of a slot, and the grant that ended that.
-func fanOutItemHooks(sink event.Sink, id string) (func(agentgraph.WaitCause), func()) {
+// can report: what held it out of a slot, and the grant that ended that. The
+// second never refuses; a caller that has something to persist first wraps it.
+func fanOutItemHooks(sink event.Sink, id string) (func(agentgraph.WaitCause), func() error) {
 	return func(cause agentgraph.WaitCause) { publishGraph(sink, fanOutItemWaitDelta(id, cause)) },
-		func() { publishGraph(sink, fanOutItemRunningDelta(id)) }
+		func() error { publishGraph(sink, fanOutItemRunningDelta(id)); return nil }
 }
 
 // fanOutItemRunningDelta reports the slot being granted. The gap back to

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/agentgraph"
+	"reasonix/internal/event"
 	"reasonix/internal/execjournal"
 )
 
@@ -53,6 +54,34 @@ func (t *TaskTool) openExecutions(ctx context.Context, group string, openings []
 		if err := execjournal.Open(path, opening); err != nil {
 			return fmt.Errorf("record delegated execution %s: %w", opening.ID, err)
 		}
+	}
+	return nil
+}
+
+// itemHooks are the scheduler's two moments with the durable record placed
+// ahead of the second. A granted slot is the point the child becomes able to
+// act, so STARTED reaches disk before anything observes it running and before
+// the run does anything at all.
+func (t *TaskTool) itemHooks(ctx context.Context, sink event.Sink, id string) (func(agentgraph.WaitCause), func() error) {
+	onWait, onSlot := fanOutItemHooks(sink, id)
+	return onWait, func() error {
+		if err := t.startExecution(ctx, id); err != nil {
+			return err
+		}
+		return onSlot()
+	}
+}
+
+// startExecution records the slot grant. An item that never reaches one — a
+// branch its dependency cut — is never started, which is the difference a
+// restart reads to tell what was executing from what merely existed.
+func (t *TaskTool) startExecution(ctx context.Context, id string) error {
+	path := t.executionSessionPath(ctx)
+	if path == "" {
+		return nil
+	}
+	if err := execjournal.Start(path, id); err != nil {
+		return fmt.Errorf("record delegated execution start %s: %w", id, err)
 	}
 	return nil
 }

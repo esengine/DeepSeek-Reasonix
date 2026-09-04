@@ -8,14 +8,19 @@ import "context"
 // participant except the scheduler is in a position to notice.
 func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest, sched SchedulerPolicy) (func(), error) {
 	if t.scheduler == nil {
-		sched.started()
-		return func() {}, nil
+		return func() {}, sched.started()
 	}
 	release, err := t.scheduler.Acquire(ctx, req)
-	if err == nil {
-		sched.started()
+	if err != nil {
+		return release, err
 	}
-	return release, err
+	// A refused start gives the slot straight back: the run never acted, so
+	// holding capacity for it would starve the ones that can.
+	if err := sched.started(); err != nil {
+		release()
+		return func() {}, err
+	}
+	return release, nil
 }
 
 // acquireRequestFor derives the slot request from the spec, and repairs a
@@ -43,8 +48,9 @@ func (t *TaskTool) acquireRequestFor(spec *ProfileExecSpec) (AcquireRequest, err
 	return req, nil
 }
 
-func (p SchedulerPolicy) started() {
-	if p.OnStart != nil {
-		p.OnStart()
+func (p SchedulerPolicy) started() error {
+	if p.OnStart == nil {
+		return nil
 	}
+	return p.OnStart()
 }

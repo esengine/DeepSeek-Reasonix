@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -45,6 +46,49 @@ func (s *openingProbeSink) ids() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.recorded...)
+}
+
+// runningProbeSink reads the journal at the moment the graph first shows one
+// item running. A worker's running delta carries an outcome only, so the group's
+// own node — declared running when the fan-out opened — is excluded by its kind.
+type runningProbeSink struct {
+	mu          sync.Mutex
+	sessionPath string
+	startedAt   map[string]bool
+}
+
+func (s *runningProbeSink) Emit(e event.Event) {
+	if e.Kind != event.GraphDelta || e.Graph == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range e.Graph.Nodes {
+		if n.State != agentgraph.StateRunning || n.Kind == agentgraph.KindGroup {
+			continue
+		}
+		if s.startedAt == nil {
+			s.startedAt = map[string]bool{}
+		}
+		s.startedAt[n.ID] = startedInJournal(s.sessionPath, n.ID)
+	}
+}
+
+func (s *runningProbeSink) observed() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	maps.Copy(out, s.startedAt)
+	return out
+}
+
+func startedInJournal(sessionPath, id string) bool {
+	for _, e := range execjournal.History(sessionPath) {
+		if e.ID == id {
+			return e.Started()
+		}
+	}
+	return false
 }
 
 func hasWorker(nodes []agentgraph.Node) bool {
@@ -171,5 +215,67 @@ func TestSkippedItemIsSettledByTheGroup(t *testing.T) {
 	execjournal.Disown(sessionPath)
 	if got := execjournal.Interrupted(sessionPath); len(got) != 0 {
 		t.Fatalf("the next process inherited %+v; a skipped branch was never running", got)
+	}
+}
+
+// TestFanOutIsDurableBeforeRunningIsObservable is the ordering the STARTED
+// record exists for. The slot grant is the point the child becomes able to act,
+// so if the record were written after that became observable, a crash in
+// between would leave an execution that ran with nothing saying it had begun —
+// indistinguishable from one that never reached a slot.
+func TestFanOutIsDurableBeforeRunningIsObservable(t *testing.T) {
+	root := testenv.TempDir(t)
+	sessions := testenv.TempDir(t)
+	reg := tool.NewRegistry()
+	reg.Add(fakeReadFileTool{})
+	sessionPath := filepath.Join(sessions, "probe.jsonl")
+	sink := &runningProbeSink{sessionPath: sessionPath}
+	task := NewTaskTool(&fleetScriptedFailureProvider{}, nil, reg, 20, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(filepath.Join(sessions, "subagents")), root, "base", "high").
+		WithScheduler(NewSubagentScheduler(4, 4))
+	ctx := withCallContext(context.Background(), "fleet-call", sink, nil, false)
+	ctx = WithTurnIdentity(WithParentSession(ctx, "probe"), "turn-1")
+
+	if _, err := NewFleetTool(task).Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"one","prompt":"one","read_only":true},
+		{"id":"two","prompt":"two","read_only":true}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	observed := sink.observed()
+	if len(observed) == 0 {
+		t.Fatal("no worker was ever observed running; the arm measured nothing")
+	}
+	for id, started := range observed {
+		if !started {
+			t.Errorf("%s was observed running while the journal had no start for it", id)
+		}
+	}
+}
+
+// TestBlockedItemIsNeverStarted is the negative control that proves the hook is
+// on the slot grant rather than on the item being created or becoming runnable.
+// A branch its dependency cut is opened and released without ever reaching a
+// slot; if it carried a start, the two interruptions would collapse again.
+func TestBlockedItemIsNeverStarted(t *testing.T) {
+	fleet, ctx, sessionPath, _ := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"research","prompt":"FAIL research","read_only":true},
+		{"id":"implement","prompt":"implement","depends_on":["research"],"write_paths":["api"]}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	byID := map[string]execjournal.Entry{}
+	for _, e := range execjournal.History(sessionPath) {
+		byID[e.ID] = e
+	}
+	if blocked := byID["fleet-call/fleet-2"]; blocked.Started() {
+		t.Fatalf("the dependency-blocked item recorded a start at %v; it never reached a slot", blocked.StartedAt)
+	}
+	if ran := byID["fleet-call/fleet-1"]; !ran.Started() {
+		t.Fatal("the item that ran recorded no start")
 	}
 }

@@ -21,10 +21,10 @@ func (c *Controller) beginTurn(ctx context.Context, startMessageIndex int, prese
 // request and every item it opened equally absent.
 
 // InterruptedExecutions returns the delegations this session recorded and never
-// settled, with no owner left in this process. Each is durable evidence that
-// work was opened and cut, never a handle to resume it: the goroutine is gone
-// and its answer, if any, belongs to the sub-agent store. Opened, not started —
-// an item still waiting on a dependency is recorded exactly the same way.
+// settled, with no owner left in this process: durable evidence that work was
+// opened and cut, never a handle to resume it. Entry.Interruption says whether
+// it had reached a slot, which decides what may be half-finished — never
+// whether anything may be restarted.
 func (c *Controller) InterruptedExecutions() []execjournal.Entry {
 	if c == nil {
 		return nil
@@ -68,12 +68,15 @@ func interruptedExecutionBlock(interrupted []execjournal.Entry) string {
 		if item.Grant != "" {
 			b.WriteString(" (" + item.Grant + ")")
 		}
+		b.WriteString(" — " + item.Interruption())
 	}
-	b.WriteString("\n\nSome may never have started; the host cannot tell which. None can be ")
-	b.WriteString("resumed and none were restarted. Whatever they had already written stands; ")
-	b.WriteString("whatever they had not is simply undone. Treat this as context for what may ")
-	b.WriteString("be half-finished, not as work to continue: anything still wanted has to be ")
-	b.WriteString("delegated again.\n")
+	b.WriteString("\n\nNone can be resumed and none were restarted. One marked ")
+	b.WriteString(execjournal.InterruptedBeforeStart)
+	b.WriteString(" never reached a slot, so nothing it would have done was done. One marked ")
+	b.WriteString(execjournal.InterruptedDuringExecution)
+	b.WriteString(" was executing: whatever it had already written stands, and whatever it had ")
+	b.WriteString("not is simply undone. Treat this as context for what may be half-finished, ")
+	b.WriteString("not as work to continue: anything still wanted has to be delegated again.\n")
 	b.WriteString("</interrupted-execution>")
 	return b.String()
 }
