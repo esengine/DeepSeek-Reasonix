@@ -6293,7 +6293,7 @@ function ProviderModelDraftPicker({
             draft.visionModels,
           );
           return (
-            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem">
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -6301,7 +6301,7 @@ function ProviderModelDraftPicker({
                   disabled={disabled}
                   onChange={() => onToggle(model)}
                 />
-                <span>{model}</span>
+                <ProviderModelName model={model} />
               </label>
               <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
                 <span>{t("settings.textInput")}</span>
@@ -6593,6 +6593,14 @@ function parseBotListInput(value: string): string[] {
     .filter(Boolean));
 }
 
+function ProviderModelName({ model }: { model: string }) {
+  return (
+    <Tooltip label={model} className="provider-model-draft__model-name-tooltip">
+      <span className="provider-model-draft__model-name">{model}</span>
+    </Tooltip>
+  );
+}
+
 export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   candidates,
   selectedModels,
@@ -6667,7 +6675,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
             visionModels,
           );
           return (
-            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem">
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -6675,7 +6683,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
                   disabled={disabled}
                   onChange={() => onToggleModel(model)}
                 />
-                <span>{model}</span>
+                <ProviderModelName model={model} />
               </label>
               <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
                 <span>{t("settings.textInput")}</span>

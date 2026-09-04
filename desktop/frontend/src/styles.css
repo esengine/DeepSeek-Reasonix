@@ -18018,8 +18018,12 @@ body > .mermaid-diagram--fullscreen {
 }
 .provider-model-draft__option {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  --provider-model-name-slot-size: 2.7em;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+  grid-template-rows: var(--provider-model-name-slot-size) auto auto;
+  align-content: start;
   gap: 4px;
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
@@ -18030,6 +18034,9 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--text-2xs);
   overflow: hidden;
 }
+.provider-model-draft--inline .provider-model-draft__option {
+  contain-intrinsic-size: auto calc(var(--provider-model-name-slot-size) + 56px);
+}
 .provider-model-draft__model,
 .provider-model-draft__vision {
   min-width: 0;
@@ -18037,6 +18044,25 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 7px;
+}
+.provider-model-draft__model {
+  align-items: start;
+}
+.provider-model-draft__model-name-tooltip {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.provider-model-draft__model-name {
+  display: -webkit-box;
+  width: 100%;
+  min-width: 0;
+  block-size: var(--provider-model-name-slot-size);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .provider-model-draft__context {
   min-width: 0;
