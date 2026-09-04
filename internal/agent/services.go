@@ -20,6 +20,8 @@ import (
 type agentServices struct {
 	prov  provider.Provider
 	tools *tool.Registry
+	// hostContext supplies facts the host owes each request and stores nowhere.
+	hostContext HostContext
 	// triage answers the small classifications the static tables come up short
 	// on, off the turn's own model so a cheap one can serve them. nil falls back
 	// to prov, which is correct but pays the main model for a two-word answer.

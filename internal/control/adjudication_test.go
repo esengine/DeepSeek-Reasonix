@@ -2,6 +2,7 @@ package control
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,5 +104,74 @@ func TestInterruptedBarrierIsDerivedAndStable(t *testing.T) {
 	}
 	if store.SessionAdjudication(c.SessionPath()) == "" {
 		t.Fatal("no adjudication log path for the session")
+	}
+}
+
+// A settled barrier projects nothing: the record is provenance for a wait that
+// ended, and a model told about it would be told about work already closed.
+func TestSettledBarriersProjectNothing(t *testing.T) {
+	for _, status := range []string{barrierResolved, barrierCancelled} {
+		c := barrierController(t)
+		if err := c.openBarrier("3", string(DecisionAsk), "Which side?"); err != nil {
+			t.Fatal(err)
+		}
+		c.closeBarrier("3", status)
+		next := &Controller{controllerDeps: controllerDeps{
+			approval: newApprovalManager(permission.Policy{}, "", 0), sink: event.Discard,
+		}}
+		next.sessionPath = c.SessionPath()
+		if got := next.InterruptedAdjudications(); len(got) != 0 {
+			t.Fatalf("%s barrier still reported as interrupted: %+v", status, got)
+		}
+		if got := next.RequestContext(); len(got) != 0 {
+			t.Fatalf("%s barrier still projected to the model: %q", status, got)
+		}
+	}
+}
+
+// The interruption rides the request and nothing else. Composing a turn must
+// not carry it: composed text becomes the canonical user message, so a block
+// added there would be history a later fold could freeze — the mistake this
+// whole line of work has been undoing.
+func TestInterruptionNeverEntersTheComposedTurn(t *testing.T) {
+	c := barrierController(t)
+	if err := c.openBarrier("11", string(DecisionAsk), "Delete X?"); err != nil {
+		t.Fatal(err)
+	}
+	next := &Controller{controllerDeps: controllerDeps{
+		approval: newApprovalManager(permission.Policy{}, "", 0), sink: event.Discard,
+	}}
+	next.sessionPath = c.SessionPath()
+	if got := next.RequestContext(); len(got) != 1 {
+		t.Fatalf("request context = %v, want the interruption", got)
+	}
+	if composed := next.Compose("go ahead, delete it"); strings.Contains(composed, "interrupted-adjudication") {
+		t.Fatalf("the composed turn carries the interruption, which persists it:\n%s", composed)
+	}
+}
+
+// What the model is told must not read as answerable, and must not hand back an
+// identity to answer with: an interrupted barrier has no owner to receive one.
+func TestInterruptionContextOffersNoHandle(t *testing.T) {
+	c := barrierController(t)
+	if err := c.openBarrier("42", string(DecisionAsk), "Delete X?"); err != nil {
+		t.Fatal(err)
+	}
+	next := &Controller{controllerDeps: controllerDeps{
+		approval: newApprovalManager(permission.Policy{}, "", 0), sink: event.Discard,
+	}}
+	next.sessionPath = c.SessionPath()
+	block := next.RequestContext()[0]
+	if !strings.Contains(block, "Delete X?") {
+		t.Fatalf("block does not say what was being asked:\n%s", block)
+	}
+	if !strings.Contains(block, "cannot be resumed") {
+		t.Fatalf("block does not say the run is gone:\n%s", block)
+	}
+	if strings.Contains(block, "42") {
+		t.Fatalf("block hands back an identity nobody can answer to:\n%s", block)
+	}
+	if len(next.Decisions()) != 0 {
+		t.Fatal("an interrupted barrier reached the answerable decision surface")
 	}
 }

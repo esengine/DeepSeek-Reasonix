@@ -43,8 +43,11 @@ type Observation struct {
 	// Interrupted is what the host derives from a barrier it found open and did
 	// not open itself: evidence the wait happened, not a question to answer.
 	Interrupted []control.InterruptedAdjudication `json:"interrupted"`
-	Graph       GraphObs                          `json:"graph"`
-	Artifacts   []ArtifactObs                     `json:"artifacts"`
+	// ModelSeesInterruption counts the interruption blocks the request carries,
+	// which is a different surface from the derived fact behind them.
+	ModelSeesInterruption int           `json:"model_sees_interruption"`
+	Graph                 GraphObs      `json:"graph"`
+	Artifacts             []ArtifactObs `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -230,12 +233,13 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		View:    view,
 		// The note is derived for a request and stored nowhere, so the contracts
 		// about it are read off the request rather than off the stored view.
-		TodoNotes:   todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
-		Graph:       graphObs(graph, deltas),
-		Deferred:    deferredObs(workspace),
-		Obligation:  obligationObs(history),
-		Interrupted: ctrl.InterruptedAdjudications(),
-		Artifacts:   readArtifacts(path),
+		TodoNotes:             todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
+		Graph:                 graphObs(graph, deltas),
+		Deferred:              deferredObs(workspace),
+		Obligation:            obligationObs(history),
+		Interrupted:           ctrl.InterruptedAdjudications(),
+		ModelSeesInterruption: countBlocks(ctrl.ModelVisibleMessages(), "<interrupted-adjudication>"),
+		Artifacts:             readArtifacts(path),
 	}
 }
 
@@ -329,6 +333,16 @@ func mentionsID(msgs []provider.Message, id string) bool {
 		}
 	}
 	return false
+}
+
+func countBlocks(msgs []provider.Message, marker string) int {
+	n := 0
+	for _, m := range msgs {
+		if strings.Contains(m.Content, marker) {
+			n++
+		}
+	}
+	return n
 }
 
 func contents(msgs []provider.Message) []string {

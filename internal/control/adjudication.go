@@ -155,3 +155,28 @@ func barrierSummary(questions []event.AskQuestion) string {
 	}
 	return strings.Join(parts, " / ")
 }
+
+// RequestContext is what the host owes the next request about work that did not
+// finish. It states provenance, not a continuation: there is no identity to
+// answer with, because no owner is left to answer to. Derived every request, so
+// nothing records having shown it.
+func (c *Controller) RequestContext() []string {
+	interrupted := c.InterruptedAdjudications()
+	if len(interrupted) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("<interrupted-adjudication>\n")
+	b.WriteString("A previous run stopped and waited for a person, and that run is gone.\n")
+	for _, item := range interrupted {
+		b.WriteString("\n- " + item.Kind)
+		if item.Summary != "" {
+			b.WriteString(": " + item.Summary)
+		}
+	}
+	b.WriteString("\n\nThe suspended response cannot be resumed, and nothing it deferred was executed. ")
+	b.WriteString("Treat this as context for what the user may refer to, not as a question to ")
+	b.WriteString("answer or work to continue: any action still wanted has to be proposed again.\n")
+	b.WriteString("</interrupted-adjudication>")
+	return []string{b.String()}
+}

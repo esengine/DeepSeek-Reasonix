@@ -23,6 +23,7 @@ func decisionRows(before, after Observation) []row {
 		deferredRow(before, after),
 		outcomeRow(before, after),
 		barrierRow(before, after),
+		modelContextRow(before, after),
 		obligationRow(before, after),
 	}
 }
@@ -104,6 +105,32 @@ func barrierSummary(o Observation) string {
 		out = append(out, b.Kind+":"+b.ID)
 	}
 	return join(out) + " (not answerable)"
+}
+
+// modelContextRow is the other read surface: what the next request tells the
+// model. One block when an interruption stands, none when it does not, and it
+// must never arrive as something answerable.
+func modelContextRow(before, after Observation) row {
+	verdict := verdictHolds
+	if before.ModelSeesInterruption != expectedBlocks(before) || after.ModelSeesInterruption != expectedBlocks(after) {
+		verdict = verdictViolated
+	}
+	return row{
+		Semantic: "what the next request tells the model", Authority: "control, projected per request",
+		Artifact: "none: derived, never stored", Reconstruction: "one block while an interruption stands, none otherwise",
+		Before: modelContextSummary(before), After: modelContextSummary(after), Verdict: verdict,
+	}
+}
+
+func expectedBlocks(o Observation) int {
+	if len(o.Interrupted) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func modelContextSummary(o Observation) string {
+	return fmt.Sprintf("%d block(s) for %d interruption(s)", o.ModelSeesInterruption, len(o.Interrupted))
 }
 
 // obligationRow shows the evidence behind that classification, so a reader can

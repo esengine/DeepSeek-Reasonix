@@ -40,7 +40,7 @@ func (a *Agent) ModelVisibleMessages() []provider.Message { return a.modelVisibl
 
 // LocalOnly stripping still happens in prepareSamplingRequest.
 func (a *Agent) modelVisibleMessages() []provider.Message {
-	return a.withTodoIdentityTail(a.modelVisibleHistory())
+	return a.withTodoIdentityTail(a.withHostContextTail(a.modelVisibleHistory()))
 }
 
 // modelVisibleHistory is the conversation half of that view: frozen body plus

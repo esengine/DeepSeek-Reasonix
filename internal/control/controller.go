@@ -494,6 +494,7 @@ func New(opts Options) *Controller {
 	c.sink = &inboxEventSink{AuditForwarder: event.AuditForwarder{Inner: c.sink}, c: c}
 	if c.executor != nil {
 		c.executor.SetSink(c.sink)
+		c.executor.SetHostContext(c)
 	}
 	cmdsInit := opts.Commands
 	c.commands.Store(&cmdsInit)
