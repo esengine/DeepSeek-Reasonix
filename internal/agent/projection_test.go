@@ -353,17 +353,14 @@ func writeFile(path string, b []byte) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// visibleContext is what the model actually sees: the frozen body spliced with
+// the live canonical tail. Reading Projection.Messages instead would answer for
+// the body alone, which stopped being the whole view once the tail left it.
 func visibleContext(a *Agent) []provider.Message {
 	if a == nil {
 		return nil
 	}
-	if msgs := a.sess.compactionState.Projection.Messages; len(msgs) > 0 {
-		return msgs
-	}
-	if a.sess.conversation != nil {
-		return a.sess.conversation.Snapshot()
-	}
-	return nil
+	return a.modelVisibleMessages()
 }
 
 func hasCompactionSummary(msgs []provider.Message) bool {

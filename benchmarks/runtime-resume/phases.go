@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/control"
 )
 
@@ -41,10 +42,10 @@ func rewindTurn(root armRoot, arm, bootSystem string, ctrl *control.Controller, 
 	}
 	target := points[len(points)-1].Turn
 	if arm == armCoveredRewind {
-		// A middle checkpoint, not the first: rewinding to the first empties the
-		// conversation, and a session with only a system row is not persisted at
-		// all, so the restart would read back the transcript this arm removed.
-		target = points[len(points)/2].Turn
+		var err error
+		if target, err = turnBelowFold(ctrl, points); err != nil {
+			return err
+		}
 	}
 	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink)); err != nil {
 		return err
@@ -53,6 +54,32 @@ func rewindTurn(root armRoot, arm, bootSystem string, ctrl *control.Controller, 
 		return fmt.Errorf("rewind: %w", err)
 	}
 	return nil
+}
+
+// turnBelowFold picks the checkpoint whose boundary sits just below the fold,
+// read from the sidecar rather than assumed: a control aiming at a fixed turn
+// stops removing folded history the moment coverage moves, and says nothing.
+// A boundary at the first message is skipped — a session left holding only a
+// system row is never persisted, so the restart would read the arm's work back.
+func turnBelowFold(ctrl *control.Controller, points []checkpoint.Meta) (int, error) {
+	covered := 0
+	if st, ok, _ := agent.LoadCompactionState(ctrl.SessionPath()); ok {
+		covered = st.Projection.CoveredCount
+	}
+	target := -1
+	for _, p := range points {
+		plan, err := ctrl.PrepareRewind(p.Turn, control.RewindConversation)
+		if err != nil || !plan.HasBoundary {
+			continue
+		}
+		if plan.BoundaryIndex > 1 && plan.BoundaryIndex < covered {
+			target = p.Turn
+		}
+	}
+	if target < 0 {
+		return 0, errUnexpected("a checkpoint below the fold boundary", covered)
+	}
+	return target, nil
 }
 
 // extraPhase names the in-process observation an arm records before its

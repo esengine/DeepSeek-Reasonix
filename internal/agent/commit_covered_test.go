@@ -2,6 +2,7 @@ package agent
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -77,4 +78,48 @@ func TestCommitSummaryProjectionRefusesBoundaryOutsideCanonical(t *testing.T) {
 			t.Fatalf("covered %d was accepted", covered)
 		}
 	}
+}
+
+// TestFoldedProjectionCarriesTheOldBodyRemainder pins the half of the split
+// that has nowhere else to live. A boundary inside an older body leaves
+// coverage where it was — those view indices name no canonical message — and
+// the part of that body the new digest did not consume has to ride along, or
+// the next view loses it with nothing to splice it back from.
+func TestFoldedProjectionCarriesTheOldBodyRemainder(t *testing.T) {
+	a := commitTestAgent(t)
+	body := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "old digest"},
+		{Role: provider.RoleUser, Content: "body-kept-a"},
+		{Role: provider.RoleAssistant, Content: "body-kept-b"},
+	}
+	state := CompactionState{Projection: ContextProjection{Messages: body, CoveredCount: 19}}
+	view := append(append([]provider.Message(nil), body...),
+		provider.Message{Role: provider.RoleUser, Content: "live-tail"})
+
+	const start = 2 // inside the body, past the head
+	got, boundary := a.foldedProjection(state, true, view, nil, 1, start, "new digest")
+
+	if boundary.Covered != 19 {
+		t.Fatalf("Covered = %d, want the previous coverage 19", boundary.Covered)
+	}
+	if boundary.BodySuffixFrom != start {
+		t.Fatalf("BodySuffixFrom = %d, want %d", boundary.BodySuffixFrom, start)
+	}
+	for _, want := range []string{"body-kept-a", "body-kept-b"} {
+		if !slices.ContainsFunc(got, func(m provider.Message) bool { return m.Content == want }) {
+			t.Fatalf("body remainder %q dropped: %+v", want, contentsOf(got))
+		}
+	}
+	if slices.ContainsFunc(got, func(m provider.Message) bool { return m.Content == "live-tail" }) {
+		t.Fatalf("the live tail was frozen into the body: %+v", contentsOf(got))
+	}
+}
+
+func contentsOf(msgs []provider.Message) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, m.Content)
+	}
+	return out
 }

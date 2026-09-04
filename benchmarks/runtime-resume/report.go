@@ -91,6 +91,8 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 		}
 	case (a.name == armTailRewind || a.name == armCoveredRewind) && extra != nil:
 		res.Rows = append(res.Rows, useRow("projection across the rewind, same process", *extra, before))
+		res.Rows = append(res.Rows, rewindLandingRow(a.name, *extra, before))
+		res.Invalid = rewindLandedWrong(a.name, *extra, before)
 	}
 	return res
 }
@@ -153,6 +155,35 @@ func sidecarClaim(o Observation) string {
 	}
 	return fmt.Sprintf("v%d msgs=%d covered=%d hash=%s",
 		o.Sidecar.ProjectionVersion, o.Sidecar.Messages, o.Sidecar.CoveredCount, short(o.Sidecar.CoveredPrefixHash))
+}
+
+// rewindLandingRow says where the rewind actually landed relative to the fold.
+// An arm that names a side and does not reach it is not measuring that side.
+func rewindLandingRow(arm string, prerewind, after Observation) row {
+	side := "above the fold boundary"
+	if after.Transcript.Messages < prerewind.Sidecar.CoveredCount {
+		side = "below the fold boundary"
+	}
+	return row{
+		Semantic: "where the rewind landed", Authority: "checkpoint boundary against the sidecar",
+		Artifact: "none: derived", Reconstruction: "canonical length after the rewind against CoveredCount before it",
+		Before: fmt.Sprintf("covered=%d", prerewind.Sidecar.CoveredCount),
+		After:  fmt.Sprintf("canonical=%d, %s", after.Transcript.Messages, side), Verdict: verdictStable,
+	}
+}
+
+// rewindLandedWrong invalidates an arm that aimed at one side of the fold and
+// reached the other. covered-rewind stopped removing folded history the moment
+// coverage became a real boundary, and nothing in the matrix said so.
+func rewindLandedWrong(arm string, prerewind, after Observation) string {
+	below := after.Transcript.Messages < prerewind.Sidecar.CoveredCount
+	switch {
+	case arm == armCoveredRewind && !below:
+		return "the rewind landed above the fold boundary, so it removed no folded history"
+	case arm == armTailRewind && below:
+		return "the rewind landed below the fold boundary, so it is not a tail-only truncation"
+	}
+	return ""
 }
 
 // useRow turns on whether the next request would ride the projection, not on

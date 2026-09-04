@@ -225,7 +225,9 @@ func (a *Agent) compressVisibleRange(
 
 	inputHash := providerVisibleFingerprint(provider.ModelMessages(snap.visible))
 	outputHash := providerVisibleFingerprint(projection)
-	// Coverage is the whole transcript while the body still freezes the tail.
+	// This fold masks a range rather than cutting a prefix, so its body keeps
+	// messages from both sides of the digest. Claiming less than the whole
+	// transcript would splice copies of them back in behind it.
 	_, err = a.commitSummaryProjection(summaryProjectionCommit{
 		canonical: snap.canonical, covered: len(snap.canonical), fold: prepared.fold, projected: projection, result: res,
 		transcriptVersion: snap.transcriptVersion, projectionVersion: snap.projectionVersion, generation: snap.generation,
@@ -475,8 +477,9 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		return CompactionNoop, "", err
 	}
 
-	projMsgs := a.withTodoIdentityProjection(checkpointProjectionMessages(msgs, head, start, kept, summary))
-	projTokens := a.estimatedPromptTokens(projMsgs)
+	projMsgs, boundary := a.foldedProjection(stateSnapshot, fromProjection, msgs, kept, head, start, summary)
+	candidate := modelVisibleFromProjection(ContextProjection{Messages: projMsgs, CoveredCount: boundary.Covered}, canonical)
+	projTokens := a.estimatedPromptTokens(candidate)
 	fixedPrefixTokens = a.estimatedPromptTokens(msgs[:head])
 	tele.ProjectionTokens = projTokens
 	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
@@ -485,10 +488,9 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, "", err
 	}
-	viewOutputHash := providerVisibleFingerprint(provider.ModelMessages(projMsgs))
-	// Coverage is the whole transcript while the body still freezes msgs[start:].
+	viewOutputHash := providerVisibleFingerprint(provider.ModelMessages(candidate))
 	_, err = a.commitSummaryProjection(summaryProjectionCommit{
-		canonical: canonical, covered: len(canonical), fold: fold, projected: projMsgs, result: res,
+		canonical: canonical, covered: boundary.Covered, fold: fold, projected: projMsgs, result: res,
 		transcriptVersion: transcriptVersion, projectionVersion: startProjectionVersion,
 		generation: startGeneration, activeTurn: activeTurn, trigger: trigger,
 		summary: summary, inputHash: viewInputHash, outputHash: viewOutputHash,
@@ -524,13 +526,32 @@ func (a *Agent) visibleInputForFold(state CompactionState, canonical []provider.
 	return canonical, false
 }
 
-func checkpointProjectionMessages(msgs []provider.Message, head, start int, kept []provider.Message, summary string) []provider.Message {
-	projMsgs := make([]provider.Message, 0, head+1+len(kept)+len(msgs)-start)
+// checkpointProjectionMessages builds the body a fold freezes: stable head,
+// digest, kept history, and the remainder of an older body the new digest did
+// not consume. The recent tail is not here — it is canonical[Covered:], spliced
+// live, and freezing a copy of it is what made a fold claim the whole
+// transcript.
+func checkpointProjectionMessages(msgs []provider.Message, head int, kept, bodySuffix []provider.Message, summary string) []provider.Message {
+	projMsgs := make([]provider.Message, 0, head+1+len(kept)+len(bodySuffix))
 	projMsgs = append(projMsgs, msgs[:head]...)
 	projMsgs = append(projMsgs, formatSummaryMessage(summary))
 	projMsgs = append(projMsgs, kept...)
-	projMsgs = append(projMsgs, msgs[start:]...)
+	projMsgs = append(projMsgs, bodySuffix...)
 	return provider.ProjectionMessages(projMsgs)
+}
+
+// foldedProjection returns the body this fold freezes and the canonical
+// boundary it claims. A boundary inside an older body carries that body's
+// remainder forward: those messages have no canonical counterpart to splice
+// them back from.
+func (a *Agent) foldedProjection(state CompactionState, projected bool, msgs, kept []provider.Message, head, start int, summary string) ([]provider.Message, foldBoundary) {
+	body := state.Projection.Messages
+	boundary := mapFoldBoundary(start, len(body), state.Projection.CoveredCount, projected)
+	var suffix []provider.Message
+	if projected && boundary.BodySuffixFrom < len(body) {
+		suffix = body[boundary.BodySuffixFrom:]
+	}
+	return a.withTodoIdentityProjection(checkpointProjectionMessages(msgs, head, kept, suffix, summary)), boundary
 }
 
 // acceptCheckpointCandidate: ≤50% + smaller for auto; force may exceed 50%

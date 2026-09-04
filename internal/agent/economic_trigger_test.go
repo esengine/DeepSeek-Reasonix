@@ -212,10 +212,11 @@ found:
 	t.Fatal("the active turn's request was folded into a digest")
 }
 
-// Growth that never closes gives a checkpoint nothing new to reach, and that
-// verdict is its own code: "already folded this turn" was an implementation
-// limit, this is a fact about the transcript.
-func TestGrowthWithNoClosedTransactionReportsNoNewPrefix(t *testing.T) {
+// Growth that never closes leaves one thing a second fold can still reach: the
+// tail the first fold kept verbatim, which lives in the canonical transcript
+// rather than in the frozen body. Reaching it is legitimate, so the verdict is
+// the economics of folding it, not an absence of new history.
+func TestGrowthWithNoClosedTransactionStaysBelowFoldEconomics(t *testing.T) {
 	a, sink := economicFixture(t, 0, 30)
 	a.activeTurnCreatedAt.Store(economicActiveTurnAt)
 	ctx := context.Background()
@@ -232,8 +233,8 @@ func TestGrowthWithNoClosedTransactionReportsNoNewPrefix(t *testing.T) {
 		}
 	}
 	codes := maintenanceCodes(sink, "noop")
-	if len(codes) != 1 || codes[0] != string(NoopNoNewClosedPrefix) {
-		t.Fatalf("noop codes = %v, want exactly [%s]", codes, NoopNoNewClosedPrefix)
+	if len(codes) != 1 || codes[0] != string(NoopFoldBelowEconomics) {
+		t.Fatalf("noop codes = %v, want exactly [%s]", codes, NoopFoldBelowEconomics)
 	}
 }
 
