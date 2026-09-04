@@ -136,8 +136,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string, pinned pinnedRev
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
 	a.task.prepareScope(scoped, scope.ID)
 	a.svc.sink.Emit(event.Event{Kind: event.TurnStarted})
-		a.emitTurnPhase(event.TurnPhaseWorking)
-		input = a.prepareProviderTurn(ctx, providerInput)
+	input = a.prepareProviderTurn(ctx, providerInput)
 
 	userCreatedAt := time.Now().UnixMilli()
 	a.activeTurnCreatedAt.Store(userCreatedAt)
@@ -149,11 +148,10 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string, pinned pinnedRev
 		Role: provider.RoleUser, Origin: inputMessageOrigin(ctx), Content: input, RawContent: rawContent,
 		Images: userImages(ctx), VisionSummary: VisionSummaryFromContext(ctx), CreatedAt: userCreatedAt,
 	}
-		a.appendPinnedRevisionAndUser(ctx, pinned, userMessage)
-		// TurnPhaseWorking is emitted after the user message is in the session, so
-		// desktop hosts can checkpoint the transcript without racing the append.
-		a.emitTurnPhase(event.TurnPhaseWorking)
-
+	a.appendPinnedRevisionAndUser(ctx, pinned, userMessage)
+	// TurnPhaseWorking is emitted after the user message is in the session, so
+	// desktop hosts can checkpoint the transcript without racing the append.
+	a.emitTurnPhase(event.TurnPhaseWorking)
 
 	// The loop fields join the classification computed above rather than
 	// opening a second object: one turn, one turnRuntime. The zero values the

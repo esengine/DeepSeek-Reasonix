@@ -162,10 +162,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-		c.executor.AppendTurnContextAndUser(ctx, persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli()))
-		// Hosts checkpoint only after the user message is present in the session.
-		c.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: event.TurnPhaseWorking})
-
+	c.executor.AppendTurnContextAndUser(ctx, persistedUserTurn(input, firstNonEmpty(raw, task), images, time.Now().UnixMilli()))
+	// Hosts checkpoint only after the user message is present in the session.
+	c.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: event.TurnPhaseWorking})
 
 	for _, sk := range skills {
 		sk = c.skills.prepare(sk)
