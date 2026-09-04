@@ -319,13 +319,10 @@ scheduler state and is deliberately not recorded as one — an unmet dependency
 is why an item is not yet ready, a slot is what a ready item waits for, and
 `agentgraph` keeps `pending` and `queued` apart for that reason.
 
-**What this still cannot say.** A declared dependency explains what an item was
-ordered behind, not whether that dependency was ever met. An item whose upstream
-finished, which then entered the queue and died waiting for a slot, reads
-exactly like one its upstream never released: both are `before-start` with an
-upstream named. Separating them needs a durable record of entering the queue,
-and the arm that would prove it worth having — ready, but never granted a slot —
-does not exist yet.
+A declared dependency explains what an item was ordered behind, not whether that
+dependency was ever met. What separates an item its upstream never released from
+one that became ready and then waited for a slot is the queue record: the first
+has none, the second names the ceiling that refused it.
 
 ## The scheduler-wait arms
 
@@ -348,15 +345,22 @@ and the refused writer comes from a later one. Both it and `wait-transition`
 wait on a signal the holder's own child sends once its slot is granted:
 dispatching earlier lets the refused item win the race and start.
 
-Measured, all four: the refusal is reached in isolation, the cause is reported
-exactly once, the restart still classifies the item `interrupted-before-start`
-correctly — and **which ceiling refused it is lost**. No artifact carries it,
-and no later state can re-derive it, because the constraint is gone by the time
-anyone asks.
-
 `wait-transition` answers what the cause means. It frees the ceiling the
 refusal named while the item stays queued, held back by a different one, and
 the graph still reports the first: one report, not two. So `WaitCause` is the
-cause that **queued** the request, not the one holding it now — which is why a
-durable record of it should be named for entering the queue rather than for
-waiting.
+cause that **queued** the request, not the one holding it now — which is why
+the durable record is named for entering the queue rather than for waiting.
+
+Measured, all four: the refusal is reached in isolation, reported exactly once,
+and read back after the restart with its cause intact. The three values are
+kept apart rather than folded into "a ceiling refused it": the scheduler knew
+which one, and a journal that discards a distinction the host actually drew
+cannot get it back. A reader that only wants capacity-versus-claim can fold
+them; the record does not fold them first.
+
+A queue record proves more than the refusal. An item reaches the scheduler only
+once its dependencies are answered, so a queued entry is durable evidence that
+the dependency gate was crossed — which a declared ordering alone can never
+say. That is the difference between the mixed arm's `fleet-3`, whose journal
+reads `open` and nothing else, and a refused item, whose journal reads
+`open queued(slots)`.

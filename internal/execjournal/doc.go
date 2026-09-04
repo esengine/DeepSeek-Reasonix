@@ -15,8 +15,12 @@
 // store, so no two files can disagree about how a child ended.
 //
 // An entry proves that work entered orchestration. It does not prove that the
-// work started, that it ran, or that anything about it can be resumed: an item
-// still waiting on a dependency is recorded exactly like one holding a slot.
+// work started, that it ran, or that anything about it can be resumed.
+//
+// A queued entry proves the scheduler initially denied admission after the item
+// became ready. Its cause records that first denial; it does not describe the
+// blocker that remained immediately before execution, which can be a different
+// one by then.
 //
 // Interrupted is never written. It is derived: an open entry with no live owner
 // in this process. Recording it would mean the dying process wrote down what it

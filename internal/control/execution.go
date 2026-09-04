@@ -73,6 +73,9 @@ func interruptedExecutionBlock(interrupted []execjournal.Entry) string {
 			b.WriteString(", which declared it may not start before ")
 			b.WriteString(strings.Join(up, ", "))
 		}
+		if !item.Started() && item.Queued() {
+			b.WriteString("; it was ready and the scheduler first refused it: " + item.Cause)
+		}
 	}
 	b.WriteString("\n\nNone can be resumed and none were restarted. One marked ")
 	b.WriteString(execjournal.InterruptedBeforeStart)

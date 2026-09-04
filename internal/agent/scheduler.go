@@ -37,10 +37,10 @@ type AcquireRequest struct {
 	// orders the queue, never the ceiling, and a caller holding no graph
 	// leaves it zero.
 	Priority int
-	// OnQueued fires once, with what held this request back, when it has to
-	// wait. Nothing else can answer it: by the time the caller is running, the
-	// constraint that stopped it is gone.
-	OnQueued func(agentgraph.WaitCause)
+	// OnQueued fires once with what held this request back. Nothing else can
+	// answer it: by the time the caller runs, the constraint is gone. It may
+	// refuse, and a wait that could not be recorded is not shown as one.
+	OnQueued func(agentgraph.WaitCause) error
 	// Label is optional diagnostics text.
 	Label string
 }
@@ -120,7 +120,9 @@ func (s *SubagentScheduler) Acquire(ctx context.Context, req AcquireRequest) (re
 	// Reported after the unlock: the cause was read under it, and the callback
 	// reaches a sink this must not be holding the scheduler's mutex for.
 	if req.OnQueued != nil {
-		req.OnQueued(cause)
+		if err := req.OnQueued(cause); err != nil {
+			return noop, s.abandonWaiter(w, req, err)
+		}
 	}
 
 	select {
@@ -143,6 +145,23 @@ func (s *SubagentScheduler) Acquire(ctx context.Context, req AcquireRequest) (re
 		}
 		return noop, ctx.Err()
 	}
+}
+
+// abandonWaiter withdraws a request whose wait could not be recorded, taking
+// the care the cancellation path takes: capacity may have been granted since
+// the refusal, and a slot nobody releases never comes back.
+func (s *SubagentScheduler) abandonWaiter(w *schedulerWaiter, req AcquireRequest, cause error) error {
+	s.mu.Lock()
+	s.removeWaiterLocked(w)
+	s.mu.Unlock()
+	select {
+	case <-w.ready:
+		if w.failed == nil {
+			s.makeRelease(req)()
+		}
+	default:
+	}
+	return cause
 }
 
 // TryClaimWritePaths checks whether paths conflict with active claims without

@@ -187,6 +187,7 @@ func schedulerWaitRows(arm string, before, after Observation) []row {
 		waitSeriesRow(arm, before),
 		executionKindRow(before, after),
 		waitProvenanceRow(before, after),
+		schedulerGateRow(before, after),
 	)
 }
 
@@ -242,14 +243,59 @@ func causeContract(o Observation) string {
 	return "reported once: the cause is the one that queued the request, not the one holding it now"
 }
 
-// waitProvenanceRow is the loss this batch was built to expose. The item comes
-// back correctly classified as never having started, and with nothing saying
-// which ceiling refused it — an answer no later state can re-derive, because
-// the constraint is gone by the time anyone asks.
+// waitProvenanceRow is what the batch was built to expose and then close. The
+// refusal exists only at the moment the scheduler makes it, so it is recorded
+// there; this compares what the graph showed against what a later process can
+// still read back.
 func waitProvenanceRow(before, after Observation) row {
-	return valueRow("why the item never started", "the scheduler, in memory only",
-		"none observed", "no durable record of the refusal",
-		causeSummary(before), causeSummary(after), false)
+	return valueRow("why the item never started", "the execution journal's queue records",
+		"<stem>.execution.jsonl", "the cause the scheduler gave when it first refused admission",
+		causeSummary(before), journalCauses(after), true)
+}
+
+// journalCauses is the refusal a restart reads back, counted the way the graph
+// counts it so the two sides of the row are the same measurement.
+func journalCauses(o Observation) string {
+	counts := map[string]int{}
+	for _, e := range o.Executions {
+		if e.Queued() {
+			counts[e.Cause]++
+		}
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, counts[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+// schedulerGateRow is the other half of what a queue record proves. An item
+// only reaches the scheduler once its dependencies are answered, so a queued
+// entry is durable evidence it crossed that gate — the one thing a dependency
+// edge alone could never say.
+func schedulerGateRow(before, after Observation) row {
+	return valueRow("items proven to have reached the scheduler", "the execution journal's queue records",
+		"<stem>.execution.jsonl", "a queue record implies the dependency gate was crossed",
+		queuedIDs(before), queuedIDs(after), true)
+}
+
+func queuedIDs(o Observation) string {
+	var out []string
+	for _, e := range o.Executions {
+		if e.Queued() {
+			out = append(out, e.ID)
+		}
+	}
+	sort.Strings(out)
+	return join(out)
 }
 
 func causeSummary(o Observation) string {

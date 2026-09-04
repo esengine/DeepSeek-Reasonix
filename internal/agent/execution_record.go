@@ -62,14 +62,34 @@ func (t *TaskTool) openExecutions(ctx context.Context, group string, openings []
 // ahead of the second. A granted slot is the point the child becomes able to
 // act, so STARTED reaches disk before anything observes it running and before
 // the run does anything at all.
-func (t *TaskTool) itemHooks(ctx context.Context, sink event.Sink, id string) (func(agentgraph.WaitCause), func() error) {
+func (t *TaskTool) itemHooks(ctx context.Context, sink event.Sink, id string) (func(agentgraph.WaitCause) error, func() error) {
 	onWait, onSlot := fanOutItemHooks(sink, id)
-	return onWait, func() error {
+	queued := func(cause agentgraph.WaitCause) error {
+		if err := t.queueExecution(ctx, id, cause); err != nil {
+			return err
+		}
+		return onWait(cause)
+	}
+	return queued, func() error {
 		if err := t.startExecution(ctx, id); err != nil {
 			return err
 		}
 		return onSlot()
 	}
+}
+
+// queueExecution records the scheduler's first refusal. An item reaches the
+// scheduler only once its dependencies are answered, so this is also the
+// durable proof that it crossed that gate — which nothing else records.
+func (t *TaskTool) queueExecution(ctx context.Context, id string, cause agentgraph.WaitCause) error {
+	path := t.executionSessionPath(ctx)
+	if path == "" {
+		return nil
+	}
+	if err := execjournal.Queue(path, id, string(cause)); err != nil {
+		return fmt.Errorf("record delegated execution wait %s: %w", id, err)
+	}
+	return nil
 }
 
 // startExecution records the slot grant. An item that never reaches one — a

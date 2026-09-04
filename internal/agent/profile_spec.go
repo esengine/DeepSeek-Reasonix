@@ -146,7 +146,8 @@ type SchedulerPolicy struct {
 	// whose start could not be recorded must not act.
 	OnStart func() error
 	// OnQueued fires with what held this run out of a slot, when something did.
-	OnQueued func(agentgraph.WaitCause)
+	// It may refuse, for the same reason OnStart may: the record goes first.
+	OnQueued func(agentgraph.WaitCause) error
 }
 
 // ResolveProfileDefinition looks up a profile and enforces the runAs=subagent

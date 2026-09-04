@@ -15,6 +15,7 @@ import (
 // with no live owner, never written by the process that died.
 const (
 	statusOpen    = "open"
+	statusQueued  = "queued"
 	statusStarted = "started"
 	statusSettled = "settled"
 )
@@ -53,6 +54,7 @@ type record struct {
 	Grant       string    `json:"grant,omitempty"`
 	Disposition string    `json:"disposition,omitempty"`
 	DependsOn   []string  `json:"dependsOn,omitempty"`
+	Cause       string    `json:"cause,omitempty"`
 	At          time.Time `json:"at"`
 }
 
@@ -96,8 +98,13 @@ type Entry struct {
 	Disposition string    `json:"disposition,omitempty"`
 	DependsOn   []string  `json:"dependsOn,omitempty"`
 	OpenedAt    time.Time `json:"openedAt"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	SettledAt   time.Time `json:"settledAt,omitempty"`
+	QueuedAt    time.Time `json:"queuedAt,omitempty"`
+	// Cause is why the scheduler denied admission the first time, never the
+	// blocker that remained before execution: a measured run kept reporting
+	// slots after slots had freed and the writer ceiling had taken over.
+	Cause     string    `json:"cause,omitempty"`
+	StartedAt time.Time `json:"startedAt,omitempty"`
+	SettledAt time.Time `json:"settledAt,omitempty"`
 }
 
 // Open reports whether the orchestration still held this execution when the
@@ -110,6 +117,12 @@ func (e Entry) Open() bool {
 // that settles without one is ordinary: a branch its dependency cut is opened,
 // never started, and released when the group ends.
 func (e Entry) Started() bool { return !e.StartedAt.IsZero() }
+
+// Queued reports whether the scheduler ever refused this execution admission.
+// It proves more than the refusal: an item only reaches the scheduler once its
+// dependencies are answered, so a queued entry crossed that gate even when
+// nothing else records it doing so.
+func (e Entry) Queued() bool { return !e.QueuedAt.IsZero() }
 
 // Interruption names how an execution with no live owner was cut. Neither
 // answer offers a continuation; they differ in what may already have happened.
@@ -155,6 +168,19 @@ func Open(sessionPath string, o Opening) error {
 		owned.claim(sessionPath, o.ID, true)
 	}
 	return nil
+}
+
+// Queue records the scheduler's first refusal, before anything can observe the
+// item waiting. Cause is that first denial and is never rewritten: the blocker
+// can change while an item waits, and a record that tracked it would say the
+// item was held by something that was not what queued it.
+func Queue(sessionPath, id, cause string) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return appendRecord(sessionPath, record{
+		Execution: id, Status: statusQueued, Cause: cause, At: time.Now().UTC(),
+	})
 }
 
 // Start records that an opened execution was granted a slot, before anything
@@ -269,15 +295,21 @@ func History(sessionPath string) []Entry {
 		if !seen || !out[at].Open() {
 			continue
 		}
-		if rec.Status == statusStarted {
-			// First start wins, and one arriving after the settling is refused:
-			// an execution the orchestration released cannot begin afterwards.
+		// Each transition is refused once the one after it has landed, and the
+		// first of each wins. A status nothing here names is ignored rather
+		// than folded into the nearest one it resembles.
+		switch rec.Status {
+		case statusQueued:
+			if !out[at].Queued() && !out[at].Started() {
+				out[at].QueuedAt, out[at].Cause = rec.At, rec.Cause
+			}
+		case statusStarted:
 			if !out[at].Started() {
 				out[at].StartedAt = rec.At
 			}
-			continue
+		case statusSettled:
+			out[at].SettledAt = rec.At
 		}
-		out[at].SettledAt = rec.At
 	}
 	return out
 }

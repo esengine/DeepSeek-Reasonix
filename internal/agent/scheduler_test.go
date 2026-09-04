@@ -219,7 +219,7 @@ func TestQueuedAcquireSaysWhichConstraintHeldIt(t *testing.T) {
 			}
 			causes := make(chan agentgraph.WaitCause, 1)
 			req := tc.queued
-			req.OnQueued = func(c agentgraph.WaitCause) { causes <- c }
+			req.OnQueued = func(c agentgraph.WaitCause) error { causes <- c; return nil }
 			var wg sync.WaitGroup
 			wg.Go(func() {
 				release, aerr := s.Acquire(context.Background(), req)

@@ -241,3 +241,109 @@ func TestStartRecordsTheJournalRefuses(t *testing.T) {
 		}
 	})
 }
+
+// TestLifecycleTruthTable walks every shape an execution can leave behind. The
+// rows are not variations on one case: an item blocked by a dependency never
+// reaches the scheduler, one the scheduler refused did, and one that settles
+// after being refused keeps that provenance even though it never ran.
+func TestLifecycleTruthTable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		queue, start, settle bool
+		cause                string
+		wantQueued           bool
+		wantStarted          bool
+		wantCause            string
+	}{
+		"blocked by a dependency":    {},
+		"refused on slots":           {queue: true, cause: "slots", wantQueued: true, wantCause: "slots"},
+		"refused on writers":         {queue: true, cause: "writers", wantQueued: true, wantCause: "writers"},
+		"refused on a claim":         {queue: true, cause: "claim", wantQueued: true, wantCause: "claim"},
+		"admitted at once":           {start: true, wantStarted: true},
+		"refused, then admitted":     {queue: true, cause: "slots", start: true, wantQueued: true, wantStarted: true, wantCause: "slots"},
+		"refused, settles unstarted": {queue: true, cause: "slots", settle: true, wantQueued: true, wantCause: "slots"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := sessionPath(t)
+			if err := Open(path, Opening{ID: "call/item"}); err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if tc.queue {
+				if err := Queue(path, "call/item", tc.cause); err != nil {
+					t.Fatalf("queue: %v", err)
+				}
+			}
+			if tc.start {
+				if err := Start(path, "call/item"); err != nil {
+					t.Fatalf("start: %v", err)
+				}
+			}
+			if tc.settle {
+				Settle(path, "call/item")
+			}
+			got := History(path)[0]
+			if got.Queued() != tc.wantQueued || got.Started() != tc.wantStarted || got.Cause != tc.wantCause {
+				t.Fatalf("entry queued=%v started=%v cause=%q, want %v/%v/%q",
+					got.Queued(), got.Started(), got.Cause, tc.wantQueued, tc.wantStarted, tc.wantCause)
+			}
+		})
+	}
+}
+
+// TestQueueRecordsTheJournalRefuses holds the cause to the one that queued the
+// request. The blocker can change while an item waits — measured: a run kept
+// reporting slots after slots had freed — so a later cause must not rewrite it,
+// and a queue record must not arrive after the item has moved past waiting.
+func TestQueueRecordsTheJournalRefuses(t *testing.T) {
+	t.Run("first cause wins", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/item"}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if err := Queue(path, "call/item", "slots"); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		if err := Queue(path, "call/item", "writers"); err != nil {
+			t.Fatalf("requeue: %v", err)
+		}
+		if got := History(path)[0].Cause; got != "slots" {
+			t.Fatalf("cause = %q, want the one that queued the request", got)
+		}
+	})
+	t.Run("after starting", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/item"}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if err := Start(path, "call/item"); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		if err := Queue(path, "call/item", "slots"); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		if History(path)[0].Queued() {
+			t.Fatal("an execution already running cannot begin waiting")
+		}
+	})
+	t.Run("after settling", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/item"}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		Settle(path, "call/item")
+		if err := Queue(path, "call/item", "slots"); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		if History(path)[0].Queued() {
+			t.Fatal("an execution the orchestration released cannot begin waiting")
+		}
+	})
+	t.Run("without an opening", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Queue(path, "call/ghost", "slots"); err != nil {
+			t.Fatalf("queue: %v", err)
+		}
+		if entries := History(path); len(entries) != 0 {
+			t.Fatalf("entries = %+v, want none from a queue with no opening", entries)
+		}
+	})
+}

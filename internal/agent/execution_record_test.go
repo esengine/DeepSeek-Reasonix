@@ -90,6 +90,49 @@ func (s *runningProbeSink) observed() map[string]bool {
 	return out
 }
 
+// queuedProbeSink reads the journal the moment the graph first shows an item
+// refused admission. A wait delta carries the cause and nothing else, so it is
+// the earliest point anything outside the scheduler can learn the item waited.
+type queuedProbeSink struct {
+	mu          sync.Mutex
+	sessionPath string
+	recorded    map[string]string
+}
+
+func (s *queuedProbeSink) Emit(e event.Event) {
+	if e.Kind != event.GraphDelta || e.Graph == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range e.Graph.Nodes {
+		if n.Wait == "" {
+			continue
+		}
+		if s.recorded == nil {
+			s.recorded = map[string]string{}
+		}
+		s.recorded[n.ID] = causeInJournal(s.sessionPath, n.ID)
+	}
+}
+
+func (s *queuedProbeSink) observed() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]string{}
+	maps.Copy(out, s.recorded)
+	return out
+}
+
+func causeInJournal(sessionPath, id string) string {
+	for _, e := range execjournal.History(sessionPath) {
+		if e.ID == id && e.Queued() {
+			return e.Cause
+		}
+	}
+	return ""
+}
+
 func startedInJournal(sessionPath, id string) bool {
 	for _, e := range execjournal.History(sessionPath) {
 		if e.ID == id {
@@ -352,5 +395,86 @@ func TestTopologyComesFromTheSameDeltaAsTheGraph(t *testing.T) {
 	// and reading them as ordering would explain a start that nothing blocked.
 	if up := byID["g/a"].DependsOn; len(up) != 0 {
 		t.Errorf("g/a dependsOn = %v, want none: an adopt edge is not an ordering edge", up)
+	}
+}
+
+// TestRefusalIsDurableBeforeWaitingIsObservable is the third seam. The refusal
+// exists only at the moment the scheduler makes it — by the time the item runs,
+// the constraint is gone — so a record written after the wait becomes visible
+// would leave a graph that says queued and a journal that never heard of it.
+func TestRefusalIsDurableBeforeWaitingIsObservable(t *testing.T) {
+	root := testenv.TempDir(t)
+	sessions := testenv.TempDir(t)
+	reg := tool.NewRegistry()
+	reg.Add(fakeReadFileTool{})
+	sessionPath := filepath.Join(sessions, "probe.jsonl")
+	sink := &queuedProbeSink{sessionPath: sessionPath}
+	task := NewTaskTool(&fleetScriptedFailureProvider{}, nil, reg, 20, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(filepath.Join(sessions, "subagents")), root, "base", "high").
+		WithScheduler(NewSubagentScheduler(1, 1))
+	ctx := withCallContext(context.Background(), "fleet-call", sink, nil, false)
+	ctx = WithTurnIdentity(WithParentSession(ctx, "probe"), "turn-1")
+
+	if _, err := NewFleetTool(task).Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"one","prompt":"one","read_only":true},
+		{"id":"two","prompt":"two","read_only":true}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	observed := sink.observed()
+	if len(observed) == 0 {
+		t.Fatal("no item was ever observed waiting; a ceiling of one should refuse the second")
+	}
+	for id, cause := range observed {
+		if cause == "" {
+			t.Errorf("%s was observed waiting while the journal had no refusal for it", id)
+		}
+	}
+}
+
+// TestAdmittedItemIsNeverQueued is the negative control for the seam. An item
+// that is admitted immediately never waited, and a queue record for it would
+// claim a refusal the scheduler never made.
+func TestAdmittedItemIsNeverQueued(t *testing.T) {
+	fleet, ctx, sessionPath, _ := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"one","prompt":"one","read_only":true},
+		{"id":"two","prompt":"two","read_only":true}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	for _, e := range execjournal.History(sessionPath) {
+		if e.Queued() {
+			t.Errorf("%s recorded a refusal (%s); a ceiling of four refuses nothing here", e.ID, e.Cause)
+		}
+		if !e.Started() {
+			t.Errorf("%s never started; both items should have been admitted", e.ID)
+		}
+	}
+}
+
+// TestBlockedItemNeverReachesTheScheduler is the row the truth table calls
+// blocked-by-dependency, driven through a real fan-out. It is what separates a
+// queued entry from an unqueued one: reaching the scheduler at all is proof the
+// dependency gate was crossed, and this item never crossed it.
+func TestBlockedItemNeverReachesTheScheduler(t *testing.T) {
+	fleet, ctx, sessionPath, _ := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"research","prompt":"FAIL research","read_only":true},
+		{"id":"implement","prompt":"implement","depends_on":["research"],"write_paths":["api"]}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	byID := map[string]execjournal.Entry{}
+	for _, e := range execjournal.History(sessionPath) {
+		byID[e.ID] = e
+	}
+	if blocked := byID["fleet-call/fleet-2"]; blocked.Queued() {
+		t.Fatalf("the dependency-blocked item recorded a refusal (%s); it never reached the scheduler", blocked.Cause)
 	}
 }
