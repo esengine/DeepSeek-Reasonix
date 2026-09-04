@@ -1,5 +1,7 @@
-const COMPLETE_BLOCK_RE = /<memory-compiler-execution>[\s\S]*?<\/memory-compiler-execution>\s*/g;
-const DANGLING_BLOCK_RE = /<memory-compiler-execution>[\s\S]*$/;
+const HIDDEN_BLOCK_NAMES = "memory-compiler-execution|autoresearch-evidence|autoresearch-runtime|active-goal";
+const COMPLETE_BLOCK_RE = new RegExp(`<(${HIDDEN_BLOCK_NAMES})>[\\s\\S]*?<\\/\\1>\\s*`, "g");
+const DANGLING_BLOCK_RE = new RegExp(`<(?:${HIDDEN_BLOCK_NAMES})>[\\s\\S]*$`);
+const GOAL_STATUS_RE = /\[goal:(?:complete|continue|blocked(?::[^\]\r\n]*)?)\]\s*/g;
 
 /**
  * Removes the legacy Memory v5 `<memory-compiler-execution>` contract block from
@@ -16,5 +18,9 @@ const DANGLING_BLOCK_RE = /<memory-compiler-execution>[\s\S]*$/;
  * contract JSON is never shown.
  */
 export function stripMemoryCompilerExecution(text: string): string {
-  return text.replace(COMPLETE_BLOCK_RE, "").replace(DANGLING_BLOCK_RE, "").trimStart();
+  return text
+    .replace(COMPLETE_BLOCK_RE, "")
+    .replace(DANGLING_BLOCK_RE, "")
+    .replace(GOAL_STATUS_RE, "")
+    .trimStart();
 }
