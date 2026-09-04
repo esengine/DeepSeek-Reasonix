@@ -110,6 +110,27 @@ func (a *Agent) InvalidateProjection() {
 	}
 }
 
+// RevalidateProjection drops the installed projection only when it no longer
+// covers the current canonical transcript. A caller that rewrote history asks
+// this instead of deciding for itself: coverage is this subsystem's judgement,
+// and a second copy of it in a caller is how two contracts start.
+func (a *Agent) RevalidateProjection() {
+	if a == nil {
+		return
+	}
+	a.sess.compactionMu.Lock()
+	st := a.sess.compactionState
+	a.sess.compactionMu.Unlock()
+	if len(st.Projection.Messages) == 0 {
+		return
+	}
+	snap := a.snapshotForProjection()
+	if projectionValid(st, snap.msgs, a.currentPromptCacheKey(), snap.fingerprint) {
+		return
+	}
+	a.InvalidateProjection()
+}
+
 // LoadProjectionSidecar loads the context sidecar into the agent. Corrupt or
 // incompatible state is dropped so the next request rebuilds from canonical.
 // Sidecars whose PromptCacheKey does not match the current agent lineage are

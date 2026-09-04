@@ -49,8 +49,10 @@ func (a conversationApplier) ApplyConversationTruncate(boundary int, forward []b
 		}
 	}
 	s.Rewrite(msgs[:boundary], "rewind_truncate")
-	// Lineage changed: drop any projection built for the longer history.
-	c.executor.InvalidateProjection()
+	// Ask whether the projection still covers what is left rather than assuming
+	// it cannot: a truncation inside the live tail leaves the folded prefix
+	// exactly as it was, and coverage is the projection subsystem's judgement.
+	c.executor.RevalidateProjection()
 	if err := c.SnapshotRewrite(); err != nil {
 		_ = a.RestoreConversation(forward)
 		return fmt.Errorf("persist conversation after rewind: %w", err)
@@ -68,7 +70,7 @@ func (a conversationApplier) RestoreConversation(forward []byte) error {
 		return err
 	}
 	c.executor.Session().Rewrite(msgs, "rewind_restore")
-	c.executor.InvalidateProjection()
+	c.executor.RevalidateProjection()
 	if err := c.SnapshotRewrite(); err != nil {
 		return fmt.Errorf("restore conversation: %w", err)
 	}
