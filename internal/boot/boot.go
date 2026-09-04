@@ -1671,7 +1671,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			Text: fmt.Sprintf("planner_model %q is not a configured provider — continuing with the executor alone", pm)})
 	}
 	if pm != "" && plannerResolved {
-		if pe.Model != entry.Model {
+		if modelRefFromEntry(pe) != modelRefFromEntry(entry) {
 			plannerProv, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
