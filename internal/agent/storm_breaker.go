@@ -22,14 +22,53 @@ const stormBreakThreshold = 3
 // no-op/write loop and should be redirected to a different tool or final answer.
 const repeatSuccessBreakThreshold = 2
 
+// todoProgressNudgeRounds is the first adaptive checkpoint. The host asks the
+// model to reassess, but keeps the turn alive so it can recover. It is the
+// built-in default for the user-configurable progress budget (see
+// NormalizeProgressBudgetRounds).
+const todoProgressNudgeRounds = 8
+
+// Bounds for the user-configurable progress budget. ProgressBudgetRoundsMin is
+// low enough to still catch a grind within one tool batch; the max keeps the
+// checkpoint from degrading into "never".
 const (
-	// todoProgressNudgeRounds is the first adaptive checkpoint. The host asks
-	// the model to reassess, but keeps the turn alive so it can recover.
-	todoProgressNudgeRounds = 8
-	// maxTodoStallRounds is the second Goal-only adaptive checkpoint. It resets
-	// the intervention epoch and asks for a new plan without ending the run.
-	maxTodoStallRounds = 16
+	// ProgressBudgetRoundsMin is the smallest accepted reassessment round.
+	ProgressBudgetRoundsMin = 3
+	// ProgressBudgetRoundsMax is the largest accepted reassessment round.
+	ProgressBudgetRoundsMax = 64
+	// ProgressBudgetRoundsOff disables the reassessment checkpoint and its
+	// Goal-only redirect entirely.
+	ProgressBudgetRoundsOff = -1
 )
+
+// DefaultProgressBudgetRounds is the round count used when configuration leaves
+// the progress budget unset. Exported so hosts (CLI status, Desktop settings)
+// render the same number the loop enforces.
+const DefaultProgressBudgetRounds = todoProgressNudgeRounds
+
+// NormalizeProgressBudgetRounds resolves a configured round count into the
+// checkpoint the loop enforces: 0 means the built-in default, a negative value
+// turns the checkpoint off, and anything else is clamped into range.
+func NormalizeProgressBudgetRounds(rounds int) int {
+	switch {
+	case rounds == 0:
+		return DefaultProgressBudgetRounds
+	case rounds < 0:
+		return ProgressBudgetRoundsOff
+	case rounds < ProgressBudgetRoundsMin:
+		return ProgressBudgetRoundsMin
+	case rounds > ProgressBudgetRoundsMax:
+		return ProgressBudgetRoundsMax
+	default:
+		return rounds
+	}
+}
+
+// progressRedirectRounds is the Goal-only second checkpoint: after this many
+// zero-evidence rounds the host asks for a new plan instead of a reassessment.
+func progressRedirectRounds(nudgeRounds int) int {
+	return nudgeRounds * 2
+}
 
 func todoProgressNudgeMessage(rounds int) string {
 	return fmt.Sprintf("Host progress check: the current todo has produced no new completion, unique read, command, or mutation for %d tool-call rounds. Reassess before using more tools: sign off the current item if it is done, narrow the remaining work without replacing the active item, or explain/ask about a real blocker. Do not repeat reads, commands, or writes just to reset this guard.", rounds)

@@ -443,6 +443,26 @@ func (c *Config) SetCompactRatio(ratio float64) error {
 	return nil
 }
 
+// SetProgressBudgetEnabled arms or disarms the host progress-reassessment
+// checkpoint. Disabling it keeps the round count so re-enabling restores the
+// user's threshold instead of falling back to the built-in default.
+func (c *Config) SetProgressBudgetEnabled(enabled bool) error {
+	flag := enabled
+	c.Agent.ProgressBudget = &flag
+	return nil
+}
+
+// SetProgressBudgetRounds sets how many zero-evidence tool-call rounds trigger
+// one reassessment nudge. 0 restores the built-in default; the runtime clamps
+// out-of-range values, so only a negative count is rejected here.
+func (c *Config) SetProgressBudgetRounds(rounds int) error {
+	if rounds < 0 {
+		return fmt.Errorf("progress budget rounds %d: must be 0 (built-in default) or positive", rounds)
+	}
+	c.Agent.ProgressBudgetRounds = rounds
+	return nil
+}
+
 // SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
 func (c *Config) SetDesktopTelemetry(enabled bool) error {
 	c.Desktop.Telemetry = &enabled

@@ -20,3 +20,15 @@ func taskBudgetFromConfig(cfg *config.Config) agent.TaskBudget {
 	}
 	return b
 }
+
+// progressBudgetRoundsFromConfig maps the configured progress-reassessment
+// checkpoint onto the agent option. A disabled budget is passed through as the
+// off sentinel so the agent never falls back to the built-in round count; an
+// enabled one is normalized once here, at the single place the executor is
+// built.
+func progressBudgetRoundsFromConfig(cfg *config.Config) int {
+	if !cfg.ProgressBudgetEnabled() {
+		return agent.ProgressBudgetRoundsOff
+	}
+	return agent.NormalizeProgressBudgetRounds(cfg.ProgressBudgetRoundsValue())
+}

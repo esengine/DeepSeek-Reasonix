@@ -853,7 +853,13 @@ type Options struct {
 	// budget. Zero delegates to the provider; a negative value asks optional
 	// protocols to omit the budget (Anthropic still requires max_tokens).
 	MaxOutputTokens int
-	Temperature     float64
+	// ProgressBudgetRounds is how many tool-call rounds without new host-observed
+	// evidence trigger one reassessment nudge for the active todo. Zero uses the
+	// built-in default (DefaultProgressBudgetRounds); a negative value disables
+	// the checkpoint and its Goal-only re-plan redirect. Out-of-range values are
+	// clamped into ProgressBudgetRoundsMin–ProgressBudgetRoundsMax.
+	ProgressBudgetRounds int
+	Temperature          float64
 	// TaskBudget bounds a task's spend; zero uses DefaultTaskBudget.
 	TaskBudget TaskBudget
 	Pricing    *provider.Pricing // optional, for per-turn cost display
@@ -1075,6 +1081,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if reasoningByteLimit == 0 {
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
+	progressBudgetRounds := NormalizeProgressBudgetRounds(opts.ProgressBudgetRounds)
 	a := &Agent{
 		svc: newAgentServices(prov, tools, sink, gate, planModeReadOnlyTrust,
 			sandboxEscapeApprover, configWriteApprover, hooks, opts),
@@ -1083,6 +1090,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			maxStepsKey:            maxStepsKey,
 			reasoningByteLimit:     reasoningByteLimit,
 			maxOutputTokens:        opts.MaxOutputTokens,
+			progressBudgetRounds:   progressBudgetRounds,
 			temperature:            opts.Temperature,
 			usageSource:            usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
 			modelRef:               strings.TrimSpace(opts.ModelRef),

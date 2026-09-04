@@ -70,6 +70,8 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 # compact_ratio = 0.80             # sole auto trigger; presets 0.70 / 0.80 / 0.85
+# progress_budget = true           # ask the model to reassess a stalled todo; false disables the checkpoint
+# progress_budget_rounds = 8       # zero-evidence tool-call rounds before one nudge; 0 = built-in default
 # max_output_tokens = 0            # auto: official DeepSeek omits the field (server 384K) until the window is tight
 # max_output_tokens = 32768        # optional cost cap; still clipped to physical remaining
 # max_output_tokens = 65536        # optional cost cap

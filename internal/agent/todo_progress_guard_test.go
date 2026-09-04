@@ -83,9 +83,9 @@ func TestGoalTodoProgressGuardReplansWithoutPausing(t *testing.T) {
 		ID: "todo", Name: "todo_write",
 		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
 	}}}}
-	// The first unique read renews the lease; maxTodoStallRounds exact repeats
-	// after it reach the Goal redirect threshold.
-	for i := range maxTodoStallRounds + 1 {
+	// The first unique read renews the lease; enough exact repeats after it
+	// reach the Goal redirect threshold (twice the nudge round).
+	for i := range progressRedirectRounds(todoProgressNudgeRounds) + 1 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("read-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
 		}}})

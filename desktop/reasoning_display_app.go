@@ -51,6 +51,7 @@ func (a *App) defaultSettingsView() SettingsView {
 			MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency, MaxParallelWriters: agent.DefaultMaxParallelWriters,
 			ReasoningLanguage: "auto",
 			CompactRatio:      defaults.Agent.CompactRatio, EffectiveCompactRatio: defaults.Agent.CompactRatio,
+			ProgressBudgetEnabled: true, ProgressBudgetRounds: agent.DefaultProgressBudgetRounds,
 		},
 		Bot: botSettingsView(config.BotConfig{}), AutoPlan: "off", DesktopLayoutStyle: "workbench",
 		DesktopTheme: "auto", DesktopThemeStyle: "graphite", DesktopTerminalTheme: "auto",

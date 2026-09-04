@@ -1622,6 +1622,9 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Gate:         headlessGate,
 		Hooks:        hookRunner,
 		Jobs:         jm,
+		// User-owned: how many zero-evidence rounds earn one reassessment
+		// nudge, or off when the checkpoint is disabled.
+		ProgressBudgetRounds: progressBudgetRoundsFromConfig(cfg),
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
