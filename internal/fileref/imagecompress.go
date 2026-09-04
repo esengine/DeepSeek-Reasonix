@@ -1,4 +1,4 @@
-package control
+package fileref
 
 import (
 	"bytes"
@@ -21,11 +21,11 @@ const maxVisionDim = 1568
 // bounded by the 64 MB file cap).
 const maxDecodePixels = 50_000_000
 
-// compressForVision downscales an oversized image to maxVisionDim and re-encodes
+// CompressForVision downscales an oversized image to maxVisionDim and re-encodes
 // it — PNG/GIF stay lossless (screenshots, text, transparency), JPEG/WebP go to
 // JPEG. Best-effort: an undecodable format, a decode/encode failure, or an image
 // already within budget returns the original bytes and mime unchanged.
-func compressForVision(raw []byte, mime string) ([]byte, string) {
+func CompressForVision(raw []byte, mime string) ([]byte, string) {
 	switch mime {
 	case "image/png", "image/jpeg", "image/gif", "image/webp":
 	default:

@@ -68,6 +68,11 @@ fleet(tasks=[
   (explicit names may call `invocation: manual` profiles).
 - The profile body becomes the **full** child system prompt — no implicit
   concise default is stacked on top.
+- `task` and `read_only_task` also accept `images`: workspace-local image file
+  paths produced earlier in the turn (rendered charts, screenshots, video
+  frames) that a vision-capable sub-agent should inspect as pixels. Paths
+  resolve through the same workspace-confinement checks as `@`-references;
+  text-only children keep metadata only.
 - `write_paths` declares write targets so parallel writers can share one
   workspace. File claims must be disjoint to start together. Directory claims
   may start together and only serialize when they realize the same file.

@@ -252,7 +252,7 @@ Bubble Tea TUI 的 modal overlay 必须隐藏 composer；slash/`@` autocomplete 
 
 子智能体 Profile 是带 `runAs: subagent` 的 Skill。桌面端和 CLI 只允许修改简单、手动调用的 project/global profile；包含 `references/`、`scripts/` 或非托管 frontmatter 的丰富 Skill 不会被编辑器扁平化覆盖。
 
-`reasonix subagent try` 使用只读 Skill runner；`reasonix subagent run` 使用常规权限与 Sandbox。`task` 支持 `profile`、`model`、`effort` 和 `write_paths`；`fleet` 在 session scheduler 上并发调度多个任务。详见[子智能体 Profile](./SUBAGENT_PROFILES.zh-CN.md)。
+`reasonix subagent try` 使用只读 Skill runner；`reasonix subagent run` 使用常规权限与 Sandbox。`task` 支持 `profile`、`model`、`effort`、`write_paths` 和 `images`；`images` 把本轮早先生成的 workspace 内图片文件（≤8 个，去重、保序）作为图像输入传给子智能体——每条路径都经过与 `@` 引用相同的 workspace 限制、symlink、大小与 TOCTOU 检查，解析失败则整次调用失败。是否真正嵌入像素仍由子智能体的 provider 决定：纯文本子智能体只收到元数据。`fleet` 在 session scheduler 上并发调度多个任务。详见[子智能体 Profile](./SUBAGENT_PROFILES.zh-CN.md)。
 
 Profile 描述的是 worker，不是一次运行。委派由五个彼此独立的概念构成：profile 说明这个 worker 怎么思考，`TaskSpec` 说明本次要什么，`CapabilityGrant` 说明本次能碰什么，`ContextCapsule` 说明从什么上下文起步，`SchedulerPolicy` 说明何时以及怎么运行。字段归属于**决定其取值**的那一方，因此 profile 可以携带能力**上界**（`allowed-tools`、`read-only`），但绝不能携带 `max_turns`、`write_paths`、重试或验证策略这类按次取值——它们由任务或调度决定。Skill frontmatter 可以继续变胖；`agent.ProfileFromSkill` 是唯一的收窄点，路由元数据（triggers、auto-use、cost、freshness）到此为止，因为它决定的是**何时**选中一个 worker，而不是它怎么思考。`internal/agent/profile_boundary_test.go` 会在任何一次拓宽时失败。
 

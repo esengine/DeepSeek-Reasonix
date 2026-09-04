@@ -291,7 +291,10 @@ type TaskTool struct {
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
 	capabilityRuntime *MCPCapabilityRuntime
-	completion        taskCompletionConfig
+	// imageResolver turns a task call's image parameter paths into data URLs
+	// under the same workspace security matrix as @-references.
+	imageResolver func(path, baseDir string) (string, error)
+	completion    taskCompletionConfig
 }
 
 // TaskToolOptions holds the construction parameters for a TaskTool.
@@ -429,6 +432,14 @@ func (t *TaskTool) WithScheduler(s *SubagentScheduler) *TaskTool {
 	return t
 }
 
+// WithImageResolver overrides how task/read_only_task image parameters become
+// provider-visible data URLs. Production wires fileref.FileImageDataURL with
+// the workspace root; tests inject fakes to observe resolution behavior.
+func (t *TaskTool) WithImageResolver(fn func(path, baseDir string) (string, error)) *TaskTool {
+	t.imageResolver = fn
+	return t
+}
+
 // Scheduler returns the attached session scheduler (may be nil in unit tests).
 func (t *TaskTool) Scheduler() *SubagentScheduler {
 	if t == nil {
@@ -487,7 +498,8 @@ func (t *TaskTool) Schema() json.RawMessage {
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name). Precedence: persistent profile config, this argument, profile frontmatter, global subagent default, parent model."},
   "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max). Same precedence as model."},
-  "continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. If the ref belongs to an ancestor conversation, the framework continues a current-conversation copy."}
+  "continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. If the ref belongs to an ancestor conversation, the framework continues a current-conversation copy."},
+  "images":{"type":"array","items":{"type":"string"},"description":"Optional image file paths (workspace-relative or absolute, must be inside the workspace) to pass to the sub-agent as image input for a vision-capable model. Use when the image was produced during this task (rendered chart, screenshot, extracted video frame) and the sub-agent must see the pixels, not just the path. Non-image or unreadable files fail the call. Max 8; deduplicated, order preserved."}
 },
 "required":["prompt"]
 }`)
@@ -561,7 +573,8 @@ func (*ReadOnlyTaskTool) Schema() json.RawMessage {
   "tools":{"type":"array","items":{"type":"string"},"description":"Optional read-only tool whitelist. Writer, installer, memory mutation, background job, and delegation tools are never exposed."},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
-  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."}
+  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
+  "images":{"type":"array","items":{"type":"string"},"description":"Optional image file paths (workspace-relative or absolute, must be inside the workspace) to pass to the sub-agent as image input for a vision-capable model. Non-image or unreadable files fail the call. Max 8; deduplicated, order preserved."}
 },
 "required":["prompt"]
 }`)
@@ -592,9 +605,14 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 		MaxSteps    int      `json:"max_steps"`
 		Model       string   `json:"model"`
 		Effort      string   `json:"effort"`
+		Images      []string `json:"images"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	images, err := r.task.resolveTaskImages(p.Images)
+	if err != nil {
+		return "", err
 	}
 	// Every entry point compiles to a spec and runs through RunProfileSpec, so a
 	// boundary added there cannot be missed by one caller. read_only_task keeps
@@ -605,6 +623,7 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	}
 	spec.Worker.SystemPrompt = DefaultReadOnlyTaskSystemPrompt
 	spec.Context.Ephemeral = true
+	spec.Context.Images = images
 	return r.task.RunProfileSpec(ctx, spec)
 }
 
@@ -633,6 +652,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		Effort          string   `json:"effort"`
 		ContinueFrom    string   `json:"continue_from"`
 		ForkFrom        string   `json:"fork_from"`
+		Images          []string `json:"images"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -640,11 +660,16 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if strings.TrimSpace(p.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
+	images, err := t.resolveTaskImages(p.Images)
+	if err != nil {
+		return "", err
+	}
 
 	spec, err := t.buildTaskSpec(ctx, p.Prompt, p.Description, p.Profile, p.WritePaths, p.Tools, p.MaxSteps, p.Model, p.Effort, p.ContinueFrom, p.ForkFrom, p.RunInBackground, false)
 	if err != nil {
 		return "", err
 	}
+	spec.Context.Images = images
 	return t.RunProfileSpec(ctx, spec)
 }
 
@@ -726,6 +751,66 @@ func (t *TaskTool) resolveWriterClaims(writePaths []string, requireClaim bool) (
 		return WritePathSet{}, nil
 	}
 	return WholeWorkspaceWriteClaim(t.workspaceRoot)
+}
+
+// maxTaskImages caps the explicit per-call image parameter so one dispatch
+// cannot balloon the child's provider request.
+const maxTaskImages = 8
+
+// mergeSubagentImages combines the call's explicit images with the parent's
+// turn candidates: param first, then candidates, deduplicated, order preserved.
+func mergeSubagentImages(param, candidates []string) []string {
+	if len(param) == 0 {
+		return candidates
+	}
+	if len(candidates) == 0 {
+		return param
+	}
+	seen := make(map[string]bool, len(param)+len(candidates))
+	out := make([]string, 0, len(param)+len(candidates))
+	for _, url := range append(append([]string(nil), param...), candidates...) {
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		out = append(out, url)
+	}
+	return out
+}
+
+// resolveTaskImages converts the call's image paths into provider-visible data
+// URLs. Unlike the parent turn path (best-effort skip), a param-passed path
+// that fails validation fails the call: the model explicitly asked for these
+// pixels and silently dropping them would produce confident wrong answers.
+func (t *TaskTool) resolveTaskImages(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	if len(paths) > maxTaskImages {
+		return nil, fmt.Errorf("images accepts at most %d paths, got %d", maxTaskImages, len(paths))
+	}
+	resolve := t.imageResolver
+	if resolve == nil {
+		return nil, nil
+	}
+	urls := make([]string, 0, len(paths))
+	seen := map[string]bool{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return nil, fmt.Errorf("images entries must be non-empty paths")
+		}
+		url, err := resolve(path, t.workspaceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("image %q: %w", path, err)
+		}
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		urls = append(urls, url)
+	}
+	return urls, nil
 }
 
 // RunProfileSpec executes a unified profile/task specification. Shared by task,
@@ -828,9 +913,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			defer mutationObserver.UnregisterWriter(recoveryTaskID)
 		}
 		if spec.Grant.ReadOnly {
-			return t.runReadOnlySubSession(runCtx, composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+			return t.runReadOnlySubSession(runCtx, spec, composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
 		}
-		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, childWriteRoots)
+		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec, composeChildTaskPrompt(spec), subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, childWriteRoots)
 	}
 
 	if spec.Sched.RunInBackground {
@@ -1540,7 +1625,7 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, writeRoots *sandbox.WritableRootSet) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, spec ProfileExecSpec, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, writeRoots *sandbox.WritableRootSet) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
 	if writeRoots != nil {
 		opts.WriteRoots = writeRoots
@@ -1552,18 +1637,18 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	prompt = t.withWorkspaceContext(prompt) + "\n\n" + completeSubtaskContract
 	// The child provider owns the final vision decision. Text-only providers
 	// retain the attachment metadata but omit image parts during serialization.
-	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
+	ctx = WithUserImages(ctx, mergeSubagentImages(spec.Context.Images, SubagentImageCandidates(ctx)))
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
-func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver) (string, error) {
+func (t *TaskTool) runReadOnlySubSession(ctx context.Context, spec ProfileExecSpec, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
 	opts.ModelRef = modelRef
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
-	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
+	ctx = WithUserImages(ctx, mergeSubagentImages(spec.Context.Images, SubagentImageCandidates(ctx)))
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 

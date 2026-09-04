@@ -555,7 +555,7 @@
     "internal/agent/task.go": {
       "complexity": 19,
       "essay": 12,
-      "file-size": 1215,
+      "file-size": 1300,
       "function-size": 99
     },
     "internal/agent/task_test.go": {
@@ -576,8 +576,8 @@
     "internal/boot/boot.go": {
       "complexity": 263,
       "essay": 81,
-      "file-size": 2074,
-      "function-size": 1722,
+      "file-size": 2078,
+      "function-size": 1725,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
