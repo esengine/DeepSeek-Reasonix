@@ -27,7 +27,7 @@ type arm struct {
 // already gone at the boundary for an unrelated reason, and the lever's own
 // effect cannot be read out of the result.
 func appendsAfterFold(name string) bool {
-	return name != "exact"
+	return name != "exact" && name != armRefoldIntoBody
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -36,10 +36,16 @@ func appendsAfterFold(name string) bool {
 // transcript version the reload does not carry.
 const armAppendAfterFold = "append-after-fold"
 
+// armRefoldIntoBody folds twice. The second fold reads the provider-visible
+// view — stored body plus live tail — and must record a boundary in canonical
+// terms, which the body has no counterpart for.
+const armRefoldIntoBody = "refold-into-body"
+
 func arms() []arm {
 	return []arm{
 		{name: "exact", asks: "nothing changed between the processes"},
 		{name: armAppendAfterFold, asks: "nothing changed, and one turn was appended after the fold"},
+		{name: armRefoldIntoBody, asks: "a second fold reaches into the body the first one stored"},
 		{name: "system-swap", asks: "only the stable prefix changed, against the surviving baseline", lever: swapSystemPrefix},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
@@ -149,7 +155,15 @@ func runArm(self, work string, a arm) (armResult, error) {
 	if err != nil {
 		return armResult{}, err
 	}
-	return classify(a, before, after), nil
+	var prefold *Observation
+	if a.name == armRefoldIntoBody {
+		obs, err := readObservation(root, "prefold")
+		if err != nil {
+			return armResult{}, err
+		}
+		prefold = &obs
+	}
+	return classify(a, prefold, before, after), nil
 }
 
 // spawn runs one phase as a real child process and waits for it to exit. The

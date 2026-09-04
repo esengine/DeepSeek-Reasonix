@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -43,7 +45,38 @@ func (s *scripted) script(req provider.Request) []provider.Chunk {
 	if s.turnCalls.Add(1) == 1 && hasTool(req.Tools, "todo_write") {
 		return append(todoCall(), done())
 	}
-	return append(text(turnBody), done())
+	return append(text(echoMarker(req)+turnBody), done())
+}
+
+// A turn is tagged twice: the user side by markerPattern, the assistant reply
+// by echoPattern. A fold folds assistant work first, so a one-sided tag would
+// let the surviving user turn hide the reply that was dropped beside it.
+var (
+	markerPattern = regexp.MustCompile(`PROBE-MARK-\d+`)
+	echoPattern   = regexp.MustCompile(`PROBE-ECHO-\d+`)
+)
+
+func marker(n int) string { return fmt.Sprintf("PROBE-MARK-%03d", n) }
+
+// markersIn returns the tags a message set still shows, in order.
+func markersIn(texts []string, pat *regexp.Regexp) []string {
+	var out []string
+	for _, t := range texts {
+		out = append(out, pat.FindAllString(t, -1)...)
+	}
+	return out
+}
+
+// echoMarker answers a turn with the assistant-side tag for the same number.
+func echoMarker(req provider.Request) string {
+	for _, m := range slices.Backward(req.Messages) {
+		found := markerPattern.FindAllString(m.Content, -1)
+		if len(found) == 0 {
+			continue
+		}
+		return "PROBE-ECHO-" + found[len(found)-1][len("PROBE-MARK-"):] + " reply. "
+	}
+	return ""
 }
 
 func hasTool(schemas []provider.ToolSchema, name string) bool {

@@ -30,16 +30,17 @@ type row struct {
 }
 
 type armResult struct {
-	Arm     string      `json:"arm"`
-	Asks    string      `json:"asks"`
-	Invalid string      `json:"invalid,omitempty"`
-	Rows    []row       `json:"rows"`
-	Before  Observation `json:"before"`
-	After   Observation `json:"after"`
+	Arm     string       `json:"arm"`
+	Asks    string       `json:"asks"`
+	Invalid string       `json:"invalid,omitempty"`
+	Rows    []row        `json:"rows"`
+	Prefold *Observation `json:"prefold,omitempty"`
+	Before  Observation  `json:"before"`
+	After   Observation  `json:"after"`
 }
 
-func classify(a arm, before, after Observation) armResult {
-	res := armResult{Arm: a.name, Asks: a.asks, Before: before, After: after}
+func classify(a arm, prefold *Observation, before, after Observation) armResult {
+	res := armResult{Arm: a.name, Asks: a.asks, Prefold: prefold, Before: before, After: after}
 	prefix := prefixRow(before, after)
 	res.Rows = append(res.Rows, prefix)
 	if a.name == "system-swap" && prefix.Verdict != verdictChanged {
@@ -84,6 +85,12 @@ func classify(a arm, before, after Observation) armResult {
 			"none observed", "fold GraphDelta events, if any survive",
 			graphMap(before.Graph.Waits), graphMap(after.Graph.Waits), false),
 	)
+	if prefold != nil {
+		res.Rows = append(res.Rows, refoldRows(*prefold, before, after, probeTurns+refoldTurns)...)
+		if prefold.Sidecar.Messages == 0 {
+			res.Invalid = "the first fold stored no body, so the second had none to reach into"
+		}
+	}
 	return res
 }
 

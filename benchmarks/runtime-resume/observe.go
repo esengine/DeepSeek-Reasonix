@@ -35,6 +35,7 @@ type Observation struct {
 	Decisions       []control.Decision  `json:"decisions"`
 	Context         ContextObs          `json:"context"`
 	Sidecar         SidecarObs          `json:"sidecar"`
+	View            ViewObs             `json:"view"`
 	Graph           GraphObs            `json:"graph"`
 	Artifacts       []ArtifactObs       `json:"artifacts"`
 }
@@ -74,6 +75,21 @@ type SidecarObs struct {
 	Err               string `json:"err,omitempty"`
 }
 
+// ViewObs is the model-visible context, spliced the way ContextProjection
+// declares it: the stored body followed by canonical[CoveredCount:]. Markers
+// are what a fold can be held to — the scripted digest carries none, so a
+// marker that is gone was dropped, not summarised.
+type ViewObs struct {
+	Messages int `json:"messages"`
+	// Markers are the user turns still shown, Echoes the assistant replies. A
+	// fold takes the reply first, so the two answer different questions.
+	Markers         []string `json:"markers"`
+	Echoes          []string `json:"echoes"`
+	BodyMarkers     []string `json:"body_markers"`
+	BodyEchoes      []string `json:"body_echoes"`
+	SplicedFromTail int      `json:"spliced_from_tail"`
+}
+
 type GraphObs struct {
 	Deltas int               `json:"deltas"`
 	Nodes  []agentgraph.Node `json:"nodes,omitempty"`
@@ -91,6 +107,7 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 	history := ctrl.History()
 	system := systemText(history)
 	snap := ctrl.ContextMaintenanceSnapshot()
+	st, loaded, loadErr := agent.LoadCompactionState(path)
 	graph, deltas := sink.snapshot()
 	return Observation{
 		Phase:           phase,
@@ -111,7 +128,8 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 			ProjectedTokens:   snap.ProjectedTokens,
 			Blocked:           snap.Blocked,
 		},
-		Sidecar:   readSidecar(path),
+		Sidecar:   sidecarObs(st, loaded, loadErr),
+		View:      viewObs(st, loaded, history),
 		Graph:     graphObs(graph, deltas),
 		Artifacts: readArtifacts(path),
 	}
@@ -151,8 +169,7 @@ func shortSum(s string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func readSidecar(sessionPath string) SidecarObs {
-	st, ok, err := agent.LoadCompactionState(sessionPath)
+func sidecarObs(st agent.CompactionState, ok bool, err error) SidecarObs {
 	out := SidecarObs{Present: ok}
 	if err != nil {
 		out.Err = err.Error()
@@ -167,6 +184,38 @@ func readSidecar(sessionPath string) SidecarObs {
 	out.ProjectionVersion = st.Projection.ProjectionVersion
 	out.TranscriptVersion = st.TranscriptVersion
 	out.Generation = st.Generation
+	return out
+}
+
+// viewObs splices the model-visible context. With no usable projection the
+// view is the canonical transcript, which is what the host would send.
+func viewObs(st agent.CompactionState, ok bool, canonical []provider.Message) ViewObs {
+	var out ViewObs
+	if !ok || len(st.Projection.Messages) == 0 {
+		out.Messages = len(canonical)
+		out.Markers = markersIn(contents(canonical), markerPattern)
+		out.Echoes = markersIn(contents(canonical), echoPattern)
+		return out
+	}
+	body := st.Projection.Messages
+	out.BodyMarkers = markersIn(contents(body), markerPattern)
+	out.BodyEchoes = markersIn(contents(body), echoPattern)
+	view := append([]provider.Message(nil), body...)
+	if n := st.Projection.CoveredCount; n >= 0 && n < len(canonical) {
+		view = append(view, canonical[n:]...)
+		out.SplicedFromTail = len(canonical) - n
+	}
+	out.Messages = len(view)
+	out.Markers = markersIn(contents(view), markerPattern)
+	out.Echoes = markersIn(contents(view), echoPattern)
+	return out
+}
+
+func contents(msgs []provider.Message) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, m.Content)
+	}
 	return out
 }
 

@@ -50,14 +50,38 @@ provider call*.
 | `append-after-fold` | fold, one more turn, die | none | same, with the projection no longer covering the whole transcript |
 | `system-swap` | fold, one more turn, die | save a **pinned** memory fact | does a changed stable prefix invalidate a projection that would otherwise survive? |
 | `covered-mutation` | fold, one more turn, die | rewrite a covered row via `SaveRewrite` | control: the digest's material changed, so it must not be reused |
+| `refold-into-body` | fold, grow, fold again, die | none | can a second fold, which reads the projected view, record its boundary without losing what it kept? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
 lever's own effect cannot be read out of the result.
 
+`refold-into-body` is the discovery arm rather than a red one. The second fold
+reads the provider-visible view — stored body plus live tail — and has to write
+a boundary back in canonical terms, which the body has no counterpart for. What
+it can lose is the part of the body past the new boundary, so the arm carries an
+oracle rather than a comparison.
+
 `system-swap` pins its fact deliberately: only a **pinned body** rides the
 stable prefix. The saved-fact index is retrieval-only and reached through the
 `memory` tool, so a relevant-activation fact moves nothing.
+
+## The marker oracle
+
+Every turn is tagged twice: `PROBE-MARK-nnn` in the user prompt and
+`PROBE-ECHO-nnn` in the reply. A fold takes assistant work first while the
+retention budget keeps user turns verbatim, so a one-sided tag lets a surviving
+user turn hide the reply dropped beside it — the first version of this arm
+reported "1-11 intact" for a fold that had removed four replies.
+
+The judgement runs on the assistant side, and the shape a fold can produce is
+narrow: an optional pinned head, then one run of replies reaching the newest
+turn. Two gaps, or a run that stops short of the newest turn, is a loss no fold
+made. The scripted digest contains no tag, so a summary can never stand in for
+a message that should have survived verbatim.
+
+`refold_test.go` holds the oracle to that: a test that cannot fail proves
+nothing, so the shapes only a loss can produce are asserted to be caught.
 
 ## Verdicts
 
@@ -114,3 +138,11 @@ them is how a stored-but-unused projection reads as healthy.
   one; whether a later turn swaps in the freshly composed prompt is outside
   this probe's boundary.
 - One session shape, one workspace, one platform per run.
+
+## Provenance
+
+Studio independently converged on the durable covered-identity contract also
+present in main-v2 `f60ab17b0` (#8923); that commit is not in studio's
+ancestry. The same commit carries two further contracts studio has not adopted
+— live-tail ownership, and wire-safe fingerprint compatibility — which is why
+that line is ported by contract rather than by file.

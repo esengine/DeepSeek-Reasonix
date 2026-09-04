@@ -5,12 +5,30 @@ import (
 	"fmt"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 )
 
 // probeTurns is enough conversation for a fold to have a region to work on:
 // the system row and the first user turn are pinned, and the recent tail is
 // kept verbatim, so a short session has nothing foldable between them.
 const probeTurns = 8
+
+// refoldTurns grows the transcript past the first fold by less than the fold
+// keeps verbatim, so the second fold has to reach into the stored body.
+const refoldTurns = 3
+
+// runTurns drives count turns, each carrying its own marker, and returns the
+// next turn number.
+func runTurns(ctx context.Context, ctrl *control.Controller, from, count int) (int, error) {
+	for i := range count {
+		n := from + i + 1
+		prompt := fmt.Sprintf("%s Probe turn %d: record the task list and keep working.", marker(n), n)
+		if err := ctrl.Run(ctx, prompt); err != nil {
+			return n, fmt.Errorf("turn %d: %w", n, err)
+		}
+	}
+	return from + count, nil
+}
 
 const probeGoal = "Prove which runtime semantics survive an OS process boundary."
 
@@ -36,10 +54,9 @@ func runConstruct(dir, arm string) error {
 	if ctrl.SessionPath() == "" {
 		return errUnexpected("a session path", "")
 	}
-	for i := range probeTurns {
-		if err := ctrl.Run(ctx, fmt.Sprintf("Probe turn %d: record the task list and keep working.", i+1)); err != nil {
-			return fmt.Errorf("turn %d: %w", i+1, err)
-		}
+	turn, err := runTurns(ctx, ctrl, 0, probeTurns)
+	if err != nil {
+		return err
 	}
 	if err := ctrl.SetGoalDurable(probeGoal); err != nil {
 		return fmt.Errorf("goal: %w", err)
@@ -47,9 +64,22 @@ func runConstruct(dir, arm string) error {
 	if err := ctrl.Compact(ctx, "Fold the probe turn."); err != nil {
 		return fmt.Errorf("compact: %w", err)
 	}
-	if appendsAfterFold(arm) {
-		if err := ctrl.Run(ctx, "Probe turn after the fold."); err != nil {
-			return fmt.Errorf("turn after fold: %w", err)
+	if arm == armRefoldIntoBody {
+		// Grow past the fold, record the view a second fold will operate on,
+		// then fold again: its region reaches back into the stored body, which
+		// has no canonical counterpart to map a new boundary onto.
+		if _, err = runTurns(ctx, ctrl, turn, refoldTurns); err != nil {
+			return err
+		}
+		if err := writeObservation(root, capture("prefold", arm, bootSystem, ctrl, sink)); err != nil {
+			return err
+		}
+		if err := ctrl.Compact(ctx, "Fold again, into the stored body."); err != nil {
+			return fmt.Errorf("refold: %w", err)
+		}
+	} else if appendsAfterFold(arm) {
+		if _, err = runTurns(ctx, ctrl, turn, 1); err != nil {
+			return err
 		}
 	}
 	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink))
