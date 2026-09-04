@@ -247,6 +247,7 @@ var ChineseTraditional = Messages{
 	CmdCls:              "清除畫面（保留 LLM 上下文）",
 	CmdCompact:          "壓縮上下文",
 	CmdContext:          "檢視上下文視窗、閾值與上次維護結果",
+	CmdGraph:            "檢視本工作階段委派了什麼，以及每一項的狀態",
 	CmdRewind:           "回滾到更早的一輪",
 	CmdTree:             "檢視對話分支樹",
 	CmdBranch:           "建立對話分支",

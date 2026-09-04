@@ -258,6 +258,7 @@ var Chinese = Messages{
 	CmdCls:              "清屏（保留 LLM 上下文）",
 	CmdCompact:          "压缩上下文",
 	CmdContext:          "查看上下文窗口、阈值与上次维护结果",
+	CmdGraph:            "查看本会话委派了什么，以及每一项的状态",
 	CmdRewind:           "回滚到更早的一轮",
 	CmdTree:             "查看对话分支树",
 	CmdBranch:           "创建对话分支",

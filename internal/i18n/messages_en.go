@@ -257,6 +257,7 @@ var English = Messages{
 	CmdCls:              "clear screen only (keep LLM context)",
 	CmdCompact:          "compact context",
 	CmdContext:          "show context window, thresholds, and last maintenance",
+	CmdGraph:            "show what this session delegated and where each item stands",
 	CmdRewind:           "rewind to an earlier turn",
 	CmdTree:             "show conversation branches",
 	CmdBranch:           "create a conversation branch",

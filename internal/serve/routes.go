@@ -20,6 +20,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /usage", s.usage)
 	mux.HandleFunc("GET /context", s.context)
 	mux.HandleFunc("GET /adjudications", s.adjudications)
+	s.registerExecutionGraphRoutes(mux)
 	mux.HandleFunc("POST /context/window", s.setContextWindow)
 	mux.HandleFunc("POST /submit", s.submit)
 	s.registerExtensionRoutes(mux)

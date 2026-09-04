@@ -134,6 +134,10 @@ type SessionHistory interface {
 	// interruption still owed, and the resolved, cancelled or superseded
 	// record behind it. History, not a prompt — nothing here is answerable.
 	Adjudications() (active, history []AdjudicationEntry)
+	// ExecutionGraph is the run graph recomputed from what survived. It is the
+	// authority a reader starts from; the delta stream carries the same facts
+	// live, and is never a history to replay into a state.
+	ExecutionGraph() ExecutionGraphSnapshot
 	Checkpoints() []checkpoint.Meta
 	CheckpointFileState(path string) (checkpoint.FileState, bool)
 	CheckpointTurnsByMessageIndex() map[int]int

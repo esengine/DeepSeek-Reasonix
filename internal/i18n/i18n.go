@@ -252,6 +252,7 @@ type Messages struct {
 	CmdCls              string // /cls
 	CmdCompact          string // /compact
 	CmdContext          string // /context
+	CmdGraph            string // /graph
 	CmdRewind           string // /rewind
 	CmdTree             string // /tree
 	CmdBranch           string // /branch

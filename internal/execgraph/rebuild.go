@@ -41,6 +41,10 @@ type Interruption struct {
 type Result struct {
 	Graph       agentgraph.Graph
 	Interrupted []Interruption
+	// LegacyIdentity are the executions whose opening predates the worker
+	// record: empty because nothing was written, which a reader must not
+	// present as an inheritance — a different answer with the same shape.
+	LegacyIdentity []string
 }
 
 // Owned reports whether this process still owns an execution. A caller with no
@@ -68,6 +72,9 @@ func Rebuild(entries []execjournal.Entry, children []ChildOutcome, owned Owned) 
 		state, cut := resolveState(e, child.Status, owned(e.ID))
 		if cut {
 			out.Interrupted = append(out.Interrupted, Interruption{Execution: e.ID, Started: e.Started()})
+		}
+		if e.Worker == nil {
+			out.LegacyIdentity = append(out.LegacyIdentity, e.ID)
 		}
 		out.Graph.Apply(agentgraph.Delta{Nodes: []agentgraph.Node{nodeFor(e, child, state)}})
 		out.Graph.Apply(edgesFor(e, answered))
