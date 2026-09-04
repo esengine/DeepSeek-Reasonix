@@ -54,9 +54,14 @@ type scripted struct {
 	refused  atomic.Bool
 	terminal atomic.Bool
 	holding  sync.Once
+	released sync.Once
 	held     chan struct{}
 	release  chan struct{}
 }
+
+// releaseOnce frees the child waiting on release. Idempotent: an arm may reach
+// the moment to release through more than one path.
+func (s *scripted) releaseOnce() { s.released.Do(func() { close(s.release) }) }
 
 func (s *scripted) Name() string { return "probe" }
 
@@ -91,7 +96,7 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	// A terminal arm needs its fan-out to finish and its turn to stay open: a
 	// closed turn would settle the marker, and the process would no longer be
 	// dying inside one.
-	if terminalArm(s.arm) && s.terminal.Load() {
+	if (terminalArm(s.arm) || deriveArm(s.arm)) && s.terminal.Load() {
 		<-ctx.Done()
 		return nil
 	}

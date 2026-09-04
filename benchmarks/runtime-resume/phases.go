@@ -142,6 +142,8 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 	switch {
 	case arm == armOpenDecision || successorArm(arm):
 		return true, openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
+	case deriveArm(arm):
+		return true, runDeriveConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case terminalArm(arm):
 		return true, runTerminalConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	case schedulerWaitArm(arm):

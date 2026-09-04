@@ -97,6 +97,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 		if len(before.Decisions) == 0 {
 			res.Invalid = "no decision was open when the process died, so nothing was interrupted"
 		}
+	case deriveArm(a.name):
+		res.Rows = append(res.Rows, deriveRows(a.name, before, after)...)
+		res.Invalid = deriveArmInvalid(a.name, before)
 	case terminalArm(a.name):
 		res.Rows = append(res.Rows, terminalRows(a.name, before, after)...)
 		res.Invalid = terminalArmInvalid(a.name, before)

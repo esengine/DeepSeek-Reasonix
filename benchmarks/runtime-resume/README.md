@@ -72,6 +72,9 @@ provider call*.
 | `terminal-cancelled` | cancel with one item admitted and two not, die | ceilings | the same for a cancellation |
 | `terminal-context` | deliver an upstream answer across an ordering edge, die | none | does a delivery edge follow from what is already durable? |
 | `child-terminal` | reach completed, failed and cancelled in one group, die | none | does the store keep every terminal the graph draws? |
+| `derive-skip-both` | two upstreams end without an answer, dependent skipped, die | none | can a restart derive the skip, and which upstream caused it? |
+| `derive-skip-flip` | the same, failures in the other order | none | does the named cause move while the durable facts do not? |
+| `derive-answered` | one completed and one adopted upstream, dependent runs, die | none | do the delivery edges follow from the durable facts? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -459,3 +462,44 @@ One thing these arms had to work around: `Controller.Cancel()` does nothing to
 a synchronous headless `Run`. That path does not pass through turn admission,
 so the gate Cancel operates has nothing registered for it, and the arm cancels
 the turn's context instead — which is how a headless caller interrupts anyway.
+
+## The derivability arms
+
+Everything before these asked what survives. These ask what still has to be
+written down — a fact a restart can compute from what is already durable needs
+no record of its own, and adding one would give it a second owner for nothing.
+
+They stand on one join: a child's metadata names the execution it ran for, so a
+restart can ask the store what each item ended as. `Answered` is then
+computable without the graph: an adoption says so on its own opening, and
+everything else is the store's terminal.
+
+**Skipped state derives.** An item the orchestration released without ever
+starting it, ordered behind something that did not answer, is exactly the set
+the picture drew — in both skip arms, and empty in the arm where both upstreams
+answered.
+
+**Context derives, including through an adoption.** The dependent receives from
+both upstreams, one that completed and one that was adopted, and the prediction
+matches edge for edge. The adopted half only works because the source rides the
+opening: without it that upstream would read as unanswered and the edge would
+go missing.
+
+**The cause derives too, but not the way it looks.** The two skip arms leave
+identical durable facts — both upstreams failed, either could have been named —
+and the picture names a different one in each:
+
+| | picture named | by declaration order | by earliest release |
+| --- | --- | --- | --- |
+| `derive-skip-both` | `a` | `a` ✓ | `a` ✓ |
+| `derive-skip-flip` | `b` | `a` ✗ | `b` ✓ |
+
+Declaration order is refuted. Earliest release holds, and not by luck: a
+fan-out cuts a branch when it processes the first result that did not complete,
+and an item is released from the journal in that same handler. The order the
+journal records is the order the choice was made in. The cause is a historical
+fact — and it is already written down, in the timestamps.
+
+So none of the three needs a record. Skipped stays a derived state, context a
+derived edge, and the cause a derived reading of when each upstream was
+released.

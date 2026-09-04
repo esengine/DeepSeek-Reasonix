@@ -65,6 +65,7 @@ const (
 	fleetTerminalSentinel = "PROBE-FLEET-TERMINAL"
 	parallelSentinel      = "PROBE-PARALLEL"
 	fleetOutcomesSentinel = "PROBE-FLEET-OUTCOMES"
+	fleetDeriveSentinel   = "PROBE-FLEET-DERIVE"
 )
 
 // childHold is a child that reports holding its slot before it blocks, so a
@@ -75,6 +76,9 @@ const (
 	// childRelease finishes only when the arm frees it, which is how capacity
 	// is returned while a refusal is still standing.
 	childRelease = "PROBE-CHILD-RELEASE"
+	// childFailLate fails only once the arm frees it, so two failures in one
+	// fan-out have a decided order instead of a raced one.
+	childFailLate = "PROBE-CHILD-FAIL-LATE"
 )
 
 // probeClaimPath is the write path the claim arm overlaps. The refused writer
@@ -104,6 +108,9 @@ func (s *scripted) childScript(ctx context.Context, sentinel string) []provider.
 	case childRelease:
 		<-s.release
 		return append(text("Child released."), done())
+	case childFailLate:
+		<-s.release
+		return []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("probe child failed on release")}}
 	case childHang:
 		<-ctx.Done()
 		return nil
@@ -131,7 +138,7 @@ func askedInPrompt(req provider.Request, sentinel string) bool {
 // childSentinel reports which child script this request is, empty when the
 // request is a parent turn.
 func childSentinel(req provider.Request) string {
-	for _, sentinel := range []string{childDone, childHang, childFail, childHold, childRelease} {
+	for _, sentinel := range []string{childDone, childHang, childFail, childHold, childRelease, childFailLate} {
 		if askedInPrompt(req, sentinel) {
 			return sentinel
 		}
@@ -217,6 +224,8 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 			return append(adoptOnlyFleet(adoptableRef(req)), done()), true
 		}
 		return append(mixedFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, fleetDeriveSentinel) && !s.terminal.Swap(true):
+		return append(deriveFleet(s.arm, adoptableRef(req)), done()), true
 	case askedInPrompt(req, fleetOutcomesSentinel) && !s.terminal.Swap(true):
 		return append(outcomesFleet(), done()), true
 	case askedInPrompt(req, fleetTerminalSentinel) && !s.terminal.Swap(true):
@@ -319,6 +328,32 @@ func outcomesFleet() []provider.Chunk {
 		{"id": "o3", "prompt": childHang + " cancelled", "description": "cancelled", "read_only": true},
 		{"id": "o4", "prompt": childHang + " cancelled too", "description": "cancelled too", "read_only": true},
 	})
+}
+
+// deriveFleet orders one dependent behind two upstreams. The skip arms end both
+// upstreams without an answer, one immediately and one on release, so which of
+// them the fan-out names is decided by the order rather than by a race; the
+// answered arm gives the dependent one completed and one adopted upstream, so
+// it must run and both deliveries must be accounted for.
+func deriveFleet(arm, adoptRef string) []provider.Chunk {
+	first, second := childFail+" first", childFailLate+" second"
+	if arm == armDeriveSkipFlip {
+		first, second = childFailLate+" first", childFail+" second"
+	}
+	up := []map[string]any{
+		{"id": "a", "prompt": first, "description": "upstream a", "read_only": true},
+		{"id": "b", "prompt": second, "description": "upstream b", "read_only": true},
+	}
+	if arm == armDeriveAnswered {
+		up = []map[string]any{
+			{"id": "a", "prompt": childDone + " first", "description": "upstream a", "read_only": true},
+			{"id": "b", "adopt_ref": adoptRef, "description": "upstream b"},
+		}
+	}
+	return fleetCall("probe_fleet_derive", append(up, map[string]any{
+		"id": "c", "prompt": childDone + " dependent", "description": "dependent",
+		"read_only": true, "depends_on": []string{"a", "b"},
+	}))
 }
 
 // slotsFleet fills the total ceiling and asks for one more, all read-only: a

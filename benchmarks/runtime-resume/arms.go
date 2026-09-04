@@ -28,7 +28,7 @@ type arm struct {
 // effect cannot be read out of the result.
 func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody &&
-		!graphArm(name) && !schedulerWaitArm(name) && !terminalArm(name)
+		!graphArm(name) && !schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -109,6 +109,9 @@ func arms() []arm {
 		{name: armTerminalCancelled, asks: "an item a cancellation ended before it was admitted"},
 		{name: armTerminalContext, asks: "whether a delivered answer's edge follows from what is already durable"},
 		{name: armChildTerminal, asks: "whether the store keeps every terminal the graph draws"},
+		{name: armDeriveSkipBoth, asks: "a skip whose two upstreams both ended without an answer"},
+		{name: armDeriveSkipFlip, asks: "the same, with the two failures in the other order"},
+		{name: armDeriveAnswered, asks: "a dependent whose upstreams answered, one by completing and one by adopting"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

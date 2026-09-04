@@ -154,7 +154,7 @@ func runSchedulerWaitConstruct(ctx context.Context, root armRoot, arm, bootSyste
 // arm's question: the ceiling it named has room, and the writer ceiling that
 // now holds it back was never reported.
 func releaseAndSettle(sink *graphSink, prov *scripted) error {
-	close(prov.release)
+	prov.releaseOnce()
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		graph, _ := sink.snapshot()
