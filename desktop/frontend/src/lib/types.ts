@@ -120,6 +120,7 @@ export interface WireTool {
   removed?: number;
   profile?: WireProfile; // subagent model/effort resolved for this call
   execution?: WireShellExecution; // local shell metadata; never provider-visible
+  tokensPerSec?: number; // subagent progress heartbeat: estimated streaming output rate
 }
 
 export interface WireCacheDiagnostics {

@@ -237,7 +237,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           const ms = sp.durationMs ?? item.durationMs ?? 0;
           return `${label} · ${t("subagent.phase.elapsed", { n: formatElapsedSeconds(ms) })}`;
         }
-        return `${label} · ${t("subagent.phase.elapsed", { n: formatElapsedSeconds(nowTick - sp.startedAt) })} · ${t("subagent.activity.ago", { n: formatElapsedSeconds(nowTick - sp.lastActivityAt) })}`;
+        return `${label} · ${t("subagent.phase.elapsed", { n: formatElapsedSeconds(nowTick - sp.startedAt) })} · ${t("subagent.activity.ago", { n: formatElapsedSeconds(nowTick - sp.lastActivityAt) })}` +
+          // TPS heartbeat (#9521): shown only while output is flowing; a zero
+          // rate during tool phases is normal and must not read as "stalled".
+          (sp.tokensPerSec && sp.tokensPerSec > 0 ? ` · ~${sp.tokensPerSec} tok/s` : "");
       })()
     : "";
   const reasoningDisplayMode = useReasoningDisplayMode();

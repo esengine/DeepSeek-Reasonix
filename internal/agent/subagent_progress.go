@@ -53,6 +53,16 @@ const (
 	subagentProgressReasoningCap    = 8 << 10
 	subagentProgressTextCap         = 8 << 10
 	subagentProgressNoticeCap       = 2 << 10
+
+	// TPS heartbeat (#9521): streaming output is sampled over a rolling
+	// window and carried on SubagentProgress status events so the UI can tell
+	// "slowly producing" from "stalled". A refreshed status is emitted at
+	// most once per child per heartbeat interval and only when the sampled
+	// rate changed, so a fleet of quiet children stays within the budget.
+	subagentRateWindow         = 3 * time.Second
+	subagentRateMinSampleBytes = 4 * 3 // ~1 tok/s floor (bytes/4 over a full window)
+	subagentRateMinInterval    = 1 * time.Second
+	subagentRateEmitDelta      = 2 // tok/s change worth an event
 )
 
 // progressClock isolates time so tests drive merge windows with a fake clock.
@@ -133,6 +143,63 @@ type progressStatusSlot struct {
 	dirty    bool
 	dueAt    time.Time
 	lastSend time.Time
+	lastTps  int
+	tpsSent  time.Time
+}
+
+// progressRateSampler estimates a child's streaming output rate as tokens
+// per second over a fixed rolling window (bytes/4, the same fallback shape
+// the token estimator uses). Sampling happens at the delta receive point, so
+// bytes dropped by preview budget trims still count as produced output.
+type progressRateSampler struct {
+	windowStart time.Time
+	windowBytes int
+	lastRate    int
+}
+
+func (r *progressRateSampler) add(now time.Time, delta string) {
+	r.rollWindowLocked(now)
+	r.windowBytes += len(delta)
+}
+
+// rollWindowLocked closes a window once it spans more than one window length.
+func (r *progressRateSampler) rollWindowLocked(now time.Time) {
+	if r.windowStart.IsZero() {
+		r.windowStart = now
+		return
+	}
+	if elapsed := now.Sub(r.windowStart); elapsed >= subagentRateWindow {
+		r.sampleRateLocked(now, elapsed)
+		r.windowStart = now
+		r.windowBytes = 0
+	}
+}
+
+func (r *progressRateSampler) sampleRateLocked(now time.Time, elapsed time.Duration) int {
+	if elapsed <= 0 || r.windowBytes == 0 {
+		r.lastRate = 0
+		return r.lastRate
+	}
+	// bytes/4 approximates tokens; the floor hides sub-second sampling noise.
+	rate := int(float64(r.windowBytes) / 4 / elapsed.Seconds())
+	if r.windowBytes < subagentRateMinSampleBytes && elapsed < subagentRateWindow {
+		rate = 0 // too little signal in a partial window
+	}
+	r.lastRate = rate
+	return rate
+}
+
+// rate returns the current sampled tokens/sec, rolling the window forward.
+func (r *progressRateSampler) rate(now time.Time) int {
+	if r.windowStart.IsZero() {
+		return 0
+	}
+	if elapsed := now.Sub(r.windowStart); elapsed >= subagentRateWindow {
+		r.sampleRateLocked(now, elapsed)
+		r.windowStart = now
+		r.windowBytes = 0
+	}
+	return r.lastRate
 }
 
 // subagentProgressMerger paces and bounds progress previews for one parent
@@ -147,6 +214,7 @@ type subagentProgressMerger struct {
 
 	slots  map[string]map[subagentProgressChannel]*progressSlot
 	status map[string]*progressStatusSlot
+	rates  map[string]*progressRateSampler
 	order  []string // child IDs in registration order, for round-robin
 	rr     int      // rotating scan start for fairness
 
@@ -173,6 +241,7 @@ func newSubagentProgressMerger(clock progressClock, sink event.Sink, groupParent
 		groupParentID:    groupParentID,
 		slots:            make(map[string]map[subagentProgressChannel]*progressSlot),
 		status:           make(map[string]*progressStatusSlot),
+		rates:            make(map[string]*progressRateSampler),
 		tokens:           subagentProgressGroupBurst,
 		lastRefill:       now,
 		wake:             make(chan struct{}, 1),
@@ -276,6 +345,14 @@ func (m *subagentProgressMerger) deltaEvent(childID string, ch subagentProgressC
 		m.slots[childID] = make(map[subagentProgressChannel]*progressSlot)
 		m.ensureOrderLocked(childID)
 	}
+	// Sample the rate at the receive point so bytes dropped by preview trims
+	// still count as produced output (#9521).
+	rate := m.rates[childID]
+	if rate == nil {
+		rate = &progressRateSampler{}
+		m.rates[childID] = rate
+	}
+	rate.add(m.clock.Now(), delta)
 	sl := m.slots[childID][ch]
 	if sl == nil {
 		sl = &progressSlot{}
@@ -320,12 +397,13 @@ func (m *subagentProgressMerger) flushChild(childID string, terminal subagentPro
 	// Truncated flag is surfaced as a truncated notice so frontends still know
 	// some preview content was lost.
 	if m.truncatedPending[childID] {
-		m.emitToolProgressLocked(childID, event.SubagentProgressNoticeName, "", true, 0)
+		m.emitToolProgressLocked(childID, event.SubagentProgressNoticeName, "", true, 0, 0)
 	}
 	// Release per-child state; later events for this child are ignored by the
 	// tracker's own done flag, and the flusher has nothing left to wake for.
 	delete(m.status, childID)
 	delete(m.slots, childID)
+	delete(m.rates, childID)
 	delete(m.truncatedPending, childID)
 	m.removeOrderLocked(childID)
 }
@@ -390,9 +468,36 @@ func (m *subagentProgressMerger) stepLocked() bool {
 			phase := st.phase
 			st.dirty = false
 			st.lastSend = now
+			st.tpsSent = now
+			if rate := m.rates[childID]; rate != nil {
+				st.lastTps = rate.rate(now)
+			}
 			m.tokens--
 			m.emitStatusLocked(childID, phase, 0)
 			return true
+		}
+		// TPS heartbeat refresh (#9521): live streaming phases re-publish the
+		// status with the freshly sampled rate so the UI can distinguish a
+		// slow producer from a stall. Bounded by min-interval + rate-delta,
+		// and it shares the round-robin budget like any other preview.
+		if st := m.status[childID]; st != nil && !st.dirty &&
+			(st.phase == subagentPhaseReasoning || st.phase == subagentPhaseResponding) &&
+			now.Sub(st.tpsSent) >= subagentRateMinInterval {
+			if rate := m.rates[childID]; rate != nil {
+				tps := rate.rate(now)
+				deltaTps := tps - st.lastTps
+				if deltaTps < 0 {
+					deltaTps = -deltaTps
+				}
+				if deltaTps >= subagentRateEmitDelta {
+					m.rr = (idx + 1) % n
+					st.lastTps = tps
+					st.tpsSent = now
+					m.tokens--
+					m.emitStatusLocked(childID, st.phase, 0)
+					return true
+				}
+			}
 		}
 		for c := subagentProgressChanReasoning; c <= subagentProgressChanNotice; c++ {
 			if sl := m.slots[childID][c]; sl != nil && sl.dirty && !now.Before(sl.dueAt) {
@@ -470,7 +575,14 @@ func (m *subagentProgressMerger) refillLocked() {
 }
 
 func (m *subagentProgressMerger) emitStatusLocked(childID string, phase subagentProgressPhase, durationMs int64) {
-	m.emitToolProgressLocked(childID, event.SubagentProgressStatusName, string(phase), false, durationMs)
+	var tps int
+	if phase != subagentPhaseQueued && phase != subagentPhaseCompleted && phase != subagentPhaseFailed && phase != subagentPhaseCancelled {
+		// Terminal/queued states carry no rate; live states sample the window.
+		if rate := m.rates[childID]; rate != nil {
+			tps = rate.rate(m.clock.Now())
+		}
+	}
+	m.emitToolProgressLocked(childID, event.SubagentProgressStatusName, string(phase), false, durationMs, tps)
 }
 
 func (m *subagentProgressMerger) emitDeltaLocked(childID string, ch subagentProgressChannel, sl *progressSlot) {
@@ -486,10 +598,10 @@ func (m *subagentProgressMerger) emitDeltaLocked(childID string, ch subagentProg
 	}
 	sl.buf, sl.truncated, sl.dirty = "", false, false
 	sl.lastSend = m.clock.Now()
-	m.emitToolProgressLocked(childID, ch.name(), buf, truncated, 0)
+	m.emitToolProgressLocked(childID, ch.name(), buf, truncated, 0, 0)
 }
 
-func (m *subagentProgressMerger) emitToolProgressLocked(childID, name, output string, truncated bool, durationMs int64) {
+func (m *subagentProgressMerger) emitToolProgressLocked(childID, name, output string, truncated bool, durationMs int64, tokensPerSec int) {
 	parentID := m.groupParentID
 	if parentID == childID {
 		parentID = ""
@@ -499,6 +611,7 @@ func (m *subagentProgressMerger) emitToolProgressLocked(childID, name, output st
 		Tool: event.Tool{
 			ID: childID, Name: name, ParentID: parentID,
 			Output: output, Truncated: truncated, DurationMs: durationMs,
+			TokensPerSec: tokensPerSec,
 		},
 	})
 }

@@ -145,6 +145,7 @@ func ToWire(e event.Event) Event {
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
 			StartedAt: e.Tool.StartedAt, EndedAt: e.Tool.EndedAt,
 			ArgChars: e.Tool.ArgChars, Refreshed: e.Tool.Refreshed,
+			TokensPerSec: e.Tool.TokensPerSec,
 			ParentID: e.Tool.ParentID, AttemptID: e.Tool.AttemptID,
 			Diff: e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
 		}
@@ -409,6 +410,7 @@ type Tool struct {
 	EndedAt      int64           `json:"endedAt,omitempty"`
 	Partial      bool            `json:"partial,omitempty"`
 	ArgChars     int             `json:"argChars,omitempty"`
+	TokensPerSec int             `json:"tokensPerSec,omitempty"`
 	Refreshed    bool            `json:"refreshed,omitempty"`
 	ParentID     string          `json:"parentId,omitempty"`
 	AttemptID    string          `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials

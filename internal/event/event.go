@@ -261,6 +261,12 @@ type Tool struct {
 	// Partial dispatch — a liveness signal while a large payload streams. Zero
 	// on the initial start dispatch and on full dispatches.
 	ArgChars int
+	// TokensPerSec is the sub-agent progress heartbeat: estimated streaming
+	// output tokens per second over a rolling window, sampled when the
+	// SubagentProgress status event was emitted. Zero means no measurable
+	// output in the window (tool phases legitimately produce none); only set
+	// on SubagentProgress* progress events, never on results.
+	TokensPerSec int
 	// Refreshed marks a repeated full ToolDispatch for the same ID whose file
 	// preview or resolved proxy metadata changed after the initial dispatch.
 	// Frontends that can upsert by ID should replace the existing card;

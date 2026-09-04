@@ -135,6 +135,7 @@ export type SubagentProgress = {
   lastActivityAt: number;
   truncated: boolean;
   durationMs?: number;
+  tokensPerSec?: number;
   startedAt: number;
 };
 export function isSubagentProgressName(name: string | undefined): boolean {
@@ -182,6 +183,11 @@ function applySubagentProgress(s: State, t: WireTool): State {
       if (!SUBAGENT_PROGRESS_PHASES.has(phase)) return s; // unknown phase: ignore
       sp.phase = phase as SubagentPhase;
       if (isTerminalSubagentPhase(phase) && typeof t.durationMs === "number") sp.durationMs = t.durationMs;
+      // TPS heartbeat (#9521): only live phases carry a rate; terminal states
+      // drop it so a finished card never shows a stale tok/s.
+      sp.tokensPerSec = !isTerminalSubagentPhase(phase) && typeof t.tokensPerSec === "number"
+        ? t.tokensPerSec
+        : undefined;
       break;
     }
     case SUBAGENT_PROGRESS_REASONING:
