@@ -102,6 +102,10 @@ type TodoNoteObs struct {
 	BodyLen int      `json:"body_len"`
 	ViewLen int      `json:"view_len"`
 	HostIDs []string `json:"host_ids"`
+	// ReadableInHistory says the conversation still shows every current id, so
+	// no note is owed. Without it a count of zero cannot be told apart from a
+	// lost identity, and the gate would demand a note nobody needs.
+	ReadableInHistory bool `json:"readable_in_history"`
 }
 
 // todoNoteMarker is the opening of todoIdentityNote. The probe reads the view
@@ -110,11 +114,17 @@ const todoNoteMarker = "Host task state."
 
 var stepIDPattern = regexp.MustCompile(`probe_step_\d+`)
 
-func todoNoteObs(view []provider.Message, bodyLen int, todos []evidence.TodoItem) TodoNoteObs {
-	out := TodoNoteObs{BodyLen: bodyLen, ViewLen: len(view)}
+func todoNoteObs(view, history []provider.Message, todos []evidence.TodoItem) TodoNoteObs {
+	out := TodoNoteObs{BodyLen: len(history), ViewLen: len(view)}
 	for _, t := range todos {
 		if t.StepID != "" {
 			out.HostIDs = append(out.HostIDs, t.StepID)
+		}
+	}
+	out.ReadableInHistory = len(out.HostIDs) > 0
+	for _, id := range out.HostIDs {
+		if !mentionsID(history, id) {
+			out.ReadableInHistory = false
 		}
 	}
 	for i, m := range view {
@@ -167,9 +177,11 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 			ProjectedTokens:   snap.ProjectedTokens,
 			Blocked:           snap.Blocked,
 		},
-		Sidecar:   sidecarObs(st, loaded, loadErr),
-		View:      view,
-		TodoNotes: todoNoteObs(viewMsgs, len(st.Projection.Messages), ctrl.Todos()),
+		Sidecar: sidecarObs(st, loaded, loadErr),
+		View:    view,
+		// The note is derived for a request and stored nowhere, so the contracts
+		// about it are read off the request rather than off the stored view.
+		TodoNotes: todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
 		Graph:     graphObs(graph, deltas),
 		Artifacts: readArtifacts(path),
 	}
@@ -249,6 +261,22 @@ func viewObs(st agent.CompactionState, ok bool, canonical []provider.Message) (V
 	out.Markers = markersIn(contents(view), markerPattern)
 	out.Echoes = markersIn(contents(view), echoPattern)
 	return out, view
+}
+
+// mentionsID reads an id the way the host's own visibility check does: text or
+// tool arguments, anywhere in the messages the request carries.
+func mentionsID(msgs []provider.Message, id string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m.Content, id) {
+			return true
+		}
+		for _, call := range m.ToolCalls {
+			if strings.Contains(call.Arguments, id) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func contents(msgs []provider.Message) []string {

@@ -354,19 +354,9 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 // attribute a prefix change to the operation that caused it rather than to a
 // generic rewrite signal that also fires on local-only metadata edits.
 func (a *Agent) settleRewritesBeforeSampling() []string {
-	reasons := a.sess.conversation.DrainContentRewriteReasons()
-	if len(reasons) > 0 {
-		// A provider-visible rewrite can have folded away the only copy of the
-		// step ids the model was shown.
-		a.noteTodoIdentityLost()
-	}
-	// Rides the tail like the context-budget notice: the canonical list stays
-	// out of the cache-stable prefix, and only the ids a sign-off must cite go
-	// back where the model can read them.
-	if projection := a.todoIdentityProjection(); projection != "" {
-		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(projection)})
-	}
-	return reasons
+	// Step identity is not settled here: it rides the request, derived from
+	// what that request can read, so a fold needs no separate signal.
+	return a.sess.conversation.DrainContentRewriteReasons()
 }
 
 // recordTruncationFact hands the model the host's reading of a response that

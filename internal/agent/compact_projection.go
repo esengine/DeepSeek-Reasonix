@@ -210,8 +210,10 @@ func (a *Agent) compressVisibleRange(
 		return tool.CompressResult{}, err
 	}
 
-	projection := a.withTodoIdentityProjection(buildVisibleCompressionProjection(snap.visible, plan, summary))
-	projectionTokens := a.estimatedPromptTokens(a.providerProjectionMessages(projection))
+	projection := buildVisibleCompressionProjection(snap.visible, plan, summary)
+	// Priced on the request this produces, not the history it stores: the note
+	// the fold makes owed cannot be folded, which does not make it free.
+	projectionTokens := a.estimatedPromptTokens(a.providerProjectionMessages(a.withTodoIdentityTail(projection)))
 	tele.ProjectionTokens = projectionTokens
 	result.Messages = len(plan.fold)
 	result.ProjectionTokens = projectionTokens
@@ -479,7 +481,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 
 	projMsgs, boundary := a.foldedProjection(stateSnapshot, fromProjection, msgs, kept, head, start, summary)
 	candidate := modelVisibleFromProjection(ContextProjection{Messages: projMsgs, CoveredCount: boundary.Covered}, canonical)
-	projTokens := a.estimatedPromptTokens(candidate)
+	projTokens := a.estimatedPromptTokens(a.withTodoIdentityTail(candidate))
 	fixedPrefixTokens = a.estimatedPromptTokens(msgs[:head])
 	tele.ProjectionTokens = projTokens
 	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
@@ -551,7 +553,7 @@ func (a *Agent) foldedProjection(state CompactionState, projected bool, msgs, ke
 	if projected && boundary.BodySuffixFrom < len(body) {
 		suffix = body[boundary.BodySuffixFrom:]
 	}
-	return a.withTodoIdentityProjection(checkpointProjectionMessages(msgs, head, kept, suffix, summary)), boundary
+	return checkpointProjectionMessages(msgs, head, kept, suffix, summary), boundary
 }
 
 // acceptCheckpointCandidate: ≤50% + smaller for auto; force may exceed 50%

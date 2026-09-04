@@ -32,36 +32,79 @@ func TestTodoCitationPrefersTheStableID(t *testing.T) {
 	}
 }
 
-func TestProjectionRestatesTheIDsAfterAFoldTakesThemOutOfView(t *testing.T) {
+func todoWriteMessage(ids ...string) provider.Message {
+	items := make([]string, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, `{"step_id":"`+id+`"}`)
+	}
+	args := `{"todos":[` + strings.Join(items, ",") + `]}`
+	return provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+		{Name: "todo_write", Arguments: args},
+	}}
+}
+
+// Owed is a fact about the request being built, not a memory of an earlier one.
+// A view that still shows the ids is owed nothing; the same host state against
+// a view that lost them is owed the note, however many requests ago the model
+// last read them.
+func TestTodoIdentityTailIsOwedByTheViewNotByHistory(t *testing.T) {
 	a := New(&scriptedProvider{name: "p"}, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
 	a.ReplaceTodoState(planTodos())
-	a.noteTodoIdentityShown() // the model wrote this list and can still read it
 
-	if got := a.todoIdentityProjection(); got != "" {
-		t.Fatalf("projection = %q, want none while the ids are still visible", got)
+	readable := []provider.Message{todoWriteMessage("plan_step_01", "plan_step_02", "plan_step_03")}
+	if got := a.withTodoIdentityTail(readable); len(got) != 1 {
+		t.Fatalf("appended %d messages to a view that already shows the ids", len(got)-1)
 	}
 
-	a.noteTodoIdentityLost() // a fold replaced the region holding them
-
-	got := a.todoIdentityProjection()
-	for _, id := range []string{"plan_step_01", "plan_step_02", "plan_step_03"} {
-		if !strings.Contains(got, "["+id+"]") {
-			t.Fatalf("projection = %q, want it to carry %s", got, id)
+	folded := []provider.Message{{Role: provider.RoleUser, Content: "summary of earlier work"}}
+	for range 2 {
+		got := a.withTodoIdentityTail(folded)
+		if len(got) != 2 {
+			t.Fatalf("appended %d messages, want the note every time the view cannot show the ids", len(got)-1)
+		}
+		for _, id := range []string{"plan_step_01", "plan_step_02", "plan_step_03"} {
+			if !strings.Contains(got[1].Content, "["+id+"]") {
+				t.Fatalf("note = %q, want it to carry %s", got[1].Content, id)
+			}
 		}
 	}
-	if second := a.todoIdentityProjection(); second != "" {
-		t.Fatalf("projection repeated as %q; it is owed once per loss, not every turn", second)
+}
+
+// The case that killed the remembered-shown design: identity moves with no fold
+// in between. A request that showed A may not suppress B.
+func TestTodoIdentityTailFollowsTheHostAcrossARewrite(t *testing.T) {
+	a := New(&scriptedProvider{name: "p"}, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
+	a.ReplaceTodoState(planTodos())
+	folded := []provider.Message{{Role: provider.RoleUser, Content: "summary of earlier work"}}
+	if got := a.withTodoIdentityTail(folded); !strings.Contains(got[1].Content, "[plan_step_03]") {
+		t.Fatalf("first request did not carry the original identity: %q", got[1].Content)
+	}
+
+	a.ReplaceTodoState([]evidence.TodoItem{
+		{Content: "Wire the parser", Status: "completed", StepID: "plan_step_01"},
+		{Content: "Add the tests", Status: "in_progress", StepID: "plan_step_02"},
+		{Content: "Ship the rename", Status: "pending", StepID: "plan_step_09"},
+	})
+	got := a.withTodoIdentityTail(folded)
+	if len(got) != 2 {
+		t.Fatalf("appended %d messages after the list changed, want one note", len(got)-1)
+	}
+	if !strings.Contains(got[1].Content, "[plan_step_09]") {
+		t.Fatalf("note = %q, want the identity the host holds now", got[1].Content)
+	}
+	if strings.Contains(got[1].Content, "[plan_step_03]") {
+		t.Fatalf("note = %q, want no id the host has dropped", got[1].Content)
 	}
 }
 
 func TestNoProjectionWithoutStableIDs(t *testing.T) {
 	a := New(&scriptedProvider{name: "p"}, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
 	a.ReplaceTodoState([]evidence.TodoItem{{Content: "Do the thing", Status: "in_progress"}})
-	a.noteTodoIdentityLost()
 
 	// Nothing to re-project: an ordinal is not an identity the host owns.
-	if got := a.todoIdentityProjection(); got != "" {
-		t.Fatalf("projection = %q, want none for a list with no ids", got)
+	folded := []provider.Message{{Role: provider.RoleUser, Content: "summary of earlier work"}}
+	if got := a.withTodoIdentityTail(folded); len(got) != 1 {
+		t.Fatalf("appended %d messages for a list with no ids", len(got)-1)
 	}
 }
 
@@ -94,30 +137,11 @@ func TestTodoWriteResultNamesTheSignableStepID(t *testing.T) {
 	}
 }
 
-func TestFoldPathAppendsTheIDsOnlyWhenItsOwnOutputLostThem(t *testing.T) {
-	a := New(&scriptedProvider{name: "p"}, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
-	a.ReplaceTodoState(planTodos())
-
-	folded := []provider.Message{{Role: provider.RoleUser, Content: "summary of earlier work"}}
-	got := a.withTodoIdentityProjection(folded)
-	if len(got) != 2 || !strings.Contains(got[1].Content, "[plan_step_02]") {
-		t.Fatalf("projection = %+v, want the ids appended to a fold that dropped them", got)
-	}
-
-	// A fold whose kept tail still carries the ids owes nothing: this replaces
-	// an identity that was lost, it does not restate one that survived.
-	kept := []provider.Message{{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
-		Name:      "todo_write",
-		Arguments: `{"todos":[{"step_id":"plan_step_01"},{"step_id":"plan_step_02"},{"step_id":"plan_step_03"}]}`,
-	}}}}
-	if got := a.withTodoIdentityProjection(kept); len(got) != 1 {
-		t.Fatalf("projection appended %d messages, want none while the ids are still readable", len(got)-1)
-	}
-}
-
 // TestRealFoldLeavesTheStepIDsReadable drives actual compaction and asserts on
-// the installed projection: the round the fold feeds is already frozen when the
-// next turn starts, so an id restored a round later is one sign-off too late.
+// the request, which is where the ids have to be readable: the round the fold
+// feeds is already frozen when the next turn starts, so an id restored a round
+// later is one sign-off too late. The installed projection is history and does
+// not carry them — that is the point of deriving the note per request.
 func TestRealFoldLeavesTheStepIDsReadable(t *testing.T) {
 	mock := &loopMock{t: t}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
@@ -127,7 +151,6 @@ func TestRealFoldLeavesTheStepIDsReadable(t *testing.T) {
 	reg.Add(fatTool{blob: strings.Repeat("file line. ", 1100)})
 	a, _ := newAgent(t, srv.URL, reg, 40000, 4)
 	a.ReplaceTodoState(planTodos())
-	a.noteTodoIdentityShown()
 
 	for i := range 20 {
 		if err := a.Run(context.Background(), fmt.Sprintf("turn %d: keep going", i)); err != nil {
@@ -141,9 +164,13 @@ func TestRealFoldLeavesTheStepIDsReadable(t *testing.T) {
 	if len(projected) == 0 {
 		t.Fatal("no fold was installed; this test asserts nothing without one")
 	}
+	visible := a.modelVisibleMessages()
 	for _, id := range []string{"plan_step_01", "plan_step_02", "plan_step_03"} {
-		if !messagesMentionID(projected, id) {
-			t.Fatalf("the installed projection dropped %s; the fold's own request cannot cite it", id)
+		if !messagesMentionID(visible, id) {
+			t.Fatalf("the request after the fold cannot cite %s", id)
 		}
+	}
+	if messagesMentionID(projected, "plan_step_02") && !messagesMentionID(a.modelVisibleHistory(), "plan_step_02") {
+		t.Fatal("the frozen body carries host step state; it is history, not host state")
 	}
 }

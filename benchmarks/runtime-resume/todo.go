@@ -18,7 +18,7 @@ const (
 // the host holds now. Each is checked on both sides of the process boundary.
 func todoRows(before, after Observation) []row {
 	return []row{
-		todoRow("host identity notes in the view", "exactly one note reaches the model",
+		todoRow("host identity notes in the view", "one note when the history lost the ids, none when it kept them",
 			before, after, noteCount, exactlyOnce),
 		todoRow("where the identity note sits", "the note rides the live tail, as a turn-tail note",
 			before, after, notePlacement, ridesTheTail),
@@ -37,16 +37,30 @@ func todoRow(semantic, contract string, before, after Observation,
 		verdict = verdictViolated
 	}
 	return row{
-		Semantic: semantic, Authority: "agent todoState, projected into the fold's output",
-		Artifact:       "<stem>.context.json (the note is frozen into the body)",
+		Semantic: semantic, Authority: "agent todoState (host-owned)",
+		Artifact:       "none: derived for each request, stored nowhere",
 		Reconstruction: contract,
 		Before:         render(before), After: render(after), Verdict: verdict,
 	}
 }
 
-func noteCount(o Observation) string { return fmt.Sprintf("%d", o.TodoNotes.Count) }
+func noteCount(o Observation) string {
+	owed := "history lost the ids"
+	if o.TodoNotes.ReadableInHistory {
+		owed = "history still shows them"
+	}
+	return fmt.Sprintf("%d (%s)", o.TodoNotes.Count, owed)
+}
 
-func exactlyOnce(o Observation) bool { return o.TodoNotes.Count == 1 }
+// exactlyOnce is conditional on need: a request whose history still shows the
+// ids is owed nothing, and demanding a note there would turn the migration into
+// an unconditional append.
+func exactlyOnce(o Observation) bool {
+	if o.TodoNotes.ReadableInHistory {
+		return o.TodoNotes.Count == 0
+	}
+	return o.TodoNotes.Count == 1
+}
 
 // notePlacement reports the note's index against the end of the frozen body.
 // An index below it means the note was frozen ahead of messages the splice adds
@@ -63,9 +77,14 @@ func notePlacement(o Observation) string {
 	return fmt.Sprintf("index %v of %d, body ends at %d — %s", n.Indexes, n.ViewLen, n.BodyLen, where)
 }
 
+// ridesTheTail passes vacuously when no note is owed: placement is a claim
+// about a note that exists.
 func ridesTheTail(o Observation) bool {
 	n := o.TodoNotes
-	return n.Count > 0 && n.Indexes[len(n.Indexes)-1] >= n.BodyLen
+	if n.Count == 0 {
+		return n.ReadableInHistory
+	}
+	return n.Indexes[len(n.Indexes)-1] >= n.BodyLen
 }
 
 func noteIdentity(o Observation) string {
@@ -75,10 +94,10 @@ func noteIdentity(o Observation) string {
 
 func matchesHost(o Observation) bool {
 	n := o.TodoNotes
-	if n.Count == 0 || len(n.HostIDs) == 0 {
-		return false
+	if n.Count == 0 {
+		return n.ReadableInHistory
 	}
-	return slices.Equal(dedupe(n.IDs), n.HostIDs)
+	return len(n.HostIDs) > 0 && slices.Equal(dedupe(n.IDs), n.HostIDs)
 }
 
 func dedupe(in []string) []string {

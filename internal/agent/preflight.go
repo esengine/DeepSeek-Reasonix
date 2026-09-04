@@ -33,10 +33,21 @@ func CompactionDeclineReason(err error) string {
 	return err.Error()
 }
 
-// modelVisibleMessages returns the provider-bound message list: a valid
-// projection plus any post-projection appends, otherwise the full canonical
-// transcript. LocalOnly stripping still happens in prepareSamplingRequest.
+// ModelVisibleMessages is the view a request carries: the history the host
+// would send plus the state it derives for that request. A caller reasoning
+// about history alone wants modelVisibleHistory instead.
+func (a *Agent) ModelVisibleMessages() []provider.Message { return a.modelVisibleMessages() }
+
+// LocalOnly stripping still happens in prepareSamplingRequest.
 func (a *Agent) modelVisibleMessages() []provider.Message {
+	return a.withTodoIdentityTail(a.modelVisibleHistory())
+}
+
+// modelVisibleHistory is the conversation half of that view: frozen body plus
+// canonical tail, and nothing derived per request. A fold plans on this, so
+// what the host adds at the tail can never become digest input or frozen
+// material.
+func (a *Agent) modelVisibleHistory() []provider.Message {
 	if a == nil || a.sess.conversation == nil {
 		return nil
 	}

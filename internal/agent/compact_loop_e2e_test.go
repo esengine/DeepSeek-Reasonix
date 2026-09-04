@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,15 +38,23 @@ type loopMock struct {
 	finalText string
 }
 
+// lastRole reports the role of the last message the model is being asked
+// about, skipping host state the request carries at the tail. That note is
+// derived per request and says nothing about whose turn it is, so a fixture
+// reading it as a user turn answers a round that never happened.
 func lastRole(msgs []json.RawMessage) string {
-	if len(msgs) == 0 {
-		return ""
+	for _, raw := range slices.Backward(msgs) {
+		var m struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(raw, &m)
+		if m.Role == "user" && strings.Contains(m.Content, "Host task state.") {
+			continue
+		}
+		return m.Role
 	}
-	var m struct {
-		Role string `json:"role"`
-	}
-	_ = json.Unmarshal(msgs[len(msgs)-1], &m)
-	return m.Role
+	return ""
 }
 
 func (m *loopMock) handler(w http.ResponseWriter, r *http.Request) {

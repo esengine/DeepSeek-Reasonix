@@ -49,10 +49,6 @@ type sessionRuntime struct {
 	// snapshot rather than letting reset blank it.
 	todoMu    sync.Mutex
 	todoState []evidence.TodoItem
-	// todoIdentityShown records whether the step ids in todoState have been put
-	// somewhere the model can read them. A fold takes the ids out of view while
-	// the host keeps holding them, and nothing else notices.
-	todoIdentityShown bool
 
 	// budgetNotice latches which context-pressure rung the model has already
 	// been told about. Plain fields: the run loop is the only reader/writer.
@@ -86,11 +82,6 @@ func (r *sessionRuntime) reset(s *Session) {
 	r.compactionMu.Unlock()
 	r.compaction.restart()
 	r.budgetNotice = budgetNoticeLatch{}
-	// The rebuilt list is the new conversation's; whether that conversation
-	// ever showed the model its ids is not something the old one can answer.
-	r.todoMu.Lock()
-	r.todoIdentityShown = false
-	r.todoMu.Unlock()
 }
 
 // session returns the bound conversation under the lock that guards the

@@ -138,6 +138,11 @@ func runConstruct(dir, arm string) error {
 		if err := ctrl.Run(ctx, fmt.Sprintf("%s %s: replace the task list.", marker(turn+1), retodoSentinel)); err != nil {
 			return fmt.Errorf("retodo turn: %w", err)
 		}
+		// Grow well past the rewrite so the fold takes the new ids out of view.
+		// A scenario that leaves them readable asks nothing of the note.
+		if _, err = runTurns(ctx, ctrl, turn+1, probeTurns); err != nil {
+			return err
+		}
 		if err := ctrl.Compact(ctx, "Fold again, after the identity moved."); err != nil {
 			return fmt.Errorf("refold: %w", err)
 		}

@@ -1,8 +1,8 @@
 package agent
 
-// Re-projection of the canonical task list's identities. The list itself never
-// rides in the prompt, so a fold can take the step ids out of the model's view
-// while the host still holds them — and complete_step goes on asking for one.
+// Re-projection of the canonical task list's identities: a fold can take the
+// step ids out of view while the host still holds them, and complete_step goes
+// on asking for one. Derived per request, stored nowhere.
 
 import (
 	"fmt"
@@ -12,20 +12,6 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 )
-
-// noteTodoIdentityShown marks the canonical step ids as readable by the model.
-func (a *Agent) noteTodoIdentityShown() {
-	a.sess.todoMu.Lock()
-	a.sess.todoIdentityShown = true
-	a.sess.todoMu.Unlock()
-}
-
-// noteTodoIdentityLost marks them unreadable after a provider-visible rewrite.
-func (a *Agent) noteTodoIdentityLost() {
-	a.sess.todoMu.Lock()
-	a.sess.todoIdentityShown = false
-	a.sess.todoMu.Unlock()
-}
 
 // todoIdentityNote renders the ids a sign-off must cite. It states whose list
 // this is: an unattributed task list reads as something the model itself sent.
@@ -38,34 +24,18 @@ func todoIdentityNote(todos []evidence.TodoItem) string {
 	return b.String()
 }
 
-// todoIdentityProjection is the turn-tail note owed when the host holds step ids
-// the conversation no longer shows. It re-projects the identity, not the list:
-// the canonical state stays out of the cache-stable prefix, and a model that
-// can only see ordinals cites ordinals — which go stale on the next insertion.
-func (a *Agent) todoIdentityProjection() string {
-	todos := a.CanonicalTodoState()
-	a.sess.todoMu.Lock()
-	shown := a.sess.todoIdentityShown
-	a.sess.todoMu.Unlock()
-	if shown || len(evidence.TodoStepIDs(todos)) == 0 {
-		return ""
-	}
-	a.noteTodoIdentityShown()
-	return todoIdentityNote(todos)
-}
-
-// withTodoIdentityProjection carries the host's step ids into a fold's own
-// output, because the fold is what removes the model's last copy of them: the
-// request it feeds is frozen before the next round exists, so a sign-off sent
-// in that round could only cite an ordinal. No turn preferences ride along —
-// a projection is persisted and reused.
-func (a *Agent) withTodoIdentityProjection(projected []provider.Message) []provider.Message {
+// withTodoIdentityTail appends the host's step ids to a request when that
+// request cannot already read them. Owed is recomputed from the ids the host
+// holds now against the history this request actually carries — a remembered
+// "already shown" answers for some earlier request, not this one, and a fold
+// between the two is exactly what takes the ids away.
+func (a *Agent) withTodoIdentityTail(visible []provider.Message) []provider.Message {
 	todos := a.CanonicalTodoState()
 	ids := evidence.TodoStepIDs(todos)
-	if len(ids) == 0 || todoIdentitiesVisible(projected, ids) {
-		return projected
+	if len(ids) == 0 || todoIdentitiesVisible(visible, ids) {
+		return visible
 	}
-	return append(projected, provider.Message{Role: provider.RoleUser, Content: todoIdentityNote(todos)})
+	return append(visible, provider.Message{Role: provider.RoleUser, Content: todoIdentityNote(todos)})
 }
 
 // todoIdentitiesVisible reports whether every id can still be read in the view

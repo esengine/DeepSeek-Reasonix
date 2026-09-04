@@ -55,7 +55,7 @@ provider call*.
 | `tail-truncate` | fold, one more turn, die | `SaveRewrite` drops everything past the fold | the same, by removal |
 | `tail-rewind` | fold, one more turn, rewind, die | none | the same truncation through the rewind a person drives |
 | `covered-rewind` | fold, one more turn, rewind below the fold, die | none | negative control for making that rewind conditional |
-| `todo-identity` | identity A, fold, grow, identity B, fold again, die | none | does the host's step-identity note stay single, current, and on the tail? |
+| `todo-identity` | identity A, fold, grow, identity B, grow, fold again, die | none | does the host's step-identity note stay single, current, and on the tail? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -108,10 +108,16 @@ of it rather than whether a note exists: exactly one note reaches the model, it
 rides the tail, and it names the ids the host holds now.
 
 The scenario moves identity while a fold sits between the model and it — write
-a list, fold, grow, rewrite the list, fold again — because one run then
-separates placement from duplication from staleness. The rewrite keeps the
+a list, fold, grow, rewrite the list, grow again, fold again — because one run
+then separates placement from duplication from staleness. The rewrite keeps the
 in_progress item and replaces the pending work: the host refuses to drop an
 item in flight, so that is what a list rewrite actually looks like.
+
+The second growth is not padding. A fold that leaves the new ids readable asks
+the note for nothing, and the arm would pass without ever exercising it — so
+the gate reports whether the ids were still readable, and expects no note when
+they were. Otherwise the migration could turn into an unconditional append and
+every row would still be green.
 
 ## Verdicts
 
