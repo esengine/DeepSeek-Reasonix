@@ -27,7 +27,7 @@ type arm struct {
 // already gone at the boundary for an unrelated reason, and the lever's own
 // effect cannot be read out of the result.
 func appendsAfterFold(name string) bool {
-	return name != "exact" && name != armRefoldIntoBody && !graphArm(name)
+	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !schedulerWaitArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -99,6 +99,10 @@ func arms() []arm {
 		{name: armGraphCompleted, asks: "a fan-out whose items had all settled when the process died"},
 		{name: armGraphRunning, asks: "a fan-out with a child still executing when the process died"},
 		{name: armGraphMixed, asks: "a fan-out holding completed, failed, adopted and running at once"},
+		{name: armWaitSlots, asks: "an item the session's total ceiling refused"},
+		{name: armWaitWriters, asks: "an item the writer ceiling refused, with total capacity free"},
+		{name: armWaitClaim, asks: "an item a path conflict refused, with both ceilings free"},
+		{name: armWaitTransition, asks: "what a reported wait cause does when the thing it named stops holding the item"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

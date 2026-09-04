@@ -144,9 +144,14 @@ func runConstruct(dir, arm string) error {
 	if err := root.create(); err != nil {
 		return err
 	}
+	if total, writers := schedulerLimits(arm); total > 0 {
+		if err := root.writeProjectConfig(total, writers); err != nil {
+			return fmt.Errorf("project config: %w", err)
+		}
+	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, arm, sink)
+	ctrl, prov, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -169,6 +174,12 @@ func runConstruct(dir, arm string) error {
 	}
 	if arm == armOpenDecision || successorArm(arm) {
 		return openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
+	}
+	if schedulerWaitArm(arm) {
+		if err := runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn); err != nil {
+			return err
+		}
+		return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root))
 	}
 	if graphArm(arm) {
 		if err := runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn); err != nil {
@@ -238,7 +249,7 @@ func runSuccessor(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, arm, sink)
+	ctrl, _, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -271,7 +282,7 @@ func runResume(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, arm, sink)
+	ctrl, _, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}

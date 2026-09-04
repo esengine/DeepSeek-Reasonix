@@ -38,6 +38,15 @@ func (r armRoot) create() error {
 	return nil
 }
 
+// writeProjectConfig puts a project config beside the workspace, which is where
+// a person configures these ceilings. The scheduler arms need them small enough
+// to reach a specific refusal, and a poked field would prove nothing about the
+// judgement production makes.
+func (r armRoot) writeProjectConfig(total, writers int) error {
+	body := fmt.Sprintf("[agent]\nmax_subagent_concurrency = %d\nmax_parallel_writers = %d\n", total, writers)
+	return os.WriteFile(filepath.Join(r.Workspace, "reasonix.toml"), []byte(body), 0o644)
+}
+
 // requireFresh refuses a root a previous run left behind. A reused root is how
 // a lever's effect ends up already present in the construct phase, which reads
 // as "the lever changed nothing" — a false negative that looks like a result.
@@ -62,6 +71,10 @@ type graphSink struct {
 	mu     sync.Mutex
 	graph  agentgraph.Graph
 	deltas int
+	// waits is every wait cause published per node, in order. The fold keeps
+	// only the latest, which cannot say whether a cause was reported once or
+	// replaced — and that is exactly what the transition arm asks.
+	waits map[string][]string
 }
 
 func (s *graphSink) Emit(e event.Event) {
@@ -71,6 +84,15 @@ func (s *graphSink) Emit(e event.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deltas++
+	for _, n := range e.Graph.Nodes {
+		if n.Wait == "" {
+			continue
+		}
+		if s.waits == nil {
+			s.waits = map[string][]string{}
+		}
+		s.waits[n.ID] = append(s.waits[n.ID], string(n.Wait))
+	}
 	s.graph.Apply(*e.Graph)
 }
 
@@ -80,10 +102,22 @@ func (s *graphSink) snapshot() (agentgraph.Graph, int) {
 	return s.graph, s.deltas
 }
 
+// waitSeries is every cause published for one node, in publication order.
+func (s *graphSink) waitSeries() map[string][]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string][]string{}
+	for id, seq := range s.waits {
+		out[id] = append([]string(nil), seq...)
+	}
+	return out
+}
+
 // buildRuntime assembles a real runtime bound to this arm's roots. Everything a
 // frontend would supply is supplied; only the provider is scripted, so the
 // probe never depends on a network or a key.
-func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink) (*control.Controller, error) {
+func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink) (*control.Controller, *scripted, error) {
+	prov := newScripted(arm)
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Version:              "runtime-resume-probe",
 		Model:                probeModelRef,
@@ -91,15 +125,15 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 		WorkspaceRoot:        root.Workspace,
 		Home:                 root.Home,
 		SessionDir:           root.Sessions,
-		ProviderResolver:     newResolver(arm),
+		ProviderResolver:     resolverFor(prov),
 		Stderr:               io.Discard,
 		HeadlessApprovalMode: approvalMode(arm),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ctrl.ApplyHeadlessApprovalMode(approvalMode(arm))
-	return ctrl, nil
+	return ctrl, prov, nil
 }
 
 // approvalMode is the gate this arm needs. Everything else runs denied, the
@@ -107,7 +141,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // denied gate the dispatch is refused before any child starts and the arm
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
-	if graphArm(arm) {
+	if graphArm(arm) || schedulerWaitArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"

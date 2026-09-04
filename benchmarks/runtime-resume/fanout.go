@@ -53,6 +53,29 @@ const (
 	fleetWarmSentinel  = "PROBE-FLEET-WARM"
 	fleetMixedSentinel = "PROBE-FLEET-MIXED"
 	fleetPairSentinel  = "PROBE-FLEET-PAIR"
+	// The scheduler arms. Holder fills a ceiling and never ends; refused asks
+	// for admission the scheduler must deny. Two sentinels rather than one
+	// because the claim and transition arms need the holder to be already
+	// admitted before the second fleet is dispatched.
+	fleetHolderSentinel  = "PROBE-FLEET-HOLDER"
+	fleetRefusedSentinel = "PROBE-FLEET-REFUSED"
+)
+
+// childHold is a child that reports holding its slot before it blocks, so a
+// later fleet can be dispatched knowing the ceiling is already occupied. Timing
+// it any other way races the scheduler.
+const (
+	childHold = "PROBE-CHILD-HOLD"
+	// childRelease finishes only when the arm frees it, which is how capacity
+	// is returned while a refusal is still standing.
+	childRelease = "PROBE-CHILD-RELEASE"
+)
+
+// probeClaimPath is the write path the claim arm overlaps. The refused writer
+// asks for a path inside it, which is a conflict no ceiling change releases.
+const (
+	probeClaimPath  = "probe-claim"
+	probeClaimInner = "probe-claim/inner"
 )
 
 // subagentRefPattern finds the references an earlier fleet's aggregate reported.
@@ -63,8 +86,18 @@ var subagentRefPattern = regexp.MustCompile(`sa_[A-Za-z0-9_-]+`)
 // childScript answers one delegated run. Hanging is expressed as a context read
 // so the child holds its scheduler slot until the process dies — a sleep long
 // enough to look the same would still be a race against the probe's deadline.
-func childScript(ctx context.Context, sentinel string) []provider.Chunk {
+func (s *scripted) childScript(ctx context.Context, sentinel string) []provider.Chunk {
 	switch sentinel {
+	case childHold:
+		// Reaching a provider call means the slot is already held, which is the
+		// only moment a later fleet can be dispatched against a full ceiling
+		// without racing it.
+		s.holding.Do(func() { close(s.held) })
+		<-ctx.Done()
+		return nil
+	case childRelease:
+		<-s.release
+		return append(text("Child released."), done())
 	case childHang:
 		<-ctx.Done()
 		return nil
@@ -92,7 +125,7 @@ func askedInPrompt(req provider.Request, sentinel string) bool {
 // childSentinel reports which child script this request is, empty when the
 // request is a parent turn.
 func childSentinel(req provider.Request) string {
-	for _, sentinel := range []string{childDone, childHang, childFail} {
+	for _, sentinel := range []string{childDone, childHang, childFail, childHold, childRelease} {
 		if askedInPrompt(req, sentinel) {
 			return sentinel
 		}
@@ -165,6 +198,9 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 	case askedInPrompt(req, fleetWarmSentinel) && !s.warmed.Swap(true):
 		return append(warmFleet(), done()), true
 	case askedInPrompt(req, fleetPairSentinel) && !s.paired.Swap(true):
+		if s.arm == armWaitSlots {
+			return append(slotsFleet(), done()), true
+		}
 		second := childDone
 		if s.arm == armGraphRunning {
 			second = childHang
@@ -172,8 +208,72 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 		return append(pairFleet(second), done()), true
 	case askedInPrompt(req, fleetMixedSentinel) && !s.mixed.Swap(true):
 		return append(mixedFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, fleetHolderSentinel) && !s.holder.Swap(true):
+		return append(holderFleet(s.arm), done()), true
+	case askedInPrompt(req, fleetRefusedSentinel) && !s.refused.Swap(true):
+		// The holder's own child says when its ceiling is occupied. Dispatching
+		// before that lets the refused item win the race and start.
+		<-s.held
+		return append(refusedFleet(s.arm), done()), true
 	}
 	return nil, false
+}
+
+// holderFleet occupies the ceiling this arm measures. The slots arm needs no
+// holder — its refused item is in the same fleet as the runs that fill the
+// ceiling — so only the arms that need one dispatch it in the background.
+func holderFleet(arm string) []provider.Chunk {
+	tasks := []map[string]any{
+		{"id": "h1", "prompt": childHold + " holder", "description": "holds the ceiling", "write_paths": []string{probeClaimPath}},
+		{"id": "h2", "prompt": childHang + " filler", "description": "filler", "read_only": true},
+	}
+	if arm == armWaitTransition {
+		// The second run is what the arm later releases: freeing total capacity
+		// while the writer ceiling stays full is how the blocker changes.
+		tasks[1] = map[string]any{"id": "h2", "prompt": childRelease + " releasable", "description": "released mid-wait", "read_only": true}
+	}
+	return backgroundFleetCall("probe_fleet_holder", tasks)
+}
+
+// refusedFleet asks for admission the scheduler must deny, with every check
+// above this arm's cause already cleared.
+func refusedFleet(arm string) []provider.Chunk {
+	refused := map[string]any{"id": "r1", "prompt": childHang + " refused", "description": "refused admission"}
+	switch arm {
+	case armWaitWriters:
+		// Disjoint from the holder's path, so only the writer ceiling can
+		// refuse it.
+		refused["write_paths"] = []string{"probe-writers-own"}
+	case armWaitClaim:
+		refused["write_paths"] = []string{probeClaimInner}
+	default:
+		refused["write_paths"] = []string{"probe-transition-own"}
+	}
+	return fleetCall("probe_fleet_refused", []map[string]any{
+		refused,
+		{"id": "r2", "prompt": childHang + " sibling", "description": "sibling", "read_only": true},
+	})
+}
+
+// slotsFleet fills the total ceiling and asks for one more, all read-only: a
+// reader clears every writer check by not being a writer.
+func slotsFleet() []provider.Chunk {
+	return fleetCall("probe_fleet_refused", []map[string]any{
+		{"id": "s1", "prompt": childHang + " one", "description": "fills a slot", "read_only": true},
+		{"id": "s2", "prompt": childHang + " two", "description": "fills a slot", "read_only": true},
+		{"id": "s3", "prompt": childHang + " three", "description": "refused admission", "read_only": true},
+	})
+}
+
+// backgroundFleetCall dispatches a fleet that returns a job id at once. The
+// holder has to keep holding while a later fleet is dispatched, which a
+// foreground call cannot do: it does not return until every item has settled.
+func backgroundFleetCall(id string, tasks []map[string]any) []provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"tasks": tasks, "run_in_background": true})
+	return []provider.Chunk{{
+		Type:     provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{ID: id, Name: "fleet", Arguments: string(args)},
+	}}
 }
 
 // adoptableRef picks a reference the warm-up fleet reported. It reads the

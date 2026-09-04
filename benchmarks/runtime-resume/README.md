@@ -63,6 +63,10 @@ provider call*.
 | `graph-completed` | a fan-out whose items all settled, then die | none | is a finished fan-out's provenance durable at all? — and does a settled item stay settled? |
 | `graph-running` | a fan-out with one item still executing, then die | none | what does a restart believe about work whose owner is gone? |
 | `graph-mixed` | completed, failed, adopted and running at once, then die | none | the same, with every reachable state and both grants in one death |
+| `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
+| `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
+| `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
+| `wait-transition` | refuse on slots, then free the slots, die | ceilings | does a reported cause track the blocker, or the moment it queued? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -322,3 +326,37 @@ exactly like one its upstream never released: both are `before-start` with an
 upstream named. Separating them needs a durable record of entering the queue,
 and the arm that would prove it worth having — ready, but never granted a slot —
 does not exist yet.
+
+## The scheduler-wait arms
+
+Four arms ask a narrower question than the fan-out ones. Classification is
+already right — `STARTED` settled that — so these ask whether the host can still
+say **why** a ready item never started.
+
+They are separate arms because `canStartLocked` decides in a fixed order:
+slots, then writers, then claim. An arm that let an earlier check fire would
+report that refusal as the later one, so each clears every check above the one
+it measures — the slots arm refuses a reader, which is not a writer at all; the
+writers arm leaves total capacity free and gives its two writers disjoint
+paths; the claim arm leaves both ceilings free. The ceilings come from a project
+`reasonix.toml`, which is where a person sets them, rather than from a poked
+field.
+
+`wait-claim` needs two fan-outs. A single fleet's preflight refuses concurrent
+writers whose claims overlap, so the holder is dispatched as a background fleet
+and the refused writer comes from a later one. Both it and `wait-transition`
+wait on a signal the holder's own child sends once its slot is granted:
+dispatching earlier lets the refused item win the race and start.
+
+Measured, all four: the refusal is reached in isolation, the cause is reported
+exactly once, the restart still classifies the item `interrupted-before-start`
+correctly — and **which ceiling refused it is lost**. No artifact carries it,
+and no later state can re-derive it, because the constraint is gone by the time
+anyone asks.
+
+`wait-transition` answers what the cause means. It frees the ceiling the
+refusal named while the item stays queued, held back by a different one, and
+the graph still reports the first: one report, not two. So `WaitCause` is the
+cause that **queued** the request, not the one holding it now — which is why a
+durable record of it should be named for entering the queue rather than for
+waiting.

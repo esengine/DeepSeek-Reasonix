@@ -8,10 +8,17 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"reasonix/internal/provider"
 )
+
+// newScripted builds the provider with its synchronisation channels open. The
+// scheduler arms coordinate through them; every other arm never reads them.
+func newScripted(arm string) *scripted {
+	return &scripted{arm: arm, held: make(chan struct{}), release: make(chan struct{})}
+}
 
 // probeModelRef is both the catalog ref and the model name boot is given, so
 // syntheticEntryFromResolver matches it without touching any config file.
@@ -40,6 +47,14 @@ type scripted struct {
 	warmed atomic.Bool
 	paired atomic.Bool
 	mixed  atomic.Bool
+	// The scheduler arms dispatch two fleets and must not race them. held is
+	// closed by the holder's own child, which only runs once its slot is
+	// granted; release lets the arm free capacity while a refusal stands.
+	holder  atomic.Bool
+	refused atomic.Bool
+	holding sync.Once
+	held    chan struct{}
+	release chan struct{}
 }
 
 func (s *scripted) Name() string { return "probe" }
@@ -67,7 +82,7 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	// argument, so any later branch that scanned the conversation would make
 	// the parent answer as one of its own children.
 	if sentinel := childSentinel(req); sentinel != "" {
-		return childScript(ctx, sentinel)
+		return s.childScript(ctx, sentinel)
 	}
 	if chunks, ok := s.fanOut(req); ok {
 		return chunks
@@ -214,13 +229,13 @@ var summaryBody = strings.Join([]string{
 	"Establish host state, exit, and observe what a new process can still prove.",
 }, "\n")
 
-func newResolver(arm string) *provider.StaticResolver {
+func resolverFor(prov *scripted) *provider.StaticResolver {
 	return &provider.StaticResolver{
 		Descriptors: []provider.Descriptor{{
 			Ref: probeModelRef, DisplayName: "probe", Model: "scripted",
 			ContextWindow: 128_000, Tools: true,
 		}},
-		Providers: map[string]provider.Provider{probeModelRef: &scripted{arm: arm}},
+		Providers: map[string]provider.Provider{probeModelRef: prov},
 	}
 }
 

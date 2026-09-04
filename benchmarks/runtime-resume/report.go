@@ -97,6 +97,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 		if len(before.Decisions) == 0 {
 			res.Invalid = "no decision was open when the process died, so nothing was interrupted"
 		}
+	case schedulerWaitArm(a.name):
+		res.Rows = append(res.Rows, schedulerWaitRows(a.name, before, after)...)
+		res.Invalid = schedulerArmInvalid(a.name, before)
 	case graphArm(a.name):
 		res.Rows = append(res.Rows, graphRows(before, after)...)
 		res.Invalid = graphArmInvalid(a.name, before)

@@ -67,8 +67,17 @@ type Observation struct {
 	InterruptedExecutions []execjournal.Entry `json:"interrupted_executions,omitempty"`
 	// ModelSeesInterruptedExecution counts the blocks the next request carries
 	// about them, which is a different surface from the fact behind them.
-	ModelSeesInterruptedExecution int           `json:"model_sees_interrupted_execution"`
-	Artifacts                     []ArtifactObs `json:"artifacts"`
+	ModelSeesInterruptedExecution int `json:"model_sees_interrupted_execution"`
+	// WaitCauses counts the refusals the graph carries, and WaitSeries keeps
+	// each node's causes in publication order. The fold keeps only the latest,
+	// which cannot say whether a cause was reported once or replaced.
+	WaitCauses map[string]int      `json:"wait_causes,omitempty"`
+	WaitSeries map[string][]string `json:"wait_series,omitempty"`
+	// SettledWorkers and QueuedWorkers are the transition arm's evidence that
+	// capacity was actually freed while a refusal still stood.
+	SettledWorkers int           `json:"settled_workers"`
+	QueuedWorkers  []string      `json:"queued_workers,omitempty"`
+	Artifacts      []ArtifactObs `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -301,6 +310,10 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		// about it are read off the request rather than off the stored view.
 		TodoNotes:             todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
 		Graph:                 graphObs(graph, deltas),
+		WaitCauses:            waitCauseCounts(graph),
+		WaitSeries:            sink.waitSeries(),
+		SettledWorkers:        settledWorkers(graph),
+		QueuedWorkers:         queuedWorkers(graph),
 		Children:              childrenObs(root, path),
 		FanOutTurn:            fanOutTurnRecorded(history),
 		Executions:            control.ExecutionHistory(path),
@@ -423,6 +436,34 @@ func contents(msgs []provider.Message) []string {
 	for _, m := range msgs {
 		out = append(out, m.Content)
 	}
+	return out
+}
+
+// waitCauseCounts is how many nodes the graph shows under each refusal. It
+// counts nodes rather than reports: a node keeps its cause after it starts, so
+// this answers what was refused, not what is refused now.
+func waitCauseCounts(g agentgraph.Graph) map[string]int {
+	out := map[string]int{}
+	for _, n := range g.Nodes {
+		if n.Wait != "" {
+			out[string(n.Wait)]++
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// queuedWorkers are the items still refused admission, in a stable order.
+func queuedWorkers(g agentgraph.Graph) []string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n.Kind != agentgraph.KindGroup && n.State == agentgraph.StateQueued {
+			out = append(out, n.ID)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
