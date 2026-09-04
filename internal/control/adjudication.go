@@ -31,6 +31,22 @@ type barrierRecord struct {
 	At      time.Time `json:"at"`
 }
 
+// AdjudicationEntry is one barrier's whole story, folded from the journal: it
+// was opened, and either it ended or it did not. Disposition is empty while a
+// barrier is still open — whether that means waiting or interrupted depends on
+// this process, not on the record.
+type AdjudicationEntry struct {
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Summary     string    `json:"summary,omitempty"`
+	Disposition string    `json:"disposition,omitempty"`
+	OpenedAt    time.Time `json:"openedAt"`
+	EndedAt     time.Time `json:"endedAt,omitempty"`
+}
+
+// Open reports whether nothing has ended this barrier yet.
+func (e AdjudicationEntry) Open() bool { return e.Disposition == "" }
+
 // InterruptedAdjudication is a barrier this process found open and did not
 // open itself. It is not a Decision: no owner is waiting on an answer, and
 // offering one as answerable is how a lost obligation becomes a ghost.
@@ -87,25 +103,23 @@ func (c *Controller) InterruptedAdjudications() []InterruptedAdjudication {
 	if c == nil {
 		return nil
 	}
-	open := loadOpenBarriers(c.SessionPath())
-	if len(open) == 0 {
-		return nil
-	}
 	live := c.approval.liveBarrierIDs()
-	out := make([]InterruptedAdjudication, 0, len(open))
-	for _, rec := range open {
-		if live[rec.Barrier] {
+	var out []InterruptedAdjudication
+	for _, e := range AdjudicationHistory(c.SessionPath()) {
+		if !e.Open() || live[e.ID] {
 			continue
 		}
-		out = append(out, InterruptedAdjudication{ID: rec.Barrier, Kind: rec.Kind, Summary: rec.Summary})
+		out = append(out, InterruptedAdjudication{ID: e.ID, Kind: e.Kind, Summary: e.Summary})
 	}
 	return out
 }
 
-// loadOpenBarriers folds the log: a barrier is open until a later record
-// closes it. Unreadable or truncated lines are skipped rather than failing the
-// read — a torn tail is exactly what a crash leaves.
-func loadOpenBarriers(sessionPath string) []barrierRecord {
+// AdjudicationHistory folds the journal in the order barriers were opened.
+// Only an open record starts an entry, so a terminal one alone invents no
+// history; the first terminal wins, so a duplicate cannot restate a settled
+// barrier; an unreadable line is skipped, because a torn tail is what a crash
+// leaves.
+func AdjudicationHistory(sessionPath string) []AdjudicationEntry {
 	path := store.SessionAdjudication(sessionPath)
 	if path == "" {
 		return nil
@@ -115,8 +129,8 @@ func loadOpenBarriers(sessionPath string) []barrierRecord {
 		return nil
 	}
 	defer f.Close()
-	opened := map[string]barrierRecord{}
-	var order []string
+	index := map[string]int{}
+	var out []AdjudicationEntry
 	scan := bufio.NewScanner(f)
 	scan.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scan.Scan() {
@@ -124,20 +138,21 @@ func loadOpenBarriers(sessionPath string) []barrierRecord {
 		if err := json.Unmarshal(scan.Bytes(), &rec); err != nil || rec.Barrier == "" {
 			continue
 		}
+		at, seen := index[rec.Barrier]
 		if rec.Status == barrierOpen {
-			if _, seen := opened[rec.Barrier]; !seen {
-				order = append(order, rec.Barrier)
+			if seen {
+				continue
 			}
-			opened[rec.Barrier] = rec
+			index[rec.Barrier] = len(out)
+			out = append(out, AdjudicationEntry{
+				ID: rec.Barrier, Kind: rec.Kind, Summary: rec.Summary, OpenedAt: rec.At,
+			})
 			continue
 		}
-		delete(opened, rec.Barrier)
-	}
-	out := make([]barrierRecord, 0, len(opened))
-	for _, id := range order {
-		if rec, ok := opened[id]; ok {
-			out = append(out, rec)
+		if !seen || !out[at].Open() {
+			continue
 		}
+		out[at].Disposition, out[at].EndedAt = rec.Status, rec.At
 	}
 	return out
 }

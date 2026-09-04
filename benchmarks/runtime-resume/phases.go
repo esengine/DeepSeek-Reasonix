@@ -167,7 +167,7 @@ func runConstruct(dir, arm string) error {
 	if err := ctrl.Compact(ctx, "Fold the probe turn."); err != nil {
 		return fmt.Errorf("compact: %w", err)
 	}
-	if arm == armOpenDecision {
+	if arm == armOpenDecision || successorArm(arm) {
 		return openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
 	}
 	if arm == armTodoIdentity {
@@ -212,6 +212,45 @@ func runConstruct(dir, arm string) error {
 		}
 	}
 	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root.Workspace))
+}
+
+// successorArm reports whether this arm starts from an interrupted barrier.
+func successorArm(arm string) bool {
+	_, ok := successorTurn(arm)
+	return ok
+}
+
+// runSuccessor is the middle process: it inherits the interruption and does
+// what a person would do next — nothing, unrelated work, or something that
+// reads like an answer to the dead question. It runs a model on purpose; the
+// phase that judges what the host knows still does not.
+func runSuccessor(dir, arm string) error {
+	root := rootFor(dir)
+	before, err := readObservation(root, "construct")
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	sink := &graphSink{}
+	ctrl, err := buildRuntime(ctx, root, sink)
+	if err != nil {
+		return fmt.Errorf("build: %w", err)
+	}
+	defer ctrl.Close()
+	bootSystem := bootSystemText(ctrl)
+	session, err := agent.LoadSession(before.SessionPath)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	if err := ctrl.Resume(session, before.SessionPath); err != nil {
+		return fmt.Errorf("resume: %w", err)
+	}
+	if turn, _ := successorTurn(arm); turn != "" {
+		if err := ctrl.Run(ctx, turn); err != nil {
+			return fmt.Errorf("successor turn: %w", err)
+		}
+	}
+	return writeObservation(root, capture("successor", arm, bootSystem, ctrl, sink, root.Workspace))
 }
 
 // runResume boots a second time against the same roots and reads host state.

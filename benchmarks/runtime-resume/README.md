@@ -57,6 +57,9 @@ provider call*.
 | `covered-rewind` | fold, one more turn, rewind below the fold, die | none | negative control for making that rewind conditional |
 | `todo-identity` | identity A, fold, grow, identity B, grow, fold again, die | none | does the host's step-identity note stay single, current, and on the tail? |
 | `open-decision` | ask a question, park the turn on it, kill the process | none | what does a restart inherit from a turn that died mid-decision? |
+| `interrupted-idle` | that, then a restart that does nothing | none | does the interruption stay active with no work to settle it? |
+| `interrupted-unrelated` | that, then a turn about something else | none | does it stick to requests that have nothing to do with it? |
+| `interrupted-answered` | that, then a turn that reads like an answer to it | none | does context carry without execution continuing? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -118,6 +121,19 @@ survives is a design choice; whether what it blocked stayed blocked is not.
 
 The process exits rather than shutting down: a clean close resolves or cancels
 the question, which is the one thing a process dying mid-decision does not do.
+
+## The successor arms
+
+Three arms share `open-decision`'s ending and differ only in what the next
+process does. They need a middle phase that runs a model — nothing else can
+represent a person carrying on — so the discipline shifts rather than bends:
+the phase that judges what the host knows is still the model-free one after it.
+
+The `interrupted-answered` arm is the end-to-end reading worth naming. A turn
+that reads like an answer to the dead question gets the interruption as
+context, and the write that question was holding back still does not run.
+Context continuity and execution continuation are different things, and this is
+where the difference is measured rather than argued.
 
 ## The todo identity gate
 

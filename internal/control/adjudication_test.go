@@ -1,6 +1,7 @@
 package control
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,8 +45,8 @@ func TestBarrierIsDurableBeforeTheQuestionIsAnswerable(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if open := loadOpenBarriers(c.SessionPath()); len(open) != 1 {
-		t.Fatalf("open barriers on disk = %d, want the question to be recorded before it is answerable", len(open))
+	if h := AdjudicationHistory(c.SessionPath()); len(h) != 1 || !h[0].Open() {
+		t.Fatalf("journal = %+v, want the question recorded before it is answerable", h)
 	}
 	// A live owner is waiting on it, so it is not an interrupted obligation.
 	if got := c.InterruptedAdjudications(); len(got) != 0 {
@@ -73,8 +74,9 @@ func TestAnsweringClosesTheBarrier(t *testing.T) {
 	}
 	c.AnswerQuestion(id, []event.AskAnswer{{QuestionID: "", Selected: []string{"Below"}}})
 	<-done
-	if open := loadOpenBarriers(c.SessionPath()); len(open) != 0 {
-		t.Fatalf("barrier still open after the answer: %+v", open)
+	h := AdjudicationHistory(c.SessionPath())
+	if len(h) != 1 || h[0].Disposition != barrierResolved {
+		t.Fatalf("journal = %+v, want the barrier recorded as resolved", h)
 	}
 }
 
@@ -173,5 +175,74 @@ func TestInterruptionContextOffersNoHandle(t *testing.T) {
 	}
 	if len(next.Decisions()) != 0 {
 		t.Fatal("an interrupted barrier reached the answerable decision surface")
+	}
+}
+
+// The fold's rules, stated as the cases a crash-written journal can hold. Each
+// one is a way a naive reader would invent history the host never recorded.
+func TestAdjudicationHistoryFoldRules(t *testing.T) {
+	dir := testenv.TempDir(t)
+	write := func(name string, recs ...barrierRecord) string {
+		path := filepath.Join(dir, name+".jsonl")
+		for _, rec := range recs {
+			if err := appendBarrier(path, rec); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return path
+	}
+	open := func(id string) barrierRecord {
+		return barrierRecord{Barrier: id, Kind: "ask", Status: barrierOpen, Summary: "Which side?"}
+	}
+	end := func(id, status string) barrierRecord {
+		return barrierRecord{Barrier: id, Status: status}
+	}
+
+	cases := []struct {
+		name  string
+		recs  []barrierRecord
+		want  []string // disposition per entry, "" for open
+		count int
+	}{
+		{"open only stays open", []barrierRecord{open("1")}, []string{""}, 1},
+		{"resolved is terminal", []barrierRecord{open("1"), end("1", barrierResolved)}, []string{barrierResolved}, 1},
+		{"cancelled is terminal", []barrierRecord{open("1"), end("1", barrierCancelled)}, []string{barrierCancelled}, 1},
+		{"the first terminal wins", []barrierRecord{open("1"), end("1", barrierResolved), end("1", barrierCancelled)}, []string{barrierResolved}, 1},
+		{"a terminal alone invents nothing", []barrierRecord{end("9", barrierResolved)}, nil, 0},
+		{"a repeated open does not restart one", []barrierRecord{open("1"), open("1")}, []string{""}, 1},
+		{"a reopen after a terminal is refused", []barrierRecord{open("1"), end("1", barrierResolved), open("1")}, []string{barrierResolved}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AdjudicationHistory(write(tc.name, tc.recs...))
+			if len(got) != tc.count {
+				t.Fatalf("entries = %+v, want %d", got, tc.count)
+			}
+			for i, want := range tc.want {
+				if got[i].Disposition != want {
+					t.Fatalf("entry %d disposition = %q, want %q", i, got[i].Disposition, want)
+				}
+			}
+		})
+	}
+}
+
+// A torn tail is what a crash leaves; the fold reads past it rather than
+// refusing the whole journal, and what came before still counts.
+func TestAdjudicationHistorySurvivesATornTail(t *testing.T) {
+	session := filepath.Join(testenv.TempDir(t), "torn.jsonl")
+	if err := appendBarrier(session, barrierRecord{Barrier: "1", Kind: "ask", Status: barrierOpen}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(store.SessionAdjudication(session), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"barrier":"2","stat`); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if h := AdjudicationHistory(session); len(h) != 1 || h[0].ID != "1" || !h[0].Open() {
+		t.Fatalf("journal = %+v, want the intact record", h)
 	}
 }

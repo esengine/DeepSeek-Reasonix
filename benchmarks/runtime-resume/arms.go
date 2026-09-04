@@ -59,7 +59,27 @@ const (
 	// armOpenDecision dies while a question is open. It asks what the host
 	// believes afterwards, not whether one particular card comes back.
 	armOpenDecision = "open-decision"
+	// The three successors to an interrupted barrier. Each starts where
+	// open-decision ends and differs only in what the next process does, which
+	// is the whole question: when does a recorded interruption stop being the
+	// context every later request carries?
+	armIdleRestart   = "interrupted-idle"
+	armUnrelatedTurn = "interrupted-unrelated"
+	armDirectAnswer  = "interrupted-answered"
 )
+
+// successorTurn is what the middle process says, empty when it only restarts.
+func successorTurn(arm string) (string, bool) {
+	switch arm {
+	case armIdleRestart:
+		return "", true
+	case armUnrelatedTurn:
+		return marker(120) + " List the files you would look at first.", true
+	case armDirectAnswer:
+		return marker(121) + " Yes, go ahead with that — take the side below the fold.", true
+	}
+	return "", false
+}
 
 func arms() []arm {
 	return []arm{
@@ -73,6 +93,9 @@ func arms() []arm {
 		{name: armCoveredRewind, asks: "a rewind that lands below the fold boundary"},
 		{name: armTodoIdentity, asks: "host step identity moved across two folds and a live tail"},
 		{name: armOpenDecision, asks: "the process died while a decision was open"},
+		{name: armIdleRestart, asks: "an interrupted barrier, and nobody does anything"},
+		{name: armUnrelatedTurn, asks: "an interrupted barrier, then a turn about something else"},
+		{name: armDirectAnswer, asks: "an interrupted barrier, then a turn that reads like an answer to it"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }
@@ -216,6 +239,11 @@ func runArm(self, work string, a arm) (armResult, error) {
 			return armResult{}, fmt.Errorf("lever: %w", err)
 		}
 	}
+	if _, ok := successorTurn(a.name); ok {
+		if err := spawn(self, "successor", root, a.name); err != nil {
+			return armResult{}, fmt.Errorf("successor process: %w", err)
+		}
+	}
 	if err := spawn(self, "resume", root, a.name); err != nil {
 		return armResult{}, fmt.Errorf("resume process: %w", err)
 	}
@@ -224,7 +252,13 @@ func runArm(self, work string, a arm) (armResult, error) {
 		return armResult{}, err
 	}
 	var extra *Observation
-	if phase := extraPhase(a.name); phase != "" {
+	if _, ok := successorTurn(a.name); ok {
+		obs, err := readObservation(root, "successor")
+		if err != nil {
+			return armResult{}, err
+		}
+		extra = &obs
+	} else if phase := extraPhase(a.name); phase != "" {
 		obs, err := readObservation(root, phase)
 		if err != nil {
 			return armResult{}, err

@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	phase := flag.String("phase", "", "internal: construct|resume, spawned by the orchestrator")
+	phase := flag.String("phase", "", "internal: construct|successor|resume, spawned by the orchestrator")
 	root := flag.String("root", "", "internal: this arm's root directory")
 	armName := flag.String("arm", "", "internal: this arm's name")
 	work := flag.String("work", "", "directory to hold arm roots; default is a temp dir")
@@ -23,6 +23,8 @@ func main() {
 	switch *phase {
 	case "construct":
 		err = runConstruct(*root, *armName)
+	case "successor":
+		err = runSuccessor(*root, *armName)
 	case "resume":
 		err = runResume(*root, *armName)
 	case "":

@@ -84,6 +84,13 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 			graphMap(before.Graph.Waits), graphMap(after.Graph.Waits), false),
 	)
 	switch {
+	case successorArm(a.name) && extra != nil:
+		res.Rows = append(res.Rows, successorRows(a.name, *extra, after)...)
+		// The premise is a barrier open at death. The construct process is its
+		// own waiter, so it reports no interruption of its own.
+		if len(before.Decisions) == 0 {
+			res.Invalid = "no decision was open when the first process died"
+		}
 	case a.name == armOpenDecision:
 		res.Rows = append(res.Rows, decisionRows(before, after)...)
 		if len(before.Decisions) == 0 {
