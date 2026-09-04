@@ -74,6 +74,7 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"vercel-ai-gateway",
 		"huggingface",
 		"nvidia",
+		"atlas-cloud",
 		"kilocode",
 		"ollama-cloud",
 		"scnet",
@@ -924,6 +925,29 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if vercel.Kind != "anthropic" || !vercel.AuthHeader || vercel.DefaultModel() != "anthropic/claude-sonnet-4.6" || !vercel.HasModel("moonshotai/kimi-k2.7-code") {
 		t.Fatalf("vercel-ai-gateway capability mismatch: %+v", vercel)
+	}
+	atlasQwen, ok := cfg.ResolveModel("atlas-cloud/qwen/qwen3.5-flash")
+	if !ok {
+		t.Fatal("atlas-cloud/qwen/qwen3.5-flash did not resolve")
+	}
+	if atlasQwen.BaseURL != "https://api.atlascloud.ai/v1" || atlasQwen.ModelsURL != "https://api.atlascloud.ai/v1/models" || atlasQwen.APIKeyEnv != "ATLASCLOUD_API_KEY" {
+		t.Fatalf("atlas-cloud endpoint/key mismatch: %+v", atlasQwen)
+	}
+	if atlasQwen.DefaultModel() != "qwen/qwen3.5-flash" || !atlasQwen.HasModel("deepseek-ai/deepseek-v4-pro") {
+		t.Fatalf("atlas-cloud model list mismatch: %+v", atlasQwen)
+	}
+	if cap := EffortCapabilityForEntry(atlasQwen); cap.Supported {
+		t.Fatalf("atlas-cloud qwen effort capability = %+v, want unsupported by default", cap)
+	}
+	atlasDeepSeek, ok := cfg.ResolveModel("atlas-cloud/deepseek-ai/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("atlas-cloud/deepseek-ai/deepseek-v4-pro did not resolve")
+	}
+	if protocol := ReasoningProtocolForEntry(atlasDeepSeek); protocol != ReasoningProtocolDeepSeek {
+		t.Fatalf("atlas-cloud deepseek protocol = %q, want deepseek", protocol)
+	}
+	if cap := EffortCapabilityForEntry(atlasDeepSeek); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "max") || !containsString(cap.Levels, "disabled") {
+		t.Fatalf("atlas-cloud deepseek effort capability = %+v, want disabled/high/max", cap)
 	}
 
 	ollama, ok := cfg.ResolveModel("ollama-cloud/nemotron-3-nano:30b")

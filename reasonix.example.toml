@@ -61,7 +61,8 @@ compact_ratio       = 0.80  # sole auto trigger; presets 0.70 (active) / 0.80 (r
 # and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
 # GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
 # CN/Global API and coding-plan routes, Token Rhythm (基元律动), StepFun,
-# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
+# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, NVIDIA, Atlas Cloud, KiloCode,
+# and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"

@@ -150,6 +150,7 @@ var (
 	vercelModels      = []string{"anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.8", "openai/gpt-5.4", "openai/gpt-5.4-pro", "moonshotai/kimi-k2.7-code", "zai/glm-5.2", "deepseek/deepseek-v4-pro"}
 	huggingFaceModels = []string{"zai-org/GLM-5.2", "deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3.5-72B-Instruct"}
 	nvidiaModels      = []string{"nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "deepseek-ai/deepseek-v4-pro", "qwen/qwen3.5-397b-a17b"}
+	atlasCloudModels  = []string{"qwen/qwen3.5-flash", "deepseek-ai/deepseek-v4-pro"}
 	ollamaCloudModels = []string{"glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"}
 )
 
@@ -1042,6 +1043,29 @@ var curatedProviderPresets = []ProviderPreset{
 			Models:    nvidiaModels,
 			Default:   "nvidia/nemotron-3-nano-30b-a3b",
 			APIKeyEnv: "NVIDIA_API_KEY",
+		}},
+	},
+	{
+		ID:          "atlas-cloud",
+		Label:       "Atlas Cloud",
+		Description: "Atlas Cloud OpenAI-compatible endpoint with Qwen and DeepSeek models.",
+		KeyEnv:      "ATLASCLOUD_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:          "atlas-cloud",
+			Kind:          "openai",
+			BaseURL:       "https://api.atlascloud.ai/v1",
+			ModelsURL:     "https://api.atlascloud.ai/v1/models",
+			Models:        atlasCloudModels,
+			Default:       "qwen/qwen3.5-flash",
+			APIKeyEnv:     "ATLASCLOUD_API_KEY",
+			ContextWindow: 1000000,
+			ModelOverrides: map[string]ProviderModelOverride{
+				"deepseek-ai/deepseek-v4-pro": {
+					ReasoningProtocol: ReasoningProtocolDeepSeek,
+					SupportedEfforts:  []string{"disabled", "high", "max"},
+					DefaultEffort:     "high",
+				},
+			},
 		}},
 	},
 	{
