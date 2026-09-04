@@ -348,7 +348,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The reader-transaction offset absorption adds 0.8 KiB raw on top; the merged
 // path measures 2471.741 KiB.
 // The progress-budget settings controls add their markup/state to the same
-// initial payload; the merged path measures 2473.0 KiB raw.
-const rawInitialBudgetKiB = 2_473.1;
+// initial payload; the merged path measures 2473.0 KiB raw. The upstream
+// submit-route merge adds a further 0.6 KiB; the merged path measures
+// 2473.6 KiB raw.
+const rawInitialBudgetKiB = 2_473.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
