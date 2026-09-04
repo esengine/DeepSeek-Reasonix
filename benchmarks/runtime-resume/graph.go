@@ -40,6 +40,7 @@ func graphRows(before, after Observation) []row {
 		graphSemanticsRow(before, after),
 		childProvenanceRow(before, after),
 		executionJournalRow(before, after),
+		executionTopologyRow(before, after),
 		executionKindRow(before, after),
 		executionContextRow(before, after),
 		graphObligationRow(before, after),
@@ -248,6 +249,33 @@ func executionJournalRow(before, after Observation) row {
 	return valueRow("delegations the journal recorded", "execution journal, written before dispatch",
 		"<stem>.execution.jsonl", "folded from openings and settlings",
 		executionSummary(before), executionSummary(after), true)
+}
+
+// executionTopologyRow is the ordering a restart inherits. An item that never
+// started is explained by what it was held behind, so the topology has to
+// survive the process that knew it — and survive unchanged, or the explanation
+// is a different graph's.
+func executionTopologyRow(before, after Observation) row {
+	return valueRow("declared ordering between items", "the fan-out plan, recorded at the opening",
+		"<stem>.execution.jsonl", "read back with the openings, never re-derived",
+		topologySummary(before), topologySummary(after), true)
+}
+
+func topologySummary(o Observation) string {
+	var out []string
+	for _, e := range o.Executions {
+		if len(e.DependsOn) == 0 {
+			continue
+		}
+		up := append([]string(nil), e.DependsOn...)
+		sort.Strings(up)
+		out = append(out, e.ID+"<-"+strings.Join(up, "+"))
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	sort.Strings(out)
+	return join(out)
 }
 
 // executionKindRow holds the two interruptions apart against what the dying

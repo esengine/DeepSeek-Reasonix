@@ -69,6 +69,10 @@ func interruptedExecutionBlock(interrupted []execjournal.Entry) string {
 			b.WriteString(" (" + item.Grant + ")")
 		}
 		b.WriteString(" — " + item.Interruption())
+		if up := item.DependsOn; len(up) > 0 && !item.Started() {
+			b.WriteString(", which declared it may not start before ")
+			b.WriteString(strings.Join(up, ", "))
+		}
 	}
 	b.WriteString("\n\nNone can be resumed and none were restarted. One marked ")
 	b.WriteString(execjournal.InterruptedBeforeStart)

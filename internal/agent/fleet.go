@@ -413,7 +413,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 // were opened, so an item it could not record must not start.
 func (f *FleetTool) openFanOut(ctx context.Context, sink event.Sink, groupParentID string, plan fleetPlan, specs []ProfileExecSpec, adopted map[int]adoptedItem, results []fleetItemResult) error {
 	opening := fleetOpeningDelta(groupParentID, plan, specs, adopted, results)
-	if err := f.taskTool.openExecutions(ctx, groupParentID, fanOutOpenings(opening.Nodes)); err != nil {
+	if err := f.taskTool.openExecutions(ctx, groupParentID, fanOutOpenings(opening)); err != nil {
 		return err
 	}
 	publishGraph(sink, opening)

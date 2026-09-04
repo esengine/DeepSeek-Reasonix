@@ -104,19 +104,35 @@ func adoptedDisposition(adopted bool) string {
 	return execjournal.DispositionPending
 }
 
-// fanOutOpenings turns the nodes a fan-out just declared into journal openings.
-// It reads the same node list the graph delta carries, so the two cannot drift:
-// an item the graph draws is an item the journal recorded.
-func fanOutOpenings(workers []agentgraph.Node) []execjournal.Opening {
-	out := make([]execjournal.Opening, 0, len(workers))
-	for _, w := range workers {
+// fanOutOpenings turns the delta a fan-out just declared into journal openings.
+// It reads the same delta the graph is drawn from, so the two cannot drift: an
+// item the graph draws is an item the journal recorded, and an ordering edge
+// the graph shows is one the journal can be asked about after a restart.
+func fanOutOpenings(delta agentgraph.Delta) []execjournal.Opening {
+	upstream := declaredDependencies(delta.Edges)
+	out := make([]execjournal.Opening, 0, len(delta.Nodes))
+	for _, w := range delta.Nodes {
 		if w.Kind != agentgraph.KindWorker {
 			continue
 		}
 		out = append(out, execjournal.Opening{
 			ID: w.ID, Kind: string(w.Kind), Name: w.Label, Grant: string(w.Grant),
 			Disposition: adoptedDisposition(w.State == agentgraph.StateAdopted),
+			DependsOn:   upstream[w.ID],
 		})
+	}
+	return out
+}
+
+// declaredDependencies collects the ordering edges by the item they hold back.
+// Only Depends is read: an adopt edge names reuse and a context edge names
+// delivery, and neither says an item may not start.
+func declaredDependencies(edges []agentgraph.Edge) map[string][]string {
+	out := map[string][]string{}
+	for _, e := range edges {
+		if e.Kind == agentgraph.Depends {
+			out[e.To] = append(out[e.To], e.From)
+		}
 	}
 	return out
 }

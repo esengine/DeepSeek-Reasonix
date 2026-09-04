@@ -307,3 +307,18 @@ an open entry with no live owner, because the process that died had no chance
 to record either. The mixed arm is the acceptance test — it dies holding an
 item its dependency blocked and an item that was executing, and the two must
 come back classified differently.
+
+The ordering a fan-out declared rides the opening, so an item that never
+started can name what it was held behind: the mixed arm's restart reads
+`fleet-3 <- fleet-2`, unchanged across the boundary. A dependency is not
+scheduler state and is deliberately not recorded as one — an unmet dependency
+is why an item is not yet ready, a slot is what a ready item waits for, and
+`agentgraph` keeps `pending` and `queued` apart for that reason.
+
+**What this still cannot say.** A declared dependency explains what an item was
+ordered behind, not whether that dependency was ever met. An item whose upstream
+finished, which then entered the queue and died waiting for a slot, reads
+exactly like one its upstream never released: both are `before-start` with an
+upstream named. Separating them needs a durable record of entering the queue,
+and the arm that would prove it worth having — ready, but never granted a slot —
+does not exist yet.

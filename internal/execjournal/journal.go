@@ -52,6 +52,7 @@ type record struct {
 	Name        string    `json:"name,omitempty"`
 	Grant       string    `json:"grant,omitempty"`
 	Disposition string    `json:"disposition,omitempty"`
+	DependsOn   []string  `json:"dependsOn,omitempty"`
 	At          time.Time `json:"at"`
 }
 
@@ -76,6 +77,10 @@ type Opening struct {
 	// a second place they can drift.
 	Grant       string
 	Disposition string
+	// DependsOn are the executions this one declared it may not start before.
+	// Not scheduler state: a dependency is why an item is not yet ready, a slot
+	// is what a ready item waits for, and the two have different remedies.
+	DependsOn []string
 }
 
 // Entry is one execution's whole story, folded from the journal: it was opened,
@@ -89,6 +94,7 @@ type Entry struct {
 	Name        string    `json:"name,omitempty"`
 	Grant       string    `json:"grant,omitempty"`
 	Disposition string    `json:"disposition,omitempty"`
+	DependsOn   []string  `json:"dependsOn,omitempty"`
 	OpenedAt    time.Time `json:"openedAt"`
 	StartedAt   time.Time `json:"startedAt,omitempty"`
 	SettledAt   time.Time `json:"settledAt,omitempty"`
@@ -141,7 +147,7 @@ func Open(sessionPath string, o Opening) error {
 	if err := appendRecord(sessionPath, record{
 		Execution: o.ID, Status: statusOpen, Group: o.Group, Turn: o.Turn,
 		Kind: o.Kind, Name: o.Name, Grant: o.Grant, Disposition: disposition,
-		At: time.Now().UTC(),
+		DependsOn: o.DependsOn, At: time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
@@ -255,7 +261,8 @@ func History(sessionPath string) []Entry {
 			index[rec.Execution] = len(out)
 			out = append(out, Entry{
 				ID: rec.Execution, Group: rec.Group, Turn: rec.Turn, Kind: rec.Kind,
-				Name: rec.Name, Grant: rec.Grant, Disposition: rec.Disposition, OpenedAt: rec.At,
+				Name: rec.Name, Grant: rec.Grant, Disposition: rec.Disposition,
+				DependsOn: rec.DependsOn, OpenedAt: rec.At,
 			})
 			continue
 		}

@@ -84,7 +84,7 @@ const parallelTasksMaxTasks = 64
 // record is the only thing that would survive to say it did.
 func (p *ParallelTasksTool) openFanOut(ctx context.Context, sink event.Sink, parentID string, items []parallelItem) error {
 	opening := parallelOpeningDelta(parentID, items)
-	if err := p.taskTool.openExecutions(ctx, parentID, fanOutOpenings(opening.Nodes)); err != nil {
+	if err := p.taskTool.openExecutions(ctx, parentID, fanOutOpenings(opening)); err != nil {
 		return err
 	}
 	publishGraph(sink, opening)

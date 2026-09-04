@@ -24,6 +24,7 @@ type openingProbeSink struct {
 	mu          sync.Mutex
 	sessionPath string
 	recorded    []string
+	upstream    []string
 	seen        bool
 }
 
@@ -39,6 +40,7 @@ func (s *openingProbeSink) Emit(e event.Event) {
 	s.seen = true
 	for _, entry := range execjournal.History(s.sessionPath) {
 		s.recorded = append(s.recorded, entry.ID)
+		s.upstream = append(s.upstream, entry.DependsOn...)
 	}
 }
 
@@ -46,6 +48,12 @@ func (s *openingProbeSink) ids() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.recorded...)
+}
+
+func (s *openingProbeSink) upstreamIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.upstream...)
 }
 
 // runningProbeSink reads the journal at the moment the graph first shows one
@@ -277,5 +285,72 @@ func TestBlockedItemIsNeverStarted(t *testing.T) {
 	}
 	if ran := byID["fleet-call/fleet-1"]; !ran.Started() {
 		t.Fatal("the item that ran recorded no start")
+	}
+}
+
+// TestOrderingTopologyIsDurableWithTheOpening: an item that never starts is
+// explained by what it was waiting for, and that has to survive the process
+// that knew it. The plan is already decided when the fan-out opens, so the
+// topology rides the opening rather than waiting for an edge nobody records.
+func TestOrderingTopologyIsDurableWithTheOpening(t *testing.T) {
+	fleet, ctx, sessionPath, sink := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"research","prompt":"FAIL research","read_only":true},
+		{"id":"implement","prompt":"implement","depends_on":["research"],"write_paths":["api"]}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	if got := sink.upstreamIDs(); !slices.Contains(got, "fleet-call/fleet-1") {
+		t.Errorf("journal held upstream %v when the graph first showed the workers, want the declared dependency", got)
+	}
+	byID := map[string]execjournal.Entry{}
+	for _, e := range execjournal.History(sessionPath) {
+		byID[e.ID] = e
+	}
+	blocked := byID["fleet-call/fleet-2"]
+	if !slices.Equal(blocked.DependsOn, []string{"fleet-call/fleet-1"}) {
+		t.Errorf("blocked item dependsOn = %v, want the item it was ordered behind", blocked.DependsOn)
+	}
+	if up := byID["fleet-call/fleet-1"].DependsOn; len(up) != 0 {
+		t.Errorf("the first item dependsOn = %v, want none", up)
+	}
+}
+
+// TestTopologyComesFromTheSameDeltaAsTheGraph is what keeps the two from
+// drifting. A dependency the graph draws and the journal does not is a picture
+// a restart cannot check; deriving both from one delta makes that unreachable
+// rather than merely unlikely.
+func TestTopologyComesFromTheSameDeltaAsTheGraph(t *testing.T) {
+	delta := agentgraph.Delta{
+		Nodes: []agentgraph.Node{
+			{ID: "g", Kind: agentgraph.KindGroup, State: agentgraph.StateRunning},
+			{ID: "g/a", Kind: agentgraph.KindWorker},
+			{ID: "g/b", Kind: agentgraph.KindWorker},
+			{ID: "src", Kind: agentgraph.KindExternal},
+		},
+		Edges: []agentgraph.Edge{
+			{From: "g", To: "g/a", Kind: agentgraph.Spawn},
+			{From: "g", To: "g/b", Kind: agentgraph.Spawn},
+			{From: "g/a", To: "g/b", Kind: agentgraph.Depends},
+			{From: "src", To: "g/a", Kind: agentgraph.Adopt},
+			{From: "g/a", To: "g/b", Kind: agentgraph.Context},
+		},
+	}
+	byID := map[string]execjournal.Opening{}
+	for _, o := range fanOutOpenings(delta) {
+		byID[o.ID] = o
+	}
+	if len(byID) != 2 {
+		t.Fatalf("openings = %d, want one per worker; a group and an external node run nothing", len(byID))
+	}
+	if !slices.Equal(byID["g/b"].DependsOn, []string{"g/a"}) {
+		t.Errorf("g/b dependsOn = %v, want the ordering edge only", byID["g/b"].DependsOn)
+	}
+	// Adopt names reuse and Context names delivery; neither holds an item back,
+	// and reading them as ordering would explain a start that nothing blocked.
+	if up := byID["g/a"].DependsOn; len(up) != 0 {
+		t.Errorf("g/a dependsOn = %v, want none: an adopt edge is not an ordering edge", up)
 	}
 }
