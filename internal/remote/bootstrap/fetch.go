@@ -21,8 +21,13 @@ func FetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		`cd "$T"`,
 		"A=" + shellQuote(d.Asset),
 		"U=" + shellQuote(d.URL),
-		`if command -v curl >/dev/null 2>&1; then curl -fsSL --retry 2 -o "$A" "$U";` +
-			` elif command -v wget >/dev/null 2>&1; then wget -q -O "$A" "$U";` +
+		// Bounded on connecting and on stalling, never on total time: 40MB over
+		// a slow link is not a failure, while a connection that opens and then
+		// never speaks is what a filtered CDN looks like — and this runs first.
+		`if command -v curl >/dev/null 2>&1; then` +
+			` curl -fsSL --retry 2 --connect-timeout 15 --speed-time 30 --speed-limit 1024 -o "$A" "$U";` +
+			` elif command -v wget >/dev/null 2>&1; then` +
+			` wget -q --tries=2 --connect-timeout=15 --read-timeout=30 -O "$A" "$U";` +
 			` else echo "bootstrap: neither curl nor wget is installed" >&2; exit 1; fi`,
 		"S=" + shellQuote(d.SHA256),
 		`if command -v sha256sum >/dev/null 2>&1; then echo "$S  $A" | sha256sum -c - >/dev/null;` +
@@ -54,7 +59,11 @@ func WindowsFetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		"New-Item -ItemType Directory -Force -Path $d,$t | Out-Null",
 		"$a = Join-Path $t " + psQuote(d.Asset),
 		"$ProgressPreference='SilentlyContinue'",
-		"Invoke-WebRequest -UseBasicParsing -Uri " + psQuote(d.URL) + " -OutFile $a",
+		// Invoke-WebRequest has no connect timeout of its own, so a short HEAD
+		// runs first: without it a stalled connection would hold the download's
+		// whole budget before the next route is tried.
+		"Invoke-WebRequest -UseBasicParsing -Method Head -Uri " + psQuote(d.URL) + " -TimeoutSec 20 | Out-Null",
+		"Invoke-WebRequest -UseBasicParsing -Uri " + psQuote(d.URL) + " -OutFile $a -TimeoutSec 900",
 		"$h = (Get-FileHash -Algorithm SHA256 -LiteralPath $a).Hash.ToLower()",
 		"if ($h -ne " + psQuote(strings.ToLower(d.SHA256)) + ") { throw 'bootstrap: SHA-256 mismatch on the downloaded archive' }",
 		"Expand-Archive -LiteralPath $a -DestinationPath $t -Force",

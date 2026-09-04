@@ -548,8 +548,10 @@ jobs:
         run: |
           mkdir -p dist
           find staging -type f -name 'ReasonixStudio-*' -exec mv {} dist/ \;
-          # The CLI archives and their digest list, from the cli job.
-          find staging -type f \( -name 'reasonix-*' -o -name 'SHA256SUMS' \) -exec mv {} dist/ \;
+          # The CLI archives and their digest list, taken from the job that
+          # produced them rather than by name — the signing flow leaves a
+          # reasonix-studio-host.exe in staging, and it matched reasonix-*.
+          find staging/cli-archives -type f -exec mv {} dist/ \;
           ls -la dist
           # Two Windows artifacts (installer, portable zip), two per macOS
           # architecture (dmg, zip) and the Linux .deb. Fewer means an artifact

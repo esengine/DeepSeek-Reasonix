@@ -1,4 +1,4 @@
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
+VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^studio-//' || echo dev)
 BUILD_TIME_UTC := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
