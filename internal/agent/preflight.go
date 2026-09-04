@@ -55,7 +55,7 @@ func (a *Agent) visibleByFullScan() []provider.Message {
 	a.sess.compactionMu.Lock()
 	st := a.sess.compactionState
 	a.sess.compactionMu.Unlock()
-	if projectionValid(st, msgs, snap.version, a.currentPromptCacheKey(), snap.fingerprint) {
+	if projectionValid(st, msgs, a.currentPromptCacheKey(), snap.fingerprint) {
 		if visible := modelVisibleFromProjection(st.Projection, msgs); len(visible) > 0 {
 			return visible
 		}
@@ -151,14 +151,13 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		// Lineage key changed (upgrade, model/workspace switch). Rebind when
 		// the projection body still matches the canonical covered prefix.
 		var msgs []provider.Message
-		var version uint64
 		var fingerprint func([]provider.Message, int) string
 		if a.sess.conversation != nil {
 			var rewriteVersion int
-			msgs, version, rewriteVersion = a.sess.conversation.snapshotWithVersion()
+			msgs, _, rewriteVersion = a.sess.conversation.snapshotWithVersion()
 			fingerprint = a.prefixHasher(rewriteVersion)
 		}
-		if projectionContentValid(st, msgs, version, fingerprint) {
+		if projectionContentValid(st, msgs, fingerprint) {
 			normalized, keyOK = key, true
 		}
 	}
@@ -176,14 +175,13 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	}
 	// Only mark restored when the projection still matches the transcript.
 	var msgs []provider.Message
-	var version uint64
 	var fingerprint func([]provider.Message, int) string
 	if a.sess.conversation != nil {
 		var rewriteVersion int
-		msgs, version, rewriteVersion = a.sess.conversation.snapshotWithVersion()
+		msgs, _, rewriteVersion = a.sess.conversation.snapshotWithVersion()
 		fingerprint = a.prefixHasher(rewriteVersion)
 	}
-	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, version, key, fingerprint)
+	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, key, fingerprint)
 	if !valid && len(st.Projection.Messages) > 0 {
 		// Keep blocked receipts / telemetry; drop unusable projection body.
 		st.Projection = ContextProjection{}

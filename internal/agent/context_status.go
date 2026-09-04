@@ -26,13 +26,13 @@ func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 		return ContextMaintenanceSnapshot{}
 	}
 	snap := a.snapshotForProjection()
-	canonical, version := snap.msgs, snap.version
+	canonical := snap.msgs
 	a.sess.compactionMu.Lock()
 	state := a.sess.compactionState
 	checkpointState := a.sess.checkpointState
 	a.sess.compactionMu.Unlock()
 	visible := canonical
-	valid := projectionValid(state, canonical, version, a.currentPromptCacheKey(), snap.fingerprint)
+	valid := projectionValid(state, canonical, a.currentPromptCacheKey(), snap.fingerprint)
 	if valid {
 		if projected := modelVisibleFromProjection(state.Projection, canonical); len(projected) > 0 {
 			visible = projected

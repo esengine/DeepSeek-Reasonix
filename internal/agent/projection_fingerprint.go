@@ -58,12 +58,12 @@ func (a *Agent) visibleBehindMemoisedFold() ([]provider.Message, bool) {
 	if len(st.Projection.Messages) == 0 || covered <= 0 || !projectionLineageOK(st, key) {
 		return nil, false
 	}
-	tail, total, version, rewriteVersion := a.sess.conversation.snapshotTail(covered)
+	tail, total, _, rewriteVersion := a.sess.conversation.snapshotTail(covered)
 	memo := a.sess.coveredHash.Load()
 	if memo == nil || memo.n != covered || memo.rewriteVersion != rewriteVersion {
 		return nil, false
 	}
-	if !projectionCoversTail(st, total, version, memo.hash) {
+	if !projectionCoversTail(st, total, memo.hash) {
 		return nil, false
 	}
 	out := make([]provider.Message, 0, len(st.Projection.Messages)+len(tail))

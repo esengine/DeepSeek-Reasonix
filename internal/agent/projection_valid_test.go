@@ -34,18 +34,18 @@ func TestProjectionValidRejectsEditedPrefix(t *testing.T) {
 			CoveredPrefixHash: coveredPrefixHash(msgs, 3),
 		},
 	}
-	if !projectionValid(st, msgs, 2, "ws|sess|model", nil) {
+	if !projectionValid(st, msgs, "ws|sess|model", nil) {
 		t.Fatal("expected valid projection for matching prefix")
 	}
 	// Append-only growth still valid.
 	grown := append(append([]provider.Message(nil), msgs...), provider.Message{Role: provider.RoleAssistant, Content: "more"})
-	if !projectionValid(st, grown, 3, "ws|sess|model", nil) {
+	if !projectionValid(st, grown, "ws|sess|model", nil) {
 		t.Fatal("append-only growth should keep projection valid")
 	}
 	// Prefix edit invalidates.
 	edited := append([]provider.Message(nil), msgs...)
 	edited[1].Content = "task-EDITED"
-	if projectionValid(st, edited, 4, "ws|sess|model", nil) {
+	if projectionValid(st, edited, "ws|sess|model", nil) {
 		t.Fatal("edited covered prefix must invalidate projection")
 	}
 }
@@ -66,21 +66,21 @@ func TestProjectionValidRejectsCacheKeyMismatch(t *testing.T) {
 			TranscriptVersion: 1,
 		},
 	}
-	if projectionValid(st, msgs, 1, "ws|sess|model-b", nil) {
+	if projectionValid(st, msgs, "ws|sess|model-b", nil) {
 		t.Fatal("model/lineage key mismatch must invalidate projection")
 	}
-	if !projectionValid(st, msgs, 1, "ws|sess|model-a", nil) {
+	if !projectionValid(st, msgs, "ws|sess|model-a", nil) {
 		t.Fatal("matching key should be valid")
 	}
 	// Fail closed: blank stored key is rejected when current key is known.
 	st.PromptCacheKey = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a", nil) {
+	if projectionValid(st, msgs, "ws|sess|model-a", nil) {
 		t.Fatal("missing sidecar cache key must invalidate when lineage is known")
 	}
 	// Missing prefix hash is always rejected.
 	st.PromptCacheKey = "ws|sess|model-a"
 	st.Projection.CoveredPrefixHash = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a", nil) {
+	if projectionValid(st, msgs, "ws|sess|model-a", nil) {
 		t.Fatal("missing CoveredPrefixHash must invalidate projection")
 	}
 }
@@ -315,8 +315,8 @@ func TestCompactInstallsCoveredPrefixHash(t *testing.T) {
 	if st.PromptCacheKey != promptCacheKey("ws", BranchID(path), "m") {
 		t.Fatalf("PromptCacheKey = %q", st.PromptCacheKey)
 	}
-	msgs, ver := sess.snapshotMessagesVersion()
-	if !projectionValid(st, msgs, ver, st.PromptCacheKey, nil) {
+	msgs, _ := sess.snapshotMessagesVersion()
+	if !projectionValid(st, msgs, st.PromptCacheKey, nil) {
 		t.Fatal("fresh projection should validate")
 	}
 }

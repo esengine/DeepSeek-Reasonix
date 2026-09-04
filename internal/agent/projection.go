@@ -51,9 +51,12 @@ const (
 // ContextProjection is the model-visible view of a session. The canonical
 // transcript in Session.Messages is never replaced by this structure.
 type ContextProjection struct {
-	Messages          []provider.Message `json:"messages"`
-	TranscriptVersion uint64             `json:"transcript_version"`
-	ProjectionVersion uint64             `json:"projection_version"`
+	Messages []provider.Message `json:"messages"`
+	// TranscriptVersion is diagnostic and in-process bookkeeping, never a
+	// durable identity for this projection's content: it is a Session counter a
+	// reload restarts. CoveredPrefixHash is what proves coverage.
+	TranscriptVersion uint64 `json:"transcript_version"`
+	ProjectionVersion uint64 `json:"projection_version"`
 	// CoveredCount is len(canonical) when the projection was built. Model-visible
 	// context is projection.Messages + canonical[CoveredCount:].
 	CoveredCount int `json:"covered_count"`
@@ -134,7 +137,10 @@ type RecallLedger struct {
 
 // CompactionState is the session context sidecar payload.
 type CompactionState struct {
-	SchemaVersion      int                        `json:"schema_version"`
+	SchemaVersion int `json:"schema_version"`
+	// TranscriptVersion is the in-process CAS counter this state was written
+	// under: diagnostics and compaction transaction metadata, never durable
+	// projection identity. See ContextProjection.TranscriptVersion.
 	TranscriptVersion  uint64                     `json:"transcript_version"`
 	Projection         ContextProjection          `json:"projection"`
 	PromptCacheKey     string                     `json:"prompt_cache_key,omitempty"`
@@ -347,14 +353,14 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 // projectionValid reports whether st can be reused for the current transcript
 // and provider/model lineage. Fail closed: missing CoveredPrefixHash or a blank
 // sidecar PromptCacheKey when the current lineage key is known forces rebuild.
-func projectionValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64, cacheKey string, fingerprint func([]provider.Message, int) string) bool {
+func projectionValid(st CompactionState, msgs []provider.Message, cacheKey string, fingerprint func([]provider.Message, int) string) bool {
 	if len(st.Projection.Messages) == 0 {
 		return false
 	}
 	if !projectionLineageOK(st, cacheKey) {
 		return false
 	}
-	return projectionContentValid(st, msgs, transcriptVersion, fingerprint)
+	return projectionContentValid(st, msgs, fingerprint)
 }
 
 // projectionLineageOK reports whether the sidecar was written for the lineage
@@ -371,7 +377,7 @@ func projectionLineageOK(st CompactionState, cacheKey string) bool {
 // projectionContentValid reports whether st's projection body still matches the
 // canonical transcript, independent of provider/model lineage. LoadProjectionSidecar
 // uses it to rebind across upgrade/model/workspace key changes.
-func projectionContentValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64, fingerprint func([]provider.Message, int) string) bool {
+func projectionContentValid(st CompactionState, msgs []provider.Message, fingerprint func([]provider.Message, int) string) bool {
 	if fingerprint == nil {
 		fingerprint = coveredPrefixHash
 	}
@@ -379,28 +385,21 @@ func projectionContentValid(st CompactionState, msgs []provider.Message, transcr
 	if len(st.Projection.Messages) == 0 || n <= 0 || n > len(msgs) {
 		return false
 	}
-	return projectionCoversTail(st, len(msgs), transcriptVersion, fingerprint(msgs, n))
+	return projectionCoversTail(st, len(msgs), fingerprint(msgs, n))
 }
 
-// projectionCoversTail is the validity judgement itself, over scalars: what the
-// projection claims, how long the transcript is now, and the hash of the prefix
-// it claims to cover. Who produced that hash — a memo or a fresh pass over the
-// canonical slice — is not this decision's business, and keeping it out is what
-// lets a turn answer without copying a transcript it does not read.
-func projectionCoversTail(st CompactionState, total int, transcriptVersion uint64, prefixHash string) bool {
+// projectionCoversTail is the validity judgement itself, and the covered-prefix
+// hash is its whole proof: it fingerprints provider-visible canonical[:n], so a
+// match says the history the digest folded is still exactly there. A transcript
+// version adds nothing to that and is not durable — a reload restarts the
+// counter — so it takes no part in this decision.
+func projectionCoversTail(st CompactionState, total int, prefixHash string) bool {
 	n := st.Projection.CoveredCount
 	if len(st.Projection.Messages) == 0 || n <= 0 || n > total {
 		return false
 	}
 	// Prefix hash is required; legacy sidecars without it are rebuilt.
-	if st.Projection.CoveredPrefixHash == "" || prefixHash != st.Projection.CoveredPrefixHash {
-		return false
-	}
-	if st.TranscriptVersion == transcriptVersion || st.Projection.TranscriptVersion == transcriptVersion {
-		return true
-	}
-	// Append-only growth with a verified covered prefix.
-	return n < total
+	return st.Projection.CoveredPrefixHash != "" && prefixHash == st.Projection.CoveredPrefixHash
 }
 
 // modelVisibleFromProjection splices the projection with any messages appended
