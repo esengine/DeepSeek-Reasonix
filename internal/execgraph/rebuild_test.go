@@ -261,3 +261,30 @@ func withDeps(e execjournal.Entry, deps ...string) execjournal.Entry {
 	e.DependsOn = deps
 	return e
 }
+
+// TestWorkerIdentityComesOnlyFromTheOpening: the store resolves inheritance and
+// the opening does not, so an inherited blank must stay blank. Filling it from
+// the store would make the rebuild more specific than the graph it rebuilds,
+// deleting the fact that the worker layer named nothing.
+func TestWorkerIdentityComesOnlyFromTheOpening(t *testing.T) {
+	for name, tc := range map[string]struct {
+		worker            *execjournal.WorkerSpec
+		wantModel, wantEf string
+	}{
+		"named both":      {&execjournal.WorkerSpec{Model: "probe/alt", Effort: "high"}, "probe/alt", "high"},
+		"named an effort": {&execjournal.WorkerSpec{Effort: "low"}, "", "low"},
+		"named nothing":   {&execjournal.WorkerSpec{}, "", ""},
+		"never recorded":  {nil, "", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := settled(started(opened("call/a"), 1), 2)
+			e.Worker = tc.worker
+			children := []ChildOutcome{{Execution: "call/a", Status: ChildCompleted}}
+			g := Rebuild([]execjournal.Entry{e}, children, nil).Graph
+			n, _ := g.Node("call/a")
+			if n.Model != tc.wantModel || n.Effort != tc.wantEf {
+				t.Fatalf("identity = %q/%q, want %q/%q", n.Model, n.Effort, tc.wantModel, tc.wantEf)
+			}
+		})
+	}
+}

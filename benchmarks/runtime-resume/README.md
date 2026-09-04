@@ -524,7 +524,7 @@ The three fan-out arms compare it against what the dying process drew:
 | --- | --- | --- | --- | --- | --- |
 | `graph-completed` | exact | exact | exact | — | exact |
 | `graph-running` | exact | exact | exact | exact | exact |
-| `graph-mixed` | exact | exact | exact | exact | **lossy** |
+| `graph-mixed` | exact | exact | exact | exact | exact |
 
 Two states are deliberately never rebuilt. An execution that was running or
 waiting when its owner disappeared does not come back as running or queued —
@@ -549,17 +549,19 @@ report. The graph shows what the sub-agent layer resolved, where empty means
 *inherit the parent*; the store shows the final identity, with the empty slots
 already filled in.
 
-So the rebuild is lossy in exactly one place: an item whose caller named a
-model or an effort. Everything the graph shows for those is in the store — and
-taking it would make the rebuild *more* specific than the picture, turning an
-inherited blank into an explicit value.
+Which settled the question the arm was built to ask. The graph's layer is the
+one worth keeping — an empty model says the worker layer named nothing and the
+parent's value stands, and rewriting it as the resolved identity would delete
+that. So the opening records it, and the rebuild reads it from there and never
+from the store.
 
-That leaves a choice rather than a gap. Either a node's model means the final
-identity, in which case the producers should fill it from the store's layer and
-the rebuild is exact with nothing new recorded; or empty keeps meaning
-inherited, in which case that is a fact only the journal could carry. Nothing
-here decides it: the point of the arm is that the field's meaning has to be
-settled before a rebuild can be held to it.
+The distinction only exists if absence is preserved. An entry that recorded the
+worker layer and named nothing, and an entry written before the record existed,
+both read back empty; only presence tells them apart, and a reader that lost it
+would report a legacy entry as an exact reconstruction of an inheritance it had
+never seen. The spec is therefore stored whole, present even when both fields
+are empty, and an older entry that has none leaves the identity unknown rather
+than borrowing the store's.
 
 The skip-cause rows read three ways: the upstream the picture named, the rules
 this benchmark works out on its own, and what the production fold concludes.

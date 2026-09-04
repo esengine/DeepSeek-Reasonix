@@ -400,3 +400,48 @@ func TestOlderAdoptionWithoutASourceIsReadable(t *testing.T) {
 		t.Fatal("an adopted entry is closed on arrival, whatever its source")
 	}
 }
+
+// TestWorkerSpecKeepsItsPresence: an entry that recorded the worker layer and
+// one written before it existed both read back with empty fields, and they mean
+// different things — "this layer named nothing" against "nobody wrote it down".
+// Only presence separates them, and a reader that lost it would report a legacy
+// entry as an exact reconstruction of an inheritance it never saw.
+func TestWorkerSpecKeepsItsPresence(t *testing.T) {
+	t.Run("recorded, naming nothing", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/a", Worker: &WorkerSpec{}}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		got := History(path)[0]
+		if got.Worker == nil {
+			t.Fatal("worker spec lost its presence; empty is a fact here")
+		}
+		if got.Worker.Model != "" || got.Worker.Effort != "" {
+			t.Fatalf("worker = %+v, want both empty", *got.Worker)
+		}
+	})
+	t.Run("recorded, naming an effort", func(t *testing.T) {
+		path := sessionPath(t)
+		if err := Open(path, Opening{ID: "call/a", Worker: &WorkerSpec{Effort: "low"}}); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		got := History(path)[0]
+		if got.Worker == nil || got.Worker.Model != "" || got.Worker.Effort != "low" {
+			t.Fatalf("worker = %+v, want an inherited model and a named effort", got.Worker)
+		}
+	})
+	t.Run("never recorded", func(t *testing.T) {
+		path := sessionPath(t)
+		f, err := os.Create(store.SessionExecution(path))
+		if err != nil {
+			t.Fatalf("create journal: %v", err)
+		}
+		if _, err := f.WriteString(`{"execution":"call/a","status":"open","at":"2026-01-01T00:00:00Z"}` + "\n"); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		f.Close()
+		if got := History(path)[0]; got.Worker != nil {
+			t.Fatalf("worker = %+v, want nil: this entry predates the record", *got.Worker)
+		}
+	})
+}

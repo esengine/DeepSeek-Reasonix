@@ -29,6 +29,7 @@ type openingProbeSink struct {
 	recorded    []string
 	upstream    []string
 	adopted     []string
+	workers     []string
 	seen        bool
 }
 
@@ -48,6 +49,11 @@ func (s *openingProbeSink) Emit(e event.Event) {
 		if entry.AdoptedFrom != "" {
 			s.adopted = append(s.adopted, entry.ID+"<-"+entry.AdoptedFrom)
 		}
+		spec := "absent"
+		if entry.Worker != nil {
+			spec = entry.Worker.Model + "/" + entry.Worker.Effort
+		}
+		s.workers = append(s.workers, entry.ID+"="+spec)
 	}
 }
 
@@ -67,6 +73,12 @@ func (s *openingProbeSink) adoptions() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.adopted...)
+}
+
+func (s *openingProbeSink) workerSpecs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.workers...)
 }
 
 // runningProbeSink reads the journal at the moment the graph first shows one
@@ -561,4 +573,31 @@ func completedChildRefs(t *testing.T, sessionPath string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestWorkerIdentityIsDurableWithTheOpening: what the worker layer resolved is
+// known when the fan-out opens, and an inherited blank is as much a fact as a
+// named model. Both ride the opening, taken off the same delta the graph draws
+// from, so the two cannot name different identities for one item.
+func TestWorkerIdentityIsDurableWithTheOpening(t *testing.T) {
+	fleet, ctx, sessionPath, sink := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"plain","prompt":"plain","read_only":true},
+		{"id":"named","prompt":"named","read_only":true,"model":"probe/alt","effort":"high"}
+	]}`)); err != nil {
+		t.Fatalf("fleet: %v", err)
+	}
+
+	got := sink.workerSpecs()
+	for _, want := range []string{"fleet-call/fleet-1=/", "fleet-call/fleet-2=probe/alt/high"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("journal held %v when the graph first showed the workers, want %q", got, want)
+		}
+	}
+	for _, e := range execjournal.History(sessionPath) {
+		if e.Worker == nil {
+			t.Errorf("%s recorded no worker layer at all; empty is a fact, absent is not", e.ID)
+		}
+	}
 }

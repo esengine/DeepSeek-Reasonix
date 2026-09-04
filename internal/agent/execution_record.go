@@ -141,6 +141,10 @@ func fanOutOpenings(delta agentgraph.Delta) []execjournal.Opening {
 			Disposition: adoptedDisposition(w.State == agentgraph.StateAdopted),
 			DependsOn:   upstream[w.ID],
 			AdoptedFrom: adopted[w.ID],
+			// Taken off the node rather than resolved again: a second call to
+			// the resolution could answer differently, and then the graph and
+			// the journal would disagree about the same item.
+			Worker: &execjournal.WorkerSpec{Model: w.Model, Effort: w.Effort},
 		})
 	}
 	return out

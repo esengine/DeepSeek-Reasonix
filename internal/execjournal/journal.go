@@ -43,22 +43,32 @@ const (
 	DispositionAdopted = "adopted"
 )
 
+// WorkerSpec is the identity the worker layer resolved for an item. An empty
+// field is itself the fact: that layer named nothing, so the parent's value
+// stands. It is recorded as a whole rather than as two strings because absent
+// and "named nothing" are different answers, and only presence tells them apart.
+type WorkerSpec struct {
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
+}
+
 // record is one line of the journal. An opening carries identity; a settling
 // carries only the id, because identity was already declared and restating it
 // would let two lines disagree.
 type record struct {
-	Execution   string    `json:"execution"`
-	Status      string    `json:"status"`
-	Group       string    `json:"group,omitempty"`
-	Turn        string    `json:"turn,omitempty"`
-	Kind        string    `json:"kind,omitempty"`
-	Name        string    `json:"name,omitempty"`
-	Grant       string    `json:"grant,omitempty"`
-	Disposition string    `json:"disposition,omitempty"`
-	DependsOn   []string  `json:"dependsOn,omitempty"`
-	AdoptedFrom string    `json:"adoptedFrom,omitempty"`
-	Cause       string    `json:"cause,omitempty"`
-	At          time.Time `json:"at"`
+	Execution   string      `json:"execution"`
+	Status      string      `json:"status"`
+	Group       string      `json:"group,omitempty"`
+	Turn        string      `json:"turn,omitempty"`
+	Kind        string      `json:"kind,omitempty"`
+	Name        string      `json:"name,omitempty"`
+	Grant       string      `json:"grant,omitempty"`
+	Disposition string      `json:"disposition,omitempty"`
+	DependsOn   []string    `json:"dependsOn,omitempty"`
+	AdoptedFrom string      `json:"adoptedFrom,omitempty"`
+	Worker      *WorkerSpec `json:"worker,omitempty"`
+	Cause       string      `json:"cause,omitempty"`
+	At          time.Time   `json:"at"`
 }
 
 // Opening is one delegated item as its orchestration declares it, before the
@@ -90,6 +100,9 @@ type Opening struct {
 	// vocabulary the graph names it. The journal does not interpret it: what
 	// kind of source it is belongs to whoever reads the graph back.
 	AdoptedFrom string
+	// Worker is what the worker layer resolved. Nil means the writer did not
+	// record it, which older entries cannot say apart from "named nothing".
+	Worker *WorkerSpec
 }
 
 // Entry is one execution's whole story, folded from the journal: it was opened,
@@ -107,8 +120,12 @@ type Entry struct {
 	// AdoptedFrom is empty on an adopted entry written before this was
 	// recorded. That is lossy history, not corruption: the source was never
 	// captured, and no other field can be read to guess it.
-	AdoptedFrom string    `json:"adoptedFrom,omitempty"`
-	OpenedAt    time.Time `json:"openedAt"`
+	AdoptedFrom string `json:"adoptedFrom,omitempty"`
+	// Worker is nil on an entry written before it was recorded. A reader must
+	// not read that as "named nothing": the fact was never captured, and the
+	// store's resolved identity is a different layer that cannot stand in.
+	Worker   *WorkerSpec `json:"worker,omitempty"`
+	OpenedAt time.Time   `json:"openedAt"`
 	// The timestamps carry no omitempty: it does nothing for time.Time, and a
 	// tag that appears to drop a zero value while emitting 0001-01-01 reads to
 	// a consumer as a transition that happened. Queued and Started answer that.
@@ -177,7 +194,8 @@ func Open(sessionPath string, o Opening) error {
 	if err := appendRecord(sessionPath, record{
 		Execution: o.ID, Status: statusOpen, Group: o.Group, Turn: o.Turn,
 		Kind: o.Kind, Name: o.Name, Grant: o.Grant, Disposition: disposition,
-		DependsOn: o.DependsOn, AdoptedFrom: o.AdoptedFrom, At: time.Now().UTC(),
+		DependsOn: o.DependsOn, AdoptedFrom: o.AdoptedFrom, Worker: o.Worker,
+		At: time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
@@ -320,7 +338,8 @@ func History(sessionPath string) []Entry {
 			out = append(out, Entry{
 				ID: rec.Execution, Group: rec.Group, Turn: rec.Turn, Kind: rec.Kind,
 				Name: rec.Name, Grant: rec.Grant, Disposition: rec.Disposition,
-				DependsOn: rec.DependsOn, AdoptedFrom: rec.AdoptedFrom, OpenedAt: rec.At,
+				DependsOn: rec.DependsOn, AdoptedFrom: rec.AdoptedFrom,
+				Worker: rec.Worker, OpenedAt: rec.At,
 			})
 			continue
 		}

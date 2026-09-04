@@ -134,12 +134,19 @@ func answeredSet(entries []execjournal.Entry, children map[string]ChildOutcome) 
 }
 
 func nodeFor(e execjournal.Entry, child ChildOutcome, state agentgraph.NodeState) agentgraph.Node {
-	return agentgraph.Node{
+	node := agentgraph.Node{
 		ID: e.ID, ParentID: e.Group, Kind: agentgraph.NodeKind(e.Kind), State: state,
 		Label: e.Name, Grant: agentgraph.Grant(e.Grant), Wait: agentgraph.WaitCause(e.Cause),
 		Ref:      child.Ref,
 		QueuedAt: milli(e.QueuedAt), StartedAt: milli(e.StartedAt), EndedAt: milli(e.SettledAt),
 	}
+	// Only from the opening. The store's resolved identity is a later layer:
+	// filling an inherited blank from it would delete the fact that the worker
+	// layer named nothing, and an entry that recorded none says nothing at all.
+	if e.Worker != nil {
+		node.Model, node.Effort = e.Worker.Model, e.Worker.Effort
+	}
+	return node
 }
 
 // edgesFor draws everything the opening implies. Spawn and depends are stated
