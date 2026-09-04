@@ -6639,9 +6639,15 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
     ? candidates.filter((model) => model.toLowerCase().includes(q))
     : candidates;
   const deferredCandidates = useDeferredValue(visibleCandidates);
-  if (candidates.length === 0) return null;
+
+  //当拉取自定义 provider 模型时，candidates 从空变成非空，React 发现 hook 数量变化 → 崩溃。
+  //if (candidates.length === 0) return null;
   const selected = new Set(selectedModels);
   const vision = new Set(visionModels);
+
+
+  //useDeferredValue 这个 hook 在提前返回之后。
+  if (candidates.length === 0) return null;
   return (
     <div className="provider-model-draft provider-model-draft--inline">
       <div className="provider-model-draft__head">
