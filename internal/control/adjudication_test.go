@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/store"
@@ -244,5 +245,57 @@ func TestAdjudicationHistorySurvivesATornTail(t *testing.T) {
 	f.Close()
 	if h := AdjudicationHistory(session); len(h) != 1 || h[0].ID != "1" || !h[0].Open() {
 		t.Fatalf("journal = %+v, want the intact record", h)
+	}
+}
+
+// TestSupersessionIsScopedToTheTurnThatInheritedIt is the whole point of the
+// edge. A turn that takes an interruption over carries it for as long as that
+// turn is running — including a retry after a crash, because the successor is
+// read off the in-flight marker on disk rather than remembered in this process
+// — and no later turn carries it at all.
+func TestSupersessionIsScopedToTheTurnThatInheritedIt(t *testing.T) {
+	c := barrierController(t)
+	if err := c.openBarrier("5", string(DecisionAsk), "Delete X?"); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.RequestContext()) != 1 {
+		t.Fatal("an unowned barrier is not being projected")
+	}
+
+	marker, err := agent.BeginSessionInFlightTurn(c.SessionPath(), 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.inheritInterruptions(marker.ID)
+
+	// The turn that took it over still sees it, and it is no longer an
+	// obligation nobody owns.
+	if got := c.RequestContext(); len(got) != 1 {
+		t.Fatalf("the successor turn was not given the interruption: %v", got)
+	}
+	if got := c.InterruptedAdjudications(); len(got) != 0 {
+		t.Fatalf("an inherited barrier is still reported as unowned: %+v", got)
+	}
+
+	// A fresh process reading the same disk answers the same way while that
+	// turn has not committed: the retry after a crash gets the same context.
+	next := &Controller{controllerDeps: controllerDeps{
+		approval: newApprovalManager(permission.Policy{}, "", 0), sink: event.Discard,
+	}}
+	next.sessionPath = c.SessionPath()
+	if got := next.RequestContext(); len(got) != 1 {
+		t.Fatalf("a restart mid-turn lost the inherited interruption: %v", got)
+	}
+
+	// Once that turn commits, nothing later carries it.
+	if _, err := agent.ClearSessionInFlightTurnIfMatch(c.SessionPath(), marker); err != nil {
+		t.Fatal(err)
+	}
+	if got := next.RequestContext(); len(got) != 0 {
+		t.Fatalf("the interruption followed a later turn: %v", got)
+	}
+	entries := AdjudicationHistory(c.SessionPath())
+	if len(entries) != 1 || entries[0].Disposition != barrierSuperseded || entries[0].SupersededBy != marker.ID {
+		t.Fatalf("journal = %+v, want the barrier superseded by the turn that took it", entries)
 	}
 }

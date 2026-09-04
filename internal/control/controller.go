@@ -1995,7 +1995,7 @@ func (c *Controller) markInFlightTurn(startMessageIndex int, preserveUser bool) 
 		slog.Warn("controller: mark in-flight turn", "err", err)
 		return agent.InFlightTurnMeta{}
 	}
-	return marker
+	return c.withInheritedInterruptions(marker)
 }
 
 // finishInFlightTurn persists the completed transcript before removing the

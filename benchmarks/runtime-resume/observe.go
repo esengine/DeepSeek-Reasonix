@@ -45,9 +45,12 @@ type Observation struct {
 	Interrupted []control.InterruptedAdjudication `json:"interrupted"`
 	// ModelSeesInterruption counts the interruption blocks the request carries,
 	// which is a different surface from the derived fact behind them.
-	ModelSeesInterruption int           `json:"model_sees_interruption"`
-	Graph                 GraphObs      `json:"graph"`
-	Artifacts             []ArtifactObs `json:"artifacts"`
+	ModelSeesInterruption int `json:"model_sees_interruption"`
+	// Journal is how each barrier ended. A superseded edge is the durable
+	// evidence that a turn received the interruption: nothing else writes one.
+	Journal   []control.AdjudicationEntry `json:"journal,omitempty"`
+	Graph     GraphObs                    `json:"graph"`
+	Artifacts []ArtifactObs               `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -238,6 +241,7 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		Deferred:              deferredObs(workspace),
 		Obligation:            obligationObs(history),
 		Interrupted:           ctrl.InterruptedAdjudications(),
+		Journal:               control.AdjudicationHistory(path),
 		ModelSeesInterruption: countBlocks(ctrl.ModelVisibleMessages(), "<interrupted-adjudication>"),
 		Artifacts:             readArtifacts(path),
 	}

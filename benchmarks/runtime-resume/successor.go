@@ -16,6 +16,10 @@ func successorRows(arm string, successor, final Observation) []row {
 		Before: fmt.Sprintf("%d block(s)", successor.ModelSeesInterruption),
 		After:  fmt.Sprintf("%d block(s)", final.ModelSeesInterruption), Verdict: verdictStable,
 	}, {
+		Semantic: "how the barrier ended", Authority: "the adjudication log",
+		Artifact: "<stem>.adjudication.jsonl", Reconstruction: "an edge is written only for a barrier a turn received",
+		Before: journalSummary(successor), After: journalSummary(final), Verdict: verdictStable,
+	}, {
 		Semantic: "the effect the dead decision held back", Authority: "the workspace",
 		Artifact: final.Deferred.MarkerPath, Reconstruction: "no successor turn may release it",
 		Before: ranOrNot(successor), After: ranOrNot(final), Verdict: heldBack(successor, final),
@@ -29,13 +33,32 @@ func interruptionState(o Observation) string {
 	return fmt.Sprintf("%d still interrupted", len(o.Interrupted))
 }
 
-// stickiness names the open question rather than answering it: an interruption
-// that outlives the work replacing it is context every later request pays for.
+// stickiness is the question these arms were built to ask: does an
+// interruption outlive the work that replaced it? A successor that took it over
+// leaves nothing behind for later requests to carry.
 func stickiness(final Observation) string {
+	if len(final.Interrupted) == 0 && final.ModelSeesInterruption == 0 {
+		return "inherited"
+	}
 	if len(final.Interrupted) == 0 {
-		return outcomeInterrupted
+		return "sticky context without an owner"
 	}
 	return "sticky"
+}
+
+func journalSummary(o Observation) string {
+	var out []string
+	for _, e := range o.Journal {
+		switch {
+		case e.Open():
+			out = append(out, e.ID+":open")
+		case e.SupersededBy != "":
+			out = append(out, e.ID+":"+e.Disposition+" by turn "+e.SupersededBy)
+		default:
+			out = append(out, e.ID+":"+e.Disposition)
+		}
+	}
+	return orNone(join(out))
 }
 
 func heldBack(successor, final Observation) string {

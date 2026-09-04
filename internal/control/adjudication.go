@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/store"
 )
@@ -21,14 +22,20 @@ const (
 	barrierOpen      = "open"
 	barrierResolved  = "resolved"
 	barrierCancelled = "cancelled"
+	// barrierSuperseded ends a barrier no live waiter can: a later turn carried
+	// its context and took the work over. The edge names that turn, so the
+	// journal answers why the question stopped being asked with a cause rather
+	// than with "someone saw it".
+	barrierSuperseded = "superseded"
 )
 
 type barrierRecord struct {
-	Barrier string    `json:"barrier"`
-	Kind    string    `json:"kind"`
-	Status  string    `json:"status"`
-	Summary string    `json:"summary,omitempty"`
-	At      time.Time `json:"at"`
+	Barrier   string    `json:"barrier"`
+	Kind      string    `json:"kind"`
+	Status    string    `json:"status"`
+	Summary   string    `json:"summary,omitempty"`
+	Successor string    `json:"successor,omitempty"`
+	At        time.Time `json:"at"`
 }
 
 // AdjudicationEntry is one barrier's whole story, folded from the journal: it
@@ -36,12 +43,14 @@ type barrierRecord struct {
 // barrier is still open — whether that means waiting or interrupted depends on
 // this process, not on the record.
 type AdjudicationEntry struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	Summary     string    `json:"summary,omitempty"`
-	Disposition string    `json:"disposition,omitempty"`
-	OpenedAt    time.Time `json:"openedAt"`
-	EndedAt     time.Time `json:"endedAt,omitempty"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Summary     string `json:"summary,omitempty"`
+	Disposition string `json:"disposition,omitempty"`
+	// SupersededBy names the turn that took the barrier over, empty otherwise.
+	SupersededBy string    `json:"supersededBy,omitempty"`
+	OpenedAt     time.Time `json:"openedAt"`
+	EndedAt      time.Time `json:"endedAt,omitempty"`
 }
 
 // Open reports whether nothing has ended this barrier yet.
@@ -153,6 +162,7 @@ func AdjudicationHistory(sessionPath string) []AdjudicationEntry {
 			continue
 		}
 		out[at].Disposition, out[at].EndedAt = rec.Status, rec.At
+		out[at].SupersededBy = rec.Successor
 	}
 	return out
 }
@@ -171,12 +181,63 @@ func barrierSummary(questions []event.AskQuestion) string {
 	return strings.Join(parts, " / ")
 }
 
+// withInheritedInterruptions records the handover and passes the marker on. It
+// sits on markInFlightTurn's return so every path that starts a turn records it
+// once the turn is identified and durable, and before the model is called.
+// Only what the turn actually receives is claimed: a barrier nothing showed it
+// is not one it took over.
+func (c *Controller) withInheritedInterruptions(marker agent.InFlightTurnMeta) agent.InFlightTurnMeta {
+	c.inheritInterruptions(marker.ID)
+	return marker
+}
+
+func (c *Controller) inheritInterruptions(successor string) {
+	if successor == "" {
+		return
+	}
+	for _, item := range c.InterruptedAdjudications() {
+		_ = appendBarrier(c.SessionPath(), barrierRecord{
+			Barrier: item.ID, Status: barrierSuperseded, Successor: successor, At: time.Now().UTC(),
+		})
+	}
+}
+
+// inheritedByRunningTurn returns the barriers a turn took over and did not
+// finish. The successor is read off the in-flight marker on disk, so this
+// answers the same way in the process that wrote the edge and in one that
+// found it after a crash: an interruption is never both un-inherited and
+// invisible, whichever side of the boundary the question is asked from.
+func (c *Controller) inheritedByRunningTurn() []InterruptedAdjudication {
+	running := runningTurnID(c.SessionPath())
+	if running == "" {
+		return nil
+	}
+	var out []InterruptedAdjudication
+	for _, e := range AdjudicationHistory(c.SessionPath()) {
+		if e.Disposition == barrierSuperseded && e.SupersededBy == running {
+			out = append(out, InterruptedAdjudication{ID: e.ID, Kind: e.Kind, Summary: e.Summary})
+		}
+	}
+	return out
+}
+
+// runningTurnID is the turn the session is in the middle of, or empty when the
+// last one committed. A completed turn clears its marker, which is what stops
+// an inherited interruption from following every later request.
+func runningTurnID(sessionPath string) string {
+	meta, ok, err := agent.LoadBranchMeta(sessionPath)
+	if err != nil || !ok || meta.InFlightTurn == nil {
+		return ""
+	}
+	return meta.InFlightTurn.ID
+}
+
 // RequestContext is what the host owes the next request about work that did not
 // finish. It states provenance, not a continuation: there is no identity to
 // answer with, because no owner is left to answer to. Derived every request, so
 // nothing records having shown it.
 func (c *Controller) RequestContext() []string {
-	interrupted := c.InterruptedAdjudications()
+	interrupted := append(c.InterruptedAdjudications(), c.inheritedByRunningTurn()...)
 	if len(interrupted) == 0 {
 		return nil
 	}
