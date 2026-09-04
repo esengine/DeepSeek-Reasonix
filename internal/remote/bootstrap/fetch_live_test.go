@@ -124,6 +124,12 @@ func TestFetchRefusesAnArchiveThatFailsItsDigest(t *testing.T) {
 	if _, err := os.Stat(bin); !os.IsNotExist(err) {
 		t.Errorf("a rejected archive still left a binary: %v", err)
 	}
+	// The archive was downloaded before the digest rejected it, so the staging
+	// directory holds a full copy of a release this machine refused. `set -e`
+	// skipped the cleanup that followed; only an exit trap runs either way.
+	if _, err := os.Stat(filepath.Join(dirOf(bin), ".fetch")); !os.IsNotExist(err) {
+		t.Errorf("a rejected archive left its staging directory behind: %v", err)
+	}
 }
 
 // runScript runs one of this package's remote scripts the way a remote shell

@@ -18,6 +18,10 @@ func FetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		`T="$D/.fetch"`,
 		`rm -rf "$T"`,
 		`mkdir -p "$T" "$D"`,
+		// On the way out, however it goes. `set -e` is what made a failed
+		// download leave the staging directory — with whatever it had already
+		// written in it — for the next attempt to find and start beside.
+		`trap 'cd "$D" 2>/dev/null; rm -rf "$T"' EXIT`,
 		`cd "$T"`,
 		"A=" + shellQuote(d.Asset),
 		"U=" + shellQuote(d.URL),
@@ -43,7 +47,6 @@ func FetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		`mv "$F" "$B"`,
 		`chmod 755 "$B"`,
 		`cd "$D"`,
-		`rm -rf "$T"`,
 	}, "; ")
 }
 
@@ -59,6 +62,9 @@ func WindowsFetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		"New-Item -ItemType Directory -Force -Path $d,$t | Out-Null",
 		"$a = Join-Path $t " + psQuote(d.Asset),
 		"$ProgressPreference='SilentlyContinue'",
+		// try/finally for the reason the POSIX side has a trap: Stop turns the
+		// first failure into a throw, and the cleanup after it never ran.
+		"try {",
 		// Invoke-WebRequest has no connect timeout of its own, so a short HEAD
 		// runs first: without it a stalled connection would hold the download's
 		// whole budget before the next route is tried.
@@ -70,7 +76,7 @@ func WindowsFetchCommand(d releaseasset.CLIDownload, dir, bin string) string {
 		"$f = Get-ChildItem -Path $t -Recurse -File -Filter " + psQuote(d.Executable) + " | Select-Object -First 1",
 		"if (-not $f) { throw 'bootstrap: no " + d.Executable + " in the archive' }",
 		"Move-Item -Force -LiteralPath $f.FullName -Destination " + psQuote(toShellPath(bin)),
-		"Remove-Item -Recurse -Force -LiteralPath $t",
+		"} finally { Remove-Item -Recurse -Force -LiteralPath $t -ErrorAction SilentlyContinue }",
 	}, "; ")
 	return psCommand(script)
 }

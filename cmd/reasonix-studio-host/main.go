@@ -95,6 +95,12 @@ func studioUpdateHost(shell shellIdentity, to io.Writer) appupdate.Capability {
 }
 
 func main() {
+	// Ahead of this host's own flags: a macOS install re-executes this binary
+	// to swap the bundle, and that child's argv is the update's. Parsed as this
+	// host's, it exits on an undefined flag and the parent reads EOF.
+	if handled, code := update.MaybeRunMacHandoff(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	page := flag.String("page", "", "directory holding the built Studio page")
 	identity := flag.Bool("instance-id", false, "print the Studio instance this data home belongs to, and exit")
 	// The shell around this process knows which build it is; this process does
