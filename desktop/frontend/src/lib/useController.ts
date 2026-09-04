@@ -479,7 +479,7 @@ export interface State {
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
-  retry?: { attempt: number; max: number; observedAt: number };
+  retry?: { attempt: number; max: number; reason?: string; delayMs?: number; observedAt: number };
   seq: number;
   sessionGen: number;
   // Per-session counter bumped after hydration ancillary data (context, effort,
@@ -1457,8 +1457,8 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
     return {
       ...s,
       retry: {
-        attempt: e.retryAttempt ?? 0,
-        max: e.retryMax ?? 0,
+        attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0,
+        reason: e.retryReason, delayMs: e.retryDelayMs,
         observedAt: promptEventClock(),
       },
       running: true,

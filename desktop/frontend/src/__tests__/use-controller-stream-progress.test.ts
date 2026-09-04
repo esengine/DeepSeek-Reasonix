@@ -372,9 +372,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   });
   eq(s.running, false, "stale idle snapshot reproduces the hidden-stop state");
 
-  s = ev(s, { kind: "retrying", retryAttempt: 3, retryMax: 10 } as WireEvent);
+  s = ev(s, { kind: "retrying", retryAttempt: 3, retryMax: 10, retryReason: "HTTP 429", retryDelayMs: 12000 } as WireEvent);
   eq(s.retry?.attempt, 3, "retry status keeps the current attempt");
   eq(s.retry?.max, 10, "retry status keeps the retry budget");
+  eq(s.retry?.reason, "HTTP 429", "retry status keeps the body-free reason");
+  eq(s.retry?.delayMs, 12000, "retry status keeps the backoff duration");
   eq(s.running, true, "retry event restores the active turn");
   eq(s.turnActive, true, "retry event restores the turn epoch");
   eq(s.cancellable, true, "retry event keeps Stop and Escape cancellation available");

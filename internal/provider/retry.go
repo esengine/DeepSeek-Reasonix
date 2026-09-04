@@ -61,6 +61,26 @@ type RetryInfo struct {
 	Err     error
 }
 
+// RetryReason returns a short, body-free description suitable for status UIs.
+func RetryReason(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("HTTP %d", apiErr.Status)
+	}
+	var authErr *AuthError
+	if errors.As(err, &authErr) {
+		return fmt.Sprintf("HTTP %d", authErr.Status)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "network timeout"
+	}
+	if IsConnReset(err) {
+		return "connection reset"
+	}
+	return "request error"
+}
+
 type RetryNotify func(RetryInfo)
 
 type retryNotifyKey struct{}

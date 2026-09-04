@@ -104,6 +104,7 @@ var English = Messages{
 	ChatSubagentProgressDoneFmt:            "%s · %ds",
 	ChatSubagentPreviewLabel:               "▎",
 	ChatStatusRetryingFmt:                  "%s retrying (%d/%d)… (Esc cancels)",
+	ChatStatusRetryingDetailFmt:            "%s retrying (%d/%d) · %s · %ds… (Esc cancels)",
 	ChatStatusCancellingFmt:                "%s stopping… (%ds · Ctrl+C exits)",
 	ChatStatusIdle:                         "ready",
 	ChatStatusYoloIdle:                     "tool approvals skipped",

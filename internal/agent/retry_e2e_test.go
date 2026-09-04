@@ -113,6 +113,11 @@ func TestAgentEmitsRetryingThenStreams(t *testing.T) {
 	if retries[0].RetryMax != provider.MaxRetries {
 		t.Errorf("RetryMax = %d, want %d", retries[0].RetryMax, provider.MaxRetries)
 	}
+	for _, retry := range retries {
+		if retry.RetryReason != "HTTP 503" || retry.RetryDelayMs <= 0 {
+			t.Errorf("retry detail = %q %dms, want HTTP 503 and a positive delay", retry.RetryReason, retry.RetryDelayMs)
+		}
+	}
 
 	var answer strings.Builder
 	for _, e := range sink.kinds(event.Text) {
