@@ -225,8 +225,9 @@ func (a *Agent) compressVisibleRange(
 
 	inputHash := providerVisibleFingerprint(provider.ModelMessages(snap.visible))
 	outputHash := providerVisibleFingerprint(projection)
+	// Coverage is the whole transcript while the body still freezes the tail.
 	_, err = a.commitSummaryProjection(summaryProjectionCommit{
-		canonical: snap.canonical, fold: prepared.fold, projected: projection, result: res,
+		canonical: snap.canonical, covered: len(snap.canonical), fold: prepared.fold, projected: projection, result: res,
 		transcriptVersion: snap.transcriptVersion, projectionVersion: snap.projectionVersion, generation: snap.generation,
 		activeTurn: a.activeTurnCreatedAt.Load(), trigger: trigger, summary: summary,
 		inputHash: inputHash, outputHash: outputHash, sourceTokens: result.SourceTokens, projectionTokens: projectionTokens,
@@ -485,8 +486,9 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		return CompactionNoop, "", err
 	}
 	viewOutputHash := providerVisibleFingerprint(provider.ModelMessages(projMsgs))
+	// Coverage is the whole transcript while the body still freezes msgs[start:].
 	_, err = a.commitSummaryProjection(summaryProjectionCommit{
-		canonical: canonical, fold: fold, projected: projMsgs, result: res,
+		canonical: canonical, covered: len(canonical), fold: fold, projected: projMsgs, result: res,
 		transcriptVersion: transcriptVersion, projectionVersion: startProjectionVersion,
 		generation: startGeneration, activeTurn: activeTurn, trigger: trigger,
 		summary: summary, inputHash: viewInputHash, outputHash: viewOutputHash,
