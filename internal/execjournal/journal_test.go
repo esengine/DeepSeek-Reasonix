@@ -69,7 +69,7 @@ func TestSettledExecutionIsNeverInterrupted(t *testing.T) {
 // interrupted would invent work nobody did.
 func TestAdoptedOpeningIsClosedOnArrival(t *testing.T) {
 	path := sessionPath(t)
-	if err := Open(path, Opening{ID: "call/item-1", Disposition: DispositionAdopted}); err != nil {
+	if err := Open(path, Opening{ID: "call/item-1", Disposition: DispositionAdopted, AdoptedFrom: "sa_source"}); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if entries := History(path); len(entries) != 1 || entries[0].Open() {
@@ -346,4 +346,57 @@ func TestQueueRecordsTheJournalRefuses(t *testing.T) {
 			t.Fatalf("entries = %+v, want none from a queue with no opening", entries)
 		}
 	})
+}
+
+// TestAdoptionMustNameItsSource holds one opening to one story. An adoption
+// with nobody to have adopted from, or a source on an item that is going to
+// run, are two fields disagreeing about what this item is.
+func TestAdoptionMustNameItsSource(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opening Opening
+		wantErr bool
+	}{
+		"adopted with a source": {Opening{ID: "call/a", Disposition: DispositionAdopted, AdoptedFrom: "sa_x"}, false},
+		"adopted with none":     {Opening{ID: "call/b", Disposition: DispositionAdopted}, true},
+		"pending with a source": {Opening{ID: "call/c", AdoptedFrom: "sa_x"}, true},
+		"pending with none":     {Opening{ID: "call/d"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := sessionPath(t)
+			err := Open(path, tc.opening)
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("open err = %v, want error: %v", err, tc.wantErr)
+			}
+			if tc.wantErr && len(History(path)) != 0 {
+				t.Fatal("a refused opening must leave no record")
+			}
+		})
+	}
+}
+
+// TestOlderAdoptionWithoutASourceIsReadable: an adoption recorded before the
+// source was captured is lossy history, not corruption. Refusing to read it
+// would condemn sidecars written by a version that could not know better, and
+// no other field can be read to guess what it adopted.
+func TestOlderAdoptionWithoutASourceIsReadable(t *testing.T) {
+	path := sessionPath(t)
+	f, err := os.Create(store.SessionExecution(path))
+	if err != nil {
+		t.Fatalf("create journal: %v", err)
+	}
+	if _, err := f.WriteString(`{"execution":"call/a","status":"open","disposition":"adopted","at":"2026-01-01T00:00:00Z"}` + "\n"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.Close()
+
+	entries := History(path)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Disposition != DispositionAdopted || entries[0].AdoptedFrom != "" {
+		t.Fatalf("entry = %+v, want an adoption whose source is unknown", entries[0])
+	}
+	if entries[0].Open() {
+		t.Fatal("an adopted entry is closed on arrival, whatever its source")
+	}
 }

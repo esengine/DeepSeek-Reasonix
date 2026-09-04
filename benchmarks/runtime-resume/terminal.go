@@ -233,11 +233,26 @@ func terminalAnswerRow(before, after Observation) row {
 
 // adoptSourceRow is the provenance an adoption carries: whose answer stood in.
 // Reuse is only visible if the source is nameable — otherwise the picture shows
-// work that cost nothing with no way to say what paid for it.
+// work that cost nothing with no way to say what paid for it. The comparison is
+// the graph's edge against the journal's opening, so a record that named a
+// different source would read as a loss rather than as agreement.
 func adoptSourceRow(before, after Observation) row {
-	return valueRow("whose answer an adoption reused", "the adopt edge in the graph",
-		"none observed", "no durable record names the source",
-		adoptEdges(before), adoptEdges(after), false)
+	return valueRow("whose answer an adoption reused", "the adopt edge, recorded with the opening",
+		"<stem>.execution.jsonl", "read back with the openings, never re-derived",
+		adoptEdges(before), journalAdoptions(after), true)
+}
+
+// journalAdoptions renders the openings' recorded sources the way the graph
+// renders its edges, so the two sides of the row are the same measurement.
+func journalAdoptions(o Observation) string {
+	var out []string
+	for _, e := range o.Executions {
+		if e.AdoptedFrom != "" {
+			out = append(out, e.ID+"<-"+e.AdoptedFrom)
+		}
+	}
+	sort.Strings(out)
+	return join(out)
 }
 
 // contextDerivabilityRow asks whether the delivery edge follows from facts that

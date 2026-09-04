@@ -388,10 +388,17 @@ What the journal actually holds, measured:
 | completed | `open+started+settled` | — |
 
 Adopted survives because the disposition rides the opening: an adoption is
-declared before anything runs, so it was already durable. Its **source** is
-not — the reference whose answer stood in is drawn as an adopt edge and
-recorded nowhere, so a restart can say an item was adopted and not what paid
-for it.
+declared before anything runs, so it is durable for the same reason the
+ordering is. Its **source** now rides it too — the reference whose answer stood
+in is taken from the same delta that draws the adopt edge, so the graph and the
+journal cannot name different sources, and a restart can say both that an item
+was adopted and what paid for it.
+
+An opening is held to one story about itself: an adoption must name a source,
+and an item that is going to run must not carry one. Older entries recorded
+before the source was captured stay readable as adoptions whose source is
+unknown — lossy history, not corruption, and nothing else in the record could
+be read to guess it.
 
 The bottom three rows are the real collapse. `open+started+settled` covers
 completed, failed and cancelled alike; the sub-agent store settles the first

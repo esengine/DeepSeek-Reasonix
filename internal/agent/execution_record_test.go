@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -25,6 +28,7 @@ type openingProbeSink struct {
 	sessionPath string
 	recorded    []string
 	upstream    []string
+	adopted     []string
 	seen        bool
 }
 
@@ -41,6 +45,9 @@ func (s *openingProbeSink) Emit(e event.Event) {
 	for _, entry := range execjournal.History(s.sessionPath) {
 		s.recorded = append(s.recorded, entry.ID)
 		s.upstream = append(s.upstream, entry.DependsOn...)
+		if entry.AdoptedFrom != "" {
+			s.adopted = append(s.adopted, entry.ID+"<-"+entry.AdoptedFrom)
+		}
 	}
 }
 
@@ -54,6 +61,12 @@ func (s *openingProbeSink) upstreamIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.upstream...)
+}
+
+func (s *openingProbeSink) adoptions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.adopted...)
 }
 
 // runningProbeSink reads the journal at the moment the graph first shows one
@@ -477,4 +490,75 @@ func TestBlockedItemNeverReachesTheScheduler(t *testing.T) {
 	if blocked := byID["fleet-call/fleet-2"]; blocked.Queued() {
 		t.Fatalf("the dependency-blocked item recorded a refusal (%s); it never reached the scheduler", blocked.Cause)
 	}
+}
+
+// TestAdoptionSourceIsDurableWithTheOpening: an adoption is a fact at the
+// moment the fan-out opens — the item was never going to run — so the source
+// rides the opening rather than waiting for a terminal nothing will publish.
+// The delta that draws the adopt edge is the delta the record comes from, so
+// the graph and the journal cannot name different sources.
+func TestAdoptionSourceIsDurableWithTheOpening(t *testing.T) {
+	fleet, ctx, sessionPath, _ := fanOutJournalFixture(t, &fleetScriptedFailureProvider{})
+
+	// A completed child first, so there is a reference an item may adopt.
+	if _, err := fleet.Execute(ctx, json.RawMessage(`{"tasks":[
+		{"id":"w1","prompt":"warm one","read_only":true},
+		{"id":"w2","prompt":"warm two","read_only":true}
+	]}`)); err != nil {
+		t.Fatalf("warm fleet: %v", err)
+	}
+	refs := completedChildRefs(t, sessionPath)
+	if len(refs) == 0 {
+		t.Fatal("the warm fleet persisted no completed child to adopt")
+	}
+	source := refs[0]
+
+	// A fresh sink: the fixture's has already latched on the warm fan-out, and
+	// the moment under test is when the adopting one first becomes visible.
+	sink := &openingProbeSink{sessionPath: sessionPath}
+	adoptCtx := withCallContext(context.Background(), "adopt-call", sink, nil, false)
+	adoptCtx = WithTurnIdentity(WithParentSession(adoptCtx, "probe"), "turn-2")
+	args := fmt.Sprintf(`{"tasks":[
+		{"id":"a1","adopt_ref":%q,"description":"adopted"},
+		{"id":"a2","prompt":"ran","read_only":true}
+	]}`, source)
+	if _, err := fleet.Execute(adoptCtx, json.RawMessage(args)); err != nil {
+		t.Fatalf("adopting fleet: %v", err)
+	}
+
+	want := "adopt-call/fleet-1<-" + source
+	if got := sink.adoptions(); !slices.Contains(got, want) {
+		t.Fatalf("journal held %v when the graph first showed the workers, want %q", got, want)
+	}
+	for _, e := range execjournal.History(sessionPath) {
+		if e.ID != "adopt-call/fleet-1" {
+			continue
+		}
+		if e.AdoptedFrom != source {
+			t.Errorf("adopted entry source = %q, want %q", e.AdoptedFrom, source)
+		}
+		if e.Started() || e.Queued() {
+			t.Error("an adopted item never runs, so it must never queue or start")
+		}
+	}
+}
+
+// completedChildRefs are the references the store owns for this parent, which
+// is where an adoptable answer comes from.
+func completedChildRefs(t *testing.T, sessionPath string) []string {
+	t.Helper()
+	dir := filepath.Dir(sessionPath)
+	parent := strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
+	artifacts, err := ListSubagentsByParent(dir, parent)
+	if err != nil {
+		t.Fatalf("list children: %v", err)
+	}
+	var out []string
+	for _, a := range artifacts {
+		if a.Meta.Status == SubagentCompleted {
+			out = append(out, a.Ref)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

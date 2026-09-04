@@ -3,6 +3,8 @@ package execjournal
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -54,6 +56,7 @@ type record struct {
 	Grant       string    `json:"grant,omitempty"`
 	Disposition string    `json:"disposition,omitempty"`
 	DependsOn   []string  `json:"dependsOn,omitempty"`
+	AdoptedFrom string    `json:"adoptedFrom,omitempty"`
 	Cause       string    `json:"cause,omitempty"`
 	At          time.Time `json:"at"`
 }
@@ -83,28 +86,39 @@ type Opening struct {
 	// Not scheduler state: a dependency is why an item is not yet ready, a slot
 	// is what a ready item waits for, and the two have different remedies.
 	DependsOn []string
+	// AdoptedFrom is whose answer stood in for running this item, in whatever
+	// vocabulary the graph names it. The journal does not interpret it: what
+	// kind of source it is belongs to whoever reads the graph back.
+	AdoptedFrom string
 }
 
 // Entry is one execution's whole story, folded from the journal: it was opened,
 // and either the orchestration let go of it or it did not. An adopted opening
 // is closed on arrival — nothing ran, so nothing can be left running.
 type Entry struct {
-	ID          string    `json:"id"`
-	Group       string    `json:"group,omitempty"`
-	Turn        string    `json:"turn,omitempty"`
-	Kind        string    `json:"kind,omitempty"`
-	Name        string    `json:"name,omitempty"`
-	Grant       string    `json:"grant,omitempty"`
-	Disposition string    `json:"disposition,omitempty"`
-	DependsOn   []string  `json:"dependsOn,omitempty"`
+	ID          string   `json:"id"`
+	Group       string   `json:"group,omitempty"`
+	Turn        string   `json:"turn,omitempty"`
+	Kind        string   `json:"kind,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	Grant       string   `json:"grant,omitempty"`
+	Disposition string   `json:"disposition,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
+	// AdoptedFrom is empty on an adopted entry written before this was
+	// recorded. That is lossy history, not corruption: the source was never
+	// captured, and no other field can be read to guess it.
+	AdoptedFrom string    `json:"adoptedFrom,omitempty"`
 	OpenedAt    time.Time `json:"openedAt"`
-	QueuedAt    time.Time `json:"queuedAt,omitempty"`
+	// The timestamps carry no omitempty: it does nothing for time.Time, and a
+	// tag that appears to drop a zero value while emitting 0001-01-01 reads to
+	// a consumer as a transition that happened. Queued and Started answer that.
+	QueuedAt time.Time `json:"queuedAt"`
 	// Cause is why the scheduler denied admission the first time, never the
 	// blocker that remained before execution: a measured run kept reporting
 	// slots after slots had freed and the writer ceiling had taken over.
 	Cause     string    `json:"cause,omitempty"`
-	StartedAt time.Time `json:"startedAt,omitempty"`
-	SettledAt time.Time `json:"settledAt,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
+	SettledAt time.Time `json:"settledAt"`
 }
 
 // Open reports whether the orchestration still held this execution when the
@@ -157,10 +171,13 @@ func Open(sessionPath string, o Opening) error {
 	if disposition == "" {
 		disposition = DispositionPending
 	}
+	if err := checkAdoption(disposition, o.AdoptedFrom); err != nil {
+		return err
+	}
 	if err := appendRecord(sessionPath, record{
 		Execution: o.ID, Status: statusOpen, Group: o.Group, Turn: o.Turn,
 		Kind: o.Kind, Name: o.Name, Grant: o.Grant, Disposition: disposition,
-		DependsOn: o.DependsOn, At: time.Now().UTC(),
+		DependsOn: o.DependsOn, AdoptedFrom: o.AdoptedFrom, At: time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
@@ -181,6 +198,21 @@ func Queue(sessionPath, id, cause string) error {
 	return appendRecord(sessionPath, record{
 		Execution: id, Status: statusQueued, Cause: cause, At: time.Now().UTC(),
 	})
+}
+
+// checkAdoption refuses the two shapes that would make one opening say two
+// things: an adoption with nobody to have adopted from, and a source on an item
+// that is going to run. Only new writes are held to it — a reader accepts an
+// older adopted entry whose source was never captured.
+func checkAdoption(disposition, source string) error {
+	adopted, named := disposition == DispositionAdopted, strings.TrimSpace(source) != ""
+	switch {
+	case adopted && !named:
+		return errors.New("an adopted opening must name the source whose answer it reuses")
+	case !adopted && named:
+		return fmt.Errorf("a %s opening cannot name an adoption source", disposition)
+	}
+	return nil
 }
 
 // Start records that an opened execution was granted a slot, before anything
@@ -288,7 +320,7 @@ func History(sessionPath string) []Entry {
 			out = append(out, Entry{
 				ID: rec.Execution, Group: rec.Group, Turn: rec.Turn, Kind: rec.Kind,
 				Name: rec.Name, Grant: rec.Grant, Disposition: rec.Disposition,
-				DependsOn: rec.DependsOn, OpenedAt: rec.At,
+				DependsOn: rec.DependsOn, AdoptedFrom: rec.AdoptedFrom, OpenedAt: rec.At,
 			})
 			continue
 		}

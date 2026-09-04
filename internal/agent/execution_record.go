@@ -130,6 +130,7 @@ func adoptedDisposition(adopted bool) string {
 // the graph shows is one the journal can be asked about after a restart.
 func fanOutOpenings(delta agentgraph.Delta) []execjournal.Opening {
 	upstream := declaredDependencies(delta.Edges)
+	adopted := adoptionSources(delta.Edges)
 	out := make([]execjournal.Opening, 0, len(delta.Nodes))
 	for _, w := range delta.Nodes {
 		if w.Kind != agentgraph.KindWorker {
@@ -139,7 +140,21 @@ func fanOutOpenings(delta agentgraph.Delta) []execjournal.Opening {
 			ID: w.ID, Kind: string(w.Kind), Name: w.Label, Grant: string(w.Grant),
 			Disposition: adoptedDisposition(w.State == agentgraph.StateAdopted),
 			DependsOn:   upstream[w.ID],
+			AdoptedFrom: adopted[w.ID],
 		})
+	}
+	return out
+}
+
+// adoptionSources collects whose answer stood in for each adopted item. The
+// source is carried through as the graph names it: what kind of thing it is
+// belongs to whoever reads the graph back, not to the record of the reuse.
+func adoptionSources(edges []agentgraph.Edge) map[string]string {
+	out := map[string]string{}
+	for _, e := range edges {
+		if e.Kind == agentgraph.Adopt {
+			out[e.To] = e.From
+		}
 	}
 	return out
 }
