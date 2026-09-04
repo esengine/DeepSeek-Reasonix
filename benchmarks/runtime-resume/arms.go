@@ -53,6 +53,9 @@ const (
 	// its invalidation can become conditional: rewinding below the fold removes
 	// history the digest folded, and no coverage check may excuse that.
 	armCoveredRewind = "covered-rewind"
+	// armTodoIdentity moves host step identity while a fold is between the
+	// model and it: identity A, fold, live tail, identity B, fold again.
+	armTodoIdentity = "todo-identity"
 )
 
 func arms() []arm {
@@ -65,6 +68,7 @@ func arms() []arm {
 		{name: armTailTruncate, asks: "the messages past the fold were dropped", lever: truncateTail},
 		{name: armTailRewind, asks: "the same truncation, driven through the rewind a person uses"},
 		{name: armCoveredRewind, asks: "a rewind that lands below the fold boundary"},
+		{name: armTodoIdentity, asks: "host step identity moved across two folds and a live tail"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

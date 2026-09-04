@@ -55,6 +55,7 @@ provider call*.
 | `tail-truncate` | fold, one more turn, die | `SaveRewrite` drops everything past the fold | the same, by removal |
 | `tail-rewind` | fold, one more turn, rewind, die | none | the same truncation through the rewind a person drives |
 | `covered-rewind` | fold, one more turn, rewind below the fold, die | none | negative control for making that rewind conditional |
+| `todo-identity` | identity A, fold, grow, identity B, fold again, die | none | does the host's step-identity note stay single, current, and on the tail? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -98,6 +99,20 @@ a message that should have survived verbatim.
 `refold_test.go` holds the oracle to that: a test that cannot fail proves
 nothing, so the shapes only a loss can produce are asserted to be caught.
 
+## The todo identity gate
+
+`todoIdentityProjection` calls itself a turn-tail note owed when the host holds
+step ids the conversation no longer shows. Once the frozen body stopped holding
+the live tail, that claim became checkable, and the arm checks all three parts
+of it rather than whether a note exists: exactly one note reaches the model, it
+rides the tail, and it names the ids the host holds now.
+
+The scenario moves identity while a fold sits between the model and it — write
+a list, fold, grow, rewrite the list, fold again — because one run then
+separates placement from duplication from staleness. The rewrite keeps the
+in_progress item and replaces the pending work: the host refuses to drop an
+item in flight, so that is what a list rewrite actually looks like.
+
 ## Verdicts
 
 Not booleans. "The host holds it verbatim" and "a fold over canonical artifacts
@@ -112,6 +127,8 @@ established supports neither.
 | `lost` | established before, absent after |
 | `not-measured` | never established before — the row asks nothing |
 | `changed` / `stable` | the arm's own control row, not a durability claim |
+| `contiguous` / `HOLE` | the shape of surviving work in the view, for a fold |
+| `holds` / `VIOLATED` | a contract the arm asserts outright, not a comparison |
 
 `not-measured` exists so the probe cannot commit the substitution the
 benchmarks contract names: **not evaluated read as false**. A row the construct

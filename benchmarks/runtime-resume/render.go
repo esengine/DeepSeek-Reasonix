@@ -37,7 +37,10 @@ func summarize(res armResult) string {
 		counts[r.Verdict]++
 	}
 	var parts []string
-	for _, v := range []string{verdictPersisted, verdictExact, verdictLossy, verdictLost, verdictNotMeasured, verdictChanged, verdictStable} {
+	// Every verdict the matrix can produce. A summary that silently omits one
+	// is how a VIOLATED row reads as a clean arm.
+	for _, v := range []string{verdictPersisted, verdictExact, verdictLossy, verdictLost, verdictNotMeasured,
+		verdictChanged, verdictStable, verdictContiguous, verdictHole, verdictHolds, verdictViolated} {
 		if counts[v] > 0 {
 			parts = append(parts, fmt.Sprintf("%s=%d", v, counts[v]))
 		}

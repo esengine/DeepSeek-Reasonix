@@ -84,6 +84,8 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 			graphMap(before.Graph.Waits), graphMap(after.Graph.Waits), false),
 	)
 	switch {
+	case a.name == armTodoIdentity:
+		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:
 		res.Rows = append(res.Rows, refoldRows(*extra, before, after, probeTurns+refoldTurns)...)
 		if extra.Sidecar.Messages == 0 {

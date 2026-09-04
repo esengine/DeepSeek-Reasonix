@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -36,6 +37,7 @@ type Observation struct {
 	Context         ContextObs          `json:"context"`
 	Sidecar         SidecarObs          `json:"sidecar"`
 	View            ViewObs             `json:"view"`
+	TodoNotes       TodoNoteObs         `json:"todo_notes"`
 	Graph           GraphObs            `json:"graph"`
 	Artifacts       []ArtifactObs       `json:"artifacts"`
 }
@@ -90,6 +92,42 @@ type ViewObs struct {
 	SplicedFromTail int      `json:"spliced_from_tail"`
 }
 
+// TodoNoteObs locates the host's step-identity note inside the model-visible
+// view. BodyLen is where the frozen body ends, so an index below it says the
+// note was frozen ahead of the live tail rather than riding it.
+type TodoNoteObs struct {
+	Count   int      `json:"count"`
+	Indexes []int    `json:"indexes"`
+	IDs     []string `json:"ids"`
+	BodyLen int      `json:"body_len"`
+	ViewLen int      `json:"view_len"`
+	HostIDs []string `json:"host_ids"`
+}
+
+// todoNoteMarker is the opening of todoIdentityNote. The probe reads the view
+// the way a model would, so it matches the text rather than a type.
+const todoNoteMarker = "Host task state."
+
+var stepIDPattern = regexp.MustCompile(`probe_step_\d+`)
+
+func todoNoteObs(view []provider.Message, bodyLen int, todos []evidence.TodoItem) TodoNoteObs {
+	out := TodoNoteObs{BodyLen: bodyLen, ViewLen: len(view)}
+	for _, t := range todos {
+		if t.StepID != "" {
+			out.HostIDs = append(out.HostIDs, t.StepID)
+		}
+	}
+	for i, m := range view {
+		if !strings.Contains(m.Content, todoNoteMarker) {
+			continue
+		}
+		out.Count++
+		out.Indexes = append(out.Indexes, i)
+		out.IDs = append(out.IDs, stepIDPattern.FindAllString(m.Content, -1)...)
+	}
+	return out
+}
+
 type GraphObs struct {
 	Deltas int               `json:"deltas"`
 	Nodes  []agentgraph.Node `json:"nodes,omitempty"`
@@ -108,6 +146,7 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 	system := systemText(history)
 	snap := ctrl.ContextMaintenanceSnapshot()
 	st, loaded, loadErr := agent.LoadCompactionState(path)
+	view, viewMsgs := viewObs(st, loaded, history)
 	graph, deltas := sink.snapshot()
 	return Observation{
 		Phase:           phase,
@@ -129,7 +168,8 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 			Blocked:           snap.Blocked,
 		},
 		Sidecar:   sidecarObs(st, loaded, loadErr),
-		View:      viewObs(st, loaded, history),
+		View:      view,
+		TodoNotes: todoNoteObs(viewMsgs, len(st.Projection.Messages), ctrl.Todos()),
 		Graph:     graphObs(graph, deltas),
 		Artifacts: readArtifacts(path),
 	}
@@ -189,13 +229,13 @@ func sidecarObs(st agent.CompactionState, ok bool, err error) SidecarObs {
 
 // viewObs splices the model-visible context. With no usable projection the
 // view is the canonical transcript, which is what the host would send.
-func viewObs(st agent.CompactionState, ok bool, canonical []provider.Message) ViewObs {
+func viewObs(st agent.CompactionState, ok bool, canonical []provider.Message) (ViewObs, []provider.Message) {
 	var out ViewObs
 	if !ok || len(st.Projection.Messages) == 0 {
 		out.Messages = len(canonical)
 		out.Markers = markersIn(contents(canonical), markerPattern)
 		out.Echoes = markersIn(contents(canonical), echoPattern)
-		return out
+		return out, canonical
 	}
 	body := st.Projection.Messages
 	out.BodyMarkers = markersIn(contents(body), markerPattern)
@@ -208,7 +248,7 @@ func viewObs(st agent.CompactionState, ok bool, canonical []provider.Message) Vi
 	out.Messages = len(view)
 	out.Markers = markersIn(contents(view), markerPattern)
 	out.Echoes = markersIn(contents(view), echoPattern)
-	return out
+	return out, view
 }
 
 func contents(msgs []provider.Message) []string {

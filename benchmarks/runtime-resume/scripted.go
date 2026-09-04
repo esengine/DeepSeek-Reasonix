@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -19,7 +20,13 @@ const probeModelRef = "probe/scripted"
 // scripted answers completions from a fixed script so the construct phase can
 // establish host state without a network call. A request carrying no tools is a
 // host-internal completion (the compaction summary); everything else is a turn.
-type scripted struct{ turnCalls atomic.Int64 }
+type scripted struct {
+	turnCalls atomic.Int64
+	// retodo latches the one reply that replaces the task list. The sentinel
+	// stays in history after the call, so without it every later round would
+	// rewrite the list again.
+	retodo atomic.Bool
+}
 
 func (s *scripted) Name() string { return "probe" }
 
@@ -43,7 +50,10 @@ func (s *scripted) script(req provider.Request) []provider.Chunk {
 		return append(text(summaryBody), done())
 	}
 	if s.turnCalls.Add(1) == 1 && hasTool(req.Tools, "todo_write") {
-		return append(todoCall(), done())
+		return append(todoCall(firstTodos()), done())
+	}
+	if hasTool(req.Tools, "todo_write") && requestMentions(req, retodoSentinel) && !s.retodo.Swap(true) {
+		return append(todoCall(secondTodos()), done())
 	}
 	return append(text(echoMarker(req)+turnBody), done())
 }
@@ -98,19 +108,43 @@ func done() provider.Chunk { return provider.Chunk{Type: provider.ChunkDone} }
 // point: they are the host identity a completion has to cite. A first write
 // may not open with a completed item — the host rejects that shape, and a
 // rejected call would leave the row unmeasured rather than answered.
-func todoCall() []provider.Chunk {
-	args, _ := json.Marshal(map[string]any{"todos": probeTodos()})
+func todoCall(todos []map[string]any) []provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"todos": todos})
 	return []provider.Chunk{{
 		Type:     provider.ChunkToolCall,
-		ToolCall: &provider.ToolCall{ID: "probe_todo_1", Name: "todo_write", Arguments: string(args)},
+		ToolCall: &provider.ToolCall{ID: "probe_todo_" + strconv.Itoa(len(todos)), Name: "todo_write", Arguments: string(args)},
 	}}
 }
 
-func probeTodos() []map[string]any {
+// retodoSentinel asks the scripted reply to replace the task list, so a probe
+// can move host step identity from one set of ids to another.
+const retodoSentinel = "PROBE-RETODO"
+
+func requestMentions(req provider.Request, needle string) bool {
+	for _, m := range slices.Backward(req.Messages) {
+		if strings.Contains(m.Content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstTodos() []map[string]any {
 	return []map[string]any{
 		{"content": "Establish probe state", "status": "in_progress", "activeForm": "Establishing probe state", "step_id": "probe_step_01"},
 		{"content": "Cross the process boundary", "status": "pending", "step_id": "probe_step_02"},
 		{"content": "Report the resurrection matrix", "status": "pending", "step_id": "probe_step_03"},
+	}
+}
+
+// secondTodos replaces the pending work while the in_progress item stays: the
+// host refuses to drop an item that is in flight, so this is what a list
+// rewrite actually looks like. The two new ids are what a stale note misses.
+func secondTodos() []map[string]any {
+	return []map[string]any{
+		{"content": "Establish probe state", "status": "in_progress", "activeForm": "Establishing probe state", "step_id": "probe_step_01"},
+		{"content": "Split the frozen body", "status": "pending", "step_id": "probe_step_21"},
+		{"content": "Hold the ordering contract", "status": "pending", "step_id": "probe_step_22"},
 	}
 }
 

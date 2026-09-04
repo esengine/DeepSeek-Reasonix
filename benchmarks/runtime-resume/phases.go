@@ -128,7 +128,20 @@ func runConstruct(dir, arm string) error {
 	if err := ctrl.Compact(ctx, "Fold the probe turn."); err != nil {
 		return fmt.Errorf("compact: %w", err)
 	}
-	if arm == armRefoldIntoBody {
+	if arm == armTodoIdentity {
+		// Identity A is already written and folded away. Grow, replace the list
+		// with identity B, then fold again: the second fold is what decides
+		// whether the model is left holding one current identity or two.
+		if turn, err = runTurns(ctx, ctrl, turn, refoldTurns); err != nil {
+			return err
+		}
+		if err := ctrl.Run(ctx, fmt.Sprintf("%s %s: replace the task list.", marker(turn+1), retodoSentinel)); err != nil {
+			return fmt.Errorf("retodo turn: %w", err)
+		}
+		if err := ctrl.Compact(ctx, "Fold again, after the identity moved."); err != nil {
+			return fmt.Errorf("refold: %w", err)
+		}
+	} else if arm == armRefoldIntoBody {
 		// Grow past the fold, record the view a second fold will operate on,
 		// then fold again: its region reaches back into the stored body, which
 		// has no canonical counterpart to map a new boundary onto.
