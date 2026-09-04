@@ -59,6 +59,11 @@ const (
 	// admitted before the second fleet is dispatched.
 	fleetHolderSentinel  = "PROBE-FLEET-HOLDER"
 	fleetRefusedSentinel = "PROBE-FLEET-REFUSED"
+	// The terminal arms. Their fan-outs run to completion, because a skip is
+	// published only in the closing delta; the turn is then held open so the
+	// process still dies mid-turn.
+	fleetTerminalSentinel = "PROBE-FLEET-TERMINAL"
+	parallelSentinel      = "PROBE-PARALLEL"
 )
 
 // childHold is a child that reports holding its slot before it blocks, so a
@@ -207,7 +212,14 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 		}
 		return append(pairFleet(second), done()), true
 	case askedInPrompt(req, fleetMixedSentinel) && !s.mixed.Swap(true):
+		if s.arm == armTerminalAdopted {
+			return append(adoptOnlyFleet(adoptableRef(req)), done()), true
+		}
 		return append(mixedFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, fleetTerminalSentinel) && !s.terminal.Swap(true):
+		return append(terminalFleet(s.arm), done()), true
+	case askedInPrompt(req, parallelSentinel) && !s.terminal.Swap(true):
+		return append(cancelParallel(), done()), true
 	case askedInPrompt(req, fleetHolderSentinel) && !s.holder.Swap(true):
 		return append(holderFleet(s.arm), done()), true
 	case askedInPrompt(req, fleetRefusedSentinel) && !s.refused.Swap(true):
@@ -252,6 +264,45 @@ func refusedFleet(arm string) []provider.Chunk {
 	return fleetCall("probe_fleet_refused", []map[string]any{
 		refused,
 		{"id": "r2", "prompt": childHang + " sibling", "description": "sibling", "read_only": true},
+	})
+}
+
+// terminalFleet runs to completion holding the disposition its arm measures.
+// The skipped arm cuts a branch with a failure; the context arm delivers a real
+// answer across an ordering edge, which is the only way a context edge appears.
+func terminalFleet(arm string) []provider.Chunk {
+	upstream := map[string]any{"id": "up", "prompt": childDone + " upstream", "description": "upstream", "read_only": true}
+	if arm == armTerminalSkippedDep {
+		upstream["prompt"] = childFail + " upstream"
+	}
+	return fleetCall("probe_fleet_terminal", []map[string]any{
+		upstream,
+		{"id": "down", "prompt": childDone + " downstream", "description": "downstream", "read_only": true, "depends_on": []string{"up"}},
+	})
+}
+
+// cancelParallel opens more items than the session admits at once, so the arm
+// can interrupt the group while one has started and another has not. That split
+// is what parallel_tasks reports as cancelled against skipped.
+func cancelParallel() []provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"tasks": []map[string]any{
+		{"prompt": childHang + " first", "description": "started"},
+		{"prompt": childHang + " second", "description": "never started"},
+		{"prompt": childHang + " third", "description": "never started"},
+	}})
+	return []provider.Chunk{{
+		Type:     provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{ID: "probe_parallel", Name: "parallel_tasks", Arguments: string(args)},
+	}}
+}
+
+// adoptOnlyFleet runs to completion with one item adopted and one that ran.
+// Nothing hangs: the arm compares two settled items whose only difference is
+// that one executed, which a fan-out still in flight could not show.
+func adoptOnlyFleet(adoptRef string) []provider.Chunk {
+	return fleetCall("probe_fleet_terminal", []map[string]any{
+		{"id": "a1", "adopt_ref": adoptRef, "description": "adopted"},
+		{"id": "a2", "prompt": childDone + " ran", "description": "ran", "read_only": true},
 	})
 }
 

@@ -50,11 +50,12 @@ type scripted struct {
 	// The scheduler arms dispatch two fleets and must not race them. held is
 	// closed by the holder's own child, which only runs once its slot is
 	// granted; release lets the arm free capacity while a refusal stands.
-	holder  atomic.Bool
-	refused atomic.Bool
-	holding sync.Once
-	held    chan struct{}
-	release chan struct{}
+	holder   atomic.Bool
+	refused  atomic.Bool
+	terminal atomic.Bool
+	holding  sync.Once
+	held     chan struct{}
+	release  chan struct{}
 }
 
 func (s *scripted) Name() string { return "probe" }
@@ -86,6 +87,13 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	}
 	if chunks, ok := s.fanOut(req); ok {
 		return chunks
+	}
+	// A terminal arm needs its fan-out to finish and its turn to stay open: a
+	// closed turn would settle the marker, and the process would no longer be
+	// dying inside one.
+	if terminalArm(s.arm) && s.terminal.Load() {
+		<-ctx.Done()
+		return nil
 	}
 	if s.turnCalls.Add(1) == 1 && hasTool(req.Tools, "todo_write") {
 		return append(todoCall(firstTodos()), done())

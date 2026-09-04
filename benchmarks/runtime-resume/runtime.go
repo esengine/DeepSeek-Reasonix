@@ -141,7 +141,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // denied gate the dispatch is refused before any child starts and the arm
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
-	if graphArm(arm) || schedulerWaitArm(arm) {
+	if graphArm(arm) || schedulerWaitArm(arm) || terminalArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"

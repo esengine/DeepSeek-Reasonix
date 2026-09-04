@@ -67,6 +67,10 @@ provider call*.
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
 | `wait-transition` | refuse on slots, then free the slots, die | ceilings | does a reported cause track the blocker, or the moment it queued? |
+| `terminal-adopted` | reuse an earlier answer, let the fan-out settle, die | none | can a restart tell an answer that was reused from one that was never produced? |
+| `terminal-skipped-dep` | fail an upstream, let the dependent be skipped, die | none | what does a skip leave behind? |
+| `terminal-cancelled` | cancel with one item admitted and two not, die | ceilings | the same for a cancellation |
+| `terminal-context` | deliver an upstream answer across an ordering edge, die | none | does a delivery edge follow from what is already durable? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -364,3 +368,54 @@ the dependency gate was crossed — which a declared ordering alone can never
 say. That is the difference between the mixed arm's `fleet-3`, whose journal
 reads `open` and nothing else, and a refused item, whose journal reads
 `open queued(slots)`.
+
+## The terminal-disposition arms
+
+`SETTLED` says an opening is no longer active and nothing else. These four ask
+what that costs, by putting lifecycles that look identical beside meanings that
+are opposite.
+
+What the journal actually holds, measured:
+
+| Disposition | Durable lifecycle | Told apart by |
+| --- | --- | --- |
+| adopted | `open+adopted` | the opening's own disposition |
+| skipped (dependency cut) | `open+settled` | nothing else reaches this shape today |
+| cancelled (never admitted) | `open+queued(cause)+settled` | the queue record |
+| cancelled (was running) | `open+started+settled` | — |
+| failed | `open+started+settled` | — |
+| completed | `open+started+settled` | — |
+
+Adopted survives because the disposition rides the opening: an adoption is
+declared before anything runs, so it was already durable. Its **source** is
+not — the reference whose answer stood in is drawn as an adopt edge and
+recorded nowhere, so a restart can say an item was adopted and not what paid
+for it.
+
+The bottom three rows are the real collapse. `open+started+settled` covers
+completed, failed and cancelled alike; the sub-agent store settles the first
+two, and what it says about a cancelled child is a separate question this batch
+did not ask. Skipped is distinguishable today only because nothing else
+produces `open+settled` — a distinction by absence, not by record.
+
+**A population that does not exist.** These arms were built expecting two ways
+to reach skipped: a dependency cut in `fleet`, and a cancellation before start
+in `parallel_tasks`. The second is unreachable. `parallel_tasks` sets
+`running[idx]` when it dispatches an item, not when the scheduler admits one,
+and every item is dispatched in one pass — so a cancellation finds `running[i]`
+true for all of them and marks them cancelled. The arm was renamed to what it
+actually reaches rather than constructed into the shape it was supposed to have.
+
+**Context is derivable, but not after a restart.** Two samples — an upstream
+that answered and one that failed — both show the delivery edges exactly
+matching what "an ordering edge whose upstream answered" predicts. So a context
+edge needs no record of its own. It does need the upstream's disposition, and
+that is precisely what is not durable: after the boundary the prediction goes
+empty, because the answered set comes from the graph rather than the journal.
+Context does not belong in the vocabulary; it belongs behind whatever makes a
+disposition durable.
+
+One thing these arms had to work around: `Controller.Cancel()` does nothing to
+a synchronous headless `Run`. That path does not pass through turn admission,
+so the gate Cancel operates has nothing registered for it, and the arm cancels
+the turn's context instead — which is how a headless caller interrupts anyway.

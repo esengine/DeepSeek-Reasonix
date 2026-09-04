@@ -135,6 +135,23 @@ func extraPhase(arm string) string {
 
 const probeGoal = "Prove which runtime semantics survive an OS process boundary."
 
+// armConstruct hands the arm to the construct path it needs, reporting whether
+// one took over. Each of them records its own observation and exits inside the
+// turn, so a caller that sees taken has nothing left to do but report the error.
+func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, prov *scripted, turn int) (bool, error) {
+	switch {
+	case arm == armOpenDecision || successorArm(arm):
+		return true, openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
+	case terminalArm(arm):
+		return true, runTerminalConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
+	case schedulerWaitArm(arm):
+		return true, runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
+	case graphArm(arm):
+		return true, runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
+	}
+	return false, nil
+}
+
 // runConstruct establishes host state through the same calls a frontend makes,
 // records what this process can see, and returns so the process can exit. It
 // never asserts: an arm that failed to establish something is reported as not
@@ -172,20 +189,8 @@ func runConstruct(dir, arm string) error {
 	if err := ctrl.Compact(ctx, "Fold the probe turn."); err != nil {
 		return fmt.Errorf("compact: %w", err)
 	}
-	if arm == armOpenDecision || successorArm(arm) {
-		return openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
-	}
-	if schedulerWaitArm(arm) {
-		if err := runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn); err != nil {
-			return err
-		}
-		return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root))
-	}
-	if graphArm(arm) {
-		if err := runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn); err != nil {
-			return err
-		}
-		return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root))
+	if taken, err := armConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn); taken {
+		return err
 	}
 	if arm == armTodoIdentity {
 		// Identity A is already written and folded away. Grow, replace the list

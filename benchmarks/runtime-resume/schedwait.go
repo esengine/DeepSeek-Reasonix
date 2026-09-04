@@ -50,6 +50,10 @@ func schedulerWaitArm(name string) bool {
 // configuring the session would get.
 func schedulerLimits(arm string) (total, writers int) {
 	switch arm {
+	case armTerminalCancelled:
+		// One slot, so the group has an item running and items that never got
+		// one — the split a cancellation is reported against.
+		return 1, 1
 	case armWaitSlots:
 		return 2, 1
 	case armWaitWriters:
