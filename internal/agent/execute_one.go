@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -123,6 +124,8 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 			plan.readOnly = true
 			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
 		}
+	} else if canonicalName == "pty" {
+		classifyPTYToolCallPlan(plan, plan.execArgs, a.svc.pty)
 	} else {
 		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	}
@@ -518,26 +521,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 			}, true
 		}
 	} else if gate != nil && !plan.skipOrdinaryGate {
-		allow, reason, err := gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
-		if err != nil {
-			return toolOutcome{
-				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
-				blocked: true,
-				errMsg:  fmt.Sprintf("blocked: %v", err),
-			}, true
-		}
-		// permission.decision: the host verdict is computed first; theextension rulingmayoverrideitineitherdirection
-		// (an allowoverriding a host deny is the full-trust contract and is audited).
-		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
-			return blocked, true
-		}
-		if !allow {
-			return toolOutcome{
-				output:  "blocked: " + reason,
-				blocked: true,
-				errMsg:  "blocked by permission policy",
-			}, true
-		}
+		return a.applyStandardGate(ctx, plan, gate)
 	}
 	return toolOutcome{}, false
 }
@@ -573,7 +557,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
 	if a.svc.hooks != nil {
-		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.evidenceName, plan.evidenceArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -608,6 +592,9 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	if a.svc.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.svc.jobs)
+	}
+	if a.svc.pty != nil {
+		cctx = pty.WithManager(cctx, a.svc.pty)
 	}
 	if a.svc.sandboxEscape != nil {
 		cctx = sandbox.WithEscapeApprover(cctx, a.svc.sandboxEscape)
@@ -646,7 +633,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	t := plan.tool
 	readOnly := plan.readOnly
 	permName := plan.permName
-	permArgs := plan.permArgs
 	evidenceName := plan.evidenceName
 	evidenceArgs := plan.evidenceArgs
 	mutates := plan.effects.StateMutation
@@ -669,6 +655,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.capabilityAudit != nil {
 		cctx = tool.WithRemoteDispatchObserver(cctx, a.capabilityAudit.RecordRemoteDispatch)
 	}
+	if a.svc.pty != nil {
+		cctx = pty.WithManager(cctx, a.svc.pty)
+	}
 	plan.cctx = cctx
 	var execution *tool.ShellExecution
 	result, images, execution, err = a.dispatchResolvedTool(cctx, plan)
@@ -686,9 +675,9 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// Success and failure hooks observe the result after the tool ran. Use thereal target name for proxiedtools.
 	if a.svc.hooks != nil {
 		if err != nil {
-			a.svc.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
+			a.svc.hooks.PostToolUseFailure(ctx, evidenceName, evidenceArgs, result, err)
 		} else {
-			a.svc.hooks.PostToolUse(ctx, permName, permArgs, result)
+			a.svc.hooks.PostToolUse(ctx, evidenceName, evidenceArgs, result)
 		}
 	}
 	// Always re-read after post hooks —

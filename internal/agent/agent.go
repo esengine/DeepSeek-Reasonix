@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/plancontract"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sessiontemp"
@@ -153,6 +154,11 @@ func (a *Agent) withAgentContext(ctx context.Context) context.Context {
 		ctx = jobs.WithManager(ctx, a.svc.jobs)
 	} else {
 		ctx = jobs.WithoutManager(ctx)
+	}
+	if a.svc.pty != nil {
+		ctx = pty.WithManager(ctx, a.svc.pty)
+	} else {
+		ctx = pty.WithoutManager(ctx)
 	}
 	if a.svc.memQueue != nil {
 		ctx = memory.WithQueue(ctx, a.svc.memQueue)
@@ -920,6 +926,8 @@ type Options struct {
 
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
+	// PTY is the session-scoped persistent PTY terminal manager.
+	PTY *pty.Manager
 	// MemoryQueue optionally gives a child agent an explicitly owned live-memory
 	// queue. When nil, child construction shadows inherited queues.
 	MemoryQueue memory.Queue

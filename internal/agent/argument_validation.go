@@ -28,6 +28,9 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 	plan.execArgs = normalized
 	plan.permArgs = normalized
 	plan.evidenceArgs = normalized
+	if plan.canonicalName == "pty" {
+		classifyPTYToolCallPlan(plan, normalized, a.svc.pty)
+	}
 	result := tool.ValidateArguments(plan.execTool, normalized)
 	failed := result.CompileErr != nil || len(result.Violations) > 0
 	if a.capabilityAudit != nil {
@@ -37,9 +40,9 @@ func (a *Agent) applyArgumentValidation(plan *toolCallPlan) (toolOutcome, bool) 
 		return toolOutcome{}, false
 	}
 	if result.CompileErr != nil {
-		msg := fmt.Sprintf("host configuration error: tool %q has an invalid argument schema (schema fingerprint %s); execution was not dispatched", plan.permName, shortSchemaFingerprint(result.Fingerprint))
+		msg := fmt.Sprintf("host configuration error: tool %q has an invalid argument schema (schema fingerprint %s); execution was not dispatched", plan.canonicalName, shortSchemaFingerprint(result.Fingerprint))
 		a.noteCapabilityInvocation(plan.call.Name, json.RawMessage(plan.call.Arguments), errors.New(msg))
-		return toolOutcome{output: "error: " + msg, errMsg: argumentValidationSignature(plan.permName, result.Fingerprint, "schema")}, true
+		return toolOutcome{output: "error: " + msg, errMsg: argumentValidationSignature(plan.canonicalName, result.Fingerprint, "schema")}, true
 	}
 	if len(result.Violations) == 0 {
 		a.clearSchemaError(plan.permName, result.Fingerprint)

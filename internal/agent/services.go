@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/mcpinteraction"
 	"reasonix/internal/memory"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
@@ -88,6 +89,8 @@ type agentServices struct {
 	// call's context so the background tools can reach it. nil degrades
 	// gracefully.
 	jobs *jobs.Manager
+	// pty is the session-scoped persistent PTY terminal manager.
+	pty *pty.Manager
 	// writeScheduler coordinates parent-agent writes against background
 	// subagent write claims. Set on the parent executor only.
 	writeScheduler *SubagentScheduler
@@ -134,6 +137,7 @@ func newAgentServices(
 		configWrite:           configWrite,
 		hooks:                 hooks,
 		jobs:                  opts.Jobs,
+		pty:                   opts.PTY,
 		memQueue:              opts.MemoryQueue,
 		writeScheduler:        opts.WriteScheduler,
 		workspaceLease:        opts.WorkspaceLease,

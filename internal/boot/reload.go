@@ -10,6 +10,8 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/extension"
 	"reasonix/internal/provider"
+	"reasonix/internal/pty"
+	"reasonix/internal/sandbox"
 )
 
 // RebuildFrom is Rebuild using previous BuildResult for incremental sidecars
@@ -100,6 +102,9 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	// model/settings hot rebuilds do not wipe temporary files mid-session.
 	if opts.SessionTemp == nil {
 		opts.SessionTemp = old.SessionTemp()
+	}
+	if opts.PTY == nil {
+		opts.PTY = old.PTY()
 	}
 
 	home := config.ReasonixHomeDir()
@@ -226,4 +231,12 @@ func spliceFreshSystemPrompt(carried, fresh []provider.Message) []provider.Messa
 		}
 	}
 	return append([]provider.Message{*system}, out...)
+}
+
+func initPTYManager(existing *pty.Manager, root string, bashSpec sandbox.Spec) *pty.Manager {
+	if existing == nil {
+		return pty.NewManager(root, bashSpec)
+	}
+	existing.TransferOwnership(root, bashSpec)
+	return existing
 }

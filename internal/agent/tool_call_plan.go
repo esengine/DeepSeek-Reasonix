@@ -16,6 +16,9 @@ type toolCallPlan struct {
 	canonicalName                   string
 	permName                        string
 	permArgs                        json.RawMessage
+	commandPermName                 string
+	commandPermArgs                 json.RawMessage
+	commandPermCalls                []json.RawMessage
 	execTool                        tool.Tool
 	execArgs                        json.RawMessage
 	evidenceName                    string

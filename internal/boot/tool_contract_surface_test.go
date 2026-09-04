@@ -67,6 +67,7 @@ model = "x"
 				"bash":           false,
 				"read_file":      true,
 				"use_capability": true,
+				"pty":            false,
 			} {
 				got, ok := readOnly[name]
 				if !ok {
