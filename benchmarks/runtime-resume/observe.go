@@ -40,8 +40,11 @@ type Observation struct {
 	TodoNotes       TodoNoteObs         `json:"todo_notes"`
 	Deferred        DeferredObs         `json:"deferred"`
 	Obligation      ObligationObs       `json:"obligation"`
-	Graph           GraphObs            `json:"graph"`
-	Artifacts       []ArtifactObs       `json:"artifacts"`
+	// Interrupted is what the host derives from a barrier it found open and did
+	// not open itself: evidence the wait happened, not a question to answer.
+	Interrupted []control.InterruptedAdjudication `json:"interrupted"`
+	Graph       GraphObs                          `json:"graph"`
+	Artifacts   []ArtifactObs                     `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -227,11 +230,12 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		View:    view,
 		// The note is derived for a request and stored nowhere, so the contracts
 		// about it are read off the request rather than off the stored view.
-		TodoNotes:  todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
-		Graph:      graphObs(graph, deltas),
-		Deferred:   deferredObs(workspace),
-		Obligation: obligationObs(history),
-		Artifacts:  readArtifacts(path),
+		TodoNotes:   todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
+		Graph:       graphObs(graph, deltas),
+		Deferred:    deferredObs(workspace),
+		Obligation:  obligationObs(history),
+		Interrupted: ctrl.InterruptedAdjudications(),
+		Artifacts:   readArtifacts(path),
 	}
 }
 

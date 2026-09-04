@@ -259,10 +259,16 @@ func (c *Controller) refreshInteractiveGate() {
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
 	// Registering after the lock left a queued question invisible everywhere:
 	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
-	id, reply := c.approval.registerAsk(questions)
+	// The record comes first: registration is what makes it answerable.
+	id := c.approval.nextAskID()
+	if err := c.openBarrier(id, string(DecisionAsk), barrierSummary(questions)); err != nil {
+		return nil, err
+	}
+	reply := c.approval.registerAsk(id, questions)
 
 	if !c.lockPromptFor(ctx, "question") {
 		c.approval.cancelAsk(id)
+		c.closeBarrier(id, barrierCancelled)
 		return nil, ctx.Err()
 	}
 	defer c.approval.promptMu.Unlock()
@@ -277,9 +283,11 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 
 	select {
 	case ans := <-reply:
+		c.closeBarrier(id, barrierResolved)
 		return ans, nil
 	case <-waitCtx.Done():
 		c.approval.cancelAsk(id)
+		c.closeBarrier(id, barrierCancelled)
 		return nil, waitCtx.Err()
 	}
 }

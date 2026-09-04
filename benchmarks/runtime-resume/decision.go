@@ -22,6 +22,7 @@ func decisionRows(before, after Observation) []row {
 	return []row{
 		deferredRow(before, after),
 		outcomeRow(before, after),
+		barrierRow(before, after),
 		obligationRow(before, after),
 	}
 }
@@ -56,6 +57,8 @@ func outcomeRow(before, after Observation) row {
 	switch {
 	case len(after.Decisions) > 0:
 		outcome = outcomeResumable
+	case len(after.Interrupted) > 0:
+		outcome = outcomeInterrupted
 	case after.Obligation.InterruptionMarked > 0 || len(after.Obligation.UnansweredCalls) > 0:
 		outcome = outcomeInterrupted
 	default:
@@ -79,6 +82,28 @@ func decisionSummary(o Observation) string {
 		kinds = append(kinds, string(d.Kind))
 	}
 	return strings.Join(kinds, ", ") + " open"
+}
+
+// barrierRow is the evidence behind an interrupted classification: a barrier
+// the host recorded before anyone could be asked, still open, with no owner in
+// this process waiting on it. It is deliberately not offered as answerable.
+func barrierRow(before, after Observation) row {
+	return row{
+		Semantic: "durable adjudication barriers", Authority: "the adjudication log",
+		Artifact: "<stem>.adjudication.jsonl", Reconstruction: "open records with no live owner in this process",
+		Before: barrierSummary(before), After: barrierSummary(after), Verdict: verdictStable,
+	}
+}
+
+func barrierSummary(o Observation) string {
+	if len(o.Interrupted) == 0 {
+		return "none"
+	}
+	var out []string
+	for _, b := range o.Interrupted {
+		out = append(out, b.Kind+":"+b.ID)
+	}
+	return join(out) + " (not answerable)"
 }
 
 // obligationRow shows the evidence behind that classification, so a reader can

@@ -89,6 +89,16 @@ func SessionGoalState(sessionPath string) string {
 	return sessionStem(sessionPath) + ".goal-state.json"
 }
 
+// SessionAdjudication is the append-only record of host adjudication barriers
+// a turn entered (<id>.adjudication.jsonl): what the host asked a person and
+// how it ended, kept apart from the transcript because the model never said it.
+func SessionAdjudication(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".adjudication.jsonl"
+}
+
 // SessionEventLog is the append-only transcript event log (<id>.events.jsonl).
 func SessionEventLog(sessionPath string) string {
 	if sessionPath == "" {
@@ -285,6 +295,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 	return []string{
 		SessionMeta(sessionPath),
 		SessionGoalState(sessionPath),
+		SessionAdjudication(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionWireLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),

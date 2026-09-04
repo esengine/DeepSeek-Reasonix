@@ -379,18 +379,38 @@ func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
 	return p, true
 }
 
-// registerAsk allocates an ask ID, records the pending question batch, and
-// returns the reply channel. The ask starts queued: registering before the
-// prompt lock is what makes a question waiting behind another prompt visible
-// at all, instead of existing only inside a blocked goroutine.
-func (a *approvalManager) registerAsk(questions []event.AskQuestion) (string, chan []event.AskAnswer) {
+// nextAskID issues the identity before the ask exists anywhere.
+func (a *approvalManager) nextAskID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
-	id := strconv.Itoa(a.nextID)
+	return strconv.Itoa(a.nextID)
+}
+
+// registerAsk records the pending question batch under an identity already
+// issued and returns the reply channel. It is the moment the ask becomes
+// observable — queued, so a question waiting behind another prompt is visible
+// rather than living only inside a blocked goroutine.
+func (a *approvalManager) registerAsk(id string, questions []event.AskQuestion) chan []event.AskAnswer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	reply := make(chan []event.AskAnswer, 1)
 	a.asks[id] = pendingAsk{questions: questions, reply: reply, queued: true}
-	return id, reply
+	return reply
+}
+
+// liveBarrierIDs names the prompts this process waits on.
+func (a *approvalManager) liveBarrierIDs() map[string]bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[string]bool, len(a.asks)+len(a.approvals))
+	for id := range a.asks {
+		out[id] = true
+	}
+	for id := range a.approvals {
+		out[id] = true
+	}
+	return out
 }
 
 // markAskEmitted clears the queued flag once the ask has reached a frontend,
