@@ -532,16 +532,34 @@ the owner is gone, and either state would describe work nobody is doing. Those
 are named as interruptions instead, split by whether they had reached a slot,
 and the arms check that set rather than letting the state row quietly drop them.
 
-The one remaining gap is the worker **override**: the model and effort a caller
-named for an item. The store keeps the identity it *resolved*, which is a
-different fact — filling one from the other would put a third meaning on the
-field — and the journal records neither. It shows up only when a caller names
-one, which is why the identity row is exact in two arms and lossy in the third.
+The one remaining gap is the worker identity, and `identity-semantics` is the
+arm that says exactly what it is. It names a worker four ways across both
+producers and reads all three layers:
 
-Note the field is not consistently meant even before a restart: `fleet` fills
-it with the caller's override and `parallel_tasks` fills it with the resolved
-identity, so what a rebuild should agree with depends on which produced the
-node.
+| item | graph | store |
+| --- | --- | --- |
+| names nothing | `none/none` | `probe/scripted/none` |
+| names a model and effort | `probe/alt/high` | `probe/alt/high` |
+| names only an effort | `none/low` | `probe/scripted/low` |
+| adopts, runs nothing | `none/none` | no child at all |
+
+`fleet` and `parallel_tasks` agree cell for cell — there is no producer
+disagreement to fix. What the two columns differ about is which layer they
+report. The graph shows what the sub-agent layer resolved, where empty means
+*inherit the parent*; the store shows the final identity, with the empty slots
+already filled in.
+
+So the rebuild is lossy in exactly one place: an item whose caller named a
+model or an effort. Everything the graph shows for those is in the store — and
+taking it would make the rebuild *more* specific than the picture, turning an
+inherited blank into an explicit value.
+
+That leaves a choice rather than a gap. Either a node's model means the final
+identity, in which case the producers should fill it from the store's layer and
+the rebuild is exact with nothing new recorded; or empty keeps meaning
+inherited, in which case that is a fact only the journal could carry. Nothing
+here decides it: the point of the arm is that the field's meaning has to be
+settled before a rebuild can be held to it.
 
 The skip-cause rows read three ways: the upstream the picture named, the rules
 this benchmark works out on its own, and what the production fold concludes.

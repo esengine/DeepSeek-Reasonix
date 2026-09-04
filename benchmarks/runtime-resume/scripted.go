@@ -24,6 +24,11 @@ func newScripted(arm string) *scripted {
 // syntheticEntryFromResolver matches it without touching any config file.
 const probeModelRef = "probe/scripted"
 
+// probeAltModelRef is a second identity the same scripted provider answers to.
+// Without one, every layer of the model resolution collapses onto the same
+// string and a probe cannot tell which layer produced it.
+const probeAltModelRef = "probe/alt"
+
 // scripted answers completions from a fixed script so the construct phase can
 // establish host state without a network call. A request carrying no tools is a
 // host-internal completion (the compaction summary); everything else is a turn.
@@ -53,6 +58,7 @@ type scripted struct {
 	holder   atomic.Bool
 	refused  atomic.Bool
 	terminal atomic.Bool
+	identity atomic.Bool
 	holding  sync.Once
 	released sync.Once
 	held     chan struct{}
@@ -247,8 +253,11 @@ func resolverFor(prov *scripted) *provider.StaticResolver {
 		Descriptors: []provider.Descriptor{{
 			Ref: probeModelRef, DisplayName: "probe", Model: "scripted",
 			ContextWindow: 128_000, Tools: true,
+		}, {
+			Ref: probeAltModelRef, DisplayName: "probe-alt", Model: "scripted-alt",
+			ContextWindow: 128_000, Tools: true,
 		}},
-		Providers: map[string]provider.Provider{probeModelRef: prov},
+		Providers: map[string]provider.Provider{probeModelRef: prov, probeAltModelRef: prov},
 	}
 }
 

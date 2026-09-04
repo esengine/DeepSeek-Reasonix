@@ -37,11 +37,16 @@ const (
 	// is the owner of "what happened to this child", so a distinction the graph
 	// draws and the store does not keep is one no reconstruction can recover.
 	armChildTerminal = "child-terminal"
+	// armIdentitySemantics asks what a node's model and effort mean. Two
+	// producers resolve them through different chains and the store resolves
+	// them again, so before a rebuild can be held to them, one of those has to
+	// be the fact the field carries.
+	armIdentitySemantics = "identity-semantics"
 )
 
 func terminalArm(name string) bool {
 	switch name {
-	case armTerminalAdopted, armTerminalSkippedDep, armTerminalCancelled, armTerminalContext, armChildTerminal:
+	case armTerminalAdopted, armTerminalSkippedDep, armTerminalCancelled, armTerminalContext, armChildTerminal, armIdentitySemantics:
 		return true
 	}
 	return false
@@ -57,6 +62,8 @@ func terminalSentinels(arm string) string {
 		return parallelSentinel
 	case armChildTerminal:
 		return fleetOutcomesSentinel
+	case armIdentitySemantics:
+		return fleetWarmSentinel + " " + fleetIdentitySentinel + " " + parallelIdentity
 	}
 	return fleetTerminalSentinel
 }
@@ -147,22 +154,43 @@ func wantedTerminal(arm string) agentgraph.NodeState {
 	if arm == armTerminalCancelled || arm == armChildTerminal {
 		return agentgraph.StateCancelled
 	}
+	if arm == armIdentitySemantics {
+		return agentgraph.StateAdopted
+	}
 	return agentgraph.StateSkipped
 }
 
-// waitForTerminal blocks until the graph shows this arm's disposition.
+// waitForTerminal blocks until the graph shows this arm's disposition. The
+// identity arm needs more than a state: it compares three producers, so it
+// waits until the last of them has settled something rather than the first.
 func waitForTerminal(sink *graphSink, arm string) error {
 	want := wantedTerminal(arm)
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		graph, _ := sink.snapshot()
-		if len(nodesInState(graph, want)) > 0 {
+		if len(nodesInState(graph, want)) > 0 && identityReady(graph, arm) {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	graph, _ := sink.snapshot()
 	return errUnexpected("an item in state "+string(want), waitStates(graph))
+}
+
+// identityReady reports whether every producer the identity arm compares has
+// published a settled item. Waiting on one of them leaves the others unread.
+func identityReady(g agentgraph.Graph, arm string) bool {
+	if arm != armIdentitySemantics {
+		return true
+	}
+	settled := map[string]int{}
+	for _, n := range g.Nodes {
+		if n.Kind == agentgraph.KindGroup || n.State == "" || !n.State.Terminal() {
+			continue
+		}
+		settled[n.ParentID]++
+	}
+	return settled["probe_fleet_identity"] >= 4 && settled["probe_parallel_identity"] >= 2
 }
 
 func nodesInState(g agentgraph.Graph, want agentgraph.NodeState) []string {
@@ -194,6 +222,9 @@ func terminalRows(arm string, before, after Observation) []row {
 	}
 	if arm == armChildTerminal {
 		rows = append(rows, childOutcomeRow(before, after))
+	}
+	if arm == armIdentitySemantics {
+		rows = append(rows, identitySemanticsRow(before), identityRebuildRow(before, after))
 	}
 	return rows
 }
@@ -336,6 +367,40 @@ func childStatusCounts(o Observation) string {
 		return ""
 	}
 	return countSummary(counts)
+}
+
+// identitySemanticsRow lays the three answers beside each other: what the
+// caller named, what the graph shows, and what the store resolved. They are not
+// expected to agree — the point is which of them a node's field is reporting,
+// because a rebuild cannot be held to a field whose meaning is unsettled.
+func identitySemanticsRow(before Observation) row {
+	store := map[string]string{}
+	for _, f := range before.Children.Facts {
+		store[f.ParentToolCallID] = orNone(f.Model) + "/" + orNone(f.Effort)
+	}
+	var out []string
+	for _, n := range before.Graph.Nodes {
+		if n.Kind != agentgraph.KindWorker {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s graph=%s/%s store=%s", n.ID,
+			orNone(n.Model), orNone(n.Effort), orNone(store[n.ID])))
+	}
+	sort.Strings(out)
+	return row{
+		Semantic: "worker identity: what each layer reports", Authority: "the fan-out's spec against the store's resolution",
+		Artifact: "subagents/<ref>.meta.json", Reconstruction: "the graph resolves a subagent chain; the store resolves the final identity",
+		Before: join(out), After: "not applicable: read before the boundary", Verdict: verdictStable,
+	}
+}
+
+// identityRebuildRow is the same question asked of the rebuild: whichever of
+// those layers the field is meant to carry, does a restart get it back?
+func identityRebuildRow(before, after Observation) row {
+	return valueRow("worker identity after a restart", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl + subagents/<ref>.meta.json",
+		"the journal records no worker identity; the store records the one it resolved",
+		identitySummary(graphOf(before)), identitySummary(rebuiltGraph(after).Graph), false)
 }
 
 func graphOf(o Observation) agentgraph.Graph {

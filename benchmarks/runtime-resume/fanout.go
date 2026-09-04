@@ -66,6 +66,8 @@ const (
 	parallelSentinel      = "PROBE-PARALLEL"
 	fleetOutcomesSentinel = "PROBE-FLEET-OUTCOMES"
 	fleetDeriveSentinel   = "PROBE-FLEET-DERIVE"
+	fleetIdentitySentinel = "PROBE-FLEET-IDENTITY"
+	parallelIdentity      = "PROBE-PARALLEL-IDENTITY"
 )
 
 // childHold is a child that reports holding its slot before it blocks, so a
@@ -229,6 +231,10 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 			return append(adoptOnlyFleet(adoptableRef(req)), done()), true
 		}
 		return append(mixedFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, fleetIdentitySentinel) && !s.terminal.Swap(true):
+		return append(identityFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, parallelIdentity) && !s.identity.Swap(true):
+		return append(identityParallel(), done()), true
 	case askedInPrompt(req, fleetDeriveSentinel) && !s.terminal.Swap(true):
 		return append(deriveFleet(s.arm, adoptableRef(req)), done()), true
 	case askedInPrompt(req, fleetOutcomesSentinel) && !s.terminal.Swap(true):
@@ -333,6 +339,34 @@ func outcomesFleet() []provider.Chunk {
 		{"id": "o3", "prompt": childHang + " cancelled", "description": "cancelled", "read_only": true},
 		{"id": "o4", "prompt": childHang + " cancelled too", "description": "cancelled too", "read_only": true},
 	})
+}
+
+// identityFleet names a worker identity four ways: not at all, by model, by
+// effort, and not at all because nothing runs. What the graph then shows for
+// each is what says which layer of the resolution it is reporting.
+func identityFleet(adoptRef string) []provider.Chunk {
+	return fleetCall("probe_fleet_identity", []map[string]any{
+		{"id": "i1", "prompt": childDone + " default", "description": "inherits", "read_only": true},
+		{"id": "i2", "prompt": childDone + " override", "description": "names a model", "read_only": true,
+			"model": probeAltModelRef, "effort": "high"},
+		{"id": "i3", "prompt": childDone + " effort only", "description": "names an effort", "read_only": true,
+			"effort": "low"},
+		{"id": "i4", "adopt_ref": adoptRef, "description": "runs nothing"},
+	})
+}
+
+// identityParallel asks the same of the other producer, which resolves through
+// a shorter chain: it has no profile layer to consult.
+func identityParallel() []provider.Chunk {
+	args, _ := json.Marshal(map[string]any{"tasks": []map[string]any{
+		{"prompt": childDone + " p default", "description": "inherits"},
+		{"prompt": childDone + " p override", "description": "names a model",
+			"model": probeAltModelRef, "effort": "high"},
+	}})
+	return []provider.Chunk{{
+		Type:     provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{ID: "probe_parallel_identity", Name: "parallel_tasks", Arguments: string(args)},
+	}}
 }
 
 // deriveFleet orders one dependent behind two upstreams. The skip arms end both

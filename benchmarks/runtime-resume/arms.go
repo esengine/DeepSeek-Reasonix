@@ -111,6 +111,7 @@ func arms() []arm {
 		{name: armChildTerminal, asks: "whether the store keeps every terminal the graph draws"},
 		{name: armDeriveSkipBoth, asks: "a skip whose two upstreams both ended without an answer"},
 		{name: armDeriveSkipFlip, asks: "the same, with the two failures in the other order"},
+		{name: armIdentitySemantics, asks: "what a node's model and effort report, across two producers and the store"},
 		{name: armDeriveAnswered, asks: "a dependent whose upstreams answered, one by completing and one by adopting"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
