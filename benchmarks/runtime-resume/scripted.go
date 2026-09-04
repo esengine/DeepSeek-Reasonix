@@ -21,6 +21,10 @@ const probeModelRef = "probe/scripted"
 // establish host state without a network call. A request carrying no tools is a
 // host-internal completion (the compaction summary); everything else is a turn.
 type scripted struct {
+	// arm is which run this provider is scripting. Only the fan-out arms read
+	// it: the pair fleet is the same dispatch either way, and the arm decides
+	// whether its second item finishes or is still executing at death.
+	arm       string
 	turnCalls atomic.Int64
 	// retodo latches the one reply that replaces the task list. The sentinel
 	// stays in history after the call, so without it every later round would
@@ -30,6 +34,12 @@ type scripted struct {
 	// tries to write. Calling ask ends the round, so the write is the effect a
 	// decision is holding back.
 	asked atomic.Bool
+	// The fan-out latches. A fleet's aggregate returns into the same round that
+	// dispatched it, so without these the reply that follows would read its own
+	// sentinel off the still-current user turn and dispatch the fleet again.
+	warmed atomic.Bool
+	paired atomic.Bool
+	mixed  atomic.Bool
 }
 
 func (s *scripted) Name() string { return "probe" }
@@ -38,7 +48,7 @@ func (s *scripted) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	ch := make(chan provider.Chunk, 8)
 	go func() {
 		defer close(ch)
-		for _, c := range s.script(req) {
+		for _, c := range s.script(ctx, req) {
 			select {
 			case ch <- c:
 			case <-ctx.Done():
@@ -49,9 +59,18 @@ func (s *scripted) Stream(ctx context.Context, req provider.Request) (<-chan pro
 	return ch, nil
 }
 
-func (s *scripted) script(req provider.Request) []provider.Chunk {
+func (s *scripted) script(ctx context.Context, req provider.Request) []provider.Chunk {
 	if len(req.Tools) == 0 {
 		return append(text(summaryBody), done())
+	}
+	// A delegated run answers first: the parent's transcript quotes every fleet
+	// argument, so any later branch that scanned the conversation would make
+	// the parent answer as one of its own children.
+	if sentinel := childSentinel(req); sentinel != "" {
+		return childScript(ctx, sentinel)
+	}
+	if chunks, ok := s.fanOut(req); ok {
+		return chunks
 	}
 	if s.turnCalls.Add(1) == 1 && hasTool(req.Tools, "todo_write") {
 		return append(todoCall(firstTodos()), done())
@@ -195,13 +214,13 @@ var summaryBody = strings.Join([]string{
 	"Establish host state, exit, and observe what a new process can still prove.",
 }, "\n")
 
-func newResolver() *provider.StaticResolver {
+func newResolver(arm string) *provider.StaticResolver {
 	return &provider.StaticResolver{
 		Descriptors: []provider.Descriptor{{
 			Ref: probeModelRef, DisplayName: "probe", Model: "scripted",
 			ContextWindow: 128_000, Tools: true,
 		}},
-		Providers: map[string]provider.Provider{probeModelRef: &scripted{}},
+		Providers: map[string]provider.Provider{probeModelRef: &scripted{arm: arm}},
 	}
 }
 

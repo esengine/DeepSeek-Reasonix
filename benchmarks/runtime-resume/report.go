@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -96,6 +97,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 		if len(before.Decisions) == 0 {
 			res.Invalid = "no decision was open when the process died, so nothing was interrupted"
 		}
+	case graphArm(a.name):
+		res.Rows = append(res.Rows, graphRows(before, after)...)
+		res.Invalid = graphArmInvalid(a.name, before)
 	case a.name == armTodoIdentity:
 		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:
@@ -240,25 +244,32 @@ func projectionUse(o Observation) string {
 		o.Context.ProjectedTokens, o.Context.CanonicalTokens)
 }
 
+// graphNodes renders the fold's nodes in a stable order. The fold keeps
+// first-seen order, which two processes reach by different routes, so an
+// unsorted rendering would report a reordering as a changed graph.
 func graphNodes(o Observation) string {
 	if len(o.Graph.Nodes) == 0 {
 		return ""
 	}
-	var ids []string
+	ids := make([]string, 0, len(o.Graph.Nodes))
 	for _, n := range o.Graph.Nodes {
 		ids = append(ids, n.ID+":"+string(n.State))
 	}
+	sort.Strings(ids)
 	return join(ids)
 }
 
+// graphMap renders one per-node attribute set. Map iteration is unordered, so
+// without the sort two identical envelopes would compare as different.
 func graphMap(m map[string]string) string {
 	if len(m) == 0 {
 		return ""
 	}
-	var out []string
+	out := make([]string, 0, len(m))
 	for k, v := range m {
 		out = append(out, k+"="+v)
 	}
+	sort.Strings(out)
 	return join(out)
 }
 

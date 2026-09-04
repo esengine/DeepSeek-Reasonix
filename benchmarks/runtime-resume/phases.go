@@ -45,7 +45,7 @@ func openDecisionAndDie(ctx context.Context, root armRoot, arm, bootSystem strin
 	if err := waitForAsk(ctrl); err != nil {
 		return err
 	}
-	obs := capture("construct", arm, bootSystem, ctrl, sink, root.Workspace)
+	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
 	if obs.Deferred.Executed {
 		return errUnexpected("a write still held back by the open question", obs.Deferred.MarkerPath)
 	}
@@ -86,7 +86,7 @@ func rewindTurn(root armRoot, arm, bootSystem string, ctrl *control.Controller, 
 			return err
 		}
 	}
-	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root.Workspace)); err != nil {
+	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root)); err != nil {
 		return err
 	}
 	if err := ctrl.Rewind(target, control.RewindConversation); err != nil {
@@ -146,7 +146,7 @@ func runConstruct(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, sink)
+	ctrl, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -169,6 +169,12 @@ func runConstruct(dir, arm string) error {
 	}
 	if arm == armOpenDecision || successorArm(arm) {
 		return openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
+	}
+	if graphArm(arm) {
+		if err := runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn); err != nil {
+			return err
+		}
+		return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root))
 	}
 	if arm == armTodoIdentity {
 		// Identity A is already written and folded away. Grow, replace the list
@@ -195,7 +201,7 @@ func runConstruct(dir, arm string) error {
 		if _, err = runTurns(ctx, ctrl, turn, refoldTurns); err != nil {
 			return err
 		}
-		if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root.Workspace)); err != nil {
+		if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root)); err != nil {
 			return err
 		}
 		if err := ctrl.Compact(ctx, "Fold again, into the stored body."); err != nil {
@@ -211,7 +217,7 @@ func runConstruct(dir, arm string) error {
 			return err
 		}
 	}
-	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root.Workspace))
+	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root))
 }
 
 // successorArm reports whether this arm starts from an interrupted barrier.
@@ -232,7 +238,7 @@ func runSuccessor(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, sink)
+	ctrl, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -250,7 +256,7 @@ func runSuccessor(dir, arm string) error {
 			return fmt.Errorf("successor turn: %w", err)
 		}
 	}
-	return writeObservation(root, capture("successor", arm, bootSystem, ctrl, sink, root.Workspace))
+	return writeObservation(root, capture("successor", arm, bootSystem, ctrl, sink, root))
 }
 
 // runResume boots a second time against the same roots and reads host state.
@@ -265,7 +271,7 @@ func runResume(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, err := buildRuntime(ctx, root, sink)
+	ctrl, err := buildRuntime(ctx, root, arm, sink)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -279,5 +285,5 @@ func runResume(dir, arm string) error {
 	if err := ctrl.Resume(session, before.SessionPath); err != nil {
 		return fmt.Errorf("resume: %w", err)
 	}
-	return writeObservation(root, capture("resume", arm, bootSystem, ctrl, sink, root.Workspace))
+	return writeObservation(root, capture("resume", arm, bootSystem, ctrl, sink, root))
 }

@@ -27,7 +27,7 @@ type arm struct {
 // already gone at the boundary for an unrelated reason, and the lever's own
 // effect cannot be read out of the result.
 func appendsAfterFold(name string) bool {
-	return name != "exact" && name != armRefoldIntoBody
+	return name != "exact" && name != armRefoldIntoBody && !graphArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -96,6 +96,9 @@ func arms() []arm {
 		{name: armIdleRestart, asks: "an interrupted barrier, and nobody does anything"},
 		{name: armUnrelatedTurn, asks: "an interrupted barrier, then a turn about something else"},
 		{name: armDirectAnswer, asks: "an interrupted barrier, then a turn that reads like an answer to it"},
+		{name: armGraphCompleted, asks: "a fan-out whose items had all settled when the process died"},
+		{name: armGraphRunning, asks: "a fan-out with a child still executing when the process died"},
+		{name: armGraphMixed, asks: "a fan-out holding completed, failed, adopted and running at once"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

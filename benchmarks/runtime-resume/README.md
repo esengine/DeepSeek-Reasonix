@@ -60,6 +60,9 @@ provider call*.
 | `interrupted-idle` | that, then a restart that does nothing | none | does the interruption stay active with no work to settle it? |
 | `interrupted-unrelated` | that, then a turn about something else | none | does it stick to requests that have nothing to do with it? |
 | `interrupted-answered` | that, then a turn that reads like an answer to it | none | does context carry without execution continuing? |
+| `graph-completed` | a fan-out whose items all settled, then die | none | is a finished fan-out's provenance durable at all? |
+| `graph-running` | a fan-out with one item still executing, then die | none | what does a restart believe about work whose owner is gone? |
+| `graph-mixed` | completed, failed, adopted and running at once, then die | none | the same, with every reachable state and both grants in one death |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -220,3 +223,55 @@ present in main-v2 `f60ab17b0` (#8923); that commit is not in studio's
 ancestry. The same commit carries two further contracts studio has not adopted
 — live-tail ownership, and wire-safe fingerprint compatibility — which is why
 that line is ported by contract rather than by file.
+
+## The fan-out arms
+
+Three arms ask the graph the question the decision arm asked the approval gate:
+after the live owner dies, what does durable truth still hold? They classify
+rather than pass or fail, and the labels are not a scale — **reconstructed-exact**,
+**interrupted-explicit** and **reconstructed-lossy** are designs a host may
+legitimately hold, while **LOST-SILENT** (gone, with nothing recording that it
+existed) and **GHOST-RUNNING** (still drawn as running with no owner alive) are
+defects. Ghost outranks every reconstruction: a fan-out that came back complete
+and still says running is the worst of the five, not the best, for the same
+reason a restored decision card with nothing behind it is worse than a dropped
+one.
+
+Two populations are classified separately, because one label over both reports
+the better half. The items that had already settled own durable child records;
+the item still executing has never been written down anywhere.
+
+All three arms die inside the turn. The completed arm is not the exception: it
+waits until every worker is terminal and then exits the same way, so what
+separates the arms is which states the graph holds at the moment of death and
+nothing else. Letting one arm shut down cleanly would have made it the only arm
+whose turn was appended, and the comparison would have been reading that
+instead.
+
+`skipped` is missing from the mixed arm on purpose. A fan-out publishes an
+item's skip only in its closing outcome delta, so no node reads skipped until
+the group has ended — by which time nothing is running, and "skipped beside
+running" is not a state a live fan-out can hold. The item whose dependency
+already failed sits at `pending` instead, which is what the arm dies holding.
+
+These arms run under the `auto` approval gate rather than the denied one every
+other arm uses. `fleet` is not read-only, so a denied gate refuses the dispatch
+before any child starts and the arm would measure a permission decision instead
+of a process boundary.
+
+## The invariant execution persistence must hold
+
+> **Persisting execution existence must never imply resumability.**
+
+A durable record saying that child B existed, held grant G, and was live when
+its owner disappeared says exactly that. It does not say restart B, re-run its
+tool calls, or continue its goroutine. This is the same shape as the decision
+arm's finding — context continuity is not execution continuation — reached
+independently: the moment execution facts become durable, the cheap next step
+is to replay them, and that turns today's `LOST-SILENT` into the one outcome
+this matrix ranks as worse than losing the graph.
+
+The ghost row is where that invariant is enforced. It is green today because
+nothing is stored at all, which is safety by absence rather than by design; any
+persistence that makes it red has replayed something it should only have
+recorded.

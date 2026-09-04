@@ -83,7 +83,7 @@ func (s *graphSink) snapshot() (agentgraph.Graph, int) {
 // buildRuntime assembles a real runtime bound to this arm's roots. Everything a
 // frontend would supply is supplied; only the provider is scripted, so the
 // probe never depends on a network or a key.
-func buildRuntime(ctx context.Context, root armRoot, sink event.Sink) (*control.Controller, error) {
+func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink) (*control.Controller, error) {
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Version:              "runtime-resume-probe",
 		Model:                probeModelRef,
@@ -91,15 +91,26 @@ func buildRuntime(ctx context.Context, root armRoot, sink event.Sink) (*control.
 		WorkspaceRoot:        root.Workspace,
 		Home:                 root.Home,
 		SessionDir:           root.Sessions,
-		ProviderResolver:     newResolver(),
+		ProviderResolver:     newResolver(arm),
 		Stderr:               io.Discard,
-		HeadlessApprovalMode: "deny",
+		HeadlessApprovalMode: approvalMode(arm),
 	})
 	if err != nil {
 		return nil, err
 	}
-	ctrl.ApplyHeadlessApprovalMode("deny")
+	ctrl.ApplyHeadlessApprovalMode(approvalMode(arm))
 	return ctrl, nil
+}
+
+// approvalMode is the gate this arm needs. Everything else runs denied, the
+// strictest a headless frontend can be. A fleet is not read-only, so under a
+// denied gate the dispatch is refused before any child starts and the arm
+// measures a permission decision instead of a process boundary.
+func approvalMode(arm string) string {
+	if graphArm(arm) {
+		return control.ToolApprovalAuto
+	}
+	return "deny"
 }
 
 // childEnv binds the child process to this arm's home through the environment

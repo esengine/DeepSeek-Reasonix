@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -48,9 +49,17 @@ type Observation struct {
 	ModelSeesInterruption int `json:"model_sees_interruption"`
 	// Journal is how each barrier ended. A superseded edge is the durable
 	// evidence that a turn received the interruption: nothing else writes one.
-	Journal   []control.AdjudicationEntry `json:"journal,omitempty"`
-	Graph     GraphObs                    `json:"graph"`
-	Artifacts []ArtifactObs               `json:"artifacts"`
+	Journal []control.AdjudicationEntry `json:"journal,omitempty"`
+	Graph   GraphObs                    `json:"graph"`
+	// Children is the durable side of the same fan-out the graph draws. The
+	// graph has no read surface after a restart, so without this a lost graph
+	// and a lost delegation would be one indistinguishable row.
+	Children ChildrenObs `json:"children"`
+	// FanOutTurn is whether the dispatching turn is in this phase's transcript
+	// at all. A turn is appended when it ends, so a process that dies inside one
+	// leaves no record of the request, and a lost graph is the smaller half.
+	FanOutTurn bool          `json:"fan_out_turn"`
+	Artifacts  []ArtifactObs `json:"artifacts"`
 }
 
 type TranscriptObs struct {
@@ -196,8 +205,53 @@ func obligationObs(msgs []provider.Message) ObligationObs {
 type GraphObs struct {
 	Deltas int               `json:"deltas"`
 	Nodes  []agentgraph.Node `json:"nodes,omitempty"`
+	Edges  []agentgraph.Edge `json:"edges,omitempty"`
 	Grants map[string]string `json:"grants,omitempty"`
 	Waits  map[string]string `json:"waits,omitempty"`
+}
+
+// ChildFact is one delegated run as the durable store records it, which is a
+// different set of facts from the node the graph drew for it. Whatever the
+// graph carried and this does not is a semantic no reconstruction can recover.
+type ChildFact struct {
+	Ref              string `json:"ref"`
+	Status           string `json:"status"`
+	Kind             string `json:"kind,omitempty"`
+	Name             string `json:"name,omitempty"`
+	ParentToolCallID string `json:"parentToolCallId,omitempty"`
+	Model            string `json:"model,omitempty"`
+	Effort           string `json:"effort,omitempty"`
+}
+
+// ChildrenObs is every child the store still owns for this parent. It is the
+// only durable execution evidence a restart has been shown to read, so a graph
+// classification that ignores it would report a loss the host can in fact
+// still speak to.
+type ChildrenObs struct {
+	Facts []ChildFact `json:"facts,omitempty"`
+	Err   string      `json:"err,omitempty"`
+}
+
+// childrenObs reads the store the way a restart does: by parent session id,
+// which is the transcript's stem. A session with no path owns nothing.
+func childrenObs(root armRoot, sessionPath string) ChildrenObs {
+	if strings.TrimSpace(sessionPath) == "" {
+		return ChildrenObs{}
+	}
+	parent := strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
+	artifacts, err := agent.ListSubagentsByParent(root.Sessions, parent)
+	if err != nil {
+		return ChildrenObs{Err: err.Error()}
+	}
+	out := ChildrenObs{}
+	for _, a := range artifacts {
+		out.Facts = append(out.Facts, ChildFact{
+			Ref: a.Ref, Status: string(a.Meta.Status), Kind: a.Meta.Kind, Name: a.Meta.Name,
+			ParentToolCallID: a.Meta.ParentToolCallID, Model: a.Meta.Model, Effort: a.Meta.Effort,
+		})
+	}
+	sort.Slice(out.Facts, func(i, j int) bool { return out.Facts[i].Ref < out.Facts[j].Ref })
+	return out
 }
 
 type ArtifactObs struct {
@@ -205,7 +259,7 @@ type ArtifactObs struct {
 	Bytes int64  `json:"bytes"`
 }
 
-func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, workspace string) Observation {
+func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, root armRoot) Observation {
 	path := ctrl.SessionPath()
 	history := ctrl.History()
 	system := systemText(history)
@@ -238,7 +292,9 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		// about it are read off the request rather than off the stored view.
 		TodoNotes:             todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
 		Graph:                 graphObs(graph, deltas),
-		Deferred:              deferredObs(workspace),
+		Children:              childrenObs(root, path),
+		FanOutTurn:            fanOutTurnRecorded(history),
+		Deferred:              deferredObs(root.Workspace),
 		Obligation:            obligationObs(history),
 		Interrupted:           ctrl.InterruptedAdjudications(),
 		Journal:               control.AdjudicationHistory(path),
@@ -363,6 +419,7 @@ func graphObs(g agentgraph.Graph, deltas int) GraphObs {
 		return out
 	}
 	out.Nodes = g.Nodes
+	out.Edges = g.Edges
 	out.Grants = map[string]string{}
 	out.Waits = map[string]string{}
 	for _, n := range g.Nodes {
