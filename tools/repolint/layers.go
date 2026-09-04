@@ -30,6 +30,7 @@ var leaves = []string{
 	"internal/billing",
 	"internal/diff",
 	"internal/extension/rpcwire",
+	"internal/execgraph",
 	"internal/execjournal",
 	"internal/extensioncontract",
 	"internal/filelock",

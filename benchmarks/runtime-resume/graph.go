@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agentgraph"
+	"reasonix/internal/execgraph"
 	"reasonix/internal/execjournal"
 )
 
@@ -40,6 +41,11 @@ func graphRows(before, after Observation) []row {
 		graphSemanticsRow(before, after),
 		childProvenanceRow(before, after),
 		executionJournalRow(before, after),
+		rebuildStateRow(before, after),
+		rebuildTopologyRow(before, after),
+		rebuildEnvelopeRow(before, after),
+		rebuildInterruptedRow(before, after),
+		rebuildIdentityRow(before, after),
 		executionTopologyRow(before, after),
 		executionKindRow(before, after),
 		executionContextRow(before, after),
@@ -240,6 +246,151 @@ func graphObligationRow(before, after Observation) row {
 		Before: orNone(join(before.Obligation.UnansweredCalls)),
 		After:  orNone(join(after.Obligation.UnansweredCalls)), Verdict: verdictStable,
 	}
+}
+
+// rebuiltGraph is what the production fold makes of this session's durable
+// facts. It is the same call a host would make, given the same inputs a
+// restart has: the journal, the store, and no live executions.
+func rebuiltGraph(o Observation) execgraph.Result {
+	children := make([]execgraph.ChildOutcome, 0, len(o.Children.Facts))
+	for _, f := range o.Children.Facts {
+		children = append(children, execgraph.ChildOutcome{
+			Execution: f.ParentToolCallID, Ref: f.Ref, Status: f.Status,
+		})
+	}
+	return execgraph.Rebuild(o.Executions, children, nil)
+}
+
+// rebuildStateRow compares the states the fold produces against the ones the
+// dying process drew. Nodes whose owner disappeared are excluded and reported
+// by their own row: putting those back as running is the one outcome this
+// whole line of work exists to prevent.
+func rebuildStateRow(before, after Observation) row {
+	rebuilt := rebuiltGraph(after)
+	cut := map[string]bool{}
+	for _, i := range rebuilt.Interrupted {
+		cut[i.Execution] = true
+	}
+	return valueRow("rebuilt node states", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl + subagents/<ref>.meta.json",
+		"recomputed from durable facts, never restored",
+		statesExcept(graphOf(before), cut), statesExcept(rebuilt.Graph, cut), false)
+}
+
+// rebuildTopologyRow compares every typed edge. Spawn and depends are stated by
+// the openings, adopt names its source, and context is derived — so a mismatch
+// here says which of those four is not yet recoverable.
+func rebuildTopologyRow(before, after Observation) row {
+	return valueRow("rebuilt topology", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl", "spawn and depends stated, adopt named, context derived",
+		edgeSummary(graphOf(before)), edgeSummary(rebuiltGraph(after).Graph), false)
+}
+
+// rebuildEnvelopeRow is the authority and the wait provenance together: what
+// each item was allowed to touch, and why admission was first refused.
+func rebuildEnvelopeRow(before, after Observation) row {
+	return valueRow("rebuilt grants and wait causes", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl", "recorded at the opening and at the first refusal",
+		envelopeSummary(graphOf(before)), envelopeSummary(rebuiltGraph(after).Graph), false)
+}
+
+// rebuildInterruptedRow accounts for the nodes the state row leaves out. They
+// are not dropped: the fold names them as interruptions, split by whether they
+// had reached a slot. A node the dying process showed live and the rebuild
+// mentions nowhere would be a loss the state row could not see.
+func rebuildInterruptedRow(before, after Observation) row {
+	rebuilt := rebuiltGraph(after)
+	var got []string
+	for _, i := range rebuilt.Interrupted {
+		kind := execjournal.InterruptedBeforeStart
+		if i.Started {
+			kind = execjournal.InterruptedDuringExecution
+		}
+		got = append(got, i.Execution+":"+kind)
+	}
+	sort.Strings(got)
+	return valueRow("nodes the rebuild will not call live", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl", "an execution with no owner is named, never redrawn as running",
+		liveAtDeath(before), join(got), false)
+}
+
+// liveAtDeath is what the dying process still showed as someone's work.
+func liveAtDeath(o Observation) string {
+	var out []string
+	for _, n := range o.Graph.Nodes {
+		if n.Kind == agentgraph.KindGroup {
+			continue
+		}
+		switch n.State {
+		case agentgraph.StateRunning:
+			out = append(out, n.ID+":"+execjournal.InterruptedDuringExecution)
+		case agentgraph.StateQueued, agentgraph.StatePending:
+			out = append(out, n.ID+":"+execjournal.InterruptedBeforeStart)
+		}
+	}
+	sort.Strings(out)
+	return join(out)
+}
+
+// rebuildIdentityRow is what a reader sees on a node beyond its state: the
+// label it was dispatched under, and which worker ran it. Only one of those is
+// recorded, so this row is where a remaining gap shows up rather than hiding
+// inside an exact verdict about states.
+func rebuildIdentityRow(before, after Observation) row {
+	return valueRow("rebuilt node identity", "execgraph.Rebuild over journal + store",
+		"<stem>.execution.jsonl", "label from the opening; the worker override is recorded nowhere",
+		identitySummary(graphOf(before)), identitySummary(rebuiltGraph(after).Graph), false)
+}
+
+func identitySummary(g agentgraph.Graph) string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n.Kind != agentgraph.KindWorker {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s[label=%s profile=%s model=%s effort=%s]",
+			n.ID, orNone(n.Label), orNone(n.Profile), orNone(n.Model), orNone(n.Effort)))
+	}
+	sort.Strings(out)
+	return join(out)
+}
+
+// statesExcept renders worker states, skipping the executions whose owner is
+// gone. Those are not a state the rebuild may assert, and comparing them would
+// demand exactly the ghost this refuses to draw.
+func statesExcept(g agentgraph.Graph, skip map[string]bool) string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n.Kind == agentgraph.KindGroup || skip[n.ID] {
+			continue
+		}
+		out = append(out, n.ID+":"+string(n.State))
+	}
+	sort.Strings(out)
+	return join(out)
+}
+
+func edgeSummary(g agentgraph.Graph) string {
+	out := make([]string, 0, len(g.Edges))
+	for _, e := range g.Edges {
+		out = append(out, fmt.Sprintf("%s-%s->%s", e.From, e.Kind, e.To))
+	}
+	sort.Strings(out)
+	return join(out)
+}
+
+func envelopeSummary(g agentgraph.Graph) string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n.Grant != "" {
+			out = append(out, n.ID+"="+string(n.Grant))
+		}
+		if n.Wait != "" {
+			out = append(out, n.ID+"@"+string(n.Wait))
+		}
+	}
+	sort.Strings(out)
+	return join(out)
 }
 
 // executionJournalRow is the record written before the work started, which is

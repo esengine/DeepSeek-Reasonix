@@ -500,6 +500,50 @@ and an item is released from the journal in that same handler. The order the
 journal records is the order the choice was made in. The cause is a historical
 fact — and it is already written down, in the timestamps.
 
+The two arms did not always differ by construction. `PROBE-CHILD-FAIL` is a
+prefix of the sentinel meant to delay the second failure, and sentinels are
+matched by substring, so for a while both children failed at once and the order
+was whatever the runtime chose. The rule survived that — it reads the order
+that actually happened — but the arms now hold the second failure until the
+first has been recorded, and repeat.
+
 So none of the three needs a record. Skipped stays a derived state, context a
 derived edge, and the cause a derived reading of when each upstream was
 released.
+
+## Rebuilding the graph
+
+`internal/execgraph` folds the journal, the store's child terminals, and this
+process's live executions into a graph. It recomputes rather than restores:
+nothing reads a file or emits an event, and the same inputs always give the
+same picture.
+
+The three fan-out arms compare it against what the dying process drew:
+
+| | states | topology | grants + waits | not-live | identity |
+| --- | --- | --- | --- | --- | --- |
+| `graph-completed` | exact | exact | exact | — | exact |
+| `graph-running` | exact | exact | exact | exact | exact |
+| `graph-mixed` | exact | exact | exact | exact | **lossy** |
+
+Two states are deliberately never rebuilt. An execution that was running or
+waiting when its owner disappeared does not come back as running or queued —
+the owner is gone, and either state would describe work nobody is doing. Those
+are named as interruptions instead, split by whether they had reached a slot,
+and the arms check that set rather than letting the state row quietly drop them.
+
+The one remaining gap is the worker **override**: the model and effort a caller
+named for an item. The store keeps the identity it *resolved*, which is a
+different fact — filling one from the other would put a third meaning on the
+field — and the journal records neither. It shows up only when a caller names
+one, which is why the identity row is exact in two arms and lossy in the third.
+
+Note the field is not consistently meant even before a restart: `fleet` fills
+it with the caller's override and `parallel_tasks` fills it with the resolved
+identity, so what a rebuild should agree with depends on which produced the
+node.
+
+The skip-cause rows read three ways: the upstream the picture named, the rules
+this benchmark works out on its own, and what the production fold concludes.
+That is deliberate — a probe that only asked the implementation would agree
+with it by construction.

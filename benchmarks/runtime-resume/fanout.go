@@ -77,8 +77,10 @@ const (
 	// is returned while a refusal is still standing.
 	childRelease = "PROBE-CHILD-RELEASE"
 	// childFailLate fails only once the arm frees it, so two failures in one
-	// fan-out have a decided order instead of a raced one.
-	childFailLate = "PROBE-CHILD-FAIL-LATE"
+	// fan-out have a decided order instead of a raced one. Its wording shares no
+	// prefix with childFail: the sentinels are matched by substring, so a name
+	// containing another's makes the shorter one win and the delay disappear.
+	childFailLate = "PROBE-CHILD-DELAYEDFAIL"
 )
 
 // probeClaimPath is the write path the claim arm overlaps. The refused writer
@@ -195,7 +197,10 @@ func pairFleet(second string) []provider.Chunk {
 // because the grant is the envelope under measurement, not the effect.
 func mixedFleet(adoptRef string) []provider.Chunk {
 	return fleetCall("probe_fleet_mixed", []map[string]any{
-		{"id": "m1", "prompt": childDone + " mixed one", "description": "completes", "read_only": true},
+		// Model and effort are named so the identity row measures something: two
+		// nodes agreeing that a field is empty proves nothing about recovering it.
+		{"id": "m1", "prompt": childDone + " mixed one", "description": "completes", "read_only": true,
+			"model": probeModelRef, "effort": "high"},
 		{"id": "m2", "prompt": childFail + " mixed two", "description": "fails", "read_only": true},
 		{"id": "m3", "prompt": childDone + " mixed three", "description": "skipped by m2", "read_only": true, "depends_on": []string{"m2"}},
 		{"id": "m4", "adopt_ref": adoptRef, "description": "adopted"},

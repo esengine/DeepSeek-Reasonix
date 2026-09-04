@@ -10,6 +10,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/agentgraph"
 	"reasonix/internal/control"
+	"reasonix/internal/execgraph"
 )
 
 // The derivability arms. Everything before them asked what survives; these ask
@@ -73,17 +74,21 @@ func waitForDerive(sink *graphSink, arm string, prov *scripted) error {
 			return len(contextTargets(g)) > 0 && len(nodesInState(g, agentgraph.StateAdopted)) > 0
 		}, "an adopted upstream and a delivered answer")
 	}
+	// The first failure decides which upstream is named — the fan-out cuts the
+	// branch when it processes that result. Only then is the second released,
+	// so the order is constructed rather than raced.
 	if err := waitForShape(sink, func(g agentgraph.Graph) bool {
-		return len(nodesInState(g, agentgraph.StateSkipped)) > 0
-	}, "a skipped dependent"); err != nil {
+		return len(nodesInState(g, agentgraph.StateFailed)) > 0
+	}, "the first upstream to fail"); err != nil {
 		return err
 	}
-	// The dependent is already skipped by the first failure; releasing the
-	// second one now settles it without changing what was named.
 	prov.releaseOnce()
+	// A skip is published only in the closing delta, so the group has to end
+	// before the state the arm compares exists at all.
 	return waitForShape(sink, func(g agentgraph.Graph) bool {
-		return len(nodesInState(g, agentgraph.StateFailed)) >= 2
-	}, "both upstreams failed")
+		return len(nodesInState(g, agentgraph.StateSkipped)) > 0 &&
+			len(nodesInState(g, agentgraph.StateFailed)) >= 2
+	}, "both upstreams failed and the dependent skipped")
 }
 
 // contextTargets are the items the graph shows receiving an upstream answer.
@@ -271,9 +276,10 @@ func skipStateRow(before, after Observation) row {
 	}
 }
 
-// skipCauseRow keeps the harder question separate. The picture names one
-// upstream; the durable facts may permit several, and two plausible rules for
-// choosing between them are reported rather than one being assumed.
+// skipCauseRow keeps the harder question separate, and reads it three ways: the
+// upstream the picture named, the two rules this file works out on its own, and
+// what the production fold concludes. The independence matters — a probe that
+// only asked the implementation would agree with it by construction.
 func skipCauseRow(before, after Observation) row {
 	all, byOrder, bySettle := impliedSkipCauses(after)
 	return row{
@@ -282,9 +288,33 @@ func skipCauseRow(before, after Observation) row {
 		Artifact:       "none: the reason text is not recorded",
 		Reconstruction: "declaration order, or earliest released, over the upstreams that did not answer",
 		Before:         actualSkipCause(before),
-		After:          "candidates " + orNone(all) + " | by-order " + orNone(byOrder) + " | by-settle " + orNone(bySettle),
-		Verdict:        verdictStable,
+		After: "candidates " + orNone(all) + " | by-order " + orNone(byOrder) +
+			" | by-settle " + orNone(bySettle) + " | rebuild " + orNone(rebuiltSkipCauses(after)),
+		Verdict: verdictStable,
 	}
+}
+
+// rebuiltSkipCauses is what the production fold names, asked the same question
+// through its own code path.
+func rebuiltSkipCauses(o Observation) string {
+	children := make([]execgraph.ChildOutcome, 0, len(o.Children.Facts))
+	for _, f := range o.Children.Facts {
+		children = append(children, execgraph.ChildOutcome{
+			Execution: f.ParentToolCallID, Ref: f.Ref, Status: f.Status,
+		})
+	}
+	rebuilt := execgraph.Rebuild(o.Executions, children, nil)
+	var out []string
+	for _, n := range rebuilt.Graph.Nodes {
+		if n.State != agentgraph.StateSkipped {
+			continue
+		}
+		if cause := execgraph.SkipCause(o.Executions, children, n.ID); cause != "" {
+			out = append(out, n.ID+"<-"+cause)
+		}
+	}
+	sort.Strings(out)
+	return join(out)
 }
 
 // contextDeriveRow asks the same question of the delivery edge, now that a
