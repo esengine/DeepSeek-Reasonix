@@ -42,7 +42,7 @@ func (*SubagentListTool) Description() string {
 }
 
 func (*SubagentListTool) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["completed","failed","interrupted","running"],"description":"Only list children in this state. Omit to list every state; completed is the only state read_subagent_result can read."}}}`)
+	return json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["completed","failed","cancelled","interrupted","running"],"description":"Only list children in this state. Omit to list every state; completed is the only state read_subagent_result can read."}}}`)
 }
 
 func (*SubagentListTool) ReadOnly() bool { return true }
@@ -62,9 +62,9 @@ func (t *SubagentListTool) Execute(ctx context.Context, args json.RawMessage) (s
 	}
 	want := SubagentStatus(strings.TrimSpace(p.Status))
 	switch want {
-	case "", SubagentCompleted, SubagentFailed, SubagentInterrupted, SubagentRunning:
+	case "", SubagentCompleted, SubagentFailed, SubagentCancelled, SubagentInterrupted, SubagentRunning:
 	default:
-		return "", fmt.Errorf("unknown status %q; want completed, failed, interrupted, or running", p.Status)
+		return "", fmt.Errorf("unknown status %q; want completed, failed, cancelled, interrupted, or running", p.Status)
 	}
 	if t == nil || t.store == nil {
 		return "", fmt.Errorf("subagent transcript storage is not available in this session")

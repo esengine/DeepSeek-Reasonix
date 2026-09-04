@@ -24,30 +24,45 @@ import (
 type SubagentStatus string
 
 const (
-	SubagentRunning     SubagentStatus = "running"
-	SubagentCompleted   SubagentStatus = "completed"
-	SubagentFailed      SubagentStatus = "failed"
+	SubagentRunning   SubagentStatus = "running"
+	SubagentCompleted SubagentStatus = "completed"
+	SubagentFailed    SubagentStatus = "failed"
+	// SubagentCancelled is a run the caller stopped: a cancelled context or an
+	// expired deadline. It is not failed — nothing about the work went wrong —
+	// and it is not interrupted, which is what a lost owner leaves behind.
+	SubagentCancelled   SubagentStatus = "cancelled"
 	SubagentInterrupted SubagentStatus = "interrupted"
+)
+
+// Terminal reasons refine a status without splitting it. The run graph maps a
+// cancelled context and an expired deadline onto one state, so the store keeps
+// one status and records which of them it was beside it.
+const (
+	TerminalCancelled = "cancel"
+	TerminalDeadline  = "deadline"
 )
 
 // SubagentMeta is the sidecar for a persisted sub-agent transcript. It captures
 // the execution identity that must stay stable for continuation/fork.
 type SubagentMeta struct {
-	Ref              string         `json:"ref"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	UpdatedAt        time.Time      `json:"updatedAt"`
-	Status           SubagentStatus `json:"status"`
-	Kind             string         `json:"kind"` // task | skill
-	Name             string         `json:"name"`
-	WorkspaceRoot    string         `json:"workspaceRoot"`
-	ParentSession    string         `json:"parentSession,omitempty"`
-	ParentToolCallID string         `json:"parentToolCallId,omitempty"`
-	ForkedFrom       string         `json:"forkedFrom,omitempty"`
-	SystemPromptHash string         `json:"systemPromptHash"`
-	ToolScope        []string       `json:"toolScope"`
-	ToolSchemaHash   string         `json:"toolSchemaHash"`
-	Model            string         `json:"model"`
-	Effort           string         `json:"effort"`
+	Ref       string         `json:"ref"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+	Status    SubagentStatus `json:"status"`
+	// TerminalReason refines a terminal status the way its producer meant it,
+	// so a reader tells a deadline from a cancellation without a second status.
+	TerminalReason   string   `json:"terminalReason,omitempty"`
+	Kind             string   `json:"kind"` // task | skill
+	Name             string   `json:"name"`
+	WorkspaceRoot    string   `json:"workspaceRoot"`
+	ParentSession    string   `json:"parentSession,omitempty"`
+	ParentToolCallID string   `json:"parentToolCallId,omitempty"`
+	ForkedFrom       string   `json:"forkedFrom,omitempty"`
+	SystemPromptHash string   `json:"systemPromptHash"`
+	ToolScope        []string `json:"toolScope"`
+	ToolSchemaHash   string   `json:"toolSchemaHash"`
+	Model            string   `json:"model"`
+	Effort           string   `json:"effort"`
 	// Capsule records what context this run was given; CapsuleHash is its
 	// stable identity for comparing two runs.
 	Capsule     ContextCapsule `json:"capsule"`
@@ -691,24 +706,7 @@ func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 }
 
 func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
-	if s == nil || run == nil || run.Ref == "" {
-		return nil
-	}
-	if s.parentDestroyed(run) {
-		return nil
-	}
-	// Terminal status is independent from transcript persistence. Keep going so
-	// a sidecar failure cannot leave a failed run marked as running on disk.
-	branchErr := s.ensureBranchCreatedAt(run)
-	var sessionErr error
-	if run.Session != nil {
-		sessionErr = run.Session.Save(s.sessionPath(run.Ref))
-	}
-	meta := run.Meta
-	meta.Status = SubagentFailed
-	meta.UpdatedAt = time.Now().UTC()
-	run.Meta = meta
-	return errors.Join(branchErr, sessionErr, s.saveMeta(meta))
+	return s.saveTerminal(run, SubagentFailed, "")
 }
 
 // ensureBranchCreatedAt seeds the session list sidecar before the first

@@ -840,7 +840,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			trk.running()
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
 			if err != nil {
-				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
+				return FormatSubagentRunResult("", run, true), errors.Join(err, t.saveRunTerminal(run, err))
 			}
 			if err := t.transcripts.SaveCompleted(run); err != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
@@ -865,7 +865,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	defer run.Release()
 	answer, err := runSession(ctx, trk.wrap(), false)
 	if err != nil {
-		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+		return "", errors.Join(err, t.saveRunTerminal(run, err))
 	}
 	if t.transcripts != nil && run.Ref != "" {
 		if err := t.transcripts.SaveCompleted(run); err != nil {
@@ -874,6 +874,21 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		return FormatSubagentRunResult(answer, run, false), nil
 	}
 	return GuardSubagentHostDecisionText(answer), nil
+}
+
+// saveRunTerminal records what happened to a child that actually ran. It is the
+// only place a cancellation may be read as a terminal outcome: everywhere else
+// a context error means the host failed to do something, and classifying those
+// would file an infrastructure failure as work the caller stopped.
+func (t *TaskTool) saveRunTerminal(run *SubagentRun, runErr error) error {
+	switch {
+	case errors.Is(runErr, context.DeadlineExceeded):
+		return t.transcripts.SaveCancelled(run, TerminalDeadline)
+	case errors.Is(runErr, context.Canceled):
+		return t.transcripts.SaveCancelled(run, TerminalCancelled)
+	default:
+		return t.transcripts.SaveFailed(run)
+	}
 }
 
 func (t *TaskTool) bashCanEnforceWriteRoots() bool {

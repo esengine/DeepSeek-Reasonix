@@ -421,23 +421,32 @@ disposition durable.
 `child-terminal` reaches all three executed terminals in one group and compares
 the two owners of the same fact:
 
+When this arm was written, no owner kept it:
+
 ```
 graph:   cancelled=2 completed=1 failed=1
-store:   completed=1 failed=3
+store:   completed=1 failed=3          ← every error path saved a child as failed
 journal: all four items open+started+settled
 ```
 
-The graph draws cancellation apart from failure. The store — which owns what
-happened to a child — folds it in: every error path saves a child as failed,
-and `SubagentStatus` has no cancelled to save. The journal cannot help, because
-it deliberately records orchestration and not outcome. So the distinction is
-not merely un-persisted; **no owner keeps it**, and no journal record could
-recover it.
+The graph drew cancellation apart from failure; the store, which owns what
+happened to a child, folded it in. The journal could not help — it records
+orchestration, not outcome — so the distinction was not merely un-persisted,
+it was unkept. That made it a store defect rather than a journal gap: adding a
+cancelled record to the journal would have created a second authority for a
+fact the store already owns, with nothing to settle the first disagreement.
 
-That makes this a store defect rather than a journal gap. Adding a cancelled
-record to the execution journal would create a second authority for a fact the
-store already owns, and the first time the two disagreed there would be nothing
-to say which was right.
+The store now keeps it, and the arm reads:
+
+```
+graph:   cancelled=2 completed=1 failed=1
+store:   cancelled=2 completed=1 failed=1
+journal: all four items open+started+settled   ← unchanged, and it must stay so
+```
+
+The journal row is part of the gate. A fix that made this arm green by teaching
+the journal about cancellation would have passed the comparison while breaking
+the boundary the comparison exists to protect.
 
 One thing these arms had to work around: `Controller.Cancel()` does nothing to
 a synchronous headless `Run`. That path does not pass through turn admission,
