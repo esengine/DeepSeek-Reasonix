@@ -71,6 +71,7 @@ provider call*.
 | `terminal-skipped-dep` | fail an upstream, let the dependent be skipped, die | none | what does a skip leave behind? |
 | `terminal-cancelled` | cancel with one item admitted and two not, die | ceilings | the same for a cancellation |
 | `terminal-context` | deliver an upstream answer across an ordering edge, die | none | does a delivery edge follow from what is already durable? |
+| `child-terminal` | reach completed, failed and cancelled in one group, die | none | does the store keep every terminal the graph draws? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -414,6 +415,29 @@ that is precisely what is not durable: after the boundary the prediction goes
 empty, because the answered set comes from the graph rather than the journal.
 Context does not belong in the vocabulary; it belongs behind whatever makes a
 disposition durable.
+
+### The terminal no owner keeps
+
+`child-terminal` reaches all three executed terminals in one group and compares
+the two owners of the same fact:
+
+```
+graph:   cancelled=2 completed=1 failed=1
+store:   completed=1 failed=3
+journal: all four items open+started+settled
+```
+
+The graph draws cancellation apart from failure. The store — which owns what
+happened to a child — folds it in: every error path saves a child as failed,
+and `SubagentStatus` has no cancelled to save. The journal cannot help, because
+it deliberately records orchestration and not outcome. So the distinction is
+not merely un-persisted; **no owner keeps it**, and no journal record could
+recover it.
+
+That makes this a store defect rather than a journal gap. Adding a cancelled
+record to the execution journal would create a second authority for a fact the
+store already owns, and the first time the two disagreed there would be nothing
+to say which was right.
 
 One thing these arms had to work around: `Controller.Cancel()` does nothing to
 a synchronous headless `Run`. That path does not pass through turn admission,

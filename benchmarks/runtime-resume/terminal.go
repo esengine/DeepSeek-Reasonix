@@ -32,11 +32,16 @@ const (
 	// armTerminalContext asks whether a context edge has to be recorded at all,
 	// or already follows from the ordering and what the upstream answered.
 	armTerminalContext = "terminal-context"
+	// armChildTerminal compares the graph's terminal for an executed item
+	// against what the sub-agent store recorded for the same child. The store
+	// is the owner of "what happened to this child", so a distinction the graph
+	// draws and the store does not keep is one no reconstruction can recover.
+	armChildTerminal = "child-terminal"
 )
 
 func terminalArm(name string) bool {
 	switch name {
-	case armTerminalAdopted, armTerminalSkippedDep, armTerminalCancelled, armTerminalContext:
+	case armTerminalAdopted, armTerminalSkippedDep, armTerminalCancelled, armTerminalContext, armChildTerminal:
 		return true
 	}
 	return false
@@ -50,6 +55,8 @@ func terminalSentinels(arm string) string {
 		return fleetWarmSentinel + " " + fleetMixedSentinel
 	case armTerminalCancelled:
 		return parallelSentinel
+	case armChildTerminal:
+		return fleetOutcomesSentinel
 	}
 	return fleetTerminalSentinel
 }
@@ -63,6 +70,11 @@ func runTerminalConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 	go func() { _ = ctrl.Run(runCtx, fanOutTurn(turn+1, terminalSentinels(arm))) }()
 	if arm == armTerminalCancelled {
 		if err := cancelBeforeStart(sink, cancelRun); err != nil {
+			return err
+		}
+	}
+	if arm == armChildTerminal {
+		if err := cancelAfterOutcomes(sink, cancelRun); err != nil {
 			return err
 		}
 	}
@@ -95,6 +107,25 @@ func cancelBeforeStart(sink *graphSink, cancelRun context.CancelFunc) error {
 	return errUnexpected("one item running and one still queued", waitStates(graph))
 }
 
+// cancelAfterOutcomes interrupts once one item has completed and another has
+// failed, with a third still running. All three terminals then come from one
+// group, so the store's record of them is compared under identical conditions.
+func cancelAfterOutcomes(sink *graphSink, cancelRun context.CancelFunc) error {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		graph, _ := sink.snapshot()
+		if len(nodesInState(graph, agentgraph.StateCompleted)) > 0 &&
+			len(nodesInState(graph, agentgraph.StateFailed)) > 0 &&
+			runningCount(graph) > 0 {
+			cancelRun()
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	graph, _ := sink.snapshot()
+	return errUnexpected("one completed, one failed and one still running", waitStates(graph))
+}
+
 func runningCount(g agentgraph.Graph) int {
 	n := 0
 	for _, node := range g.Nodes {
@@ -113,7 +144,7 @@ func wantedTerminal(arm string) agentgraph.NodeState {
 	if arm == armTerminalContext {
 		return agentgraph.StateCompleted
 	}
-	if arm == armTerminalCancelled {
+	if arm == armTerminalCancelled || arm == armChildTerminal {
 		return agentgraph.StateCancelled
 	}
 	return agentgraph.StateSkipped
@@ -160,6 +191,9 @@ func terminalRows(arm string, before, after Observation) []row {
 	}
 	if arm == armTerminalContext || arm == armTerminalSkippedDep {
 		rows = append(rows, contextDerivabilityRow(before, after))
+	}
+	if arm == armChildTerminal {
+		rows = append(rows, childOutcomeRow(before, after))
 	}
 	return rows
 }
@@ -224,6 +258,69 @@ func contextDerivabilityRow(before, after Observation) row {
 		After:          "implied " + orNone(impliedContext(after)) + " / actual: not observable",
 		Verdict:        verdict,
 	}
+}
+
+// executedTerminals are the graph's terminals for items that actually ran.
+// Adopted and skipped are excluded: nothing executed under them, so the store
+// owes them no record and counting them would read a correct store as short.
+func executedTerminals(o Observation) map[string]int {
+	out := map[string]int{}
+	for _, n := range o.Graph.Nodes {
+		if n.Kind == agentgraph.KindGroup || n.State == "" || !n.State.Terminal() {
+			continue
+		}
+		if n.State == agentgraph.StateAdopted || n.State == agentgraph.StateSkipped {
+			continue
+		}
+		out[string(n.State)]++
+	}
+	return out
+}
+
+// childOutcomeRow compares the two owners of the same fact. The graph draws
+// completed, failed and cancelled apart; the store is what a restart reads. A
+// terminal the graph distinguishes and the store folds into another is gone for
+// good — no journal record could recover it, because the owner never kept it.
+func childOutcomeRow(before, after Observation) row {
+	graphTerminals := executedTerminals(before)
+	verdict := verdictNotMeasured
+	if len(graphTerminals) > 0 {
+		verdict = verdictHolds
+		for state := range graphTerminals {
+			if !storeKnows(after, state) {
+				verdict = verdictViolated
+			}
+		}
+	}
+	return row{
+		Semantic:       "terminal outcome: what the graph drew, what the store kept",
+		Authority:      "the graph's closing delta against SubagentStore.Meta.Status",
+		Artifact:       "subagents/<ref>.meta.json",
+		Reconstruction: "the store owns what happened to a child; every terminal it draws it must keep",
+		Before:         "graph " + countSummary(graphTerminals) + " / store " + orNone(childStatusCounts(before)),
+		After:          "store " + orNone(childStatusCounts(after)), Verdict: verdict,
+	}
+}
+
+// storeKnows reports whether any child carries this terminal as its status.
+func storeKnows(o Observation, state string) bool {
+	for _, f := range o.Children.Facts {
+		if f.Status == state {
+			return true
+		}
+	}
+	return false
+}
+
+func childStatusCounts(o Observation) string {
+	counts := map[string]int{}
+	for _, f := range o.Children.Facts {
+		counts[f.Status]++
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	return countSummary(counts)
 }
 
 func graphOf(o Observation) agentgraph.Graph {

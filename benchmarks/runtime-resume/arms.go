@@ -108,6 +108,7 @@ func arms() []arm {
 		{name: armTerminalSkippedDep, asks: "an item that never ran and holds none, because its dependency failed"},
 		{name: armTerminalCancelled, asks: "an item a cancellation ended before it was admitted"},
 		{name: armTerminalContext, asks: "whether a delivered answer's edge follows from what is already durable"},
+		{name: armChildTerminal, asks: "whether the store keeps every terminal the graph draws"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

@@ -64,6 +64,7 @@ const (
 	// process still dies mid-turn.
 	fleetTerminalSentinel = "PROBE-FLEET-TERMINAL"
 	parallelSentinel      = "PROBE-PARALLEL"
+	fleetOutcomesSentinel = "PROBE-FLEET-OUTCOMES"
 )
 
 // childHold is a child that reports holding its slot before it blocks, so a
@@ -216,6 +217,8 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 			return append(adoptOnlyFleet(adoptableRef(req)), done()), true
 		}
 		return append(mixedFleet(adoptableRef(req)), done()), true
+	case askedInPrompt(req, fleetOutcomesSentinel) && !s.terminal.Swap(true):
+		return append(outcomesFleet(), done()), true
 	case askedInPrompt(req, fleetTerminalSentinel) && !s.terminal.Swap(true):
 		return append(terminalFleet(s.arm), done()), true
 	case askedInPrompt(req, parallelSentinel) && !s.terminal.Swap(true):
@@ -303,6 +306,18 @@ func adoptOnlyFleet(adoptRef string) []provider.Chunk {
 	return fleetCall("probe_fleet_terminal", []map[string]any{
 		{"id": "a1", "adopt_ref": adoptRef, "description": "adopted"},
 		{"id": "a2", "prompt": childDone + " ran", "description": "ran", "read_only": true},
+	})
+}
+
+// outcomesFleet reaches all three executed terminals in one group: one item
+// completes, one fails, and two are still running when the arm interrupts. The
+// store's record of each is then compared under identical conditions.
+func outcomesFleet() []provider.Chunk {
+	return fleetCall("probe_fleet_outcomes", []map[string]any{
+		{"id": "o1", "prompt": childDone + " completes", "description": "completes", "read_only": true},
+		{"id": "o2", "prompt": childFail + " fails", "description": "fails", "read_only": true},
+		{"id": "o3", "prompt": childHang + " cancelled", "description": "cancelled", "read_only": true},
+		{"id": "o4", "prompt": childHang + " cancelled too", "description": "cancelled too", "read_only": true},
 	})
 }
 
