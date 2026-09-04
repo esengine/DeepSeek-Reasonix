@@ -25,6 +25,8 @@ type ResolvedHost struct {
 	PassphraseEnv    string   // credential env var name for the key passphrase
 	PasswordEnv      string   // credential env var name for password auth
 	ProxyJump        []string // resolved jump chain, in dial order
+	ProxyCommand     string   // effective ssh_config command for the first transport hop
+	SSHConfigAlias   string   // original ssh_config host token used by ProxyCommand %n
 	Workspace        string   // default remote workspace directory
 	ServeInstall     string   // auto|npm|upload|never
 	Forwards         []config.RemoteForwardEntry
@@ -210,6 +212,10 @@ func applySSHConfig(r *ResolvedHost, alias string, sshCfg *SSHConfigSource) erro
 		if j := effective.ProxyJump; j != "" {
 			r.ProxyJump = splitJumpChain(j)
 		}
+	}
+	if effective.ProxyCommand != "" {
+		r.ProxyCommand = effective.ProxyCommand
+		r.SSHConfigAlias = alias
 	}
 	r.IdentitiesOnly = effective.IdentitiesOnly
 	return nil

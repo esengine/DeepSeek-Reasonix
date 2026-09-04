@@ -48,11 +48,11 @@ func TestEffectiveSSHConfigUsesOpenSSHOutputAndKeepsAllIdentities(t *testing.T) 
 		if path != src.Path() || alias != "gpu" {
 			t.Fatalf("ssh -G request = path %q alias %q", path, alias)
 		}
-		return []byte("hostname resolved.example\nuser effective-user\nport 2207\nidentityfile ~/.ssh/first\nidentityfile ~/.ssh/second\nproxyjump jump-a,jump-b\nidentitiesonly yes\n"), nil
+		return []byte("hostname resolved.example\nuser effective-user\nport 2207\nidentityfile ~/.ssh/first\nidentityfile ~/.ssh/second\nproxyjump jump-a,jump-b\nproxycommand cloudflared access ssh --hostname %h\nidentitiesonly yes\n"), nil
 	}
 
 	got := src.Effective("gpu")
-	if got.HostName != "resolved.example" || got.User != "effective-user" || got.Port != 2207 || got.ProxyJump != "jump-a,jump-b" || !got.IdentitiesOnly {
+	if got.HostName != "resolved.example" || got.User != "effective-user" || got.Port != 2207 || got.ProxyJump != "jump-a,jump-b" || got.ProxyCommand != "cloudflared access ssh --hostname %h" || !got.IdentitiesOnly {
 		t.Fatalf("effective config = %+v", got)
 	}
 	home, err := os.UserHomeDir()
@@ -238,6 +238,21 @@ func TestEmbeddedSSHConfigPreservesIdentityFileNone(t *testing.T) {
 	}
 }
 
+func TestEmbeddedSSHConfigDoesNotResolveProxyCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("Host tunnel-box\n  HostName tunnel.example\n  ProxyCommand cloudflared access ssh --hostname %h\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src, err := LoadSSHConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.resolveOpenSSH = nil
+	if got := src.Effective("tunnel-box").ProxyCommand; got != "" {
+		t.Fatalf("embedded fallback resolved ProxyCommand = %q", got)
+	}
+}
+
 func TestEffectiveSSHConfigPropagatesInstalledOpenSSHErrors(t *testing.T) {
 	src, err := LoadSSHConfig(writeSampleConfig(t))
 	if err != nil {
@@ -358,6 +373,27 @@ func TestResolveHostLayersSSHConfig(t *testing.T) {
 	}
 	if h.Port != 2222 {
 		t.Errorf("Port not taken from ssh_config: %d", h.Port)
+	}
+}
+
+func TestResolveHostKeepsProxyCommandLookupAlias(t *testing.T) {
+	src, err := LoadSSHConfig(writeSampleConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.resolveOpenSSH = func(context.Context, string, string) ([]byte, error) {
+		return []byte("hostname tunnel.example\nuser dev\nport 22\nproxycommand cloudflared access ssh --hostname %h --original %n\n"), nil
+	}
+	cfg := config.Default()
+	if err := cfg.UpsertRemoteHost(config.RemoteHostEntry{Name: "friendly", Host: "gpu", UseSSHConfig: true}); err != nil {
+		t.Fatal(err)
+	}
+	host, err := ResolveHost(cfg, "friendly", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.ProxyCommand == "" || host.SSHConfigAlias != "gpu" {
+		t.Fatalf("resolved ProxyCommand host = %+v", host)
 	}
 }
 

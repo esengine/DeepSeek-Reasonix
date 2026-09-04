@@ -304,8 +304,10 @@ reasonix remote fs ls gpu-box:'~/projects/app'
 ```
 
 启用 `use_ssh_config` 的主机会通过本机 OpenSSH `ssh -G` 获取最终有效配置，因此支持
-`Include`、通配 `Host`、`Match`（包括 `Match exec`）、多个 `IdentityFile`、`ProxyJump` 和
-`IdentitiesOnly`。导入时只保存原始别名，不复制一份容易过期的解析结果。
+`Include`、通配 `Host`、`Match`（包括 `Match exec`）、多个 `IdentityFile`、`ProxyJump`、
+`ProxyCommand` 和 `IdentitiesOnly`。`ProxyCommand` 通过标准输入/输出提供第一段传输，并支持
+OpenSSH 的 `%%`、`%h`、`%n`、`%p` 和 `%r` 替换。导入时只保存原始别名，不复制一份容易过期的
+解析结果。
 
 `connect` 是前台守护(相当于 `ssh -N` 加上 serve 引导):它保持隧道与已配置的转发存活,断线时
 以指数退避自动重连,并在重连后重新挂载转发。Ctrl-C 只断开本地一侧 —— 远端 serve 继续运行,

@@ -343,8 +343,11 @@ reasonix remote fs ls gpu-box:'~/projects/app'
 
 Hosts with `use_ssh_config` enabled resolve the final effective configuration
 through the local OpenSSH `ssh -G`, including `Include`, wildcard `Host`,
-`Match` (including `Match exec`), repeated `IdentityFile`, `ProxyJump`, and
-`IdentitiesOnly`. Import stores the original alias instead of a stale snapshot.
+`Match` (including `Match exec`), repeated `IdentityFile`, `ProxyJump`,
+`ProxyCommand`, and `IdentitiesOnly`. `ProxyCommand` supplies the first
+transport hop through its standard input/output and supports OpenSSH's `%%`,
+`%h`, `%n`, `%p`, and `%r` substitutions. Import stores the original alias
+instead of a stale snapshot.
 
 `connect` is a foreground supervisor (like `ssh -N` plus the serve bootstrap):
 it keeps the tunnel and configured forwards alive, auto-reconnects with

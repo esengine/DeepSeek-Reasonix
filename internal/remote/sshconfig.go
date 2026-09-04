@@ -43,6 +43,7 @@ type EffectiveSSHConfig struct {
 	IdentityFiles    []string
 	IdentityFileNone bool
 	ProxyJump        string
+	ProxyCommand     string
 	IdentitiesOnly   bool
 }
 
@@ -227,6 +228,10 @@ func parseOpenSSHEffectiveConfig(output []byte, alias string) (EffectiveSSHConfi
 			if !strings.EqualFold(value, "none") {
 				effective.ProxyJump = value
 			}
+		case "proxycommand":
+			if !strings.EqualFold(value, "none") {
+				effective.ProxyCommand = value
+			}
 		case "identitiesonly":
 			effective.IdentitiesOnly = strings.EqualFold(value, "yes")
 		}
@@ -269,6 +274,8 @@ func (s *SSHConfigSource) parserEffective(alias string) EffectiveSSHConfig {
 			port = parsed
 		}
 	}
+	// ProxyCommand is intentionally omitted here: only ssh -G can resolve its
+	// first-set precedence against ProxyJump accurately enough to execute it.
 	return EffectiveSSHConfig{
 		HostName: hostName, User: s.get(alias, "User"), Port: port,
 		IdentityFiles: identities, IdentityFileNone: identityFileNone, ProxyJump: s.get(alias, "ProxyJump"),
