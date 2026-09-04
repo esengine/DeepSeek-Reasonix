@@ -274,6 +274,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# subagent_efforts = { review = \"max\", task = \"high\" }   # per-tool/skill effort overrides\n")
 	}
+	if scope != RenderScopeProject && len(c.Agent.SubagentMaxSteps) > 0 {
+		fmt.Fprintf(&b, "subagent_max_steps = %s   # per-skill subagent step caps; 0/unset inherits the engine default\n", renderIntMap(c.Agent.SubagentMaxSteps))
+	}
 	if c.Agent.MaxSubagentDepth != defaults.Agent.MaxSubagentDepth {
 		fmt.Fprintf(&b, "max_subagent_depth = %d   # nested subagent delegation depth; 1 restores the old single-layer boundary\n", c.Agent.MaxSubagentDepth)
 	} else {
@@ -957,6 +960,10 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 	if len(c.Agent.SubagentEfforts) > 0 && !reflect.DeepEqual(c.Agent.SubagentEfforts, d.Agent.SubagentEfforts) {
 		fmt.Fprintf(&agentBuf, "subagent_efforts = %s\n", renderStringMap(c.Agent.SubagentEfforts))
+		anyAgent = true
+	}
+	if len(c.Agent.SubagentMaxSteps) > 0 && !reflect.DeepEqual(c.Agent.SubagentMaxSteps, d.Agent.SubagentMaxSteps) {
+		fmt.Fprintf(&agentBuf, "subagent_max_steps = %s\n", renderIntMap(c.Agent.SubagentMaxSteps))
 		anyAgent = true
 	}
 	if c.Agent.MaxSubagentDepth != d.Agent.MaxSubagentDepth {

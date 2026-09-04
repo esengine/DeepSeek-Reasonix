@@ -23,6 +23,9 @@ import (
 type SubagentRunOptions struct {
 	ContinueFrom string
 	ForkFrom     string
+	// MaxSteps is an explicit final cap for this child run. Zero leaves the
+	// profile/config/default budget resolution unchanged.
+	MaxSteps int
 	// HostInitiated marks an explicit controller entry point such as
 	// /<subagent-skill>. It may still carry a synthetic call context for nested
 	// UI events, but that ephemeral event ID must not be persisted as though it
@@ -576,7 +579,7 @@ func (*installSkillTool) Schema() json.RawMessage {
   "model":{"type":"string","description":"Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise."},
   "effort":{"type":"string","description":"Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise."},
   "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."},
-  "maxSteps":{"type":"integer","minimum":1,"description":"Optional step cap for runAs=subagent — how many tool-execution steps the child may take before being asked to wrap up. Omitted/0 inherits the engine's default budget. Ignored for inline."}
+  "maxSteps":{"type":"integer","minimum":0,"description":"Optional step cap for runAs=subagent — how many tool-execution steps the child may take before being asked to wrap up. Omitted/0 inherits the engine's default budget. Ignored for inline."}
 },
 "required":["name","description","body"]
 }`)
@@ -610,23 +613,32 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 	}
 
 	scope := ScopeGlobal
-	switch strings.TrimSpace(p.Scope) {
+	switch rawScope := strings.TrimSpace(p.Scope); rawScope {
+	case "":
+		if t.store.HasProjectScope() {
+			scope = ScopeProject
+		}
 	case "global":
 		scope = ScopeGlobal
 	case "project":
 		scope = ScopeProject
 	default:
-		if t.store.HasProjectScope() {
-			scope = ScopeProject
-		}
+		return "", fmt.Errorf("install_skill: unsupported scope %q; use 'project' or 'global'", p.Scope)
 	}
 	if scope == ScopeProject && !t.store.HasProjectScope() {
 		return "", fmt.Errorf("install_skill: scope='project' requires a workspace — use scope='global'")
 	}
 
 	runAs := RunInline
-	if strings.TrimSpace(p.RunAs) == "subagent" {
+	switch rawRunAs := strings.TrimSpace(p.RunAs); rawRunAs {
+	case "":
+		// inline is the backwards-compatible default.
+	case "inline":
+		runAs = RunInline
+	case "subagent":
 		runAs = RunSubagent
+	default:
+		return "", fmt.Errorf("install_skill: unsupported runAs %q; use 'inline' or 'subagent'", p.RunAs)
 	}
 
 	content := RenderSkillFile(SkillFileOptions{

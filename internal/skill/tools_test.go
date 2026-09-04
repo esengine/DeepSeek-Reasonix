@@ -545,6 +545,22 @@ func TestInstallSkill(t *testing.T) {
 	if sk.RunAs != RunSubagent || sk.Model != "deepseek-pro" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
 		t.Errorf("frontmatter not round-tripped: runAs=%s model=%q effort=%q tools=%v", sk.RunAs, sk.Model, sk.Effort, sk.AllowedTools)
 	}
+	// A zero cap is accepted by the schema and remains unset in frontmatter.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"uncapped","description":"default","body":"x","runAs":"subagent","maxSteps":0}`)); err != nil {
+		t.Fatalf("zero maxSteps should be accepted: %v", err)
+	}
+	if capped, ok := st.Read("uncapped"); !ok || capped.MaxSteps != 0 {
+		t.Fatalf("zero maxSteps should round-trip as unset: %+v, found=%v", capped, ok)
+	}
+	for _, raw := range []string{
+		`{"name":"bad-scope","description":"d","body":"b","scope":"other"}`,
+		`{"name":"bad-runas","description":"d","body":"b","runAs":"other"}`,
+	} {
+		if _, err := tl.Execute(context.Background(), json.RawMessage(raw)); err == nil {
+			t.Fatalf("invalid enum should be rejected: %s", raw)
+		}
+	}
 	// Refuses overwrite.
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"deploy","description":"again","body":"x"}`)); err == nil {

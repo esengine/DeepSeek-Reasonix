@@ -1225,7 +1225,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		case "review", "security-review", "security_review":
 			agent.AttachReviewReportTool(subReg)
 		}
-		steps := sk.MaxSteps
+		steps := runOpts.MaxSteps
+		if steps <= 0 {
+			steps = sk.MaxSteps
+		}
 		if steps <= 0 {
 			// Built-in profiles have no frontmatter to carry a `max-steps:`
 			// line, so a per-name config override (subagent_max_steps) is the
@@ -1361,7 +1364,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			}
 		}
 		defer run.Release()
-		steps := sk.MaxSteps
+		steps := runOpts.MaxSteps
+		if steps <= 0 {
+			steps = sk.MaxSteps
+		}
 		if steps <= 0 {
 			// Built-in profiles have no frontmatter to carry a `max-steps:`
 			// line, so a per-name config override (subagent_max_steps) is the

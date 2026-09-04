@@ -130,14 +130,17 @@ func TestSubagentProfileCLIMaxStepsRoundTrip(t *testing.T) {
 
 func TestParseCLIMaxSteps(t *testing.T) {
 	cases := []struct {
-		raw  string
-		want int
+		raw     string
+		want    int
+		wantErr bool
 	}{
-		{"", 0}, {"0", 0}, {"-3", 0}, {"abc", 0}, {"1", 1}, {" 20 ", 20}, {"999", 999},
+		{"", 0, false}, {"0", 0, false}, {"1", 1, false}, {" 20 ", 20, false}, {"999", 999, false},
+		{"-3", 0, true}, {"abc", 0, true}, {"1.5", 0, true},
 	}
 	for _, tc := range cases {
-		if got := parseCLIMaxSteps(tc.raw); got != tc.want {
-			t.Errorf("parseCLIMaxSteps(%q) = %d, want %d", tc.raw, got, tc.want)
+		got, err := parseCLIMaxSteps(tc.raw)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("parseCLIMaxSteps(%q) = %d, %v; want %d, error=%v", tc.raw, got, err, tc.want, tc.wantErr)
 		}
 	}
 }
@@ -261,6 +264,24 @@ func TestSubagentProfileCLIRejectsReservedAndCustomCommandNames(t *testing.T) {
 		if !strings.Contains(errOut, "slash command namespace") {
 			t.Fatalf("create %q output = %q", name, errOut)
 		}
+	}
+}
+
+func TestSubagentProfileCLIEditBuiltinMaxStepsOverride(t *testing.T) {
+	isolateCLIConfigHome(t)
+	if rc := subagentCommand([]string{"edit", "review", "--max-steps", "20"}); rc != 0 {
+		t.Fatalf("builtin max-steps edit rc = %d", rc)
+	}
+	loaded := config.LoadForEdit(config.UserConfigPath())
+	if got := loaded.Agent.SubagentMaxSteps["review"]; got != 20 {
+		t.Fatalf("review max-steps override = %d, want 20", got)
+	}
+	if rc := subagentCommand([]string{"edit", "review", "--max-steps=0"}); rc != 0 {
+		t.Fatalf("builtin max-steps clear rc = %d", rc)
+	}
+	loaded = config.LoadForEdit(config.UserConfigPath())
+	if got := loaded.Agent.SubagentMaxSteps["review"]; got != 0 {
+		t.Fatalf("review max-steps clear = %d, want 0", got)
 	}
 }
 

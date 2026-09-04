@@ -203,7 +203,12 @@ func subagentCreateCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
 		return 1
 	}
-	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, false, parseCLIMaxSteps(values.maxSteps.value))
+	maxSteps, err := parseCLIMaxSteps(values.maxSteps.value)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "subagent create:", err)
+		return 2
+	}
+	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, false, maxSteps)
 	path, err := store.CreateWithContent(name, scope, content)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
@@ -284,7 +289,11 @@ func subagentEditCommand(args []string) int {
 		color = values.color.value
 	}
 	if values.maxSteps.set {
-		maxSteps = parseCLIMaxSteps(values.maxSteps.value)
+		maxSteps, err = parseCLIMaxSteps(values.maxSteps.value)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "subagent edit:", err)
+			return 2
+		}
 	}
 	if strings.TrimSpace(description) == "" || strings.TrimSpace(body) == "" {
 		fmt.Fprintln(os.Stderr, "subagent edit: description and prompt cannot be empty")
@@ -357,7 +366,8 @@ func subagentRunCommand(args []string, readOnly bool) int {
 	}
 	fs := flag.NewFlagSet("subagent "+verb, flag.ContinueOnError)
 	model := fs.String("model", "", "default model reference")
-	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds")
+	var maxStepsValue optionalString
+	fs.Var(&maxStepsValue, "max-steps", "final subagent tool-call round cap (0 = profile/default)")
 	dir := fs.String("dir", "", "project root")
 	if code, ok := parseCommandFlags(fs, rest); !ok {
 		return code
@@ -378,15 +388,20 @@ func subagentRunCommand(args []string, readOnly bool) int {
 		fmt.Fprintf(os.Stderr, "subagent %s: task is required\n", verb)
 		return 2
 	}
+	maxSteps, err := parseCLIMaxSteps(maxStepsValue.value)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "subagent %s: %v\n", verb, err)
+		return 2
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	ctrl, err := setupSubagentCommand(ctx, *model, *maxSteps, true, event.Discard, workspaceRoot)
+	ctrl, err := setupSubagentCommand(ctx, *model, 0, true, event.Discard, workspaceRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "subagent %s: %v\n", verb, err)
 		return 1
 	}
 	defer ctrl.Close()
-	answer, err := ctrl.RunSubagentProfile(ctx, name, task, readOnly)
+	answer, err := ctrl.RunSubagentProfile(ctx, name, task, readOnly, maxSteps)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "subagent %s: %v\n", verb, err)
 		return 1
@@ -465,8 +480,8 @@ func refuseSubagentNameCollision(skills []skill.Skill, name string) error {
 }
 
 func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) error {
-	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set || values.maxSteps.set {
-		return fmt.Errorf("built-in profile %q only supports --model and --effort overrides", sk.Name)
+	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set {
+		return fmt.Errorf("built-in profile %q only supports --model, --effort, and --max-steps overrides", sk.Name)
 	}
 	unlock := config.LockUserConfigEdits()
 	defer unlock()
@@ -515,6 +530,19 @@ func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) err
 			cfg.Agent.SubagentEfforts[sk.Name] = effort
 		}
 	}
+	if values.maxSteps.set {
+		maxSteps, err := parseCLIMaxSteps(values.maxSteps.value)
+		if err != nil {
+			return err
+		}
+		deleteSubagentMaxStepsAliases(cfg.Agent.SubagentMaxSteps, sk.Name)
+		if maxSteps > 0 {
+			if cfg.Agent.SubagentMaxSteps == nil {
+				cfg.Agent.SubagentMaxSteps = map[string]int{}
+			}
+			cfg.Agent.SubagentMaxSteps[sk.Name] = maxSteps
+		}
+	}
 	return cfg.SaveTo(path)
 }
 
@@ -528,6 +556,12 @@ func subagentOverride(overrides map[string]string, name string) string {
 }
 
 func deleteSubagentOverrideAliases(overrides map[string]string, name string) {
+	for _, key := range boot.SubagentModelKeys(name) {
+		delete(overrides, key)
+	}
+}
+
+func deleteSubagentMaxStepsAliases(overrides map[string]int, name string) {
 	for _, key := range boot.SubagentModelKeys(name) {
 		delete(overrides, key)
 	}
@@ -562,15 +596,19 @@ func profileFlagsChanged(values subagentProfileFlags) bool {
 		values.effort.set || values.tools.set || values.color.set || values.maxSteps.set
 }
 
-// parseCLIMaxSteps maps a --max-steps flag value to a step cap. Empty, invalid,
-// or <= 0 resolve to 0 ("unset" — inherit the engine default), so an explicit
-// `--max-steps=` clears a previously set cap on edit.
-func parseCLIMaxSteps(raw string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || n <= 0 {
-		return 0
+// parseCLIMaxSteps maps a --max-steps flag value to a step cap. Empty and zero
+// clear the cap; malformed or negative values are rejected before any config or
+// runner is changed.
+func parseCLIMaxSteps(raw string) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, nil
 	}
-	return n
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid --max-steps %q: use a non-negative integer", raw)
+	}
+	return n, nil
 }
 
 func parseToolList(raw string) []string {
