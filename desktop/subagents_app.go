@@ -75,6 +75,9 @@ func editableSubagentProfileScope(raw string) (skill.Scope, error) {
 // same-scope-only overwrite check.
 func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) {
 	name := strings.TrimSpace(input.Name)
+	if input.MaxSteps < 0 {
+		return "", fmt.Errorf("max steps must be non-negative")
+	}
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {
 		return "", fmt.Errorf("description is required")
@@ -153,6 +156,9 @@ func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) 
 // the frontend applies by filtering its list to invocation=manual.
 func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInput) error {
 	name = strings.TrimSpace(name)
+	if input.MaxSteps < 0 {
+		return fmt.Errorf("max steps must be non-negative")
+	}
 	if name == "" {
 		return fmt.Errorf("name is required")
 	}

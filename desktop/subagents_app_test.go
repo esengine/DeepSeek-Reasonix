@@ -65,6 +65,20 @@ func TestCreateSubagentProfileWritesManualInvocationSubagentSkill(t *testing.T) 
 	}
 }
 
+func TestSubagentProfileRejectsNegativeMaxSteps(t *testing.T) {
+	a := newTestSubagentApp(t)
+	if _, err := a.CreateSubagentProfile(SubagentProfileInput{
+		Name: "negative-cap", Description: "d", SystemPrompt: "p", MaxSteps: -1,
+	}); err == nil {
+		t.Fatal("CreateSubagentProfile accepted negative MaxSteps")
+	}
+	if err := a.UpdateSubagentProfile("missing", "global", SubagentProfileInput{
+		Description: "d", SystemPrompt: "p", MaxSteps: -1,
+	}); err == nil {
+		t.Fatal("UpdateSubagentProfile accepted negative MaxSteps")
+	}
+}
+
 func TestCreateSubagentProfileRejectsBuiltinNameCollision(t *testing.T) {
 	a := newTestSubagentApp(t)
 	_, err := a.CreateSubagentProfile(SubagentProfileInput{
