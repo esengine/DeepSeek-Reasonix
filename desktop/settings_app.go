@@ -169,6 +169,13 @@ type AgentView struct {
 	CompactRatio           float64 `json:"compactRatio,omitempty"`
 	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
 	CompactRatioOverridden bool    `json:"compactRatioOverridden,omitempty"`
+	// ProgressBudgetEnabled and ProgressBudgetRounds are the user-owned
+	// progress-reassessment checkpoint: after this many tool-call rounds with
+	// no new host-observed evidence the host asks the model to reassess. Rounds
+	// is always the effective value, never the raw 0 that means "default", so
+	// the UI can render it in a number field without a second lookup.
+	ProgressBudgetEnabled bool `json:"progressBudgetEnabled"`
+	ProgressBudgetRounds  int  `json:"progressBudgetRounds"`
 }
 
 type BotAllowlistView struct {
@@ -1035,6 +1042,8 @@ func (a *App) Settings() SettingsView {
 			ReasoningLanguage:      cfg.ReasoningLanguage(),
 			CompactRatio:           cfg.Agent.CompactRatio,
 			EffectiveCompactRatio:  cfg.Agent.CompactRatio,
+			ProgressBudgetEnabled:  cfg.ProgressBudgetEnabled(),
+			ProgressBudgetRounds:   desktopProgressBudgetRounds(cfg),
 		},
 		Bot:                          botSettingsView(cfg.Bot),
 		DesktopLanguage:              cfg.DesktopLanguage(),
@@ -2349,6 +2358,17 @@ func desktopParallelWriters(writers, total int) int {
 	return w
 }
 
+// desktopProgressBudgetRounds resolves the configured checkpoint into the
+// effective round count the settings UI renders. A disabled budget still shows
+// the threshold the user last chose (or the built-in default), so re-enabling
+// it never silently changes the number.
+func desktopProgressBudgetRounds(cfg *config.Config) int {
+	if !cfg.ProgressBudgetEnabled() {
+		return agent.NormalizeProgressBudgetRounds(cfg.Agent.ProgressBudgetRounds)
+	}
+	return agent.NormalizeProgressBudgetRounds(cfg.ProgressBudgetRoundsValue())
+}
+
 // SetMaxSubagentConcurrency sets the session-wide sub-agent concurrency cap (1–32).
 func (a *App) SetMaxSubagentConcurrency(n int) error {
 	return a.applyConfigChange(func(c *config.Config) error {
@@ -2366,6 +2386,24 @@ func (a *App) SetMaxParallelWriters(n int) error {
 		c.Agent.MaxSubagentConcurrency = total
 		c.Agent.MaxParallelWriters = writers
 		return nil
+	})
+}
+
+// SetProgressBudgetEnabled arms or disarms the progress-reassessment
+// checkpoint. The round count is preserved either way, so turning the checkpoint
+// back on restores the user's threshold instead of the built-in default.
+func (a *App) SetProgressBudgetEnabled(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		return c.SetProgressBudgetEnabled(enabled)
+	})
+}
+
+// SetProgressBudgetRounds sets how many zero-evidence tool-call rounds earn one
+// reassessment nudge. Out-of-range values are clamped by the runtime, so the
+// field only rejects a negative count.
+func (a *App) SetProgressBudgetRounds(rounds int) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		return c.SetProgressBudgetRounds(rounds)
 	})
 }
 

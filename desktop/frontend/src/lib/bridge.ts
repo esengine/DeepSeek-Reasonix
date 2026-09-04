@@ -149,6 +149,8 @@ import type {
 import { browserPreviewShellSupport } from "./shellSupportPreview";
 export * from "./remoteTabEvents";
 export const COMPACT_RATIO_MIN_PERCENT = 30, COMPACT_RATIO_MAX_PERCENT = 85;
+// Progress-budget bounds mirror agent.NormalizeProgressBudgetRounds.
+export const PROGRESS_BUDGET_MIN_ROUNDS = 3, PROGRESS_BUDGET_MAX_ROUNDS = 64;
 
 export interface DesktopShellStatusView {
   trayState: "probing" | "ready" | "unavailable";
@@ -618,6 +620,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
+  SetProgressBudgetEnabled(enabled: boolean): Promise<void>;
+  SetProgressBudgetRounds(rounds: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
@@ -1089,7 +1093,7 @@ function bridgeBreadcrumb(method: string): string {
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetDefaultModel|SetPlannerModel|SetVisionModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetProgressBudget|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|SetProviderWebSearch|SaveProviderModelCatalogs|AddOfficialProviderAccess|UpgradeDeepSeekProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|RemoveProviderAccesses|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|FetchProviderModels|FetchAllProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
@@ -1728,7 +1732,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", reasoningLanguage: "auto", compactRatio: 0.8 },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", reasoningLanguage: "auto", compactRatio: 0.8, progressBudgetEnabled: true, progressBudgetRounds: 8 },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -5048,6 +5052,15 @@ function makeMockApp(): AppBindings {
         throw new Error(`compact ratio must be between ${COMPACT_RATIO_MIN_PERCENT / 100} and ${COMPACT_RATIO_MAX_PERCENT / 100}`);
       }
       settings.agent = { ...settings.agent, compactRatio: ratio };
+    },
+    async SetProgressBudgetEnabled(enabled: boolean) {
+      settings.agent = { ...settings.agent, progressBudgetEnabled: enabled };
+    },
+    async SetProgressBudgetRounds(rounds: number) {
+      if (!Number.isInteger(rounds) || rounds < PROGRESS_BUDGET_MIN_ROUNDS || rounds > PROGRESS_BUDGET_MAX_ROUNDS) {
+        throw new Error(`progress budget rounds must be an integer between ${PROGRESS_BUDGET_MIN_ROUNDS} and ${PROGRESS_BUDGET_MAX_ROUNDS}`);
+      }
+      settings.agent = { ...settings.agent, progressBudgetRounds: rounds };
     },
     async SetReasoningLanguage(lang: string) {
       const normalized = lang === "zh" || lang === "en" ? lang : "auto";

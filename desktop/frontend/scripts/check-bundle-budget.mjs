@@ -190,7 +190,10 @@ console.log("\nbundle budgets");
 // Absorbing content-preserving block-window prepends into the active reader
 // transaction adds 0.2 KiB gzip on top; the merged path measures 463.292 KiB,
 // 8 bytes under the next decimal. Retain one cross-platform decimal step.
-const initialJSBudgetKiB = 463.4;
+// The model-settings progress-budget controls add a bounded settings-owner
+// block (toggle, round input, validation copy) to the always-mounted settings
+// path; the merged path measures 463.7 KiB gzip.
+const initialJSBudgetKiB = 463.8;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -254,7 +257,9 @@ for (const path of localeChunks) {
   // reclaim), while Sticky Context adds file-state and limit diagnostics. The
   // merged stable chunks measure 60.395 KiB zh and 61.232 KiB zh-TW; retain
   // only the next one-decimal ceiling for each dialect.
-  const budget = name.startsWith("zh-TW-") ? 61.3 * 1024 : 60.4 * 1024;
+  // The progress-budget settings add nine labels/hints per dialect (~0.4 KiB
+  // gzip); the merged chunks measure 60.8 KiB zh and 61.5 KiB zh-TW.
+  const budget = name.startsWith("zh-TW-") ? 61.6 * 1024 : 60.9 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -342,6 +347,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // path measures 2470.932 KiB.
 // The reader-transaction offset absorption adds 0.8 KiB raw on top; the merged
 // path measures 2471.741 KiB.
-const rawInitialBudgetKiB = 2_471.8;
+// The progress-budget settings controls add their markup/state to the same
+// initial payload; the merged path measures 2473.0 KiB raw.
+const rawInitialBudgetKiB = 2_473.1;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -865,6 +865,12 @@ const COMPACT_RATIO_PRESETS = [
   [0.8, "settings.compactRatioPreset.80"],
   [0.85, "settings.compactRatioPreset.85"],
 ] as const;
+// Progress-budget bounds mirror agent.NormalizeProgressBudgetRounds: the
+// kernel clamps to the same range, so the UI must not offer a value the loop
+// would silently rewrite.
+const PROGRESS_BUDGET_MIN_ROUNDS = 3;
+const PROGRESS_BUDGET_MAX_ROUNDS = 64;
+const PROGRESS_BUDGET_DEFAULT_ROUNDS = 8;
 const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
@@ -4264,7 +4270,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.80 };
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.80, progressBudgetEnabled: true, progressBudgetRounds: PROGRESS_BUDGET_DEFAULT_ROUNDS };
   const compactRatio = agent.compactRatio ?? 0.80;
   const compactRatioPercent = Math.round(compactRatio * 1000) / 10;
   const [compactRatioDraft, setCompactRatioDraft] = useState(() => String(compactRatioPercent));
@@ -4298,6 +4304,20 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const parallelWriters = Number.isFinite(agent.maxParallelWriters) && agent.maxParallelWriters > 0
     ? Math.max(1, Math.min(subagentConcurrency, Math.floor(agent.maxParallelWriters)))
     : Math.min(3, subagentConcurrency);
+  // The checkpoint is on unless the backend says otherwise, so an older bundle
+  // that omits the field keeps the host behavior instead of disabling it.
+  const progressBudgetEnabled = agent.progressBudgetEnabled !== false;
+  const configuredProgressBudgetRounds = agent.progressBudgetRounds ?? 0;
+  const progressBudgetRounds = Number.isFinite(configuredProgressBudgetRounds) && configuredProgressBudgetRounds > 0
+    ? Math.max(PROGRESS_BUDGET_MIN_ROUNDS, Math.min(PROGRESS_BUDGET_MAX_ROUNDS, Math.floor(configuredProgressBudgetRounds)))
+    : PROGRESS_BUDGET_DEFAULT_ROUNDS;
+  const [progressBudgetRoundsDraft, setProgressBudgetRoundsDraft] = useState(() => String(progressBudgetRounds));
+  const progressBudgetRoundsNumber = Number(progressBudgetRoundsDraft);
+  const progressBudgetRoundsValid = progressBudgetRoundsDraft !== ""
+    && Number.isInteger(progressBudgetRoundsNumber)
+    && progressBudgetRoundsNumber >= PROGRESS_BUDGET_MIN_ROUNDS
+    && progressBudgetRoundsNumber <= PROGRESS_BUDGET_MAX_ROUNDS;
+  const progressBudgetRoundsDirty = progressBudgetRoundsValid && progressBudgetRoundsNumber !== progressBudgetRounds;
   const visionRefs = useMemo(() => {
     const defaultProviderName = defaultRef.split("/")[0];
     const candidates = refs.filter((ref) => {
@@ -4316,6 +4336,12 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   useEffect(() => {
     setCompactRatioDraft(String(compactRatioPercent));
   }, [compactRatioPercent]);
+
+  // Re-sync after a save or a settings refresh so the field never keeps a
+  // rejected draft the backend clamped or refused.
+  useEffect(() => {
+    setProgressBudgetRoundsDraft(String(progressBudgetRounds));
+  }, [progressBudgetRounds]);
 
   useEffect(() => {
     if (compactRatioCustomOpen) compactRatioCustomInputRef.current?.focus();
@@ -4346,6 +4372,15 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const saveCompactRatioDraft = async () => {
     if (!compactRatioDraftValid || !compactRatioDraftDirty || busy) return;
     await persistCompactRatio(compactRatioDraftPercent / 100);
+  };
+
+  const saveProgressBudgetRounds = async () => {
+    if (!progressBudgetRoundsValid || !progressBudgetRoundsDirty || busy) return;
+    await apply(() => app.SetProgressBudgetRounds(progressBudgetRoundsNumber));
+  };
+
+  const revertProgressBudgetRounds = () => {
+    setProgressBudgetRoundsDraft(String(progressBudgetRounds));
   };
 
   useEffect(() => {
@@ -4676,6 +4711,73 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
               </div>
             </SettingsField>
             {compactRatioOverrideHint && <div className="provider-fetch-banner provider-fetch-banner--warn">{compactRatioOverrideHint}</div>}
+          </SettingsSection>
+          <SettingsSection title={t("settings.progressBudget")} description={t("settings.progressBudgetHint")}>
+            <SettingsField label={t("settings.progressBudgetEnabled")} hint={t("settings.progressBudgetEnabledHint")}>
+              <label className="set-check set-check--inline">
+                <input
+                  type="checkbox"
+                  checked={progressBudgetEnabled}
+                  disabled={busy}
+                  onChange={(event) => void apply(() => app.SetProgressBudgetEnabled(event.target.checked))}
+                />
+                {t("settings.progressBudgetEnabledToggle")}
+              </label>
+            </SettingsField>
+            <SettingsField label={t("settings.progressBudgetRounds")} hint={t("settings.progressBudgetRoundsHint")} stacked>
+              <div className="settings-inline-controls">
+                <input
+                  id="settings-progress-budget-rounds"
+                  className="mem-input set-narrow"
+                  type="number"
+                  min={PROGRESS_BUDGET_MIN_ROUNDS}
+                  max={PROGRESS_BUDGET_MAX_ROUNDS}
+                  step={1}
+                  inputMode="numeric"
+                  value={progressBudgetRoundsDraft}
+                  disabled={busy || !progressBudgetEnabled}
+                  aria-label={t("settings.progressBudgetRoundsAria")}
+                  aria-describedby="settings-progress-budget-rounds-hint"
+                  aria-invalid={!progressBudgetRoundsValid}
+                  onInput={(event) => setProgressBudgetRoundsDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void saveProgressBudgetRounds();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      revertProgressBudgetRounds();
+                    }
+                  }}
+                />
+                <span className="compact-ratio-custom__suffix" aria-hidden="true">{t("settings.progressBudgetRoundsSuffix")}</span>
+                <button
+                  type="button"
+                  className="btn btn--small"
+                  disabled={busy || !progressBudgetEnabled || !progressBudgetRoundsValid || !progressBudgetRoundsDirty}
+                  onClick={() => void saveProgressBudgetRounds()}
+                >
+                  {t("settings.compactRatioApply")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--small"
+                  disabled={busy || !progressBudgetRoundsDirty}
+                  onClick={revertProgressBudgetRounds}
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+              <div
+                id="settings-progress-budget-rounds-hint"
+                className={`compact-ratio-custom__hint${progressBudgetRoundsValid ? "" : " compact-ratio-custom__hint--invalid"}`}
+              >
+                {progressBudgetRoundsValid
+                  ? t("settings.progressBudgetRoundsRangeHint", { min: PROGRESS_BUDGET_MIN_ROUNDS, max: PROGRESS_BUDGET_MAX_ROUNDS })
+                  : t("settings.progressBudgetRoundsInvalidHint", { min: PROGRESS_BUDGET_MIN_ROUNDS, max: PROGRESS_BUDGET_MAX_ROUNDS })}
+              </div>
+            </SettingsField>
           </SettingsSection>
         </>
       ) : subtab === "access" ? (

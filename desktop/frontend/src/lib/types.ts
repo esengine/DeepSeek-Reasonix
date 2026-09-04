@@ -1952,6 +1952,8 @@ export interface AgentView {
   compactRatio?: number; // Advanced global default; older backends omit it.
   effectiveCompactRatio?: number; // Active local session after project overrides.
   compactRatioOverridden?: boolean;
+  progressBudgetEnabled?: boolean; // older backends omit it; absent means on
+  progressBudgetRounds?: number; // effective round count; 0/absent means built-in default
 }
 
 export interface BotAllowlistView {

@@ -233,6 +233,16 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# reasoning_language = \"zh\"   # visible reasoning language: auto|zh|en\n")
 	}
 	fmt.Fprintf(&b, "compact_ratio       = %s   # sole auto trigger; presets 0.70/0.80/0.85 (default 0.80)\n", formatFloat(c.Agent.CompactRatio))
+	if c.Agent.ProgressBudget != nil {
+		fmt.Fprintf(&b, "progress_budget       = %t   # ask the model to reassess a stalled todo; false disables the checkpoint\n", *c.Agent.ProgressBudget)
+	} else {
+		b.WriteString("# progress_budget       = true   # ask the model to reassess a stalled todo; false disables the checkpoint\n")
+	}
+	if c.Agent.ProgressBudgetRounds > 0 {
+		fmt.Fprintf(&b, "progress_budget_rounds = %d   # zero-evidence tool-call rounds before one nudge; 0 = built-in default (8)\n", c.Agent.ProgressBudgetRounds)
+	} else {
+		b.WriteString("# progress_budget_rounds = 8   # zero-evidence tool-call rounds before one nudge; 0 = built-in default (8)\n")
+	}
 	if c.Agent.Keep != nil {
 		fmt.Fprintf(&b, "keep                = %s   # deprecated compatibility field; ignored at runtime\n", renderStringArray(c.Agent.Keep))
 	} else {
@@ -921,6 +931,14 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 	if c.Agent.CompactRatio != d.Agent.CompactRatio {
 		fmt.Fprintf(&agentBuf, "compact_ratio = %s\n", formatFloat(c.Agent.CompactRatio))
+		anyAgent = true
+	}
+	if c.ProgressBudgetEnabled() != d.ProgressBudgetEnabled() {
+		fmt.Fprintf(&agentBuf, "progress_budget = %t\n", c.ProgressBudgetEnabled())
+		anyAgent = true
+	}
+	if c.Agent.ProgressBudgetRounds != d.Agent.ProgressBudgetRounds {
+		fmt.Fprintf(&agentBuf, "progress_budget_rounds = %d\n", c.Agent.ProgressBudgetRounds)
 		anyAgent = true
 	}
 	if c.Agent.Keep != nil && !reflect.DeepEqual(c.Agent.Keep, d.Agent.Keep) {

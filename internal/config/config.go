@@ -680,6 +680,26 @@ func NormalizeLanguage(lang string) string {
 	}
 }
 
+// ProgressBudgetEnabled reports whether the host progress-reassessment
+// checkpoint is armed. Unset means on: the checkpoint is host behavior, so an
+// absent key must not silently disable it — only an explicit false does.
+func (c *Config) ProgressBudgetEnabled() bool {
+	if c == nil || c.Agent.ProgressBudget == nil {
+		return true
+	}
+	return *c.Agent.ProgressBudget
+}
+
+// ProgressBudgetRoundsValue returns the configured zero-evidence round count for
+// one reassessment nudge. 0 means the runtime default; a disabled budget also
+// reports 0, since the caller turns the checkpoint off either way.
+func (c *Config) ProgressBudgetRoundsValue() int {
+	if c == nil || !c.ProgressBudgetEnabled() {
+		return 0
+	}
+	return max(c.Agent.ProgressBudgetRounds, 0)
+}
+
 // ReasoningLanguage normalizes agent.reasoning_language. Empty means auto:
 // visible reasoning follows the conversation language already described by the
 // stable LanguagePolicy. Legacy "default" is treated as auto.
@@ -1345,6 +1365,18 @@ type AgentConfig struct {
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
 	// ContextEditing is retired; native tool clearing is no longer an auto path.
 	ContextEditing string `toml:"context_editing"`
+	// ProgressBudget arms the host progress-reassessment checkpoint: once the
+	// active todo goes ProgressBudgetRounds tool-call rounds with no new
+	// host-observed evidence, the host asks the model to reassess before it
+	// spends more tools. nil means on — the checkpoint is host behavior, so an
+	// absent key must not silently disable it. false disables both the nudge
+	// and the Goal-only re-plan redirect that follows it.
+	ProgressBudget *bool `toml:"progress_budget"`
+	// ProgressBudgetRounds is the zero-evidence round count for one
+	// reassessment nudge. 0 means the built-in default; out-of-range values are
+	// clamped by the runtime (see agent.NormalizeProgressBudgetRounds).
+	// Ignored while ProgressBudget is false.
+	ProgressBudgetRounds int `toml:"progress_budget_rounds"`
 	// Keep and RecentKeep are deprecated compatibility fields. They remain
 	// readable and writable but Harness-style compaction ignores them.
 	Keep       []string `toml:"keep"`

@@ -60,8 +60,17 @@ func (a *Agent) stopUnexecutedBoundaryCalls(ctx context.Context, state *turnRunt
 // the storm breaker already own that decision on the same receipts, and they
 // reach it far earlier, so a second stop keyed to a todo only added a way for
 // the host to end a turn the user never asked it to end.
+//
+// The checkpoint is user-owned: a configured round budget replaces the built-in
+// one, and ProgressBudgetRoundsOff skips both the nudge and the Goal-only
+// redirect below, so a user who raises or clears it is never second-guessed by
+// a hardcoded number.
 func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, receiptMark int) {
 	if a.planMode.Load() {
+		return
+	}
+	nudgeRounds := a.progressBudgetRounds
+	if nudgeRounds <= 0 {
 		return
 	}
 	nextProgress, nextTracking := a.canonicalTodoProgress()
@@ -81,12 +90,12 @@ func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, recei
 		state.todoStallRounds++
 	}
 	state.todoProgress, state.trackingTodoProgress = nextProgress, nextTracking
-	if state.todoStallRounds == todoProgressNudgeRounds {
+	if state.todoStallRounds == nudgeRounds {
 		a.sess.conversation.Add(HostGeneratedUserMessage(a.withTurnPreferences(todoProgressNudgeMessage(state.todoStallRounds))))
 		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds; asking the assistant to reassess", state.todoStallRounds)})
 	}
-	if state.todoStallRounds < maxTodoStallRounds {
+	if state.todoStallRounds < progressRedirectRounds(nudgeRounds) {
 		return
 	}
 	if _, goalScoped := DeliveryExecutionScopeFromContext(ctx); goalScoped {
