@@ -38,6 +38,8 @@ type Observation struct {
 	Sidecar         SidecarObs          `json:"sidecar"`
 	View            ViewObs             `json:"view"`
 	TodoNotes       TodoNoteObs         `json:"todo_notes"`
+	Deferred        DeferredObs         `json:"deferred"`
+	Obligation      ObligationObs       `json:"obligation"`
 	Graph           GraphObs            `json:"graph"`
 	Artifacts       []ArtifactObs       `json:"artifacts"`
 }
@@ -138,6 +140,50 @@ func todoNoteObs(view, history []provider.Message, todos []evidence.TodoItem) To
 	return out
 }
 
+// DeferredObs is the effect a pending decision is holding back. Whether the
+// decision itself survives is one question; whether what it blocked stayed
+// blocked is the one that cannot be answered by a design choice.
+type DeferredObs struct {
+	MarkerPath string `json:"marker_path"`
+	Executed   bool   `json:"executed"`
+}
+
+func deferredObs(workspace string) DeferredObs {
+	path := filepath.Join(workspace, deferredEffect)
+	_, err := os.Stat(path)
+	return DeferredObs{MarkerPath: deferredEffect, Executed: err == nil}
+}
+
+// ObligationObs is what the transcript itself still says about a turn that
+// never finished: a tool call with no result is a claim the host made and did
+// not settle, and an interruption record is the host saying so outright. Either
+// tells a lost decision apart from a silently dropped one.
+type ObligationObs struct {
+	UnansweredCalls    []string `json:"unanswered_calls"`
+	InterruptionMarked int      `json:"interruption_marked"`
+}
+
+func obligationObs(msgs []provider.Message) ObligationObs {
+	answered := map[string]bool{}
+	var out ObligationObs
+	for _, m := range msgs {
+		if m.ToolCallID != "" {
+			answered[m.ToolCallID] = true
+		}
+		if m.InterruptedTurn != nil {
+			out.InterruptionMarked++
+		}
+	}
+	for _, m := range msgs {
+		for _, call := range m.ToolCalls {
+			if call.ID != "" && call.ID != provider.LocalOnlyToolID && !answered[call.ID] {
+				out.UnansweredCalls = append(out.UnansweredCalls, call.Name+":"+call.ID)
+			}
+		}
+	}
+	return out
+}
+
 type GraphObs struct {
 	Deltas int               `json:"deltas"`
 	Nodes  []agentgraph.Node `json:"nodes,omitempty"`
@@ -150,7 +196,7 @@ type ArtifactObs struct {
 	Bytes int64  `json:"bytes"`
 }
 
-func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *graphSink) Observation {
+func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, workspace string) Observation {
 	path := ctrl.SessionPath()
 	history := ctrl.History()
 	system := systemText(history)
@@ -181,9 +227,11 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		View:    view,
 		// The note is derived for a request and stored nowhere, so the contracts
 		// about it are read off the request rather than off the stored view.
-		TodoNotes: todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
-		Graph:     graphObs(graph, deltas),
-		Artifacts: readArtifacts(path),
+		TodoNotes:  todoNoteObs(ctrl.ModelVisibleMessages(), viewMsgs, ctrl.Todos()),
+		Graph:      graphObs(graph, deltas),
+		Deferred:   deferredObs(workspace),
+		Obligation: obligationObs(history),
+		Artifacts:  readArtifacts(path),
 	}
 }
 

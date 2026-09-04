@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
@@ -31,6 +33,43 @@ func runTurns(ctx context.Context, ctrl *control.Controller, from, count int) (i
 	return from + count, nil
 }
 
+// openDecisionAndDie leaves a question open and kills the process while the
+// turn is still parked on it. It exits rather than returning: a clean shutdown
+// would resolve or cancel the question, which is the one thing a process that
+// dies mid-decision does not do.
+func openDecisionAndDie(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink) error {
+	// The gate a person answers through, wired the way chat and desktop wire
+	// it. Without it the ask tool decides for itself and nothing ever blocks.
+	ctrl.EnableInteractiveApproval()
+	go func() { _ = ctrl.Run(ctx, marker(99)+" "+askSentinel+": ask before writing.") }()
+	if err := waitForAsk(ctrl); err != nil {
+		return err
+	}
+	obs := capture("construct", arm, bootSystem, ctrl, sink, root.Workspace)
+	if obs.Deferred.Executed {
+		return errUnexpected("a write still held back by the open question", obs.Deferred.MarkerPath)
+	}
+	if err := writeObservation(root, obs); err != nil {
+		return err
+	}
+	os.Exit(0)
+	return nil
+}
+
+// waitForAsk blocks until the host reports a question waiting on a person.
+func waitForAsk(ctrl *control.Controller) error {
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, d := range ctrl.Decisions() {
+			if d.Kind == control.DecisionAsk {
+				return nil
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return errUnexpected("a question waiting on a person", ctrl.Decisions())
+}
+
 // rewindTurn drives the rewind a person drives, recording the projection
 // before it: the tail arm takes back the turn appended after the fold, the
 // covered arm lands below the fold boundary and must lose the projection
@@ -47,7 +86,7 @@ func rewindTurn(root armRoot, arm, bootSystem string, ctrl *control.Controller, 
 			return err
 		}
 	}
-	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink)); err != nil {
+	if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root.Workspace)); err != nil {
 		return err
 	}
 	if err := ctrl.Rewind(target, control.RewindConversation); err != nil {
@@ -128,6 +167,9 @@ func runConstruct(dir, arm string) error {
 	if err := ctrl.Compact(ctx, "Fold the probe turn."); err != nil {
 		return fmt.Errorf("compact: %w", err)
 	}
+	if arm == armOpenDecision {
+		return openDecisionAndDie(ctx, root, arm, bootSystem, ctrl, sink)
+	}
 	if arm == armTodoIdentity {
 		// Identity A is already written and folded away. Grow, replace the list
 		// with identity B, then fold again: the second fold is what decides
@@ -153,7 +195,7 @@ func runConstruct(dir, arm string) error {
 		if _, err = runTurns(ctx, ctrl, turn, refoldTurns); err != nil {
 			return err
 		}
-		if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink)); err != nil {
+		if err := writeObservation(root, capture(extraPhase(arm), arm, bootSystem, ctrl, sink, root.Workspace)); err != nil {
 			return err
 		}
 		if err := ctrl.Compact(ctx, "Fold again, into the stored body."); err != nil {
@@ -169,7 +211,7 @@ func runConstruct(dir, arm string) error {
 			return err
 		}
 	}
-	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink))
+	return writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root.Workspace))
 }
 
 // runResume boots a second time against the same roots and reads host state.
@@ -198,5 +240,5 @@ func runResume(dir, arm string) error {
 	if err := ctrl.Resume(session, before.SessionPath); err != nil {
 		return fmt.Errorf("resume: %w", err)
 	}
-	return writeObservation(root, capture("resume", arm, bootSystem, ctrl, sink))
+	return writeObservation(root, capture("resume", arm, bootSystem, ctrl, sink, root.Workspace))
 }

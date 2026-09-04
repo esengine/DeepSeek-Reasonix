@@ -26,6 +26,10 @@ type scripted struct {
 	// stays in history after the call, so without it every later round would
 	// rewrite the list again.
 	retodo atomic.Bool
+	// asked latches the one reply that opens a question and, in the same round,
+	// tries to write. Calling ask ends the round, so the write is the effect a
+	// decision is holding back.
+	asked atomic.Bool
 }
 
 func (s *scripted) Name() string { return "probe" }
@@ -54,6 +58,9 @@ func (s *scripted) script(req provider.Request) []provider.Chunk {
 	}
 	if hasTool(req.Tools, "todo_write") && requestMentions(req, retodoSentinel) && !s.retodo.Swap(true) {
 		return append(todoCall(secondTodos()), done())
+	}
+	if requestMentions(req, askSentinel) && !s.asked.Swap(true) {
+		return append(askAndWrite(), done())
 	}
 	return append(text(echoMarker(req)+turnBody), done())
 }
@@ -119,6 +126,34 @@ func todoCall(todos []map[string]any) []provider.Chunk {
 // retodoSentinel asks the scripted reply to replace the task list, so a probe
 // can move host step identity from one set of ids to another.
 const retodoSentinel = "PROBE-RETODO"
+
+// askSentinel asks for a question the host must put to a person, alongside the
+// write that question is holding back.
+const (
+	askSentinel      = "PROBE-ASK"
+	deferredEffect   = "probe-deferred-effect.txt"
+	deferredContents = "this write was not held back by the decision"
+)
+
+// askAndWrite opens a question and asks to write in the same round. The round
+// ends at the question, so the write must not run — not while the answer is
+// pending, and not because a later process reloaded the session.
+func askAndWrite() []provider.Chunk {
+	ask, _ := json.Marshal(map[string]any{"questions": []map[string]any{{
+		"header":   "Boundary",
+		"question": "Which side of the fold should the probe measure?",
+		"reason":   "user_decision",
+		"options": []map[string]any{
+			{"label": "Below the fold", "description": "removes folded history"},
+			{"label": "Above the fold", "description": "leaves coverage intact"},
+		},
+	}}})
+	write, _ := json.Marshal(map[string]string{"path": deferredEffect, "content": deferredContents})
+	return []provider.Chunk{
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "probe_ask_1", Name: "ask", Arguments: string(ask)}},
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "probe_write_1", Name: "write_file", Arguments: string(write)}},
+	}
+}
 
 func requestMentions(req provider.Request, needle string) bool {
 	for _, m := range slices.Backward(req.Messages) {

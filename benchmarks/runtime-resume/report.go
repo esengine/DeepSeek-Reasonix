@@ -84,6 +84,11 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 			graphMap(before.Graph.Waits), graphMap(after.Graph.Waits), false),
 	)
 	switch {
+	case a.name == armOpenDecision:
+		res.Rows = append(res.Rows, decisionRows(before, after)...)
+		if len(before.Decisions) == 0 {
+			res.Invalid = "no decision was open when the process died, so nothing was interrupted"
+		}
 	case a.name == armTodoIdentity:
 		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:

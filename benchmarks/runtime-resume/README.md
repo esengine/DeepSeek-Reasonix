@@ -56,6 +56,7 @@ provider call*.
 | `tail-rewind` | fold, one more turn, rewind, die | none | the same truncation through the rewind a person drives |
 | `covered-rewind` | fold, one more turn, rewind below the fold, die | none | negative control for making that rewind conditional |
 | `todo-identity` | identity A, fold, grow, identity B, grow, fold again, die | none | does the host's step-identity note stay single, current, and on the tail? |
+| `open-decision` | ask a question, park the turn on it, kill the process | none | what does a restart inherit from a turn that died mid-decision? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -98,6 +99,25 @@ a message that should have survived verbatim.
 
 `refold_test.go` holds the oracle to that: a test that cannot fail proves
 nothing, so the shapes only a loss can produce are asserted to be caught.
+
+## The open-decision gate
+
+This one does not ask whether a particular card comes back. "The same question
+must survive" is a design requirement nobody has established: the goroutine
+parked on it did not survive, so a restored card with nothing behind it would
+be a durable-looking state that cannot be answered. The arm classifies instead:
+**resumable** (the question is there to answer), **interrupted-explicit** (it is
+gone and the host records that a turn was cut), or **LOST-SILENT** (gone, with
+nothing saying it existed). Only the last is a defect.
+
+One row is not a classification. The scripted round asks *and* tries to write in
+the same reply; calling ask ends the round, so the write is the effect the
+decision is holding back. It must not run while the answer is pending and must
+not run because a later process loaded the session. Whether the question
+survives is a design choice; whether what it blocked stayed blocked is not.
+
+The process exits rather than shutting down: a clean close resolves or cancels
+the question, which is the one thing a process dying mid-decision does not do.
 
 ## The todo identity gate
 
@@ -162,10 +182,10 @@ them is how a stored-but-unused projection reads as healthy.
 
 ## What this does not measure
 
-- **Open decisions.** `approvalManager` holds pending approvals and asks in
-  memory; the probe never establishes one, so those rows report `not-measured`.
-  Establishing one needs a gate that blocks, which a headless probe must then
-  answer.
+- **Whether a restored question could be answered.** The `open-decision` arm
+  can see that a question is gone; it cannot tell a restored one that works
+  from a restored one whose owner died with the process. Answering that needs a
+  phase that tries to answer, which this probe deliberately does not have.
 - **The run graph.** `publishGraph` emits `GraphDelta` to the event sink; the
   probe never runs a fan-out, so the graph rows report `not-measured`. The
   narrow question to answer next is not "should the graph be persisted" but

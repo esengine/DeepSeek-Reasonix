@@ -56,6 +56,9 @@ const (
 	// armTodoIdentity moves host step identity while a fold is between the
 	// model and it: identity A, fold, live tail, identity B, fold again.
 	armTodoIdentity = "todo-identity"
+	// armOpenDecision dies while a question is open. It asks what the host
+	// believes afterwards, not whether one particular card comes back.
+	armOpenDecision = "open-decision"
 )
 
 func arms() []arm {
@@ -69,6 +72,7 @@ func arms() []arm {
 		{name: armTailRewind, asks: "the same truncation, driven through the rewind a person uses"},
 		{name: armCoveredRewind, asks: "a rewind that lands below the fold boundary"},
 		{name: armTodoIdentity, asks: "host step identity moved across two folds and a live tail"},
+		{name: armOpenDecision, asks: "the process died while a decision was open"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }
