@@ -21,17 +21,35 @@ import (
 	"strings"
 )
 
+// jsonlSidecarSuffixes are the sidecars that end in .jsonl and therefore cannot
+// be told apart from a transcript by extension. A session listing classifies by
+// name, so one missing from here is shown to the user as a conversation of its
+// own. It is one list rather than a chain of conditions because the failure is
+// silent: nothing tells the author of the next sidecar that a scan now sees it.
+var jsonlSidecarSuffixes = []string{
+	".events.jsonl",
+	".conflicts.jsonl",
+	".guardian.jsonl",
+	".wire.jsonl",
+	".adjudication.jsonl",
+	".execution.jsonl",
+}
+
 // IsSessionTranscriptName reports whether name is a primary session transcript
 // file. Append-only event logs and guardian sidecars also end in .jsonl, so
 // callers that discover sessions by directory scan must use this helper instead
 // of filepath.Ext.
 func IsSessionTranscriptName(name string) bool {
 	name = strings.TrimSpace(name)
-	return strings.HasSuffix(name, ".jsonl") &&
-		!strings.HasSuffix(name, ".events.jsonl") &&
-		!strings.HasSuffix(name, ".conflicts.jsonl") &&
-		!strings.HasSuffix(name, ".guardian.jsonl") &&
-		!strings.HasSuffix(name, ".wire.jsonl")
+	if !strings.HasSuffix(name, ".jsonl") {
+		return false
+	}
+	for _, suffix := range jsonlSidecarSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return false
+		}
+	}
+	return true
 }
 
 // IsSubagentTranscriptName reports a flat legacy subagent transcript, which the
@@ -87,6 +105,16 @@ func SessionGoalState(sessionPath string) string {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".goal-state.json"
+}
+
+// SessionExecution is the append-only record of delegated executions a turn
+// opened (<id>.execution.jsonl): that they existed and under what authority,
+// written before the work starts because a turn is only appended when it ends.
+func SessionExecution(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".execution.jsonl"
 }
 
 // SessionAdjudication is the append-only record of host adjudication barriers
@@ -296,6 +324,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionMeta(sessionPath),
 		SessionGoalState(sessionPath),
 		SessionAdjudication(sessionPath),
+		SessionExecution(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionWireLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),

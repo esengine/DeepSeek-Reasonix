@@ -63,6 +63,19 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 	}
 }
 
+// TestEveryJSONLSidecarIsExcludedFromListings is the structural half of the
+// name test above: a sidecar ending in .jsonl that nothing excludes is listed
+// to the user as a conversation of its own, and the failure is silent. Deriving
+// the cases from the same list the check uses is what makes the next sidecar
+// safe without anyone remembering this file.
+func TestEveryJSONLSidecarIsExcludedFromListings(t *testing.T) {
+	for _, suffix := range jsonlSidecarSuffixes {
+		if IsSessionTranscriptName("session" + suffix) {
+			t.Errorf("session%s is listed as a transcript; it is a sidecar", suffix)
+		}
+	}
+}
+
 func TestIsSessionTranscriptName(t *testing.T) {
 	cases := []struct {
 		name string
@@ -73,6 +86,8 @@ func TestIsSessionTranscriptName(t *testing.T) {
 		{"session.conflicts.jsonl", false},
 		{"session.guardian.jsonl", false},
 		{"session.wire.jsonl", false},
+		{"session.adjudication.jsonl", false},
+		{"session.execution.jsonl", false},
 		{"session.guardian.events.jsonl", false},
 		{"session.events.jsonl.damaged", false},
 		{"session.jsonl.meta", false},
@@ -93,6 +108,7 @@ func TestSessionSidecarFiles(t *testing.T) {
 		p + ".meta",
 		"/home/u/.reasonix/sessions/abc.goal-state.json",
 		"/home/u/.reasonix/sessions/abc.adjudication.jsonl",
+		"/home/u/.reasonix/sessions/abc.execution.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.wire.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl.damaged",
