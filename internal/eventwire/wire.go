@@ -41,9 +41,10 @@ type Event struct {
 	RetryAttempt    int                 `json:"retryAttempt,omitempty"`
 	RetryMax        int                 `json:"retryMax,omitempty"`
 	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream" | "protocol"; omit for older clients
+	RetryReason     string              `json:"retryReason,omitempty"`
+	RetryDelayMs    int64               `json:"retryDelayMs,omitempty"`
 	StreamAttempt   *StreamAttempt      `json:"streamAttempt,omitempty"`
-	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
-	// session-inbox entry. Empty for legacy text-only guidance.
+	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable session-inbox entry; empty for legacy text-only guidance.
 	ItemID string `json:"itemId,omitempty"`
 	// SessionPath routes frames emitted by detached Serve controllers. Older
 	// clients ignore the omitted/unknown field and keep single-session behavior.
@@ -211,6 +212,8 @@ func ToWire(e event.Event) Event {
 	case event.Retrying:
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax
+		w.RetryReason = e.RetryReason
+		w.RetryDelayMs = e.RetryDelayMs
 		if e.RetryScope != "" {
 			w.RetryScope = string(e.RetryScope)
 		}

@@ -563,10 +563,10 @@ type Event struct {
 	SessionPath     string                    // routes Serve frames
 	SessionReset    bool                      // SessionChanged came from /new or /clear, not resume/recovery
 	Workspace       *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
-	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
-	PhaseName TurnPhaseName
-	// Completion is set on CompletionSummary events.
-	Completion *CompletionSummaryInfo
+	PhaseName       TurnPhaseName             // TurnPhase events: working|checking|verifying|reviewing
+	Completion      *CompletionSummaryInfo    // CompletionSummary events
+
+	RetryDetail
 }
 
 type WorkspaceWatchState string

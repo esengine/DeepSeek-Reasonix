@@ -76,6 +76,24 @@ func TestIsConnReset(t *testing.T) {
 	}
 }
 
+func TestRetryReasonIsShortAndBodyFree(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{&APIError{Provider: "p", Status: 429, Body: "secret response body"}, "HTTP 429"},
+		{&AuthError{Provider: "p", Status: 401, Body: "secret response body"}, "HTTP 401"},
+		{fmt.Errorf("wrapped: %w", syscall.ECONNRESET), "connection reset"},
+		{&net.DNSError{IsTimeout: true}, "network timeout"},
+		{errors.New("opaque failure with secret details"), "request error"},
+	}
+	for _, tc := range cases {
+		if got := RetryReason(tc.err); got != tc.want {
+			t.Errorf("RetryReason(%T) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
 func TestBackoffDelay(t *testing.T) {
 	if d := backoffDelay(1, 0); d < 500*time.Millisecond || d >= 750*time.Millisecond {
 		t.Errorf("attempt 1 base delay = %v, want [500ms,750ms)", d)

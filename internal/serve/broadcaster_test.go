@@ -114,10 +114,11 @@ func TestBroadcasterEmitsRetryingJSON(t *testing.T) {
 	ch, cancel := b.Subscribe()
 	defer cancel()
 
-	b.Emit(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10})
+	b.Emit(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10,
+		RetryDetail: event.RetryDetail{RetryReason: "HTTP 429", RetryDelayMs: 12000}})
 
 	s := string(<-ch)
-	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
+	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`, `"retryReason":"HTTP 429"`, `"retryDelayMs":12000`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("retrying broadcast JSON = %s, want it to contain %s", s, want)
 		}

@@ -101,6 +101,7 @@ var ChineseTraditional = Messages{
 	ChatSubagentProgressDoneFmt:            "%s · %d 秒",
 	ChatSubagentPreviewLabel:               "▎",
 	ChatStatusRetryingFmt:                  "%s 正在重試 (%d/%d)… (Esc 取消)",
+	ChatStatusRetryingDetailFmt:            "%s 正在重試 (%d/%d) · %s · %d 秒… (Esc 取消)",
 	ChatStatusCancellingFmt:                "%s 正在停止… (%d 秒 · Ctrl+C 退出)",
 	ChatStatusIdle:                         "就緒",
 	ChatStatusYoloIdle:                     "已跳過核准",

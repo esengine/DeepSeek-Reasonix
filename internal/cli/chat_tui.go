@@ -98,8 +98,7 @@ type chatTUI struct {
 	elapsedTickGeneration uint64
 	// retryAttempt/retryMax drive the transient "retrying (n/m)" indicator while
 	// the provider re-attempts the connection; cleared by the next stream event.
-	retryAttempt int
-	retryMax     int
+	retry retryStatus
 	// turnPhase is the host turn phase from turn_phase events
 	// (working|checking|verifying|reviewing). Cleared on TurnDone.
 	turnPhase string
@@ -3260,8 +3259,8 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 	if m.state != tuiRunning {
 		return ""
 	}
-	if m.retryAttempt > 0 && !cancelRequested {
-		return fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
+	if m.retry.active() && !cancelRequested {
+		return m.retry.line(m.spinner.View())
 	}
 
 	var working string
@@ -4227,8 +4226,7 @@ func (m *chatTUI) unsendPending() {
 // of a flattened byte stream: the structure is now explicit.
 func (m *chatTUI) ingestEvent(e event.Event) {
 	if e.Kind == event.Retrying {
-		m.retryAttempt = e.RetryAttempt
-		m.retryMax = e.RetryMax
+		m.retry.set(e)
 		return
 	}
 	if e.Kind == event.StreamAttempt {
@@ -4245,8 +4243,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	}
 	// Any other event means the connection got past the retry window (or the turn
 	// ended), so the transient "retrying" indicator clears.
-	m.retryAttempt = 0
-	m.retryMax = 0
+	m.retry.clear()
 	if m.turnDiscarded {
 		// The turn was un-sent (Esc before any packet); swallow whatever was already
 		// buffered for it until it settles, so nothing lands in scrollback.

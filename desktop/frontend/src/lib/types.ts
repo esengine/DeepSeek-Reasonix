@@ -387,10 +387,10 @@ export interface WireEvent {
   submissionId?: string; // Opaque correlation for the exact optimistic user submission.
   outcome?: "completed" | "partial" | "blocked" | "final_readiness" | "recovery_paused" | "completion_uncertain";
   readiness?: WireFinalReadiness;
-  retryAttempt?: number;
-  retryMax?: number;
+  retryAttempt?: number; retryMax?: number;
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
   retryScope?: "headers" | "stream" | "protocol";
+  retryReason?: string; retryDelayMs?: number;
   streamAttempt?: WireStreamAttempt;
   /** Durable session-inbox item id for steer / TurnDone correlation. */
   itemId?: string;

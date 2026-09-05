@@ -684,7 +684,7 @@ export function Composer({
   // pill as an estimated-token tail so a long write_file body reads as
   // progress, not a stall.
   turnArgChars?: number;
-  retry?: { attempt: number; max: number };
+  retry?: { attempt: number; max: number; reason?: string; delayMs?: number };
   // True while a footer decision surface (approval / ask / clear context) owns
   // the UI. Pauses the model-work ticker without rendering a "waiting approval"
   // run strip (the decision card already conveys that state).
@@ -3801,7 +3801,7 @@ export function Composer({
     }
   })();
   const runStateText = retry
-    ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
+    ? `${t("status.retrying", { attempt: retry.attempt, max: retry.max })}${retry.reason && retry.delayMs ? ` · ${retry.reason} · ${Math.ceil(retry.delayMs / 1000)}s` : ""}`
     : waitingPrompt === "approval"
       ? t("composer.runWaitingApproval", { tool: pendingApprovalLabel ?? "" })
       : waitingPrompt === "ask"
