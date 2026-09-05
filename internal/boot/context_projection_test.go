@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
@@ -321,6 +322,38 @@ func TestProjectionOutOfBandSkillWriteReachesTheNextTurn(t *testing.T) {
 	}
 	if listing := blockOf(projectionOf(t, h.turn("turn-delta"), "turn-delta"), "available-skills"); listing != "" {
 		t.Errorf("a touched mtime re-sent a listing that did not change:\n%s", listing)
+	}
+}
+
+// Arm 7 is a lifecycle contract, not a freshness row, and is pinned as one. An
+// activation change is written to config and does not reach the live session:
+// both surfaces that make it say so, in the API response and in the notice. The
+// second half is what makes the first half mean anything — after a rebuild the
+// change is there, so the live session's silence is a boundary and not a no-op.
+func TestProjectionActivationChangeIsRebuildScoped(t *testing.T) {
+	h := newProjectionHarness(t, "ctxproj-activation", "", "")
+	// The entry line, never the bare name: the index preamble names a built-in
+	// as its own call example, so matching the name matches the boilerplate.
+	const entry = "\n- explore "
+	if listing := blockOf(projectionOf(t, h.turn("turn-alpha"), "turn-alpha"), "available-skills"); !strings.Contains(listing, entry) {
+		t.Fatalf("the skill this arm disables is not in the listing to begin with:\n%s", listing)
+	}
+
+	if err := h.ctrl.SetSkillEnabled("explore", config.ActivationProject, false); err != nil {
+		t.Fatalf("SetSkillEnabled: %v", err)
+	}
+
+	if listing := blockOf(projectionOf(t, h.turn("turn-beta"), "turn-beta"), "available-skills"); listing != "" {
+		t.Errorf("an activation change reached the live session, which both surfaces that make it promise it does not:\n%s", listing)
+	}
+
+	h.restart()
+	listing := blockOf(projectionOf(t, h.turn("turn-gamma"), "turn-gamma"), "available-skills")
+	if listing == "" {
+		t.Fatal("the rebuilt session owes a listing and sent none, so this arm cannot say the change took")
+	}
+	if strings.Contains(listing, entry) {
+		t.Errorf("the activation change did not take effect on a rebuild either, so nothing here was measured:\n%s", listing)
 	}
 }
 

@@ -66,6 +66,34 @@ func (r SkillResolver) find(name string) (ActivationOverride, bool) {
 	return findOverride(r.overrides, overrideKey(probe))
 }
 
+// SkillSwitches returns the names this resolver decides for: off are the ones
+// switched off, on the ones switched on against a declared default. Discovery
+// needs the pair rather than a per-name question, because it does not yet know
+// which names exist when it is configured.
+func (r SkillResolver) SkillSwitches() (off, on []string) {
+	seen := map[string]bool{}
+	for _, storageKey := range append(append([]string{}, r.keys...), "") {
+		for _, row := range r.overrides {
+			if row.Kind != CapabilitySkill || row.Name == "" || seen[row.Name] {
+				continue
+			}
+			// A project row answers for its own workspace only; a global row
+			// answers where no project row does, which is what the empty key
+			// pass covers.
+			if (storageKey == "" && row.Scope != ActivationGlobal) || (storageKey != "" && row.Key != storageKey) {
+				continue
+			}
+			seen[row.Name] = true
+			if row.Enabled {
+				on = append(on, row.Name)
+			} else {
+				off = append(off, row.Name)
+			}
+		}
+	}
+	return off, on
+}
+
 // SkillEnabled resolves whether name is on in root. declared is what the skill
 // itself asks for when nothing overrides it.
 func (s *ActivationStore) SkillEnabled(name, root string, declared bool) (bool, error) {
