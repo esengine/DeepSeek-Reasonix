@@ -28,6 +28,13 @@ const runtime = (overrides: Partial<BackgroundRuntimeView> = {}): BackgroundRunt
 assert.equal(BACKGROUND_RUNTIME_ACTIVE_REFRESH_MS, 5_000);
 assert.equal(BACKGROUND_RUNTIME_ERROR_RETRY_BASE_MS, 5_000);
 assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime()]), true);
+assert.equal(
+  sameBackgroundRuntimeLists(
+    [runtime({ tabId: "tab-a" }), runtime({ tabId: "tab-b" })],
+    [runtime({ tabId: "tab-b" }), runtime({ tabId: "tab-a" })],
+  ),
+  true,
+);
 assert.equal(sameBackgroundRuntimeLists([runtime()], [runtime({ running: false })]), false);
 
 {

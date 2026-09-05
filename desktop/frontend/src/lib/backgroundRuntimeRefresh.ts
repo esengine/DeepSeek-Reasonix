@@ -10,8 +10,12 @@ export function sameBackgroundRuntimeLists(
 ): boolean {
   if (current === next) return true;
   if (current.length !== next.length) return false;
-  for (let index = 0; index < current.length; index += 1) {
-    if (JSON.stringify(current[index]) !== JSON.stringify(next[index])) return false;
+  const sortByTabId = (left: BackgroundRuntimeView, right: BackgroundRuntimeView) =>
+    left.tabId.localeCompare(right.tabId);
+  const currentByTab = [...current].sort(sortByTabId);
+  const nextByTab = [...next].sort(sortByTabId);
+  for (let index = 0; index < currentByTab.length; index += 1) {
+    if (JSON.stringify(currentByTab[index]) !== JSON.stringify(nextByTab[index])) return false;
   }
   return true;
 }

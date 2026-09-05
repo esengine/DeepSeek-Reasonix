@@ -103,6 +103,26 @@ func TestTurnDonePersistsSession(t *testing.T) {
 	waitForAutosaveIdle(t, tab)
 }
 
+// TestTurnDoneWaitBlocksUntilSnapshotWritten is the persistence-barrier
+// regression test: when Emit(TurnDone) returns, the session snapshot must
+// already be on disk, not merely scheduled. A process exit right after a turn
+// completes can otherwise lose the final transcript.
+func TestTurnDoneWaitBlocksUntilSnapshotWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	_, tab := appWithTab(t, path)
+
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read session file immediately after TurnDone: %v", err)
+	}
+	if !strings.Contains(string(b), "remember this turn") {
+		t.Fatalf("session file after TurnDone = %q, want the turn transcript", string(b))
+	}
+	waitForAutosaveIdle(t, tab)
+}
+
 // TestStreamingDeltasDoNotPersist confirms per-token events stay out of the
 // autosave path, while durable lifecycle events checkpoint the session.
 func TestStreamingDeltasDoNotPersist(t *testing.T) {
