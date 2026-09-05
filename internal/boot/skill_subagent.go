@@ -2,7 +2,6 @@ package boot
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -21,11 +20,14 @@ import (
 // capRuntime is filled in after the capability runtime exists; nothing calls a
 // runner before then, because the tools holding them only fire on a model request.
 type skillSubagents struct {
-	root       string
-	cfg        *config.Config
-	registry   *tool.Registry
+	root     string
+	cfg      *config.Config
+	registry *tool.Registry
+	// tasks is the one runner every delegated execution goes through. A skill
+	// that kept its own would be a second owner of admission, of the child's
+	// loop and of how a run ended, and the three drifted apart once already.
+	tasks      *agent.TaskTool
 	scheduler  *agent.SubagentScheduler
-	store      *agent.SubagentStore
 	provider   provider.Provider
 	entry      *config.ProviderEntry
 	capRuntime *agent.MCPCapabilityRuntime
@@ -136,122 +138,53 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 		runOptions, agent.NestedSink(sctx, event.Discard))
 }
 
+// run executes a subagent skill as what it is: one delegated execution. It owns
+// the skill's own facts — the body, the workspace note, the tool ceiling, the
+// verdict a reviewer owes — and nothing about how an execution is admitted,
+// carried out or ended, which belong to the runner every other delegation uses.
 func (r *skillSubagents) run(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
-	// Writer skills without write_paths claim the whole workspace so they
-	// cannot race fleet/task writers that declared disjoint paths.
-	acq := agent.AcquireRequest{
-		Writer: !sk.ReadOnly,
-		Nested: agent.SubagentDepth(sctx) > 0,
-		Label:  sk.Name,
-	}
-	if !sk.ReadOnly {
-		whole, werr := agent.WholeWorkspaceWriteClaim(r.root)
-		if werr != nil {
-			return "", fmt.Errorf("subagent skill %q write claim: %w", sk.Name, werr)
-		}
-		acq.WritePaths = whole
-	}
-	releaseSlot, err := r.scheduler.Acquire(sctx, acq)
+	spec, err := r.compile(sctx, sk, task, runOpts)
 	if err != nil {
 		return "", err
 	}
-	defer releaseSlot()
-	sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(r.registry))
-	prov, price, ctxWin, modelRef, effortRef, err := r.resolveModel(sk)
-	if err != nil {
-		return "", fmt.Errorf("subagent skill %q profile: %w", sk.Name, err)
-	}
-	childDepth := agent.SubagentDepth(sctx) + 1
-	if childDepth > r.maxDepth {
-		return "", fmt.Errorf("subagent delegation depth limit reached (max_subagent_depth=%d)", r.maxDepth)
-	}
-	// A read-only skill (builtin review/security-review, or frontmatter
-	// `read-only: true`) gets its promise enforced at the tool boundary:
-	// writer tools are stripped and bash runs under the read-only command
-	// policy. Transcripts recorded against the writer-capable registry stop
-	// matching on continue_from (schema-hash check reports the mismatch).
-	var subReg *tool.Registry
-	if sk.ReadOnly {
-		subReg = agent.ReadOnlySubagentToolRegistryForDepthWithRuntime(r.registry, sk.AllowedTools, childDepth, r.maxDepth, r.capRuntime)
-	} else {
-		subReg = agent.SubagentToolRegistryForDepthWithRuntime(r.registry, sk.AllowedTools, childDepth, r.maxDepth, r.capRuntime)
-	}
-	// Delivery risk gates require structured review_report from review
-	// subagents only — never expose it on the parent tool surface.
-	switch sk.Name {
-	case "review", "security-review", "security_review":
-		agent.AttachReviewReportTool(subReg)
-	}
-	run, err := r.prepareRun(sctx, sk, subReg, runOpts, modelRef, effortRef)
-	if err != nil {
-		return "", err
-	}
-	defer run.Release()
-	runOptions := r.runOptions(sctx, r.halfSteps(), price, ctxWin, childDepth)
-	usageModelRef, _ := r.identity(modelRef, effortRef)
-	runOptions.ModelRef = usageModelRef
-	// A verdict the parent must act on carries an identity, never a sentence,
-	// so the typed report is required at every role setting. How much review a
-	// change set owes is still the delivery contract's separate call.
-	runOptions.RequireReviewReportKind = agent.ReviewReportKindForSkill(sk.Name)
-	var answer string
-	// See runReadOnly: the child provider, not the parent model, owns the
-	// final vision decision.
-	childCtx := agent.WithUserImages(sctx, agent.SubagentImageCandidates(sctx))
-	if sk.ReadOnly {
-		answer, err = agent.RunReadOnlySubAgentWithSession(childCtx, prov, subReg, run.Session, task,
-			runOptions, agent.NestedSink(sctx, event.Discard))
-	} else {
-		answer, err = agent.RunSubAgentWithSession(childCtx, prov, subReg, run.Session, task,
-			runOptions, agent.NestedSink(sctx, event.Discard))
-	}
-	if err != nil {
-		return "", errors.Join(err, r.store.SaveFailed(run))
-	}
-	if err := r.store.SaveCompleted(run); err != nil {
-		return "", errors.Join(err, r.store.SaveFailed(run))
-	}
-	return agent.FormatSubagentRunResult(answer, run, false), nil
+	return r.tasks.RunProfileSpec(sctx, spec)
 }
 
-// prepareRun opens the child's transcript. Headless runs have no persistent
-// session to own one, so the skill runs ephemerally instead of failing —
-// continuation still errors there, because it needs a persisted owner.
-func (r *skillSubagents) prepareRun(sctx context.Context, sk skill.Skill, subReg *tool.Registry, runOpts skill.SubagentRunOptions, modelRef, effortRef string) (*agent.SubagentRun, error) {
-	continueFrom := strings.TrimSpace(runOpts.ContinueFrom)
-	legacyForkFrom := strings.TrimSpace(runOpts.ForkFrom)
-	if continueFrom != "" && legacyForkFrom != "" {
-		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
+// compile turns a skill and one invocation into the shared execution spec. Every
+// value here is one the skill layer alone knows; anything the runner can resolve
+// for itself is left to it, so the two cannot come to disagree.
+func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (agent.ProfileExecSpec, error) {
+	sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(r.registry))
+	spec := agent.ProfileExecSpec{
+		Task: agent.TaskSpec{Objective: task, Description: sk.Name},
+		Worker: agent.WorkerSpec{
+			Kind: "skill", Name: sk.Name, Profile: sk.Name,
+			// The body alone is not the prefix: the workspace facts a child
+			// cannot discover for free are part of it, and letting the runner
+			// resolve the profile again would silently drop them.
+			SystemPrompt: r.systemPrompt(sk), UseProfilePrompt: true,
+			Model:  subagentModelRef(r.cfg, sk),
+			Effort: subagentEffortRef(r.cfg, sk),
+			// A verdict the parent must act on carries an identity, never a
+			// sentence, so the typed report is required at every role setting.
+			ReviewReport: agent.ReviewReportKindForSkill(sk.Name),
+		},
+		Grant: agent.CapabilityGrant{ReadOnly: sk.ReadOnly, ProfileTools: sk.AllowedTools},
+		Context: agent.ContextRequest{
+			ContinueFrom: runOpts.ContinueFrom, ForkFrom: runOpts.ForkFrom,
+			TopLevel: runOpts.HostInitiated,
+		},
+		Sched: agent.SchedulerPolicy{MaxSteps: r.halfSteps(), Nested: agent.SubagentDepth(sctx) > 0},
 	}
-	parentID, _, _, _ := agent.CallContext(sctx)
-	if runOpts.HostInitiated {
-		parentID = ""
-	}
-	parentSession := agent.ParentSession(sctx)
-	if r.store == nil || parentSession == "" {
-		if continueFrom != "" || legacyForkFrom != "" {
-			return nil, fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
+	if !sk.ReadOnly {
+		// Writer skills without declared paths claim the whole workspace, so
+		// they serialize against fleet and task writers that declared disjoint
+		// ones rather than racing them.
+		whole, err := agent.WholeWorkspaceWriteClaim(r.root)
+		if err != nil {
+			return agent.ProfileExecSpec{}, fmt.Errorf("subagent skill %q write claim: %w", sk.Name, err)
 		}
-		return agent.EphemeralSubagentRun(r.systemPrompt(sk)), nil
+		spec.Grant.WritePaths = whole
 	}
-	identityModel, identityEffort := r.identity(modelRef, effortRef)
-	spec := agent.SubagentSpec{
-		Kind:             "skill",
-		Name:             sk.Name,
-		WorkspaceRoot:    r.root,
-		ParentSession:    parentSession,
-		ParentToolCallID: parentID,
-		SystemPrompt:     r.systemPrompt(sk),
-		Registry:         subReg,
-		Model:            identityModel,
-		Effort:           identityEffort,
-	}
-	switch {
-	case continueFrom != "":
-		return r.store.PrepareContinue(continueFrom, spec)
-	case legacyForkFrom != "":
-		return r.store.PrepareLegacyForkFrom(legacyForkFrom, spec)
-	default:
-		return r.store.PrepareFresh(spec)
-	}
+	return spec, nil
 }

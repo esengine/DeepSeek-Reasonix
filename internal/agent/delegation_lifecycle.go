@@ -33,7 +33,7 @@ type delegationLifecycle struct {
 func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, req *AcquireRequest, trk *subagentProgressTracker) (*delegationLifecycle, error) {
 	parentID, sink, _, ok := CallContext(ctx)
 	_, declared := graphNodeDeclared(ctx)
-	if declared || !ok || sink == nil || parentID == "" {
+	if declared || spec.Context.TopLevel || !ok || sink == nil || parentID == "" {
 		return nil, nil
 	}
 	life := &delegationLifecycle{

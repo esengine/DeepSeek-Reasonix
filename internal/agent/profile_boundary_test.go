@@ -58,13 +58,19 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 		"Task", "Worker", "Grant", "Context", "Sched",
 	})
 	assertFieldSet(t, "TaskSpec", TaskSpec{}, []string{"Objective", "Description"})
+	// ReviewReport is the worker's, not the call's: it is decided by which
+	// profile this is and never by what one caller asks for, so a reviewer owes
+	// a typed verdict whichever entry point invoked it.
 	assertFieldSet(t, "WorkerSpec", WorkerSpec{}, []string{
-		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort",
+		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort", "ReviewReport",
 	})
 	assertFieldSet(t, "CapabilityGrant", CapabilityGrant{}, []string{
 		"ReadOnly", "AllowNoTools", "CallTools", "ProfileTools", "WritePaths",
 	})
-	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral", "Upstream"})
+	// TopLevel is what the child starts from in the sense that matters here:
+	// whether it descends from a call at all. It is not a scheduling choice and
+	// not a capability — it says there is no parent call to inherit.
+	assertFieldSet(t, "ContextRequest", ContextRequest{}, []string{"ContinueFrom", "ForkFrom", "Ephemeral", "Upstream", "TopLevel"})
 	assertFieldSet(t, "SchedulerPolicy", SchedulerPolicy{}, []string{
 		"MaxSteps", "RunInBackground", "BackgroundWriter", "Nested", "Priority", "OnStart", "OnQueued",
 	})

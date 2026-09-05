@@ -380,6 +380,17 @@ is its contract, and the row says so. What remains worth naming there is
 different — it holds a scheduler slot that nothing draws — so its verdicts are
 `ephemeral-seen` and `ephemeral-unseen`, a classification rather than a pass.
 
+The queued arm's negative control is about the store alone. An opening is the
+orchestration saying work entered it, which a refused item did; a child record is
+an execution artifact, which it has none of. Demanding silence from the journal
+too would forbid the very record that tells a restart the item was held back
+rather than lost.
+
+The identity row checks a **join**, not one spelling. A record's parent is the
+execution's own identity — the id the journal opened it under, which itself hangs
+below the call the model made — so comparing it to the bare call id would fail
+the chain that makes the two joinable.
+
 The graph row carries the whole graph's node count beside its own answer,
 because "the filter found nothing" and "there was nothing to find" are different
 readings and only the second is what the row means.

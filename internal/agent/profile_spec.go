@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"reasonix/internal/agentgraph"
+	"reasonix/internal/evidence"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -92,6 +93,10 @@ type WorkerSpec struct {
 	// (after config override → call params → frontmatter → global → parent).
 	Model  string
 	Effort string
+	// ReviewReport is the typed verdict this worker owes its caller, empty when
+	// it owes none. It follows from who the worker is — a reviewer answers with
+	// a report — and the gate reads that rather than the answer's wording.
+	ReviewReport evidence.ReviewKind
 }
 
 // CapabilityGrant is what the run may touch. Profile frontmatter supplies a
@@ -122,6 +127,10 @@ type ContextRequest struct {
 	// Ephemeral forces a non-persisted transcript for entry points that promise
 	// no durable host side effects, such as read_only_task.
 	Ephemeral bool
+	// TopLevel marks a run the host started, not one a model's tool call made.
+	// Any call context it carries is a synthetic id for nesting the child's UI,
+	// and persisting that would file host work as work the model asked for.
+	TopLevel bool
 }
 
 // SchedulerPolicy is when and how the run executes. It never changes what the
@@ -267,6 +276,16 @@ func NamedBuiltinProfile(name string) bool {
 	default:
 		return false
 	}
+}
+
+// executionParent is what the store records this run under. A host-started run
+// names none: whatever call context it carries is the host's own event id, and a
+// reader that found it there would take it for a call the model made.
+func (c ContextRequest) executionParent(id string) string {
+	if c.TopLevel {
+		return ""
+	}
+	return id
 }
 
 // parentSession returns the owning session, or empty when the caller asked for

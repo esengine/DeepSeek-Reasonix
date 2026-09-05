@@ -556,28 +556,34 @@ func skillIdentityRow(arm string, before, after Observation) row {
 		Artifact:       "subagents/<ref>.meta.json",
 		Reconstruction: "the call the model made, against the entry point that made it",
 		Before:         skillLineageExpected(arm), After: orNone(join(got)),
-		Verdict: skillIdentityVerdict(arm, after),
+		Verdict: skillIdentityVerdict(after),
 	}
 }
 
 func skillLineageExpected(arm string) string {
 	if arm == armSkillCompleted || arm == armReadOnlySkillCompleted {
-		return "model-invoked joins " + skillCallID + "; host-initiated names none"
+		return "model-invoked joins the execution under " + skillCallID + "; host-initiated names none"
 	}
-	return "model-invoked joins " + skillCallID
+	return "model-invoked joins the execution opened under " + skillCallID
 }
 
-// skillIdentityVerdict holds when the model-invoked record joins the call the
-// model made. The host-initiated one is not held to that: its runner drops the
-// id deliberately, and a row demanding it would be reporting a contract as a gap.
-func skillIdentityVerdict(arm string, after Observation) string {
+// skillIdentityVerdict holds when the model-invoked record joins the execution
+// the journal opened under the call the model made. The join is checked, never
+// one spelling of it: a record's parent is the execution's own identity, so
+// comparing it to the bare call id would fail the chain that makes them
+// joinable. A host-started run has no call to hang under, so it is not held.
+func skillIdentityVerdict(after Observation) string {
+	opened := map[string]bool{}
+	for _, id := range skillExecutions(after) {
+		opened[id] = true
+	}
 	joined, records := false, 0
 	for _, f := range after.Children.Facts {
 		if f.Kind != "skill" {
 			continue
 		}
 		records++
-		if f.ParentToolCallID == skillCallID {
+		if opened[f.ParentToolCallID] && strings.HasPrefix(f.ParentToolCallID, skillCallID) {
 			joined = true
 		}
 	}
@@ -645,15 +651,16 @@ const (
 	verdictEphemeralUnseen = "ephemeral-unseen"
 )
 
-// skillQueuedNegative is the control the running row needs. An execution the
-// scheduler never admitted produced nothing, so no layer owes it a record, and a
-// convergence that satisfied the row above by recording every opening would
-// break this one.
+// skillQueuedNegative is the control the running row needs, and it is about the
+// store alone. An opening is the orchestration saying work entered it, which a
+// refused item did; a store record is a child execution artifact, which it has
+// none of. Demanding silence from the journal too would forbid the very record
+// that tells a restart the item was held back rather than lost.
 func skillQueuedNegative(before Observation) (string, string) {
-	if len(skillChildren(before)) > 0 || len(skillExecutions(before)) > 0 {
-		return "a record for work the scheduler never admitted", verdictViolated
+	if len(skillChildren(before)) > 0 {
+		return "a child record for work the scheduler never admitted", verdictViolated
 	}
-	return "held back, and no layer records it — as nothing that never ran should be", verdictHolds
+	return "held back: opened and queued, with no child execution artifact", verdictHolds
 }
 
 func skillGraphNodes(o Observation) []string {
