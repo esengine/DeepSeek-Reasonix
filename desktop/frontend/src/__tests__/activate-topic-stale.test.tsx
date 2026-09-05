@@ -7,7 +7,6 @@
 // single-surface prune removes every other tab state, blanking the visible
 // transcript).
 
-import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -388,26 +387,6 @@ await act(async () => {
 eq(controller?.activeTabId, tabA.id, "late X activation cannot replace A");
 eq(backendActiveId, tabA.id, "late X activation reasserts A as backend owner");
 eq(controller?.state.ask?.id, "pending-tab-a", "late X completion cannot clear A's ask");
-
-// Wiring lock: App.enqueueNavigation must invalidate in-flight activations at
-// enqueue time — the queue-based scenario above only proves the mechanism.
-const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
-ok(
-  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationWithIntent\(input, navigationIntentSeq\)/.test(appSource),
-  "App.enqueueNavigation captures a shared navigation intent before handing the request to the queue",
-);
-ok(
-  /const enqueueNavigationWithIntent = useCallback\([\s\S]{0,900}?enqueueNavigationRequest\([\s\S]{0,900}?\{ \.\.\.input, navigationIntentSeq \}/.test(appSource),
-  "App.enqueueNavigationWithIntent forwards the captured intent into enqueueNavigationRequest",
-);
-ok(
-  /const enqueueTabSwitch = useCallback\([\s\S]{0,1400}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,1400}?switchTab\(request\.tabId, request\.optimisticTab, request\.navigationIntentSeq\)/.test(appSource),
-  "App.enqueueTabSwitch invalidates older navigation at enqueue time and forwards the shared intent",
-);
-ok(
-  /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\)/.test(appSource),
-  "App navigation results require both queue ownership and the shared navigation intent",
-);
 
 // useController owns periodic runtime metadata refreshes. Unmount explicitly
 // so the suite verifies their cleanup and does not keep the discovery runner

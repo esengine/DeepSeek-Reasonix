@@ -56,7 +56,10 @@ export function createOperationOwner() {
 
     unmount(epoch: number): void {
       if (!mounted || epoch !== ownerEpoch) return;
-      if (active) terminalCounts.cancelled += 1;
+      if (active) {
+        terminalCounts.cancelled += 1;
+        trackAppOperation(-1);
+      }
       active = undefined;
       mounted = false;
     },
@@ -64,6 +67,7 @@ export function createOperationOwner() {
     begin(target: OperationTarget, navigationIntent?: number): OperationIdentity {
       if (!mounted) throw new Error("operation owner is not mounted");
       if (active) terminalCounts.cancelled += 1;
+      else trackAppOperation(1);
       active = freezeIdentity({
         ownerEpoch,
         requestId: ++requestId,
@@ -87,6 +91,7 @@ export function createOperationOwner() {
     finish(identity: OperationIdentity, status: OperationTerminalStatus = "completed"): boolean {
       if (!this.owns(identity)) return false;
       active = undefined;
+      trackAppOperation(-1);
       terminalCounts[status] += 1;
       return true;
     },
@@ -104,3 +109,4 @@ export function createOperationOwner() {
     },
   };
 }
+import { trackAppOperation } from "./appLifecycleProbe";

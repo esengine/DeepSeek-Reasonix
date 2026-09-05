@@ -1222,6 +1222,12 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
+function browserMockDesktopLayoutStyle(): "classic" | "workbench" | "creation" {
+  if (typeof window === "undefined" || window.go?.main?.App) return "workbench";
+  const value = new URLSearchParams(window.location.search).get("layout");
+  return value === "classic" || value === "creation" ? value : "workbench";
+}
+
 function browserPreviewBashSandboxMode(): "enforce" | "off" {
   return browserPlatformOverride() === "windows" ? "off" : "enforce";
 }
@@ -1872,7 +1878,7 @@ function makeMockApp(): AppBindings {
     },
     desktopLanguage: "",
     desktopCurrency: "",
-    desktopLayoutStyle: "workbench",
+    desktopLayoutStyle: browserMockDesktopLayoutStyle(),
     desktopTheme: "auto",
     desktopThemeStyle: "graphite",
     desktopTerminalTheme: "auto",

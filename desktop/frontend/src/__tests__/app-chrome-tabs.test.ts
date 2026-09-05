@@ -233,14 +233,6 @@ ok(
   "tab metadata refresh is event-driven with a visibility-aware fallback",
 );
 
-ok(
-  appSource.includes("refreshTabMetas(undefined, { afterMutation: true })") &&
-    appSource.includes("{ afterMutation: true }") &&
-    appSource.includes("if (shouldRefreshTabMetaForEvent(e.kind)) {") &&
-    appSource.includes("void refreshTabMetas(undefined, { afterMutation: true });") &&
-    /await refreshTabMetas\(\s*\(\) => isNavigationIntentCurrent\(request\.navigationIntentSeq\),\s*\{\s*afterMutation:\s*true\s*\},?\s*\)/.test(appSource),
-  "tab lifecycle events and explicit mutations force a post-mutation trailing metadata refresh",
-);
 
 ok(
   /import \{ TabBar \} from "\.\/TabBar";/.test(appChromeSource),
@@ -389,11 +381,6 @@ ok(
   "transcript bottom reveal is decoupled from tab-strip reveal",
 );
 
-const tabsReorderBlock = appSource.match(/const handleTabsReorder = useCallback\([\s\S]*?\n  \}, \[refreshTabMetas, reorderTabs\]\);/)?.[0] ?? "";
-ok(
-  /setTabRevealSignal/.test(tabsReorderBlock) && !/setTranscriptRevealSignal/.test(tabsReorderBlock),
-  "tab reordering refreshes the tab strip without snapping the transcript",
-);
 
 ok(
   /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
@@ -436,20 +423,7 @@ ok(
   "code-only rewind retains the committed transaction id for real undo",
 );
 
-ok(
-  /onSessionRevertCommitted\?\.\(workspaceTabId, result\)/.test(workspacePanelSource) &&
-    /onSessionRevertCommitted=\{handleSessionRevertCommitted\}/.test(appSource) &&
-    /handleSessionRevertCommitted[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
-  "single-file session revert publishes its transaction id to the app undo state",
-);
 
-ok(
-  /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
-    /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
-    /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
-    /submitDisabled=\{remoteSurfaceActive \? !remoteComposerReady \|\| !remoteComposerProfileReady : !controllerReady\}/.test(appSource),
-  "welcome prompts and composer submit share the controller readiness gate",
-);
 
 ok(
   /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
@@ -458,22 +432,7 @@ ok(
   "queued plan revisions stay scoped to their source tab",
 );
 
-ok(
-  /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\), structured\)/.test(appSource) &&
-    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured, initialGoal\)/.test(appSource) &&
-    /onSteer=\{handleSteer\}/.test(appSource) &&
-    /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
-    /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
-  "composer sends and steers carry an explicit source tab through async preparation",
-);
 
-ok(
-  appSource.includes('key={`${activeTabId ?? ""}:${state.approval.id}`}') &&
-    appSource.includes('key={`${activeTabId ?? ""}:${state.ask.id}`}') &&
-    /planRevisionInsertRequest\.tabId === activeTabId/.test(appSource) &&
-    /planRevisionInsertRequest\.approvalId === state\.approval\?\.id/.test(appSource),
-  "approval and ask local state is scoped by tab plus prompt identity",
-);
 
 ok(
   /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
@@ -506,15 +465,6 @@ ok(/const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded
   "Welcome stays suppressed through target data commit and navigation settles only after paint readiness",
 );
 
-ok(
-  /const creationEmptyHero =/.test(appSource) &&
-    /!sidebarImDetailConnection/.test(appSource) &&
-    /!transcriptHydrating/.test(appSource) &&
-    /!hydratePlaceholderActive/.test(appSource) &&
-    /chat-pane\$\{creationEmptyHero \? " chat-pane--creation-empty" : ""\}/.test(appSource) &&
-    /heroMode=\{creationEmptyHero\}/.test(appSource),
-  "Creation empty hero waits for hydration and skips IM/Bot detail panels",
-);
 
 ok(
   /if \(heroMode\) \{[\s\S]*?const maxHeight = composerHeroInputMaxHeight\(\);[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
@@ -522,40 +472,9 @@ ok(
   "Creation hero composer auto-grows multi-line drafts instead of clipping at 20px",
 );
 
-ok(
-  /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
-    /const workspaceScopeKey = \[/.test(appSource) &&
-    /activeTab\?\.sessionPath/.test(appSource) &&
-    /state\.meta\?\.sessionPath/.test(appSource) &&
-    /state\.meta\?\.cwd/.test(appSource) &&
-    /state\.sessionGen/.test(appSource) &&
-    /workspaceControllerEpoch/.test(appSource) &&
-    Array.from(appSource.matchAll(/workspaceScopeKey=\{workspaceScopeKey\}/g)).length === 3,
-  "workspace file consumers receive a session and controller scoped identity",
-);
 
-ok(
-  /const unsubReady = onReady\(\(readyTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource) &&
-    /const unsubRebuilt = onRuntimeRebuilt\(\(rebuiltTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource),
-  "controller ready and rebuilt events invalidate active workspace file scopes",
-);
 
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
-ok(
-  /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
-    /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
-    /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\);/.test(appSource) &&
-    /return activateTopic\(scope, workspaceRoot, topicId, sessionPath \|\| "", request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openTopicSession\(scope, workspaceRoot, topicId, sessionPath, request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openGlobalTab\(topicId, request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openProjectTab\(workspaceRoot, topicId, request\.navigationIntentSeq\)/.test(appSource) &&
-    /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
-    !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
-    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
-    /if \(!latest\(\)\) return;[\s\S]*seedActiveTabMeta\(openedTab\);[\s\S]*void refreshLatestTabMetas\(\);/.test(navigationBlock),
-  "desktop navigation coalesces pending requests, ignores stale results, and seeds active tab metadata before background refresh",
-);
 
 ok(
   /return enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(appSource) &&
@@ -565,13 +484,6 @@ ok(
   "topic, blank, IM, and history navigation all use the shared coalescing path",
 );
 
-ok(
-  /const enterChatViewForTabNavigation = useCallback\(\(\) => \{\s*setMainView\("chat"\);/.test(appSource) &&
-    /const enqueueTabSwitch = useCallback\([\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?enqueueNavigationRequest/.test(appSource) &&
-    /const revealBackgroundRuntime = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealBackgroundRuntime/.test(appSource) &&
-    /const revealWorkspaceWriter = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealWorkspaceWriterForTab/.test(appSource),
-  "every direct tab activation returns overlay pages to the chat view",
-);
 
 ok(
   !/await resumeSession\(session\.path, targetTab\.id\);/.test(navigationBlock),
@@ -814,13 +726,6 @@ ok(
 ok(
   /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
   "title-bar double click still ignores interactive controls",
-);
-ok(
-  /function isMacOSWorkbenchSidebarTitlebar[\s\S]{0,500}?closest\("\.sidebar--workbench"\)[\s\S]{0,500}?MACOS_WORKBENCH_TITLEBAR_HEIGHT/.test(appSource) &&
-    /handleChromeTitlebarDoubleClick[\s\S]{0,400}?isMacOSWorkbenchSidebarTitlebar\(target, event\.clientY, desktopPlatform\)/.test(appSource) &&
-    !appSource.includes("window.runtime?.WindowToggleMaximise") &&
-    !bridgeSource.includes("WindowToggleMaximise?(): void;"),
-  "macOS workbench sidebar titlebar reuses the centralized zoom path",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

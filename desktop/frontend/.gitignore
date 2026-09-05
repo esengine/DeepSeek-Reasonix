@@ -20,3 +20,4 @@ package-lock.json
 # Playwright browsers for the real-DOM bench (kept inside the repo; see bench/).
 .pw-browsers
 bench/results.json
+bench/app-memory-results.json

@@ -1,5 +1,6 @@
 import { useEffect, useInsertionEffect, useMemo, useRef } from "react";
 import type { CommandOutcome } from "./useCommittedCommand";
+import { trackAppOperation } from "../app-runtime/appLifecycleProbe";
 
 type AsyncCommand<Args extends unknown[], Result> = (...args: Args) => Result;
 type AsyncCommandSlot<Args extends unknown[], Result> = {
@@ -20,6 +21,7 @@ async function invokeCommittedAsync<Args extends unknown[], Result>(
   }
   const lifecycle = slot.lifecycle;
   const requestId = ++slot.requestId;
+  trackAppOperation(1);
   try {
     const value = await command(...args);
     if (!slot.mounted || lifecycle !== slot.lifecycle) return { status: "cancelled", reason: "disposed" };
@@ -29,6 +31,8 @@ async function invokeCommittedAsync<Args extends unknown[], Result>(
     if (!slot.mounted || lifecycle !== slot.lifecycle) return { status: "cancelled", reason: "disposed" };
     if (requestId !== slot.requestId) return { status: "cancelled", reason: "superseded" };
     return { status: "failed", error };
+  } finally {
+    trackAppOperation(-1);
   }
 }
 

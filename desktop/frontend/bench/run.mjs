@@ -222,7 +222,7 @@ async function rendererTaskDuration(cdp) {
 }
 
 const INTERACTIVE_FN = () => {
-  const input = document.querySelector("textarea.composer__input");
+  const input = document.querySelector("textarea.composer__input:not([aria-hidden=true])");
   const inputReady = Boolean(input && !input.disabled);
   const rows = document.querySelectorAll(".transcript__row").length;
   return inputReady && rows > 0;
@@ -370,7 +370,7 @@ async function main() {
       if ((i + 1) % 10 === 0) {
         // INP-ish probe: real key events against the composer while the
         // pipeline is warm; event-timing entries capture the latency.
-        const composer = page.locator("textarea.composer__input");
+        const composer = page.locator("textarea.composer__input:not([aria-hidden=true])");
         await composer.click();
         await page.keyboard.type("x", { delay: 5 });
         await page.keyboard.press("Backspace");
