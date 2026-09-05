@@ -23,10 +23,9 @@ type skillSet struct {
 	allStore             *skill.Store  // reloadable all-skill store; nil falls back to all/enabled
 	noImplicitInvocation bool          // the model may not reach a skill on its own; slash still does
 	slashSeq             atomic.Uint64 // numbers the synthetic call a slash-invoked skill reports under
-	// delivered is the listing the model has, nil when it has none — the state
-	// a new session and a completed fold are both in. It rides the turn, never
+	// catalog is what the model has of the listing. It rides the turn, never
 	// the prefix, which a per-project catalog would diverge.
-	delivered atomic.Pointer[string]
+	catalog projectionDebt
 }
 
 func newSkillSet(enabled, all []skill.Skill, store, allStore *skill.Store, noImplicit bool) skillSet {
@@ -42,21 +41,13 @@ func (s *skillSet) owedCatalog() string {
 	if s.noImplicitInvocation {
 		return ""
 	}
-	block := skill.IndexBlock(s.list())
-	if block == "" {
-		return ""
-	}
-	if prev := s.delivered.Load(); prev != nil && *prev == block {
-		return ""
-	}
-	s.delivered.Store(&block)
-	return block
+	return s.catalog.owed(func() string { return skill.IndexBlock(s.list()) })
 }
 
 // forgetDeliveredCatalog returns the listing to the unknown state: what the
 // model was sent is no longer in the context it samples from.
 func (s *skillSet) forgetDeliveredCatalog() {
-	s.delivered.Store(nil)
+	s.catalog.forget()
 }
 
 // list returns the enabled skills, preferring the live store.
