@@ -1424,6 +1424,8 @@ export interface ModelInfo {
   provider: string;
   model: string;
   current: boolean;
+  contextWindow?: number;
+  vision?: boolean;
 }
 
 export interface EffortInfo {

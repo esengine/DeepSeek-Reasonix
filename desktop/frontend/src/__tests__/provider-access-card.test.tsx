@@ -391,7 +391,8 @@ await act(async () => {
   );
   await flushPromises();
 });
-const installedOfficialChoice = Array.from(rootEl.querySelectorAll("button"))
+await act(async () => { rootEl.querySelector<HTMLButtonElement>(".provider-catalog-trigger")?.click(); await flushPromises(); });
+const installedOfficialChoice = Array.from(rootEl.querySelectorAll(".provider-catalog__list button"))
   .find((button) => button.textContent?.includes("DeepSeek"));
 ok(installedOfficialChoice?.disabled === true, "installed official providers cannot be added again");
 ok(installedOfficialChoice?.textContent?.includes("Added") === true, "installed official providers show their backend status");
@@ -450,36 +451,19 @@ await act(async () => {
   );
   await flushPromises();
 });
-ok(rootEl.textContent?.includes("OpenCode Go Anthropic") === false, "OpenCode setup hides protocol-specific provider entries");
-ok(rootEl.textContent?.includes("Advanced routes") === false, "OpenCode setup does not expose an advanced-route decision");
-ok(rootEl.textContent?.includes("Compatibility") === false, "OpenCode setup hides compatibility entries from new users");
-const featuredProviders = rootEl.querySelector(".provider-featured-grid");
-ok(
-  featuredProviders?.textContent?.includes("DeepSeek") === true
-    && featuredProviders.textContent.includes("OpenCode Go"),
-  "OpenCode Go and DeepSeek are presented as same-level recommended providers",
-);
-ok(
-  featuredProviders?.querySelectorAll(".provider-template-card").length === 2
-    && featuredProviders.textContent?.includes("OpenCode Zen") === false,
-  "the top-level provider row contains only DeepSeek and OpenCode Go",
-);
-ok(
-  rootEl.querySelector<HTMLInputElement>('input[placeholder*="OPENCODE_GO_API_KEY"]') !== null,
-  "OpenCode Go opens directly on its API key field",
-);
-ok(
-  Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Connect and start using"),
-  "OpenCode Go setup exposes one outcome-oriented primary action",
-);
-ok(rootEl.querySelector('[role="tablist"]') === null, "OpenCode Go quick setup does not ask users to choose a configuration mode");
-const chooseAnotherProvider = Array.from(rootEl.querySelectorAll("button"))
-  .find((button) => button.textContent?.trim() === "Choose another provider") as HTMLButtonElement | undefined;
-await act(async () => {
-  chooseAnotherProvider?.click();
-  await flushPromises();
-});
-ok(rootEl.textContent?.includes("OpenCode Zen") === true, "OpenCode Zen remains an independent product choice");
+ok(rootEl.querySelector(".provider-catalog__list") === null, "provider catalog starts compact and closed");
+await act(async () => { rootEl.querySelector<HTMLButtonElement>(".provider-catalog-trigger")?.click(); await flushPromises(); });
+const catalog = rootEl.querySelector(".provider-catalog__list");
+ok(catalog?.textContent?.includes("OpenCode Go Anthropic") === false, "catalog hides protocol-specific provider entries");
+ok(catalog?.textContent?.includes("Compatibility") === false, "catalog hides compatibility routes from new users");
+ok(catalog?.textContent?.includes("DeepSeek") === true && catalog.textContent.includes("OpenCode Go"), "catalog lists DeepSeek and OpenCode Go together");
+ok(catalog?.textContent?.includes("OpenCode Zen") === true, "OpenCode Zen remains an independent product choice");
+ok(rootEl.querySelector('input[placeholder="Search providers…"]') !== null, "provider catalog has search");
+const goChoice = Array.from(catalog?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) => button.textContent?.includes("OpenCode Go"));
+await act(async () => { goChoice?.click(); await flushPromises(); });
+ok(rootEl.querySelector(".provider-catalog__list") === null, "choosing a provider closes the catalog");
+ok(rootEl.querySelector<HTMLInputElement>('input[type="password"]') !== null, "selecting OpenCode Go displays its credential field");
+ok(Array.from(rootEl.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Add provider"), "selected preset offers a connect action");
 
 const openCodeProviders: ProviderView[] = [
   { ...deepSeekAnthropic, builtIn: false, name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", apiKeyEnv: "OPENCODE_GO_API_KEY", webSearch: false },

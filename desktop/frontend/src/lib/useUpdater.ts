@@ -25,6 +25,8 @@ export type UpdateErrorDisposition = "retryable" | "recovery" | "manual";
 export interface Updater {
   status: UpdateStatus;
   check: () => Promise<void>;
+  /** Refresh an idle updater without superseding an active operation. */
+  refresh: () => Promise<void>;
   /** Single-action update: download + verify + install + relaunch. */
   apply: (info: UpdateInfo) => void;
   openDownload: () => void;
@@ -223,6 +225,11 @@ function useUpdaterInternal(): Updater {
     }
   }, [beginOperation, completeOperation, isCurrentOperation]);
 
+  const refresh = useCallback(async () => {
+    if (isBusyOperation(operationRef.current.kind)) return;
+    await check();
+  }, [check]);
+
   const apply = useCallback((info: UpdateInfo) => {
     const selectedChannel = normalizedChannel(info.channel);
     if (selectedChannel !== "stable") {
@@ -287,7 +294,7 @@ function useUpdaterInternal(): Updater {
     setStatus({ kind: "idle" });
   }, []);
 
-  return { status, check, apply, openDownload, abandonPending, reset };
+  return { status, check, refresh, apply, openDownload, abandonPending, reset };
 }
 
 export function UpdaterProvider({ children }: { children: ReactNode }) {

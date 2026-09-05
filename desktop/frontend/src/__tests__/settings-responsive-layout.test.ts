@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const managementStyles = readFileSync(resolve(testDir, "../components/ManagementPageShell.css"), "utf8");
 const panelStyles = readFileSync(resolve(testDir, "../components/SettingsPanel.css"), "utf8");
 
 let passed = 0;
@@ -36,9 +37,17 @@ function declaration(block: string, property: string): string | undefined {
 
 console.log("\nsettings responsive layout contract");
 
-const settingsModal = ruleBlock(panelStyles, ".settings-modal");
-eq(declaration(settingsModal, "width"), "min(1380px, calc(100vw - clamp(32px, calc(96px - (900px - 100vw) * 0.457), 96px)))", "wide settings modal keeps centered desktop margins");
-eq(declaration(settingsModal, "height"), "min(960px, calc(100vh - 80px))", "wide settings modal keeps the intended desktop height without becoming full screen");
+const settingsScreen = ruleBlock(managementStyles, ".management-screen");
+eq(declaration(settingsScreen, "position"), "fixed", "settings owns the viewport without resizing the workspace");
+eq(declaration(settingsScreen, "inset"), "0", "settings fills the entire viewport");
+eq(declaration(settingsScreen, "background"), "var(--bg-soft)", "settings has an opaque theme surface");
+const windowsSettings = ruleBlock(managementStyles, ".app--windows-frameless:has(.management-screen:not([hidden]))");
+const caption = ruleBlock(managementStyles, ":root[data-theme-style] .app--windows-frameless:has(.management-screen:not([hidden])) > .windows-window-controls");
+eq(declaration(windowsSettings, "--management-titlebar-height"), "48px", "Windows settings owns a caption height independent of workspace style");
+eq(declaration(ruleBlock(managementStyles, ".management-screen__chrome"), "flex"), "0 0 var(--management-titlebar-height, 44px)", "drag strip shares caption geometry while retaining macOS spacing");
+eq(declaration(caption, "--windows-window-controls-height"), "var(--management-titlebar-height)", "Windows caption buttons match the settings drag strip");
+eq(declaration(caption, "background"), "var(--bg-soft)", "caption controls blend with settings in every theme");
+eq(declaration(caption, "border"), "0", "workspace borders do not leak into the settings caption");
 const settingsCenter = ruleBlock(panelStyles, ".settings-center");
 eq(declaration(settingsCenter, "grid-template-columns"), "clamp(220px, 20.5vw, 304px) minmax(0, 1fr)", "settings navigation remains readable without consuming the content pane");
 
@@ -90,18 +99,6 @@ eq(declaration(narrowTail, "display"), "flex", "narrow memory controls form a fl
 eq(declaration(narrowTail, "flex"), "0 1 100%", "narrow memory controls stay on their own row");
 eq(declaration(narrowTail, "min-width"), "0", "narrow memory controls may shrink without overflowing");
 eq(declaration(narrowTail, "gap"), "12px", "narrow memory controls retain their compact spacing");
-
-const narrowModalOverrideSelector = ".settings-modal.management-modal,\n  :root[data-theme-style] .settings-modal.management-modal";
-const narrowModalOverride = ruleBlock(panelStyles, narrowModalOverrideSelector);
-eq(declaration(narrowModalOverride, "width"), "100vw", "minimum-width settings modal spans the viewport");
-eq(declaration(narrowModalOverride, "height"), "100vh", "minimum-width settings modal uses the full viewport height");
-eq(declaration(narrowModalOverride, "max-height"), "100vh", "minimum-width settings modal clears the shared modal height cap");
-eq(declaration(narrowModalOverride, "border-radius"), "0", "minimum-width settings modal removes floating-panel corners");
-eq(
-  panelStyles.indexOf(narrowModalOverrideSelector) > panelStyles.indexOf("@media (max-width: 760px)"),
-  true,
-  "minimum-width settings modal override follows the shared theme shell",
-);
 
 const compactPanelStart = panelStyles.indexOf("@media (max-width: 760px)");
 const compactPanel = panelStyles.slice(compactPanelStart);

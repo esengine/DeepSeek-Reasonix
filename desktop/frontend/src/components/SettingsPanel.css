@@ -6,11 +6,16 @@
   line-height: 1.45;
 }
 
-.settings-modal {
-  width: min(1380px, calc(100vw - clamp(32px, calc(96px - (900px - 100vw) * 0.457), 96px)));
-  height: min(960px, calc(100vh - 80px));
+.settings-screen__sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-soft);
 }
 
+.settings-screen .settings-center__nav { flex: 1; min-height: 0; border-right: 0; }
+.settings-screen .settings-center__content { margin: 0 8px 8px 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); }
 .settings-center {
   grid-template-columns: clamp(220px, 20.5vw, 304px) minmax(0, 1fr);
 }
@@ -501,13 +506,8 @@
     min-height: 150px;
   }
 
-  .settings-modal.management-modal,
-  :root[data-theme-style] .settings-modal.management-modal {
-    width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 0;
-  }
+  .management-screen__back { margin: 0 10px; padding: 8px; }
+  .settings-screen .settings-center__content { margin: 0; border-radius: 0; border-inline: 0; border-bottom: 0; }
 
   .settings-center,
   :root[data-theme-style] .settings-center {
@@ -642,3 +642,4 @@
   font-size: var(--text-2xs);
   line-height: 1.45;
 }
+.settings-page-content { min-height: 100%; }

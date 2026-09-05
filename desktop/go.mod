@@ -19,6 +19,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ole/go-ole v1.3.0
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/google/uuid v1.6.0
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/go-webview2 v1.0.28
 	github.com/wailsapp/wails/v2 v2.13.0
@@ -41,7 +42,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
@@ -100,3 +100,6 @@ replace reasonix => ../
 // Reasonix patches WebView2 monitor-scale detection for mixed-DPI restore
 // (#5862) and isolates its embedded/loopback UI from stale system proxies.
 replace github.com/wailsapp/go-webview2 => ./third_party/go-webview2
+
+// Reasonix keeps one signed Windows tray identity across versioned desktop paths.
+replace fyne.io/systray => ./third_party/systray

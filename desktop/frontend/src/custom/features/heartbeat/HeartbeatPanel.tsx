@@ -1,3 +1,7 @@
+import { ManagementPageShell } from "../../../components/ManagementPageShell";
+import { useConfirmDialog } from "../../../components/ConfirmDialog";
+import { useManagementT } from "../../../lib/managementLocale";
+import { useAutomationDraftStore, automationDraftDirty, reconcileAutomationDraft } from "../../../store/automationDrafts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -36,23 +40,29 @@ import { useHeartbeatT, type HeartbeatTranslator } from "./heartbeat.i18n";
 import "./heartbeat.css";
 import { formatInterval, formatTaskNextRun, prepareTasksByNextRun } from "./heartbeat.presentation";
 import { TaskEditor } from "./HeartbeatTaskEditor";
-import { CirclePlaySolid, mergeEngineRunState } from "./HeartbeatShared";
-import { AutomationSurface } from "./AutomationSurface";
+import { CirclePlaySolid } from "./HeartbeatShared";
 export { changeHeartbeatFrequency, cronToInterval, heartbeatNextRunAt, intervalToCron, nextCycleRunAt, prepareTasksByNextRun } from "./heartbeat.presentation";
 export { heartbeatBuildCycleInterval } from "./HeartbeatCycleEditor";
 export { TaskEditor } from "./HeartbeatTaskEditor";
 export { mergeEngineRunState } from "./HeartbeatShared";
 
 interface HeartbeatPanelProps {
+  active?: boolean; onBack?: () => void;
   onOpenTopic?: (scope: string, workspaceRoot: string, topicId: string) => void;
-  onToggleSidebar?: () => void;
 }
 
-export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelProps) {
+export function HeartbeatView({ onOpenTopic, active = true, onBack = () => {} }: HeartbeatPanelProps) {
   const t = useHeartbeatT();
+  const m = useManagementT();
+  const entries = useAutomationDraftStore((state) => state.entries);
+  const drafts = useAutomationDraftStore.getState;
+  const { confirm, dialog, dismiss } = useConfirmDialog();
+  const [loadError, setLoadError] = useState(false);
+  const [operationError, setOperationError] = useState(false);
   const [tasks, setTasks] = useState<HeartbeatTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [mutationError, setMutationError] = useState(false);
+  const editorIntent = useRef(0);
   const [editing, setEditing] = useState<HeartbeatTask | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
@@ -70,18 +80,13 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
   // 重新打开面板/切换视图后恢复，无需每次重拖。
   const [listWidthPct, setListWidthPct] = useState(() => {
     try {
-      const cached = Number(localStorage.getItem("reasonix-heartbeat-list-width"));
-      return Number.isFinite(cached) ? Math.min(70, Math.max(30, cached)) : 50;
+      const raw = localStorage.getItem("reasonix-heartbeat-list-width");
+      const cached = raw === null ? 40 : Number(raw);
+      return Number.isFinite(cached) ? Math.min(70, Math.max(30, cached)) : 40;
     } catch {
-      return 50;
+      return 40;
     }
   });
-  const dirtyRef = useRef(false);
-  // IDs of drafts created via Add/scoped-Add/startNew that have not been saved yet.
-  // They are intentionally absent from `tasks`, so the "clear editing" effect
-  // below must not close the editor for them.
-  const unsavedDraftIdsRef = useRef<Set<string>>(new Set());
-
   // ── 自定义滚动条：隐藏系统滚动条，DOM 直接驱动 + rAF 帧同步 ──
   const listRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
@@ -174,19 +179,19 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
     document.addEventListener("mouseup", onUp);
   }, []);
 
-  // Reset dirty ref when leaving edit mode
-  useEffect(() => {
-    if (!editing) dirtyRef.current = false;
-  }, [editing]);
-
+  const listGeneration = useRef(0);
   const loadTasks = useCallback(async (): Promise<HeartbeatTask[] | null> => {
+    const generation = ++listGeneration.current;
     setLoading(true);
     try {
       const [taskList, wsList] = await Promise.all([
         heartbeatListTasks(),
         app.ListWorkspaces(),
       ]);
+      if (generation !== listGeneration.current) return null;
       setTasks(taskList);
+      drafts().reconcile(taskList);
+      setLoadError(false);
       const map: Record<string, string> = {};
       if (wsList) {
         wsList.forEach((ws) => { if (ws.path) map[ws.path] = ws.name; });
@@ -194,46 +199,23 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
       setWorkspaceMap(map);
       return taskList;
     } catch {
+      if (generation === listGeneration.current) setLoadError(true);
       return null;
     } finally {
-      setLoading(false);
+      if (generation === listGeneration.current) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    setEditing(null);
-    setSearchQuery("");
-    setStatusFilter("all");
-    void loadTasks();
-  }, [loadTasks]);
-
-  // Clear editing when the edited task is no longer in the filtered list.
-  // Unsaved drafts (created via Add/scoped-Add/startNew) are not yet in
-  // `tasks`; keep their editor open until the user saves or cancels.
-  // 列表切换任务：未保存修改直接放弃（ChatGPT 式，不弹确认）
-  useEffect(() => {
-    if (!editing) return;
-    if (unsavedDraftIdsRef.current.has(editing.id)) return;
-    // 过滤变化导致编辑任务不可见时，直接关闭（丢弃未保存修改）。
-    const closeIfNotDirty = () => {
-      dirtyRef.current = false;
-      return true;
-    };
-    const match = tasks.find(t => t.id === editing.id);
-    if (!match) { if (closeIfNotDirty()) setEditing(null); return; }
-    // 状态筛选切换（全部↔已开启↔已暂停）不关闭已打开的详情——右侧详情跟随任务，
-    // 与左侧列表筛选解耦（用户明确要求：已激活任务的详情不受筛选影响）。
-    if (searchQuery && !match.title.toLowerCase().includes(searchQuery.toLowerCase())) { if (closeIfNotDirty()) setEditing(null); return; }
-    // 与列表过滤一致：scopeFilter 过滤掉正在编辑的任务时关闭编辑器。
-    if (scopeFilter === "global" && (match.scope === "project" && match.workspaceRoot)) { if (closeIfNotDirty()) setEditing(null); return; }
-    if (scopeFilter !== "all" && scopeFilter !== "global" && (match.scope !== "project" || match.workspaceRoot !== scopeFilter)) { if (closeIfNotDirty()) setEditing(null); }
-  }, [tasks, editing?.id, statusFilter, searchQuery, scopeFilter, t]);
+  useEffect(() => { if (active) void loadTasks(); else { editorIntent.current++; dismiss(); } }, [active, loadTasks, dismiss]);
 
   const save = useCallback(
     async (mutate: (current: HeartbeatTask[]) => HeartbeatTask[]): Promise<HeartbeatTask[] | null> => {
       try {
         const persisted = await heartbeatMutateTasks(mutate);
+        ++listGeneration.current;
+        setLoading(false);
         setTasks(persisted);
+        drafts().reconcile(persisted);
         setMutationError(false);
         return persisted;
       } catch {
@@ -248,13 +230,14 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
     [loadTasks],
   );
 
-  const openUnsavedDraft = useCallback((task: HeartbeatTask) => {
-    unsavedDraftIdsRef.current.add(task.id);
-    setEditing(task);
-    setDetailOpen(true);
+  const openUnsavedDraft = useCallback((task: HeartbeatTask, intent: number) => {
+    if (drafts().entries[task.id]) task = { ...task, id: `hb-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+    drafts().ensure(task, true);
+    if (editorIntent.current === intent) { setEditing(task); setDetailOpen(true); }
   }, []);
 
   const handleAdd = useCallback(async () => {
+    const intent = ++editorIntent.current;
     let id = `hb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       id = await heartbeatGenerateID();
@@ -271,10 +254,11 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
       approvalMode: "yolo",
       newConversationEachRun: false,
       notifyChannels: false,
-    });
+    }, intent);
   }, [openUnsavedDraft]);
 
   const handleAddToScope = useCallback(async (scopeKey: string) => {
+    const intent = ++editorIntent.current;
     let id = `hb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       id = await heartbeatGenerateID();
@@ -289,13 +273,14 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
       enabled: true,
       scope: isProject ? "project" : "global",
       workspaceRoot: isProject ? scopeKey : "",
-    });
+    }, intent);
   }, [openUnsavedDraft]);
 
   // 建议区：用预设内容打开未保存草稿，由用户确认后再创建。
   // 动态推荐：建议只在"对应标题的任务不存在"时显示——添加后消失，删除后恢复。
   const handleAddSuggestion = useCallback(
     async (sug: Suggestion) => {
+      const intent = ++editorIntent.current;
       let id = `hb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       try {
         id = await heartbeatGenerateID();
@@ -317,82 +302,107 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
         scope: "global",
         workspaceRoot: "",
       };
-      openUnsavedDraft(task);
+      openUnsavedDraft(task, intent);
     },
     [openUnsavedDraft],
   );
 
   const handleEdit = useCallback((task: HeartbeatTask) => {
-    // 分栏模式下切换任务直接丢弃当前编辑器未保存改动（ChatGPT 式，不确认）。
-    dirtyRef.current = false;
-    unsavedDraftIdsRef.current.delete(task.id);
-    setEditing({ ...task });
+    editorIntent.current++;
+    drafts().ensure(task);
+    setEditing(task);
     setDetailOpen(true);
   }, []);
 
   // 列表行点击状态图标切换任务启用/暂停（即时保存）
   const handleToggle = useCallback(async (task: HeartbeatTask) => {
-    const saved = await save((current) => current.map((item) => (
-      item.id === task.id ? { ...item, enabled: !item.enabled } : item
-    )));
-    if (saved) {
-      const authoritative = saved.find((item) => item.id === task.id);
-      if (!authoritative) return;
-      setEditing((prev) => (prev && prev.id === task.id ? mergeEngineRunState({ ...prev, enabled: authoritative.enabled }, authoritative) : prev));
-    }
+    drafts().ensure(task);
+    const version = drafts().begin(task.id);
+    if (version === null) return false;
+    const saved = await save((current) => current.map((item) => item.id === task.id ? { ...item, enabled: !item.enabled } : item));
+    drafts().settle(task.id, version, saved !== null);
+    return saved !== null;
   }, [save]);
 
-  const handleDelete = useCallback(
-    async (id: string) => (await save((current) => current.filter((task) => task.id !== id))) !== null,
-    [save],
-  );
+  const handleDelete = useCallback(async (id: string) => {
+    const entry = drafts().entries[id];
+    if (entry?.busy) return false;
+    const name = entry?.draft.title || tasks.find((task) => task.id === id)?.title || t("heartbeat.untitled");
+    if (!await confirm({ title: m("deleteTask"), message: m("deleteTaskDescription", { name }), confirmLabel: m("confirm"), cancelLabel: m("cancel"), tone: "danger" })) return false;
+    const original = tasks.find((task) => task.id === id);
+    if (original) drafts().ensure(original);
+    const version = drafts().begin(id);
+    if (version === null) return false;
+    const saved = await save((current) => current.filter((task) => task.id !== id));
+    drafts().settle(id, version, saved !== null);
+    if (!saved) return false;
+    drafts().remove(id);
+    setEditing((previous) => previous?.id === id ? null : previous);
+    return true;
+  }, [save, tasks, t, m, confirm]);
 
   // 任务行 ⋯ 菜单（仅删除任务）：单个 popover，anchor 动态指向当前点击的按钮
   const [menuTaskId, setMenuTaskId] = useState<string | null>(null);
   const menuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (!active) { setMenuTaskId(null); setScopeFilterOpen(false); } }, [active]);
 
-  const handleTrigger = useCallback(
-    async (id: string) => {
-      try {
-        await heartbeatTriggerNow(id);
-        const fresh = await loadTasks();
-        // 详情页正在编辑该任务时，同步最新 run 状态（runHistory/topicId/lastRunAt），
-        // 否则详情页 runHistory 区域停留在触发前的旧快照，看不到新记录。
-        // 只合并引擎拥有的字段：等待期间用户对 title/prompt/schedule 的草稿
-        // 编辑不能被磁盘旧快照覆盖。
-        if (fresh) {
-          const updated = fresh.find((t) => t.id === id);
-          if (updated) {
-            setEditing((prev) => (prev && prev.id === id ? mergeEngineRunState(prev, updated) : prev));
-          }
-        }
-      } catch {
-        // ignore
-      }
-    },
-    [loadTasks],
-  );
+  const handleTrigger = useCallback(async (id: string) => {
+    const task = tasks.find((item) => item.id === id); if (!task) return;
+    drafts().ensure(task);
+    const version = drafts().begin(id); if (version === null) return;
+    setOperationError(false);
+    let success = false;
+    try { await heartbeatTriggerNow(id); success = true; await loadTasks(); }
+    catch { setOperationError(true); }
+    finally { drafts().settle(id, version, success); }
+  }, [tasks, loadTasks]);
 
-  const handleSaveEdit = useCallback(
-    async (task: HeartbeatTask) => {
-      // 新建任务（无 createdAt，isNew）保存时补 createdAt，使其成为正式任务：
-      // isNew=false 后详情头部出现启停/删除按钮，呈现与常规任务完全一致。
-      const persisted = task.createdAt ? task : { ...task, createdAt: Date.now() };
-      const saved = await save((current) => {
-        const idx = current.findIndex((item) => item.id === task.id);
-        if (idx < 0) return [...current, persisted];
-        const next = [...current];
-        next[idx] = mergeEngineRunState(persisted, current[idx]);
-        return next;
-      });
-      if (!saved) return false;
-      // The draft is now persisted; stop treating it as an unsaved draft.
-      unsavedDraftIdsRef.current.delete(task.id);
-      setEditing({ ...(saved.find((item) => item.id === task.id) ?? persisted) });
-      return true;
-    },
-    [save],
-  );
+  const handleSaveEdit = useCallback(async (input: HeartbeatTask) => {
+    let task = input;
+    drafts().ensure(task, !task.createdAt);
+    if (!drafts().entries[task.id].baseline && tasks.some((item) => item.id === task.id)) {
+      const oldId = task.id;
+      let id = await heartbeatGenerateID().catch(() => "");
+      if (!id || tasks.some((item) => item.id === id) || drafts().entries[id]) id = `hb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const latest = drafts().entries[oldId];
+      if (!latest || latest.busy) return false;
+      task = { ...latest.draft, id };
+      drafts().ensure(task, true); drafts().remove(oldId);
+      const replacement = task;
+      setEditing((current) => current?.id === oldId ? replacement : current);
+    }
+    const entry = drafts().entries[task.id];
+    if (entry.missing || entry.conflicts.length) return false;
+    const version = drafts().begin(task.id);
+    if (version === null) return false;
+    const saved = await save((current) => {
+      const existing = current.find((item) => item.id === task.id);
+      if (!entry.baseline && existing) throw new Error("Automation ID conflict");
+      const merged = reconcileAutomationDraft(entry, existing);
+      if (merged.missing || merged.conflicts.length) throw new Error("Automation changed elsewhere");
+      const persisted = { ...merged.draft, createdAt: merged.draft.createdAt || Date.now() };
+      return existing ? current.map((item) => item.id === task.id ? persisted : item) : [...current, persisted];
+    });
+    const persisted = saved?.find((item) => item.id === task.id);
+    drafts().finish(task.id, version, persisted);
+    return Boolean(persisted);
+  }, [save, tasks]);
+
+  const saveAsNew = useCallback(async (task: HeartbeatTask) => {
+    const version = drafts().begin(task.id);
+    if (version === null) return false;
+    let id = await heartbeatGenerateID().catch(() => "");
+    if (!id || tasks.some((item) => item.id === id) || drafts().entries[id]) id = `hb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const copy = { ...task, id, enabled: false, createdAt: undefined, topicId: undefined, lastRunAt: undefined, runHistory: [] };
+    drafts().ensure(copy, true);
+    const saved = await handleSaveEdit(copy);
+    drafts().settle(task.id, version, saved);
+    if (saved) {
+      drafts().discard(task.id);
+      setEditing((current) => current?.id === task.id ? drafts().entries[id].draft : current);
+    } else { setEditing((current) => current?.id === task.id ? copy : current); }
+    return saved;
+  }, [handleSaveEdit, tasks]);
 
   const onDividerMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -429,19 +439,14 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
   };
 
   return (
-    <AutomationSurface onToggleSidebar={onToggleSidebar} sidebarLabel={t("sidebar.expand")}>
-      <div className="heartbeat-page">
-      {/* 无详情时：页面顶部一条全宽透明窗口拖拽条 */}
-      {!detailOpen && <div className="heartbeat-drag-strip" />}
+    <ManagementPageShell active={active} onBack={onBack} title={t("heartbeat.heroTitle")} description={t("heartbeat.heroSubtitle")}
+      actions={<><button className="btn btn--small" disabled={loading} onClick={() => void loadTasks()}>{m("refresh")}</button><button className="btn btn--primary btn--small" onClick={() => void handleAdd()}><Plus size={14} />{t("heartbeat.addTask")}</button></>}>
+    {loadError && <div className="management-notice" role="alert">{m("loadFailed")}<button className="btn btn--small" onClick={() => void loadTasks()}>{m("retry")}</button></div>}
+    {operationError && <div className="management-notice" role="alert">{m("operationFailed")}</div>}
+    <div className="heartbeat-page" data-detail={detailOpen}>
       <div className={`heartbeat-split${detailOpen ? " heartbeat-split--detail-open" : ""}`}>
           {/* ── Left column: task list（含列表区头部工具栏） ── */}
           <div className={`heartbeat-split__left${detailOpen ? "" : " heartbeat-split__left--full"}`} style={{ width: detailOpen ? `${listWidthPct}%` : "100%" }}>
-            {!detailOpen && (
-              <div className="heartbeat-hero">
-                <h1 className="heartbeat-hero__title">{t("heartbeat.heroTitle")}</h1>
-                <p className="heartbeat-hero__subtitle">{t("heartbeat.heroSubtitle")}</p>
-              </div>
-            )}
             <div className="heartbeat-toolbar">
               <div className="heartbeat-status-tabs" role="tablist" aria-label={t("heartbeat.filterStatus")}>
                 {(["all", "enabled", "disabled"] as const).map((key) => (
@@ -458,7 +463,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                 ))}
               </div>
               <div className="heartbeat-toolbar__view" style={{ marginLeft: "auto" }}>
-                {listView === "flat" && (
+                {true && (
                 <div className="heartbeat-scope-filter">
                 <button
                   ref={scopeFilterRef}
@@ -537,15 +542,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                 >
                   {listView === "flat" ? <FolderTree size={14} /> : <List size={14} />}
                 </button>
-                <button
-                  className="heartbeat-toolbar__btn heartbeat-toolbar__btn--primary heartbeat-toolbar__btn--add"
-                  type="button"
-                  onClick={() => void handleAdd()}
-                  title={t("heartbeat.addTask")}
-                >
-                  <Plus size={14} strokeWidth={2.2} />
-                  {t("heartbeat.btnNew")}
-                </button>
+
               </div>
             </div>
 
@@ -568,6 +565,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                 )}
               </div>
               <div className="heartbeat-split__list" ref={listRef}>
+                {Object.values(entries).filter((entry) => !entry.baseline || entry.missing).length > 0 && <section className="automation-draft-list"><h3>{m("drafts")}</h3>{Object.values(entries).filter((entry) => !entry.baseline || entry.missing).map((entry) => <button className="btn" key={entry.draft.id} onClick={() => handleEdit(entry.draft)}>{entry.draft.title || t("heartbeat.untitled")} <span>{m("unsaved")}</span></button>)}</section>}
                 {(() => {
                 const now = Date.now();
                 const filtered = prepareTasksByNextRun(
@@ -630,11 +628,11 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                     <Heart size={24} className="heartbeat-pulse" />
                     <span>{t("workspace.loading")}</span>
                   </div>
-                ) : filtered.length === 0 ? (
+                ) : loadError && tasks.length === 0 ? null : filtered.length === 0 ? (
                   tasks.length === 0 ? (
                     <div className="heartbeat-empty heartbeat-empty--guided">
                       <Heart size={28} />
-                      <span>{t("heartbeat.noTasks")}</span>
+                      <span>{m("noTasks")}</span>
                       <button className="heartbeat-btn heartbeat-btn--primary" type="button" onClick={handleAdd}>
                         <Plus size={13} />
                         {t("heartbeat.addTask")}
@@ -643,7 +641,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                   ) : (
                     <div className="heartbeat-empty">
                       <Heart size={24} />
-                      <span>{t("heartbeat.noMatchingTasks")}</span>
+                      <span>{t("heartbeat.noMatchingTasks")}</span><button className="btn btn--small" onClick={() => { setSearchQuery(""); setStatusFilter("all"); setScopeFilter("all"); }}>{m("clearFilters")}</button>
                     </div>
                   )
                 ) : listView === "flat" ? (
@@ -684,7 +682,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                                 </button>
                               </Tooltip>
                             </span>
-                            <span className="worktree-node__label">{task.title || t("heartbeat.untitled")}</span>
+                            <button type="button" className="worktree-node__label automation-task-select" onClick={(event) => { event.stopPropagation(); handleEdit(task); }}>{task.title || t("heartbeat.untitled")}{entries[task.id] && automationDraftDirty(entries[task.id]) && <small className="automation-dirty"> · {m("unsaved")}</small>}</button>
                             <span className="worktree-node__actions">
                               <button
                                 className="worktree-node__action-btn"
@@ -789,7 +787,7 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
                                       </button>
                                     </Tooltip>
                                   </span>
-                                  <span className="worktree-node__label">{task.title || t("heartbeat.untitled")}</span>
+                                  <button type="button" className="worktree-node__label automation-task-select" onClick={(event) => { event.stopPropagation(); handleEdit(task); }}>{task.title || t("heartbeat.untitled")}{entries[task.id] && automationDraftDirty(entries[task.id]) && <small className="automation-dirty"> · {m("unsaved")}</small>}</button>
                                   <span className="worktree-node__actions">
                                   <button
                                     className="worktree-node__action-btn"
@@ -903,21 +901,20 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
           {/* ── Right column: detail / editor (ChatGPT-style, opens on task click) ── */}
           {detailOpen && (
             <div className="heartbeat-split__right">
+              <button className="btn btn--small management-list-back" onClick={() => setDetailOpen(false)}>{m("listBack")}</button>
+              {editing && ((searchQuery && !editing.title.toLowerCase().includes(searchQuery.toLowerCase())) || (statusFilter === "enabled" && !editing.enabled) || (statusFilter === "disabled" && editing.enabled) || (scopeFilter !== "all" && (editing.scope === "project" ? editing.workspaceRoot : "global") !== scopeFilter)) && <div className="management-notice">{m("filteredDetail")}<button className="btn btn--small" onClick={() => { setSearchQuery(""); setScopeFilter("all"); setStatusFilter("all"); }}>{m("clearFilters")}</button></div>}
               {editing ? (
-                <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onDelete={async () => {
-                  const deleted = await handleDelete(editing.id);
-                  if (deleted) {
-                    setEditing(null);
-                    setDetailOpen(false);
-                  }
-                  return deleted;
-                }} onCloseDetail={() => { setDetailOpen(false); }} onDirtyChange={(d) => { dirtyRef.current = d; }} onOpenTopic={onOpenTopic} onTrigger={handleTrigger} />
+                <TaskEditor key={editing.id} task={entries[editing.id]?.baseline ?? editing} onSave={handleSaveEdit}
+                  onToggleEnabled={() => handleToggle(entries[editing.id]?.baseline ?? editing)} onSaveAsNew={saveAsNew}
+                  onDelete={() => handleDelete(editing.id)}
+                  onDiscard={() => { const id = editing.id; drafts().discard(id); if (!drafts().entries[id]) { setEditing(null); setDetailOpen(false); } }}
+                  onCloseDetail={() => setDetailOpen(false)} onOpenTopic={onOpenTopic} onTrigger={handleTrigger} />
               ) : (
                 <div className="heartbeat-split__empty">
                   <div className="heartbeat-split__empty-inner">
                     <Activity size={28} />
                     <span>{t("heartbeat.selectTask")}</span>
-                    <span className="heartbeat-split__empty-hint">{t("heartbeat.configHint")}</span>
+
                   </div>
                 </div>
               )}
@@ -930,7 +927,8 @@ export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelPr
           </div>
         )}
       </div>
-    </AutomationSurface>
+      {active && dialog}
+    </ManagementPageShell>
   );
 }
 

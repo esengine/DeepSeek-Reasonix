@@ -1,0 +1,20 @@
+.management-screen { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-soft); color: var(--fg); --wails-draggable: no-drag; }
+.management-screen[hidden] { display: none; }
+.management-screen__chrome { flex: 0 0 var(--management-titlebar-height, 44px); background: var(--bg-soft); --wails-draggable: drag; user-select: none; }
+.management-screen__back { display: flex; align-items: center; gap: 10px; margin: 8px 14px 12px; padding: 12px; flex: 0 0 auto; border: 0; border-radius: 8px; background: transparent; color: var(--fg-dim); font: inherit; text-align: left; cursor: pointer; --wails-draggable: no-drag; }
+.management-screen__back:hover { background: var(--bg-elev); color: var(--fg); }
+.management-screen__back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.management-screen__top { display: flex; align-items: center; gap: 20px; padding: 0 24px 16px 0; }
+.management-screen__heading { flex: 1; min-width: 0; }
+.management-screen__heading h1 { margin: 0; font-size: 24px; }
+.management-screen__heading p { margin: 8px 0 0; color: var(--fg-dim); }
+.management-screen__actions { display: flex; gap: 8px; }
+.management-screen__content { flex: 1; min-height: 0; margin: 0 16px 16px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+.management-screen:not([hidden]) ~ .windows-window-controls { z-index: var(--z-popover); }
+.app--windows-frameless:has(.management-screen:not([hidden])) { --management-titlebar-height: 48px; }
+.app--windows-frameless:has(.management-screen:not([hidden])) > .windows-window-controls,
+:root[data-theme-style] .app--windows-frameless:has(.management-screen:not([hidden])) > .windows-window-controls { --windows-window-controls-height: var(--management-titlebar-height); --windows-window-control-width: 46px; --windows-window-controls-width: 138px; background: var(--bg-soft); border: 0; box-shadow: none; }
+.management-notice { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--bg-soft); flex-wrap: wrap; }
+.management-list-back { display: none; }
+@media (max-width: 959px) { .management-list-back { display: inline-flex; } }
+@media (max-width: 760px) { .management-screen__top { flex-wrap: wrap; gap: 8px; padding-right: 12px; }.management-screen__heading { flex-basis: 50%; }.management-screen__actions { margin-left: 16px; }.management-screen__content { margin: 0; border-radius: 0; border-inline: 0; border-bottom: 0; } }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"reasonix/desktop/internal/instanceidentity"
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
@@ -77,27 +77,9 @@ func sessionTempFromController(ctrl control.SessionAPI) *sessiontemp.Manager {
 // `data:` frames.
 const eventChannel = "agent:event"
 
-const singleInstanceIDPrefix = "com.reasonix.desktop"
+const singleInstanceIDPrefix = instanceidentity.Prefix
 
-// singleInstanceID is used by Wails to route a second desktop launch back to the
-// process that owns the same Reasonix data home. Basing the identity on the
-// executable path let installed, portable, stable, and canary binaries write the
-// same sessions concurrently. Explicit REASONIX_HOME isolation still produces
-// an independent instance; REASONIX_DEV continues to bypass the lock entirely.
-func singleInstanceID() string {
-	root := strings.TrimSpace(config.ReasonixHomeDir())
-	if root == "" {
-		return singleInstanceIDPrefix
-	}
-	// Reuse the lease path canonicalizer so a missing home below a symlink or
-	// junction still hashes to the same physical data directory.
-	if marker := agent.CanonicalSessionPath(filepath.Join(root, ".reasonix-home.identity")); marker != "" {
-		root = filepath.Dir(marker)
-	}
-	root = filepath.Clean(root)
-	sum := sha256.Sum256([]byte(root))
-	return singleInstanceIDPrefix + "." + hex.EncodeToString(sum[:8])
-}
+func singleInstanceID() string { return instanceidentity.ForHome(config.ReasonixHomeDir()) }
 
 // PromptHistoryEntry is one user prompt extracted from a session JSONL file.
 // The frontend uses these for ↑/↓ prompt-history navigation.
@@ -9272,10 +9254,12 @@ func removeServerOrder(order []string, name string) []string {
 // ModelInfo is one (provider, model) the bottom switcher can pick. Ref ("provider/
 // model") is what SetModel takes; Provider/Model are for display.
 type ModelInfo struct {
-	Ref      string `json:"ref"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Current  bool   `json:"current"`
+	Ref           string `json:"ref"`
+	Provider      string `json:"provider"`
+	Model         string `json:"model"`
+	Current       bool   `json:"current"`
+	ContextWindow int    `json:"contextWindow,omitempty"`
+	Vision        bool   `json:"vision,omitempty"`
 }
 
 type EffortInfo struct {

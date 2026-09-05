@@ -807,7 +807,7 @@ window.go = {
     App: {
       Settings: async () => providerRefreshCancelSettings,
       FetchAllProviderModelCatalogs: async () => ({}),
-      FetchProviderModelCatalog: async () => ["deepseek-v4-flash", "deepseek-v4-pro"].map((model) => ({ model, inputModalities: ["text"], state: "unsupported", source: "adapter" })),
+      FetchProviderModelCatalogDraft: async () => ["deepseek-v4-flash", "deepseek-v4-pro"].map((model) => ({ model, inputModalities: ["text"], state: "unsupported", source: "adapter" })),
     } as Partial<AppBindings> as AppBindings,
   },
 };
@@ -836,26 +836,12 @@ await act(async () => {
   providerRefreshCancelButton.click();
   await flushPromises();
 });
-await waitFor(
-  "provider model draft",
-  () => providerRefreshCancelRootEl.textContent?.includes("Found 2 models for DeepSeek Official. Review and save the enabled list.") === true,
-);
-const providerModelDraftCancelButton = providerRefreshCancelRootEl.querySelector<HTMLButtonElement>(
-  ".provider-model-draft__actions button",
-);
-if (!providerModelDraftCancelButton) throw new Error("provider model draft cancel action did not render");
-await act(async () => {
-  providerModelDraftCancelButton.click();
-  await flushPromises();
-});
-ok(
-  providerRefreshCancelRootEl.textContent?.includes("Found 2 models for DeepSeek Official. Review and save the enabled list.") === false,
-  "cancelling a provider model draft clears its stale save instruction",
-);
-ok(
-  providerRefreshCancelRootEl.querySelector(".provider-model-draft") === null,
-  "cancelling a provider model draft closes the candidate editor",
-);
+await waitFor("provider model discovery", () => document.querySelector('[role="dialog"] .provider-discovery-list') !== null);
+const providerModelDraftCancelButton = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Cancel");
+if (!providerModelDraftCancelButton) throw new Error("provider discovery cancel action did not render");
+await act(async () => { providerModelDraftCancelButton.click(); await flushPromises(); });
+ok(document.querySelector('[role="dialog"] .provider-discovery-list') === null, "cancelling model discovery closes the candidate dialog");
+ok(providerRefreshCancelSettings.providers[0].models.length === 1, "cancelling discovery preserves configured models");
 await act(async () => {
   providerRefreshCancelRoot.unmount();
 });

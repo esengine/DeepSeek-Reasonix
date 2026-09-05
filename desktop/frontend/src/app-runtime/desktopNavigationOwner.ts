@@ -20,6 +20,7 @@ export type DesktopNavigationPorts = Pick<Runtime["navigation"],
     openRemoteProject(hostId: string, workspace: string, options: RemoteTabOpenOptions): Promise<TabMeta>;
     applyTabs(tabs: TabMeta[]): void;
     seedTab(tab: TabMeta): void;
+    topicAccepted?(intent: number): void;
     reveal(): void;
     projectChanged(): void;
     closeHistory(): void;
@@ -81,6 +82,7 @@ export async function executeDesktopNavigation(input: DesktopNavigationCapture, 
         ? await openTopic(request.scope, request.workspaceRoot, request.topicId, request.sessionPath)
         : await openBlank(request.scope, request.workspaceRoot);
       checkpoint(); ports.seedTab(tab);
+      if (request.kind === "topic") ports.topicAccepted?.(seq);
       if (request.kind === "blank") ports.projectChanged();
       if (request.kind === "topic") { ports.reveal(); await refresh(); }
       else { await refresh(); checkpoint(); ports.reveal(); }

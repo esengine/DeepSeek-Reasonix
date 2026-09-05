@@ -134,9 +134,9 @@ console.log("\nhistory recovery data visibility");
       session({ path: "/t/normal.jsonl", title: "deleted session", deletedAt: now }),
       session({ path: "/t/covered.jsonl", title: "system copy", deletedAt: now, recovered: true, recoveryCopy: true }),
     ],
-    onRestore: (path: string) => restored.push(path),
-    onPurge: (path: string) => purged.push(path),
-    onPurgeAll: (paths: string[]) => emptied.push(paths),
+    onRestore: async (path: string) => { restored.push(path); },
+    onPurge: async (path: string) => { purged.push(path); },
+    onPurgeAll: async (paths: string[]) => { emptied.push(paths); },
   });
 
   ok(document.body.textContent?.includes("system copy") === false, "trash collapses system recovery data by default");

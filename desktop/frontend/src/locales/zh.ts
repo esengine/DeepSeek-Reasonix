@@ -953,6 +953,8 @@ export const zh: Record<DictKey, string> = {
   "status.jobsLabel": "任务",
   "status.plan": "计划",
   "status.switchModel": "切换模型",
+  "providerUI.image": "图片",
+  "providerUI.manageModels": "管理模型",
   "modelSwitcher.searchPlaceholder": "搜索模型…",
   "modelSwitcher.noMatches": "没有匹配的模型",
   "status.noModels": "没有可切换模型",
@@ -1645,6 +1647,7 @@ export const zh: Record<DictKey, string> = {
 
 
   // 设置抽屉
+  "settings.backToWorkspace": "返回工作区",
   "settings.title": "设置",
   "settings.loading": "加载中…",
   "settings.loadFailed": "设置加载失败。",

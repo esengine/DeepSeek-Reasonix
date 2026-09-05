@@ -18,6 +18,7 @@ const root = createRoot(document.getElementById("root")!);
 const tab = (id: string) => ({ id, label: id } as TabMeta);
 const pending = new Map<string, ReturnType<typeof deferred<TabMeta>>>();
 const calls: string[] = [];
+const acceptedTopics: number[] = [];
 let intent = 0;
 let registration: ReturnType<typeof deferred<string>> | undefined;
 let api!: ReturnType<typeof useDesktopNavigation>;
@@ -38,6 +39,7 @@ const ports: Parameters<typeof useDesktopNavigation>[0]["ports"] = {
   resumeSession: async (path, id) => { calls.push(`resume:${id}:${path}`); },
   listTabs: async () => [], applyTabs: () => { calls.push("tabs"); }, seedTab: value => { calls.push(`seed:${value.id}`); },
   listSessions: async () => { calls.push("history-refresh"); return []; },
+  topicAccepted: seq => { acceptedTopics.push(seq); },
 };
 function Probe({ visible = "A", single = true }: { visible?: string; single?: boolean }) {
   useRemoteTabOpened(meta => { calls.push(`resource:${meta.id}`); }, () => {});
@@ -63,6 +65,7 @@ try {
   assert.deepEqual(calls.filter(value => value.startsWith("open:")), ["open:A", "open:C"]);
   await finish("C", c);
   assert.deepEqual(calls.filter(value => value.startsWith("seed:")), ["seed:C"]);
+  assert.deepEqual(acceptedTopics, [3], "only the accepted queue target can release an automation link");
   assert.deepEqual(calls.filter(value => value.startsWith("settle:")), ["settle:3"], "old finally cannot settle the current surface");
   calls.length = 0;
   const stale = topic("stale"); intent++;

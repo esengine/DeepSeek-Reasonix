@@ -1,31 +1,40 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 
-const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
-const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-const heartbeatStyles = readFileSync(new URL("../custom/features/heartbeat/heartbeat.css", import.meta.url), "utf8");
-const terminalWarmthSource = readFileSync(new URL("../lib/useWarmTerminalPanel.ts", import.meta.url), "utf8");
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const app = read("../App.tsx");
+const isolation = read("../lib/useManagementWorkspace.ts");
+const shell = read("../components/ManagementPageShell.tsx");
+const css = read("../components/ManagementPageShell.css");
+const heartbeat = read("../custom/features/heartbeat/HeartbeatPanel.tsx");
+const warmth = read("../lib/useWarmTerminalPanel.ts");
 
-assert.match(appSource, /const chatSurfaceVisible = !automationView;/, "one page projection gates every chat-owned surface");
+// The shared full-window shell replaces the old chat-pane projection. Background
+// geometry and component identity survive while all workspace input is inert.
+assert.match(app, /useManagementWorkspace\(layoutRef, managementActive\)/);
+assert.match(isolation, /workspace\.inert = true/);
+assert.match(isolation, /workspace\.inert = false/);
+assert.doesNotMatch(app, /mainView === "automation"/);
+assert.match(app, /inert=\{managementActive\}/);
+assert.match(css, /\.management-screen \{[^}]*position: fixed;[^}]*inset: 0;/);
+assert.match(shell, /hidden=\{!active\} inert=\{!active\}/);
+assert.match(app, /if \(managementActive\) returnToWorkspace\(\)/);
+assert.match(heartbeat, /<ManagementPageShell active=\{active\}/);
+assert.match(css, /management-titlebar-height: 48px/);
+assert.match(app, /useWarmTerminalPanel\(terminalPanelOpen, terminalResizing, !managementActive\)/);
+assert.match(warmth, /if \(open\) setMounted\(true\)/);
+assert.match(warmth, /if \(!open \|\| !visible\) \{\s*setFitEnabled\(false\)/s);
 
-assert.match(appSource, /automationView \? "app--automation" : ""/, "root marks automation before lazy Heartbeat mounts");
-assert.match(appSource, /!automationView \? "layout--terminal-drawer-open" : ""/, "automation removes the terminal grid row");
-// Resizer visibility and all layout entry points are exercised by automation-regions.test.tsx.
-assert.match(appSource, /Boolean\(activeTabId\) && !automationView/, "automation disables the hidden-chat close shortcut");
-assert.match(heartbeatStyles, /\.app--automation \.skip-to-composer\s*\{\s*display:\s*none;/s, "automation removes the hidden composer focus target");
-assert.doesNotMatch(appSource, /sidebar__quick-action--active/, "Workbench does not add a second automation entry beside New session");
-
-assert.match(stylesSource, /\.layout--automation \.terminal-drawer\s*\{\s*display:\s*none;/s, "hidden terminal cannot occupy or receive input");
-assert.match(heartbeatStyles, /\.automation-surface > \.heartbeat-page\s*\{[^}]*flex:\s*1;[^}]*width:\s*100%;/s, "shared automation page fills its shell");
-assert.match(heartbeatStyles, /\.layout--sidebar-collapsed \.automation-surface\s*\{[^}]*padding-top:\s*44px/s, "collapsed automation reserves one shared titlebar safe area");
-assert.match(heartbeatStyles, /\.app--darwin \.automation-sidebar-toggle\s*\{[^}]*left:\s*96px/s, "macOS sidebar recovery stays clear of traffic lights");
-assert.match(stylesSource, /\.layout--automation:not\(\.layout--sidebar-collapsed\)[^}]*grid-template-columns:\s*var\(--sidebar-expanded-width\)/s, "minimum-width automation can restore its sidebar");
-
-assert.match(heartbeatStyles, /container:\s*heartbeat-page \/ inline-size/, "Heartbeat responds to its real content width");
-assert.match(heartbeatStyles, /@container heartbeat-page \(max-width:\s*559px\)/, "narrow editor mode starts below 560px");
-assert.match(heartbeatStyles, /\.heartbeat-split--detail-open \.heartbeat-split__left,[\s\S]*\.heartbeat-split--detail-open \.heartbeat-split__divider\s*\{\s*display:\s*none;/s, "narrow editor hides the list and divider without remounting");
-
-assert.match(terminalWarmthSource, /if \(open\) setMounted\(true\)/, "terminal content remains mounted while presentation is hidden");
-assert.match(terminalWarmthSource, /if \(!open \|\| !visible\) \{\s*setFitEnabled\(false\)/s, "terminal fitting pauses while automation hides it");
-
-console.log("automation CSS and retained terminal warmth contracts passed");
+// Exercise the selector actually used by App against the header actually emitted
+// by the shared shell. A class rename must not silently break native double-click.
+const selector = app.match(/const onChromeSurface = target\?\.closest\("([^"]+)"\)/)![1];
+const headerClass = shell.match(/<header className="([^"]+)"/)![1];
+const dom = new JSDOM(`<section><header class="${headerClass}"></header><main><button>Back</button></main></section>`);
+assert(dom.window.document.querySelector("header")!.closest(selector));
+assert.equal(dom.window.document.querySelector("button")!.closest(selector), null);
+assert.match(app, /desktopPlatform === "darwin"/);
+assert.match(app, /windowsFramelessChrome \|\| desktopPlatform/);
+assert.match(app, /target\?\.closest\("button, input, textarea, select, a,/);
+dom.window.close();
+console.log("PASS shared management geometry, input isolation, terminal retention and native titlebar dispatch");

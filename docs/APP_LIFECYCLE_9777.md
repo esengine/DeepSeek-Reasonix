@@ -5,8 +5,9 @@
 ## Status and scope
 
 This is an implementation checkpoint, not a merge signoff. The current work
-preserves the existing PR history and merges main-v2 `f12cbdd2f` through
-`5cb605a4d`. Full App layering and native qualification remain required.
+preserves the existing PR history, including the `5cb605a4d` mainline merge and
+the `2b9aba0fb` resource/navigation implementation. The current synchronization
+incorporates main-v2 `e47ff8cb6`. Full App layering and native qualification remain required.
 
 ## Shared contracts implemented
 
@@ -58,9 +59,9 @@ browser replay, Transcript unit tests, Chromium selection/scroll/composer replay
 Chromium and Playwright WebKit reader replay, frontend/test typechecks, hooks,
 AST gate with negative fixtures, single writer and diff whitespace checks.
 
-Latest checked production bundle measurements (KiB): initial JS 423.7 / 426.8; shell
-CSS 116.0 / 116.0; Chinese 60.5 / 60.6; Traditional Chinese 61.3 / 61.5; raw
-initial assets 2332.3 / 2349.4. No capacity limit was increased. Settings-only
+Latest checked production bundle measurements (KiB): initial JS 425.0 / 426.8; shell
+CSS 115.9 / 116.0; Chinese 60.5 / 60.6; Traditional Chinese 61.4 / 61.5; raw
+initial assets 2329.8 / 2349.4. No capacity limit was increased. Settings-only
 image-control CSS moved to the existing lazy settings stylesheet. The unused
 labels for removed density/reasoning/fold controls were deleted in all three
 locales; legacy configuration fields, setters, events and mirrors are unchanged.
@@ -120,6 +121,15 @@ refreshes coalesce, dispose revokes pending delivery, and old source finally
 cannot release the current request. These are shared lifecycle changes, not
 additional polling delays or per-platform recovery paths.
 
+The September 6 mainline integration preserves full-window Settings, Trash and
+Automation pages in the existing region host, with the actual workspace kept
+mounted and inert. Automation links use the common navigation queue and a
+commit-owned page receipt; accepted targets preserve the return link, whereas
+page replacement, old finally and unmount cannot revive it. Node component
+discovery now shares one CSS-asset loader instead of a filename allowlist that
+missed transitive imports introduced by the management shell. This does not
+replace real CSS or browser verification.
+
 ### Retired assertion → behavioral evidence
 
 | Former source assertion | Production behavior exercised |
@@ -139,13 +149,14 @@ additional polling delays or per-platform recovery paths.
 | Automation/dock visibility callback strings | `conversation-projection.test.ts` and `terminal-panel-commands.test.tsx` verify the shared projection, stored preferences and native shortcut effects |
 | Remote wizard canonical path string | `remote-connect-wizard.test.tsx` finishes a merged canonical project through the actual navigation owner |
 | Global remote New Session helper string | `test:app-browser` clicks the real global action after remote project selection and verifies hydrated remote content, Composer identity and return navigation |
+| Mainline inline automation navigation string | `automation-navigation-lifecycle.test.tsx` checks page ABA, acceptance and exact cleanup; `desktop-navigation-lifecycle.test.tsx` proves only the winning target publishes acceptance |
 
 These retirements do not certify every earlier removed assertion. Remaining
 source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,922 lines. Six domain owners, remaining effects, the pure shell
+- App is still 3,900 lines. Six domain owners, remaining effects, the pure shell
   and removal of its size exception are not complete.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,
@@ -154,9 +165,11 @@ source-only tests must be audited as their owning features migrate.
 - Repolint is clean after cohesive preferences/model-command extraction in
   SettingsPanel, bridge, useController, desktop settings and config. The App
   exception still exists and must be removed; no baseline was widened.
-- Existing App browser replay checks the Sidebar project tree, not the actual
-  WorkspacePanel/editor identity. Its six tracked subscriptions and zero
-  instrumented operations do not represent every remaining App workflow.
+- App browser replay now checks actual WorkspacePanel, file tree, selected file
+  and preview DOM identity across layouts, Settings visits and same-project
+  session switching. This is file-preview evidence, not every editing path.
+  Its six tracked subscriptions and zero instrumented operations still do not
+  represent every remaining App workflow.
 - The memory runner now rebuilds production assets, records source/build
   fingerprints, counts completed round trips, samples every 32 and saves heap
   categories/weak identity cohorts. It fails closed as NEEDS_ATTRIBUTION, not

@@ -84,7 +84,7 @@ func (a *App) remoteProxyModelCatalog(curModel string) []ModelInfo {
 		}
 		for _, model := range entry.ChatModelList() {
 			ref := entry.Name + "/" + model
-			out = append(out, ModelInfo{Ref: ref, Provider: entry.Name, Model: model, Current: ref == canonical})
+			out = append(out, configuredModelInfo(cfg, entry.Name, model, ref == canonical))
 		}
 	}
 	return out
@@ -112,8 +112,20 @@ func (a *App) desktopModelCatalog(curModel, workspaceRoot string, ctrl control.S
 		}
 		for _, m := range p.ChatModelList() {
 			ref := p.Name + "/" + m
-			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel})
+			out = append(out, configuredModelInfo(cfg, p.Name, m, ref == curModel))
 		}
 	}
 	return mergeExtensionModelInfos(out, extensionCatalog, curModel)
+}
+
+// configuredModelInfo projects the same per-model overrides and capability
+// resolver used by settings, without guessing capabilities for unknown models.
+func configuredModelInfo(cfg *config.Config, name, model string, current bool) ModelInfo {
+	info := ModelInfo{Ref: name + "/" + model, Provider: name, Model: model, Current: current}
+	if entry, ok := cfg.ResolveModel(info.Ref); ok {
+		info.ContextWindow = entry.ContextWindow
+		capability := config.NewModelCapabilityResolver().Resolve(entry)
+		info.Vision = string(capability.State) == "supported"
+	}
+	return info
 }

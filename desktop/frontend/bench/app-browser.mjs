@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
+import { chooseAppLayout } from "./app-page-actions.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(frontendDir, ".pw-browsers");
@@ -23,17 +24,8 @@ async function settle(page, frames = 5) {
   }), frames);
 }
 
-async function openSettings(page) {
-  await page.locator("button:has(svg.lucide-settings)").last().click();
-  await page.locator(".settings-modal").waitFor();
-}
-
 async function chooseLayout(page, label, className) {
-  await openSettings(page);
-  await page.locator(".settings-modal .set-seg__btn").filter({ hasText: new RegExp(`^${label}$`) }).click();
-  await page.locator(`.app.${className}`).waitFor();
-  await page.locator(".settings-modal .modal-close-button").click();
-  await page.locator(".settings-modal").waitFor({ state: "detached" });
+  await chooseAppLayout(page, label, className);
   await settle(page);
 }
 
@@ -53,6 +45,16 @@ try {
   });
   const composer = page.locator("textarea.composer__input:not([aria-hidden=true])");
   await composer.fill("layout-owned draft");
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await page.locator('[data-workspace-path="README.md"]').click();
+  await page.waitForFunction(() => document.querySelector('.workspace-preview__body')?.textContent?.includes('Browser-dev workspace preview.'));
+  await page.evaluate(() => {
+    Object.assign(window.__appBrowserIdentity, {
+      workspace: document.querySelector('.workspace-panel'),
+      workspaceTree: document.querySelector('.workspace-tree'),
+      preview: document.querySelector('.workspace-preview__body'),
+    });
+  });
 
   assert(await page.locator(".app.app--workbench").count() === 1, "workbench layout renders from the authoritative startup snapshot");
   await chooseLayout(page, "Creation", "app--creation");
@@ -64,8 +66,11 @@ try {
     composer: window.__appBrowserIdentity.composer === document.querySelector("textarea.composer__input:not([aria-hidden=true])"),
     projectTree: window.__appBrowserIdentity.projectTree === document.querySelector(".project-tree"),
     sidebar: window.__appBrowserIdentity.sidebar === document.querySelector(".sidebar"),
+    workspace: window.__appBrowserIdentity.workspace === document.querySelector('.workspace-panel'),
+    workspaceTree: window.__appBrowserIdentity.workspaceTree === document.querySelector('.workspace-tree'),
+    preview: window.__appBrowserIdentity.preview === document.querySelector('.workspace-preview__body'),
   }));
-  assert(Object.values(identities).every(Boolean), "layout variants reuse the shared sidebar, project tree, and Composer DOM identity");
+  assert(Object.values(identities).every(Boolean), "layout variants and management-page visits retain Sidebar, Composer, actual WorkspacePanel/tree and file preview identity");
 
   const terminalToggle = page.getByRole("button", { name: "Terminal", exact: true }).first();
   await terminalToggle.click();
@@ -83,10 +88,16 @@ try {
   await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("ASYNC LAYOUT EXPANSION COMPLETE"));
   const afterSwitch = await page.evaluate(() => ({
     projectTree: window.__appBrowserIdentity.projectTree === document.querySelector(".project-tree"),
+    workspace: window.__appBrowserIdentity.workspace === document.querySelector('.workspace-panel'),
+    workspaceTree: window.__appBrowserIdentity.workspaceTree === document.querySelector('.workspace-tree'),
+    preview: window.__appBrowserIdentity.preview === document.querySelector('.workspace-preview__body'),
+    selectedFile: document.querySelector('.workspace-tree__row--active')?.getAttribute('data-workspace-path'),
     subscriptions: window.__reasonixAppLifecycle?.snapshot().activeSubscriptions,
     operations: window.__reasonixAppLifecycle?.snapshot().activeOperations,
   }));
   assert(afterSwitch.projectTree, "same-project session switching preserves the Sidebar project tree (not WorkspacePanel)");
+  assert(afterSwitch.workspace && afterSwitch.workspaceTree && afterSwitch.preview && afterSwitch.selectedFile === 'README.md',
+    'same-project session switching preserves actual WorkspacePanel, tree, preview DOM and selected file');
   assert(afterSwitch.subscriptions === 6, `the six AppRuntimeEffects subscriptions remain singular (${afterSwitch.subscriptions})`);
   assert(afterSwitch.operations === 0, "instrumented operation owners report zero active operations (not yet all App operations)");
 

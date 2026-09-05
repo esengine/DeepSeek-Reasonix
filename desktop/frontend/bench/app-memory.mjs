@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
+import { chooseAppLayout } from "./app-page-actions.mjs";
 import { buildIdentity, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -124,11 +125,7 @@ async function runProcess(index) {
     await enterSafety(page);
     await selectFixture(page, fixtures.full);
     for (const [label, className] of [["Creation", "app--creation"], ["Workbench", "app--workbench"]]) {
-      await page.locator("button:has(svg.lucide-settings)").last().click();
-      await page.locator(".settings-modal .set-seg__btn").filter({ hasText: new RegExp(`^${label}$`) }).click();
-      await page.locator(`.app.${className}`).waitFor();
-      await page.locator(".settings-modal .modal-close-button").click();
-      await page.locator(".settings-modal").waitFor({ state: "detached" });
+      await chooseAppLayout(page, label, className);
       await settleFrames(page);
     }
     const samples = [{ phase: "baseline", roundTrips: 0, ...await forceGc(cdp, page) }];

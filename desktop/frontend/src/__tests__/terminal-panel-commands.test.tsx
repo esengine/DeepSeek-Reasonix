@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { useTerminalPanelCommands } from "../app-runtime/useTerminalPanelCommands";
 import { useLayoutStore } from "../store/layout";
-import { useOverlayStore } from "../store/overlays";
+import { useAppNavigationStore } from "../store/appNavigation";
 import { useTerminalStore } from "../store/terminal";
 import { AppBottomRegions } from "../app-shell/AppBottomRegions";
 import { TopicbarSessionActions } from "../components/TopicbarSessionActions";
@@ -21,7 +21,8 @@ useTerminalStore.setState({ createSession: async (tab, path) => { calls.push(`${
 let commands!: ReturnType<typeof useTerminalPanelCommands>;
 const noop = () => {};
 function Probe({ remote }: { remote: boolean }) {
-  commands = useTerminalPanelCommands({ tabId: "A", enabled: !remote });
+  const page = useAppNavigationStore(state => state.page);
+  commands = useTerminalPanelCommands({ tabId: "A", enabled: !remote, shortcutsEnabled: page.kind === "workspace" });
   const t = useT();
   return <>
     <TopicbarSessionActions sessionHasContent={false} getSessionMarkdown={() => ""} exportSession={noop}
@@ -46,9 +47,12 @@ try {
   assert.equal(useLayoutStore.getState().terminalPanelOpen, false);
   assert.deepEqual(calls, [], "remote shortcut and direct commands share one local-tool capability gate");
   await paint(false);
-  useOverlayStore.getState().setMainView("automation");
+  await act(async () => useAppNavigationStore.getState().openPage({ kind: "automation" }));
   await act(async () => key());
-  assert.equal(useOverlayStore.getState().mainView, "chat");
+  assert.equal(useAppNavigationStore.getState().page.kind, "automation");
+  assert.equal(useLayoutStore.getState().terminalPanelOpen, false, "management pages suppress workspace shortcuts without changing stored geometry");
+  await act(async () => useAppNavigationStore.getState().returnToWorkspace());
+  await act(async () => key());
   assert.equal(useLayoutStore.getState().terminalPanelOpen, true);
   await act(async () => key(true));
   assert.deepEqual(calls, ["A:."]);

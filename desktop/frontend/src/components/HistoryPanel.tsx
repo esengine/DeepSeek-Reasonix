@@ -1,3 +1,4 @@
+import { useManagementT } from "../lib/managementLocale";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Archive, GitBranch, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
@@ -22,6 +23,7 @@ type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
 // a single click selects a read-only preview; explicit actions resume, restore,
 // rename, or delete the selected session.
 export function HistoryPanel({
+  presentation = "dialog", active = true, busy = false,
   kind = "history",
   sessions: suppliedSessions,
   running,
@@ -35,6 +37,7 @@ export function HistoryPanel({
   onInspectVersions,
   onClose,
 }: {
+  presentation?: "dialog" | "page"; active?: boolean; busy?: boolean;
   kind?: "history" | "trash";
   sessions: SessionMeta[];
   running: boolean;
@@ -42,13 +45,16 @@ export function HistoryPanel({
   onPreview: (path: string) => Promise<HistoryMessage[]>;
   onDelete: (path: string) => void;
   onRename: (session: SessionMeta, title: string) => void;
-  onRestore?: (path: string) => void;
-  onPurge?: (path: string) => void;
-  onPurgeAll?: (paths: string[]) => void;
+  onRestore?: (path: string) => Promise<void>;
+  onPurge?: (path: string) => Promise<void>;
+  onPurgeAll?: (paths: string[]) => Promise<void>;
   onInspectVersions?: (session: SessionMeta, view: RecoveryLineageView) => void;
   onClose: () => void;
 }) {
   const tr = useT();
+  const m = useManagementT();
+  const [detailVisible, setDetailVisible] = useState(false);
+  const previousPaths = useRef<string[]>([]);
   const isTrash = kind === "trash";
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
@@ -76,6 +82,7 @@ export function HistoryPanel({
     meta: string;
     messages: HistoryMessage[];
     loading: boolean;
+    error?: boolean;
   } | null>(null);
   const previewSeq = useRef(0);
   const lineageSeq = useRef(0);
@@ -110,9 +117,11 @@ export function HistoryPanel({
         messages: [],
         loading: true,
       });
-      const messages = await onPreview(s.path);
-      if (seq === previewSeq.current) {
-        setPreview((cur) => (cur?.path === s.path ? { ...cur, messages, loading: false } : cur));
+      try {
+        const messages = await onPreview(s.path);
+        if (seq === previewSeq.current) setPreview((cur) => cur?.path === s.path ? { ...cur, messages, loading: false } : cur);
+      } catch {
+        if (seq === previewSeq.current) setPreview((cur) => cur?.path === s.path ? { ...cur, loading: false, error: true } : cur);
       }
     },
     [isTrash, onPreview, tr],
@@ -142,10 +151,10 @@ export function HistoryPanel({
   }, [isTrash, ordinarySessions]);
 
   useEffect(() => {
-    if (!isTrash) return;
+    if (!isTrash || presentation === "page") return;
     if (scopeFilter === "project" && scopeCounts.project === 0) setScopeFilter("all");
     if (scopeFilter === "global" && scopeCounts.global === 0) setScopeFilter("all");
-  }, [isTrash, scopeCounts.global, scopeCounts.project, scopeFilter]);
+  }, [isTrash, presentation, scopeCounts.global, scopeCounts.project, scopeFilter]);
 
   useEffect(() => {
     if (!isTrash) return;
@@ -154,9 +163,9 @@ export function HistoryPanel({
   }, [isTrash, statusCounts.current, statusCounts.open, statusFilter]);
 
   useEffect(() => {
-    if (!isTrash) return;
+    if (!isTrash || presentation === "page") return;
     if (dateFilter !== "all" && dateCounts[dateFilter] === 0) setDateFilter("all");
-  }, [dateCounts, dateFilter, isTrash]);
+  }, [dateCounts, dateFilter, isTrash, presentation]);
 
   const filteredSessions = useMemo(() => {
     const q = isTrash ? query.trim().toLowerCase() : "";
@@ -204,15 +213,18 @@ export function HistoryPanel({
   }, [isTrash]);
 
   useEffect(() => {
-    setEditing(null);
-    if (displayedSessions.length === 0) {
-      if (preview && !selectableSessions.some((s) => s.path === preview.path)) setPreview(null);
-      return;
-    }
-    if (preview && selectableSessions.some((s) => s.path === preview.path)) return;
-    const first = displayedSessions.find((s) => !s.current) ?? displayedSessions[0];
-    void loadPreview(first);
-  }, [displayedSessions, loadPreview, preview, selectableSessions]);
+    if (!active) return;
+    const oldPaths = previousPaths.current;
+    previousPaths.current = displayedSessions.map((item) => item.path);
+    if (preview && selectableSessions.some((item) => item.path === preview.path)) return;
+    if (!displayedSessions.length) { ++previewSeq.current; setPreview(null); return; }
+    const oldIndex = preview ? oldPaths.indexOf(preview.path) : 0;
+    const next = displayedSessions[Math.max(0, Math.min(oldIndex, displayedSessions.length - 1))];
+    void loadPreview(next);
+  }, [active, displayedSessions, loadPreview, preview, selectableSessions]);
+  useEffect(() => {
+    if (!active) { setMenuSession(null); setBlankMenuPoint(null); setMenuConfirmTarget(null); }
+  }, [active]);
 
   const previewItems = useMemo(() => previewMessagesToItems(preview?.messages ?? []), [preview?.messages]);
   const selectedSession = useMemo(
@@ -246,7 +258,8 @@ export function HistoryPanel({
     setMenuPoint(contextMenuPointFromEvent(event));
   };
   const openTrashBlankMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!isTrash || ordinarySessions.length === 0) return;
+    if (!isTrash || busy || ordinarySessions.length === 0) return;
+    if (presentation === "page") { onPurgeAll?.(ordinarySessions.map((item) => item.path)); return; }
     const target = event.target as HTMLElement | null;
     if (target?.closest(".hist-item,.history-search,.history-preview,button,input,textarea,select")) return;
     event.preventDefault();
@@ -256,7 +269,8 @@ export function HistoryPanel({
     setBlankMenuPoint(contextMenuPointFromEvent(event));
   };
   const armClearTrash = () => {
-    if (!isTrash || ordinarySessions.length === 0) return;
+    if (!isTrash || busy || ordinarySessions.length === 0) return;
+    if (presentation === "page") { onPurgeAll?.(ordinarySessions.map((item) => item.path)); return; }
     setMenuSession(null);
     setMenuPoint(null);
     setBlankMenuPoint(null);
@@ -274,12 +288,12 @@ export function HistoryPanel({
   };
   const purgeTrashSession = (s: SessionMeta) => {
     closeHistoryMenus();
-    onPurge?.(s.path);
+    if (!busy) onPurge?.(s.path);
   };
   const clearTrash = () => {
     const paths = ordinarySessions.map((s) => s.path);
     closeHistoryMenus();
-    onPurgeAll?.(paths);
+    if (!busy) onPurgeAll?.(paths);
   };
   const sessionMenuItems: ContextMenuItem[] = menuSession
     ? isTrash
@@ -289,7 +303,7 @@ export function HistoryPanel({
           icon: <RotateCcw size={13} />,
           label: tr("history.restoreSession"),
           onSelect: () => {
-            onRestore?.(menuSession.path);
+            if (!busy) onRestore?.(menuSession.path);
             closeHistoryMenus();
           },
         },
@@ -303,7 +317,7 @@ export function HistoryPanel({
               : tr("history.purgeSession"),
           danger: true,
           onSelect: () => {
-            if (menuConfirmTarget?.kind === "purge" && menuConfirmTarget.path === menuSession.path) {
+            if (presentation === "page" || (menuConfirmTarget?.kind === "purge" && menuConfirmTarget.path === menuSession.path)) {
               purgeTrashSession(menuSession);
             } else {
               setMenuConfirmTarget({ kind: "purge", path: menuSession.path });
@@ -363,7 +377,7 @@ export function HistoryPanel({
               icon: <Trash2 size={13} />,
               label: tr("history.clearTrashMenu"),
               danger: true,
-              onSelect: () => setMenuConfirmTarget({ kind: "clear" }),
+              onSelect: armClearTrash,
             },
           ];
   const actionConfirmDelete =
@@ -394,11 +408,11 @@ export function HistoryPanel({
   const restoreSelected = () => {
     if (!selectedSession || !isTrash) return;
     closeHistoryMenus();
-    onRestore?.(selectedSession.path);
+    if (!busy) onRestore?.(selectedSession.path);
   };
   const purgeSelected = () => {
     if (!selectedSession || !isTrash) return;
-    if (actionConfirmPurge) purgeTrashSession(selectedSession);
+    if (presentation === "page" || actionConfirmPurge) purgeTrashSession(selectedSession);
     else setMenuConfirmTarget({ kind: "purge", path: selectedSession.path });
   };
 
@@ -429,6 +443,7 @@ export function HistoryPanel({
             aria-pressed={selected}
             onClick={() => {
               setMenuConfirmTarget(null);
+              setDetailVisible(true);
               void loadPreview(session);
             }}
             onDoubleClick={() => {
@@ -463,15 +478,8 @@ export function HistoryPanel({
     );
   };
 
-  return (
-    <div className="management-modal-backdrop history-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
-      <section
-        className="management-modal history-modal"
-        data-state={status}
-        aria-label={tr(isTrash ? "history.trashTitle" : "history.title")}
-        onClick={(e) => e.stopPropagation()}
-      >
-      <header className="management-modal__head history-modal__head">
+  const content = (<>
+      {presentation === "dialog" && <header className="management-modal__head history-modal__head">
         <div>
           <div className="management-modal__title history-modal__title">{tr(isTrash ? "history.trashTitle" : "history.title")}</div>
           {!isTrash && running && <div className="management-modal__summary history-modal__summary">{tr("history.readOnlyHint")}</div>}
@@ -480,15 +488,15 @@ export function HistoryPanel({
           {isTrash && ordinarySessions.length > 0 && (
             <button
               className={`chip history-clear${actionConfirmClearTrash ? " history-clear--confirm" : ""}`}
-              type="button"
+              type="button" disabled={busy}
               onClick={actionConfirmClearTrash ? clearTrash : armClearTrash}
             >
               {tr(actionConfirmClearTrash ? "history.confirmClearTrash" : "history.clearTrash")}
             </button>
           )}
-          <ModalCloseButton label={tr("common.close")} onClick={requestClose} />
+          {presentation === "dialog" && <ModalCloseButton label={tr("common.close")} onClick={requestClose} />}
         </div>
-      </header>
+      </header>}
 
       <div
         className="history-manager"
@@ -548,7 +556,7 @@ export function HistoryPanel({
           </div>
         )}
 
-        <div className="history-content">
+        <div className="history-content" data-detail={detailVisible}>
           <div className={`history-list${isTrash ? " history-list--trash" : ""}`}>
             {(() => {
               const hasBodyHits = !isTrash && searchHits.length > 0;
@@ -561,7 +569,7 @@ export function HistoryPanel({
                 );
               }
               if (displayedSessions.length === 0 && (!isTrash || systemRecoverySessions.length === 0) && !hasBodyHits) {
-                return <div className="mem-empty">{tr("history.noResults")}</div>;
+                return <div className="mem-empty">{tr("history.noResults")}<button className="btn btn--small" onClick={() => { setQuery(""); setScopeFilter("all"); setDateFilter("all"); }}>{m("clearFilters")}</button></div>;
               }
               return (
               <>
@@ -627,6 +635,7 @@ export function HistoryPanel({
           </div>
 
           <section className={`history-preview${!preview && !searchContext ? " history-preview--empty" : ""}`}>
+            {presentation === "page" && <button className="btn btn--small management-list-back" onClick={() => setDetailVisible(false)}>{m("listBack")}</button>}
             {searchContext ? (
               <>
                 <div className="history-preview__head">
@@ -660,10 +669,10 @@ export function HistoryPanel({
                 <div className="history-preview__actions">
                   {isTrash ? (
                     <>
-                      <button className="btn btn--primary btn--small" type="button" disabled={!selectedSession} onClick={restoreSelected}>
+                      <button className="btn btn--primary btn--small" type="button" disabled={!selectedSession || busy} onClick={restoreSelected}>
                         {tr("history.restore")}
                       </button>
-                      <button className="btn btn--small btn--danger" type="button" disabled={!selectedSession} onClick={purgeSelected}>
+                      <button className="btn btn--small btn--danger" type="button" disabled={!selectedSession || busy} onClick={purgeSelected}>
                         {actionConfirmPurge ? tr("history.confirmPurge") : tr("history.purge")}
                       </button>
                     </>
@@ -699,10 +708,12 @@ export function HistoryPanel({
               <div className="history-preview__body">
                 {preview.loading ? (
                   <div className="mem-empty">{tr("common.loading")}</div>
+                ) : preview.error ? (
+                  <div className="mem-empty" role="alert">{m("loadFailed")}<button className="btn btn--small" onClick={() => { if (selectedSession) void loadPreview(selectedSession); }}>{m("retry")}</button></div>
                 ) : previewItems.length === 0 ? (
                   <div className="mem-empty">{tr("history.previewEmpty")}</div>
                 ) : (
-                  <Transcript items={previewItems} onPrompt={() => {}} questionNavigator={false} />
+                  <Transcript items={previewItems} onPrompt={() => {}} questionNavigator={false} rewindDisabled />
                 )}
               </div>
               </>
@@ -728,9 +739,11 @@ export function HistoryPanel({
           onClose={closeHistoryMenus}
         />
       </div>
-      </section>
-    </div>
-  );
+    </>);
+  if (presentation === "page") return <div className="history-page" aria-busy={busy}>{content}</div>;
+  return <div className="management-modal-backdrop history-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+    <section className="management-modal history-modal" data-state={status} aria-label={tr(isTrash ? "history.trashTitle" : "history.title")} onClick={(e) => e.stopPropagation()}>{content}</section>
+  </div>;
 }
 
 // dayLabel buckets a timestamp into "Today", "Yesterday", or a locale date. It's

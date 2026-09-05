@@ -38,6 +38,7 @@ var (
 	claimInstallerExecutionFn               = claimVerifiedInstallerForExecution
 	lstatUpdateStagingFn                    = os.Lstat
 	reconcileWindowsUninstallRegistrationFn = winuninstall.Reconcile
+	verifyDesktopHandoffFn                  = verifyDesktopHandoff
 )
 
 func main() {
@@ -93,6 +94,7 @@ func run(args []string) int {
 	if parentPID != 0 {
 		if err := waitForProcessExitFn(uint32(parentPID), parentExitTimeout); err != nil {
 			logger.Printf("wait for parent process %d: %v", parentPID, err)
+			notifyHandoffBlockedFn(false)
 			return 1
 		}
 	}
@@ -137,7 +139,7 @@ func run(args []string) int {
 			logger.Printf("cancel unstarted update: %v", cancelErr)
 		}
 		if relaunch != "" {
-			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+			if relaunchErr := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); relaunchErr != nil {
 				logger.Printf("relaunch after unstarted update failure: %v", relaunchErr)
 			}
 		}
@@ -222,13 +224,7 @@ func run(args []string) int {
 			logger.Printf("clear completed update marker: %v", err)
 		}
 	}
-	if relaunch != "" {
-		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
-			logger.Printf("relaunch: %v", err)
-			return 1
-		}
-	}
-	return 0
+	return relaunchPublishedInstall(logger, relaunch, installDir, "relaunch")
 }
 
 func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, installDir, relaunch, toVersion string) int {
@@ -296,23 +292,42 @@ func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, i
 		// this idempotent reconciliation.
 		logger.Printf("reconcile Windows uninstall registration: %v", err)
 	}
-	if relaunch != "" {
-		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
-			logger.Printf("relaunch versioned release: %v", err)
-			return 1
-		}
+	return relaunchPublishedInstall(logger, relaunch, installDir, "relaunch versioned release")
+}
+
+func relaunchPublishedInstall(logger *log.Logger, relaunch, installDir, failVerb string) int {
+	if err := verifyDesktopHandoffFn(installDir, false); err != nil {
+		logger.Printf("installed; restart incomplete: %v", err)
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	path := preferRelaunchPath(relaunch, installDir)
+	if path == "" {
+		logger.Print("installed; no stable restart target is available")
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	if err := startRelaunchFn(path, installDir); err != nil {
+		logger.Printf("%s: %v", failVerb, err)
+		notifyHandoffBlockedFn(true)
+		return 1
+	}
+	if err := verifyDesktopHandoffFn(installDir, true); err != nil {
+		logger.Printf("installed; restart unconfirmed: %v", err)
+		notifyHandoffBlockedFn(true)
+		return 1
 	}
 	return 0
 }
 
-// preferRelaunchPath chooses the thin launcher when present so post-update
-// restarts use the permanent entry point, not a flat desktop binary.
+// preferRelaunchPath chooses the install-root launcher after a versioned
+// activation. A retained versions/<old>/ desktop path is never restarted.
 func preferRelaunchPath(relaunch, installDir string) string {
-	for _, name := range []string{"reasonix-launcher.exe", "Reasonix.exe"} {
-		path := filepath.Join(installDir, name)
-		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-			return path
-		}
+	if path, err := installlayout.StableRelaunchPath(installDir); err == nil && path != "" {
+		return path
+	}
+	if installlayout.IsSupersededVersionedDesktop(installDir, relaunch) {
+		return ""
 	}
 	return relaunch
 }

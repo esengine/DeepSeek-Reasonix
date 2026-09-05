@@ -1,3 +1,4 @@
+import { useAppNavigationStore } from "../store/appNavigation";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, ArrowUp, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FileText, Folder, Gauge, List, MessageSquare, PackageCheck, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
@@ -49,7 +50,7 @@ import { SlashMenu, sortSlashCommandsForMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 import { EffortSwitcher } from "./EffortSwitcher";
-import { ModelSwitcher } from "./ModelSwitcher";
+const ModelSwitcher = lazy(() => import("./ModelSwitcher").then((module) => ({ default: module.ModelSwitcher })));
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
 import { Markdown } from "./Markdown";
@@ -4762,7 +4763,10 @@ export function Composer({
                   balance={balance}
                 />
               )}
-              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+              <Suspense fallback={<span className="modelsw__label">{modelLabel}</span>}><ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} onManage={() => {
+                useAppNavigationStore.getState().setSettingsFocus({ target: "model-access" });
+                useAppNavigationStore.getState().setSettingsTarget("models");
+              }} /></Suspense>
             </div>
             {!heroMode && hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">

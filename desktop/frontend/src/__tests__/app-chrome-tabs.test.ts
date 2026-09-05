@@ -395,7 +395,7 @@ ok(
 
 ok(
   /topicShortcutIndexFromEvent\(event, desktopPlatform\)/.test(appSource) &&
-    /useTopicShortcuts\(!sidebarCollapsed, desktopPlatform\)/.test(appSource),
+    /useTopicShortcuts\(!sidebarCollapsed && !managementActive, desktopPlatform\)/.test(appSource),
   "topic shortcuts use the resolved desktop platform",
 );
 
@@ -490,10 +490,6 @@ ok(
   "history navigation does not re-resume a session that OpenTopicSession already pinned",
 );
 
-ok(
-  /<HeartbeatView[\s\S]*onOpenTopic=\{\(scope, workspaceRoot, topicId\) => \{[\s\S]*void handleOpenTopic\(scope, workspaceRoot, topicId\);[\s\S]*\}\}/.test(appSource),
-  "heartbeat topic navigation uses the guarded open-topic path",
-);
 
 for (const selector of [
   ".app--darwin .app-chrome--tabs",

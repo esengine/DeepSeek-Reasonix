@@ -952,6 +952,8 @@ export const en = {
   "status.jobsLabel": "jobs",
   "status.plan": "PLAN",
   "status.switchModel": "Switch model",
+  "providerUI.image": "Images",
+  "providerUI.manageModels": "Manage models",
   "modelSwitcher.searchPlaceholder": "Search models…",
   "modelSwitcher.noMatches": "No matching models",
   "status.noModels": "no switchable models",
@@ -1643,6 +1645,7 @@ export const en = {
   "mcp.interaction.fieldUnsupported": "This field type is not supported and cannot be submitted safely.",
 
   // settings drawer
+  "settings.backToWorkspace": "Back to workspace",
   "settings.title": "Settings",
   "settings.loading": "Loading…",
   "settings.loadFailed": "Settings could not be loaded.",

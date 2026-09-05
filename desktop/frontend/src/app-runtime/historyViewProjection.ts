@@ -3,8 +3,7 @@ import type { SessionMeta } from "../lib/types";
 export type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 export type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
-  | { kind: "history"; source: "all"; sessions: SessionMeta[] }
-  | { kind: "trash"; sessions: SessionMeta[] };
+  | { kind: "history"; source: "all"; sessions: SessionMeta[] };
 export function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
   return filter.scope === "project"
     ? sessions.filter(session => session.scope === "project" && session.workspaceRoot === filter.workspaceRoot)

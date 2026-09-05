@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { useOnboardingCommands } from "../app-runtime/useOnboardingCommands";
 import { useOverlayStore } from "../store/overlays";
+import { useAppNavigationStore } from "../store/appNavigation";
 import { onboardingWasDismissed } from "../lib/onboarding";
 
 const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost" });
@@ -15,8 +16,8 @@ let completed = 0;
 function Probe() { commands = useOnboardingCommands(() => { completed++; }); return null; }
 await act(async () => root.render(<Probe />));
 commands.chooseOnboardingProvider();
-assert.equal(useOverlayStore.getState().settingsTarget, "models");
-assert.deepEqual(useOverlayStore.getState().settingsFocus, { target: "model-access" });
+assert.deepEqual(useAppNavigationStore.getState().page, { kind: "settings", tab: "models" });
+assert.deepEqual(useAppNavigationStore.getState().settingsFocus, { target: "model-access" });
 assert.equal(useOverlayStore.getState().needsOnboarding, false);
 commands.completeOnboarding();
 assert.equal(completed, 1);

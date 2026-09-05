@@ -1,20 +1,17 @@
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { useGlobalShortcut } from "../lib/keyboardShortcuts";
 import { useLayoutStore, saveTerminalPanelOpen } from "../store/layout";
-import { useOverlayStore } from "../store/overlays";
 import { useTerminalStore } from "../store/terminal";
 
 function showTerminal() {
-  useOverlayStore.getState().setMainView("chat");
   useLayoutStore.getState().setTerminalPanelOpen(true);
   saveTerminalPanelOpen(true);
 }
 
 /** Commands and shortcuts share the same committed capability boundary. */
-export function useTerminalPanelCommands(input: { tabId?: string; enabled: boolean }) {
+export function useTerminalPanelCommands(input: { tabId?: string; enabled: boolean; shortcutsEnabled?: boolean }) {
   const toggleTerminalPanel = useCommittedCommand(() => {
     if (!input.enabled) return;
-    if (useOverlayStore.getState().mainView === "automation") { showTerminal(); return; }
     const next = !useLayoutStore.getState().terminalPanelOpen;
     useLayoutStore.getState().setTerminalPanelOpen(next);
     saveTerminalPanelOpen(next);
@@ -31,7 +28,7 @@ export function useTerminalPanelCommands(input: { tabId?: string; enabled: boole
     useLayoutStore.getState().setTerminalPanelOpen(false);
     saveTerminalPanelOpen(false);
   });
-  useGlobalShortcut("terminal.toggle", toggleTerminalPanel);
-  useGlobalShortcut("terminal.newSession", newTerminalSession);
+  useGlobalShortcut("terminal.toggle", toggleTerminalPanel, [toggleTerminalPanel], input.shortcutsEnabled !== false);
+  useGlobalShortcut("terminal.newSession", newTerminalSession, [newTerminalSession], input.shortcutsEnabled !== false);
   return { toggleTerminalPanel, openTerminalForPath, closeTerminalPanel };
 }

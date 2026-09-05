@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type { HeartbeatTask } from "./heartbeat.types";
 import { useHeartbeatT } from "./heartbeat.i18n";
 
@@ -60,16 +60,14 @@ export function CycleEditor({
   cycleType: "daily" | "weekly" | "biweekly" | "monthly" | "yearly";
 }) {
   const t = useHeartbeatT();
-  const cycleMatch = (draft.interval || "").match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(\d{2}:\d{2}))?$/);
+  const cycleMatch = (draft.interval || "").match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(.*))?$/);
   const cycleDays = cycleMatch?.[3] || "";
-  const cycleTime = cycleMatch?.[4] || "09:00";
-  const [selectedDays, setSelectedDays] = useState<string[]>(
-    cycleDays ? cycleDays.split(",") : ["mon","tue","wed","thu","fri","sat","sun"]
-  );
-  const [monthDay, setMonthDay] = useState(cycleDays || "1");
-  const [yearMonth, setYearMonth] = useState(cycleDays.split("-")[0] || "1");
-  const [yearDay, setYearDay] = useState(cycleDays.split("-")[1] || "1");
-  const [timeVal, setTimeVal] = useState(cycleTime);
+  // The interval is the controlled draft, including an unfinished time value.
+  const selectedDays = cycleDays ? cycleDays.split(",") : defaultHeartbeatCycleDays(cycleType);
+  const monthDay = cycleDays || "1";
+  const yearMonth = cycleDays.split("-")[0] || "1";
+  const yearDay = cycleDays.split("-")[1] || "1";
+  const timeVal = cycleMatch?.[4] ?? "09:00";
 
   // Build interval string when config changes
   const buildInterval = useCallback((ct: string, days: string[], tm: string) => {
@@ -93,37 +91,26 @@ export function CycleEditor({
     return (base[ct] || "24h") + suffix;
   }, []);
 
-  const onDayToggle = useCallback((day: string) => {
-    setSelectedDays((prev) => {
-      // Weekly/biweekly schedules must keep at least one weekday selected;
-      // an empty weekday rule is rejected by the backend's schedule parser,
-      // silently turning the task into a rolling interval.
-      const isWeeklyLike = cycleType === "weekly" || cycleType === "biweekly";
-      const wouldBeEmpty = prev.includes(day) && prev.length === 1 && isWeeklyLike;
-      if (wouldBeEmpty) return prev;
-      const next = prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day];
-      setDraft("interval", buildInterval(cycleType, next, timeVal));
-      return next;
-    });
-  }, [buildInterval, cycleType, setDraft, timeVal]);
+  const onDayToggle = (day: string) => {
+    const isWeeklyLike = cycleType === "weekly" || cycleType === "biweekly";
+    if (selectedDays.includes(day) && selectedDays.length === 1 && isWeeklyLike) return;
+    const next = selectedDays.includes(day) ? selectedDays.filter((value) => value !== day) : [...selectedDays, day];
+    setDraft("interval", buildInterval(cycleType, next, timeVal));
+  };
 
   const onMonthDayChange = useCallback((d: string) => {
-    setMonthDay(d);
     setDraft("interval", buildInterval(cycleType, [d], timeVal));
   }, [buildInterval, cycleType, setDraft, timeVal]);
 
   const onYearMonthChange = useCallback((m: string) => {
-    setYearMonth(m);
     setDraft("interval", buildInterval(cycleType, [m, yearDay], timeVal));
   }, [buildInterval, cycleType, setDraft, timeVal, yearDay]);
 
   const onYearDayChange = useCallback((d: string) => {
-    setYearDay(d);
     setDraft("interval", buildInterval(cycleType, [yearMonth, d], timeVal));
   }, [buildInterval, cycleType, setDraft, timeVal, yearMonth]);
 
   const onTimeChange = useCallback((tm: string) => {
-    setTimeVal(tm);
     const days = cycleType === "daily" || cycleType === "weekly" || cycleType === "biweekly" ? selectedDays
       : cycleType === "monthly" ? [monthDay]
       : cycleType === "yearly" ? [yearMonth, yearDay]

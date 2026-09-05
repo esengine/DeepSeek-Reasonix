@@ -33,10 +33,10 @@ assert.equal(finalDeclaration(windowsPreviewSelector, "opacity"), "0");
 assert.equal(finalDeclaration(windowsPreviewSelector, "visibility"), "hidden");
 assert.equal(finalDeclaration(windowsPreviewSelector, "pointer-events"), "none");
 
-// The entire automation page (list, editor, and loading fallback) owns this
-// region. Hiding only the icon would leave invisible caption click targets.
-assert.equal(finalDeclaration(windowsAutomationSelector, "opacity"), "0");
-assert.equal(finalDeclaration(windowsAutomationSelector, "visibility"), "hidden");
-assert.equal(finalDeclaration(windowsAutomationSelector, "pointer-events"), "none");
+// Management pages reserve caption space; unlike image previews, they retain
+// native window controls, including while the automation editor is open.
+assert.equal(finalDeclaration(windowsAutomationSelector, "opacity"), undefined);
+assert.equal(finalDeclaration(windowsAutomationSelector, "visibility"), undefined);
+assert.equal(finalDeclaration(windowsAutomationSelector, "pointer-events"), undefined);
 
 console.log("image viewer and automation window controls: 8 passed");

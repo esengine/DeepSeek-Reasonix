@@ -1,3 +1,5 @@
+import { useManagementT } from "../../../lib/managementLocale";
+import { automationDraftDirty, useAutomationDraftStore } from "../../../store/automationDrafts";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, CirclePause, Play, Trash2, X } from "lucide-react";
 import { Tooltip } from "../../../components/Tooltip";
@@ -21,8 +23,11 @@ export function TaskEditor({
   onCloseDetail,
   onDirtyChange,
   onOpenTopic,
-  onTrigger,
+  onTrigger, onDiscard, onToggleEnabled, onSaveAsNew,
 }: {
+  onDiscard?: () => void;
+  onToggleEnabled?: () => Promise<boolean>;
+  onSaveAsNew?: (task: HeartbeatTask) => Promise<boolean>;
   task: HeartbeatTask;
   onSave: (t: HeartbeatTask) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
@@ -32,11 +37,18 @@ export function TaskEditor({
   onTrigger?: (id: string) => void;
 }) {
   const t = useHeartbeatT();
+  const m = useManagementT();
+  const entry = useAutomationDraftStore((state) => state.entries[task.id]);
+  const managed = Boolean(onDiscard);
+  const [localTab, setLocalTab] = useState<"configuration" | "history">("configuration");
+  const tab = managed ? entry?.tab ?? "configuration" : localTab;
+  const setTab = (value: "configuration" | "history") => managed ? useAutomationDraftStore.getState().ui(task.id, { tab: value }) : setLocalTab(value);
   const titleRef = useRef<HTMLInputElement>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceView[]>([]);
   const [projectOpen, setProjectOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [localSaving, setSaving] = useState(false);
+  const saving = localSaving || (managed && Boolean(entry?.busy));
   const [saveError, setSaveError] = useState(false);
   const [frequencyError, setFrequencyError] = useState(false);
   const projectRef = useRef<HTMLDivElement>(null);
@@ -56,7 +68,12 @@ export function TaskEditor({
     return () => document.removeEventListener("click", close);
   }, [projectOpen]);
 
-  const [draft, setDraft] = useState(task);
+  const [localDraft, setLocalDraft] = useState(task);
+  const draft = managed && entry ? entry.draft : localDraft;
+  const setDraft = useCallback((update: HeartbeatTask | ((task: HeartbeatTask) => HeartbeatTask)) => {
+    if (managed) useAutomationDraftStore.getState().edit(task.id, (current) => typeof update === "function" ? update(current) : update);
+    else setLocalDraft(update);
+  }, [managed, task.id]);
   const initialTaskRef = useRef(task);
   // 保存后父组件 setEditing({...task}) 传入新引用，同步基线使 isDirty
   // 复位（保存按钮与 dirtyRef 不再保持脏状态）。
@@ -67,10 +84,11 @@ export function TaskEditor({
   // input. In particular, TriggerNow may advance topicId/lastRunAt/runHistory
   // while the user is editing title, prompt, or schedule.
   useEffect(() => {
+    if (managed) return;
     setDraft((current) => mergeEngineRunState({ ...current, enabled: task.enabled }, task));
-  }, [task.enabled, task.lastRunAt, task.runHistory, task.topicId]);
-  const isNew = !task.createdAt;
-  const isDirty = draft.title !== initialTaskRef.current.title
+  }, [managed, setDraft, task.enabled, task.lastRunAt, task.runHistory, task.topicId]);
+  const isNew = managed ? !entry?.baseline : !task.createdAt;
+  const isDirty = managed && entry ? automationDraftDirty(entry) : draft.title !== initialTaskRef.current.title
     || draft.prompt !== initialTaskRef.current.prompt
     || draft.interval !== initialTaskRef.current.interval
     || draft.enabled !== initialTaskRef.current.enabled
@@ -103,8 +121,9 @@ export function TaskEditor({
   // 手动保存（ChatGPT 式）：修改后底部出现取消/保存，无修改时不显示。
   // enabled 开关走头部即时保存并同步基线，不进入 isDirty。
   const handleCancel = useCallback(() => {
-    setDraft(initialTaskRef.current);
-  }, []);
+    setSaveError(false);
+    if (onDiscard) onDiscard(); else setDraft(initialTaskRef.current);
+  }, [onDiscard, setDraft]);
 
   const handleSave = useCallback(async () => {
     if (!draft.title.trim() || !draft.prompt.trim()) return;
@@ -115,7 +134,7 @@ export function TaskEditor({
   }, [draft, onSave]);
   const set = useCallback((field: keyof HeartbeatTask, value: string | boolean) => {
     setDraft((prev) => ({ ...prev, [field]: value }));
-  }, []);
+  }, [setDraft]);
 
   // 启用/暂停切换（状态文字入口 + 右侧按钮共用）：
   // 只持久化 enabled 变更，基于最近保存基线（initialTaskRef）翻转，
@@ -125,18 +144,18 @@ export function TaskEditor({
     const saved = initialTaskRef.current;
     const updated = { ...saved, enabled: !saved.enabled };
     setSaving(true);
-    const persisted = await onSave(updated);
+    const persisted = onToggleEnabled ? await onToggleEnabled() : await onSave(updated);
     setSaving(false);
     setSaveError(!persisted);
-    if (persisted) {
+    if (persisted && !managed) {
       // 只同步 enabled（磁盘已持久化），title/prompt/interval 等草稿编辑保留。
       setDraft((prev) => ({ ...prev, enabled: updated.enabled }));
       initialTaskRef.current = { ...saved, enabled: updated.enabled };
     }
-  }, [onSave]);
+  }, [managed, onSave, onToggleEnabled, setDraft]);
 
   // Detect frequency type from interval value
-  const [freqType, setFreqType] = useState<HeartbeatFrequencyType>(
+  const [localFrequency, setLocalFrequency] = useState<HeartbeatFrequencyType>(
     (() => {
       const iv = task.interval || "";
       if (isCronExpr(iv)) return "cron";
@@ -145,6 +164,11 @@ export function TaskEditor({
       return "interval";
     })()
   );
+
+  const freqType = managed ? entry?.frequency ?? localFrequency : localFrequency;
+  const setFreqType = useCallback((frequency: HeartbeatFrequencyType) => {
+    if (managed) useAutomationDraftStore.getState().ui(task.id, { frequency }); else setLocalFrequency(frequency);
+  }, [managed, task.id]);
 
   // 切换频率类型时重建 interval（摊开的 7 个选项）
   const onFreqSelect = useCallback((ft: HeartbeatFrequencyType) => {
@@ -156,7 +180,7 @@ export function TaskEditor({
     setFrequencyError(false);
     setDraft(converted);
     setFreqType(ft);
-  }, [draft]);
+  }, [draft, setDraft, setFreqType]);
 
   const selectedWorkspace = draft.scope === "project" && draft.workspaceRoot
     ? workspaces.find((w) => w.path === draft.workspaceRoot)
@@ -228,8 +252,8 @@ export function TaskEditor({
               type="button"
               disabled={saving}
               onClick={() => {
-                if (confirmingDelete) {
-                  void onDelete().then((deleted) => setSaveError(!deleted));
+                if (managed || confirmingDelete) {
+                  void onDelete();
                 } else {
                   setConfirmingDelete(true);
                   window.setTimeout(() => setConfirmingDelete(false), 3000);
@@ -247,7 +271,18 @@ export function TaskEditor({
       </header>
 
       {/* Fields: 表单滚动区 */}
+      {isDirty && !isNew && <div className="management-notice">{m("savedRun")}</div>}
+      {managed && entry && (entry.missing || entry.conflicts.length > 0) && <div className="management-notice" role="alert">
+        {m(entry.missing ? "missingTask" : "conflict")}
+        {!entry.missing && <button className="btn btn--small" disabled={saving} onClick={handleCancel}>{m("reloadTask")}</button>}
+        <button className="btn btn--small" disabled={saving || !draft.title.trim() || !draft.prompt.trim()} onClick={() => void onSaveAsNew?.(draft)}>{m("saveAsNew")}</button>
+      </div>}
+      <div className="heartbeat-detail-tabs" role="tablist" aria-label={t("heartbeat.detailTitle")}>
+        <button role="tab" aria-selected={tab === "configuration"} onClick={() => setTab("configuration")}>{m("configuration")}</button>
+        <button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>{t("heartbeat.runHistory")}</button>
+      </div>
       <div className="heartbeat-editor__fields">
+      <fieldset className="automation-fields" disabled={saving} hidden={tab !== "configuration"}>
       {/* Title: 隐形输入框——无边框大标题样式，点击仍可直接编辑 */}
       <input
         ref={titleRef}
@@ -442,13 +477,12 @@ export function TaskEditor({
               className="heartbeat-editor__freq-input"
               value={(() => {
                 const m = (draft.interval || "").match(/^(\d+)/);
-                return m ? m[1] : "1";
+                return m ? m[1] : "";
               })()}
               onChange={(e) => {
                 const num = e.target.value.replace(/\D/g, "");
-                const mUnit = (draft.interval || "").match(/^(\d+)([smh])/);
-                const unit = mUnit ? mUnit[2] : "h";
-                setDraft((prev) => ({ ...prev, interval: num ? num + unit : "1" + unit }));
+                const unit = (draft.interval || "").match(/([smh])$/)?.[1] || "h";
+                setDraft((prev) => ({ ...prev, interval: num + unit }));
               }}
               placeholder="1"
             />
@@ -524,7 +558,8 @@ export function TaskEditor({
       {/* 运行历史记录：每次成功执行的记录，点击可打开对应对话
           历史为空但有最近会话（task.topicId）时，用最近会话合成一条——旧任务
           在 runHistory 字段引入前执行过，topicId 仍指向最近对话 */}
-      <div className="heartbeat-run-history">
+      </fieldset>
+      <div className="heartbeat-run-history" hidden={tab !== "history"}>
         <div className="heartbeat-run-history__header">
           <span>{t("heartbeat.runHistory")}</span>
         </div>
@@ -572,24 +607,26 @@ export function TaskEditor({
       </div>
 
       {/* 保存/取消：仅在有未保存修改时显示（ChatGPT 式），固定在面板底部 */}
-      {saveError && (
+      {(saveError || (managed && entry?.error)) && (
         <div className="heartbeat-editor__save-notice">
           <span className="heartbeat-editor__save-error" role="alert">{t("heartbeat.saveFailed")}</span>
         </div>
       )}
-      {(isNew || isDirty) && (
+      {(managed || isNew || isDirty) && (
         <div className="heartbeat-editor__actions">
+          {managed && <span className="automation-save-status" role="status">{m(saving ? "saving" : isDirty ? "unsaved" : "saved")}</span>}
           <button
             className="heartbeat-editor__action-btn"
             type="button"
+            disabled={saving || (!isNew && !isDirty)}
             onClick={handleCancel}
           >
-            {t("common.cancel")}
+            {managed ? m("discard") : t("common.cancel")}
           </button>
           <button
             className="heartbeat-editor__action-btn heartbeat-editor__action-btn--primary"
             type="button"
-            disabled={saving || !draft.title.trim() || !draft.prompt.trim()}
+            disabled={saving || (!isNew && !isDirty) || Boolean(managed && (entry?.missing || entry?.conflicts.length)) || !draft.title.trim() || !draft.prompt.trim()}
             onClick={() => void handleSave()}
           >
             {t("common.save")}

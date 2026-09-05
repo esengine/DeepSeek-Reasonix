@@ -144,3 +144,67 @@
     justify-content: flex-start;
   }
 }
+
+/* Provider settings share one rail/detail layout across themes. Hidden panels
+   remain mounted so switching providers cannot discard an unsaved draft. */
+.provider-workspace { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 510px; border: 1px solid var(--border); border-radius: 12px; overflow: clip; background: var(--bg-elev); }
+.provider-workspace [hidden], .provider-add-panel [hidden] { display: none !important; }
+.provider-workspace__rail { border-right: 1px solid var(--border); padding: 12px; background: var(--bg-soft); display: flex; flex-direction: column; gap: 16px; }
+.provider-workspace__rail h4 { margin: 4px 8px 8px; color: var(--fg-dim); font-size: var(--text-2xs); font-weight: 500; }
+.provider-workspace__rail button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: 1px solid transparent; background: transparent; color: var(--fg); border-radius: 7px; padding: 10px; text-align: left; cursor: pointer; font: inherit; font-size: var(--font-control-small); }
+.provider-workspace__rail button span:first-child { overflow-wrap: anywhere; }
+.provider-workspace__rail button:hover { background: var(--bg-elev-2); }
+.provider-workspace__rail button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev)); border-color: color-mix(in srgb, var(--accent) 25%, var(--border)); color: var(--accent); }
+.provider-workspace__rail .provider-workspace__add { margin-top: auto; color: var(--accent); }
+.provider-status-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--fg-dim); }
+.provider-status-dot--ready { background: var(--success, #23864b); }
+.provider-workspace__detail { min-width: 0; padding: 22px; }
+.provider-workspace__detail .provider-access-card, .provider-workspace__detail .provider-add-panel { border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
+.provider-access-card--detail .provider-access-card__head { margin-bottom: 16px; }
+.provider-access-card--detail .provider-editor { border: 0; padding: 0; margin-top: 14px; }
+.provider-catalog-trigger { width: 100%; justify-content: space-between; margin-bottom: 8px; }
+.provider-catalog { border: 1px solid var(--border); background: var(--bg-elev); border-radius: 8px; padding: 8px; }
+.provider-catalog__list { max-height: 280px; overflow-y: auto; margin-top: 6px; }
+.provider-catalog__list .provider-template-card { width: 100%; min-height: 0; padding: 10px; border: 0; border-radius: 5px; margin-bottom: 2px; text-align: left; }
+.provider-catalog__list .provider-template-card strong { font-size: var(--font-control-small); }
+.provider-catalog__list .provider-template-card span { font-size: var(--text-2xs); }
+.provider-models-editor { margin-top: 22px; min-width: 0; }
+.provider-models-editor__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.provider-models-editor__head > div { display: flex; gap: 6px; }
+.provider-models-editor__head strong { font-size: var(--font-control-small); }
+.provider-models-editor__empty { padding: 20px 14px; border: 1px dashed var(--border); border-radius: 8px; color: var(--fg-dim); font-size: var(--font-control-small); }
+.provider-models-editor__list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.provider-models-editor__list:empty { display: none; }
+.provider-model-row { padding: 10px; border-bottom: 1px solid var(--border-soft); }
+.provider-model-row:last-child { border-bottom: 0; }
+.provider-model-row__main { display: flex; align-items: center; gap: 6px; }
+.provider-model-row__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--font-control-small); }
+.provider-model-row__main > .btn { padding-inline: 6px; flex-shrink: 0; border-color: transparent; }
+.provider-model-row .provider-fetch-status { margin-top: 8px; font-size: var(--text-2xs); overflow-wrap: anywhere; }
+.provider-field { display: grid; gap: 7px; margin: 16px 0; font-size: var(--font-control-small); }
+.provider-field small { color: var(--fg-dim); line-height: 1.5; }
+.provider-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.provider-dialog-backdrop { z-index: var(--z-overlay-backdrop); }
+.provider-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 24px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; }
+.provider-dialog > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.provider-dialog h3 { margin: 0; font-size: 17px; }
+.provider-dialog footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.provider-dialog footer > span { margin-right: auto; font-size: var(--text-2xs); color: var(--fg-dim); }
+.provider-dialog .mem-input, .provider-dialog .mem-select { width: 100%; box-sizing: border-box; }
+.provider-catalog-search { display: flex; align-items: center; gap: 8px; }
+.provider-discovery-list { max-height: 320px; overflow-y: auto; margin-top: 14px; }
+.provider-discovery-row { display: flex; gap: 12px; align-items: center; padding: 12px 4px; border-bottom: 1px solid var(--border-soft); font-size: var(--font-control-small); }
+.provider-discovery-row > span { flex: 1; overflow-wrap: anywhere; }
+.provider-discovery-row small { color: var(--fg-dim); }
+.provider-editor code { overflow-wrap: anywhere; font-size: var(--text-2xs); }
+@media (max-width: 900px) {
+  .provider-workspace { grid-template-columns: 150px minmax(0, 1fr); }
+  .provider-workspace__detail { padding: 14px; }
+  .provider-model-row__main { flex-wrap: wrap; }
+  .provider-model-row__name { flex-basis: 100%; }
+}
+@media (max-width: 640px) {
+  .provider-workspace { grid-template-columns: minmax(0, 1fr); }
+  .provider-workspace__rail { border-right: 0; border-bottom: 1px solid var(--border); max-height: 200px; overflow-y: auto; }
+  .provider-field-grid { grid-template-columns: 1fr; gap: 0; }
+}

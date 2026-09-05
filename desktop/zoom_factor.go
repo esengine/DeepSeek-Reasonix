@@ -21,6 +21,13 @@ func zoomFactorPath() string {
 	return filepath.Join(config.MemoryUserDir(), "desktop-zoom.json")
 }
 
+func initialDesktopZoomFactor() float64 {
+	if zf, ok := loadZoomFactor(); ok && zf > 0 {
+		return zf
+	}
+	return 1.0
+}
+
 // loadZoomFactor reads the saved zoom factor. The bool is false when no saved
 // value exists (first launch, missing file, corrupt JSON). Callers should fall
 // back to 1.0 (no zoom) in that case.

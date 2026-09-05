@@ -1,7 +1,11 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useManagementWorkspace } from "./lib/useManagementWorkspace";
+import { useAppNavigationStore } from "./store/appNavigation";
+import { useAutomationNavigation } from "./app-runtime/useAutomationNavigation";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
+  AlarmClock,
   Search,
   Server,
   SquarePen,
@@ -22,7 +26,7 @@ import { useGoalActionHandler } from "./lib/goalAction";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { activeLeaseBlockedTab, createBoundedRefreshCoordinator, sameTabMetaLists, seedActiveTabMetaList, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT } from "./lib/tabMetaRefresh";
-import { t, useT } from "./lib/i18n";
+import { t, useT, useI18n } from "./lib/i18n";
 import { useActiveRemoteSession } from "./lib/useRemoteSession";
 import { useRemoteTabOpened } from "./lib/useRemoteTabOpened";
 import { publishNavigationIntent } from "./lib/useNavigationIntentFence";
@@ -283,7 +287,6 @@ function NoticePreviewPanel() {
   );
 }
 
-const HeartbeatView = lazy(() => import("./custom/features/heartbeat/HeartbeatPanel").then((module) => ({ default: module.HeartbeatView })));
 const TaskMonitorPanel = lazy(() => import("./components/TaskMonitorPanel").then((module) => ({ default: module.TaskMonitorPanel })));
 const loadNavigationOwner = () => import("./app-runtime/navigationOwner");
 const loadDeliveryContinue = () => import("./lib/deliveryContinue");
@@ -435,6 +438,7 @@ export default function App() {
     ensureBlankTab, ensureBlankSurface, commitSingleSurfaceNavigation,
   } = runtime.navigation;
   const t = useT();
+  const { locale } = useI18n();
   const { showToast } = useToast();
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
@@ -487,10 +491,18 @@ export default function App() {
   const needsOnboarding = useOverlayStore((s) => s.needsOnboarding);
   const setNeedsOnboarding = useOverlayStore((s) => s.setNeedsOnboarding);
   const [providerSetupNeeded, setProviderSetupNeeded] = useState(false);
-  const settingsTarget = useOverlayStore((s) => s.settingsTarget);
-  const setSettingsTarget = useOverlayStore((s) => s.setSettingsTarget);
-  const settingsFocus = useOverlayStore((s) => s.settingsFocus);
-  const setSettingsFocus = useOverlayStore((s) => s.setSettingsFocus);
+  const page = useAppNavigationStore((s) => s.page);
+  const managementActive = page.kind !== "workspace";
+  const settingsTarget = page.kind === "settings" ? page.tab : null;
+  const openPage = useAppNavigationStore((s) => s.openPage);
+  const returnToWorkspace = useAppNavigationStore((s) => s.returnToWorkspace);
+  const enterConversation = useAppNavigationStore((s) => s.enterConversation);
+  const visitedTrash = useAppNavigationStore((s) => s.visitedTrash);
+  const visitedAutomation = useAppNavigationStore((s) => s.visitedAutomation);
+  const automationReturn = useAppNavigationStore((s) => s.automationReturn);
+  const setSettingsTarget = useAppNavigationStore((s) => s.setSettingsTarget);
+  const settingsFocus = useAppNavigationStore((s) => s.settingsFocus);
+  const setSettingsFocus = useAppNavigationStore((s) => s.setSettingsFocus);
   const { desktopLayoutStyle, startupUpdateChecksEnabled, statusBarStyle, statusBarItems,
     sidebarImConnections, imTopicSources, configLoadWarnings, reloadConfigWarnings,
     dismissConfigWarnings, reload: reloadDesktopPreferences } = useDesktopPreferences();
@@ -518,9 +530,6 @@ export default function App() {
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useLayoutStore((s) => s.setSidebarCollapsed);
-  const mainView = useOverlayStore((s) => s.mainView);
-  const setMainView = useOverlayStore((s) => s.setMainView);
-  const automationView = mainView === "automation";
   type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
   const [topicTimeFilter, setTopicTimeFilter] = useState<TimeFilter>(() => {
     try {
@@ -564,7 +573,7 @@ export default function App() {
   const workspacePanelMaximized = useLayoutStore((s) => s.workspacePanelMaximized);
   const rightDockMode = useLayoutStore((s) => s.rightDockMode);
   const terminalPanelOpen = useLayoutStore((s) => s.terminalPanelOpen);
-  const { mounted: terminalContentVisible, fitEnabled: terminalFitEnabled, prefetch: prefetchTerminalPanel } = useWarmTerminalPanel(terminalPanelOpen, terminalResizing, !automationView);
+  const { mounted: terminalContentVisible, fitEnabled: terminalFitEnabled, prefetch: prefetchTerminalPanel } = useWarmTerminalPanel(terminalPanelOpen, terminalResizing, !managementActive);
   const terminalHeight = useLayoutStore((s) => s.terminalHeight);
   const setTerminalHeight = useLayoutStore((s) => s.setTerminalHeight);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
@@ -593,20 +602,6 @@ export default function App() {
   const sidebarSearchOpen = useOverlayStore((s) => s.sidebarSearchOpen);
   const setSidebarSearchOpen = useOverlayStore((s) => s.setSidebarSearchOpen);
 
-  // Leaving the automation view: any overlay/sidebar surface that signals the
-  // user is returning to the chat workspace switches mainView back to "chat".
-  // Navigation paths (open topic / new session / resume) are covered by
-  // enqueueNavigation.
-  useEffect(() => {
-    if (mainView !== "automation") return;
-    // Any chat-side overlay/surface counts as "returning to the chat
-    // workspace": settings, palette, sidebar search, history, the shortcuts
-    // cheatsheet and the topic export menu all switch mainView back to chat.
-    if (settingsTarget !== null || paletteOpen || sidebarSearchOpen || histView !== null
-      || shortcutsOpen || topicExportOpen) {
-      setMainView("chat");
-    }
-  }, [mainView, settingsTarget, paletteOpen, sidebarSearchOpen, histView, shortcutsOpen, topicExportOpen, setMainView]);
   const sidebarSearchFocusSignal = useOverlayStore((s) => s.sidebarSearchFocusSignal);
   const setSidebarSearchFocusSignal = useOverlayStore((s) => s.setSidebarSearchFocusSignal);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
@@ -617,6 +612,7 @@ export default function App() {
   const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  useManagementWorkspace(layoutRef, managementActive);
   const workspacePanelResizeFinishRef = useRef<(() => void) | null>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
 
@@ -717,7 +713,7 @@ export default function App() {
     if (typeof window === "undefined" || !window.runtime) return;
     return window.runtime.EventsOn("app:open-settings", () => {
       closeTransientOverlays();
-      setSettingsTarget("general");
+      setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
     });
   }, [closeTransientOverlays]);
   useEffect(() => {
@@ -817,9 +813,9 @@ export default function App() {
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
   );
-  const chatSurfaceVisible = !automationView;
+  const chatSurfaceVisible = true;
   const { dockVisible: surfaceWorkspacePanelRenderable, dockGridOpen: surfaceWorkspacePanelGridOpen,
-    dockOverlay: surfaceWorkspacePanelOverlay, dockMaximized: surfaceWorkspacePanelMaximized,
+    dockOverlay: surfaceWorkspacePanelOverlay,
     terminalOpen: terminalSurfaceOpen } = projectConversationLayout({
     chatVisible: chatSurfaceVisible, localToolsEnabled: conversationView.localToolsEnabled, dockMode: rightDockMode,
     dockRenderable: workspacePanelRenderable, dockGridOpen: workspacePanelGridOpen, dockOverlay: workspacePanelOverlay,
@@ -2015,7 +2011,7 @@ export default function App() {
   useEffect(() => { setVerificationRevealRequest(null); }, [activeTabId, state.completionSummary, state.turnStartAt]);
 
   const { toggleTerminalPanel, openTerminalForPath, closeTerminalPanel } = useTerminalPanelCommands({
-    tabId: activeTabId, enabled: conversationView.localToolsEnabled,
+    tabId: activeTabId, enabled: conversationView.localToolsEnabled, shortcutsEnabled: !managementActive,
   });
 
   const remoteWorkspaceLaunchGate = useRef(new RemoteWorkspaceLaunchGate());
@@ -2160,7 +2156,7 @@ export default function App() {
   const tabSwitchRunningRef = useRef(false);
   const tabSwitchPendingRef = useRef<PendingNavigationRequest<{ tabId: string; optimisticTab?: TabMeta; navigationIntentSeq: number }> | null>(null);
   const enterChatViewForTabNavigation = useCommittedCommand(() => {
-    setMainView("chat");
+    enterConversation();
   });
   const enqueueTabSwitch = useCommittedCommand((tabId: string, optimisticTab?: TabMeta): Promise<void> => {
       enterChatViewForTabNavigation();
@@ -2663,7 +2659,8 @@ export default function App() {
 
   const openTrash = useCommittedCommand(async () => {
     closeTransientOverlays();
-    setHistView({ kind: "trash", sessions: await listTrashedSessions() });
+    setHistView(null);
+    openPage({ kind: "trash" });
   });
   const closeHistory = useCommittedCommand(() => {
     closeTransientOverlays();
@@ -2681,15 +2678,17 @@ export default function App() {
     );
   });
 
+  const { openAutomationTopic, topicAccepted } = useAutomationNavigation({ noteIntent: noteNavigationIntent,
+    enqueue: useCommittedCommand((intent, seq) => enqueueNavigationWithIntent(intent, seq)) });
   const { enqueueNavigation, enqueueNavigationWithIntent, openRemoteProject } = useDesktopNavigation({
     visible: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, singleSurface: singleSurfaceLayout,
     ports: { isNavigationIntentCurrent, activateTopic, openTopicSession, openGlobalTab, openProjectTab,
       ensureBlankSurface, ensureBlankTab, createIsolatedWorktree, openChannelSession, resumeSession,
       registeredNavigationIntent, switchRemoteTab, openRemoteProject: app.OpenRemoteProjectTab,
-      listTabs: app.ListTabs, applyTabs: setTabMetas, seedTab: seedActiveTabMeta, listSessions },
+      listTabs: app.ListTabs, applyTabs: setTabMetas, seedTab: seedActiveTabMeta, listSessions, topicAccepted },
     setTabRevealSignal, setTranscriptRevealSignal, setProjectRevision, setHistory: setHistView, t, showToast,
     noteIntent: noteNavigationIntent, beginSurface: beginNavigationSurface, settleSurface: settleNavigationSurface,
-    showChat: useCommittedCommand(() => setMainView("chat")),
+    showChat: enterConversation,
   });
 
   const openBlankSession = useCommittedCommand((scope: string, workspaceRoot: string): Promise<void> =>
@@ -2782,13 +2781,14 @@ export default function App() {
   useGlobalShortcut("app.newSession", () => void handleNewTab(), [handleNewTab]);
   useGlobalShortcut("settings.open", () => {
     closeTransientOverlays();
-    setSettingsTarget("general");
+    setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
   }, [closeTransientOverlays]);
   useGlobalShortcut("tab.close", () => {
-    if (activeTabId) void handleTabClose(activeTabId);
-  }, [activeTabId, handleTabClose], Boolean(activeTabId) && !automationView);
+    if (managementActive) returnToWorkspace();
+    else if (activeTabId) void handleTabClose(activeTabId);
+  }, [activeTabId, handleTabClose, managementActive, returnToWorkspace], managementActive || Boolean(activeTabId));
   useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
-  useGlobalShortcut("sidebar.toggle", toggleSidebar, [toggleSidebar]);
+  useGlobalShortcut("sidebar.toggle", toggleSidebar, [toggleSidebar], !managementActive);
 
   // --- Topic shortcut navigation (Cmd/Ctrl+1-9) ---
   const visibleTopicsRef = useRef<TopicShortcutEntry[]>([]);
@@ -2798,11 +2798,11 @@ export default function App() {
   const handleNavigateTopic = useCommittedCommand((entry: TopicShortcutEntry) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   });
-  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed, desktopPlatform);
+  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed && !managementActive, desktopPlatform);
 
   // Register Cmd/Ctrl+1-9 shortcuts for topic navigation
   useEffect(() => {
-    if (sidebarCollapsed) return;
+    if (sidebarCollapsed || managementActive) return;
     const onKeydown = (event: globalThis.KeyboardEvent) => {
       const idx = topicShortcutIndexFromEvent(event, desktopPlatform);
       if (idx === null) return;
@@ -2814,13 +2814,14 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeydown);
     return () => document.removeEventListener("keydown", onKeydown);
-  }, [sidebarCollapsed, desktopPlatform, handleNavigateTopic]);
+  }, [sidebarCollapsed, managementActive, desktopPlatform, handleNavigateTopic]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
+      { id: "cmd-automation", group: t("palette.group.commands"), title: t("sidebar.automation"), icon: <AlarmClock size={15} />, compact: true, keywords: ["automation", "自动化"], run: () => openPage({ kind: "automation" }) },
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
-      { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
+      { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget) },
       { id: "cmd-appearance", group: t("palette.group.commands"), title: t("palette.cmd.appearance"), icon: <Palette size={15} />, compact: true, keywords: ["theme", "appearance", "外观", "主题"], run: () => setSettingsTarget("appearance") },
       {
         id: "cmd-theme-reset",
@@ -2959,30 +2960,13 @@ export default function App() {
             : cur,
       );
     });
-  const onRestoreTrashedSession = useCommittedCommand(async (path: string) => {
-      await restoreSession(path);
-      const trashed = await listTrashedSessions();
-      setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
-    });
-  const onPurgeTrashedSession = useCommittedCommand(async (path: string) => {
-      await purgeTrashedSession(path);
-      const trashed = await listTrashedSessions();
-      setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
-    });
-  const onPurgeAllTrashedSessions = useCommittedCommand(async (paths: string[]) => {
-      const uniquePaths = Array.from(new Set(paths));
-      for (const path of uniquePaths) {
-        await purgeTrashedSession(path);
-      }
-      const trashed = await listTrashedSessions();
-      setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
-    });
   // Workspace: open the folder chooser and switch projects. The hook resets the
   // transcript and refreshes meta on a pick. A cancel is a no-op.
   const refreshTabsAfterMutation = useCommittedCommand((latest: () => boolean) => (
     refreshTabMetas(latest, { afterMutation: true })
   ));
   const switchFolder = useCommittedCommand(async (path?: string) => {
+    enterConversation();
     return lazyNavigateWorkspace(path, {
       claimIntent: noteNavigationIntent,
       beginSurface: beginNavigationSurface,
@@ -3070,7 +3054,7 @@ export default function App() {
   const handleChromeTitlebarDoubleClick = useCommittedCommand((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!chromeDoubleClickZooms) return;
     const target = event.target as HTMLElement | null;
-    const onChromeSurface = target?.closest(".app-chrome, .topicbar, .workbench-dock__tools");
+    const onChromeSurface = target?.closest(".app-chrome, .topicbar, .workbench-dock__tools, .management-screen__chrome");
     const onMacOSWorkbenchSidebarTitlebar = isMacOSWorkbenchSidebarTitlebar(target, event.clientY, desktopPlatform);
     if (!onChromeSurface && !onMacOSWorkbenchSidebarTitlebar) return;
     if (target?.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
@@ -3325,11 +3309,10 @@ export default function App() {
         sidebarWorkbench ? "app--workbench" : "",
         sidebarCreation ? "app--creation" : "",
         !sidebarWorkbench && !sidebarCreation ? "app--classic" : "",
-        automationView ? "app--automation" : "",
       ].filter(Boolean).join(" ")}
     >
       <ThemeBackground />
-      {sidebarWorkbench && chatSurfaceVisible && <div className="app__dock-toggle">{dockToggleButton}</div>}
+      {sidebarWorkbench && <div className="app__dock-toggle" inert={managementActive}>{dockToggleButton}</div>}
       <div
         ref={layoutRef}
         className={[
@@ -3337,17 +3320,16 @@ export default function App() {
           sidebarWorkbench ? "layout--workbench" : "",
           workbenchChromeHidden ? "layout--workbench-chrome-hidden" : "",
           sidebarCreation ? "layout--creation-chrome-hidden" : "",
-          automationView ? "layout--automation" : "",
-          !statusBarVisible ? "layout--statusbar-hidden" : "",
+          sidebarImDetailConnection ? "layout--statusbar-hidden" : "",
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           surfaceWorkspacePanelGridOpen ? "layout--workspace-open" : "",
-          surfaceWorkspacePanelOverlay ? "layout--workspace-overlay" : "",
-          !automationView ? "layout--terminal-drawer-open" : "",
+          workspacePanelOverlay ? "layout--workspace-overlay" : "",
+          "layout--terminal-drawer-open",
           terminalSurfaceOpen ? "layout--terminal-drawer-expanded" : "",
-          !automationView && terminalResizing ? "layout--terminal-resizing" : "",
-          surfaceWorkspacePanelMaximized ? "layout--workspace-maximized" : "",
-          !automationView && workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
+          terminalResizing ? "layout--terminal-resizing" : "",
+          workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
+          workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -3384,7 +3366,7 @@ export default function App() {
         </a>
 
         <SidebarRegion
-          automation={automationView}
+          automation={page.kind === "automation"}
           className={sidebarClassName}
           workbench={sidebarWorkbench}
           creation={sidebarCreation}
@@ -3396,7 +3378,7 @@ export default function App() {
           t={t}
           onNewSession={() => void handleNewTab()}
           onOpenTrash={() => void openTrash()}
-          onOpenAutomation={() => setMainView("automation")}
+          onOpenAutomation={() => openPage({ kind: "automation" })}
           onOpenSettings={openSidebarSettings}
           onToggleSearch={toggleSidebarSearch}
           onToggle={toggleSidebar}
@@ -3421,13 +3403,8 @@ export default function App() {
         />
 
         <section className={`chat-pane${creationEmptyHero ? " chat-pane--creation-empty" : ""}`}>
-          {mainView === "automation" ? (
-            <Suspense fallback={<div className="heartbeat-page" />}>
-              <HeartbeatView onToggleSidebar={toggleSidebar} onOpenTopic={(scope, workspaceRoot, topicId) => { void handleOpenTopic(scope, workspaceRoot, topicId); }} />
-            </Suspense>
-          ) : (
-          <>
           <header className="topicbar">
+            {automationReturn && <button className="btn btn--small" type="button" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); openPage({ kind: "automation" }); }}>{locale === "en" ? "Back to automation" : locale === "zh-TW" ? "返回自動化" : "返回自动化"}</button>}
             {workbenchChromeHidden && (
               <Tooltip label={sidebarToggleTitle}>
                 <button
@@ -3780,8 +3757,6 @@ export default function App() {
               },
             }}
           />
-          </>
-          )}
         </section>
 
         <WorkspaceDockRegion
@@ -3863,11 +3838,14 @@ export default function App() {
           view: { kind: histView.kind, sessions: histView.sessions, running: state.running },
           commands: {
             onResume: onResumeSession, onPreview: previewSession, onDelete: onDeleteSession,
-            onRename: onRenameHistorySession, onRestore: onRestoreTrashedSession,
-            onPurge: onPurgeTrashedSession, onPurgeAll: onPurgeAllTrashedSessions,
+            onRename: onRenameHistorySession,
             onInspectVersions: requestSessionVersions, onClose: closeHistory,
           },
         } : undefined}
+        trash={visitedTrash ? { view: { active: page.kind === "trash" },
+          commands: { onBack: returnToWorkspace, list: listTrashedSessions, restore: restoreSession, purge: purgeTrashedSession } } : undefined}
+        automation={visitedAutomation ? { view: { active: page.kind === "automation" },
+          commands: { onBack: returnToWorkspace, onOpenTopic: openAutomationTopic } } : undefined}
         recovery={{
           view: { sessions: histView?.sessions },
           commands: { onResumeSession, onRecoveryCreated, onLineageChanged: onRecoveryLineageChanged },
@@ -3878,7 +3856,7 @@ export default function App() {
             agentRunning: state.running, desktopPlatform,
             activeWorkspaceKey: `${activeTab?.id ?? activeTabId ?? ""}\u0000${activeTab?.workspaceRoot ?? activeTab?.cwd ?? state.meta?.cwd ?? ""}`,
           },
-          commands: { onUseSubagent: prefillSubagentCommand, onClose: closeSettings, onChanged: handleSettingsChanged },
+          commands: { onUseSubagent: prefillSubagentCommand, onClose: closeSettings, onNavigate: setSettingsTarget, onChanged: handleSettingsChanged },
         } : undefined}
         palette={paletteOpen ? {
           view: { open: true, items: paletteItems, placeholder: t("palette.placeholder"), emptyText: t("palette.empty") },

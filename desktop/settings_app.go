@@ -3033,75 +3033,7 @@ func providerPresetNoExistingProviderError(id string) error {
 // The probe rides the configured network proxy so a broken proxy path fails
 // here, at setup time, instead of succeeding and stalling chat later (#9560).
 func (a *App) FetchProviderModelCatalog(p ProviderView) ([]ProviderModelCapabilityView, error) {
-	root := a.activeWorkspaceRoot()
-	// Capture persisted identity separately from the editor draft. Draft routes
-	// may differ legitimately; a saved provider changing during discovery may not.
-	savedIdentity := func() string {
-		cfg, err := config.LoadForRootWithoutCredentialsReadOnly(root)
-		if err != nil {
-			return ""
-		}
-		for _, entry := range cfg.Providers {
-			if entry.Name == p.Name {
-				return providerModelCatalogFingerprint(entry)
-			}
-		}
-		return ""
-	}
-	before := savedIdentity()
-	e := config.ProviderEntry{
-		Name:       p.Name,
-		Kind:       p.Kind,
-		BaseURL:    p.BaseURL,
-		ModelsURL:  strings.TrimSpace(p.ModelsURL),
-		APIKeyEnv:  p.APIKeyEnv,
-		Headers:    p.Headers,
-		AuthHeader: p.AuthHeader,
-		NoProxy:    p.NoProxy,
-		ChatURL:    p.ChatURL,
-		RequestURL: p.RequestURL,
-	}
-	started := time.Now()
-	credentialsRevision := config.CredentialStoreRevision()
-	e.ResolveAPIKeyForRoot(root)
-	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
-	defer cancel()
-	models, err := e.FetchModelCatalogWithProxy(ctx, withProbeDirectHost(a.networkProxySpecForRoot(root), e.BaseURL, p.NoProxy))
-	if err != nil {
-		return []ProviderModelCapabilityView{}, err
-	}
-	// Credential changes invalidate a result even when the endpoint stayed the same.
-	unlockConfig := config.LockUserConfigEdits()
-	defer unlockConfig()
-	unlockCredentials, err := config.LockUserCredentialEdits()
-	if err != nil {
-		return []ProviderModelCapabilityView{}, err
-	}
-	defer unlockCredentials()
-	if credentialsRevision != config.CredentialStoreRevision() || before != savedIdentity() {
-		return []ProviderModelCapabilityView{}, fmt.Errorf("model discovery configuration changed; fetch again")
-	}
-	capabilities := config.NewModelCapabilityResolver()
-	capabilities.PutCatalogAt(e, models, started)
-	// Only adapter facts enter the cache. User choices apply to the returned view.
-	if cfg, err := config.LoadForRootWithoutCredentialsReadOnly(root); err == nil {
-		for _, saved := range cfg.Providers {
-			if saved.Name == p.Name {
-				e.PresetID, e.Vision = saved.PresetID, saved.Vision
-				break
-			}
-		}
-	}
-	e.VisionModels = p.VisionModels
-	e.ModelOverrides = providerModelOverridesForSave(p.ModelOverrides, nil)
-	result := make([]ProviderModelCapabilityView, 0, len(models))
-	for _, model := range models {
-		entry := e
-		entry.Model = model.ID
-		resolved := capabilities.Resolve(&entry)
-		result = append(result, modelCapabilityView(resolved))
-	}
-	return result, nil
+	return a.FetchProviderModelCatalogDraft(p, "")
 }
 
 // FetchProviderModels is the legacy ID-only wrapper retained for older

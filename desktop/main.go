@@ -115,6 +115,9 @@ func main() {
 	installFatalCrashOutput()
 
 	launch := parseDesktopLaunchArgs(os.Args[1:])
+	if maybeRelaunchPrimaryIfSuperseded(launch) {
+		return
+	}
 
 	app := NewApp()
 	title := "Reasonix"
@@ -150,12 +153,7 @@ func main() {
 	}
 
 	width, height := initialDesktopWindowSize(remoteWindow)
-
-	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
-	zoomFactor := 1.0
-	if zf, ok := loadZoomFactor(); ok && zf > 0 {
-		zoomFactor = zf
-	}
+	zoomFactor := initialDesktopZoomFactor()
 
 	// On Linux, cover JavaScriptCore's lazy signal-handler installation window.
 	// Other platforms provide a no-op implementation.

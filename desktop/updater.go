@@ -1376,7 +1376,10 @@ func updateSiblingNames(goos string) []string {
 }
 
 func currentLauncherPath() string {
-	exe := currentExecutablePath()
+	return launcherPathForExecutable(currentExecutablePath())
+}
+
+func launcherPathForExecutable(exe string) string {
 	if exe == "" {
 		return ""
 	}
@@ -1384,27 +1387,11 @@ func currentLauncherPath() string {
 	if resolved, err := installlayout.ResolveInstallRoot(exe); err == nil && resolved != "" {
 		root = resolved
 	}
-	for _, name := range []string{"reasonix-launcher.exe", "Reasonix.exe", "reasonix-launcher", "reasonix-guard.exe", "reasonix-guard"} {
-		if runtime.GOOS != "windows" && strings.HasSuffix(name, ".exe") {
-			continue
-		}
-		if runtime.GOOS == "windows" && !strings.HasSuffix(name, ".exe") && name != "Reasonix.exe" {
-			// Unix names on Windows are unused.
-			if !strings.HasSuffix(name, ".exe") {
-				continue
-			}
-		}
-		path := filepath.Join(root, name)
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
+	if path, err := installlayout.StableRelaunchPath(root); err == nil {
+		return path
 	}
-	// Fall through to previous flat-dir behavior for incomplete installs.
-	if runtime.GOOS == "windows" {
-		guard := filepath.Join(filepath.Dir(exe), "reasonix-guard.exe")
-		if _, err := os.Stat(guard); err == nil {
-			return guard
-		}
+	if installlayout.IsSupersededVersionedDesktop(root, exe) {
+		return filepath.Join(root, installlayout.LauncherBinaryName())
 	}
 	return exe
 }

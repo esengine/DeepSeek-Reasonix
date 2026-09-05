@@ -657,6 +657,10 @@ jobs:
         timeout-minutes: 15
         run: go test ./...
 
+      - name: test (vendored systray identity)
+        timeout-minutes: 2
+        run: go test -timeout=60s fyne.io/systray
+
       # A cold nested-module cache can spend several minutes compiling the
       # real WebView2 cookie integration test. Keep its budget independent of
       # the already-complete desktop suite and retain a Go timeout stack dump.

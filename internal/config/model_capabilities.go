@@ -87,11 +87,16 @@ type ModelCapabilityResolver struct {
 	credentialsRevision string
 }
 
-func NewModelCapabilityResolver() *ModelCapabilityResolver {
-	r := &ModelCapabilityResolver{
+// NewTransientModelCapabilityResolver isolates unsaved credential previews from disk caches.
+func NewTransientModelCapabilityResolver() *ModelCapabilityResolver {
+	return &ModelCapabilityResolver{
 		entries:             map[string]ModelCapabilityCacheEntry{},
 		credentialsRevision: CredentialStoreRevision(),
 	}
+}
+
+func NewModelCapabilityResolver() *ModelCapabilityResolver {
+	r := NewTransientModelCapabilityResolver()
 	if dir := CacheDir(); dir != "" {
 		r.path = filepath.Join(dir, "model-capabilities-v2.json")
 		r.load()

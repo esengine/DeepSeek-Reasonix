@@ -1,5 +1,6 @@
+import { formatTokens } from "../lib/format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Check, ChevronsUpDown, Search } from "lucide-react";
+import { Brain, Check, ChevronsUpDown, Search, Settings } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -13,10 +14,12 @@ export function ModelSwitcher({
   label,
   tabId,
   onPick,
+  onManage,
 }: {
   label: string;
   tabId?: string;
   onPick: (name: string) => boolean | Promise<boolean>;
+  onManage?: () => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -216,12 +219,15 @@ export function ModelSwitcher({
                   <span className="modelsw__copy">
                     <span className="modelsw__model">{m.model}</span>
                   </span>
+                  {m.contextWindow ? <span className="badge badge--neutral">{formatTokens(m.contextWindow)}</span> : null}
+                  {m.vision && <span className="badge badge--neutral">{t("providerUI.image")}</span>}
                   {m.current && <Check size={13} className="modelsw__check" />}
                 </button>
               ))}
             </div>
           ))}
         </div>
+        {onManage && <button className="modelsw__item modelsw__manage" type="button" onClick={() => { setOpen(false); onManage(); }}><Settings size={14} />{t("providerUI.manageModels")}</button>}
       </AnchoredPopover>
     </div>
   );

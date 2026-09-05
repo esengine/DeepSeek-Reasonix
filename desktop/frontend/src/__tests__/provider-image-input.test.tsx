@@ -34,12 +34,6 @@ assert(modeInput("auto").closest("label")?.classList.contains("set-seg__btn--on"
 await choose("on");
 assert(el.textContent?.includes("Manually enabled"));
 assert.equal(saved.length, 0, "draft must not write config");
-// Toggle enablement without losing this editor's image choice.
-const modelCheckbox = el.querySelector<HTMLInputElement>('.provider-model-draft__model input')!;
-await act(async () => modelCheckbox.click());
-assert(modeInput("auto").disabled && modeInput("on").disabled && modeInput("off").disabled);
-await act(async () => modelCheckbox.click());
-assert(modeInput("on").checked);
 await click("Save");
 assert.equal(saved[0].modelOverrides?.[0].vision, true);
 assert.equal(saved[0].modelOverrides?.[0].contextWindow, 123456);
@@ -60,9 +54,9 @@ assert(el.textContent?.includes("Image capability unknown"), "auto must not reus
 // A controlled Promise completes only after unmount. It must not modify the
 // replacement editor or enable a model from the previous provider request.
 let complete!: (v: ProviderModelCapabilityView[]) => void;
-window.go = { main: { App: { FetchProviderModelCatalog: () => new Promise((resolve) => { complete = resolve; }) } as Partial<AppBindings> as AppBindings } };
+window.go = { main: { App: { FetchProviderModelCatalogDraft: () => new Promise((resolve) => { complete = resolve; }) } as Partial<AppBindings> as AppBindings } };
 await render(editor("fetching"));
-await click("Test and fetch models");
+await click("Refresh models");
 await render(editor("replacement"));
 await act(async () => { complete([{ ...unknown, model: "stale-model", state: "supported" }]); });
 assert(!el.textContent?.includes("stale-model"));

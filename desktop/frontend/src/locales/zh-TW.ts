@@ -722,6 +722,8 @@ export const zhTW: Record<DictKey, string> = {
   "status.hydrateSync": "正在同步…",
   "status.plan": "計畫",
   "status.switchModel": "切換模型",
+  "providerUI.image": "圖片",
+  "providerUI.manageModels": "管理模型",
   "modelSwitcher.searchPlaceholder": "搜尋模型…",
   "modelSwitcher.noMatches": "沒有匹配的模型",
   "status.noModels": "沒有可切換模型",
@@ -1275,6 +1277,7 @@ export const zhTW: Record<DictKey, string> = {
 
 
   // 設定抽屜
+  "settings.backToWorkspace": "返回工作區",
   "settings.title": "設定",
   "settings.loading": "載入中…",
   "settings.loadFailed": "設定載入失敗。",

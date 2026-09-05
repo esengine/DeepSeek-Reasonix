@@ -1,6 +1,7 @@
 import { dismissOnboarding } from "../lib/onboarding";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { useOverlayStore } from "../store/overlays";
+import { useAppNavigationStore } from "../store/appNavigation";
 
 export function useOnboardingCommands(providerConfigured: () => void) {
   const completeOnboarding = useCommittedCommand(() => {
@@ -10,8 +11,9 @@ export function useOnboardingCommands(providerConfigured: () => void) {
   const chooseOnboardingProvider = useCommittedCommand(() => {
     const overlays = useOverlayStore.getState();
     overlays.setNeedsOnboarding(false);
-    overlays.setSettingsFocus({ target: "model-access" });
-    overlays.setSettingsTarget("models");
+    const navigation = useAppNavigationStore.getState();
+    navigation.setSettingsFocus({ target: "model-access" });
+    navigation.setSettingsTarget("models");
   });
   const skipOnboarding = useCommittedCommand(() => {
     dismissOnboarding();
