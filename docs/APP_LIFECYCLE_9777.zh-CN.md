@@ -184,11 +184,15 @@ inventory：30 个 effect、约 90 个状态/ref、44 处直接 bridge 调用、
    （#25）随 footer 区域、activeTabIdRef（#22）随调用方、三个 pointer resize
    生命周期与 `toggleSidebar/pulseSidebarToggle` 随 sidebar/chrome 区域，消费点
    （terminal clamp、conversation width、className）改读同一 store。
-2. **Banner/Overlay 栈**：config-warnings 横幅 JSX（3338-3372）、provider-setup
-   横幅、lease/startup-error IIFE（3314-3332）、RemoteReclaimBanner 内联
-   onReclaim（3308-3309 直接 bridge）、extension drain（effect #15）与
-   `app:open-settings` 事件（effect #10）、NeedsOnboarding（effect #24）。
-3. **Session actions（rewind/undo/delivery/clear/takeover/export）**：
+2. ✅ **Banner 栈（已完成）**：reclaim/lease/startupErr/错误横幅、takeover
+   对话框、config 警告、provider 提示与 UpdateBanner 已迁
+   `app-shell/SessionStatusBanners.tsx` + `app-runtime/useSessionBannerCommands.ts`
+   + `store/overlays.ts`（takeoverDialogTab/reclaimBusyTab/providerSetupNeeded）
+   + `app-runtime/StartupGateLifecycle.tsx`（onboarding 探测，effect #24）。
+   剩余：extension drain（#15）与 `app:open-settings`（#10）随所属领域。
+3. **Session actions（rewind/undo/delivery/clear/takeover/export）**：导出纵向已完成
+   （`app-runtime/useSessionExportCommands.ts`：exportSession/getSessionMarkdown/Json、
+   弹层外点关闭、主题 scene effect）。剩余：
    handleMessageAction、handleEditPrompt、handleSessionRevertCommitted、
    rewind 三状态（rewindStates/rewindCommitting/rewindSignal）、confirmClearContext、
    handleDeliveryContinue（surface fence 已就绪）、exportSession + topic export

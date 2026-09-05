@@ -252,12 +252,16 @@ state/refs, 44 direct bridge call sites, 16 orchestrating handlers, return JSX
    its callers, and the three pointer-resize lifecycles with
    toggleSidebar/pulseSidebarToggle with the sidebar/chrome regions while their
    consumers read the same store.
-2. **Banner/overlay stack**: config-warnings banner JSX (3338-3372),
-   provider-setup banner, lease/startup-error IIFE (3314-3332), inline
-   RemoteReclaimBanner onReclaim (3308-3309 direct bridge), extension drain
-   (effect #15), the `app:open-settings` event (effect #10) and NeedsOnboarding
-   (effect #24).
-3. **Session actions (rewind/undo/delivery/clear/takeover/export)**:
+2. **Banner/overlay stack (done)**: reclaim/lease/startup-error banners,
+   takeover dialog, config warnings, provider prompt and UpdateBanner now live
+   in `app-shell/SessionStatusBanners.tsx` with
+   `app-runtime/useSessionBannerCommands.ts`, `store/overlays.ts`
+   (takeoverDialogTab/reclaimBusyTab/providerSetupNeeded) and
+   `app-runtime/StartupGateLifecycle.tsx` (onboarding probe, effect #24).
+   Remaining: extension drain (#15) and the `app:open-settings` event (#10)
+   move with their own domains.
+3. **Session actions (rewind/undo/delivery/clear/takeover/export)**: the
+   export vertical is done (`app-runtime/useSessionExportCommands.ts`).
    handleMessageAction, handleEditPrompt, handleSessionRevertCommitted, the
    three rewind states, confirmClearContext, handleDeliveryContinue (surface
    fence already in place), exportSession + topic export popover (effect #20)
