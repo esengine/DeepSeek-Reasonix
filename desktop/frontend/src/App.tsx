@@ -37,7 +37,7 @@ import { useDesktopNavigation } from "./app-runtime/useDesktopNavigation";
 import { useRuntimeStatus } from "./app-runtime/useRuntimeStatus";
 import { sessionsForScope, type HistoryViewState } from "./app-runtime/historyViewProjection";
 import { useTerminalPanelCommands } from "./app-runtime/useTerminalPanelCommands";
-import { type HistoryLoadTrigger, type Item } from "./lib/useController";
+import { type HistoryLoadTrigger } from "./lib/useController";
 import { app, onProjectTreeChanged, openExternal } from "./lib/bridge";
 import { useDesktopPreferences } from "./app-runtime/useDesktopPreferences";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
@@ -77,7 +77,6 @@ import {
   type ActiveWorkView,
   type CollaborationMode,
   type ComposerInsertRequest,
-  type RewindResultView,
   type RemoteHostView,
   type SessionMeta,
   type SettingsView,
@@ -92,7 +91,6 @@ import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
-import type { RewindUndoState } from "./lib/rewindTypes";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import { resolveTaskMonitorSession } from "./lib/taskMonitorNavigation";
 import {
@@ -180,6 +178,7 @@ import { WindowChromeLifecycle } from "./app-runtime/WindowChromeLifecycle";
 import { StartupGateLifecycle, probeProviderSetupState } from "./app-runtime/StartupGateLifecycle";
 import { useSessionBannerCommands } from "./app-runtime/useSessionBannerCommands";
 import { useSessionExportCommands } from "./app-runtime/useSessionExportCommands";
+import { useSessionUndo } from "./app-runtime/useSessionUndo";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -473,17 +472,6 @@ export default function App() {
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
   const activeTabIdRef = useRef(activeTabId);
-  const [rewindStatesByTab, setRewindStatesByTab] = useState<Record<string, RewindUndoState>>({});
-  const setRewindStateForTab = useCommittedCommand((tabId: string, nextState: RewindUndoState | null) => {
-    if (!tabId) return;
-    setRewindStatesByTab(current => {
-      if (!nextState && !current[tabId]) return current;
-      const next = { ...current };
-      if (nextState) next[tabId] = nextState;
-      else delete next[tabId];
-      return next;
-    });
-  });
   const handleInvocationMetadataChange = useCommittedCommand((metadata: InvocationMetadataMap) => {
     const sourceTabId = activeTabIdRef.current;
     if (!sourceTabId) return;
@@ -808,6 +796,30 @@ export default function App() {
     ready: controllerReady, remote: remoteSurfaceActive, runtimeEpoch: state.meta?.runtime?.epoch, operations: sessionOperations,
     ports: { model: setModelForTab, profile: setControllerComposerProfileForTab },
     remoteModel: remoteSession.setModel, report: handleGoalActionError,
+  });
+  const hydratePlaceholderActive = Boolean(
+    state.hydrating &&
+    state.items.length === 0 &&
+    state.hydratePlaceholderItems?.length,
+  );
+  const {
+    rewindState, rewindCommitting, rewindSignal, setRewindStateForTab, bumpRewindSignal,
+    handleSessionRevertCommitted, handleMessageAction, handleEditPrompt,
+  } = useSessionUndo({
+    activeTabId,
+    activeTabReadOnly: Boolean(activeTab?.readOnly),
+    items: state.items,
+    hydratePlaceholderActive,
+    controllerReady, running: state.running, messageActionOpen: state.messageAction != null,
+    approvalOpen: state.approval != null, askOpen: state.ask != null, clearContextPending,
+    ports: {
+      rewindForTab, rewindForTabDetailed,
+      refreshTabMetas: () => void refreshTabMetas(undefined, { afterMutation: true }),
+      undoRewindForTab, sendToTab,
+      composeInsert: (tabId, text) => setComposerInsertRequestsByTab((current) => ({ ...current, [tabId]: { id: Date.now(), text, mode: "replace" } })),
+      refreshDock: () => setDockRefreshKey((value) => value + 1),
+      refreshProject: () => setProjectRevision((value) => value + 1),
+    },
   });
   const clearSubmissionUndo = useCommittedCommand((tab: string) => setRewindStateForTab(tab, null));
   const { commitThenSend, submit: submitComposerTurn, applyGoalForTab, applyGoal, sendRevision } = useSessionSubmission({
@@ -1652,44 +1664,6 @@ export default function App() {
     setTabRevealSignal((signal) => signal + 1);
   });
 
-  const [rewindSignal, setRewindSignal] = useState(0);
-
-  // ── Immediate rewind ──────────────────────────────────────────────────
-  // On confirm, call Go prepare+commit immediately. Only after success does
-  // the UI truncate the transcript, refresh files, and fill the composer.
-  // Real backend undo uses UndoRewindForTab when a transaction id is available.
-  const [rewindCommittingByTab, setRewindCommittingByTab] = useState<Record<string, boolean>>({});
-  const rewindState = activeTabId ? rewindStatesByTab[activeTabId] ?? null : null;
-  const rewindCommitting = Boolean(activeTabId && rewindCommittingByTab[activeTabId]);
-
-
-  const setRewindCommittingForTab = useCommittedCommand((tabId: string, committing: boolean) => {
-    setRewindCommittingByTab((current) => {
-      const next = { ...current };
-      if (committing) next[tabId] = true;
-      else delete next[tabId];
-      return next;
-    });
-  });
-
-  const handleSessionRevertCommitted = useCommittedCommand((sourceTabId: string, outcome: RewindResultView) => {
-    if (!sourceTabId || !outcome.ok) return;
-    setRewindStateForTab(sourceTabId, {
-      turnDiff: 0,
-      transactionId: outcome.transactionId,
-      undoAvailable: outcome.undoAvailable,
-      filesRestored: outcome.written ?? [],
-      filesRemoved: outcome.deleted ?? [],
-    });
-    setDockRefreshKey((value) => value + 1);
-    setProjectRevision((value) => value + 1);
-  });
-
-  const hydratePlaceholderActive = Boolean(
-    state.hydrating &&
-    state.items.length === 0 &&
-    state.hydratePlaceholderItems?.length,
-  );
   const transcriptHydrating = state.hydrating && !state.hydrateHistoryLoaded;
   // Creation hero only after history hydration settles on a truly empty session.
   // Avoid flash while switching tabs: items may be empty while placeholders show.
@@ -1771,144 +1745,6 @@ export default function App() {
   const cancelWorkspaceConflict = useCommittedCommand(() => {
     void handleCancelActive();
     setWorkspaceConflict(null);
-  });
-
-  const handleMessageAction = useCommittedCommand((turn: number, scope: string) => {
-    const sourceTabId = activeTabId;
-    if (!sourceTabId || activeTab?.readOnly) return;
-    if (hydratePlaceholderActive) return;
-    if (scope === "fork") {
-      // Fork still goes through the controller (not optimistic).
-      rewindForTab(sourceTabId, turn, scope).then((ok) => {
-        if (!ok) return;
-        void refreshTabMetas(undefined, { afterMutation: true });
-        setProjectRevision((v) => v + 1);
-      });
-      return;
-    }
-
-    // Code-only rewind only affects files — no message truncation,
-    // no optimistic UI needed.  Execute immediately.
-    if (scope === "code") {
-      setRewindCommittingForTab(sourceTabId, true);
-      void rewindForTabDetailed(sourceTabId, turn, scope).then((outcome) => {
-        setRewindCommittingForTab(sourceTabId, false);
-        if (!outcome.ok) return;
-        setRewindStateForTab(sourceTabId, {
-          turnDiff: 0,
-          transactionId: outcome.transactionId,
-          undoAvailable: outcome.undoAvailable,
-          filesRestored: outcome.written ?? [],
-          filesRemoved: outcome.deleted ?? [],
-        });
-        setDockRefreshKey((v) => v + 1);
-        setProjectRevision((v) => v + 1);
-      });
-      return;
-    }
-
-    // Summarize only compresses the conversation log — no files touched,
-    // no optimistic UI needed. Execute immediately like code-only rewind.
-    if (scope === "summ-from" || scope === "summ-upto") {
-      rewindForTab(sourceTabId, turn, scope).then((ok) => {
-        if (!ok) return;
-        setDockRefreshKey((v) => v + 1);
-        setProjectRevision((v) => v + 1);
-      });
-      return;
-    }
-
-    const items = state.items;
-    const hasCheckpointTurns = items.some((it) => it.kind === "user" && it.checkpointTurn != null);
-    let boundaryIdx = -1;
-    let userCount = 0;
-    let targetUserCount = -1;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].kind === "user") {
-        const item = items[i] as Extract<Item, { kind: "user" }>;
-        const matches = hasCheckpointTurns ? item.checkpointTurn === turn : userCount === turn;
-        if (matches) {
-          boundaryIdx = i;
-          targetUserCount = userCount;
-          break;
-        }
-        userCount++;
-      }
-    }
-    if (boundaryIdx < 0) {
-      rewindForTab(sourceTabId, turn, scope).then((ok) => {
-        if (!ok) return;
-        if (scope === "both") {
-          setDockRefreshKey((v) => v + 1);
-          setProjectRevision((v) => v + 1);
-        }
-      });
-      return;
-    }
-
-    const prevUserCount = items.filter((it) => it.kind === "user").length;
-    const turnDiff = prevUserCount - targetUserCount;
-    const userItem = items[boundaryIdx]?.kind === "user" ? items[boundaryIdx] as Extract<Item, { kind: "user" }> : undefined;
-    const prompt = userItem?.text ?? "";
-
-    // Immediate backend commit — only update UI after success.
-    setRewindCommittingForTab(sourceTabId, true);
-    void rewindForTabDetailed(sourceTabId, turn, scope).then((outcome) => {
-      setRewindCommittingForTab(sourceTabId, false);
-      if (!outcome.ok) {
-        // Keep conversation/files as-is; notices already carry the reason.
-        return;
-      }
-      const targetTabId = outcome.tabId || sourceTabId;
-      setRewindStateForTab(targetTabId, {
-        turnDiff: outcome.tabId ? 0 : turnDiff,
-        transactionId: outcome.transactionId,
-        undoAvailable: outcome.undoAvailable,
-        undoTabId: sourceTabId,
-        filesRestored: outcome.written ?? [],
-        filesRemoved: outcome.deleted ?? [],
-      });
-      const insertId = Date.now();
-      setComposerInsertRequestsByTab((current) => ({
-        ...current,
-        [targetTabId]: { id: insertId, text: prompt, mode: "replace" },
-      }));
-      setRewindSignal((v) => v + 1);
-      if (scope === "both" || scope === "code") {
-        setDockRefreshKey((v) => v + 1);
-        setProjectRevision((v) => v + 1);
-      }
-    });
-  });
-
-  const handleEditPrompt = useCommittedCommand(async (turn: number, displayText: string, submitText?: string): Promise<boolean> => {
-    const sourceTabId = activeTabId;
-    if (!sourceTabId || activeTab?.readOnly || !controllerReady || hydratePlaceholderActive || rewindStatesByTab[sourceTabId] || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
-    const next = displayText.trim();
-    if (!next) return false;
-    const submit = (submitText ?? displayText).trim();
-    const hasCheckpointTurns = state.items.some((it) => it.kind === "user" && it.checkpointTurn != null);
-    let original = "";
-    let userCount = 0;
-    for (const item of state.items) {
-      if (item.kind !== "user") continue;
-      const matches = hasCheckpointTurns ? item.checkpointTurn === turn : userCount === turn;
-      if (matches) {
-        original = (item.submitText ?? item.text).trim();
-        break;
-      }
-      userCount++;
-    }
-    const outcome = await rewindForTabDetailed(sourceTabId, turn, "conversation");
-    if (!outcome.ok) return false;
-    setRewindSignal((v) => v + 1);
-    const targetTabId = outcome.tabId || sourceTabId;
-    try {
-      await sendToTab(targetTabId, next, submit, original);
-      return true;
-    } catch {
-      return false;
-    }
   });
 
   const openTrash = useCommittedCommand(async () => {
@@ -2410,7 +2246,7 @@ export default function App() {
               ...current,
               [tabId]: { id: Date.now(), text: "", mode: "replace" },
             }));
-            setRewindSignal((value) => value + 1);
+            bumpRewindSignal();
             setDockRefreshKey((value) => value + 1);
             setProjectRevision((value) => value + 1);
           });
