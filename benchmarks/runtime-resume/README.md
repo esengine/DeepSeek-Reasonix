@@ -66,6 +66,7 @@ provider call*.
 | `ui-graph-mixed` | a settled fan-out and a mid-flight one, then die; a frontend attaches to the resumed process | none | through which door does each fact reach the view? |
 | `task-completed` | one lone delegation, finished, in a turn that closed | none | is a single worker's provenance durable at all? |
 | `task-running` | the same, killed with the child executing | none | what can a restart say about work nobody is running? |
+| `task-foreground-queued` | the ceiling is full when the delegation asks | ceilings | what is it drawn as while the scheduler holds it back? |
 | `task-background-queued` | a backgrounded delegation the ceiling refused, its job already handed over | ceilings | does the handoff reach the durable record? |
 | `task-background-running` | the same, with the slot granted | ceilings | the same, past the point ownership moves |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
@@ -129,6 +130,16 @@ its ceiling with a fan-out, and a fan-out records everything — the same journa
 the same scheduler, the same session — so that fleet rides along as the arm's
 positive control: whatever these rows report missing is missing at the entry
 point, not in the machinery.
+
+One of the five asks about now rather than about a restart.
+`task-foreground-queued` fills the ceiling first, so the scheduler has to refuse
+the delegation admission, and the arm then reads what the picture says while
+that is true. A graph and a parent status are claims about the present: a
+restart cannot correct one, because by then it describes a moment nobody can
+observe again. The premise is established from two sides — the fan-out holding
+the ceiling has `queued=slots` on disk, and the delegation's own child never
+reached the provider — and the arm settles for two seconds before dying, so a
+child that was merely slow to start is not read as one the scheduler held.
 
 The identity row is the one that decides how much Step 8 can cost. Four
 spellings are in play — the live node, the call it hangs under, the parent the

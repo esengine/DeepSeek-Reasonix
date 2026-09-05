@@ -101,6 +101,9 @@ var subagentRefPattern = regexp.MustCompile(`sa_[A-Za-z0-9_-]+`)
 // so the child holds its scheduler slot until the process dies — a sleep long
 // enough to look the same would still be a race against the probe's deadline.
 func (s *scripted) childScript(ctx context.Context, sentinel string) []provider.Chunk {
+	// Reaching here is the child's own proof that it started: an arm asking
+	// whether the scheduler held one back has no other way to know.
+	s.fleets.first(childEntered(sentinel))
 	switch sentinel {
 	case childHold:
 		// Reaching a provider call means the slot is already held, which is the
@@ -289,10 +292,10 @@ func holderFleet(arm string) []provider.Chunk {
 		// while the writer ceiling stays full is how the blocker changes.
 		tasks[1] = map[string]any{"id": "h2", "prompt": childRelease + " releasable", "description": "released mid-wait", "read_only": true}
 	}
-	if arm == armTaskBgQueued {
-		// Either item may win the one slot this arm leaves, so both report
-		// holding it: waiting on the wrong one is waiting on a child the
-		// scheduler queued behind the other.
+	if queuedTaskArm(arm) {
+		// Either item may win the one slot these arms leave, so both report
+		// holding it, and the delegation's own child is then the only arrival
+		// that means anything.
 		tasks[1] = map[string]any{"id": "h2", "prompt": childHold + " second holder", "description": "holds the ceiling", "read_only": true}
 	}
 	return backgroundFleetCall("probe_fleet_holder", tasks)

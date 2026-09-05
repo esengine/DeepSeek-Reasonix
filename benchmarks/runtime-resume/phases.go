@@ -149,7 +149,7 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 	case schedulerWaitArm(arm):
 		return true, runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case loneTaskArm(arm):
-		return true, runLoneTaskConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
+		return true, runLoneTaskConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case graphArm(arm) || uiArm(arm):
 		return true, runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	}

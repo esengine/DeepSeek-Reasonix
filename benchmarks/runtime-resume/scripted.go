@@ -71,6 +71,15 @@ type dispatched struct {
 	seen map[string]bool
 }
 
+// held reports whether something already recorded this name, without claiming
+// it. The lone-delegation arms read it to ask a negative: that a child the
+// scheduler should be holding back never reached the provider at all.
+func (d *dispatched) held(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.seen[name]
+}
+
 // first reports whether this is the sentinel's first dispatch, and records it.
 func (d *dispatched) first(sentinel string) bool {
 	d.mu.Lock()
@@ -120,7 +129,7 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 		return chunks
 	}
 	if s.opensRun(req, taskSentinel) {
-		if s.arm == armTaskBgQueued {
+		if queuedTaskArm(s.arm) {
 			// The holder's own child says when the ceiling is occupied.
 			// Dispatching before that lets the delegation win the race and start.
 			<-s.held

@@ -15,7 +15,7 @@ import (
 // say. Nothing here is a fix — the arm exists to find which transition stops
 // being recorded, because "single task has no graph" was the roadmap's guess
 // and the live chain has since been unified.
-func loneTaskRows(before, after Observation) []row {
+func loneTaskRows(arm string, before, after Observation) []row {
 	return []row{
 		liveDelegationRow(before),
 		parentStatusRow(before),
@@ -28,6 +28,7 @@ func loneTaskRows(before, after Observation) []row {
 		rebuiltDelegationIdentityRow(after),
 		delegationInterruptionRow(before, after),
 		identityJoinRow(before),
+		heldBackRow(arm, before),
 		fanOutControlRow(before),
 	}
 }
@@ -314,6 +315,42 @@ func orDash(s string) string {
 	return s
 }
 
+// heldBackRow is the live-truth row: with the ceiling full and the delegation's
+// own child never reaching the provider, the scheduler is holding it back — and
+// what the picture says while that is true is a claim about now, which no
+// restart can correct. Running is the answer that is wrong.
+func heldBackRow(arm string, before Observation) row {
+	if !queuedTaskArm(arm) {
+		return row{
+			Semantic: "what the picture says while the scheduler holds it back", Authority: liveAuthority,
+			Artifact: "none observed", Reconstruction: "this arm never fills the ceiling",
+			Before: "—", After: "—", Verdict: verdictNotMeasured,
+		}
+	}
+	drawn := orNone(liveWorkers(before))
+	told := orNone(loneStatus(before))
+	verdict := verdictHolds
+	if strings.Contains(drawn, ":running") || told == subagentRunning {
+		verdict = verdictViolated
+	}
+	return row{
+		Semantic: "what the picture says while the scheduler holds it back", Authority: liveAuthority,
+		Artifact:       "none observed",
+		Reconstruction: "queued with its cause, or at least not started",
+		Before:         "held back: ceiling full, child never entered",
+		After:          "graph=" + drawn + " parent=" + told, Verdict: verdict,
+	}
+}
+
+func loneStatus(o Observation) string {
+	for id, phases := range o.Progress {
+		if ofLoneTask(id) && len(phases) > 0 {
+			return phases[len(phases)-1]
+		}
+	}
+	return ""
+}
+
 // fanOutControlRow is the positive control the queued arm carries with it: the
 // fleet that fills its ceiling runs through the same scheduler in the same
 // session, and records everything. What this arm reports missing is missing at
@@ -363,6 +400,13 @@ func loneTaskArmInvalid(arm string, before Observation) string {
 	case armTaskRunning:
 		if !holdsState(before, string(agentgraph.StateRunning)) {
 			return "nothing was executing when the process died"
+		}
+	case armTaskFgQueued:
+		if entered := before.Progress[probeChildEntered]; len(entered) == 0 || entered[0] != "false" {
+			return "the delegation's child ran, so the scheduler was not holding it back"
+		}
+		if !strings.Contains(fanOutControlRow(before).Before, "queued=slots") {
+			return "no fan-out filled the ceiling, so nothing refused the delegation"
 		}
 	case armTaskBgQueued:
 		if !strings.HasSuffix(phases, subagentQueued) {

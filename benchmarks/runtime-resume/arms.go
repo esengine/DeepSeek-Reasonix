@@ -103,6 +103,7 @@ func arms() []arm {
 		{name: armUIGraphMixed, asks: "which door each fact reaches the frontend through, after a death"},
 		{name: armTaskCompleted, asks: "a lone delegation that finished, in a turn that closed"},
 		{name: armTaskRunning, asks: "a lone delegation still executing when the process died"},
+		{name: armTaskFgQueued, asks: "what a lone delegation is drawn as while the scheduler holds it back"},
 		{name: armTaskBgQueued, asks: "a backgrounded delegation the ceiling refused, with its job already handed over"},
 		{name: armTaskBgRunning, asks: "a backgrounded delegation executing inside its job"},
 		{name: armWaitSlots, asks: "an item the session's total ceiling refused"},

@@ -54,7 +54,7 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the group has an item running and items that never got
 		// one — the split a cancellation is reported against.
 		return 1, 1
-	case armTaskBgQueued:
+	case armTaskFgQueued, armTaskBgQueued:
 		// One slot, held by the fleet dispatched ahead of the delegation, so the
 		// refusal the arm records is the scheduler's and not a race.
 		return 1, 1

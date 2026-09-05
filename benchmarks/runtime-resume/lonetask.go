@@ -27,6 +27,11 @@ const (
 	// armTaskRunning kills the process with the child mid-execution, the same
 	// death the fan-out arms take.
 	armTaskRunning = "task-running"
+	// armTaskFgQueued is the live-truth arm: the ceiling is full when the
+	// delegation asks, so the scheduler is holding it back. What the parent and
+	// the graph say while that is true is the whole question — a picture that
+	// says running while nothing has started is wrong before any restart.
+	armTaskFgQueued = "task-foreground-queued"
 	// armTaskBgQueued is the one the foreground arms cannot stand in for: a
 	// background run hands its execution to a job and asks for a slot inside it,
 	// so the parent tool call has already returned when the refusal happens.
@@ -38,11 +43,26 @@ const (
 
 func loneTaskArm(name string) bool {
 	switch name {
-	case armTaskCompleted, armTaskRunning, armTaskBgQueued, armTaskBgRunning:
+	case armTaskCompleted, armTaskRunning, armTaskFgQueued, armTaskBgQueued, armTaskBgRunning:
 		return true
 	}
 	return false
 }
+
+// queuedTaskArm names the arms that fill the ceiling before delegating, so the
+// scheduler has to refuse the delegation admission.
+func queuedTaskArm(name string) bool {
+	return name == armTaskFgQueued || name == armTaskBgQueued
+}
+
+// childEntered names the record a child leaves when it reaches the provider.
+// The queued arms ask a negative — that one never did — which nothing else in
+// the probe can answer.
+func childEntered(sentinel string) string { return "child-entered:" + sentinel }
+
+// probeChildEntered is where that answer rides into the observation. It is not
+// a status the kernel emits: the key names the probe so no row reads it as one.
+const probeChildEntered = "probe:delegated-child-entered"
 
 func backgroundTaskArm(name string) bool {
 	return name == armTaskBgQueued || name == armTaskBgRunning
@@ -100,7 +120,7 @@ func signStep(id string) []provider.Chunk {
 
 // loneTaskSentinels is what this arm's one prompt carries.
 func loneTaskSentinels(arm string) string {
-	if arm == armTaskBgQueued {
+	if queuedTaskArm(arm) {
 		return taskHoldsFirst
 	}
 	return taskSentinel
@@ -109,7 +129,7 @@ func loneTaskSentinels(arm string) string {
 // runLoneTaskConstruct drives one delegation and dies at the moment this arm is
 // about. The completed arm is the exception that proves the rest: it lets the
 // turn close, so what it loses was never about dying inside one.
-func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, turn int) error {
+func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, prov *scripted, turn int) error {
 	// One turn, whatever the arm needs in it: a session admits no second one. The
 	// queued arm's ceiling is filled by a background fleet named in the same
 	// prompt, whose own child says when the slot is taken.
@@ -120,11 +140,17 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 		}
 	} else {
 		go func() { _ = ctrl.Run(ctx, prompt) }()
-		if err := waitForLoneTask(sink, arm); err != nil {
+		if err := waitForLoneTask(sink, prov, arm); err != nil {
 			return err
 		}
 	}
-	if err := writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root)); err != nil {
+	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
+	if queuedTaskArm(arm) {
+		// Whether the delegation's own child ever ran is the fact the live rows
+		// are read against, and only the scripted provider knows it.
+		obs.Progress[probeChildEntered] = []string{fmt.Sprint(prov.fleets.held(childEntered(childHang)))}
+	}
+	if err := writeObservation(root, obs); err != nil {
 		return err
 	}
 	os.Exit(0)
@@ -134,10 +160,17 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 // waitForLoneTask blocks until the delegation stands where this arm dies. The
 // foreground arms read the live graph; the background ones cannot — a handed-off
 // run publishes no node — so they read the progress the parent was told.
-func waitForLoneTask(sink *graphSink, arm string) error {
+func waitForLoneTask(sink *graphSink, prov *scripted, arm string) error {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		if loneTaskReady(sink, arm) {
+		if loneTaskReady(sink, prov, arm) {
+			// A refusal is a state nothing announces, so the arm holds still and
+			// asks again: a child that was merely slow to start would have
+			// arrived by now, and the death would be measuring a race.
+			if arm == armTaskFgQueued {
+				time.Sleep(2 * time.Second)
+				return refusalHolding(prov, arm)
+			}
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -147,8 +180,22 @@ func waitForLoneTask(sink *graphSink, arm string) error {
 		nodeStates(graph)+" progress="+fmt.Sprint(sink.phaseSeries()))
 }
 
-func loneTaskReady(sink *graphSink, arm string) bool {
+// refusalHolding reports the arm's premise once more, after the settle: the
+// delegation's child must still not have run.
+func refusalHolding(prov *scripted, arm string) error {
+	if prov.fleets.held(childEntered(childHang)) {
+		return errUnexpected("a delegation the scheduler was still holding back", "its child ran")
+	}
+	return nil
+}
+
+func loneTaskReady(sink *graphSink, prov *scripted, arm string) bool {
 	switch arm {
+	case armTaskFgQueued:
+		// The node is drawn — the delegation reached the graph — and its child
+		// has not started, which with the ceiling full is the refusal.
+		graph, _ := sink.snapshot()
+		return loneNodeDrawn(graph) && !prov.fleets.held(childEntered(childHang))
 	case armTaskRunning:
 		graph, _ := sink.snapshot()
 		return holdsAll(graph, []agentgraph.NodeState{agentgraph.StateRunning})
@@ -161,10 +208,26 @@ func loneTaskReady(sink *graphSink, arm string) bool {
 	return false
 }
 
+// loneNodeDrawn reports whether the delegation's own node is on the graph.
+func loneNodeDrawn(g agentgraph.Graph) bool {
+	for _, n := range g.Nodes {
+		if n.Kind == agentgraph.KindWorker && n.ID == parallelLoneNodeID {
+			return true
+		}
+	}
+	return false
+}
+
+// parallelLoneNodeID is what a lone delegation's node is called: the parent
+// call, and the first slot of the fan-out numbering it shares.
+const parallelLoneNodeID = taskCallID + "/sub-1"
+
 func loneTaskWanted(arm string) string {
 	switch arm {
 	case armTaskRunning:
 		return "running"
+	case armTaskFgQueued:
+		return "drawn while the scheduler holds it back"
 	case armTaskBgQueued:
 		return "queued for a slot and not started"
 	}
