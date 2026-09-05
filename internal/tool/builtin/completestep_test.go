@@ -609,7 +609,9 @@ func TestCompleteStepRejectsReviewEvidenceBeforeLatestMutation(t *testing.T) {
 func TestCompleteStepAcceptsStructuredReviewWithBlockingFindings(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, evidence.ToolFacts{WritesNamedPaths: true}))
-	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	auth := evidence.GrantReviewAuthority(evidence.ReviewKindReview)
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true,
+		ReportKind: evidence.ReviewKindReview, ReviewAuthority: &auth, SourceExecutionID: "exec-probe", Args: json.RawMessage(`{
 		"kind":"review",
 		"verdict":"block",
 		"reviewed_paths":["changed.go"],
@@ -889,5 +891,35 @@ func TestCompleteStepOnAFinishedPlanStaysTerminal(t *testing.T) {
 	}
 	if !strings.Contains(out, "Every step in the task list is now complete") {
 		t.Fatalf("renewal did not report the plan as finished: %q", out)
+	}
+}
+
+// A step's review evidence asks for the ordinary review obligation, and the two
+// reviewers are declared as separate capabilities: security-review's own
+// contract puts style, tests and the rest out of scope and names regular review
+// as their owner. So a security grant does not sign off a step's review, and
+// the refusal has to say a review is missing rather than accept a narrower one.
+func TestCompleteStepReviewEvidenceNeedsTheReviewCapability(t *testing.T) {
+	for _, tc := range []struct {
+		granted  evidence.ReviewKind
+		accepted bool
+	}{
+		{evidence.ReviewKindReview, true},
+		{evidence.ReviewKindSecurity, false},
+	} {
+		ledger := evidence.NewLedger()
+		ledger.Record(evidence.ReceiptFromToolCall("edit_file",
+			json.RawMessage(`{"path":"a.go"}`), true, evidence.ToolFacts{WritesNamedPaths: true}))
+		authority := evidence.GrantReviewAuthority(tc.granted)
+		ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true,
+			ReportKind: tc.granted, ReviewAuthority: &authority, SourceExecutionID: "exec-1",
+			Args: json.RawMessage(`{"kind":"` + string(tc.granted) + `","verdict":"pass","reviewed_paths":["a.go"]}`)})
+
+		_, err := (completeStep{}).Execute(evidence.WithLedger(context.Background(), ledger),
+			json.RawMessage(`{"step":"Review code","result":"done",
+				"evidence":[{"kind":"review","summary":"a reviewer looked at it"}]}`))
+		if accepted := err == nil; accepted != tc.accepted {
+			t.Fatalf("grant=%s accepted=%v want %v (err=%v)", tc.granted, accepted, tc.accepted, err)
+		}
 	}
 }

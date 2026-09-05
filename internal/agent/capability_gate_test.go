@@ -64,23 +64,23 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 		t.Fatalf("review gate must not end with empty coverage: %q", got)
 	}
 
-	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	ledger.Record(grantedReviewReceipt(evidence.ReviewKindReview, `{
 		"kind":"review",
 		"verdict":"pass",
 		"reviewed_paths":["internal/agent/agent.go"],
 		"findings":[]
-	}`)})
+	}`))
 	got = a.reviewGateFailure()
 	if !strings.Contains(got, "security_review") || !strings.Contains(got, "reported no file paths") {
 		t.Fatalf("security review gate = %q, want opaque-mutation recovery guidance", got)
 	}
 
-	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	ledger.Record(grantedReviewReceipt(evidence.ReviewKindSecurity, `{
 		"kind":"security",
 		"verdict":"pass",
 		"reviewed_paths":["internal/agent/agent.go"],
 		"findings":[]
-	}`)})
+	}`))
 	if got := a.reviewGateFailure(); got != "" {
 		t.Fatalf("review gate = %q after both reports, want ready", got)
 	}
@@ -114,22 +114,22 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 		t.Fatalf("review gate = %q, want high-risk review demand", got)
 	}
 
-	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	ledger.Record(grantedReviewReceipt(evidence.ReviewKindReview, `{
 		"kind":"review",
 		"verdict":"pass",
 		"reviewed_paths":["internal/permission/gate.go"],
 		"findings":[]
-	}`)})
+	}`))
 	if got := a.reviewGateFailure(); !strings.Contains(got, "security_review") {
 		t.Fatalf("security review gate = %q, want security_review demand", got)
 	}
 
-	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	ledger.Record(grantedReviewReceipt(evidence.ReviewKindSecurity, `{
 		"kind":"security",
 		"verdict":"pass",
 		"reviewed_paths":["internal/permission/gate.go"],
 		"findings":[]
-	}`)})
+	}`))
 	if got := a.reviewGateFailure(); got != "" {
 		t.Fatalf("review gate = %q after both reports, want ready", got)
 	}

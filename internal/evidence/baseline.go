@@ -160,16 +160,17 @@ func (l *Ledger) UnreviewedMutationBaseline() (int, bool) {
 }
 
 // latestAcceptedReview returns the index of the last review of this kind the
-// host accepted, or -1. A blocking one is not accepted: it leaves the change
-// set exactly where it was.
+// host accepted, or -1. Which obligation a report closed is the host's grant to
+// say, not the report's own kind. A blocking one is not accepted either: it
+// leaves the change set exactly where it was.
 func latestAcceptedReview(receipts []Receipt, kind ReviewKind) int {
 	accepted := -1
 	for i, r := range receipts {
-		if !r.Success || r.ToolName != reviewReportTool {
+		if !ReceiptProves(r, kind) {
 			continue
 		}
 		report, err := ParseReviewReport(r.Args)
-		if err != nil || report.Kind != kind || report.HasBlockingFinding() {
+		if err != nil || report.HasBlockingFinding() {
 			continue
 		}
 		accepted = i

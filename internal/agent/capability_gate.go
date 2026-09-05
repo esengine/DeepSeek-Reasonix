@@ -277,11 +277,13 @@ func (a *Agent) reviewObligationFailure(baseline, freshness int, paths []string)
 		}
 		okR, blockR, _ := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindReview, freshness, paths)
 		if !okR || blockR {
-			return "high-risk changes require review with review_report after the latest mutation" + reviewCoverageHint(paths)
+			return "high-risk changes require review with review_report after the latest mutation" +
+				a.reviewProofHint(evidence.ReviewKindReview) + reviewCoverageHint(paths)
 		}
 		okS, blockS, _ := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindSecurity, freshness, paths)
 		if !okS || blockS {
-			return "high-risk changes require security_review with review_report after the latest mutation" + reviewCoverageHint(paths)
+			return "high-risk changes require security_review with review_report after the latest mutation" +
+				a.reviewProofHint(evidence.ReviewKindSecurity) + reviewCoverageHint(paths)
 		}
 	}
 	return ""
@@ -370,4 +372,17 @@ func (a *Agent) reportReviewWarnings() {
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 		Text:   "Review shipped with unresolved warnings.",
 		Detail: strings.Join(kept, "; ")})
+}
+
+// reviewProofHint names why a report the turn did submit does not close its
+// obligation. Without it the gate repeats a demand the model believes it has
+// already met, and the rule it invents for that outlives the turn.
+func (a *Agent) reviewProofHint(kind evidence.ReviewKind) string {
+	switch a.task.ledger.ReviewProofGapFor(kind) {
+	case evidence.ReviewProofUnattributed:
+		return "; the " + string(kind) + " report you have was submitted by a run the host cannot name, so it proves nothing — start the reviewer through its own tool, not read_only_skill"
+	case evidence.ReviewProofUngranted:
+		return "; the " + string(kind) + " report you have came from a run not authorized to answer for this, so it proves nothing — start the reviewer that is"
+	}
+	return ""
 }

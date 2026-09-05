@@ -99,7 +99,9 @@ func TestLedgerRequiresReviewCoverageAfterMutation(t *testing.T) {
 func TestLedgerAcceptsCollectedStructuredReviewReport(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, ToolFacts{WritesNamedPaths: true}))
-	ledger.Record(Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+	auth := GrantReviewAuthority(ReviewKindReview)
+	ledger.Record(Receipt{ToolName: "review_report", Success: true, ReportKind: ReviewKindReview,
+		ReviewAuthority: &auth, SourceExecutionID: "exec-probe", Args: json.RawMessage(`{
 		"kind":"review",
 		"verdict":"block",
 		"reviewed_paths":["changed.go"],

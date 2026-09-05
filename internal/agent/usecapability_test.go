@@ -718,11 +718,11 @@ func TestUseCapabilityProxyHonorsRealMCPPermissionDeny(t *testing.T) {
 }
 
 func TestReviewReportToolValidatesSchema(t *testing.T) {
-	tl := NewReviewReportTool()
+	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindSecurity))
 	led := evidence.NewLedger()
 	led.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, evidence.ToolFacts{ReadOnly: true}))
 	ctx := evidence.WithLedger(context.Background(), led)
-	if _, err := tl.Execute(ctx, json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":[]}`)); err == nil {
+	if _, err := tl.Execute(ctx, json.RawMessage(`{"kind":"security","verdict":"pass","reviewed_paths":[]}`)); err == nil {
 		t.Fatal("empty reviewed_paths should fail")
 	}
 	out, err := tl.Execute(ctx, json.RawMessage(`{"kind":"security","verdict":"block","reviewed_paths":["a.go"],"findings":[{"severity":"critical","summary":"secret"}]}`))
@@ -732,7 +732,7 @@ func TestReviewReportToolValidatesSchema(t *testing.T) {
 }
 
 func TestReviewReportRequiresHostReadEvidence(t *testing.T) {
-	tl := NewReviewReportTool()
+	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindReview))
 	// No ledger on ctx: fail closed.
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["a.go"]}`)); err == nil {
 		t.Fatal("expected failure without a host evidence ledger")
@@ -762,7 +762,7 @@ func TestReviewReportRequiresHostReadEvidence(t *testing.T) {
 }
 
 func TestReviewReportRejectsNonContentEvidence(t *testing.T) {
-	tl := NewReviewReportTool()
+	tl := NewReviewReportTool(reviewGrant(evidence.ReviewKindReview))
 	report := json.RawMessage(`{"kind":"review","verdict":"pass","reviewed_paths":["internal/agent/agent.go"]}`)
 
 	// git status mentions the path but never shows content.

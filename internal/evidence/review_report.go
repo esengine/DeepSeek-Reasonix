@@ -174,14 +174,11 @@ func (l *Ledger) HasStructuredReviewAfter(kind ReviewKind, after int, requiredPa
 	defer l.mu.Unlock()
 	for i := start; i < len(l.receipts); i++ {
 		r := l.receipts[i]
-		if !r.Success || r.ToolName != reviewReportTool {
+		if !ReceiptProves(r, kind) {
 			continue
 		}
 		parsed, err := ParseReviewReport(r.Args)
 		if err != nil {
-			continue
-		}
-		if parsed.Kind != kind {
 			continue
 		}
 		if !parsed.CoversPaths(requiredPaths) {
@@ -201,11 +198,10 @@ func (l *Ledger) HasSuccessfulStructuredReviewAfter(kind ReviewKind, after int, 
 	return ok && !blocking
 }
 
-// HasSuccessfulReviewReportOfKind reports whether any successful review_report
-// receipt of the given kind exists, regardless of mutation ordering or path
-// coverage. Subagent completion gates use it: a review subagent that never
-// submitted a typed report must fail its parent tool call instead of returning
-// prose the delivery gate cannot verify.
+// HasSuccessfulReviewReportOfKind reports whether the worker handed back the
+// typed report it owed, whatever the mutation ordering or path coverage. This
+// is the delivery question, so it reads the report kind; what that report may
+// close is the separate one ReceiptProves answers.
 func (l *Ledger) HasSuccessfulReviewReportOfKind(kind ReviewKind) bool {
 	if l == nil {
 		return false
@@ -213,18 +209,29 @@ func (l *Ledger) HasSuccessfulReviewReportOfKind(kind ReviewKind) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
-		if !r.Success || r.ToolName != reviewReportTool {
-			continue
-		}
-		parsed, err := ParseReviewReport(r.Args)
-		if err != nil {
-			continue
-		}
-		if parsed.Kind == kind {
+		if r.Success && r.ToolName == reviewReportTool && r.ReportKind == kind {
 			return true
 		}
 	}
 	return false
+}
+
+// AcceptedReviewReports counts the accepted review_report receipts on this
+// ledger. The report tool reads it to hold one execution to a single accepted
+// report; a refused attempt records none, so a worker can still correct itself.
+func (l *Ledger) AcceptedReviewReports() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == reviewReportTool {
+			n++
+		}
+	}
+	return n
 }
 
 // HasReadEvidenceForPath reports whether the host observed the CONTENT of
@@ -297,4 +304,20 @@ func (l *Ledger) BlockingReviewAfter(after int) (ReviewReport, bool) {
 		}
 	}
 	return ReviewReport{}, false
+}
+
+// parsedReportKind reads the delivery fact off a review_report payload. What
+// the report may close is stamped separately, from the host's own grant.
+func parsedReportKind(fields map[string]json.RawMessage) ReviewKind {
+	return ReviewKind(strings.ToLower(strings.TrimSpace(stringField(fields, "kind"))))
+}
+
+// completedStructuredReviewReceipt reports whether this receipt is a review the
+// host authorized to answer for the ordinary review obligation, covering paths.
+func completedStructuredReviewReceipt(r Receipt, requiredPaths []string) bool {
+	if !ReceiptProves(r, ReviewKindReview) {
+		return false
+	}
+	report, err := ParseReviewReport(r.Args)
+	return err == nil && report.CoversPaths(requiredPaths)
 }

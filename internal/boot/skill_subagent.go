@@ -116,11 +116,14 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 	if subReg.Len() == 0 {
 		return "", fmt.Errorf("read_only_skill: skill %q has no read-only tools available", sk.Name)
 	}
-	// A worker that owes a typed verdict is given the tool that produces one,
-	// on its own declaration and never on how it is spelled.
-	review := agent.ProfileFromSkill(sk).Delivery.ReviewReport
+	// The tool that produces a verdict, bound to what this worker may prove.
+	// Outside the delegation lifecycle there is no execution to name, so the
+	// grant withholds authority: the report is owed and a block still lands.
+	def := agent.ProfileFromSkill(sk)
+	review := def.Delivery.ReviewReport
+	grant := agent.IssueReviewGrant(review, def.Authority.Review, "")
 	if review != "" {
-		agent.AttachReviewReportTool(subReg)
+		agent.AttachReviewReportTool(subReg, grant)
 	}
 	// Custom and named built-in profiles fully control their system prompt
 	// (no implicit concise/DefaultReadOnlyTaskSystemPrompt overlay).
@@ -169,7 +172,9 @@ func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task stri
 			Effort: subagentEffortRef(r.cfg, sk),
 			// A verdict the parent must act on carries an identity, never a
 			// sentence, so the typed report is required at every role setting.
-			ReviewReport: agent.ProfileFromSkill(sk).Delivery.ReviewReport,
+			// What that verdict may close is the separate grant beside it.
+			ReviewReport:    agent.ProfileFromSkill(sk).Delivery.ReviewReport,
+			ReviewAuthority: agent.ProfileFromSkill(sk).Authority.Review,
 		},
 		Grant: agent.CapabilityGrant{ReadOnly: sk.ReadOnly, ProfileTools: sk.AllowedTools},
 		Context: agent.ContextRequest{

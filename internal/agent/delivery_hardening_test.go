@@ -205,7 +205,7 @@ func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 func TestRunSubAgentReviewReportNudgeRecovers(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
-	AttachReviewReportTool(reg)
+	AttachReviewReportTool(reg, reviewGrant(evidence.ReviewKindReview))
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		// Run 1: reads the file, then finishes with prose only — no report.
 		{toolCallChunk("1", "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}},
@@ -236,7 +236,7 @@ func TestRunSubAgentReviewReportNudgeRecovers(t *testing.T) {
 func TestRunSubAgentReviewReportExhaustionNamesRecovery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
-	AttachReviewReportTool(reg)
+	AttachReviewReportTool(reg, reviewGrant(evidence.ReviewKindReview))
 	dir := testenv.TempDir(t)
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{{Type: provider.ChunkText, Text: "looks fine"}, {Type: provider.ChunkDone}},
@@ -469,7 +469,7 @@ func TestDeliveryDiagnosticConversationCompletes(t *testing.T) {
 func TestRunSubAgentReviewWithoutVerdictDegradesOutsideDelivery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
-	AttachReviewReportTool(reg)
+	AttachReviewReportTool(reg, reviewGrant(evidence.ReviewKindReview))
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{{Type: provider.ChunkText, Text: "verdict: pass, nothing to fix"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "verdict: pass, nothing to fix"}, {Type: provider.ChunkDone}},

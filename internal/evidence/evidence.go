@@ -553,14 +553,6 @@ func successfulForegroundReviewReceipt(r Receipt) bool {
 	return json.Unmarshal(r.Args, &p) == nil && !p.RunInBackground
 }
 
-func completedStructuredReviewReceipt(r Receipt, requiredPaths []string) bool {
-	if !r.Success || r.ToolName != "review_report" {
-		return false
-	}
-	report, err := ParseReviewReport(r.Args)
-	return err == nil && report.Kind == ReviewKindReview && report.CoversPaths(requiredPaths)
-}
-
 // HasFailedCommand reports whether the cited command ran this turn but exited
 // non-zero — so callers can distinguish "ran and failed" from "never ran".
 func (l *Ledger) HasFailedCommand(command string) bool {
@@ -1496,6 +1488,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, fa
 		}
 		if toolName == "todo_write" {
 			r.Todos = todoItemsField(fields, "todos")
+		}
+		if toolName == reviewReportTool {
+			r.ReportKind = parsedReportKind(fields)
 		}
 		r.Paths = extractPaths(fields)
 	}

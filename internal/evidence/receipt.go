@@ -58,6 +58,15 @@ type Receipt struct {
 	// output demonstrably carried. It is decided while the output is in hand,
 	// so the ledger keeps the verdict and never the content.
 	Showed []string `json:"showed,omitempty"`
+	// ReportKind is what a review_report handed back: the delivery fact, read
+	// off the payload. It says what the worker owed, never what it may close.
+	ReportKind ReviewKind `json:"report_kind,omitempty"`
+	// ReviewAuthority is what the host granted the execution that produced this
+	// receipt. Nil is unknown, and stays unknown: see ReceiptProves.
+	ReviewAuthority *ReviewAuthority `json:"review_authority,omitempty"`
+	// SourceExecutionID names the execution this receipt came from, so a grant
+	// can be joined back to the run the host issued it to.
+	SourceExecutionID string `json:"source_execution_id,omitempty"`
 }
 
 // ObserveOutput records the trimmed output size and a compact digest without

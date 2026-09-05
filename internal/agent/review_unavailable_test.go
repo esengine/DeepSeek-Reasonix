@@ -33,7 +33,7 @@ func TestRequireReviewReportRetriesOnceThenUnavailable(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "should-not-run"}, {Type: provider.ChunkDone}},
 	}}
 	reg := tool.NewRegistry()
-	AttachReviewReportTool(reg)
+	AttachReviewReportTool(reg, reviewGrant(evidence.ReviewKindReview))
 	sess := NewSession("sys")
 	out, err := RunSubAgentWithSession(context.Background(), scripted, reg, sess, "review a.go",
 		Options{RequireReviewReportKind: evidence.ReviewKindReview, MaxSteps: 2, DeliveryProfile: true}, event.Discard)

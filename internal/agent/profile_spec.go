@@ -34,6 +34,18 @@ type ProfileDefinition struct {
 	// defined it. A ceiling like the tool list: a call may not add one, and no
 	// entry point may read one out of how a worker is spelled.
 	Delivery DeliveryContract
+	// Authority is what this worker's execution may prove. Held apart from
+	// Delivery because the two answer different questions, and answering both
+	// with one field made the report's own label the capability.
+	Authority AuthorityContract
+}
+
+// AuthorityContract is what the host lets one worker's execution establish, as
+// opposed to what that worker must hand back. It travels with the worker's
+// identity for the same reason Delivery does, and a call may never widen it.
+type AuthorityContract struct {
+	// Review is the grant over structured review obligations.
+	Review evidence.ReviewAuthority
 }
 
 // DeliveryContract is what finishing means for a worker. It travels with the
@@ -62,6 +74,7 @@ func ProfileFromSkill(sk skill.Skill) ProfileDefinition {
 		Invocation:   sk.Invocation,
 		NamedBuiltin: NamedBuiltinProfile(sk.Name),
 		Delivery:     DeliveryContract{ReviewReport: evidence.ReviewKind(sk.Delivery.ReviewReport)},
+		Authority:    AuthorityContract{Review: reviewAuthorityOf(sk.Authority)},
 	}
 }
 
@@ -109,6 +122,10 @@ type WorkerSpec struct {
 	// it owes none. It follows from who the worker is — a reviewer answers with
 	// a report — and the gate reads that rather than the answer's wording.
 	ReviewReport evidence.ReviewKind
+	// ReviewAuthority is what this worker's report may close. A worker can owe
+	// a report it is not authorized to prove anything with, and did: the pair
+	// is two fields because it was one.
+	ReviewAuthority evidence.ReviewAuthority
 }
 
 // CapabilityGrant is what the run may touch. Profile frontmatter supplies a
@@ -307,4 +324,17 @@ func (c ContextRequest) parentSession(ctx context.Context) string {
 		return ""
 	}
 	return ParentSession(ctx)
+}
+
+// reviewAuthorityOf projects a skill's declared grant. Unknown obligation names
+// are dropped rather than carried: a grant is only as good as the host's own
+// vocabulary for it, and a string nothing consumes is not a permission.
+func reviewAuthorityOf(c skill.AuthorityContract) evidence.ReviewAuthority {
+	var granted []evidence.ReviewKind
+	for _, kind := range evidence.ReviewKinds() {
+		if c.GrantsReview(string(kind)) {
+			granted = append(granted, kind)
+		}
+	}
+	return evidence.GrantReviewAuthority(granted...)
 }

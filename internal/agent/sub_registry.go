@@ -10,8 +10,9 @@ import (
 
 // subRegistryFor narrows the parent's tools to what this run may touch: the
 // profile ceiling intersected with the call, the read-only or writer registry
-// for the grant, the write claim bound into the tools that must honour it, and
-// the report tool a worker owing a typed verdict answers with.
+// for the grant, and the write claim bound into the tools that must honour it.
+// The report tool is not here: it carries a permission, and a permission is
+// issued once the execution it belongs to exists (see attachReviewReport).
 func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int) (*tool.Registry, error) {
 	toolNames, err := IntersectToolLists(t.parentReg, spec.Grant.ProfileTools, spec.Grant.CallTools)
 	if err != nil {
@@ -35,11 +36,6 @@ func (t *TaskTool) subRegistryFor(spec *ProfileExecSpec, childDepth int) (*tool.
 				return nil, fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
 			}
 		}
-	}
-	// Never on the parent surface: the gate reads a child's report, and exposing
-	// it upward would let a turn file a verdict on its own behalf.
-	if spec.Worker.ReviewReport != "" {
-		AttachReviewReportTool(subReg)
 	}
 	return subReg, nil
 }

@@ -127,7 +127,9 @@ func TestStructuredReviewReportGate(t *testing.T) {
 		"reviewed_paths":["internal/a.go"],
 		"findings":[]
 	}`)
-	ledger.Record(Receipt{ToolName: "review_report", Args: raw, Success: true})
+	reviewAuth := GrantReviewAuthority(ReviewKindReview)
+	ledger.Record(Receipt{ToolName: "review_report", Args: raw, Success: true,
+		ReportKind: ReviewKindReview, ReviewAuthority: &reviewAuth, SourceExecutionID: "exec-probe"})
 	if !ledger.HasSuccessfulStructuredReviewAfter(ReviewKindReview, mutation, []string{"internal/a.go"}) {
 		t.Fatal("expected structured review coverage")
 	}
@@ -138,7 +140,9 @@ func TestStructuredReviewReportGate(t *testing.T) {
 		"reviewed_paths":["internal/a.go"],
 		"findings":[{"severity":"critical","summary":"hardcoded secret","path":"internal/a.go","line":1}]
 	}`)
-	ledger.Record(Receipt{ToolName: "review_report", Args: block, Success: true})
+	securityAuth := GrantReviewAuthority(ReviewKindSecurity)
+	ledger.Record(Receipt{ToolName: "review_report", Args: block, Success: true,
+		ReportKind: ReviewKindSecurity, ReviewAuthority: &securityAuth, SourceExecutionID: "exec-probe"})
 	ok, blocking, _ := ledger.HasStructuredReviewAfter(ReviewKindSecurity, mutation, []string{"internal/a.go"})
 	if !ok || !blocking {
 		t.Fatalf("security block: ok=%v blocking=%v", ok, blocking)

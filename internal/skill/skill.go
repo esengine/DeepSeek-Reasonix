@@ -83,9 +83,13 @@ type Skill struct {
 	// Delivery is what this worker owes beyond an answer — a declaration, never
 	// read out of a name. User frontmatter does not set it yet.
 	Delivery DeliveryContract
-	RunAs    RunAs  // inline | subagent
-	Model    string // optional model override for runAs=subagent (frontmatter `model:`)
-	Effort   string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// Authority is what this worker's execution may prove. Separate from
+	// Delivery on purpose: emitting a report of some kind and being allowed to
+	// satisfy that obligation are different grants. Frontmatter sets neither.
+	Authority AuthorityContract
+	RunAs     RunAs  // inline | subagent
+	Model     string // optional model override for runAs=subagent (frontmatter `model:`)
+	Effort    string // optional effort for runAs=subagent (frontmatter `effort:`)
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
 	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
@@ -826,6 +830,17 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 	if v := fm[skillFrontmatterName]; v != "" && IsValidName(v) {
 		name = v
 	}
+	// Read from the document, never from the flat view: flattening drops the
+	// key a field was written under, which is the whole of what a namespace is.
+	delivery, err := deliveryFromDocument(doc)
+	if err != nil {
+		fmt.Fprintf(s.stderr, "error: skill %q at %s: %v\n", name, path, err)
+		return Skill{}, false
+	}
+	if misplaced := misplacedDeliveryField(doc); misplaced != "" {
+		fmt.Fprintf(s.stderr, "warning: skill %q at %s declares %q at the top level, where it means nothing. Write it under its namespace:\n  delivery:\n    %s: review\n",
+			name, path, misplaced, misplaced)
+	}
 	desc := strings.TrimSpace(fm[skillFrontmatterDescription])
 	if desc == "" {
 		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
@@ -850,6 +865,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		Color:      strings.TrimSpace(fm[skillFrontmatterColor]),
 		Invocation: parseInvocation(fm[skillFrontmatterInvocation]),
 		Requires:   parseCSVFrontmatter(fm[skillFrontmatterRequires]),
+		Delivery:   delivery,
 	}
 	sk.Profiles, sk.InvalidProfiles = parseProfilesFrontmatter(fm[skillFrontmatterProfiles])
 	return sk, true

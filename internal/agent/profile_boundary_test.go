@@ -48,11 +48,11 @@ func assertFieldSet(t *testing.T, what string, v any, want []string) {
 // A profile describes a worker, not a run. Widening it is how a profile turns
 // into a workflow definition language.
 func TestProfileDefinitionStaysWorkerIdentityOnly(t *testing.T) {
-	// Delivery is a ceiling in the same sense AllowedTools is: what this worker
-	// owes when it finishes, decided by whoever defined it and never by a call
-	// or by how the worker is spelled.
+	// Delivery and Authority are ceilings in the same sense AllowedTools is,
+	// and two fields because one field made the report's own label the
+	// permission.
 	assertFieldSet(t, "ProfileDefinition", ProfileDefinition{}, []string{
-		"Name", "Body", "AllowedTools", "Model", "Effort", "ReadOnly", "Invocation", "NamedBuiltin", "Delivery",
+		"Name", "Body", "AllowedTools", "Model", "Effort", "ReadOnly", "Invocation", "NamedBuiltin", "Delivery", "Authority",
 	})
 }
 
@@ -61,11 +61,11 @@ func TestDelegationSpecMembersStaySeparate(t *testing.T) {
 		"Task", "Worker", "Grant", "Context", "Sched",
 	})
 	assertFieldSet(t, "TaskSpec", TaskSpec{}, []string{"Objective", "Description"})
-	// ReviewReport is the worker's, not the call's: it is decided by which
-	// profile this is and never by what one caller asks for, so a reviewer owes
-	// a typed verdict whichever entry point invoked it.
+	// ReviewReport and ReviewAuthority are the worker's, not the call's: a
+	// reviewer owes a typed verdict whichever entry point invoked it, and may
+	// close only what its own definition was granted.
 	assertFieldSet(t, "WorkerSpec", WorkerSpec{}, []string{
-		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort", "ReviewReport",
+		"Kind", "Name", "Profile", "SystemPrompt", "UseProfilePrompt", "Model", "Effort", "ReviewReport", "ReviewAuthority",
 	})
 	assertFieldSet(t, "CapabilityGrant", CapabilityGrant{}, []string{
 		"ReadOnly", "AllowNoTools", "CallTools", "ProfileTools", "WritePaths",
@@ -102,6 +102,7 @@ func TestProfileFromSkillPopulatesEveryIdentityField(t *testing.T) {
 		ReadOnly:     true,
 		Invocation:   "manual",
 		Delivery:     skill.DeliveryContract{ReviewReport: skill.ReviewReportReview},
+		Authority:    skill.AuthorityContract{Satisfies: []string{skill.ReviewReportReview}},
 	})
 	rv := reflect.ValueOf(got)
 	rt := rv.Type()

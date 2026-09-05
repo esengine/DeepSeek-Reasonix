@@ -583,9 +583,11 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		spec.Worker.Kind = "skill"
 		spec.Worker.SystemPrompt = def.Body
 		spec.Worker.UseProfilePrompt = true
-		// What the worker owes comes with the worker. Deriving it from the
-		// profile's name here would put an undeclared rule in a second place.
+		// What the worker owes comes with the worker, and so does what it may
+		// prove. Deriving either from the profile's name here would put an
+		// undeclared rule in a second place.
 		spec.Worker.ReviewReport = def.Delivery.ReviewReport
+		spec.Worker.ReviewAuthority = def.Authority.Review
 		profileTools = def.AllowedTools
 		profileModel, profileEffort = def.Model, def.Effort
 		if def.ReadOnly {
@@ -730,6 +732,12 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	// which provider-visible call it descends from. They are the same string
 	// for everything a model delegated and cannot be for anything else.
 	execution := life.executionID(parentID)
+	// Never on the parent surface: the gate reads a child's report, and exposing
+	// it upward would let a turn file a verdict on its own behalf. Mounted here
+	// rather than with the rest of the registry because it is bound to a grant,
+	// and the execution that grant names does not exist until now.
+	grant := reviewGrantFor(spec.Worker, execution)
+	attachReviewReport(subReg, grant)
 	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), execution, spec.Context.executionParent(execution), spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
 	if err != nil {
 		return "", err
@@ -751,9 +759,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			defer mutationObserver.UnregisterWriter(recoveryTaskID)
 		}
 		if spec.Grant.ReadOnly {
-			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind, spec.Worker.ReviewReport)
+			return t.runReadOnlySubSession(withUpstream(runCtx, spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, "read_only_"+spec.Worker.Kind, grant)
 		}
-		return t.runSubSession(withUpstream(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, spec.Worker.ReviewReport)
+		return t.runSubSession(withUpstream(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Context.Upstream), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, spec.Worker.Kind, grant)
 	}
 
 	if spec.Sched.RunInBackground {
@@ -1488,10 +1496,10 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, review evidence.ReviewKind) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, grant ReviewReportGrant) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
 	opts.ModelRef = modelRef
-	opts.RequireReviewReportKind = review
+	opts.RequireReviewReportKind = grant.Delivery
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
@@ -1503,9 +1511,9 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
-func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, review evidence.ReviewKind) (string, error) {
+func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, entrance string, grant ReviewReportGrant) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
-	opts.RequireReviewReportKind = review
+	opts.RequireReviewReportKind = grant.Delivery
 	ctx, prompt, opts = t.prepareSubSession(ctx, prompt, opts, modelRef, entrance)
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
