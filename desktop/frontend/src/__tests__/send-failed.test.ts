@@ -415,30 +415,9 @@ eq(
   true,
   "composer submit stays behind the controller-ready gate",
 );
-eq(
-    appSource.includes("activateGoalAndSubmitOnTab({") &&
-    appSource.includes("tabId: sourceTabId") &&
-    appSource.includes("goal: nextGoal") &&
-    appSource.includes("collaborationMode: controllerComposerProfileCollaborationMode(composerProfile)") &&
-    appSource.includes("toolApprovalMode,"),
-  true,
-  "initial Goal activation captures the submission tab",
-);
-eq(
-  appSource.includes("setControllerGoalForTab(tabId, trimmed)") && appSource.includes("clearControllerGoalForTab(tabId)"),
-  true,
-  "tab-scoped Goal activation updates the matching controller",
-);
-eq(
-  /await \(trimmed \? setControllerGoalForTab\(tabId, trimmed\) : clearControllerGoalForTab\(tabId\)\);\s*patchActivatedGoalForTab\(tabId, trimmed\)/.test(appSource),
-  true,
-  "local Goal profile is patched only after backend activation succeeds",
-);
-eq(
-  /displayGoal && !\["status", "clear", "off", "stop", "done", "pause", "resume"\]\.includes/.test(appSource) && /else if \(\["clear", "off", "stop", "done"\]\.includes/.test(appSource),
-  true,
-  "Goal pause and resume do not clear the active Goal before lifecycle handling",
-);
+// session-submission-lifecycle.test.tsx mounts the production submission owner
+// and adapter: explicit targets, failure-before-patch, pause/resume, and exact
+// structured/unstructured first-Goal bytes replace the old App source locations.
 eq(
   controllerSource.includes("await app.SetGoalForTab(tabId, goal)") && !/SetGoalForTab\(tabId, goal\)\.catch\(\(\) => \{\}\)/.test(controllerSource),
   true,
@@ -449,12 +428,8 @@ eq(
   true,
   "ClearGoalForTab failures also propagate to callers",
 );
-eq(
-  controllerSource.includes("app.SubmitInitialGoalToTabWithID(") &&
-    appSource.includes("patchActivatedGoalForTab(sourceTabId, trimmed)"),
-  true,
-  "the first Goal turn uses the atomic target-scoped backend contract",
-);
+// goal-activation-tab-routing.test.tsx retains real Controller/bridge coverage
+// for the atomic target-scoped first Goal contract.
 
 const unsent = reducer(sent, { type: "unsend" });
 eq(unsent.pendingUser, undefined, "unsend clears the pending marker");

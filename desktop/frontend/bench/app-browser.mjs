@@ -135,6 +135,15 @@ try {
   await page.locator('.project-tree__topic-main:has-text("bench:geometry")').click();
   await page.waitForFunction(() => document.querySelector('.transcript')?.textContent?.includes('Geometry contract fixture complete.'));
   assert(await page.locator('.remote-surface').count() === 0, "subsequent local navigation owns the surface; remote events do not reclaim it");
+  const sentText = 'App source-bound submission fixture';
+  await composer.fill(sentText);
+  await composer.press('Enter');
+  await page.locator('[data-row-kind="user"]').filter({ hasText: sentText }).waitFor();
+  await page.locator('.composer__btn--stop').click();
+  await page.locator('.composer__btn--stop').waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.querySelector('textarea.composer__input:not([aria-hidden=true])')?.disabled === false);
+  assert(await page.evaluate(() => window.__appBrowserIdentity.composer === document.querySelector('textarea.composer__input:not([aria-hidden=true])')),
+    'ordinary source-bound send and native Stop preserve Composer identity and restore writable readiness');
   assert(pageErrors.length === 0, `three-layout replay emits no page errors (${pageErrors.length})`);
 
   const classicPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

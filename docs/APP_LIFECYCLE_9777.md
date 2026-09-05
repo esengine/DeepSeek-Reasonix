@@ -59,9 +59,9 @@ browser replay, Transcript unit tests, Chromium selection/scroll/composer replay
 Chromium and Playwright WebKit reader replay, frontend/test typechecks, hooks,
 AST gate with negative fixtures, single writer and diff whitespace checks.
 
-Latest checked production bundle measurements (KiB): initial JS 425.8 / 426.8; shell
+Latest checked production bundle measurements (KiB): initial JS 426.7 / 426.8; shell
 CSS 115.9 / 116.0; Chinese 60.5 / 60.6; Traditional Chinese 61.4 / 61.5; raw
-initial assets 2333.0 / 2349.4. No capacity limit was increased. Settings-only
+initial assets 2336.3 / 2349.4. No capacity limit was increased. Settings-only
 image-control CSS moved to the existing lazy settings stylesheet. The unused
 labels for removed density/reasoning/fold controls were deleted in all three
 locales; legacy configuration fields, setters, events and mirrors are unchanged.
@@ -147,7 +147,23 @@ rejection, boolean failure, remote routing and same-profile runtime replacement.
 The production App replay also selects a different model through the real picker
 and verifies stable hydrated block keys/content revisions, Composer draft and
 writable readiness. Transient raw-Markdown fallback text is not a history oracle.
-This does not certify the remaining send/Goal coordination still inside App.
+Local ordinary/direct submission and Goal activation now use one source-bound
+submission owner. The render-published `commitThenSendRef` and rewind-state ref
+are removed. After profile/Goal awaits, resource ownership is checked before
+undo invalidation, submission or source-profile patching. Structured first-Goal
+submissions retain the atomic Controller contract and exact existing trimming,
+prefix and invocation semantics. The production App replay submits a real mock
+turn, clicks Stop and verifies retained Composer identity and writable readiness.
+
+Pending Plan revisions belong to an independent source/session queue owner.
+Only the identical request releases its slot; replacement resources can proceed
+while old transports finish. Failed revisions remain available for the existing
+source-reactivation/idle-transition retry policy, but unrelated renders cannot
+create a retry loop. Admission requires a committed, ready source without a pending
+prompt. The queue reuses the submission executor under its own authority rather
+than a nested UI command: failed resource data survives suppressed old error UI.
+Disposal releases queued input synchronously. Native slash
+commands, clear/steer/stop coordination and other App domains still need migration.
 
 ### Retired assertion → behavioral evidence
 
@@ -155,6 +171,8 @@ This does not certify the remaining send/Goal coordination still inside App.
 | --- | --- |
 | Worktree badge JSX inside App | `topicbar-region.test.tsx` mounts isolated/ordinary topics and verifies accessible badge visibility and source-bound merge actions |
 | Background profile restoration and awaited model callback text | `controller-profile-lifecycle.test.tsx` executes the real effect and model commands, including single failure ownership and direct reject semantics |
+| App Goal activation, source submit and undo callback locations | `session-submission-lifecycle.test.tsx` exercises the real owner/adapter; existing `goal-activation-tab-routing.test.tsx` retains Controller/atomic bridge coverage |
+| App pending-revision map and render-ref text | `pending-plan-revision-lifecycle.test.tsx` covers source queues, replacement, identical text, old finally, failure retention and disposal |
 | Goal clear/mode JSX wiring | `goal-action-errors.test.tsx` mounts the real goal-command hook; failures are presented once |
 | Startup snapshot, warnings, failed startup, IM reload | `desktop-preferences-lifecycle.test.tsx` checks bridge calls, revision fencing, backend authority and disposal |
 | Onboarding model-access callback text | `onboarding-commands.test.tsx` checks actual overlay/dismissal state |
@@ -177,7 +195,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,792 lines. Six domain owners, remaining effects, the pure shell
+- App is still 3,668 lines. Six domain owners, remaining effects, the pure shell
   and removal of its size exception are not complete.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,

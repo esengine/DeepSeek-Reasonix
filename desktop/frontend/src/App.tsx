@@ -103,7 +103,6 @@ import {
   composerProfileFromMeta,
   composerProfileFromTab,
   composerProfileMode,
-  controllerComposerProfileCollaborationMode,
   defaultComposerProfile,
   displayedComposerProfileCollaborationMode,
   hydrateComposerProfileFromMeta,
@@ -178,7 +177,10 @@ import { formatShortcutCombo, resolvedShortcutCombo, useGlobalShortcut } from ".
 import { useWarmTerminalPanel } from "./lib/useWarmTerminalPanel";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
-import { activateGoalAndSubmitOnTab } from "./lib/goalSubmit";
+import { useSessionSubmission } from "./lib/useSessionSubmission";
+import { usePendingPlanRevisions, reportPendingRevisionFailure } from "./lib/usePendingPlanRevisions";
+import { createSubmissionPorts, projectSubmissionResources } from "./app-runtime/desktopSubmissionAdapter";
+import { goalCommand } from "./app-runtime/sessionSubmissionOwner";
 import { useCommittedCommand } from "./lib/useCommittedCommand";
 import { createSessionSurfaceFence, sessionIdentityKey } from "./app-runtime/sessionTarget";
 import { commitAppRenderToken, createAppRenderToken } from "./app-runtime/appLifecycleProbe";
@@ -310,19 +312,6 @@ function lazyNavigateWorkspace(
 }
 const CHAT_MIN_WIDTH = 400;
 const WORKSPACE_RESIZER_WIDTH = 8;
-function stripLegacyGoalBudgetFlags(arg: string): string {
-  const parts = arg.trim().split(/\s+/).filter(Boolean);
-  while (parts.length > 0) {
-    const flag = parts[0].toLowerCase();
-    if (flag !== "--research" && flag !== "--auto-research" && flag !== "--deep" && flag !== "--simple" && flag !== "--no-research") break;
-    parts.shift();
-  }
-  return parts.join(" ");
-}
-function hasLegacyGoalBudgetFlag(arg: string): boolean {
-  const first = arg.trim().split(/\s+/, 1)[0]?.toLowerCase();
-  return first === "--research" || first === "--auto-research" || first === "--deep" || first === "--simple" || first === "--no-research";
-}
 
 function isThemeMode(value: string): value is Theme {
   return value === "auto" || value === "light" || value === "dark";
@@ -727,24 +716,22 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const [pendingPlanRevisionsByTab, setPendingPlanRevisionsByTab] = useState<Record<string, string>>({});
   const [invocationMetadataByTab, setInvocationMetadataByTab] = useState<Record<string, InvocationMetadataMap>>({});
-  const pendingPlanRevisionSendingTabsRef = useRef(new Set<string>());
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
   const activeTabIdRef = useRef(activeTabId);
-  const commitThenSendRef = useRef<(
-    tabId: string,
-    displayText: string,
-    submitText?: string,
-    structured?: StructuredInvocationSubmit,
-    initialGoal?: {
-      goal: string;
-      collaborationMode: CollaborationMode;
-      toolApprovalMode: ToolApprovalMode;
-    },
-  ) => Promise<void>>(async () => {});
+  const [rewindStatesByTab, setRewindStatesByTab] = useState<Record<string, RewindUndoState>>({});
+  const setRewindStateForTab = useCommittedCommand((tabId: string, nextState: RewindUndoState | null) => {
+    if (!tabId) return;
+    setRewindStatesByTab(current => {
+      if (!nextState && !current[tabId]) return current;
+      const next = { ...current };
+      if (nextState) next[tabId] = nextState;
+      else delete next[tabId];
+      return next;
+    });
+  });
   const handleInvocationMetadataChange = useCommittedCommand((metadata: InvocationMetadataMap) => {
     const sourceTabId = activeTabIdRef.current;
     if (!sourceTabId) return;
@@ -1098,23 +1085,25 @@ export default function App() {
       }, ["collaborationMode", "goal"]);
       userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, tabId, false);
     });
-  const applyGoalForTab = useCommittedCommand(async (tabId: string, nextGoal: string): Promise<void> => {
-      if (!tabId) return;
-      const trimmed = nextGoal.trim();
-      // Activate the backend Goal first. Only then patch the local profile so a
-      // failed SetGoalForTab cannot leave the Composer thinking a Goal is active.
-      if (tabMetas.some((tab) => tab.id === tabId && tab.remote)) {
-        await app.SetRemoteTabGoal(tabId, trimmed);
-        patchActivatedGoalForTab(tabId, trimmed);
-        return;
-      }
-      await (trimmed ? setControllerGoalForTab(tabId, trimmed) : clearControllerGoalForTab(tabId));
-      patchActivatedGoalForTab(tabId, trimmed);
-    });
-  const applyGoal = useCommittedCommand(async (nextGoal: string): Promise<void> => {
-      if (!activeTabId) return;
-      await applyGoalForTab(activeTabId, nextGoal);
-    });
+  const controllerProfiles = projectControllerProfiles(tabMetas, composerProfilesByTab, {
+    target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, profile: composerProfile, remote: remoteSurfaceActive,
+  });
+  const { switchModel, switchModelFromUi, applyProfile: applyControllerProfile } = useControllerProfileCommands({
+    target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, profiles: controllerProfiles,
+    ready: controllerReady, remote: remoteSurfaceActive, runtimeEpoch: state.meta?.runtime?.epoch, operations: sessionOperations,
+    ports: { model: setModelForTab, profile: setControllerComposerProfileForTab },
+    remoteModel: remoteSession.setModel, report: handleGoalActionError,
+  });
+  const clearSubmissionUndo = useCommittedCommand((tab: string) => setRewindStateForTab(tab, null));
+  const { commitThenSend, submit: submitComposerTurn, applyGoalForTab, applyGoal, sendRevision } = useSessionSubmission({
+    target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, operations: sessionOperations,
+    resources: projectSubmissionResources(controllerProfiles, tabMetas, composerProfilesByTab,
+      { tabId: activeTabId ?? "", profile: composerProfile, ready: controllerReady },
+      { starting: t("composer.workspaceStarting"), readOnly: t("composer.readOnlyChannel") }),
+    missingSource: t("composer.workspaceStarting"),
+    ports: createSubmissionPorts({ send: sendToTab, setGoal: setControllerGoalForTab, clearGoal: clearControllerGoalForTab,
+      clearUndo: clearSubmissionUndo, patchGoal: patchActivatedGoalForTab, profile: applyControllerProfile }),
+  });
   const notePlanModeForTab = useCommittedCommand((tabId: string, enabled: boolean) => {
     userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, tabId, enabled);
   });
@@ -1144,8 +1133,11 @@ export default function App() {
     },
     showError: (message) => showToast(message, "error"),
   });
-  const rememberPlanRevisionForTab = useCommittedCommand((tabId: string, revision: string) => {
-    setPendingPlanRevisionsByTab(current => ({ ...current, [tabId]: revision }));
+  const rememberPlanRevisionForTab = usePendingPlanRevisions({
+    visible: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity },
+    resources: controllerProfiles.map(resource => resource.target), running: state.running,
+    ready: controllerReady && !state.approval && !state.ask && !state.mcpInteraction,
+    operations: sessionOperations, send: sendRevision, report: reportPendingRevisionFailure,
   });
   const { handleApprovalAnswer, handleRecoveryAnswer, handleRevisePlan, handleExitPlan,
     handleQuestionAnswer, handleQuestionDismiss, handleMCPAnswer } = useSessionPromptCommands({
@@ -1181,15 +1173,6 @@ export default function App() {
   // tool-permission axis while preserving the Ask/Auto base mode.
   const cycleMode = useCommittedCommand(() => {
     runGoalAction(() => applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan"));
-  });
-  const { switchModel, switchModelFromUi, applyProfile: applyControllerProfile } = useControllerProfileCommands({
-    target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity },
-    profiles: projectControllerProfiles(tabMetas, composerProfilesByTab, {
-      target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, profile: composerProfile, remote: remoteSurfaceActive,
-    }),
-    ready: controllerReady, remote: remoteSurfaceActive, runtimeEpoch: state.meta?.runtime?.epoch, operations: sessionOperations,
-    ports: { model: setModelForTab, profile: setControllerComposerProfileForTab },
-    remoteModel: remoteSession.setModel, report: handleGoalActionError,
   });
 
   // The live task list pinned above the composer comes from the most recent
@@ -1328,27 +1311,6 @@ export default function App() {
       }
     });
 
-  useEffect(() => {
-    if (!activeTabId || state.running) return;
-    const text = pendingPlanRevisionsByTab[activeTabId];
-    if (!text || pendingPlanRevisionSendingTabsRef.current.has(activeTabId)) return;
-    pendingPlanRevisionSendingTabsRef.current.add(activeTabId);
-    void commitThenSendRef.current(activeTabId, text)
-      .then(() => {
-        setPendingPlanRevisionsByTab((current) => {
-          if (current[activeTabId] !== text) return current;
-          const next = { ...current };
-          delete next[activeTabId];
-          return next;
-        });
-      })
-      .catch((err) => {
-        console.warn("Failed to submit pending plan revision", err);
-      })
-      .finally(() => {
-        pendingPlanRevisionSendingTabsRef.current.delete(activeTabId);
-      });
-  }, [activeTabId, pendingPlanRevisionsByTab, state.running]);
 
   useEffect(() => {
     setClearContextPending(false);
@@ -1449,49 +1411,8 @@ export default function App() {
         }
         return;
       }
-      const goalCommand = /^\/goal(?:\s+(.*))?$/.exec(trimmed);
-      if (goalCommand) {
-        const arg = (goalCommand[1] ?? "").trim();
-        const displayGoal = stripLegacyGoalBudgetFlags(arg);
-        if (displayGoal && !["status", "clear", "off", "stop", "done", "pause", "resume"].includes(displayGoal.toLowerCase())) {
-          if (hasLegacyGoalBudgetFlag(arg)) {
-            userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, activeTabId, false);
-            patchActiveComposerProfile({
-              collaborationMode: "goal",
-              goalDraftMode: false,
-              goal: displayGoal,
-            }, ["collaborationMode", "goal"]);
-          } else {
-            await applyGoal(displayGoal);
-          }
-        } else if (["clear", "off", "stop", "done"].includes(displayGoal.toLowerCase())) {
-          await applyGoal("");
-        }
-        if (!controllerReady) return;
-        await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim());
-        return;
-      }
-      if (collaborationMode === "goal" && !goal.trim()) {
-        if (!controllerReady) return;
-        await activateGoalAndSubmitOnTab({
-          tabId: sourceTabId,
-          displayText: trimmed,
-          submitText,
-          structured,
-          sendToTab: (tabId, nextGoal, display, routedSubmit, routedStructured) =>
-            commitThenSendRef.current(
-              tabId,
-              display,
-              routedSubmit,
-              routedStructured,
-              {
-                goal: nextGoal,
-                collaborationMode: controllerComposerProfileCollaborationMode(composerProfile),
-                toolApprovalMode,
-              },
-            ),
-        });
-        patchActivatedGoalForTab(sourceTabId, trimmed);
+      if (goalCommand(trimmed) || (collaborationMode === "goal" && !goal.trim())) {
+        await submitComposerTurn(sourceTabId, displayText, submitText, structured);
         return;
       }
       const theme = /^\/theme(?:\s+(\S+))?$/.exec(trimmed);
@@ -1538,10 +1459,7 @@ export default function App() {
         notice(t("settings.themeUnknown", { name: arg }), "warn");
         return;
       }
-      if (!controllerReady) return;
-      const profileApplied = await applyControllerProfile(sourceTabId, false);
-      if (!profileApplied) return;
-      await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim(), structured);
+      await submitComposerTurn(sourceTabId, displayText, submitText, structured);
     });
 
   const handleSteer = useCommittedCommand(async (text: string, requestedTabId = activeTabId) => {
@@ -2326,21 +2244,10 @@ export default function App() {
   // On confirm, call Go prepare+commit immediately. Only after success does
   // the UI truncate the transcript, refresh files, and fill the composer.
   // Real backend undo uses UndoRewindForTab when a transaction id is available.
-  const [rewindStatesByTab, setRewindStatesByTab] = useState<Record<string, RewindUndoState>>({});
-  const rewindStatesByTabRef = useRef(rewindStatesByTab);
-  rewindStatesByTabRef.current = rewindStatesByTab;
   const [rewindCommittingByTab, setRewindCommittingByTab] = useState<Record<string, boolean>>({});
   const rewindState = activeTabId ? rewindStatesByTab[activeTabId] ?? null : null;
   const rewindCommitting = Boolean(activeTabId && rewindCommittingByTab[activeTabId]);
 
-  const setRewindStateForTab = useCommittedCommand((tabId: string, nextState: RewindUndoState | null) => {
-    if (!tabId) return;
-    const next = { ...rewindStatesByTabRef.current };
-    if (nextState) next[tabId] = nextState;
-    else delete next[tabId];
-    rewindStatesByTabRef.current = next;
-    setRewindStatesByTab(next);
-  });
 
   const setRewindCommittingForTab = useCommittedCommand((tabId: string, committing: boolean) => {
     setRewindCommittingByTab((current) => {
@@ -2421,36 +2328,6 @@ export default function App() {
     return null;
   }, [state.items]);
 
-  // send wrapper: clear local undo banner state before sending a new turn
-  // (new mutation invalidates undo). Rewind itself already committed immediately.
-  const commitThenSend = useCommittedCommand(async (
-    sourceTabId: string,
-    displayText: string,
-    submitText?: string,
-    structured?: StructuredInvocationSubmit,
-    initialGoal?: {
-      goal: string;
-      collaborationMode: CollaborationMode;
-      toolApprovalMode: ToolApprovalMode;
-    },
-  ) => {
-    const sourceTab = tabMetas.find((tab) => tab.id === sourceTabId);
-    if (!sourceTab) throw new Error(t("composer.workspaceStarting"));
-    if (sourceTab.readOnly) throw new Error(t("composer.readOnlyChannel"));
-    if (
-      sourceTab.ready !== true ||
-      (sourceTab.runtime && sourceTab.runtime.phase !== "ready") ||
-      sourceTab.startupErr
-    ) {
-      throw new Error(sourceTab.runtime?.issue?.message || sourceTab.startupErr || t("composer.workspaceStarting"));
-    }
-    // New turn invalidates the last undo slot.
-    if (rewindStatesByTabRef.current[sourceTabId]) {
-      setRewindStateForTab(sourceTabId, null);
-    }
-    await sendToTab(sourceTabId, displayText, submitText, undefined, structured, initialGoal);
-  });
-
   const handleTranscriptPrompt = useCommittedCommand((text: string) => {
     if (!activeTabId || !controllerReady) return;
     void commitThenSend(activeTabId, text).catch((err) => {
@@ -2481,7 +2358,6 @@ export default function App() {
     void handleCancelActive();
     setWorkspaceConflict(null);
   });
-  commitThenSendRef.current = commitThenSend;
 
   const handleMessageAction = useCommittedCommand((turn: number, scope: string) => {
     const sourceTabId = activeTabId;
@@ -2593,7 +2469,7 @@ export default function App() {
 
   const handleEditPrompt = useCommittedCommand(async (turn: number, displayText: string, submitText?: string): Promise<boolean> => {
     const sourceTabId = activeTabId;
-    if (!sourceTabId || activeTab?.readOnly || !controllerReady || hydratePlaceholderActive || rewindStatesByTabRef.current[sourceTabId] || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
+    if (!sourceTabId || activeTab?.readOnly || !controllerReady || hydratePlaceholderActive || rewindStatesByTab[sourceTabId] || state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending) return false;
     const next = displayText.trim();
     if (!next) return false;
     const submit = (submitText ?? displayText).trim();

@@ -95,10 +95,8 @@ ok(
 // and verifies one error report, alongside the direct/awaited model reject contract.
 ok(errors.filter(error => error === "stop goal bridge failed").length === 1, "production Composer Stop Goal adapter presents the failure exactly once");
 ok(errors.filter(error => error === "switch mode bridge failed").length === 1, "production Composer mode adapter presents the failure exactly once");
-ok(
-  /await \(trimmed \? setControllerGoalForTab\(tabId, trimmed\) : clearControllerGoalForTab\(tabId\)\);\s*patchActivatedGoalForTab\(tabId, trimmed\)/.test(appSource),
-  "failed Goal bridge calls cannot patch local Goal state or user intent",
-);
+// session-submission-lifecycle.test.tsx rejects real Goal activation and checks
+// zero profile/intent patches or submit/undo side effects.
 
 await act(async () => {
   root.unmount();

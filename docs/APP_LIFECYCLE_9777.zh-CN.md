@@ -48,8 +48,8 @@ AST 门禁解析 import、re-export、别名和动态 import，区分 type-only 
 reader 回放、前端及测试类型检查、hooks、含负例的 AST 门禁、single-writer
 和 diff 空白检查。
 
-最近已检查生产 bundle（KiB）：初始 JS 425.8 / 426.8；外壳 CSS 115.9 / 116.0；
-简中60.5 / 60.6；繁中61.4 / 61.5；初始原始资源2333.0 / 2349.4。
+最近已检查生产 bundle（KiB）：初始 JS 426.7 / 426.8；外壳 CSS 115.9 / 116.0；
+简中60.5 / 60.6；繁中61.4 / 61.5；初始原始资源2336.3 / 2349.4。
 未提高容量预算。仅设置页使用的图片控件 CSS 移入既有懒加载样式表；三语
 删除了已移除密度/reasoning/fold 控件的无引用文案。旧配置字段、setter、
 事件和镜像的一版兼容政策不变。
@@ -107,6 +107,8 @@ Node 组件发现器统一加载 CSS 资源桩，不再维护易遗漏传递依�
 | --- | --- |
 | WorktreeBadge 必须写在 App 的 JSX | `topicbar-region.test.tsx` 挂载隔离/普通会话，验证标识可达性、条件显隐和合并按钮的源 tab |
 | 后台 profile 恢复及 await 模型回调文本 | `controller-profile-lifecycle.test.tsx` 执行真实 effect/模型命令，覆盖单次失败呈现及直接调用的 reject 契约 |
+| App Goal 激活、源发送和 undo 回调位置 | `session-submission-lifecycle.test.tsx` 执行真实 owner/adapter；既有 Goal 路由测试继续覆盖 Controller 与原子 bridge |
+| App pending revision map 与 render ref 文本 | `pending-plan-revision-lifecycle.test.tsx` 验证源队列、资源替换、相同文本、旧 finally、失败保留及卸载 |
 | Goal 清理/模式 JSX | `goal-action-errors.test.tsx` 挂载真实命令 hook，失败只提示一次 |
 | 启动 snapshot、警告、失败默认值、IM 刷新 | `desktop-preferences-lifecycle.test.tsx` 验证 bridge 调用、revision、后端权威及卸载 |
 | 引导回调文本 | `onboarding-commands.test.tsx` 验证 overlay 与 dismissal 状态 |
@@ -139,10 +141,22 @@ Topicbar 标题、重命名输入与来源控件已迁入展示区域，展示�
 顺序都只有一个失败呈现 owner。真实 hook 测试还覆盖直接 reject、boolean
 失败、远端路径及相同 profile 下的 runtime 替换。生产 App 回放通过真实模型
 选择器切换模型，验证已 hydrate 的 block key/内容 revision、草稿与可写状态；
-临时原始 Markdown fallback 文本不能作为历史内容权威。这不代表 App 中剩余
-发送/Goal 协调已经全部迁移。
+临时原始 Markdown fallback 文本不能作为历史内容权威。
 
-- App 仍3792行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。
+本地普通/直接提交与 Goal 激活现已接入共同源会话 submission owner，删除
+render 阶段发布的 `commitThenSendRef` 和 rewind-state ref。等待 profile/Goal
+返回后，在清理 undo、发送或 patch 源 profile 之前检查资源身份。结构化首轮
+Goal 保留原子 Controller 接口及既有 trim、前缀和 invocation 字节语义。生产
+App 回放实际发送 mock turn、点击停止，并验证 Composer 身份和可写恢复。
+
+Plan 修订由独立的源会话队列 owner 管理，仅原请求可释放其槽位；旧传输等待中
+不阻塞替换资源。失败修订保留原有源会话重新激活/运行结束时的重试语义，但无关
+重渲染不会循环重试。提交需等待源 surface 已提交、runtime 可用且没有待处理提示。
+队列以自身 authority 复用 submission executor，不嵌套 UI 命令，确保旧错误不弹到
+当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调及其余
+App 领域仍需继续迁移。
+
+- App 仍3668行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。
 - 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
   Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
   head 或原生平台验收。

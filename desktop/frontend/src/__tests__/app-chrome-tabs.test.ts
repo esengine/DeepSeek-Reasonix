@@ -411,12 +411,8 @@ ok(
   "topic shortcut badge state is cleared when disabled, interrupted, or cleaned up",
 );
 
-ok(
-  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindUndoState>>\(\{\}\);/.test(appSource) &&
-    /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
-    /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
-  "committing optimistic rewind clears only the source tab before awaiting the backend",
-);
+// session-submission-lifecycle.test.tsx verifies source-only undo invalidation
+// before send, and zero invalidation for stale/read-only/disposed submissions.
 
 ok(
   /if \(scope === "code"\) \{[\s\S]*?rewindForTabDetailed\(sourceTabId, turn, scope\)[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
@@ -425,12 +421,8 @@ ok(
 
 
 
-ok(
-  /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
-    /commitThenSendRef\.current\(activeTabId, text\)/.test(appSource) &&
-    !/const \[pendingPlanRevision, setPendingPlanRevision\]/.test(appSource),
-  "queued plan revisions stay scoped to their source tab",
-);
+// pending-plan-revision-lifecycle.test.tsx drives running/idle, tab changes,
+// replacement sessions, identical queued text, old finally and disposal.
 
 
 
