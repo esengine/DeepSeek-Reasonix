@@ -52,6 +52,44 @@ export function advanceSurfacePaintCommit(
 
 export type NavigationSurfaceIntent = number | null;
 
+export type NavigationSurfaceTicket = Readonly<{
+  token: string;
+  intent: number;
+  targetTabId: string;
+  targetSessionKey: string;
+}>;
+
+/** Opaque public token plus the complete internal target identity. */
+export function createNavigationSurfaceTicket(
+  intent: number,
+  targetTabId: string,
+  targetSessionKey: string,
+): NavigationSurfaceTicket {
+  return Object.freeze({
+    token: `navigation-${intent}`,
+    intent,
+    targetTabId,
+    targetSessionKey,
+  });
+}
+
+export function matchesNavigationSurfaceTicket(
+  ticket: NavigationSurfaceTicket | null,
+  token: string,
+  intent: number | null,
+  targetTabId: string | undefined,
+  targetSessionKey: string,
+): boolean {
+  return Boolean(
+    ticket
+    && intent !== null
+    && ticket.token === token
+    && ticket.intent === intent
+    && ticket.targetTabId === targetTabId
+    && ticket.targetSessionKey === targetSessionKey,
+  );
+}
+
 export function beginNavigationSurfaceState(intent: number): NavigationSurfaceState {
   return { intent, phase: "source-retained" };
 }

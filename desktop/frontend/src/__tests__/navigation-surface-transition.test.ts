@@ -1,11 +1,14 @@
 // Run: tsx src/__tests__/navigation-surface-transition.test.ts
 
 import { readFileSync } from "node:fs";
+import { navigateWorkspace } from "../app-runtime/navigationOwner";
 import {
   advanceSurfacePaintCommit,
   beginNavigationSurfaceState,
+  createNavigationSurfaceTicket,
   guardBackendNavigationResult,
   markNavigationTargetMasked,
+  matchesNavigationSurfaceTicket,
   settleNavigationSurfaceIntent,
   settleNavigationSurfaceState,
 } from "../lib/navigationSurfaceTransition";
@@ -40,6 +43,14 @@ surface = settleNavigationSurfaceState(surface, 8);
 ok(surface?.intent === 9, "a stale paint terminal cannot release the latest mask");
 surface = settleNavigationSurfaceState(surface, 9);
 ok(surface === null, "the matching paint terminal releases the mask");
+
+const ticketA1 = createNavigationSurfaceTicket(20, "tab-a", "session-a:1");
+const ticketB = createNavigationSurfaceTicket(21, "tab-b", "session-b:1");
+const ticketA2 = createNavigationSurfaceTicket(22, "tab-a", "session-a:1");
+ok(matchesNavigationSurfaceTicket(ticketA1, ticketA1.token, 20, "tab-a", "session-a:1"), "paint acknowledgement matches the complete ticket");
+ok(!matchesNavigationSurfaceTicket(ticketB, ticketA1.token, 21, "tab-b", "session-b:1"), "an old paint token cannot commit B");
+ok(!matchesNavigationSurfaceTicket(ticketA2, ticketA1.token, 22, "tab-a", "session-a:1"), "A → B → A cannot revive A's old paint token");
+ok(!matchesNavigationSurfaceTicket(ticketA1, ticketA1.token, 20, "tab-a", "session-a:2"), "same-tab replacement session rejects the old ticket");
 
 let paint = advanceSurfacePaintCommit({ attempts: 0, stableFrames: 0 }, {
   rendered: true, placementReady: true, geometryReady: true, geometryKey: "755:1200:445",
@@ -115,16 +126,30 @@ ok(appSource.includes("{rewindState && ("), "target rewind footprint is laid out
 ok(/\.footer--navigation-hidden\s*\{[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;/.test(stylesSource), "masked target footer cannot paint or receive input");
 ok(appSource.includes('style={navigationSurface?.phase === "source-retained"') && appSource.includes("const visibleDecisionSurface = decisionSurface"), "target-masked paint uses the target footer geometry");
 ok((appSource.match(/guardBackendNavigationResult\(\{/g) ?? []).length === 2, "both Reveal paths guard stale backend activation results");
-const switchFolderSource = appSource.slice(
-  appSource.indexOf("const switchFolder = useCallback"),
-  appSource.indexOf("const refreshProjectsAndTabs = useCallback"),
-);
-ok(switchFolderSource.includes("const navigationIntentSeq = noteNavigationIntent()"), "workspace navigation claims the shared intent before Wails");
-ok(switchFolderSource.includes("beginNavigationSurface(navigationIntentSeq)"), "workspace navigation masks the source surface before Wails");
-ok(switchFolderSource.includes("pickWorkspace(navigationIntentSeq)"), "folder-pick navigation carries the shared intent into the controller");
-ok(switchFolderSource.includes("switchWorkspace(path, navigationIntentSeq)"), "direct workspace navigation carries the shared intent into the controller");
-ok(switchFolderSource.includes("settleNavigationSurface(navigationIntentSeq)"), "workspace request completion advances the target under its surface mask");
 ok(surfaceHookSource.includes("navigation.paint-ready"), "surface settlement is diagnosed only from target paint readiness");
+
+let currentWorkspaceIntent = 30;
+let releaseWorkspace!: (picked: string) => void;
+const workspaceResult = new Promise<string>((resolve) => { releaseWorkspace = resolve; });
+const workspaceCalls: string[] = [];
+const staleWorkspace = navigateWorkspace("/workspace-a", {
+  claimIntent: () => currentWorkspaceIntent,
+  beginSurface: (intent) => workspaceCalls.push(`begin:${intent}`),
+  isIntentCurrent: (intent) => intent === currentWorkspaceIntent,
+  pickWorkspace: async () => "",
+  switchWorkspace: async (path, intent) => {
+    workspaceCalls.push(`switch:${intent}:${path}`);
+    return workspaceResult;
+  },
+  markProjectChanged: (updater) => { updater(0); workspaceCalls.push("changed"); },
+  refreshTabsAfterMutation: async (latest) => { workspaceCalls.push(`refresh:${latest() ? "current" : "stale"}`); },
+  maskTarget: (intent) => workspaceCalls.push(`mask:${intent}`),
+});
+currentWorkspaceIntent = 31;
+releaseWorkspace("/workspace-a");
+ok(await staleWorkspace === "/workspace-a", "source workspace data may finish after a newer navigation");
+ok(!workspaceCalls.includes("changed") && !workspaceCalls.some((call) => call.startsWith("refresh:")), "stale workspace completion cannot mutate current UI");
+ok(workspaceCalls.at(-1) === "mask:30", "old workspace finally addresses only its own surface intent");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

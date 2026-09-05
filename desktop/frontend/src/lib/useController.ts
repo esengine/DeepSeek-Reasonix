@@ -3885,23 +3885,27 @@ export function useController() {
     }
   }, [bumpCancelHydrateSeq, dispatchTo, scheduleCancelReconcile]);
 
-  const cancel = useCallback(async (inboxItemIDs: string[] = []): Promise<CancelOutcome> => {
-    const cur = stateRef.current, tabId = activeTabId;
+  const cancelForTab = useCallback(async (tabId: string, inboxItemIDs: string[] = []): Promise<CancelOutcome> => {
+    const cur = statesRef.current.get(tabId);
     let restoredText: string | undefined;
-    if (cur.running && cur.pendingUser !== undefined) {
+    if (cur?.running && cur.pendingUser !== undefined) {
       restoredText = cur.pendingUser;
-      if (tabId) dispatchTo(tabId, { type: "unsend" });
-    } else if (tabId) {
+      dispatchTo(tabId, { type: "unsend" });
+    } else {
       dispatchTo(tabId, { type: "cancel_requested" });
     }
-    if (!tabId) return { restoredText, discardedItemIds: [] };
     const result = await cancelTab(tabId, inboxItemIDs);
     return { restoredText, ...result };
-  }, [activeTabId, cancelTab, dispatchTo]);
+  }, [cancelTab, dispatchTo]);
 
-  const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
-    if (!activeTabId) return;
+  const cancel = useCallback(async (inboxItemIDs: string[] = []): Promise<CancelOutcome> => {
     const tabId = activeTabId;
+    if (!tabId) return { discardedItemIds: [] };
+    return cancelForTab(tabId, inboxItemIDs);
+  }, [activeTabId, cancelForTab]);
+
+  const approveForTab = useCallback((tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => {
+    if (!tabId) return;
     // Pin the failure callback to the prompt-id epoch the RPC was issued in:
     // if a controller rebuild lands while the call is in flight, a late
     // failure must not undo bookkeeping the NEW controller wrote for the same
@@ -3915,11 +3919,14 @@ export function useController() {
       dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
       replayPendingPromptsForActiveTab(tabId);
     });
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
 
-  const resolvePlanDecision = useCallback((id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
-    if (!activeTabId) return;
-    const tabId = activeTabId;
+  const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
+    if (activeTabId) approveForTab(activeTabId, id, allow, session, persist);
+  }, [activeTabId, approveForTab]);
+
+  const resolvePlanDecisionForTab = useCallback((tabId: string, id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
+    if (!tabId) return;
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
     const request = typeof app.ResolvePlanDecisionTab === "function"
@@ -3929,22 +3936,28 @@ export function useController() {
       dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
       replayPendingPromptsForActiveTab(tabId);
     });
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
 
-  const resolveRecovery = useCallback((id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
-    if (!activeTabId) return;
-    const tabId = activeTabId;
+  const resolvePlanDecision = useCallback((id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
+    if (activeTabId) resolvePlanDecisionForTab(activeTabId, id, action);
+  }, [activeTabId, resolvePlanDecisionForTab]);
+
+  const resolveRecoveryForTab = useCallback((tabId: string, id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
+    if (!tabId) return;
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
     app.ResolveRecoveryTab(tabId, id, action, feedback).catch(() => {
       dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
       replayPendingPromptsForActiveTab(tabId);
     });
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
 
-  const answerQuestion = useCallback((id: string, answers: QuestionAnswer[]): Promise<void> => {
-    if (!activeTabId) return Promise.reject(new Error("active tab is unavailable"));
-    const tabId = activeTabId;
+  const resolveRecovery = useCallback((id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
+    if (activeTabId) resolveRecoveryForTab(activeTabId, id, action, feedback);
+  }, [activeTabId, resolveRecoveryForTab]);
+
+  const answerQuestionForTab = useCallback((tabId: string, id: string, answers: QuestionAnswer[]): Promise<void> => {
+    if (!tabId) return Promise.reject(new Error("source tab is unavailable"));
     const state = statesRef.current.get(tabId);
     const epoch = state?.promptEpoch ?? 0;
     return answerPromptForActiveTurn(app, tabId, id, answers, state?.activeTurnId).then(
@@ -3955,23 +3968,33 @@ export function useController() {
         throw error;
       },
     );
-  }, [activeTabId, dispatchTo, reconcileRuntimeAfterRejectedMutation]);
+  }, [dispatchTo, reconcileRuntimeAfterRejectedMutation]);
 
-  const answerMCPInteraction = useCallback(
-    (id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => {
-      if (!activeTabId) return;
-      const tabId = activeTabId;
+  const answerQuestion = useCallback((id: string, answers: QuestionAnswer[]): Promise<void> => {
+    if (!activeTabId) return Promise.reject(new Error("active tab is unavailable"));
+    return answerQuestionForTab(activeTabId, id, answers);
+  }, [activeTabId, answerQuestionForTab]);
+
+  const answerMCPInteractionForTab = useCallback(
+    (tabId: string, id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => {
+      if (!tabId) return;
       dispatchTo(tabId, { type: "clearAsk" });
       app.AnswerMCPInteractionForTab(tabId, id, action, content ?? null).catch(() => {
         replayPendingPromptsForActiveTab(tabId);
       });
     },
-    [activeTabId, dispatchTo],
+    [dispatchTo],
   );
 
-  const setControllerMode = useCallback((mode: Mode): Promise<void> => {
-    if (!activeTabId) return Promise.resolve();
-    const tabId = activeTabId;
+  const answerMCPInteraction = useCallback(
+    (id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => {
+      if (activeTabId) answerMCPInteractionForTab(activeTabId, id, action, content);
+    },
+    [activeTabId, answerMCPInteractionForTab],
+  );
+
+  const setControllerModeForTab = useCallback((tabId: string, mode: Mode): Promise<void> => {
+    if (!tabId) return Promise.resolve();
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     return app.SetModeForTab(tabId, mode).then((drained) => {
       // Only dismiss the approvals the backend reports it actually
@@ -3980,7 +4003,12 @@ export function useController() {
       const ids = Array.isArray(drained) ? drained : [];
       if (ids.length) dispatchTo(tabId, { type: "approval_drained", ids, epoch });
     }).catch(() => {});
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
+
+  const setControllerMode = useCallback((mode: Mode): Promise<void> => {
+    if (!activeTabId) return Promise.resolve();
+    return setControllerModeForTab(activeTabId, mode);
+  }, [activeTabId, setControllerModeForTab]);
 
   const setCollaborationModeForTab = useCallback(async (tabId: string, mode: CollaborationMode): Promise<void> => {
     if (!tabId) return;
@@ -5003,7 +5031,10 @@ export function useController() {
     state: activeState,
     liveStore,
     activeTabId,
-    send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolvePlanDecision, resolveRecovery, answerQuestion, answerMCPInteraction, setControllerMode,
+    send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice,
+    cancel, cancelForTab, approve, approveForTab, resolvePlanDecision, resolvePlanDecisionForTab,
+    resolveRecovery, resolveRecoveryForTab, answerQuestion, answerQuestionForTab,
+    answerMCPInteraction, answerMCPInteractionForTab, setControllerMode, setControllerModeForTab,
     dismissExtensionForm, drainExtensionNotifications,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setQualityFloor, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, retrySessionHistory, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,

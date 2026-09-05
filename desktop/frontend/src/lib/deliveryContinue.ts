@@ -10,7 +10,11 @@ export interface DeliveryContinueOptions {
   tabId: string | null | undefined;
   ready: boolean;
   goal: string | undefined;
-  activeTabId: () => string | null | undefined;
+  /** Full committed UI ownership; unlike activeTabId this cannot revive on A → B → A. */
+  uiOwnership?: unknown;
+  ownsUI?: (ownership: unknown) => boolean;
+  /** One-release compatibility adapter for callers without a surface fence. */
+  activeTabId?: () => string | null | undefined;
   resumeGoal: (tabId: string) => Promise<boolean>;
   send: (tabId: string) => Promise<void>;
 }
@@ -21,7 +25,7 @@ export async function continueDelivery(opts: DeliveryContinueOptions): Promise<v
   if ((goal ?? "").trim()) {
     const resumed = await opts.resumeGoal(tabId);
     if (!resumed) return;
-    if (opts.activeTabId() !== tabId) return;
+    if (opts.ownsUI ? !opts.ownsUI(opts.uiOwnership) : opts.activeTabId?.() !== tabId) return;
   }
   await opts.send(tabId);
 }

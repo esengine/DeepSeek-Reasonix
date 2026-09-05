@@ -10,6 +10,8 @@ import {
   activateGoalAndSubmitOnTab,
 } from "../lib/goalSubmit";
 import type { WireEvent } from "../lib/types";
+import { submitPlanDecision, type SessionActionPorts } from "../app-runtime/sessionActionOwner";
+import { createSessionSurfaceFence } from "../app-runtime/sessionTarget";
 
 let passed = 0;
 let failed = 0;
@@ -356,21 +358,43 @@ const typesSource = readFileSync(resolve(here, "../lib/types.ts"), "utf8");
 const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
 eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
-eq(
-  /if \(allow\) \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "start_execution"\);/.test(appSource),
-  true,
-  "plan approval clears the remembered plan restore intent and records start execution explicitly",
-);
-eq(
-  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "exit_plan"\);\s*\}\}/.test(appSource),
-  true,
-  "exit-without-executing switches to Normal before recording the explicit plan exit",
-);
-eq(
-  /onRevisePlan=\{\(text\) => \{[\s\S]{0,260}resolvePlanDecision\(state\.approval!\.id, "revise_plan"\);/.test(appSource),
-  true,
-  "plan revision records a distinct revise decision",
-);
+{
+  const calls: string[] = [];
+  const ports: SessionActionPorts = {
+    approveForTab: () => undefined,
+    resolvePlanForTab: (tabId, id, action) => calls.push(`resolve:${tabId}:${id}:${action}`),
+    resolveRecoveryForTab: () => undefined,
+    answerQuestionForTab: async () => undefined,
+    answerMCPForTab: () => undefined,
+    setCollaborationModeForTab: async (tabId, mode) => { calls.push(`mode:${tabId}:${mode}`); },
+    clearGoalForTab: async (tabId) => { calls.push(`goal-clear:${tabId}`); },
+    setRemoteComposerProfile: async () => [],
+    patchComposerProfile: (tabId, mode) => calls.push(`profile:${tabId}:${mode}`),
+    notePlanMode: (tabId, enabled) => calls.push(`plan:${tabId}:${enabled}`),
+    drainRemoteApprovals: () => undefined,
+  };
+  const target = { tabId: "tab-source", sessionKey: "session-source:1", promptId: "approval-7" };
+  await submitPlanDecision(target, {
+    action: "start_execution", leavePlanMode: true, remote: false, goal: "", toolApprovalMode: "ask",
+  }, ports);
+  eq(
+    calls.join("|"),
+    "mode:tab-source:normal|plan:tab-source:false|profile:tab-source:normal|resolve:tab-source:approval-7:start_execution",
+    "plan approval clears source plan mode before recording start execution",
+  );
+
+  calls.length = 0;
+  await submitPlanDecision(target, {
+    action: "exit_plan", leavePlanMode: true, remote: false, goal: "", toolApprovalMode: "ask",
+  }, ports);
+  eq(calls.at(-1), "resolve:tab-source:approval-7:exit_plan", "exit-without-executing records the explicit source-bound plan exit last");
+
+  calls.length = 0;
+  await submitPlanDecision(target, {
+    action: "revise_plan", leavePlanMode: false, remote: false, goal: "", toolApprovalMode: "ask",
+  }, ports);
+  eq(calls.join("|"), "resolve:tab-source:approval-7:revise_plan", "plan revision records only the source-bound revise decision");
+}
 eq(
   !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),
   true,
@@ -424,11 +448,6 @@ eq(
   controllerSource.includes("await app.ClearGoalForTab(tabId)") && !/ClearGoalForTab\(tabId\)\.catch\(\(\) => \{\}\)/.test(controllerSource),
   true,
   "ClearGoalForTab failures also propagate to callers",
-);
-eq(
-  /await continueDelivery\(\{[\s\S]{0,240}goal: state\.meta\?\.goal,[\s\S]{0,240}resumeGoal: resumeControllerGoalForTab,/.test(appSource),
-  true,
-  "delivery recovery routes through continueDelivery with the backend Goal state",
 );
 eq(
   controllerSource.includes("app.SubmitInitialGoalToTabWithID(") &&
@@ -509,6 +528,28 @@ async function runContinueDelivery(opts: {
 const noGoal = await runContinueDelivery({ goal: undefined });
 eq(noGoal.resumes.length, 0, "delivery recovery without a Goal skips the resume call");
 eq(noGoal.sends.join(","), "tab-a", "delivery recovery without a Goal submits the continuation directly");
+
+{
+  const fence = createSessionSurfaceFence();
+  const ownership = fence.commit("tab-a", "session-a:1")!;
+  let releaseResume!: () => void;
+  const resumeGate = new Promise<void>((resolve) => { releaseResume = resolve; });
+  const sends: string[] = [];
+  const pending = continueDelivery({
+    tabId: "tab-a",
+    ready: true,
+    goal: "ship",
+    uiOwnership: ownership,
+    ownsUI: fence.ownsUnknown,
+    resumeGoal: async () => { await resumeGate; return true; },
+    send: async (tabId) => { sends.push(tabId); },
+  });
+  fence.commit("tab-b", "session-b:1");
+  fence.commit("tab-a", "session-a:1");
+  releaseResume();
+  await pending;
+  eq(sends.length, 0, "delivery recovery cannot reacquire UI ownership after A → B → A");
+}
 
 const blankGoal = await runContinueDelivery({ goal: "   " });
 eq(blankGoal.resumes.length, 0, "delivery recovery treats a blank Goal as absent");
