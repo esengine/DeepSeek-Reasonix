@@ -183,6 +183,8 @@ import { useCommittedCommand } from "./lib/useCommittedCommand";
 import { createSessionSurfaceFence, sessionIdentityKey } from "./app-runtime/sessionTarget";
 import { commitAppRenderToken, createAppRenderToken } from "./app-runtime/appLifecycleProbe";
 import { useAppRuntimeAdapter } from "./app-runtime/useAppRuntimeAdapter";
+import { projectControllerProfiles } from "./app-runtime/controllerProfileOwner";
+import { useControllerProfileCommands } from "./lib/useControllerProfileCommands";
 import { AppOverlayHost } from "./app-shell/AppOverlayHost";
 import { WorkspaceDockRegion } from "./app-shell/WorkspaceDockRegion";
 import { AppBottomRegions } from "./app-shell/AppBottomRegions";
@@ -420,7 +422,7 @@ export default function App() {
     setComposerProfileForTab: setControllerComposerProfileForTab, setGoalForTab: setControllerGoalForTab,
     resumeGoalForTab: resumeControllerGoalForTab, pauseGoalForTab: pauseControllerGoalForTab,
     clearGoalForTab: clearControllerGoalForTab,
-    setModel, setEffortForTab, cancelJob,
+    setModelForTab, setEffortForTab, cancelJob,
   } = runtime.composer;
   const {
     recoverDeliveryToTab, approveForTab, isPromptCurrentForTab, resolvePlanDecisionForTab, resolveRecoveryForTab,
@@ -1180,39 +1182,15 @@ export default function App() {
   const cycleMode = useCommittedCommand(() => {
     runGoalAction(() => applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan"));
   });
-  // Switching models rebuilds the controller, which starts in normal mode — re-apply
-  // it or the pill would say plan/YOLO while the fresh controller uses normal gating.
-  const switchModel = useCommittedCommand(async (name: string) => {
-      if (remoteSurfaceActive && activeTabId) return remoteSession.setModel(name).then(() => true);
-      const switched = await setModel(name);
-      if (!switched) return false;
-      if (!activeTabId) return false;
-      const profileApplied = await setControllerComposerProfileForTab(
-        activeTabId,
-        controllerComposerProfileCollaborationMode(composerProfile),
-        toolApprovalMode,
-        goal,
-        { propagateError: true },
-      );
-      return profileApplied;
-    });
-
-  // Startup and workspace/model rebuilds create a fresh controller in normal
-  // mode. Re-apply the UI mode once the controller is ready, including the case
-  // where the user picked YOLO while boot was still loading and the legacy
-  // SetBypass binding was a harmless no-op.
-  useEffect(() => {
-    if (!controllerReady || !activeTabId || remoteSurfaceActive) return;
-    runGoalAction(async () => {
-      await setControllerComposerProfileForTab(
-        activeTabId,
-        controllerComposerProfileCollaborationMode(composerProfile),
-        toolApprovalMode,
-        goal,
-        { propagateError: true },
-      );
-    });
-  }, [activeTabId, composerProfile, controllerReady, goal, remoteSurfaceActive, runGoalAction, setControllerComposerProfileForTab, toolApprovalMode]);
+  const { switchModel, switchModelFromUi, applyProfile: applyControllerProfile } = useControllerProfileCommands({
+    target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity },
+    profiles: projectControllerProfiles(tabMetas, composerProfilesByTab, {
+      target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, profile: composerProfile, remote: remoteSurfaceActive,
+    }),
+    ready: controllerReady, remote: remoteSurfaceActive, runtimeEpoch: state.meta?.runtime?.epoch, operations: sessionOperations,
+    ports: { model: setModelForTab, profile: setControllerComposerProfileForTab },
+    remoteModel: remoteSession.setModel, report: handleGoalActionError,
+  });
 
   // The live task list pinned above the composer comes from the most recent
   // successful top-level todo_write result; failed or still-running attempts do
@@ -1418,7 +1396,7 @@ export default function App() {
       }
       const model = /^\/model\s+(\S+)$/.exec(trimmed);
       if (model) {
-        await switchModel(model[1]);
+        await switchModel(model[1], sourceTabId);
         return;
       }
       if (trimmed === "/memory") {
@@ -1561,12 +1539,7 @@ export default function App() {
         return;
       }
       if (!controllerReady) return;
-      const profileApplied = await setControllerComposerProfileForTab(
-        sourceTabId,
-        controllerComposerProfileCollaborationMode(composerProfile),
-        toolApprovalMode,
-        goal,
-      );
+      const profileApplied = await applyControllerProfile(sourceTabId, false);
       if (!profileApplied) return;
       await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim(), structured);
     });
@@ -1587,14 +1560,6 @@ export default function App() {
     remote: remoteSurfaceActive, session: remoteSession, runGoalAction,
     pauseLocal: pauseControllerGoalForTab, resumeLocal: resumeControllerGoalForTab,
     setLocalEffort: setEffortForTab, showError: (message) => showToast(message, "error"),
-  });
-  const switchModelFromUi = useCommittedCommand(async (name: string): Promise<boolean> => {
-    try {
-      return await switchModel(name);
-    } catch (error) {
-      handleGoalActionError(error);
-      return false;
-    }
   });
 
   const tabMetaRefreshCoordinatorRef = useRef<ReturnType<typeof createBoundedRefreshCoordinator<TabMeta[]>> | null>(null);

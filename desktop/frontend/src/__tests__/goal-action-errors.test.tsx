@@ -91,13 +91,10 @@ ok(
   /runGoalAction\(\(\) => applyCollaborationMode\(collaborationMode === "plan" \? "normal" : "plan"\)\)/.test(appSource),
   "mode shortcut routes through the rejection handler",
 );
-ok(
-  /runGoalAction\(async \(\) => \{[\s\S]{0,260}setControllerComposerProfileForTab\([\s\S]{0,260}propagateError: true/.test(appSource),
-  "background Goal resync routes through the rejection handler",
-);
+// controller-profile-lifecycle.test.tsx drives the production restoration effect
+// and verifies one error report, alongside the direct/awaited model reject contract.
 ok(errors.filter(error => error === "stop goal bridge failed").length === 1, "production Composer Stop Goal adapter presents the failure exactly once");
 ok(errors.filter(error => error === "switch mode bridge failed").length === 1, "production Composer mode adapter presents the failure exactly once");
-ok(/if \(model\) \{\s*await switchModel\(model\[1\]\);/.test(appSource), "/model awaits Goal restoration failures");
 ok(
   /await \(trimmed \? setControllerGoalForTab\(tabId, trimmed\) : clearControllerGoalForTab\(tabId\)\);\s*patchActivatedGoalForTab\(tabId, trimmed\)/.test(appSource),
   "failed Goal bridge calls cannot patch local Goal state or user intent",

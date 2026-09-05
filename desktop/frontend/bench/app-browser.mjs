@@ -44,7 +44,27 @@ try {
     };
   });
   const composer = page.locator("textarea.composer__input:not([aria-hidden=true])");
+  await page.locator('.project-tree__topic-main:has-text("bench:small-6t")').click();
+  await page.waitForFunction(() => document.querySelector('.transcript')?.textContent?.includes('ASYNC LAYOUT EXPANSION COMPLETE'));
   await composer.fill("layout-owned draft");
+  // Raw Markdown fallbacks become parsed DOM asynchronously. History preservation
+  // means stable block identity/content revision, not identical transient textContent.
+  const transcriptIdentity = () => [...document.querySelectorAll('[data-transcript-block-key]')].map(node => ({
+    key: node.getAttribute('data-transcript-block-key'), revision: node.getAttribute('data-transcript-content-revision'),
+  }));
+  const transcriptBeforeModel = await page.evaluate(transcriptIdentity);
+  assert(transcriptBeforeModel.length > 0, 'model replay starts with hydrated transcript blocks');
+  await page.locator('.modelsw__trigger:not(.effortsw__trigger)').click();
+  const nextModel = page.locator('.modelsw__item[role="option"]:not([aria-selected="true"])').first();
+  const nextModelName = await nextModel.locator('.modelsw__model').textContent();
+  await nextModel.click();
+  await page.waitForFunction(name => document.querySelector('.modelsw__label')?.textContent?.includes(name), nextModelName);
+  await page.waitForFunction(() => document.querySelector('textarea.composer__input:not([aria-hidden=true])')?.disabled === false
+    && window.__reasonixAppLifecycle?.snapshot().activeOperations === 0);
+  const transcriptAfterModel = await page.evaluate(transcriptIdentity);
+  const draftAfterModel = await composer.inputValue();
+  assert(draftAfterModel === 'layout-owned draft' && JSON.stringify(transcriptAfterModel) === JSON.stringify(transcriptBeforeModel),
+    'real model selection preserves source transcript, Composer draft and writable readiness');
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await page.locator('[data-workspace-path="README.md"]').click();
   await page.waitForFunction(() => document.querySelector('.workspace-preview__body')?.textContent?.includes('Browser-dev workspace preview.'));

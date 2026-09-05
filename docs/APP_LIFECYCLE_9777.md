@@ -59,9 +59,9 @@ browser replay, Transcript unit tests, Chromium selection/scroll/composer replay
 Chromium and Playwright WebKit reader replay, frontend/test typechecks, hooks,
 AST gate with negative fixtures, single writer and diff whitespace checks.
 
-Latest checked production bundle measurements (KiB): initial JS 425.2 / 426.8; shell
+Latest checked production bundle measurements (KiB): initial JS 425.8 / 426.8; shell
 CSS 115.9 / 116.0; Chinese 60.5 / 60.6; Traditional Chinese 61.4 / 61.5; raw
-initial assets 2330.8 / 2349.4. No capacity limit was increased. Settings-only
+initial assets 2333.0 / 2349.4. No capacity limit was increased. Settings-only
 image-control CSS moved to the existing lazy settings stylesheet. The unused
 labels for removed density/reasoning/fold controls were deleted in all three
 locales; legacy configuration fields, setters, events and mirrors are unchanged.
@@ -134,14 +134,27 @@ Topicbar identity, rename input and source controls now live in a presentation
 region with display data separate from commands. Its mounted test verifies the
 original DOM structure, synchronous focus, keyboard cancellation and action
 subtree identity; the production App replay still preserves Composer and actual
-workspace file-preview nodes. This is a presentation boundary, not completion
-of model switching or controller-profile rebuild ownership.
+workspace file-preview nodes.
+
+Controller model switching, startup/runtime-epoch restoration and send readiness
+now share source-bound profile application. The owner reads the source resource's
+latest layout-committed profile after a model rebuild, rather than restoring an
+old render or the newly visible tab. A replacement session or disposed lifecycle
+revokes continuations; A-B-A does not revive UI rights. Model and readiness paths
+share the profile request channel, so both orders of a coalesced Controller failure
+have one presentation owner. Deterministic mounted-hook tests also cover direct
+rejection, boolean failure, remote routing and same-profile runtime replacement.
+The production App replay also selects a different model through the real picker
+and verifies stable hydrated block keys/content revisions, Composer draft and
+writable readiness. Transient raw-Markdown fallback text is not a history oracle.
+This does not certify the remaining send/Goal coordination still inside App.
 
 ### Retired assertion → behavioral evidence
 
 | Former source assertion | Production behavior exercised |
 | --- | --- |
 | Worktree badge JSX inside App | `topicbar-region.test.tsx` mounts isolated/ordinary topics and verifies accessible badge visibility and source-bound merge actions |
+| Background profile restoration and awaited model callback text | `controller-profile-lifecycle.test.tsx` executes the real effect and model commands, including single failure ownership and direct reject semantics |
 | Goal clear/mode JSX wiring | `goal-action-errors.test.tsx` mounts the real goal-command hook; failures are presented once |
 | Startup snapshot, warnings, failed startup, IM reload | `desktop-preferences-lifecycle.test.tsx` checks bridge calls, revision fencing, backend authority and disposal |
 | Onboarding model-access callback text | `onboarding-commands.test.tsx` checks actual overlay/dismissal state |
@@ -164,7 +177,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,827 lines. Six domain owners, remaining effects, the pure shell
+- App is still 3,792 lines. Six domain owners, remaining effects, the pure shell
   and removal of its size exception are not complete.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,
