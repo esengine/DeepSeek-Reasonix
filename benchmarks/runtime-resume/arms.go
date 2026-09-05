@@ -29,7 +29,7 @@ type arm struct {
 func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
 		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) &&
-		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name)
+		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name) && !activeStoreArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -130,6 +130,7 @@ func arms() []arm {
 		{name: armDeriveSkipFlip, asks: "the same, with the two failures in the other order"},
 		{name: armIdentitySemantics, asks: "what a node's model and effort report, across two producers and the store"},
 		{name: armDeriveAnswered, asks: "a dependent whose upstreams answered, one by completing and one by adopting"},
+		{name: armFleetActiveStore, asks: "whether the store can be asked about a fan-out item that is executing"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

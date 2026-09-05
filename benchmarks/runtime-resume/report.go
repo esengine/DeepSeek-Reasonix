@@ -119,6 +119,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 	case loneTaskArm(a.name):
 		res.Rows = append(res.Rows, loneTaskRows(a.name, before, after)...)
 		res.Invalid = loneTaskArmInvalid(a.name, before)
+	case activeStoreArm(a.name):
+		res.Rows = append(res.Rows, activeStoreRows(before, after)...)
+		res.Invalid = activeStoreInvalid(before)
 	case a.name == armTodoIdentity:
 		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:

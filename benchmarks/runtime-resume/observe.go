@@ -56,6 +56,10 @@ type Observation struct {
 	// graph has no read surface after a restart, so without this a lost graph
 	// and a lost delegation would be one indistinguishable row.
 	Children ChildrenObs `json:"children"`
+	// Listing is the same children through the read list_subagents performs.
+	// It filters by workspace and walks lineage, so it can answer differently
+	// from the one above — and it is the answer a model asking would be shown.
+	Listing ListingObs `json:"listing"`
 	// FanOutTurn is whether the dispatching turn is in this phase's transcript
 	// at all. A turn is appended when it ends, so a process that dies inside one
 	// leaves no record of the request, and a lost graph is the smaller half.
@@ -279,6 +283,45 @@ func childrenObs(root armRoot, sessionPath string) ChildrenObs {
 	return out
 }
 
+// ListingRow is one row list_subagents would print. The tool call itself needs
+// a registry this probe has no way to build, so the read behind it is what is
+// exercised; the formatting adds no fact the row does not already carry.
+type ListingRow struct {
+	Ref    string `json:"ref"`
+	Status string `json:"status"`
+	From   string `json:"from,omitempty"`
+}
+
+// ListingObs is what the recovery surface would show for this conversation.
+type ListingObs struct {
+	Rows []ListingRow `json:"rows,omitempty"`
+	Err  string       `json:"err,omitempty"`
+}
+
+// listingObs reads the store the way the tool does: by the parent session the
+// child recorded, filtered to this workspace. The workspace filter is why this
+// cannot be folded into childrenObs — a root that does not match drops every
+// row, and a reader must be able to see that happen rather than read it as an
+// empty store.
+func listingObs(root armRoot, sessionPath string) ListingObs {
+	if strings.TrimSpace(sessionPath) == "" {
+		return ListingObs{}
+	}
+	store := agent.NewSubagentStore(filepath.Join(root.Sessions, "subagents"))
+	parent := strings.TrimSuffix(filepath.Base(sessionPath), ".jsonl")
+	artifacts, err := store.ListForParent(parent, root.Workspace)
+	if err != nil {
+		return ListingObs{Err: err.Error()}
+	}
+	out := ListingObs{}
+	for _, a := range artifacts {
+		out.Rows = append(out.Rows, ListingRow{
+			Ref: a.Ref, Status: string(a.Meta.Status), From: a.Meta.ParentToolCallID,
+		})
+	}
+	return out
+}
+
 type ArtifactObs struct {
 	Name  string `json:"name"`
 	Bytes int64  `json:"bytes"`
@@ -323,6 +366,7 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		SettledWorkers:        settledWorkers(graph),
 		QueuedWorkers:         queuedWorkers(graph),
 		Children:              childrenObs(root, path),
+		Listing:               listingObs(root, path),
 		FanOutTurn:            fanOutTurnRecorded(history),
 		Executions:            control.ExecutionHistory(path),
 		InterruptedExecutions: ctrl.InterruptedExecutions(),

@@ -91,6 +91,7 @@ provider call*.
 | `derive-skip-both` | two upstreams end without an answer, dependent skipped, die | none | can a restart derive the skip, and which upstream caused it? |
 | `derive-skip-flip` | the same, failures in the other order | none | does the named cause move while the durable facts do not? |
 | `derive-answered` | one completed and one adopted upstream, dependent runs, die | none | do the delivery edges follow from the durable facts? |
+| `fleet-active-store` | one delegation and one fan-out sharing a ceiling: an item settled, one executing, one refused, the delegation still running | ceilings | can the store be asked about a fan-out item that is executing? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -222,6 +223,88 @@ are already one identity, nothing here needs a new one invented for it.
 `read_only_task` is deliberately out of scope: it declares itself ephemeral and
 carries no durable host side effects, so demanding a journal entry from it would
 break a contract rather than close a gap.
+
+## The active-store arm
+
+This one asks nothing about a restart. It asks whether the sub-agent store can
+be asked about an execution that is happening: the journal proves the scheduler
+granted the slot, the child proves it reached the provider, and the store is the
+only surface `list_subagents`, `read_subagent_result` and `adopt_ref` read. An
+execution missing from it is missing from every recovery path a person or a
+model has, whether or not a process ever dies.
+
+It is deliberately not a parity arm. "The fan-out differs from the lone task"
+would be a finding about two code paths, and closing it would be cosmetic. What
+is measured instead is one store answering differently about executions it holds
+the same evidence for, by which entry point opened them.
+
+One death holds four populations, and they are read off the journal rather than
+off the ids the dispatch declared:
+
+| population | journal | proven to have run |
+| --- | --- | --- |
+| a settled fan-out item | opened, started, settled | yes |
+| an executing fan-out item | opened, started, still open | yes, the child reached the provider |
+| a refused fan-out item | opened, queued, never started | no — and that is the point |
+| an executing lone delegation | opened, started, still open | yes |
+
+The ceiling is two. The delegation goes out first and holds one slot to the
+death, which is what keeps capacity from returning under the fan-out; the
+fan-out's first item takes the other, settles, and frees it for exactly one of
+the two behind it. Which of those two wins is the scheduler's to decide, so the
+arm never names them — an arm that did would be reporting a race as a premise.
+
+The finding is a conjunction, and all three parts are separate columns:
+
+```text
+the journal proves the slot was granted
++ the child proves it reached the provider
++ the store has no record of that execution
+```
+
+Any two of them are not it. A slot grant without an arrival is an execution
+nobody has shown happened; an absent record for work that never ran is the
+correct answer, not a gap.
+
+The two `holds` rows are the arm's own falsifier. `a settled fan-out item` and
+`an executing lone delegation` run the same acknowledgement check as the row
+under measurement — the same store, the same read, the same join by execution id
+— so a green there is what says the check can see a record when one exists. If
+all three went red together, the finding would be about persistence in general
+and not about executions in flight.
+
+`a refused fan-out item` bounds any fix the arm could support. An execution the
+scheduler never admitted produced nothing, so the store is owed no record for
+it, and a change that recorded every opening would satisfy the row above by
+reintroducing exactly the proxy the delegation arms removed: a run object
+existing read as execution having happened.
+
+`no ghost, and how the rebuild names the cut` pins what a fix must not move. A
+store that learned to record executions in flight leaves stale records behind
+for the next process to fold, and reconstruction must still answer with no node
+in `running` and an `interrupted-during-execution` for the item that held a slot.
+
+### The reading
+
+```text
+Metric:      StoreAcknowledgesActiveExecution
+Anchor:      SubagentStore metadata joined to the execution journal by the id
+             the child recorded as its parent call, read twice: in the dying
+             process and in the resumed one
+Population:  executions this arm's own death placed in each of the four
+             populations above — one each, or the arm is reported invalid
+Excludes:    every execution outside this turn's delegation and fan-out; any
+             population whose child is not proven to have reached the provider
+Reads as:    whether the store can be asked about that execution, not whether
+             the host knows it happened — the journal already answers that, and
+             the two disagree
+```
+
+Measured on the current tree: the settled item is `completed` in both processes
+and the lone delegation is `running` then `interrupted`, while the executing
+fan-out item is `no record` in both — and `list_subagents` shows the delegation
+running and the fan-out item not at all. The refused item is absent from the
+store, as it should be, and the rebuild names both cuts without a ghost.
 
 ## The one arm that reads the frontend
 

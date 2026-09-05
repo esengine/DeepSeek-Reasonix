@@ -67,6 +67,10 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the item after the one that hangs is refused: the death
 		// then holds a node that was queued and never admitted.
 		return 1, 1
+	case armFleetActiveStore:
+		// Two slots: the delegation holds one to the death, and the fan-out's
+		// first item frees the other for exactly one of the two behind it.
+		return 2, 2
 	case armWaitSlots:
 		return 2, 1
 	case armWaitWriters:

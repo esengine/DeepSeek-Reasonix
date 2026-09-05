@@ -99,7 +99,7 @@ const probeChildEntered = "probe:delegated-child-entered"
 func backgroundTaskArm(name string) bool {
 	switch name {
 	case armTaskBgQueued, armTaskBgRunning, armTaskBgQueuedCancel, armTaskBgRunningCancel,
-		armLineageBackground, armLineageJobKill, armCancelBackground:
+		armLineageBackground, armLineageJobKill, armCancelBackground, armFleetActiveStore:
 		return true
 	}
 	return false
@@ -119,7 +119,13 @@ const (
 // the production path, so it must enter it the way a model does.
 func loneTaskCall(arm string) []provider.Chunk {
 	prompt, description := childDone+" lone task", "completes"
-	if arm != armTaskCompleted {
+	switch {
+	case arm == armFleetActiveStore:
+		// This delegation is the other occupant of the ceiling its arm shares
+		// with a fan-out, and its own child is the only thing that can say the
+		// slot is taken. Holding is how it hangs and says so at once.
+		prompt, description = childHold+" lone task", "holds a slot to the death"
+	case arm != armTaskCompleted:
 		prompt, description = childHang+" lone task", "still executing at death"
 	}
 	args, _ := json.Marshal(map[string]any{

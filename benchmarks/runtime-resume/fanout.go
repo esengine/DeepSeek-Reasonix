@@ -68,6 +68,9 @@ const (
 	fleetDeriveSentinel   = "PROBE-FLEET-DERIVE"
 	fleetIdentitySentinel = "PROBE-FLEET-IDENTITY"
 	parallelIdentity      = "PROBE-PARALLEL-IDENTITY"
+	// The active-store arm. Its fan-out shares one ceiling with a lone
+	// delegation, so the four populations it needs are reached in one death.
+	fleetActiveSentinel = "PROBE-FLEET-ACTIVE"
 )
 
 // childHold is a child that reports holding its slot before it blocks, so a
@@ -273,6 +276,12 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 		return append(terminalFleet(s.arm), done()), true
 	case s.opensRun(req, parallelSentinel):
 		return append(cancelParallel(), done()), true
+	case s.fleets.held(taskSentinel) && s.opens(req, fleetActiveSentinel):
+		// The delegation goes first and its own child says when the slot is
+		// taken. Dispatching before that lets the fan-out take the whole
+		// ceiling, and the arm loses the entry point it exists to compare.
+		<-s.held
+		return append(activeStoreFleet(), done()), true
 	case s.opens(req, fleetHolderSentinel):
 		return append(holderFleet(s.arm), done()), true
 	case s.opens(req, fleetRefusedSentinel):
@@ -429,6 +438,20 @@ func deriveFleet(arm, adoptRef string) []provider.Chunk {
 		"id": "c", "prompt": childDone + " dependent", "description": "dependent",
 		"read_only": true, "depends_on": []string{"a", "b"},
 	}))
+}
+
+// activeStoreFleet reaches three fan-out populations under one ceiling. The
+// first item settles and frees the slot the other two then contend for, so one
+// executes and one is refused — which of them is the scheduler's to decide, and
+// the arm reads the populations off the journal rather than naming them here.
+func activeStoreFleet() []provider.Chunk {
+	return fleetCall(activeFleetCallID, []map[string]any{
+		{"id": "a1", "prompt": childDone + " settles", "description": "settles", "read_only": true},
+		{"id": "a2", "prompt": childHang + " holds", "description": "contends for the freed slot",
+			"read_only": true, "depends_on": []string{"a1"}},
+		{"id": "a3", "prompt": childHang + " contends", "description": "contends for the freed slot",
+			"read_only": true, "depends_on": []string{"a1"}},
+	})
 }
 
 // slotsFleet fills the total ceiling and asks for one more, all read-only: a
