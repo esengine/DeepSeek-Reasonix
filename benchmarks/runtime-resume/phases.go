@@ -148,7 +148,7 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 		return true, runTerminalConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	case schedulerWaitArm(arm):
 		return true, runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
-	case graphArm(arm):
+	case graphArm(arm) || uiArm(arm):
 		return true, runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	}
 	return false, nil
@@ -170,11 +170,16 @@ func runConstruct(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, prov, err := buildRuntime(ctx, root, arm, sink)
+	bus, into := uiBus(arm, sink)
+	ctrl, prov, err := buildRuntime(ctx, root, arm, into)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
 	defer ctrl.Close()
+	// The process that dies is a window in production, and a window records what
+	// it served. Without that the trajectory this session leaves behind holds
+	// none of its own frames.
+	recordLikeAWindow(ctrl, bus)
 
 	bootSystem := bootSystemText(ctrl)
 	ctrl.EnsureSessionPath()
@@ -289,7 +294,8 @@ func runResume(dir, arm string) error {
 	}
 	ctx := context.Background()
 	sink := &graphSink{}
-	ctrl, _, err := buildRuntime(ctx, root, arm, sink)
+	bus, into := uiBus(arm, sink)
+	ctrl, _, err := buildRuntime(ctx, root, arm, into)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -303,5 +309,10 @@ func runResume(dir, arm string) error {
 	if err := ctrl.Resume(session, before.SessionPath); err != nil {
 		return fmt.Errorf("resume: %w", err)
 	}
-	return writeObservation(root, capture("resume", arm, bootSystem, ctrl, sink, root))
+	obs := capture("resume", arm, bootSystem, ctrl, sink, root)
+	if uiArm(arm) {
+		ui := observeUI(root, ctrl, bus, obs)
+		obs.UI = &ui
+	}
+	return writeObservation(root, obs)
 }

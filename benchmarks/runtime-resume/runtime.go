@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"reasonix/internal/agentgraph"
@@ -141,7 +142,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // denied gate the dispatch is refused before any child starts and the arm
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
-	if graphArm(arm) || schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) {
+	if graphArm(arm) || uiArm(arm) || schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"
@@ -151,8 +152,35 @@ func approvalMode(arm string) string {
 // as well as through Options.Home: a Controller's later re-reads and the shared
 // history index still read the process, not the assembly.
 func childEnv(root armRoot) []string {
-	return append(os.Environ(),
+	env := append(os.Environ(),
 		"REASONIX_HOME="+root.Home,
 		"REASONIX_STATE_HOME="+root.Home,
 	)
+	// A child runs in its own workspace, so the one arm that has to build the
+	// frontend is told where the checkout is rather than searching for it.
+	if repo := repoRoot(); repo != "" {
+		env = append(env, envProbeRepo+"="+repo)
+	}
+	return env
+}
+
+// repoRoot walks up from the orchestrator's working directory for the module
+// this probe lives in. Empty when it is not run from a checkout, which the arm
+// reports as not measured rather than as a failure.
+func repoRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if b, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil &&
+			strings.HasPrefix(string(b), "module reasonix") {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

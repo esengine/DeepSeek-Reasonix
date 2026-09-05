@@ -78,6 +78,10 @@ type Observation struct {
 	SettledWorkers int           `json:"settled_workers"`
 	QueuedWorkers  []string      `json:"queued_workers,omitempty"`
 	Artifacts      []ArtifactObs `json:"artifacts"`
+	// UI is what a frontend attached to this process saw, in order. Only the one
+	// arm that runs a client fills it; a value comparison cannot answer what it
+	// asks, which is through which door each fact arrived.
+	UI *UIObs `json:"ui,omitempty"`
 }
 
 type TranscriptObs struct {

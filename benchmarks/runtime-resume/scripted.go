@@ -46,23 +46,43 @@ type scripted struct {
 	// tries to write. Calling ask ends the round, so the write is the effect a
 	// decision is holding back.
 	asked atomic.Bool
-	// The fan-out latches. A fleet's aggregate returns into the same round that
-	// dispatched it, so without these the reply that follows would read its own
-	// sentinel off the still-current user turn and dispatch the fleet again.
-	warmed atomic.Bool
-	paired atomic.Bool
-	mixed  atomic.Bool
+	// Which fleets have been opened. A fleet's aggregate returns into the same
+	// round that dispatched it, so without a latch the reply that follows reads
+	// its own sentinel off the still-current user turn and dispatches again.
+	fleets dispatched
+	// opened says the arm's own fan-out has gone out, whichever sentinel opened
+	// it: the terminal and derive arms then hold the turn rather than replying,
+	// so the process still dies inside one.
+	opened atomic.Bool
 	// The scheduler arms dispatch two fleets and must not race them. held is
 	// closed by the holder's own child, which only runs once its slot is
 	// granted; release lets the arm free capacity while a refusal stands.
-	holder   atomic.Bool
-	refused  atomic.Bool
-	terminal atomic.Bool
-	identity atomic.Bool
 	holding  sync.Once
 	released sync.Once
 	held     chan struct{}
 	release  chan struct{}
+}
+
+// dispatched is the set of fleets already opened, keyed by the sentinel that
+// opened each. One named state rather than a latch per fleet: they share a
+// lifetime and a meaning, and every new fan-out was adding another flag.
+type dispatched struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+// first reports whether this is the sentinel's first dispatch, and records it.
+func (d *dispatched) first(sentinel string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.seen[sentinel] {
+		return false
+	}
+	if d.seen == nil {
+		d.seen = map[string]bool{}
+	}
+	d.seen[sentinel] = true
+	return true
 }
 
 // releaseOnce frees the child waiting on release. Idempotent: an arm may reach
@@ -102,7 +122,7 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	// A terminal arm needs its fan-out to finish and its turn to stay open: a
 	// closed turn would settle the marker, and the process would no longer be
 	// dying inside one.
-	if (terminalArm(s.arm) || deriveArm(s.arm)) && s.terminal.Load() {
+	if (terminalArm(s.arm) || deriveArm(s.arm)) && s.opened.Load() {
 		<-ctx.Done()
 		return nil
 	}

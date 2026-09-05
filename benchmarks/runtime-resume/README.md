@@ -63,6 +63,7 @@ provider call*.
 | `graph-completed` | a fan-out whose items all settled, then die | none | is a finished fan-out's provenance durable at all? — and does a settled item stay settled? |
 | `graph-running` | a fan-out with one item still executing, then die | none | what does a restart believe about work whose owner is gone? |
 | `graph-mixed` | completed, failed, adopted and running at once, then die | none | the same, with every reachable state and both grants in one death |
+| `ui-graph-mixed` | a settled fan-out and a mid-flight one, then die; a frontend attaches to the resumed process | none | through which door does each fact reach the view? |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -100,6 +101,59 @@ had removed — a different rule answering instead of the one under test.
 `system-swap` pins its fact deliberately: only a **pinned body** rides the
 stable prefix. The saved-fact index is retrieval-only and reached through the
 `memory` tool, so a relevant-activation fact moves nothing.
+
+## The one arm that reads the frontend
+
+Every other arm compares values across the boundary. `ui-graph-mixed` compares
+**doors**: a view assembled by replaying history as live transitions settles on
+the same graph and tells the user that work which ended in a dead process is
+starting now. Only a sequence can tell those apart, so the arm records one.
+
+The resumed process serves the session on a loopback listener and runs the real
+client against it — the production `SsePort`, the production `ExecutionStore`,
+bundled from the frontend's own sources with its own toolchain. The probe plays
+only the part the desktop shell plays: it forwards the kernel's frames onto a
+bus that has no reconnect, which is the transport the bootstrap was written for.
+Every visible state the store passes through is recorded, along with what each
+delta it folded named.
+
+Seven rows follow, and each one is a rule rather than a comparison:
+
+| Rule | Why it is not the row above it |
+| --- | --- |
+| the first graph a resumed view draws | a picture that appears from a delta was assembled out of transitions |
+| how work from the dead process entered the view | an execution the dead process opened may only arrive as part of an answer |
+| a dead run shown as work in progress | one render tick is enough: the user saw it |
+| interruptions the view names | what the host derived and what the view said, compared as sets |
+| work started after the resume | a view that stopped folding deltas would satisfy every rule above |
+| a node introduced twice in one session | idempotent underneath is not the same as introduced once |
+| deltas naming work the dead process opened | the only rule that catches a republication at a view that already holds the snapshot |
+
+The last two rules are the ones a value comparison cannot reach at all. A
+republished history moves no visible state — the fold is idempotent — and is
+still the kernel saying that finished work is happening now.
+
+### The sabotages
+
+A probe nobody has watched fail is a decoration, so the two ways this has been
+got wrong are runnable:
+
+```bash
+go run ./benchmarks/runtime-resume -only ui-graph-mixed                      # holds=7
+go run ./benchmarks/runtime-resume -only ui-graph-mixed -sabotage publish     # the republication rule fails
+go run ./benchmarks/runtime-resume -only ui-graph-mixed -sabotage trajectory  # that one and the ghost rule fail
+```
+
+`publish` is a resume that helpfully republishes what it rebuilt, fired after
+the client has read the snapshot — the only window where it can be seen at all,
+because what a resume publishes *before* that is numbered below the watermark
+the client then resumes past, and the bootstrap absorbs it. `trajectory` is the
+frontend half: the line that used to build the graph out of the recorded
+trajectory. It puts pre-death nodes back on screen as pending and running, which
+is the ghost this whole line of work exists to prevent.
+
+The arm needs `node` and the frontend's installed toolchain. Without either it
+reports not-measured and says which, rather than passing quietly.
 
 ## The marker oracle
 

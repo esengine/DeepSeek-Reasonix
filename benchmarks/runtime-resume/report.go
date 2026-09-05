@@ -109,6 +109,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 	case graphArm(a.name):
 		res.Rows = append(res.Rows, graphRows(before, after)...)
 		res.Invalid = graphArmInvalid(a.name, before)
+	case uiArm(a.name):
+		res.Rows = append(res.Rows, uiRows(before, after)...)
+		res.Invalid = uiArmInvalid(before, after)
 	case a.name == armTodoIdentity:
 		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:

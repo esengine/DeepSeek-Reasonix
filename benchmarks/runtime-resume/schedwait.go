@@ -54,6 +54,10 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the group has an item running and items that never got
 		// one — the split a cancellation is reported against.
 		return 1, 1
+	case armUIGraphMixed:
+		// One slot, so the item after the one that hangs is refused: the death
+		// then holds a node that was queued and never admitted.
+		return 1, 1
 	case armWaitSlots:
 		return 2, 1
 	case armWaitWriters:

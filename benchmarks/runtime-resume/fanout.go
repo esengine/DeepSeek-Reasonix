@@ -210,14 +210,29 @@ func mixedFleet(adoptRef string) []provider.Chunk {
 	})
 }
 
+// opens reports whether this round is the one that dispatches that fleet.
+func (s *scripted) opens(req provider.Request, sentinel string) bool {
+	return askedInPrompt(req, sentinel) && s.fleets.first(sentinel)
+}
+
+// opensRun is the same for the fan-out an arm is built around: the terminal and
+// derive arms hold the turn open once theirs has gone out.
+func (s *scripted) opensRun(req provider.Request, sentinel string) bool {
+	if !s.opens(req, sentinel) {
+		return false
+	}
+	s.opened.Store(true)
+	return true
+}
+
 // fanOut answers a parent turn that opens a fleet, at most once per sentinel.
 // The sentinel is read off the current user turn, and the latch is what stops
 // the round that receives the aggregate from dispatching the same fleet again.
 func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 	switch {
-	case askedInPrompt(req, fleetWarmSentinel) && !s.warmed.Swap(true):
+	case s.opens(req, fleetWarmSentinel):
 		return append(warmFleet(), done()), true
-	case askedInPrompt(req, fleetPairSentinel) && !s.paired.Swap(true):
+	case s.opens(req, fleetPairSentinel):
 		if s.arm == armWaitSlots {
 			return append(slotsFleet(), done()), true
 		}
@@ -226,26 +241,33 @@ func (s *scripted) fanOut(req provider.Request) ([]provider.Chunk, bool) {
 			second = childHang
 		}
 		return append(pairFleet(second), done()), true
-	case askedInPrompt(req, fleetMixedSentinel) && !s.mixed.Swap(true):
+	case s.opens(req, fleetSettledSentinel):
+		return append(settledFleet(), done()), true
+	case s.opens(req, fleetLiveSentinel):
+		return append(liveFleet(), done()), true
+	case s.opens(req, fleetMixedSentinel):
 		if s.arm == armTerminalAdopted {
 			return append(adoptOnlyFleet(adoptableRef(req)), done()), true
 		}
+		if s.arm == armUIGraphMixed {
+			return append(uiMixedFleet(adoptableRef(req)), done()), true
+		}
 		return append(mixedFleet(adoptableRef(req)), done()), true
-	case askedInPrompt(req, fleetIdentitySentinel) && !s.terminal.Swap(true):
+	case s.opensRun(req, fleetIdentitySentinel):
 		return append(identityFleet(adoptableRef(req)), done()), true
-	case askedInPrompt(req, parallelIdentity) && !s.identity.Swap(true):
+	case s.opens(req, parallelIdentity):
 		return append(identityParallel(), done()), true
-	case askedInPrompt(req, fleetDeriveSentinel) && !s.terminal.Swap(true):
+	case s.opensRun(req, fleetDeriveSentinel):
 		return append(deriveFleet(s.arm, adoptableRef(req)), done()), true
-	case askedInPrompt(req, fleetOutcomesSentinel) && !s.terminal.Swap(true):
+	case s.opensRun(req, fleetOutcomesSentinel):
 		return append(outcomesFleet(), done()), true
-	case askedInPrompt(req, fleetTerminalSentinel) && !s.terminal.Swap(true):
+	case s.opensRun(req, fleetTerminalSentinel):
 		return append(terminalFleet(s.arm), done()), true
-	case askedInPrompt(req, parallelSentinel) && !s.terminal.Swap(true):
+	case s.opensRun(req, parallelSentinel):
 		return append(cancelParallel(), done()), true
-	case askedInPrompt(req, fleetHolderSentinel) && !s.holder.Swap(true):
+	case s.opens(req, fleetHolderSentinel):
 		return append(holderFleet(s.arm), done()), true
-	case askedInPrompt(req, fleetRefusedSentinel) && !s.refused.Swap(true):
+	case s.opens(req, fleetRefusedSentinel):
 		// The holder's own child says when its ceiling is occupied. Dispatching
 		// before that lets the refused item win the race and start.
 		<-s.held
@@ -439,6 +461,9 @@ func fanOutTurn(n int, sentinel string) string {
 // that dispatched it, so the second round dispatches the mixed fleet without
 // the turn ever closing.
 func fanOutSentinels(arm string) string {
+	if arm == armUIGraphMixed {
+		return fleetWarmSentinel + " " + fleetSettledSentinel + " " + fleetMixedSentinel
+	}
 	if arm == armGraphMixed {
 		return fleetWarmSentinel + " " + fleetMixedSentinel
 	}
@@ -496,8 +521,14 @@ func fanOutReady(g agentgraph.Graph, arm string) bool {
 // then, which is what the mixed arm dies holding.
 func wantedStates(arm string) []agentgraph.NodeState {
 	want := []agentgraph.NodeState{agentgraph.StateCompleted, agentgraph.StateRunning}
-	if arm == armGraphMixed {
+	if arm == armGraphMixed || arm == armUIGraphMixed {
 		want = append(want, agentgraph.StateFailed, agentgraph.StateAdopted)
+	}
+	// The UI arm dies holding a settled fan-out beside a live one, so it also
+	// reaches the two states the mixed arm cannot: a skip, which is published
+	// only when a group closes, and an item a ceiling never admitted.
+	if arm == armUIGraphMixed {
+		want = append(want, agentgraph.StateSkipped, agentgraph.StatePending, agentgraph.StateQueued)
 	}
 	return want
 }
