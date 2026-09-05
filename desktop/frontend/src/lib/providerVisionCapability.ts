@@ -1,4 +1,5 @@
 import type { ProviderView } from "./types";
+import { matchingModelKey, modelCapabilityForModel } from "./providerImageInput";
 
 export type ProviderModelVisionCapability = "supported" | "unsupported" | "unknown";
 
@@ -12,12 +13,13 @@ export function providerVisionModelsForView(
   models = provider.models,
 ): string[] {
   const legacyVision = new Set(provider.visionModels);
-  const overrides = new Map((provider.modelOverrides ?? []).map((override) => [override.model.trim().toLowerCase(), override.vision]));
-  const metadata = new Map((provider.modelCapabilities ?? []).map((item) => [item.model.trim().toLowerCase(), item.state]));
   return models.filter((model) => {
-    const override = overrides.get(model.trim().toLowerCase());
+    const metadata = modelCapabilityForModel(provider.modelCapabilities, model);
+    if (metadata?.imageInputEnableAllowed === false) return false;
+    const key = matchingModelKey((provider.modelOverrides ?? []).map((item) => item.model), model);
+    const override = provider.modelOverrides?.find((item) => item.model === key)?.vision;
     if (override !== undefined && override !== null) return override;
-    if (metadata.get(model.trim().toLowerCase()) !== undefined) return metadata.get(model.trim().toLowerCase()) === "supported";
+    if (metadata) return metadata.state === "supported";
     return legacyVision.has(model);
   });
 }
@@ -28,7 +30,7 @@ export function providerModelVisionCapability(
   model: string,
   visionModels: string[],
 ): ProviderModelVisionCapability {
-  const metadata = provider.modelCapabilities?.find((item) => item.model.trim().toLowerCase() === model.trim().toLowerCase());
+  const metadata = modelCapabilityForModel(provider.modelCapabilities, model);
   if (metadata) return metadata.state === "supported" ? "supported" : metadata.state === "unknown" ? "unknown" : "unsupported";
   if (visionModels.includes(model)) return "supported";
   if (provider.visionModelsConfigured || provider.visionCapability === "unsupported") return "unsupported";

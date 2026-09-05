@@ -423,7 +423,10 @@ for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
 heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
 max-effort support, and OpenCode Go per-model reasoning overrides. Official DeepSeek Anthropic, Responses, and Chat Completions catalogs also
 include `deepseek-v4-flash-vision-exp`. Settings derives image support from
-model capability metadata; no per-provider vision-model checkbox is needed.
+model capability metadata. Each model also has an Image input Auto / On / Off
+selector. For an ID-only relay list, unknown means unrecognized, not confirmed
+text-only: select On after confirming support with the relay, then save. See the
+[image input guide](MODEL_CAPABILITIES.md#set-image-input-for-a-relay-model).
 Composer
 and `@` user images are sent as official visual input using the three documented
 shapes: inline base64 `data:` URLs for local files, `http(s)` image URLs as-is,

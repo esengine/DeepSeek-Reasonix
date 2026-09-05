@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"reasonix/internal/netclient"
+	"reasonix/internal/provider"
 )
 
 func TestFetchModels(t *testing.T) {
@@ -41,6 +42,57 @@ func TestFetchModels(t *testing.T) {
 	}
 	if models[0] != "model-a" || models[1] != "model-b" {
 		t.Errorf("want sorted [model-a model-b], got %v", models)
+	}
+}
+
+func TestDiscoveryUnknownAndConflictingDuplicates(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []string
+		state   string
+	}{
+		{"missing", []string{`{"id":"x"}`}, "unknown"},
+		{"invalid standard blocks positive alias", []string{`{"id":"x","input_modalities":null,"vision":true}`}, "unknown"},
+		{"invalid array", []string{`{"id":"x","input_modalities":["text",42],"supports_vision":true}`}, "unknown"},
+		{"invalid bool", []string{`{"id":"x","vision":null}`}, "unknown"},
+		{"empty capabilities", []string{`{"id":"x","capabilities":{},"vision":true}`}, "unknown"},
+		{"conflict sticky", []string{`{"id":"x","vision":true}`, `{"id":"x","vision":false}`, `{"id":"x","vision":true}`, `{"id":"x"}`}, "unknown"},
+		{"unknown does not override known", []string{`{"id":"x"}`, `{"id":"x","vision":true}`}, "supported"},
+		{"unknown does not erase negative", []string{`{"id":"x"}`, `{"id":"x","vision":false}`}, "unsupported"},
+		{"standard wins", []string{`{"id":"x","input_modalities":["text"],"vision":true}`}, "unsupported"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var permutations func([]string, int)
+			permutations = func(entries []string, i int) {
+				if i < len(entries) {
+					for j := i; j < len(entries); j++ {
+						entries[i], entries[j] = entries[j], entries[i]
+						permutations(entries, i+1)
+						entries[i], entries[j] = entries[j], entries[i]
+					}
+					return
+				}
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					fmt.Fprint(w, `{"data":[`+strings.Join(entries, ",")+`]}`)
+				}))
+				catalog, err := FetchModelCatalog(context.Background(), srv.URL, "", nil)
+				srv.Close()
+				if err != nil || len(catalog) != 1 {
+					t.Fatalf("catalog=%+v err=%v", catalog, err)
+				}
+				state := "unsupported"
+				if catalog[0].InputModalities == nil {
+					state = "unknown"
+				} else if catalog[0].SupportsInput(provider.ModalityImage) {
+					state = "supported"
+				}
+				if state != tc.state {
+					t.Fatalf("entries %v: got %s want %s", entries, state, tc.state)
+				}
+			}
+			permutations(append([]string(nil), tc.entries...), 0)
+		})
 	}
 }
 
@@ -80,8 +132,8 @@ func TestFetchModelCatalogParsesInputModalitiesAndAliases(t *testing.T) {
 	if got := byID["text-only"]; len(got) != 1 || got[0] != "text" {
 		t.Fatalf("text-only modalities = %v", got)
 	}
-	if got := byID["missing"]; len(got) != 1 || got[0] != "text" {
-		t.Fatalf("missing modalities = %v, want explicit safe text default", got)
+	if got := byID["missing"]; len(got) != 0 {
+		t.Fatalf("missing modalities = %v, want unknown", got)
 	}
 }
 

@@ -65,7 +65,7 @@ func FetchModels(ctx context.Context, baseURL, apiKey string, headers map[string
 
 // FetchModelCatalog calls the OpenAI-compatible model endpoint and returns
 // model-level capability metadata. The adapter deliberately uses a
-// conservative text-only default when an endpoint omits capability fields;
+// unknown capability when an endpoint omits capability fields;
 // callers must never infer image support from a model name.
 func FetchModelCatalog(ctx context.Context, baseURL, apiKey string, headers map[string]string) ([]provider.ModelInfo, error) {
 	return FetchModelCatalogWithOptions(ctx, baseURL, apiKey, FetchModelsOptions{Headers: headers})
@@ -132,15 +132,24 @@ func FetchModelCatalogWithOptions(ctx context.Context, baseURL, apiKey string, o
 	}
 
 	modelsByID := make(map[string]provider.ModelInfo, len(result.Data))
+	conflicts := make(map[string]bool)
 	for _, raw := range result.Data {
 		model := parseModelInfo(baseURL, raw)
 		if model.ID == "" {
 			continue
 		}
-		if previous, exists := modelsByID[model.ID]; exists && !sameModalities(previous.InputModalities, model.InputModalities) {
-			// Conflicting declarations for the same model are unsafe. Keep the
-			// explicit text-only result rather than enabling image input.
-			model.InputModalities = []provider.ModelModality{provider.ModalityText}
+		if previous, exists := modelsByID[model.ID]; exists {
+			switch {
+			case conflicts[model.ID]:
+				model.InputModalities = nil
+			case model.InputModalities == nil:
+				model.InputModalities = previous.InputModalities
+			case previous.InputModalities != nil && !sameModalities(previous.InputModalities, model.InputModalities):
+				// A conflict stays unknown for the rest of this response, regardless
+				// of duplicate ordering. Missing metadata is not a negative fact.
+				conflicts[model.ID] = true
+				model.InputModalities = nil
+			}
 		}
 		modelsByID[model.ID] = model
 	}
@@ -153,7 +162,7 @@ func FetchModelCatalogWithOptions(ctx context.Context, baseURL, apiKey string, o
 }
 
 func sameModalities(a, b []provider.ModelModality) bool {
-	return slices.Equal(a, b)
+	return len(a) == len(b) && !slices.ContainsFunc(a, func(m provider.ModelModality) bool { return !slices.Contains(b, m) })
 }
 
 func parseModelInfo(baseURL string, raw json.RawMessage) provider.ModelInfo {
@@ -167,17 +176,14 @@ func parseModelInfo(baseURL string, raw json.RawMessage) provider.ModelInfo {
 	if id == "" {
 		return provider.ModelInfo{}
 	}
-	modalities, ok := parseModalities(entry)
-	if !ok {
-		modalities = []provider.ModelModality{provider.ModalityText}
-	}
+	modalities, _ := parseModalities(entry)
 	return provider.ModelInfo{ID: id, InputModalities: modalities}
 }
 
 func parseModalities(entry map[string]json.RawMessage) ([]provider.ModelModality, bool) {
 	// Canonical and nested array fields are ordered before compatibility
 	// aliases. Presence with an invalid value is treated as an unsafe
-	// declaration and therefore falls back to text-only.
+	// declaration and therefore stays unknown.
 	for _, key := range []string{"input_modalities"} {
 		if raw, present := entry[key]; present {
 			return decodeModalities(raw)
@@ -202,6 +208,7 @@ func parseModalities(entry map[string]json.RawMessage) ([]provider.ModelModality
 				return decodeVisionBool(vision)
 			}
 		}
+		return nil, false
 	}
 	for _, key := range []string{"supports_vision", "vision"} {
 		if raw, present := entry[key]; present {
@@ -228,15 +235,19 @@ func decodeModalities(raw json.RawMessage) ([]provider.ModelModality, bool) {
 			out = append(out, modality)
 		}
 	}
+	// Stable order also makes duplicate merging independent of array order.
+	if len(out) == 2 && out[0] == provider.ModalityImage {
+		out[0], out[1] = out[1], out[0]
+	}
 	return out, len(out) > 0
 }
 
 func decodeVisionBool(raw json.RawMessage) ([]provider.ModelModality, bool) {
-	var vision bool
-	if json.Unmarshal(raw, &vision) != nil {
+	var vision *bool
+	if json.Unmarshal(raw, &vision) != nil || vision == nil {
 		return nil, false
 	}
-	if vision {
+	if *vision {
 		return []provider.ModelModality{provider.ModalityText, provider.ModalityImage}, true
 	}
 	return []provider.ModelModality{provider.ModalityText}, true

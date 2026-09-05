@@ -1,6 +1,29 @@
 package main
 
-import "reasonix/internal/control"
+import (
+	"fmt"
+
+	"reasonix/internal/control"
+)
+
+type imageCapabilitySnapshot interface{ ImageCapabilityChanged() bool }
+
+// Use the existing build/swap/lease boundary before accepting a new turn.
+// A failed rebuild leaves the previous snapshot visible and rejects this turn.
+func (a *App) refreshTabImageCapability(tab *WorkspaceTab) error {
+	a.runtimeRebuildMu.Lock()
+	defer a.runtimeRebuildMu.Unlock()
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+	current, ok := a.controllerForTab(tab).(imageCapabilitySnapshot)
+	if !ok || !current.ImageCapabilityChanged() {
+		return nil
+	}
+	if err := a.rebuildSettingTurnLocked("image input", tab, false, false); err != nil {
+		return fmt.Errorf("refresh image input configuration: %w", err)
+	}
+	return nil
+}
 
 // tabTurnAdmission owns both locks acquired while a foreground turn starts.
 type tabTurnAdmission struct {
@@ -91,6 +114,13 @@ func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (
 			}
 			abort()
 			return nil, nil, control.ErrTurnRunning
+		}
+		if snapshot, ok := ctrl.(imageCapabilitySnapshot); a.ctx != nil && ok && snapshot.ImageCapabilityChanged() {
+			abort()
+			if err := a.refreshTabImageCapability(tab); err != nil {
+				return nil, nil, err
+			}
+			continue
 		}
 		if tab.sink != nil && !tab.sink.tryBeginTurn(submissionID...) {
 			abort()

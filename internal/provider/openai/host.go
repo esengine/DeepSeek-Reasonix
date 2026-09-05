@@ -48,6 +48,15 @@ func IsOfficialDeepSeekVisionModel(model string) bool {
 	return strings.EqualFold(strings.TrimSpace(model), OfficialDeepSeekVisionModel)
 }
 
+// DeepSeekImageInputAllowed applies the official endpoint hard limit after a
+// provider has resolved its configured or catalog-derived image capability.
+func DeepSeekImageInputAllowed(officialBase bool, requestURL, model string, metadataProvided, enabled bool) bool {
+	if !officialBase && !IsDeepSeek(requestURL) {
+		return enabled
+	}
+	return (!metadataProvided || enabled) && IsOfficialDeepSeekVisionModel(model)
+}
+
 // OfficialDeepSeekAllowsVision reports whether this official DeepSeek endpoint
 // may serialize image parts for the selected model. Custom gateways never match.
 func OfficialDeepSeekAllowsVision(baseURL, model string) bool {

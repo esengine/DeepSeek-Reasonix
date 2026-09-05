@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 type CapabilityState string
@@ -38,14 +40,19 @@ const (
 	CapabilitySourceCache    CapabilitySource = "cache"
 	CapabilitySourceDefault  CapabilitySource = "adapter_default"
 	CapabilitySourceUnknown  CapabilitySource = "unknown"
+	CapabilitySourceProtocol CapabilitySource = "protocol"
 )
 
 type ResolvedModelCapability struct {
-	Model           string
-	InputModalities []provider.ModelModality
-	State           CapabilityState
-	Source          CapabilitySource
-	ModelInfo       provider.ModelInfo
+	Model                   string
+	InputModalities         []provider.ModelModality
+	State                   CapabilityState
+	Source                  CapabilitySource
+	ModelInfo               provider.ModelInfo
+	AutomaticState          CapabilityState
+	AutomaticSource         CapabilitySource
+	ImageInputEnableAllowed bool
+	ImageInputBlockReason   string
 }
 
 type ModelCapabilityCacheFile struct {
@@ -63,7 +70,7 @@ type ModelCapabilityCacheEntry struct {
 }
 
 const (
-	modelCapabilityCacheVersion  = 1
+	modelCapabilityCacheVersion  = 2
 	modelCapabilityCacheTTL      = 24 * time.Hour
 	modelCapabilityCacheMaxSize  = 2 << 20
 	modelCapabilityCacheMaxItems = 4096
@@ -74,21 +81,72 @@ const (
 // hydrated from the sidecar cache; user config remains the higher-priority
 // source and is never rewritten by discovery.
 type ModelCapabilityResolver struct {
-	mu      sync.RWMutex
-	entries map[string]ModelCapabilityCacheEntry
-	path    string
+	mu                  sync.RWMutex
+	entries             map[string]ModelCapabilityCacheEntry
+	path                string
+	credentialsRevision string
 }
 
 func NewModelCapabilityResolver() *ModelCapabilityResolver {
-	r := &ModelCapabilityResolver{entries: map[string]ModelCapabilityCacheEntry{}}
+	r := &ModelCapabilityResolver{
+		entries:             map[string]ModelCapabilityCacheEntry{},
+		credentialsRevision: CredentialStoreRevision(),
+	}
 	if dir := CacheDir(); dir != "" {
-		r.path = filepath.Join(dir, "model-capabilities-v1.json")
+		r.path = filepath.Join(dir, "model-capabilities-v2.json")
 		r.load()
 	}
 	return r
 }
 
 func (r *ModelCapabilityResolver) Resolve(entry *ProviderEntry) ResolvedModelCapability {
+	return r.resolveWithCredentialRevision(entry, r.credentialRevision())
+}
+
+func (r *ModelCapabilityResolver) credentialRevision() string {
+	if r != nil && r.credentialsRevision != "" {
+		return r.credentialsRevision
+	}
+	return CredentialStoreRevision()
+}
+
+func (r *ModelCapabilityResolver) resolveWithCredentialRevision(entry *ProviderEntry, credentialsRevision string) ResolvedModelCapability {
+	resolved := r.resolveAutomatic(entry, credentialsRevision)
+	resolved.AutomaticState, resolved.AutomaticSource = resolved.State, resolved.Source
+	resolved.ImageInputEnableAllowed = entry != nil
+	if entry == nil {
+		return resolved
+	}
+	// Read the exact model's override even when a catalog caller has not gone
+	// through Config.ResolveModel. Never reuse another selected model's value.
+	override := entry.visionOverride
+	if len(entry.ModelOverrides) > 0 {
+		override = nil
+		if ov, ok := entry.modelOverrideForModel(entry.Model); ok {
+			override = ov.Vision
+		}
+	}
+	if override != nil {
+		value := capabilityFromBool(resolved.Model, *override, CapabilitySourceOverride)
+		resolved.State, resolved.Source, resolved.InputModalities = value.State, value.Source, value.InputModalities
+	}
+	requestURL := entry.RequestURL
+	if requestURL == "" && entry.Kind == "openai" {
+		requestURL = entry.ChatURL
+	}
+	if (openai.IsDeepSeek(entry.BaseURL) || openai.IsDeepSeek(requestURL)) && !openai.IsOfficialDeepSeekVisionModel(entry.Model) {
+		resolved.State, resolved.Source = CapabilityUnsupported, CapabilitySourceProtocol
+		resolved.InputModalities = []provider.ModelModality{provider.ModalityText}
+		resolved.AutomaticState, resolved.AutomaticSource = CapabilityUnsupported, CapabilitySourceProtocol
+		resolved.ImageInputEnableAllowed = false
+		resolved.ImageInputBlockReason = "official_deepseek_text_model"
+	}
+	resolved.ModelInfo.ID = resolved.Model
+	resolved.ModelInfo.InputModalities = append([]provider.ModelModality(nil), resolved.InputModalities...)
+	return resolved
+}
+
+func (r *ModelCapabilityResolver) resolveAutomatic(entry *ProviderEntry, credentialsRevision string) ResolvedModelCapability {
 	if entry == nil {
 		return ResolvedModelCapability{State: CapabilityUnknown, Source: CapabilitySourceUnknown}
 	}
@@ -96,32 +154,37 @@ func (r *ModelCapabilityResolver) Resolve(entry *ProviderEntry) ResolvedModelCap
 	if model == "" {
 		return ResolvedModelCapability{State: CapabilityUnknown, Source: CapabilitySourceUnknown}
 	}
-	if entry.visionOverride != nil {
-		return capabilityFromBool(model, *entry.visionOverride, CapabilitySourceOverride)
+	// Resolve catalog facts separately so a vision override or legacy declaration
+	// cannot erase context/output/protocol metadata.
+	facts, hasFacts := provider.PiCatalogModelInfoForProvider(entry.Name, entry.Kind, entry.BaseURL, model)
+	if !hasFacts {
+		facts, hasFacts = provider.BuiltinModelInfo(entry.Kind, entry.BaseURL, model)
 	}
 	if info, ok := presetModelInfo(entry, model); ok {
 		resolved := capabilityFromModalities(model, info.InputModalities, CapabilitySourcePreset)
 		resolved.ModelInfo = info
+		if hasFacts {
+			resolved.ModelInfo = facts
+		}
 		return resolved
 	}
 	if entry.Vision {
-		return capabilityFromBool(model, true, CapabilitySourceLegacy)
-	}
-	if entry.HasVisionModel(model) {
-		return capabilityFromBool(model, true, CapabilitySourceLegacy)
-	}
-	if info, ok := provider.PiCatalogModelInfoForProvider(entry.Name, entry.Kind, entry.BaseURL, model); ok {
-		resolved := capabilityFromModalities(model, info.InputModalities, CapabilitySourceAdapter)
-		resolved.ModelInfo = info
+		resolved := capabilityFromBool(model, true, CapabilitySourceLegacy)
+		resolved.ModelInfo = facts
 		return resolved
 	}
-	if info, ok := provider.BuiltinModelInfo(entry.Kind, entry.BaseURL, model); ok {
-		resolved := capabilityFromModalities(model, info.InputModalities, CapabilitySourceAdapter)
-		resolved.ModelInfo = info
+	if entry.HasVisionModel(model) {
+		resolved := capabilityFromBool(model, true, CapabilitySourceLegacy)
+		resolved.ModelInfo = facts
+		return resolved
+	}
+	if hasFacts {
+		resolved := capabilityFromModalities(model, facts.InputModalities, CapabilitySourceAdapter)
+		resolved.ModelInfo = facts
 		return resolved
 	}
 	if r != nil {
-		key := r.entryKey(entry, model)
+		key := r.entryKeyWithCredentialRevision(entry, model, credentialsRevision)
 		r.mu.RLock()
 		cached, ok := r.entries[key]
 		r.mu.RUnlock()
@@ -129,9 +192,7 @@ func (r *ModelCapabilityResolver) Resolve(entry *ProviderEntry) ResolvedModelCap
 			return capabilityFromModalities(model, cached.InputModalities, cached.Source)
 		}
 	}
-	// Match the Harness adapter contract: an exact model resolved by a generic
-	// adapter is explicitly text-only when no positive declaration exists.
-	return capabilityFromBool(model, false, CapabilitySourceDefault)
+	return capabilityFromModalities(model, nil, CapabilitySourceUnknown)
 }
 
 // presetModelInfo turns the repository's curated provider templates into a
@@ -183,10 +244,18 @@ func capabilityFromModalities(model string, modalities []provider.ModelModality,
 // PutCatalog stores adapter results for one provider identity and persists a
 // disposable cache. Invalid entries are ignored rather than enabling images.
 func (r *ModelCapabilityResolver) PutCatalog(entry ProviderEntry, catalog []provider.ModelInfo) {
+	r.PutCatalogAt(entry, catalog, time.Now())
+}
+
+// PutCatalogAt orders successful discoveries by request start, not completion.
+// Callers must validate their frozen provider/credential identity before commit.
+func (r *ModelCapabilityResolver) PutCatalogAt(entry ProviderEntry, catalog []provider.ModelInfo, started time.Time) {
 	if r == nil {
 		return
 	}
 	now := time.Now()
+	credentialsRevision := r.credentialRevision()
+	providerFingerprint := r.providerFingerprintForCredentialRevision(entry, credentialsRevision)
 	r.mu.Lock()
 	for _, model := range catalog {
 		id := strings.TrimSpace(model.ID)
@@ -194,16 +263,16 @@ func (r *ModelCapabilityResolver) PutCatalog(entry ProviderEntry, catalog []prov
 			continue
 		}
 		modalities := normalizeInputModalities(model.InputModalities)
-		if modalities == nil {
-			modalities = []provider.ModelModality{provider.ModalityText}
+		key := providerFingerprint + "\x00" + id
+		if previous, ok := r.entries[key]; ok && !started.After(previous.FetchedAt) {
+			continue
 		}
-		key := r.entryKey(&entry, id)
 		r.entries[key] = ModelCapabilityCacheEntry{
-			ProviderFingerprint: r.providerFingerprint(entry),
+			ProviderFingerprint: providerFingerprint,
 			ModelID:             id,
 			InputModalities:     modalities,
 			Source:              CapabilitySourceAdapter,
-			FetchedAt:           now,
+			FetchedAt:           started,
 			ExpiresAt:           now.Add(modelCapabilityCacheTTL),
 		}
 	}
@@ -234,15 +303,23 @@ func normalizeInputModalities(values []provider.ModelModality) []provider.ModelM
 }
 
 func (r *ModelCapabilityResolver) entryKey(entry *ProviderEntry, model string) string {
-	return r.providerFingerprint(*entry) + "\x00" + strings.TrimSpace(model)
+	return r.entryKeyWithCredentialRevision(entry, model, r.credentialRevision())
+}
+
+func (r *ModelCapabilityResolver) entryKeyWithCredentialRevision(entry *ProviderEntry, model, credentialsRevision string) string {
+	return r.providerFingerprintForCredentialRevision(*entry, credentialsRevision) + "\x00" + strings.TrimSpace(model)
 }
 
 func (r *ModelCapabilityResolver) providerFingerprint(entry ProviderEntry) string {
-	h := hmac.New(sha256.New, []byte("reasonix-model-capabilities-cache-v1"))
+	return r.providerFingerprintForCredentialRevision(entry, r.credentialRevision())
+}
+
+func (r *ModelCapabilityResolver) providerFingerprintForCredentialRevision(entry ProviderEntry, credentialsRevision string) string {
+	h := hmac.New(sha256.New, []byte("reasonix-model-capabilities-cache-v2"))
 	for _, value := range []string{
-		"reasonix-model-capabilities-v1", entry.Name, entry.Kind, entry.BaseURL,
+		"reasonix-model-capabilities-v2", entry.Name, entry.Kind, entry.BaseURL, entry.ChatURL, entry.RequestURL,
 		entry.ModelsURL, entry.APIKeyEnv, fmt.Sprintf("%t", entry.AuthHeader), fmt.Sprintf("%t", entry.NoProxy),
-		CredentialStoreRevision(),
+		credentialsRevision,
 	} {
 		_, _ = fmt.Fprintf(h, "%d:", len(value))
 		_, _ = h.Write([]byte(value))
@@ -276,11 +353,9 @@ func (r *ModelCapabilityResolver) load() {
 		if entry.ProviderFingerprint == "" || entry.ModelID == "" || !now.Before(entry.ExpiresAt) {
 			continue
 		}
-		if normalized := normalizeInputModalities(entry.InputModalities); normalized != nil {
-			entry.InputModalities = normalized
-			entry.Source = CapabilitySourceCache
-			r.entries[entry.ProviderFingerprint+"\x00"+entry.ModelID] = entry
-		}
+		entry.InputModalities = normalizeInputModalities(entry.InputModalities)
+		entry.Source = CapabilitySourceCache
+		r.entries[entry.ProviderFingerprint+"\x00"+entry.ModelID] = entry
 	}
 }
 
@@ -321,14 +396,21 @@ func (r *ModelCapabilityResolver) persist() {
 	// Merge with the latest on-disk snapshot after taking the cross-process
 	// lock. Separate settings refreshes must not erase one another's entries.
 	if existing, ok := readModelCapabilityCacheFile(r.path); ok {
-		seen := make(map[string]bool, len(entries))
-		for _, entry := range entries {
-			seen[entry.ProviderFingerprint+"\x00"+entry.ModelID] = true
+		seen := make(map[string]int, len(entries))
+		for i, entry := range entries {
+			seen[entry.ProviderFingerprint+"\x00"+entry.ModelID] = i
 		}
 		for _, entry := range existing.Entries {
 			key := entry.ProviderFingerprint + "\x00" + entry.ModelID
-			if !seen[key] && time.Now().Before(entry.ExpiresAt) {
-				entries = append(entries, entry)
+			if time.Now().Before(entry.ExpiresAt) {
+				if i, ok := seen[key]; ok {
+					if entry.FetchedAt.After(entries[i].FetchedAt) {
+						entries[i] = entry
+					}
+				} else {
+					seen[key] = len(entries)
+					entries = append(entries, entry)
+				}
 			}
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].FetchedAt.After(entries[j].FetchedAt) })
@@ -341,22 +423,19 @@ func (r *ModelCapabilityResolver) persist() {
 			return
 		}
 	}
-	tmp, err := os.CreateTemp(dir, ".model-capabilities-*.tmp")
-	if err != nil {
-		return
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err = tmp.Chmod(0o600); err == nil {
-		_, err = tmp.Write(data)
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		if len(data) <= modelCapabilityCacheMaxSize {
-			_ = os.Rename(tmpName, r.path)
+	// Keep this resolver consistent with the winning on-disk observations.
+	r.mu.Lock()
+	for _, entry := range entries {
+		key := entry.ProviderFingerprint + "\x00" + entry.ModelID
+		if current, ok := r.entries[key]; !ok || entry.FetchedAt.After(current.FetchedAt) {
+			r.entries[key] = entry
 		}
+	}
+	r.mu.Unlock()
+	if len(data) <= modelCapabilityCacheMaxSize {
+		// Use the repository's strict cross-platform replacement helper so an
+		// existing cache is replaced atomically on Windows as well as Unix.
+		_ = fileutil.AtomicWriteFileStrict(r.path, data, 0o600)
 	}
 }
 
@@ -373,6 +452,19 @@ func readModelCapabilityCacheFile(path string) (ModelCapabilityCacheFile, bool) 
 	var file ModelCapabilityCacheFile
 	if json.Unmarshal(data, &file) != nil || file.Version != modelCapabilityCacheVersion {
 		return ModelCapabilityCacheFile{}, false
+	}
+	if len(file.Entries) > modelCapabilityCacheMaxItems {
+		return ModelCapabilityCacheFile{}, false
+	}
+	// All read paths, including cross-process persistence merges, must apply
+	// the same validation before an entry becomes visible to a resolver.
+	for i := range file.Entries {
+		entry := &file.Entries[i]
+		entry.ModelID = strings.TrimSpace(entry.ModelID)
+		if entry.ProviderFingerprint == "" || entry.ModelID == "" {
+			return ModelCapabilityCacheFile{}, false
+		}
+		entry.InputModalities = normalizeInputModalities(entry.InputModalities)
 	}
 	return file, true
 }

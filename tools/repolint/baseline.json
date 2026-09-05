@@ -25,7 +25,7 @@
     "desktop/app.go": {
       "complexity": 57,
       "essay": 63,
-      "file-size": 11046,
+      "file-size": 11054,
       "function-size": 354,
       "struct-state": 15
     },
@@ -150,7 +150,7 @@
       "file-size": 264
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1559
+      "file-size": 1563
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 4227
@@ -893,8 +893,8 @@
     "internal/control/controller.go": {
       "complexity": 11,
       "essay": 91,
-      "file-size": 5490,
-      "function-size": 78,
+      "file-size": 5515,
+      "function-size": 80,
       "narrative": 4,
       "struct-state": 16
     },
@@ -1249,7 +1249,7 @@
     "internal/provider/responses/responses.go": {
       "complexity": 54,
       "essay": 18,
-      "file-size": 96,
+      "file-size": 99,
       "function-size": 181,
       "struct-state": 6
     },

@@ -214,7 +214,9 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.0 * 1024);
+// The one-row model configuration list and responsive stacking measure
+// 116.3 KiB gzip while reusing the shared segmented-control styles.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }

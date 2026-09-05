@@ -317,7 +317,7 @@ ok(!editorThrew, "provider editor can switch from built-in to custom without cha
 ok(rootEl.textContent?.includes("OpenAI-compatible") === true, "provider editor renders the custom provider fields after the switch");
 ok(rootEl.textContent?.includes("Kimi K3 reasoning (low / high / max)") === true, "custom provider editor exposes the explicit Kimi K3 reasoning protocol");
 const providerUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
-ok(rootEl.querySelectorAll('input[type="radio"]').length === 0, "custom provider editor exposes only one API address input");
+ok(rootEl.querySelectorAll('input[type="radio"]:not(.sr-only)').length === 0, "custom provider editor exposes only one API address input");
 ok(providerUrlInput?.value === "", "new custom providers start with an empty exact request address");
 const providerUrlLabel = Array.from(rootEl.querySelectorAll<HTMLLabelElement>("label")).find(
   (label) => label.htmlFor === providerUrlInput?.id,
@@ -338,7 +338,8 @@ await act(async () => {
 const webSearchSwitch = rootEl.querySelector<HTMLInputElement>('input[role="switch"]');
 ok(rootEl.textContent?.includes("Server-side web search") === true, "DeepSeek Responses editor separates service capabilities from model selection");
 ok(webSearchSwitch?.checked === true, "curated DeepSeek Responses capability is enabled in the editor");
-ok(rootEl.textContent?.includes("No image input") === true, "DeepSeek Responses editor renders model image capability read-only");
+ok(rootEl.textContent?.includes("This official endpoint does not accept images for this model.") === true, "DeepSeek Responses editor explains the protocol image restriction");
+ok(rootEl.querySelector<HTMLInputElement>('.provider-image-input input[value="on"]')?.disabled === true, "DeepSeek Responses text model cannot be manually enabled");
 ok(
   rootEl.querySelectorAll('.provider-model-draft__capabilities input[type="checkbox"]').length === 0,
   "DeepSeek Responses editor does not render an image-capability checkbox",
@@ -356,11 +357,11 @@ await act(async () => {
   await flushPromises();
 });
 ok(
-  rootEl.textContent?.includes("No image input") === true,
-  "provider editor honors backend model capability for endpoints outside the legacy frontend heuristic",
+  rootEl.textContent?.includes("This official endpoint does not accept images for this model.") === true,
+  "provider editor honors backend vision capability for endpoints outside the legacy frontend heuristic",
 );
 const customProviderUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
-ok(rootEl.querySelectorAll('input[type="radio"]').length === 0, "existing custom providers no longer expose an address mode selector");
+ok(rootEl.querySelectorAll('input[type="radio"]:not(.sr-only)').length === 0, "existing custom providers no longer expose an address mode selector");
 ok(customProviderUrlInput?.value === "https://eu.deepseek.com/v1/chat/completions", "legacy base-only providers display their previously effective request URL");
 ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.disabled === true, "existing custom provider name is locked");
 ok(rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]')?.nextElementSibling?.textContent === "Changing the provider name is not supported yet", "existing custom provider editor shows the rename hint");

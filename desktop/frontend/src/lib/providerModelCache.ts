@@ -22,13 +22,16 @@ function normalizedHeaders(headers?: Record<string, string> | null): [string, st
   return Object.entries(headers ?? {}).sort(([a], [b]) => a.localeCompare(b));
 }
 
-function cacheKey(p: ProviderView): string {
+export function providerDiscoveryIdentity(p: ProviderView): string {
   return JSON.stringify([
     p.apiKeyEnv.trim(),
     p.name.trim(),
     p.kind.trim(),
     p.baseUrl.trim(),
     p.modelsUrl.trim(),
+    p.chatUrl?.trim() ?? "",
+    p.requestUrl?.trim() ?? "",
+    Boolean(p.noProxy),
     Boolean(p.authHeader),
     normalizedHeaders(p.headers),
     (p.keySource ?? "").trim(),
@@ -36,6 +39,8 @@ function cacheKey(p: ProviderView): string {
     (p.modelCatalogFingerprint ?? "").trim(),
   ]);
 }
+
+const cacheKey = providerDiscoveryIdentity;
 
 function cacheKeyAPIKeyEnv(key: string): string {
   try {
@@ -125,6 +130,7 @@ export async function cachedFetchProviderModelCatalog(
   void force;
   const fetched = await fetchFn(provider);
   return fetched.map((item) => ({
+	...item,
     model: item.model,
     inputModalities: [...(item.inputModalities ?? [])],
     state: item.state,

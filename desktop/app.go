@@ -6694,6 +6694,14 @@ func (a *App) MetaForTab(tabID string) Meta {
 	// stale entry schedules a refresh and serves the last known values (empty
 	// on the very first call; the "tab:meta" event delivers the refresh).
 	extras, refreshExtras := tabMetaExtrasFor(tab, cwd, snap.model)
+	// Native image routing is already frozen in the Controller. Reading this
+	// cheap snapshot also makes rebuilds visible immediately, without mixing
+	// newly saved config with a provider from the preceding runtime generation.
+	if capability, ok := snap.ctrl.(interface{ ImageInputSnapshot() (bool, bool, bool) }); ok {
+		if enabled, fallback, available := capability.ImageInputSnapshot(); available {
+			extras.imageInputEnabled, extras.visionFallbackEnabled = enabled, fallback
+		}
+	}
 	if refreshExtras {
 		a.scheduleTabMetaExtrasRefresh(tab.ID)
 	}

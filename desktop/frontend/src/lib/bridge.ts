@@ -4662,8 +4662,8 @@ function makeMockApp(): AppBindings {
       const models = await this.FetchProviderModels(p);
       return models.map((model) => ({
         model,
-        inputModalities: p.modelCapabilities?.find((item) => item.model === model)?.inputModalities ?? ["text"],
-        state: p.modelCapabilities?.find((item) => item.model === model)?.state ?? "unsupported",
+        inputModalities: p.modelCapabilities?.find((item) => item.model === model)?.inputModalities ?? [],
+        state: p.modelCapabilities?.find((item) => item.model === model)?.state ?? "unknown",
         source: "adapter",
       }));
     },

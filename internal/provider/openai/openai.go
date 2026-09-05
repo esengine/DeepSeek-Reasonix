@@ -95,16 +95,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		modelInfo = *cfg.ModelInfo
 		modelInfo.ID = cfg.Model
 	}
-	if modelInfo.InputModalities == nil {
-		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText}
-	}
 	if cfg.ModelInfo != nil {
 		vision = modelInfo.SupportsInput(provider.ModalityImage)
 	}
 	// Official DeepSeek image input is pinned to one SKU even when a catalog
 	// or gateway metadata entry claims otherwise.
-	if officialDeepSeek {
-		vision = IsOfficialDeepSeekVisionModel(cfg.Model)
+	vision = DeepSeekImageInputAllowed(officialDeepSeek, chatURL, cfg.Model, cfg.ModelInfo != nil, vision)
+	if vision {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText, provider.ModalityImage}
+	} else if modelInfo.SupportsInput(provider.ModalityImage) {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText}
 	}
 	visionDetail, _ := cfg.Extra["vision_detail"].(string)
 	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))

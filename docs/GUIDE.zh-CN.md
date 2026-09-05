@@ -363,7 +363,10 @@ Gateway、HuggingFace Router、ModelScope、NVIDIA NIM、KiloCode 和 Ollama Clo
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
 以及 OpenCode Go 的每模型 reasoning 覆盖。官方 DeepSeek 的 Anthropic、Responses 与
 Chat Completions 目录还会带上 `deepseek-v4-flash-vision-exp`。设置页会按模型能力元数据
-展示支持图片的模型，不再要求逐个勾选。composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
+展示支持图片的模型，也提供逐模型“图片输入：自动 / 开启 / 关闭”。中转站只返回
+模型 ID 时会显示“图片能力未识别”；向服务商确认支持后，选择开启并保存即可。
+详见[图片输入指南](MODEL_CAPABILITIES.zh-CN.md#中转站模型使用指南)。
+composer/`@` 用户图片会按官方文档的三种方式发出：本地小图走内联 base64 `data:` URL；
 `http(s)` 图片链接原样作为 URL 传入；`file-api-` 引用走 Files API（官方 DeepSeek 上
 超过 32 MiB 的本地图会自动上传）。Chat Completions 用 `image_url` 或 `file`，Anthropic
 用 `image`+`source.base64|url|file`，Responses 用 `input_image`。Flash/Pro 即使旧配置列出

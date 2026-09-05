@@ -149,9 +149,7 @@ func New(cfg Config) provider.Provider {
 	}
 	// Official DeepSeek image input is pinned to one SKU. Ignore metadata or
 	// Extra["vision"] for Flash/Pro.
-	if vendor == "deepseek" {
-		vision = openai.IsOfficialDeepSeekVisionModel(cfg.Model)
-	}
+	vision = openai.DeepSeekImageInputAllowed(vendor == "deepseek", cfg.RequestURL, cfg.Model, cfg.ModelInfo != nil, vision)
 	httpClient := &http.Client{}
 	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
@@ -168,6 +166,11 @@ func New(cfg Config) provider.Provider {
 	if cfg.ModelInfo != nil {
 		modelInfo = *cfg.ModelInfo
 		modelInfo.ID = cfg.Model
+	}
+	if vision {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText, provider.ModalityImage}
+	} else if modelInfo.SupportsInput(provider.ModalityImage) {
+		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText}
 	}
 	return &client{
 		name: cfg.Name, apiKey: cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,

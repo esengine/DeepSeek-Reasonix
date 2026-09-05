@@ -24,6 +24,9 @@ func NewLocalProviderResolver(cfg *config.Config, proxy netclient.ProxySpec) *Lo
 }
 
 func NewLocalProviderResolverWithCapabilities(cfg *config.Config, proxy netclient.ProxySpec, capabilities *config.ModelCapabilityResolver) *LocalProviderResolver {
+	if capabilities == nil {
+		capabilities = config.NewModelCapabilityResolver()
+	}
 	return &LocalProviderResolver{cfg: cfg, proxy: proxy, capabilities: capabilities}
 }
 
@@ -41,6 +44,9 @@ func (r *LocalProviderResolver) Catalog() []provider.Descriptor {
 		for _, model := range models {
 			entry := *base
 			entry.Model = model
+			if selected, ok := r.cfg.ResolveModel(base.Name + "/" + model); ok {
+				entry = *selected
+			}
 			ref := modelRefFromEntry(&entry)
 			capability := config.ResolvedModelCapability{State: config.CapabilityUnknown}
 			if r.capabilities != nil {

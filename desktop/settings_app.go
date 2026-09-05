@@ -83,10 +83,14 @@ type ProviderView struct {
 }
 
 type ProviderModelCapabilityView struct {
-	Model           string   `json:"model"`
-	InputModalities []string `json:"inputModalities"`
-	State           string   `json:"state"`
-	Source          string   `json:"source"`
+	Model                   string   `json:"model"`
+	InputModalities         []string `json:"inputModalities"`
+	State                   string   `json:"state"`
+	Source                  string   `json:"source"`
+	AutomaticState          string   `json:"automaticState"`
+	AutomaticSource         string   `json:"automaticSource"`
+	ImageInputEnableAllowed bool     `json:"imageInputEnableAllowed"`
+	ImageInputBlockReason   string   `json:"imageInputBlockReason,omitempty"`
 }
 
 type ProviderModelCatalogUpdate struct {
@@ -473,6 +477,9 @@ func providerModelCatalogFingerprintForCredentials(p config.ProviderEntry, crede
 	write(p.BaseURL)
 	write("models_url")
 	write(p.ModelsURL)
+	write(p.ChatURL)
+	write(p.RequestURL)
+	write(fmt.Sprintf("%t", p.NoProxy))
 	write("api_key_env")
 	write(p.APIKeyEnv)
 	write("credentials_revision")
@@ -712,16 +719,22 @@ func providerModelCapabilitiesForView(p config.ProviderEntry, models []string) [
 		entry := p
 		entry.Model = model
 		capability := resolver.Resolve(&entry)
-		modalities := make([]string, len(capability.InputModalities))
-		for i, modality := range capability.InputModalities {
-			modalities[i] = string(modality)
-		}
-		out = append(out, ProviderModelCapabilityView{
-			Model: model, InputModalities: modalities,
-			State: string(capability.State), Source: string(capability.Source),
-		})
+		out = append(out, modelCapabilityView(capability))
 	}
 	return out
+}
+
+func modelCapabilityView(capability config.ResolvedModelCapability) ProviderModelCapabilityView {
+	modalities := make([]string, len(capability.InputModalities))
+	for i, modality := range capability.InputModalities {
+		modalities[i] = string(modality)
+	}
+	return ProviderModelCapabilityView{
+		Model: capability.Model, InputModalities: modalities,
+		State: string(capability.State), Source: string(capability.Source),
+		AutomaticState: string(capability.AutomaticState), AutomaticSource: string(capability.AutomaticSource),
+		ImageInputEnableAllowed: capability.ImageInputEnableAllowed, ImageInputBlockReason: capability.ImageInputBlockReason,
+	}
 }
 
 func providerThinkingForSettings(thinking string) string {
@@ -2546,6 +2559,7 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	if len(models) > 0 {
 		e.Model = models[0] // also satisfies validateProvider's model requirement
 		e.Models = models
+		e.VisionModels = providerVisionModels(models, original.VisionModels)
 		e.ModelOverrides = providerModelOverridesForSave(p.ModelOverrides, models)
 		if p.VisionModelsSet || len(p.VisionModels) > 0 {
 			e.Vision = false
@@ -3020,6 +3034,21 @@ func providerPresetNoExistingProviderError(id string) error {
 // here, at setup time, instead of succeeding and stalling chat later (#9560).
 func (a *App) FetchProviderModelCatalog(p ProviderView) ([]ProviderModelCapabilityView, error) {
 	root := a.activeWorkspaceRoot()
+	// Capture persisted identity separately from the editor draft. Draft routes
+	// may differ legitimately; a saved provider changing during discovery may not.
+	savedIdentity := func() string {
+		cfg, err := config.LoadForRootWithoutCredentialsReadOnly(root)
+		if err != nil {
+			return ""
+		}
+		for _, entry := range cfg.Providers {
+			if entry.Name == p.Name {
+				return providerModelCatalogFingerprint(entry)
+			}
+		}
+		return ""
+	}
+	before := savedIdentity()
 	e := config.ProviderEntry{
 		Name:       p.Name,
 		Kind:       p.Kind,
@@ -3028,7 +3057,12 @@ func (a *App) FetchProviderModelCatalog(p ProviderView) ([]ProviderModelCapabili
 		APIKeyEnv:  p.APIKeyEnv,
 		Headers:    p.Headers,
 		AuthHeader: p.AuthHeader,
+		NoProxy:    p.NoProxy,
+		ChatURL:    p.ChatURL,
+		RequestURL: p.RequestURL,
 	}
+	started := time.Now()
+	credentialsRevision := config.CredentialStoreRevision()
 	e.ResolveAPIKeyForRoot(root)
 	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
 	defer cancel()
@@ -3036,21 +3070,36 @@ func (a *App) FetchProviderModelCatalog(p ProviderView) ([]ProviderModelCapabili
 	if err != nil {
 		return []ProviderModelCapabilityView{}, err
 	}
+	// Credential changes invalidate a result even when the endpoint stayed the same.
+	unlockConfig := config.LockUserConfigEdits()
+	defer unlockConfig()
+	unlockCredentials, err := config.LockUserCredentialEdits()
+	if err != nil {
+		return []ProviderModelCapabilityView{}, err
+	}
+	defer unlockCredentials()
+	if credentialsRevision != config.CredentialStoreRevision() || before != savedIdentity() {
+		return []ProviderModelCapabilityView{}, fmt.Errorf("model discovery configuration changed; fetch again")
+	}
 	capabilities := config.NewModelCapabilityResolver()
-	capabilities.PutCatalog(e, models)
+	capabilities.PutCatalogAt(e, models, started)
+	// Only adapter facts enter the cache. User choices apply to the returned view.
+	if cfg, err := config.LoadForRootWithoutCredentialsReadOnly(root); err == nil {
+		for _, saved := range cfg.Providers {
+			if saved.Name == p.Name {
+				e.PresetID, e.Vision = saved.PresetID, saved.Vision
+				break
+			}
+		}
+	}
+	e.VisionModels = p.VisionModels
+	e.ModelOverrides = providerModelOverridesForSave(p.ModelOverrides, nil)
 	result := make([]ProviderModelCapabilityView, 0, len(models))
 	for _, model := range models {
 		entry := e
 		entry.Model = model.ID
 		resolved := capabilities.Resolve(&entry)
-		modalities := make([]string, len(resolved.InputModalities))
-		for i, modality := range resolved.InputModalities {
-			modalities[i] = string(modality)
-		}
-		result = append(result, ProviderModelCapabilityView{
-			Model: model.ID, InputModalities: modalities,
-			State: string(resolved.State), Source: string(resolved.Source),
-		})
+		result = append(result, modelCapabilityView(resolved))
 	}
 	return result, nil
 }
@@ -3117,18 +3166,16 @@ func (a *App) FetchAllProviderModels(providers []ProviderView) map[string][]stri
 		p := providers[i]
 		g.Go(func() error {
 			e := config.ProviderEntry{
-				Name:       p.Name,
-				Kind:       p.Kind,
-				BaseURL:    p.BaseURL,
+				Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, ChatURL: p.ChatURL, RequestURL: p.RequestURL,
 				ModelsURL:  strings.TrimSpace(p.ModelsURL),
 				APIKeyEnv:  p.APIKeyEnv,
 				Headers:    p.Headers,
-				AuthHeader: p.AuthHeader,
+				AuthHeader: p.AuthHeader, NoProxy: p.NoProxy,
 			}
 			e.ResolveAPIKeyForRoot(root)
 			ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			models, err := e.FetchModelsWithProxy(ctx, proxy)
+			models, err := e.FetchModelsWithProxy(ctx, withProbeDirectHost(proxy, e.BaseURL, e.NoProxy))
 			if err != nil {
 				// Omit failed providers so the frontend can retry them through
 				// the cached single-provider path without emitting JSON null.

@@ -9,7 +9,7 @@ import {
 } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
-import type { SettingsView } from "../lib/types";
+import type { ProviderModelCapabilityView, ProviderView, SettingsView } from "../lib/types";
 import {
   applyTypographyPreferences,
   createDefaultTypographyPreferences,
@@ -211,7 +211,7 @@ window.go = {
   main: {
     App: {
       Settings: async () => compactSettings,
-      FetchAllProviderModels: async () => ({}),
+      FetchAllProviderModelCatalogs: async () => ({}),
       SetCompactRatio: async (ratio: number) => {
         compactRatioCalls.push(ratio);
         compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
@@ -716,8 +716,8 @@ providerRaceSettings.providers = [{
   modelOverrides: [],
   modelCatalogFingerprint: "old-fingerprint",
 }];
-let resolveProviderBatch: ((models: Record<string, string[]>) => void) | undefined;
-const providerBatch = new Promise<Record<string, string[]>>((resolve) => {
+let resolveProviderBatch: ((models: Record<string, ProviderModelCapabilityView[]>) => void) | undefined;
+const providerBatch = new Promise<Record<string, ProviderModelCapabilityView[]>>((resolve) => {
   resolveProviderBatch = resolve;
 });
 let providerBatchCalls = 0;
@@ -726,7 +726,7 @@ window.go = {
   main: {
     App: {
       Settings: async () => providerRaceSettings,
-      FetchAllProviderModels: async () => {
+      FetchAllProviderModelCatalogs: async () => {
         providerBatchCalls += 1;
         return providerBatch;
       },
@@ -759,7 +759,7 @@ await act(async () => {
   await flushPromises();
 });
 await act(async () => {
-  resolveProviderBatch?.({ "race-provider": ["old-model", "stale-fetched-model"] });
+  resolveProviderBatch?.({ "race-provider": ["old-model", "stale-fetched-model"].map((model) => ({ model, inputModalities: [], state: "unknown", source: "adapter" })) });
   await flushPromises();
 });
 await waitFor("stale provider discovery completion", () => providerBatchCalls === 1);
@@ -806,7 +806,7 @@ window.go = {
   main: {
     App: {
       Settings: async () => providerRefreshCancelSettings,
-      FetchAllProviderModels: async () => ({}),
+      FetchAllProviderModelCatalogs: async () => ({}),
       FetchProviderModelCatalog: async () => ["deepseek-v4-flash", "deepseek-v4-pro"].map((model) => ({ model, inputModalities: ["text"], state: "unsupported", source: "adapter" })),
     } as Partial<AppBindings> as AppBindings,
   },
@@ -905,7 +905,7 @@ window.go = {
         upgradeFailureSettingsCalls += 1;
         return upgradeFailureSettings;
       },
-      FetchAllProviderModels: async () => ({}),
+      FetchAllProviderModelCatalogs: async () => ({}),
       UpgradeDeepSeekProviderAccess: async () => {
         upgradeFailureMutationCalls += 1;
         upgradeFailureSettings = {

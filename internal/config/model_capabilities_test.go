@@ -27,11 +27,11 @@ func TestModelCapabilityResolverHonorsExplicitConfigBeforeCache(t *testing.T) {
 	}
 }
 
-func TestModelCapabilityResolverDefaultsExactModelsToText(t *testing.T) {
+func TestModelCapabilityResolverDefaultsExactModelsToUnknown(t *testing.T) {
 	r := &ModelCapabilityResolver{entries: map[string]ModelCapabilityCacheEntry{}}
 	entry := ProviderEntry{Name: "custom", Kind: "openai", BaseURL: "https://example.test", Model: "new-model"}
 	got := r.Resolve(&entry)
-	if got.State != CapabilityUnsupported || got.Source != CapabilitySourceDefault || len(got.InputModalities) != 1 || got.InputModalities[0] != provider.ModalityText {
+	if got.State != CapabilityUnknown || got.Source != CapabilitySourceUnknown || got.InputModalities != nil {
 		t.Fatalf("default capability = %+v", got)
 	}
 }
@@ -52,7 +52,7 @@ func TestModelCapabilityResolverUsesBuiltinAdapterCatalog(t *testing.T) {
 	}
 	unknown := vision
 	unknown.Model = "omen-alpha"
-	if got := r.Resolve(&unknown); got.State != CapabilityUnsupported || got.Source != CapabilitySourceDefault {
+	if got := r.Resolve(&unknown); got.State != CapabilityUnknown || got.Source != CapabilitySourceUnknown {
 		t.Fatalf("OpenCode Go unknown capability = %+v", got)
 	}
 	modelScope := ProviderEntry{Name: "modelscope", Kind: "openai", BaseURL: "https://api-inference.modelscope.cn/v1", Model: "Qwen/Qwen3.5-27B"}
@@ -101,10 +101,10 @@ func TestModelCapabilityResolverLoadsIndependentCache(t *testing.T) {
 	if got.State != CapabilitySupported || got.Source != CapabilitySourceCache {
 		t.Fatalf("reloaded capability = %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "model-capabilities-v1.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "model-capabilities-v2.json")); err != nil {
 		t.Fatalf("cache file missing: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "model-capabilities-v1.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "model-capabilities-v2.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestModelCapabilityResolverIgnoresExpiredCache(t *testing.T) {
 		ExpiresAt:       time.Now().Add(-time.Minute), Source: CapabilitySourceCache,
 	}
 	got := r.Resolve(&entry)
-	if got.Source != CapabilitySourceDefault || got.State != CapabilityUnsupported {
+	if got.Source != CapabilitySourceUnknown || got.State != CapabilityUnknown {
 		t.Fatalf("expired cache capability = %+v", got)
 	}
 }

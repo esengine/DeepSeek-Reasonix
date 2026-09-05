@@ -127,6 +127,8 @@ type Controller struct {
 	visionProviderResolver  func(string) (provider.Provider, error)
 	visionModelSelector     func(string, string) (string, bool)
 	modelCapabilityResolver func(*config.ProviderEntry) config.ResolvedModelCapability
+	frozenImageInput        *bool
+	imageCapabilityChanged  func() bool
 	prompt                  controllerPromptState
 	pinnedContextLoader     PinnedContextLoader
 	sessionContextStatic    sessioncontext.Sections
@@ -487,7 +489,10 @@ type Options struct {
 	// ModelCapabilityResolver returns the adapter/config-resolved metadata for
 	// the exact active model. Nil keeps the legacy config-only behavior.
 	ModelCapabilityResolver func(*config.ProviderEntry) config.ResolvedModelCapability
-	SystemPrompt            string
+	// FrozenImageInput belongs to the provider instance built for this runtime.
+	FrozenImageInput       *bool
+	ImageCapabilityChanged func() bool
+	SystemPrompt           string
 	// PinnedContextLoader snapshots the current session sidecar at turn
 	// admission. The Agent persists changes as append-only user-role revisions.
 	PinnedContextLoader PinnedContextLoader
@@ -671,6 +676,8 @@ func New(opts Options) *Controller {
 		visionProviderResolver:            opts.VisionProviderResolver,
 		visionModelSelector:               opts.VisionModelSelector,
 		modelCapabilityResolver:           opts.ModelCapabilityResolver,
+		frozenImageInput:                  opts.FrozenImageInput,
+		imageCapabilityChanged:            opts.ImageCapabilityChanged,
 		prompt:                            newControllerPromptState(opts.SystemPrompt, opts.Executor),
 		pinnedContextLoader:               opts.PinnedContextLoader,
 		sessionContextStatic:              opts.SessionContextStatic,
@@ -5380,6 +5387,9 @@ func (c *Controller) ModelRef() string { return c.modelRef }
 func (c *Controller) WorkspaceRoot() string { return c.workspaceRoot }
 
 func (c *Controller) imageInputEnabled() bool {
+	if c.frozenImageInput != nil {
+		return *c.frozenImageInput
+	}
 	ref := c.modelRef
 	cfg, err := config.LoadForRoot(c.workspaceRoot)
 	if err == nil && ref == "" {
@@ -5401,6 +5411,21 @@ func (c *Controller) imageInputEnabled() bool {
 // ImageInputEnabled reports whether the current model accepts direct image
 // inputs, so frontends can gate image-only UX before a turn starts.
 func (c *Controller) ImageInputEnabled() bool { return c.imageInputEnabled() }
+
+// ImageInputSnapshot avoids configuration reads on the Desktop metadata path.
+// Legacy/custom controllers without a frozen boot snapshot use the existing
+// background metadata fallback instead.
+func (c *Controller) ImageInputSnapshot() (enabled, fallback, available bool) {
+	if c == nil || c.frozenImageInput == nil {
+		return false, false, false
+	}
+	return *c.frozenImageInput, c.visionModel != "", true
+}
+
+// ImageCapabilityChanged lets desktop refresh an idle runtime before admission.
+func (c *Controller) ImageCapabilityChanged() bool {
+	return c.imageCapabilityChanged != nil && c.imageCapabilityChanged()
+}
 
 // InheritLifecycleFrom carries same-session lifecycle state across controller
 // rebuilds, such as model switches that preserve the conversation.

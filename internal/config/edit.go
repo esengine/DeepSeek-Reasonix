@@ -99,7 +99,7 @@ func (c *Config) SetVisionModel(name string) error {
 	if !ok {
 		return fmt.Errorf("set vision model: no such model %q (configured: %s)", name, c.providerNames())
 	}
-	if !EffectiveVision(entry) {
+	if NewModelCapabilityResolver().Resolve(entry).State != CapabilitySupported {
 		return fmt.Errorf("set vision model: %q does not support image input", name)
 	}
 	if !entry.Configured() {
