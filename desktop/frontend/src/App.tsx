@@ -147,9 +147,9 @@ import {
   isThemeStyle,
   type Theme,
 } from "./lib/theme";
-import { applyThemeScene, clearThemePack } from "./lib/themePack";
+import { clearThemePack } from "./lib/themePack";
 import { ThemeBackground } from "./components/ThemeBackground";
-import { tabWorkspaceTitle, topicDisplayTitle, topicTitle, safeFilename } from "./lib/sessionTitles";
+import { tabWorkspaceTitle, topicDisplayTitle, topicTitle } from "./lib/sessionTitles";
 import { GUIDANCE_QUEUE_MOCK_ITEMS, browserMockScenarioParam, isGuidanceMockScenario } from "./lib/mockScenarios";
 import { loadDismissedTodoKeys, saveDismissedTodoKeys } from "./lib/todoDismissalStorage";
 import { NoticePreviewPanel, noticePreviewMockEnabled } from "./app-shell/NoticePreviewPanel";
@@ -179,6 +179,7 @@ import { useWindowChromeStore } from "./store/windowChrome";
 import { WindowChromeLifecycle } from "./app-runtime/WindowChromeLifecycle";
 import { StartupGateLifecycle, probeProviderSetupState } from "./app-runtime/StartupGateLifecycle";
 import { useSessionBannerCommands } from "./app-runtime/useSessionBannerCommands";
+import { useSessionExportCommands } from "./app-runtime/useSessionExportCommands";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -409,8 +410,6 @@ export default function App() {
   const windowsFramelessChrome = desktopPlatform === "windows";
   const [mainWindowMaximised, syncMainWindowMaximised] = useWindowsMaximised(windowsFramelessChrome);
   useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
-  const topicExportOpen = useOverlayStore((s) => s.topicExportOpen);
-  const setTopicExportOpen = useOverlayStore((s) => s.setTopicExportOpen);
   const sidebarSearchOpen = useOverlayStore((s) => s.sidebarSearchOpen);
   const setSidebarSearchOpen = useOverlayStore((s) => s.setSidebarSearchOpen);
 
@@ -964,69 +963,14 @@ export default function App() {
     : liveStore.getSnapshot(activeTabId) ?? state.live;
   const sessionHasContent = exportItems.length > 0 || Boolean(exportLive?.text || exportLive?.reasoning);
 
-  // Theme pack scene: home when the session is empty, task once content exists.
-  useEffect(() => {
-    applyThemeScene(sessionHasContent ? "task" : "home");
-  }, [sessionHasContent]);
-  const getSessionMarkdown = useCommittedCommand(async () => (await import("./lib/sessionExportData")).sessionItemsToMarkdown(sessionTitle, exportItems, exportLive));
-  const getSessionJson = useCommittedCommand(async () => (await import("./lib/sessionExportData")).sessionItemsToJson(sessionTitle, exportItems, exportLive));
-
-  useEffect(() => {
-    if (!topicExportOpen) return;
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as Element | null;
-      if (!target?.closest(".topicbar__export")) setTopicExportOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [topicExportOpen]);
-
-  const exportSession = useCommittedCommand(async (format: "markdown" | "json" | "pdf" | "image") => {
-      const base = safeFilename(sessionTitle);
-      setTopicExportOpen(false);
-      try {
-        if (format === "json") {
-          const path = await app.PickExportFile(`${base}.json`, "application/json");
-          if (path) {
-            await app.SaveExportFile(path, await getSessionJson(), false);
-            showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
-          }
-        } else if (format === "pdf") {
-          const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
-          if (!path) return;
-          const { blobToBase64, renderSessionPdfBlob } = await import("./lib/sessionExport");
-          const blob = await renderSessionPdfBlob(await getSessionMarkdown(), sessionTitle);
-          await app.SaveExportFile(path, await blobToBase64(blob), true);
-          showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
-        } else if (format === "image") {
-          const path = await app.PickExportFile(`${base}.png`, "image/png");
-          if (!path) return;
-          const { renderSessionImageBase64Payloads } = await import("./lib/sessionExport");
-          const payloads = await renderSessionImageBase64Payloads(await getSessionMarkdown());
-          await app.SaveExportImageFiles(path, payloads);
-          showToast(
-            payloads.length > 1
-              ? t("topicBar.exportImageParts", { count: payloads.length })
-              : t("topicBar.exportSuccess", { count: 1 }),
-            "info",
-          );
-        } else {
-          const path = await app.PickExportFile(`${base}.md`, "text/markdown");
-          if (path) {
-            await app.SaveExportFile(path, await getSessionMarkdown(), false);
-            showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
-          }
-        }
-      } catch (err) {
-        console.error("Failed to export session", err);
-        showToast(
-          t("topicBar.exportFailed", { error: err instanceof Error ? err.message : String(err) }),
-          "error",
-          { durationMs: 8000 },
-        );
-      }
-    });
-
+  const { getSessionMarkdown, exportSession } = useSessionExportCommands({
+    sessionTitle,
+    items: exportItems,
+    live: exportLive,
+    hasContent: sessionHasContent,
+    t,
+    showToast,
+  });
 
   useEffect(() => {
     setClearContextPending(false);

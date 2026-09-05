@@ -195,7 +195,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,072 lines (25 -> 23 effects). Six domain owners, remaining
+- App is still 3,016 lines (25 -> 23 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
@@ -211,7 +211,9 @@ source-only tests must be audited as their owning features migrate.
   provider prompt, UpdateBanner) through `app-shell/SessionStatusBanners.tsx`
   with commands in `app-runtime/useSessionBannerCommands.ts`, the takeover/
   reclaim/provider gate state on `store/overlays.ts` and the startup
-  onboarding probe in `app-runtime/StartupGateLifecycle.tsx`. The footer
+  onboarding probe in `app-runtime/StartupGateLifecycle.tsx`, and the
+  session export vertical in `app-runtime/useSessionExportCommands.ts`
+  (export commands, export popover outside-click close, theme scene). The footer
   ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App
   lifecycle and browser replays all pass.
