@@ -1550,7 +1550,23 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		addReadOnlySkillTools()
 		reg.Add(skill.NewRunSkillTool(skillStore, gateSubagentArm(opts.Ablation, skillRunner), skillProfile))
 		reg.Add(skill.NewReadSkillTool(skillStore))
-		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
+		// install_skill writes through the same shared slash namespace as the
+		// CLI/desktop profile editors; give it the identical validation so the
+		// model cannot install reserved verbs or command-colliding names.
+		installer := skill.NewInstallSkillTool(skillStore, nil)
+		if ig, ok := installer.(interface{ SetNameGuard(skill.NameGuard) }); ok {
+			ig.SetNameGuard(func(name string) error {
+				occupied := make([]string, 0, 2*len(skills)+len(cmds))
+				for _, sk := range skillStore.List() {
+					occupied = append(occupied, sk.Name, sk.SlashName())
+				}
+				for _, cmd := range cmds {
+					occupied = append(occupied, cmd.Name)
+				}
+				return skill.ValidateSubagentProfileName(name, occupied)
+			})
+		}
+		reg.Add(installer)
 		for _, t := range builtinSubagentTools(opts.Ablation, skillStore, skillRunner, skillProfile) {
 			reg.Add(t)
 		}

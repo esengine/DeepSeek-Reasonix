@@ -49,8 +49,16 @@ type SubagentOutputError interface {
 type ProfileResolver func(sk Skill) *event.Profile
 
 // InstalledHook fires after install_skill writes a new file, so a host can
-// refresh UI (e.g. a skills sidebar) without a reload. nil is fine.
+// refresh its skill index. nil is fine.
 type InstalledHook func(name, path string, scope Scope)
+
+// NameGuard validates a candidate skill name against the host's shared slash
+// namespace — reserved verbs, custom commands, MCP prompts, and already
+// installed skills (see ValidateSubagentProfileName). Without a guard,
+// install_skill falls back to the store's own skill list, which still blocks
+// reserved verbs, mcp__ names, and same-store collisions but cannot see
+// host-side command registries.
+type NameGuard func(name string) error
 
 // run_skill
 
@@ -549,12 +557,18 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 type installSkillTool struct {
 	store       *Store
 	onInstalled InstalledHook
+	nameGuard   NameGuard
 }
 
 // NewInstallSkillTool builds the skill-authoring tool. onInstalled may be nil.
+// Hosts that own additional slash-namespace occupants (custom commands, MCP
+// prompts) should attach a NameGuard via SetNameGuard.
 func NewInstallSkillTool(store *Store, onInstalled InstalledHook) tool.Tool {
 	return &installSkillTool{store: store, onInstalled: onInstalled}
 }
+
+// SetNameGuard installs the shared slash-namespace validator for install_skill.
+func (t *installSkillTool) SetNameGuard(guard NameGuard) { t.nameGuard = guard }
 
 func (*installSkillTool) Name() string   { return "install_skill" }
 func (*installSkillTool) ReadOnly() bool { return false }
@@ -583,6 +597,27 @@ func (*installSkillTool) Schema() json.RawMessage {
 },
 "required":["name","description","body"]
 }`)
+}
+
+// checkNameNamespace refuses names that would collide with the shared slash
+// command namespace before any file is written. The host guard (when set)
+// sees custom commands and MCP prompts; the fallback still enforces reserved
+// verbs, mcp__ names, and collisions with installed skills.
+func (t *installSkillTool) checkNameNamespace(name string) error {
+	if t.nameGuard != nil {
+		if err := t.nameGuard(name); err != nil {
+			return fmt.Errorf("install_skill: %w", err)
+		}
+		return nil
+	}
+	occupied := make([]string, 0, 8)
+	for _, sk := range t.store.List() {
+		occupied = append(occupied, sk.Name, sk.SlashName())
+	}
+	if err := ValidateSubagentProfileName(name, occupied); err != nil {
+		return fmt.Errorf("install_skill: %w", err)
+	}
+	return nil
 }
 
 func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
@@ -641,6 +676,9 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		return "", fmt.Errorf("install_skill: unsupported runAs %q; use 'inline' or 'subagent'", p.RunAs)
 	}
 
+	if err := t.checkNameNamespace(name); err != nil {
+		return "", err
+	}
 	content := RenderSkillFile(SkillFileOptions{
 		Name:         name,
 		Description:  desc,

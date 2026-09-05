@@ -573,6 +573,81 @@ func TestInstallSkill(t *testing.T) {
 	}
 }
 
+// TestInstallSkillRejectsReservedNames proves install_skill cannot create
+// skills that collide with the shared slash command namespace — the same
+// protection the CLI and desktop profile editors enforce. Nothing may be
+// written for a rejected name.
+func TestInstallSkillRejectsReservedNames(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil)
+
+	for _, raw := range []string{
+		`{"name":"clear","description":"reserved verb","body":"b"}`,
+		`{"name":"model","description":"reserved verb","body":"b"}`,
+		`{"name":"mcp__server__prompt","description":"mcp namespace","body":"b"}`,
+	} {
+		if _, err := tl.Execute(context.Background(), json.RawMessage(raw)); err == nil {
+			t.Errorf("install_skill should reject %s", raw)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".reasonix", "skills"))
+	if err == nil && len(entries) > 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("rejected installs must not create files, found %v", names)
+	}
+}
+
+// TestInstallSkillRejectsStoreCollisions proves the fallback guard blocks a
+// name that already exists as an installed skill, even with different casing
+// where the platform folds it (config.SkillNameKey).
+func TestInstallSkillRejectsStoreCollisions(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil)
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"my-tool","description":"first","body":"b"}`)); err != nil {
+		t.Fatalf("seed install: %v", err)
+	}
+	// Same normalized key as the existing skill: rejected by the namespace
+	// guard before CreateWithContent gets a chance to check the file.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"MY-TOOL","description":"collision","body":"b"}`)); err == nil {
+		t.Fatal("install_skill should reject a normalized collision with an installed skill")
+	}
+}
+
+// TestInstallSkillUsesHostNameGuard proves the host-injected guard (custom
+// commands, MCP prompts) runs before anything is written.
+func TestInstallSkillUsesHostNameGuard(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil).(*installSkillTool)
+	tl.SetNameGuard(func(name string) error {
+		if name == "deploy-review" {
+			return errors.New("%q already exists in the slash command namespace")
+		}
+		return nil
+	})
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"deploy-review","description":"command collision","body":"b"}`)); err == nil {
+		t.Fatal("host name guard should reject command-colliding install")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".reasonix", "skills", "deploy-review")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected install must not create files, stat err=%v", err)
+	}
+	// A name the guard accepts still installs.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"accepted","description":"ok","body":"b"}`)); err != nil {
+		t.Fatalf("guard-approved install should succeed: %v", err)
+	}
+}
+
 func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
 	content := RenderSkillFile(SkillFileOptions{
 		Name:        "my-agent",
