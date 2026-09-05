@@ -70,7 +70,7 @@ func TestDelegationClassesStayApart(t *testing.T) {
 					assertEphemeral(t, entries, children, rebuilt, w.drawn(), running)
 					return
 				}
-				assertDurable(t, entries, children, rebuilt, w.drawn(), running)
+				assertDurable(t, tc.root, entries, children, rebuilt, w.drawn(), running)
 			})
 		})
 	}
@@ -79,7 +79,7 @@ func TestDelegationClassesStayApart(t *testing.T) {
 // assertDurable is the durable class's whole contract: an opening precedes the
 // picture, a slot grant precedes the work, the store answers for what ran, and
 // the two identities join so a rebuild can place it.
-func assertDurable(t *testing.T, entries []execjournal.Entry, children []agent.SubagentArtifact, rebuilt, drawn, running []string) {
+func assertDurable(t *testing.T, root bool, entries []execjournal.Entry, children []agent.SubagentArtifact, rebuilt, drawn, running []string) {
 	t.Helper()
 	if len(running) == 0 {
 		t.Fatal("a child was executing and the store had never heard of it: nothing could be asked about work in flight")
@@ -104,9 +104,24 @@ func assertDurable(t *testing.T, entries []execjournal.Entry, children []agent.S
 		t.Fatal("the store answers for nothing that ran")
 	}
 	for _, c := range children {
-		if !opened[c.Meta.ParentToolCallID] {
-			t.Fatalf("child %s is stored under %q, which no opening names: nothing can join them",
+		if !opened[c.Meta.ExecutionID] {
+			t.Fatalf("child %s names execution %q, which no opening does: nothing can join them",
+				c.Ref, c.Meta.ExecutionID)
+		}
+		// Work the host started has an execution and no call. Filling the call
+		// in to make a join easier would say the model issued one it never did.
+		if root && strings.TrimSpace(c.Meta.ParentToolCallID) != "" {
+			t.Fatalf("child %s descends from %q; work the host started descends from no call",
 				c.Ref, c.Meta.ParentToolCallID)
+		}
+		if !root && c.Meta.ParentToolCallID != c.Meta.ExecutionID {
+			t.Fatalf("child %s: execution %q and parent call %q disagree for a model-delegated run",
+				c.Ref, c.Meta.ExecutionID, c.Meta.ParentToolCallID)
+		}
+	}
+	for _, e := range entries {
+		if root != (e.Group == "") {
+			t.Fatalf("execution %s hangs under group %q; root=%v", e.ID, e.Group, root)
 		}
 	}
 	if len(rebuilt) == 0 {
@@ -139,7 +154,10 @@ func assertEphemeral(t *testing.T, entries []execjournal.Entry, children []agent
 type matrixRow struct {
 	name    string
 	durable bool
-	call    func(ctx context.Context, w *matrixWorld) (string, error)
+	// root marks work descending from no provider-visible call: it owns its
+	// execution and its lineage stays empty.
+	root bool
+	call func(ctx context.Context, w *matrixWorld) (string, error)
 }
 
 // delegationMatrix names every surface that spawns a child. run_skill appears
@@ -164,6 +182,9 @@ func delegationMatrix() []matrixRow {
 		}},
 		{name: "read_only_task", durable: false, call: func(ctx context.Context, w *matrixWorld) (string, error) {
 			return agent.NewReadOnlyTaskTool(w.tasks).Execute(ctx, json.RawMessage(`{"prompt":"look","description":"one"}`))
+		}},
+		{name: "run_skill (host-initiated)", durable: true, root: true, call: func(ctx context.Context, w *matrixWorld) (string, error) {
+			return w.skills.run(ctx, probeSkill(), "look", skill.SubagentRunOptions{HostInitiated: true})
 		}},
 		{name: "read_only_skill", durable: false, call: func(ctx context.Context, w *matrixWorld) (string, error) {
 			return w.skills.runReadOnly(ctx, probeSkill(), "look", skill.SubagentRunOptions{})
@@ -265,10 +286,14 @@ func (s *matrixSink) Emit(e event.Event) {
 	}
 }
 
+// workers is every worker node drawn in this world. No id filter: one world runs
+// one entry point, and a host-started run's node is its own execution rather
+// than anything under the call — filtering by call prefix reported that as
+// nothing drawn.
 func (s *matrixSink) workers() []string {
 	var out []string
 	for _, n := range s.graph.Nodes {
-		if n.Kind == agentgraph.KindWorker && strings.HasPrefix(n.ID, "matrix-call") {
+		if n.Kind == agentgraph.KindWorker {
 			out = append(out, n.ID)
 		}
 	}

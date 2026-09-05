@@ -112,23 +112,27 @@ What the arms below establish, frozen. Every surface that spawns a child belongs
 to one of two classes, and a class is a contract about what a run leaves behind
 rather than a family resemblance.
 
-| execution class | scheduler | Graph | journal | store | restart |
-| --- | :--: | :--: | :--: | :--: | :--: |
-| `task` | ✓ | ✓ | ✓ | after STARTED | ✓ |
-| `fleet` | ✓ | ✓ | ✓ | after STARTED | ✓ |
-| `parallel_tasks` | ✓ | ✓ | ✓ | after STARTED | ✓ |
-| `run_skill` **(model-invoked)** | ✓ | ✓ | ✓ | after STARTED | ✓ |
-| `read_only_task` | ✓ | — | — | — | — |
-| `read_only_skill` | ✓ | — | — | — | — |
+| execution class | scheduler | Graph | journal | store | lineage | restart |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| `task` | ✓ | ✓ | ✓ | after STARTED | the call | ✓ |
+| `fleet` | ✓ | ✓ | ✓ | after STARTED | the call | ✓ |
+| `parallel_tasks` | ✓ | ✓ | ✓ | after STARTED | the call | ✓ |
+| `run_skill` **(model-invoked)** | ✓ | ✓ | ✓ | after STARTED | the call | ✓ |
+| `run_skill` **(host-initiated)** | ✓ | ✓ root | ✓ | after STARTED | **none** | ✓ |
+| `read_only_task` | ✓ | — | — | — | — | — |
+| `read_only_skill` | ✓ | — | — | — | — | — |
 
 The dashes are a promise, not a gap. An ephemeral run asks the same scheduler and
 holds real capacity; what it declines to do is claim anything a snapshot cannot
 justify, because the graph projects durable facts and it writes none.
 
-`run_skill` is listed as the **model-invoked** entry point only. A slash
-invocation reaches the same runner without a provider-visible parent call, so it
-is not a delegation and this table makes no claim about it — see the open
-questions below.
+The two `run_skill` rows are one execution class with two lineages. A model
+delegated the first from a tool call, so its execution and its parent call are
+one string. A person started the second, so it descends from nothing: its
+execution is the host's own, it draws a **root** node with no spawn edge above
+it, and its parent call stays empty. `SubagentMeta` carries both answers, and
+this is the first place they differ — until a host-started run existed, every
+durable execution came from a tool call and one field could hold both.
 
 `TestDelegationClassesStayApart` in `internal/boot` holds the classification, and
 holds it where a completed run cannot: what the store answers at the one instant
@@ -141,15 +145,23 @@ store — and each turns exactly the rows that would drift red.
 The evidence for every cell is the arms in this probe, not that test. It freezes
 the classification; they are what established it.
 
-### Open, and deliberately not closed here
+### Reading a record older than the separation
 
-**Host-initiated top-level execution.** A slash-invoked subagent skill records
-nothing: no journal, no graph, no store. The contract it honours is narrow and
-real — a synthetic slash event id must not be persisted as though the model had
-made that call — but that is not the same claim as "a host-started execution
-deserves no durable provenance", and only the first has been established. The
-shape worth falsifying next is an execution identity the host owns with an empty
-parent call, rather than either of the two answers in play today.
+A stored child names its own execution now. One written before that did is
+aliased to its parent call **only** where the journal opened an execution by
+exactly that id — the journal is what confirms that the older writer used one id
+for both, and a parent id alone proves only what it meant by lineage. A record
+whose parent names no execution stays unknown and is joined on by nothing: a
+single task once stored the call while the journal opened the node, and a prefix
+rule would have joined those two wrong.
+
+Nothing is rewritten. The safe legacy subset resolves losslessly on read, and the
+unsafe one — a host-started record from before this, which never had an execution
+to name — cannot be recovered by any rule that is not inventing history. Reads
+stay lenient about them forever; writes are strict, because a new record with no
+execution is the one shape no later reader can place.
+
+### Open, and deliberately not closed here
 
 **Delivery obligations across invocation surfaces.** `run_skill(review)` requires
 a typed verdict; `task(profile=review)` does not. That divergence is about what a
@@ -538,38 +550,34 @@ Three oracles hold across every arm:
   three candidates above can be it. The arms test that by exhaustion rather than
   by assertion.
 
-### What it found
+### What they found, and what changed
+
+The first reading was narrower and sharper than "a slash skill records nothing".
+The store was never empty: a slash-started child reaches the shared runner, so it
+was already marked running before it acted and carried a correct terminal
+afterwards. What was missing was the execution. Nothing had been opened, so
+nothing placed that child — `record-only`, a reader could see a child of this
+name was cut and could not say which invocation it belonged to. Only the queued
+arm was silent outright: work the scheduler had admitted into its domain and then
+refused leaves no child artifact, and there was nothing else to hold an identity.
+
+That is what made the queued arm decide a linearization rather than a display.
+The three candidate identities failed by exhaustion — the synthetic id may never
+be persisted, the child ref does not exist while the work is queued, the parent
+call must stay empty — so a host-started execution needed one of its own, minted
+before the work is opened.
 
 | arm | scheduler | provider | Graph | journal | store | lineage | pre-start id | restart |
 | --- | --- | --- | :--: | :--: | --- | :--: | :--: | --- |
-| completed | admitted | completed | — | — | `completed` | empty | none | `record-only` |
-| queued-crash | **refused** | never entered | — | — | none | n/a | none | `LOST-SILENT` |
-| running-crash | admitted | entered | — | — | `running`→`interrupted` | empty | none | `record-only` |
-| cancel | admitted | cancelled | — | — | `cancelled` | empty | none | `record-only` |
+| completed | admitted | completed | root | ✓ | `completed` | empty | `host-…` | exact |
+| queued-crash | **refused** | never entered | root, queued | ✓ | none | n/a | `host-…` | exact |
+| running-crash | admitted | entered | root, running | ✓ | `running`→`interrupted` | empty | `host-…` | exact |
+| cancel | admitted | cancelled | root, cancelled | ✓ | `cancelled` | empty | `host-…` | exact |
 
-Synthetic host id persisted as lineage: **no**, in every arm.
-
-The store is not empty, and that matters: a slash-started skill reaches the
-shared runner, so its child is marked running before it acts and carries a
-correct terminal afterwards. What is missing is narrower and more precise than
-"it records nothing" — no execution was ever opened, so nothing places that
-child, and `record-only` says exactly that: a reader can see a child of this
-name was cut, and cannot say which invocation it belonged to.
-
-Only the queued arm is silent outright. Work the scheduler had admitted into its
-domain and then refused a slot leaves nothing at all — no child artifact exists
-yet, and there is nothing else to hold an identity. That is what makes the arm
-decide a linearization rather than a display: an identity for this class would
-have to exist **before** the child does.
-
-Oracle C therefore holds by exhaustion. The synthetic id cannot be persisted
-(A); the child ref does not exist while the work is queued; the parent lineage
-must stay empty (B). A host-started execution that deserves durable provenance
-needs an identity of its own, and `SubagentMeta` would be the first place where
-execution identity and parent lineage stop being the same field.
-
-None of that is implemented here. These arms establish what the candidates
-cannot do; choosing what replaces them is the next cut's question.
+Synthetic host id persisted as lineage: **no**, before and after. The queued arm
+is the one to read twice: the execution exists and is recorded while no child
+artifact does, which is the whole reason the identity could not have been the
+store's ref.
 
 ## The one arm that reads the frontend
 

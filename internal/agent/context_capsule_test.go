@@ -21,7 +21,7 @@ func capsuleForSpec(t *testing.T, spec SubagentSpec) ContextCapsule {
 // inheriting something has to come here, flip the flag, and update the SPEC
 // table in the same commit.
 func TestContextCapsuleRecordsWhatIsNotInherited(t *testing.T) {
-	capsule := capsuleForSpec(t, SubagentSpec{
+	capsule := capsuleForSpec(t, SubagentSpec{ExecutionID: "exec-test",
 		Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt,
 	})
 	if !reflect.DeepEqual(capsule.Inherited, InheritedContext{}) {
@@ -36,7 +36,7 @@ func TestContextCapsuleRecordsWhatIsNotInherited(t *testing.T) {
 // it is what keeps the delivery a decision rather than an accident, and it is
 // what lets two runs that started from different context be told apart.
 func TestContextCapsuleRecordsDeliveredUpstream(t *testing.T) {
-	isolated := SubagentSpec{Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}
+	isolated := SubagentSpec{ExecutionID: "exec-test", Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}
 	fed := isolated
 	fed.UpstreamFrom = []string{"research"}
 	other := isolated
@@ -93,16 +93,16 @@ func TestContextCapsuleNamesTheSystemPromptSource(t *testing.T) {
 		spec SubagentSpec
 		want string
 	}{
-		{"writer default", SubagentSpec{Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}, SystemPromptTaskDefault},
-		{"read-only default", SubagentSpec{Kind: "task", Name: "task", SystemPrompt: DefaultReadOnlyTaskSystemPrompt}, SystemPromptReadOnlyDefault},
-		{"profile body", SubagentSpec{Kind: "skill", Name: "reviewer", SystemPrompt: "you review code"}, "profile:reviewer"},
+		{"writer default", SubagentSpec{ExecutionID: "exec-test", Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}, SystemPromptTaskDefault},
+		{"read-only default", SubagentSpec{ExecutionID: "exec-test", Kind: "task", Name: "task", SystemPrompt: DefaultReadOnlyTaskSystemPrompt}, SystemPromptReadOnlyDefault},
+		{"profile body", SubagentSpec{ExecutionID: "exec-test", Kind: "skill", Name: "reviewer", SystemPrompt: "you review code"}, "profile:reviewer"},
 	} {
 		if got := capsuleForSpec(t, tc.spec).SystemPromptSource; got != tc.want {
 			t.Errorf("%s: SystemPromptSource = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 	// The capsule identifies the prompt without carrying it.
-	capsule := capsuleForSpec(t, SubagentSpec{Kind: "skill", Name: "reviewer", SystemPrompt: "secret review playbook"})
+	capsule := capsuleForSpec(t, SubagentSpec{ExecutionID: "exec-test", Kind: "skill", Name: "reviewer", SystemPrompt: "secret review playbook"})
 	if capsule.SystemPromptHash == "" {
 		t.Fatal("capsule must hash the system prompt")
 	}
@@ -112,7 +112,7 @@ func TestContextCapsuleNamesTheSystemPromptSource(t *testing.T) {
 }
 
 func TestContextCapsuleHashDiscriminatesRealDifferences(t *testing.T) {
-	base := SubagentSpec{Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt, WorkspaceRoot: "/w", Model: "m"}
+	base := SubagentSpec{ExecutionID: "exec-test", Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt, WorkspaceRoot: "/w", Model: "m"}
 	first := capsuleForSpec(t, base).Hash()
 	if first == "" {
 		t.Fatal("capsule hash must be computable")
@@ -139,7 +139,7 @@ func TestContextCapsuleHashDiscriminatesRealDifferences(t *testing.T) {
 func TestContextCapsuleHashCoversToolScope(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(&recordingWriter{name: "write_file", writesPaths: true})
-	base := SubagentSpec{Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}
+	base := SubagentSpec{ExecutionID: "exec-test", Kind: "task", Name: "task", SystemPrompt: DefaultTaskSystemPrompt}
 	withTools := base
 	withTools.Registry = reg
 	if capsuleForSpec(t, base).Hash() == capsuleForSpec(t, withTools).Hash() {

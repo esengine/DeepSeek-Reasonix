@@ -148,12 +148,19 @@ func hostParentLineage(o Observation) []string {
 func hostExecutions(o Observation) []string {
 	var out []string
 	for _, e := range o.Executions {
-		if strings.Contains(e.Name, probeSkillName) || strings.HasPrefix(e.ID, "slash-skill-") {
+		if ofHostExecution(e.ID) || strings.Contains(e.Name, probeSkillName) {
 			out = append(out, e.ID)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ofHostExecution matches both names this work can go by: the execution the host
+// owns, and the synthetic event id it mints for the screen. Reading only the
+// second is how an arm reports absence when what changed is the identity.
+func ofHostExecution(id string) bool {
+	return strings.HasPrefix(id, "host-") || strings.HasPrefix(id, "slash-skill-")
 }
 
 func hostStanding(ctrl *control.Controller, prov *scripted, arm string) string {
@@ -297,7 +304,7 @@ func hostIdentityRow(before Observation) row {
 func hostGraphRow(before Observation) row {
 	var drawn []string
 	for _, n := range before.Graph.Nodes {
-		if strings.HasPrefix(n.ID, "slash-skill-") {
+		if ofHostExecution(n.ID) {
 			drawn = append(drawn, n.ID+":"+string(n.State))
 		}
 	}
@@ -458,7 +465,7 @@ func hostRebuilt(o Observation) []string {
 		if n.Kind == agentgraph.KindGroup {
 			continue
 		}
-		if strings.HasPrefix(n.ID, "slash-skill-") || strings.Contains(n.Label, probeSkillName) {
+		if ofHostExecution(n.ID) || strings.Contains(n.Label, probeSkillName) {
 			out = append(out, n.ID+":"+string(n.State))
 		}
 	}

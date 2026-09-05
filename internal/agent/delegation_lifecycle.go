@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"strconv"
 	"sync/atomic"
+	"time"
 
 	"reasonix/internal/agentgraph"
 	"reasonix/internal/event"
@@ -27,29 +31,37 @@ type delegationLifecycle struct {
 // not settle or a runtime that would not resolve is not work the orchestration
 // ever held, and a journal that said otherwise would be inventing history.
 func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, req *AcquireRequest, trk *subagentProgressTracker) (*delegationLifecycle, error) {
-	parentID, sink, _, ok := CallContext(ctx)
+	parentID, sink, _, _ := CallContext(ctx)
 	_, declared := graphNodeDeclared(ctx)
-	// An ephemeral run opens nothing, picture included: the graph projects
-	// durable facts, so a node no record justifies leaves the screen at the
-	// next resync while the work it named still holds a slot.
-	if declared || spec.Context.Ephemeral || spec.Context.TopLevel || !ok || sink == nil || parentID == "" {
+	// An ephemeral run opens nothing, picture included: a node no record
+	// justifies leaves the screen at the next resync. A fan-out item's group
+	// opened it already.
+	if declared || spec.Context.Ephemeral {
 		return nil, nil
 	}
-	life := &delegationLifecycle{
-		tool: t, sink: sink, track: trk, parent: parentID,
-		id: parallelNodeID(parentID, 0),
+	// Descending from a call and having somewhere to draw are separate facts.
+	// Work the host started descends from no call: it is its own root, with an
+	// execution of its own. The picture goes only where a sink exists.
+	group, id := parentID, parallelNodeID(parentID, 0)
+	if spec.Context.TopLevel || parentID == "" {
+		group, id = "", newHostExecutionID()
 	}
-	opening := fanOutOpeningDelta(parentID, delegationLabel(*spec), []agentgraph.Node{{
-		ID: life.id, ParentID: parentID, Kind: agentgraph.KindWorker,
+	life := &delegationLifecycle{tool: t, sink: sink, track: trk, parent: group, id: id}
+	worker := agentgraph.Node{
+		ID: life.id, ParentID: group, Kind: agentgraph.KindWorker,
 		// Pending, not running: nothing has asked the scheduler yet, and a
 		// picture that says otherwise is wrong for as long as the wait lasts.
 		State: agentgraph.StatePending, Label: delegationTaskLabel(*spec),
 		Profile: spec.Worker.Profile, Model: spec.Worker.Model, Effort: spec.Worker.Effort,
 		Grant: grantOf(spec.Grant.ReadOnly),
-	}})
+	}
+	opening := agentgraph.Delta{Nodes: []agentgraph.Node{worker}}
+	if group != "" {
+		opening = fanOutOpeningDelta(group, delegationLabel(*spec), []agentgraph.Node{worker})
+	}
 	// The same fact, twice: the journal is written from the delta the graph is
 	// drawn from, so the two cannot come to disagree about what was opened.
-	if err := t.openExecutions(ctx, parentID, fanOutOpenings(opening)); err != nil {
+	if err := t.openExecutions(ctx, group, fanOutOpenings(opening)); err != nil {
 		return nil, err
 	}
 	publishGraph(sink, opening)
@@ -149,7 +161,22 @@ func (d *delegationLifecycle) settle(ctx context.Context, out string, err error)
 	_, ref := splitSubagentRunResult(out)
 	d.tool.settleExecution(ctx, d.id)
 	publishGraph(d.sink, fanOutItemSettledDelta(d.id, state, ref, err))
-	publishGraph(d.sink, fanOutOutcomeDelta(d.parent, state, nil))
+	if d.parent != "" {
+		publishGraph(d.sink, fanOutOutcomeDelta(d.parent, state, nil))
+	}
+}
+
+// newHostExecutionID names an execution the host started. It is minted before
+// the work is opened, because that is when the work becomes real: a store ref
+// cannot stand in for it — the scheduler can be holding an execution back long
+// before any transcript exists — and the synthetic id the host uses to nest a
+// child's events is UI identity that must never reach a durable record.
+func newHostExecutionID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "host-" + strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return "host-" + hex.EncodeToString(b[:])
 }
 
 // delegationQueuedDelta reports a refusal the scheduler made: the state and the

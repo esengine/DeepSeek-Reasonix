@@ -40,7 +40,7 @@ func TestSplitSubagentRunResultDoesNotRewriteEphemeralAnswer(t *testing.T) {
 func TestSubagentResultToolPagesOnUTF8Boundaries(t *testing.T) {
 	workspace := testenv.TempDir(t)
 	store := NewSubagentStore(testenv.TempDir(t))
-	run, err := store.PrepareFresh(SubagentSpec{
+	run, err := store.PrepareFresh(SubagentSpec{ExecutionID: "exec-test",
 		Kind:          "task",
 		Name:          "task",
 		WorkspaceRoot: workspace,

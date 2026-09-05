@@ -12,7 +12,7 @@ import (
 func prepareRunningSubagent(t *testing.T, sessionDir string) string {
 	t.Helper()
 	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
-	spec := agent.SubagentSpec{
+	spec := agent.SubagentSpec{ExecutionID: "exec-test",
 		Kind:          "task",
 		Name:          "task",
 		WorkspaceRoot: robustTempDir(t),

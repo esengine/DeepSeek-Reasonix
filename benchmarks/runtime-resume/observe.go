@@ -243,10 +243,14 @@ type GraphObs struct {
 // different set of facts from the node the graph drew for it. Whatever the
 // graph carried and this does not is a semantic no reconstruction can recover.
 type ChildFact struct {
-	Ref              string `json:"ref"`
-	Status           string `json:"status"`
-	Kind             string `json:"kind,omitempty"`
-	Name             string `json:"name,omitempty"`
+	Ref    string `json:"ref"`
+	Status string `json:"status"`
+	Kind   string `json:"kind,omitempty"`
+	Name   string `json:"name,omitempty"`
+	// ExecutionID is which execution the record belongs to; ParentToolCallID is
+	// the provider-visible call it descends from. They are separate answers, and
+	// a host-started run has only the first.
+	ExecutionID      string `json:"executionId,omitempty"`
 	ParentToolCallID string `json:"parentToolCallId,omitempty"`
 	Model            string `json:"model,omitempty"`
 	Effort           string `json:"effort,omitempty"`
@@ -276,6 +280,7 @@ func childrenObs(root armRoot, sessionPath string) ChildrenObs {
 	for _, a := range artifacts {
 		out.Facts = append(out.Facts, ChildFact{
 			Ref: a.Ref, Status: string(a.Meta.Status), Kind: a.Meta.Kind, Name: a.Meta.Name,
+			ExecutionID:      a.Meta.ExecutionID,
 			ParentToolCallID: a.Meta.ParentToolCallID, Model: a.Meta.Model, Effort: a.Meta.Effort,
 		})
 	}

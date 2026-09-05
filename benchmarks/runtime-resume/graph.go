@@ -249,13 +249,20 @@ func graphObligationRow(before, after Observation) row {
 }
 
 // rebuiltGraph is what the production fold makes of this session's durable
-// facts. It is the same call a host would make, given the same inputs a
-// restart has: the journal, the store, and no live executions.
+// facts, join included: a record names its own execution, and an older one is
+// aliased to its parent call only where the journal opened one by that id.
 func rebuiltGraph(o Observation) execgraph.Result {
+	opened := make(map[string]bool, len(o.Executions))
+	for _, e := range o.Executions {
+		opened[e.ID] = true
+	}
 	children := make([]execgraph.ChildOutcome, 0, len(o.Children.Facts))
 	for _, f := range o.Children.Facts {
+		identity := agent.ResolveExecutionIdentity(
+			agent.SubagentMeta{ExecutionID: f.ExecutionID, ParentToolCallID: f.ParentToolCallID},
+			func(id string) bool { return opened[id] })
 		children = append(children, execgraph.ChildOutcome{
-			Execution: f.ParentToolCallID, Ref: f.Ref, Status: f.Status,
+			Execution: identity.Execution, Ref: f.Ref, Status: f.Status,
 		})
 	}
 	return execgraph.Rebuild(o.Executions, children, nil)

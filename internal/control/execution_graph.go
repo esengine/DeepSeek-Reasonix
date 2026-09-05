@@ -45,9 +45,10 @@ func (c *Controller) ExecutionGraph() ExecutionGraphSnapshot {
 	if strings.TrimSpace(path) == "" {
 		return ExecutionGraphSnapshot{}
 	}
+	history := execjournal.History(path)
 	rebuilt := execgraph.Rebuild(
-		execjournal.History(path),
-		c.executionChildren(path),
+		history,
+		c.executionChildren(path, history),
 		func(id string) bool { return execjournal.Live(path, id) },
 	)
 	out := ExecutionGraphSnapshot{Graph: rebuilt.Graph, IdentityUnknown: rebuilt.LegacyIdentity}
@@ -61,18 +62,23 @@ func (c *Controller) ExecutionGraph() ExecutionGraphSnapshot {
 	return out
 }
 
-// executionChildren is what the store kept for this session, mapped onto the
-// fold's input. A store it cannot read leaves the terminals unknown rather than
-// failing the read: a graph missing outcomes is still worth more than none.
-func (c *Controller) executionChildren(path string) []execgraph.ChildOutcome {
+// executionChildren maps the store's records onto the fold's input, on a join
+// key that is resolved rather than assumed. An unreadable store, and a record
+// nothing places, both leave outcomes unknown rather than borrowed.
+func (c *Controller) executionChildren(path string, history []execjournal.Entry) []execgraph.ChildOutcome {
 	artifacts, err := agent.ListSubagentsByParent(c.sessionDir, parentSessionOf(path))
 	if err != nil {
 		return nil
 	}
+	opened := make(map[string]bool, len(history))
+	for _, e := range history {
+		opened[e.ID] = true
+	}
 	out := make([]execgraph.ChildOutcome, 0, len(artifacts))
 	for _, a := range artifacts {
+		identity := agent.ResolveExecutionIdentity(a.Meta, func(id string) bool { return opened[id] })
 		out = append(out, execgraph.ChildOutcome{
-			Execution: a.Meta.ParentToolCallID, Ref: a.Ref, Status: string(a.Meta.Status),
+			Execution: identity.Execution, Ref: a.Ref, Status: string(a.Meta.Status),
 		})
 	}
 	return out

@@ -1014,7 +1014,7 @@ func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 	t.Helper()
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	return SubagentSpec{
+	return SubagentSpec{ExecutionID: "exec-test",
 		Kind:          "skill",
 		Name:          name,
 		WorkspaceRoot: testenv.TempDir(t),

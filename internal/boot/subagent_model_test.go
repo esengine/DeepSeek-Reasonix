@@ -161,7 +161,7 @@ func TestNewSubagentStoreRequiresSessionDir(t *testing.T) {
 func TestNewSubagentStoreCleansStaleRunningRefs(t *testing.T) {
 	sessionDir := robustTempDir(t)
 	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
-	spec := agent.SubagentSpec{
+	spec := agent.SubagentSpec{ExecutionID: "exec-test",
 		Kind:          "task",
 		Name:          "task",
 		WorkspaceRoot: robustTempDir(t),

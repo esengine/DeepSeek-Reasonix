@@ -13,7 +13,7 @@ import (
 func cancelTestRun(t *testing.T) (*SubagentStore, *SubagentRun) {
 	t.Helper()
 	store := NewSubagentStore(testenv.TempDir(t))
-	run, err := store.PrepareFresh(SubagentSpec{
+	run, err := store.PrepareFresh(SubagentSpec{ExecutionID: "exec-test",
 		Kind: "task", Name: "task", WorkspaceRoot: testenv.TempDir(t),
 		ParentSession: "parent-session", SystemPrompt: "sys", Registry: tool.NewRegistry(),
 	})
