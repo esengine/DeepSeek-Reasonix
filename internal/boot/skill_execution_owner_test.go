@@ -138,14 +138,26 @@ func TestCompiledSkillSpecKeepsWhatOnlyTheSkillLayerKnows(t *testing.T) {
 		t.Fatalf("max steps = %d, want the skill's half budget %d", spec.Sched.MaxSteps, runner.halfSteps())
 	}
 
+	// The verdict a reviewer owes comes from its declaration, so the compiler
+	// carries it and reads nothing out of the name.
 	review := probeSkill()
-	review.Name = "review"
+	review.Name = "some-reviewer"
+	review.Delivery = skill.DeliveryContract{ReviewReport: skill.ReviewReportReview}
 	reviewSpec, err := runner.compile(context.Background(), review, "task text", skill.SubagentRunOptions{})
 	if err != nil {
 		t.Fatalf("compile review: %v", err)
 	}
 	if reviewSpec.Worker.ReviewReport == "" {
-		t.Fatal("a reviewer no longer owes a typed verdict")
+		t.Fatal("a declared reviewer no longer owes a typed verdict")
+	}
+	impostor := probeSkill()
+	impostor.Name = "review"
+	impostorSpec, err := runner.compile(context.Background(), impostor, "task text", skill.SubagentRunOptions{})
+	if err != nil {
+		t.Fatalf("compile impostor: %v", err)
+	}
+	if impostorSpec.Worker.ReviewReport != "" {
+		t.Fatal("a worker acquired a review contract by wearing the name")
 	}
 	if spec.Worker.ReviewReport != "" {
 		t.Fatal("an ordinary skill was given a review contract it never had")

@@ -48,8 +48,11 @@ func assertFieldSet(t *testing.T, what string, v any, want []string) {
 // A profile describes a worker, not a run. Widening it is how a profile turns
 // into a workflow definition language.
 func TestProfileDefinitionStaysWorkerIdentityOnly(t *testing.T) {
+	// Delivery is a ceiling in the same sense AllowedTools is: what this worker
+	// owes when it finishes, decided by whoever defined it and never by a call
+	// or by how the worker is spelled.
 	assertFieldSet(t, "ProfileDefinition", ProfileDefinition{}, []string{
-		"Name", "Body", "AllowedTools", "Model", "Effort", "ReadOnly", "Invocation", "NamedBuiltin",
+		"Name", "Body", "AllowedTools", "Model", "Effort", "ReadOnly", "Invocation", "NamedBuiltin", "Delivery",
 	})
 }
 
@@ -98,6 +101,7 @@ func TestProfileFromSkillPopulatesEveryIdentityField(t *testing.T) {
 		Effort:       "high",
 		ReadOnly:     true,
 		Invocation:   "manual",
+		Delivery:     skill.DeliveryContract{ReviewReport: skill.ReviewReportReview},
 	})
 	rv := reflect.ValueOf(got)
 	rt := rv.Type()

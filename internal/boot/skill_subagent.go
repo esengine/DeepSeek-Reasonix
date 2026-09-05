@@ -116,8 +116,10 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 	if subReg.Len() == 0 {
 		return "", fmt.Errorf("read_only_skill: skill %q has no read-only tools available", sk.Name)
 	}
-	switch sk.Name {
-	case "review", "security-review", "security_review":
+	// A worker that owes a typed verdict is given the tool that produces one,
+	// on its own declaration and never on how it is spelled.
+	review := agent.ProfileFromSkill(sk).Delivery.ReviewReport
+	if review != "" {
 		agent.AttachReviewReportTool(subReg)
 	}
 	// Custom and named built-in profiles fully control their system prompt
@@ -129,7 +131,7 @@ func (r *skillSubagents) runReadOnly(sctx context.Context, sk skill.Skill, task 
 	// A verdict the parent must act on carries an identity, never a sentence,
 	// so the typed report is required at every role setting. How much review a
 	// change set owes is still the delivery contract's separate call.
-	runOptions.RequireReviewReportKind = agent.ReviewReportKindForSkill(sk.Name)
+	runOptions.RequireReviewReportKind = review
 	// Provider serializers decide whether these images are wire-visible from
 	// the child model's own vision capability. Text-only children retain the
 	// attachment metadata locally but never receive image parts on the wire.
@@ -167,7 +169,7 @@ func (r *skillSubagents) compile(sctx context.Context, sk skill.Skill, task stri
 			Effort: subagentEffortRef(r.cfg, sk),
 			// A verdict the parent must act on carries an identity, never a
 			// sentence, so the typed report is required at every role setting.
-			ReviewReport: agent.ReviewReportKindForSkill(sk.Name),
+			ReviewReport: agent.ProfileFromSkill(sk).Delivery.ReviewReport,
 		},
 		Grant: agent.CapabilityGrant{ReadOnly: sk.ReadOnly, ProfileTools: sk.AllowedTools},
 		Context: agent.ContextRequest{

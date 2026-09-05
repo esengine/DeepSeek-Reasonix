@@ -30,6 +30,17 @@ type ProfileDefinition struct {
 	// security-review profiles. Their body is still the full system prompt
 	// (no implicit concise default), matching custom profiles.
 	NamedBuiltin bool
+	// Delivery is what this worker owes beyond an answer, declared by whoever
+	// defined it. A ceiling like the tool list: a call may not add one, and no
+	// entry point may read one out of how a worker is spelled.
+	Delivery DeliveryContract
+}
+
+// DeliveryContract is what finishing means for a worker. It travels with the
+// worker's identity because that is what decides it — the same reviewer owes the
+// same verdict through every entry point that can reach it.
+type DeliveryContract struct {
+	ReviewReport evidence.ReviewKind
 }
 
 // ProfileLookup resolves a profile by exact skill name. Implementations read
@@ -50,6 +61,7 @@ func ProfileFromSkill(sk skill.Skill) ProfileDefinition {
 		ReadOnly:     sk.ReadOnly,
 		Invocation:   sk.Invocation,
 		NamedBuiltin: NamedBuiltinProfile(sk.Name),
+		Delivery:     DeliveryContract{ReviewReport: evidence.ReviewKind(sk.Delivery.ReviewReport)},
 	}
 }
 

@@ -81,18 +81,6 @@ func (*ReviewReportTool) Execute(ctx context.Context, args json.RawMessage) (str
 	return msg, nil
 }
 
-// ReviewReportKindForSkill maps a review-capable skill name to the report kind
-// its subagent must submit before finishing; empty means no requirement.
-func ReviewReportKindForSkill(name string) evidence.ReviewKind {
-	switch name {
-	case "review":
-		return evidence.ReviewKindReview
-	case "security-review", "security_review":
-		return evidence.ReviewKindSecurity
-	}
-	return ""
-}
-
 var _ tool.Tool = (*ReviewReportTool)(nil)
 
 // AttachReviewReportTool adds review_report to a subagent registry used by

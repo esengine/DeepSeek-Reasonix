@@ -583,6 +583,9 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		spec.Worker.Kind = "skill"
 		spec.Worker.SystemPrompt = def.Body
 		spec.Worker.UseProfilePrompt = true
+		// What the worker owes comes with the worker. Deriving it from the
+		// profile's name here would put an undeclared rule in a second place.
+		spec.Worker.ReviewReport = def.Delivery.ReviewReport
 		profileTools = def.AllowedTools
 		profileModel, profileEffort = def.Model, def.Effort
 		if def.ReadOnly {

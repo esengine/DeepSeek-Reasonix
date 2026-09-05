@@ -4,113 +4,82 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
 	"reasonix/internal/testenv"
 	"reasonix/internal/tool"
 )
 
-// Who owns the typed-review obligation — the layer it first becomes true in, not
-// the one that enforces it. A fact can be declared in one layer, projected by a
-// second and checked by a third, and only the first of those owns it.
+// What a worker owes when it finishes is declared by whoever defined it,
+// projected into the execution spec, and enforced by delivery. The three are
+// separate layers and this holds the first one to being the only source: the
+// requirement was once a switch on the worker's name, which meant an ordinary
+// worker borrowing the name acquired it and a renamed reviewer lost it.
+func TestDeliveryObligationFollowsTheDeclarationAndNotTheName(t *testing.T) {
+	reviewer := probeSkill()
+	reviewer.Name = "code-review-under-another-name"
+	reviewer.Delivery = skill.DeliveryContract{ReviewReport: skill.ReviewReportReview}
 
-// A skill and a profile are the two objects a person edits. Neither has a field
-// that could carry this, and a requirement no vocabulary can express is one no
-// configuration can own — which leaves only the name.
-func TestNoConfigurationLayerCanDeclareTheReviewObligation(t *testing.T) {
-	for _, tc := range []struct {
-		what string
-		v    any
-	}{
-		{"skill.Skill", skill.Skill{}},
-		{"agent.ProfileDefinition", agent.ProfileDefinition{}},
-	} {
-		if fields := obligationFields(tc.v); len(fields) > 0 {
-			t.Errorf("%s declares %v; the obligation may have an owner after all", tc.what, fields)
-		}
-	}
-
-	// What is left is the spelling. An ordinary worker that borrows the name
-	// acquires the obligation and a reviewer that gives the name up loses it,
-	// which is a requirement derived from a word rather than a declaration.
-	if agent.ReviewReportKindForSkill("review") == "" {
-		t.Fatal("the name carries nothing; the derivation is something else")
-	}
-	if agent.ReviewReportKindForSkill("code-review") != "" {
-		t.Fatal("a renamed reviewer kept the obligation; something other than the name carries it")
-	}
-}
-
-// obligationFields reports any field on a configuration type that could declare
-// a delivery obligation. It reads the type rather than one value, so a field
-// added later is found whether or not anyone sets it.
-func obligationFields(v any) []string {
-	var out []string
-	for field := range reflect.TypeOf(v).Fields() {
-		name := strings.ToLower(field.Name)
-		if strings.Contains(name, "report") || strings.Contains(name, "verdict") ||
-			strings.Contains(name, "obligation") || strings.Contains(name, "delivery") {
-			out = append(out, field.Name)
-		}
-	}
-	return out
-}
-
-// The same worker, compiled through both surfaces, read by what each child is
-// actually given: a run that owes a typed verdict is handed the tool that
-// produces one. The matrix is logged rather than asserted cell by cell — what it
-// establishes is where the requirement enters, and a per-cell expectation would
-// be asserting the answer it exists to find.
-func TestTheReviewObligationEntersAtTheInvocationSurface(t *testing.T) {
-	reviewer, ordinary := probeSkill(), probeSkill()
-	reviewer.Name = "review"
-	ordinary.Name = "helper"
+	impostor := probeSkill()
+	impostor.Name = "review"
 
 	for _, tc := range []struct {
 		cell string
 		sk   skill.Skill
 		via  string
+		owes bool
 	}{
-		{"review name, via run_skill", reviewer, "skill"},
-		{"review name, via task(profile=)", reviewer, "task"},
-		{"ordinary name, via run_skill", ordinary, "skill"},
-		{"ordinary name, via task(profile=)", ordinary, "task"},
-		// The cross-wiring. With nothing but a name to carry the requirement,
-		// these two decide it: semantics without the name, and the name without
-		// the semantics.
-		{"ordinary worker wearing the review name, via run_skill", named(ordinary, "review"), "skill"},
-		{"ordinary worker wearing the review name, via task(profile=)", named(ordinary, "review"), "task"},
-		{"the reviewer under another name, via run_skill", named(reviewer, "code-review"), "skill"},
+		// The declaration travels with the worker, through either surface.
+		{"a declared reviewer, renamed, via run_skill", reviewer, "skill", true},
+		{"a declared reviewer, renamed, via task(profile=)", reviewer, "task", true},
+		// The name confers nothing, through either surface.
+		{"an ordinary worker named review, via run_skill", impostor, "skill", false},
+		{"an ordinary worker named review, via task(profile=)", impostor, "task", false},
 	} {
-		offered := reviewToolOffered(t, tc.sk, tc.via)
-		t.Logf("%-58s skill=no profile=no delivery=%s", tc.cell, yn(offered))
+		t.Run(tc.cell, func(t *testing.T) {
+			if got := reviewToolOffered(t, tc.sk, tc.via); got != tc.owes {
+				t.Fatalf("owes a typed verdict = %v, want %v", got, tc.owes)
+			}
+		})
 	}
 }
 
-func yn(b bool) string {
-	if b {
-		return "yes"
+// The built-in reviewers declare their own contract. Read from the store the
+// way a session reads it, so a definition that lost its declaration fails here
+// rather than silently stopping a verdict from being required.
+func TestBuiltInReviewersDeclareTheirVerdict(t *testing.T) {
+	store := skill.New(skill.Options{})
+	for name, want := range map[string]string{
+		"review":          skill.ReviewReportReview,
+		"security-review": skill.ReviewReportSecurity,
+		"explore":         "",
+		"research":        "",
+	} {
+		sk, ok := store.Read(name)
+		if !ok {
+			t.Fatalf("built-in %q is missing", name)
+		}
+		if got := sk.Delivery.ReviewReport; got != want {
+			t.Errorf("built-in %q declares %q, want %q", name, got, want)
+		}
+		if got := agent.ProfileFromSkill(sk).Delivery.ReviewReport; got != evidence.ReviewKind(want) {
+			t.Errorf("built-in %q projects %q, want %q", name, got, want)
+		}
 	}
-	return "no"
-}
-
-func named(sk skill.Skill, name string) skill.Skill {
-	sk.Name = name
-	return sk
 }
 
 // reviewToolOffered runs one worker through one surface and reports whether the
 // child was handed review_report. That is the requirement made concrete: the
 // gate reads a typed verdict, and a child with no way to produce one owes none.
+// One field drives both the tool and the option, so the two cannot disagree.
 func reviewToolOffered(t *testing.T, sk skill.Skill, via string) bool {
 	t.Helper()
 	w := newReviewWorld(t, sk)

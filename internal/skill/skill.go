@@ -80,9 +80,12 @@ type Skill struct {
 	// AllowedTools, when non-empty, scopes a subagent skill's tool registry to
 	// these literal tool names (from the `allowed-tools` frontmatter).
 	AllowedTools []string
-	RunAs        RunAs  // inline | subagent
-	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
-	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// Delivery is what this worker owes beyond an answer — a declaration, never
+	// read out of a name. User frontmatter does not set it yet.
+	Delivery DeliveryContract
+	RunAs    RunAs  // inline | subagent
+	Model    string // optional model override for runAs=subagent (frontmatter `model:`)
+	Effort   string // optional effort for runAs=subagent (frontmatter `effort:`)
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
 	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
@@ -888,46 +891,6 @@ func mapClaudeAgentTools(in []string) []string {
 		}
 	}
 	return out
-}
-
-const (
-	skillFrontmatterDescription      = "description"
-	skillFrontmatterName             = "name"
-	skillFrontmatterRunAs            = "runas"
-	skillFrontmatterContext          = "context"
-	skillFrontmatterAgent            = "agent"
-	skillFrontmatterAllowedTools     = "allowed-tools"
-	skillFrontmatterModel            = "model"
-	skillFrontmatterEffort           = "effort"
-	skillFrontmatterReadOnly         = "read-only"
-	skillFrontmatterTriggers         = "triggers"
-	skillFrontmatterNegativeTriggers = "negative-triggers"
-	skillFrontmatterAutoUse          = "auto-use"
-	skillFrontmatterCost             = "cost"
-	skillFrontmatterColor            = "color"
-	skillFrontmatterInvocation       = "invocation"
-	skillFrontmatterRequires         = "requires"
-	skillFrontmatterProfiles         = "profiles"
-)
-
-var skillMarkerFrontmatterKeys = []string{
-	skillFrontmatterDescription,
-	skillFrontmatterName,
-	skillFrontmatterRunAs,
-	skillFrontmatterContext,
-	skillFrontmatterAgent,
-	skillFrontmatterAllowedTools,
-	skillFrontmatterModel,
-	skillFrontmatterEffort,
-	skillFrontmatterReadOnly,
-	skillFrontmatterTriggers,
-	skillFrontmatterNegativeTriggers,
-	skillFrontmatterAutoUse,
-	skillFrontmatterCost,
-	skillFrontmatterColor,
-	skillFrontmatterInvocation,
-	skillFrontmatterRequires,
-	skillFrontmatterProfiles,
 }
 
 func hasSkillMarker(content string, fm map[string]string) bool {

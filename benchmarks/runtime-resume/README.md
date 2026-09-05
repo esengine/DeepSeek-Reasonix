@@ -164,26 +164,46 @@ to name — cannot be recovered by any rule that is not inventing history. Reads
 stay lenient about them forever; writes are strict, because a new record with no
 execution is the one shape no later reader can place.
 
+### What a worker owes when it finishes
+
+`run_skill(review)` required a typed verdict and `task(profile=review)` did not,
+and asking why the second lacked it was the wrong question: the requirement had
+no owner to inherit from. Neither `skill.Skill` nor `agent.ProfileDefinition`
+could express it — checked over the types, so a field added later is caught — and
+what remained was a switch on the worker's *name*. The cross-wiring showed the
+name was the whole of it: an ordinary worker that borrowed it acquired the
+obligation, and the reviewer renamed lost it.
+
+So the tempting fix was the defect. `if worker.Name == "review"` in the task
+compiler would have put the same undeclared derivation in a second place and made
+the accident look like a design.
+
+A worker now declares what it owes. `DeliveryContract` lives on the definition,
+projects into the execution spec, and both entry points read only the projection:
+
+| | contract | before | now |
+| --- | --- | --- | --- |
+| `run_skill(review)` | declared | required | required |
+| `task(profile=review)` | declared | none | **required** |
+| a reviewer under another name | declared | none | **required** |
+| an ordinary worker named `review` | none | required | **none** |
+
+The last two rows are the point. This fixed two independent errors — a real
+reviewer that lost its obligation by being renamed, and an ordinary worker that
+gained one by borrowing a word — and `task(profile=review)` changing behaviour is
+a consequence of moving the rule from wording to structure, not the goal.
+
+> **Delivery obligations are declared by the worker, projected into the
+> execution spec, and enforced independently of invocation surface or names.**
+
 ### Open, and deliberately not closed here
 
-**Delivery obligations across invocation surfaces.** `run_skill(review)` requires
-a typed verdict; `task(profile=review)` does not. Asking why the second one lacks
-it turned out to be the wrong question — `internal/boot/review_obligation_test.go`
-traced the requirement to its source and found none.
-
-Neither `skill.Skill` nor `agent.ProfileDefinition` has a field that could
-express it, checked over the types so a field added later is caught too. What is
-left is a switch on the worker's *name*, and the cross-wiring shows the name is
-the whole of it: an ordinary worker that borrows the name acquires the
-obligation, and the reviewer renamed loses it. One surface projects that switch
-and the other never did.
-
-So there is nothing for `task(profile=review)` to inherit. The requirement is not
-a property of the reviewer; it is something one compiler adds on recognising a
-word — the phrase-table shape this repo retires wherever it finds one. The
-tempting fix is also the bug: `if worker.Name == "review"` in the task compiler
-would not close a gap, it would put the same undeclared derivation in a second
-place. An owner has to exist before either surface can project it.
+**Third-party delivery declarations.** `DeliveryContract` is set by the built-in
+definitions and is not parsed from user frontmatter. Whether a third-party
+profile may declare that it produces a system-recognised typed verdict is a
+question about permission, not about where the fact lives — and if a security
+verdict ever counts as verification evidence, a line of YAML should not be enough
+to claim it. Settling that is separate from having settled the ownership.
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
