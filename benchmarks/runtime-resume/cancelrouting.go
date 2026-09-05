@@ -46,7 +46,7 @@ func cancelRoutingArm(name string) bool {
 // which is the surface a person's Stop reaches.
 func guardedArm(name string) bool {
 	return cancelTaskArm(name) || name == armCancelTool || name == armCancelBackground ||
-		name == armSkillCancel
+		name == armSkillCancel || name == armHostCancel
 }
 
 const (

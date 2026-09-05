@@ -101,6 +101,10 @@ provider call*.
 | `readonly-skill-completed` | it finishes, then die | none | does a run that really happened leave anything at all? |
 | `ephemeral-task-authority` | a read-only research child executing, read against the snapshot | none | can the execution authority account for what it draws? |
 | `ephemeral-skill-authority` | the same of the other ephemeral entry point | none | do the two agree on what they claim? |
+| `interactive-host-skill-completed` | a person's `/<skill>`, finished, then die | none | what does it leave besides its answer? |
+| `interactive-host-skill-queued-crash` | the same with the ceiling full, killed while held back | ceilings | what names work the scheduler is holding back? |
+| `interactive-host-skill-running-crash` | the same, killed with the child executing | none | what does a restart inherit? |
+| `interactive-host-skill-cancel` | the same, stopped through the turn that admitted it | none | what does the stop reach, and what history remains? |
 
 ## The delegation matrix
 
@@ -499,6 +503,73 @@ cannot be — across a gap, a bootstrap, or a restart. Who is currently occupyin
 a scheduler slot is a real question and a different one; answering it belongs to
 a live-only read model that can say plainly that it does not survive the
 process, not to a graph that promises it does.
+
+## The host-initiated arms
+
+Their subject is one surface and the names say so: a person typing `/<skill>`
+into a live session, routed through `Submit` to the controller's slash path. The
+headless counterpart (`RunSubagentProfile`) is deliberately not measured with
+them — it is a synchronous caller-owned call whose cancellation and session
+ownership need not match, and reading one for the other is how a real number
+gets the wrong subject. Its parity is a separate question.
+
+Each arm prints **four identities apart**, because this is the first surface
+where they may not coincide:
+
+| identity | what it is |
+| --- | --- |
+| dispatch id (`slash-skill-N`) | a synthetic event id, minted so the child's activity can nest on screen |
+| child ref (`sa_…`) | the store's artifact, which exists only once a transcript has been prepared |
+| `ParentToolCallID` | the provider-visible call this descends from — correctly empty here |
+| execution id | what a journal would have opened it under |
+
+For a model-delegated run the last two are one string. That has only ever been
+true because a tool call produced every durable execution there was, and this is
+where the coincidence ends.
+
+Three oracles hold across every arm:
+
+- **A** — no persisted lineage may name a synthetic host id. It is UI identity;
+  writing one down would say the model issued a call it never made.
+- **B** — a host-started run's `ParentToolCallID` stays empty. It has no
+  provider-visible parent, and filling it to make a join easier would trade a
+  truth for a convenience.
+- **C** — if a durable execution identity turns out to be needed, none of the
+  three candidates above can be it. The arms test that by exhaustion rather than
+  by assertion.
+
+### What it found
+
+| arm | scheduler | provider | Graph | journal | store | lineage | pre-start id | restart |
+| --- | --- | --- | :--: | :--: | --- | :--: | :--: | --- |
+| completed | admitted | completed | — | — | `completed` | empty | none | `record-only` |
+| queued-crash | **refused** | never entered | — | — | none | n/a | none | `LOST-SILENT` |
+| running-crash | admitted | entered | — | — | `running`→`interrupted` | empty | none | `record-only` |
+| cancel | admitted | cancelled | — | — | `cancelled` | empty | none | `record-only` |
+
+Synthetic host id persisted as lineage: **no**, in every arm.
+
+The store is not empty, and that matters: a slash-started skill reaches the
+shared runner, so its child is marked running before it acts and carries a
+correct terminal afterwards. What is missing is narrower and more precise than
+"it records nothing" — no execution was ever opened, so nothing places that
+child, and `record-only` says exactly that: a reader can see a child of this
+name was cut, and cannot say which invocation it belonged to.
+
+Only the queued arm is silent outright. Work the scheduler had admitted into its
+domain and then refused a slot leaves nothing at all — no child artifact exists
+yet, and there is nothing else to hold an identity. That is what makes the arm
+decide a linearization rather than a display: an identity for this class would
+have to exist **before** the child does.
+
+Oracle C therefore holds by exhaustion. The synthetic id cannot be persisted
+(A); the child ref does not exist while the work is queued; the parent lineage
+must stay empty (B). A host-started execution that deserves durable provenance
+needs an identity of its own, and `SubagentMeta` would be the first place where
+execution identity and parent lineage stop being the same field.
+
+None of that is implemented here. These arms establish what the candidates
+cannot do; choosing what replaces them is the next cut's question.
 
 ## The one arm that reads the frontend
 

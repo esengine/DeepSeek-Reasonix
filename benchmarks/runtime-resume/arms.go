@@ -30,7 +30,7 @@ func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
 		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) &&
 		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name) && !activeStoreArm(name) &&
-		!skillArm(name) && !ephemeralArm(name)
+		!skillArm(name) && !ephemeralArm(name) && !hostExecArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -141,6 +141,10 @@ func arms() []arm {
 		{name: armReadOnlySkillCompleted, asks: "what a finished read-only skill leaves behind, if anything"},
 		{name: armEphemeralTask, asks: "can the execution authority account for what read_only_task draws?"},
 		{name: armEphemeralSkill, asks: "the same of read_only_skill, the other ephemeral entry point"},
+		{name: armHostRunning, asks: "what a slash-started subagent leaves when the process dies mid-execution"},
+		{name: armHostQueued, asks: "what names slash-started work the scheduler is holding back"},
+		{name: armHostCompleted, asks: "what a finished slash invocation leaves besides its answer"},
+		{name: armHostCancel, asks: "what a stop reaches, and what history it leaves"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

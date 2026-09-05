@@ -160,6 +160,8 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 		return true, runSkillClassConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case ephemeralArm(arm):
 		return true, runEphemeralConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
+	case hostExecArm(arm):
+		return true, runHostExecConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case graphArm(arm) || uiArm(arm):
 		return true, runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	}
@@ -175,7 +177,7 @@ func runConstruct(dir, arm string) error {
 	if err := root.create(); err != nil {
 		return err
 	}
-	if skillArm(arm) || arm == armEphemeralSkill {
+	if skillArm(arm) || arm == armEphemeralSkill || hostExecArm(arm) {
 		if err := writeProbeSkill(root.Workspace); err != nil {
 			return fmt.Errorf("probe skill: %w", err)
 		}

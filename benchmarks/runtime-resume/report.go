@@ -128,6 +128,9 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 	case ephemeralArm(a.name):
 		res.Rows = append(res.Rows, ephemeralRows(a.name, before, after)...)
 		res.Invalid = ephemeralArmInvalid(before)
+	case hostExecArm(a.name):
+		res.Rows = append(res.Rows, hostExecRows(a.name, before, after)...)
+		res.Invalid = hostExecArmInvalid(a.name, before)
 	case a.name == armTodoIdentity:
 		res.Rows = append(res.Rows, todoRows(before, after)...)
 	case a.name == armRefoldIntoBody && extra != nil:

@@ -320,7 +320,9 @@ func holderFleet(arm string) []provider.Chunk {
 // win it, so both report holding, and the refused delegation's own child is then
 // the only arrival that means anything — a filler that hung under the same
 // sentinel would be read as the subject having started.
-func bothHoldersReport(arm string) bool { return queuedTaskArm(arm) || queuedSkillArm(arm) }
+func bothHoldersReport(arm string) bool {
+	return queuedTaskArm(arm) || queuedSkillArm(arm) || arm == armHostQueued
+}
 
 // refusedFleet asks for admission the scheduler must deny, with every check
 // above this arm's cause already cleared.

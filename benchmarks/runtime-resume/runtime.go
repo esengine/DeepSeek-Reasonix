@@ -209,7 +209,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 func approvalMode(arm string) string {
 	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) || cancelRoutingArm(arm) || lineageArm(arm) ||
 		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) || activeStoreArm(arm) ||
-		skillArm(arm) || ephemeralArm(arm) {
+		skillArm(arm) || ephemeralArm(arm) || hostExecArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"
@@ -250,4 +250,16 @@ func repoRoot() string {
 		}
 		dir = parent
 	}
+}
+
+// toolIDs is every call this sink saw dispatched, which is where a host-minted
+// event id first appears: it is not in the graph and not in the transcript.
+func (s *graphSink) toolIDs() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.tools))
+	for id := range s.tools {
+		out[id] = true
+	}
+	return out
 }
