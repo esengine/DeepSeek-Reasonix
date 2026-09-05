@@ -729,7 +729,13 @@ export class MockPort extends MockTheme implements AgentPort {
     this.at = 0;
   }
 
-  async planDecision(_id: string, _action: PlanAction) {}
+  // 三条出路是三个不同的内核状态转移，不是「批准/拒绝」。只有开始执行把计划
+  // 带进执行、因而离开计划模式；改计划留在里面。真机上这个标志由 /status 说，
+  // 台架不建模它，靠它判断的守卫就只能永远红 —— 那正是它红了的原因。
+  async planDecision(_id: string, action: PlanAction) {
+    if (action !== "revise") this.state.plan = false;
+    this.ungate();
+  }
 
   async approve(_id: string, verdict: ApprovalVerdict) {
     if (verdict === "deny") {

@@ -8,7 +8,11 @@ const SHOTS = fileURLToPath(new URL("shots", import.meta.url));
 
 mkdirSync(SHOTS, { recursive: true });
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// 判据比的是界面上那几个词，所以语种得钉住 —— 不钉就跟着运行环境走，在英文机
+// 器上这一整组会全红，而红的是台架没说自己要哪一种语言。locale.mjs 早就是这么
+// 开页面的。
+const ctx = await browser.newContext({ locale: "zh-CN", viewport: { width: 1440, height: 900 } });
+const page = await ctx.newPage();
 const fails = [];
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "  ok" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
