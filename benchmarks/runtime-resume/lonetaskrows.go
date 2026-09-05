@@ -29,6 +29,7 @@ func loneTaskRows(arm string, before, after Observation) []row {
 		delegationInterruptionRow(before, after),
 		identityJoinRow(before),
 		heldBackRow(arm, before),
+		stoppedOwnershipRow(arm, before),
 		startedTerminalRow(before, after),
 		fanOutControlRow(before),
 	}
@@ -367,6 +368,44 @@ func loneStatus(o Observation) string {
 	return ""
 }
 
+// stoppedOwnershipRow is the invariant a stop has to leave behind: once the
+// turn is over, nothing it owned may still be open with a live owner. A record
+// left open is what a restart reads as an interruption, so a turn that merely
+// stopped waiting looks, afterwards, exactly like a process that died.
+func stoppedOwnershipRow(arm string, before Observation) row {
+	if !cancelTaskArm(arm) {
+		return row{
+			Semantic: "work the stopped turn still owns", Authority: crossAuthority,
+			Artifact: "<stem>.execution.jsonl", Reconstruction: "this arm stops nothing",
+			Before: "—", After: "—", Verdict: verdictNotMeasured,
+		}
+	}
+	reading := ""
+	if seen := before.Progress[probeStopReached]; len(seen) > 0 {
+		reading = seen[0]
+	}
+	entry, _ := loneEntry(before)
+	open := entry.SettledAt.IsZero()
+	turnOver := strings.Contains(reading, "turn=ended")
+	// An open record implies a live owner: nothing else closes one. The child's
+	// liveness rides in the reading as evidence, not as the test — a delegation
+	// still waiting for a slot has no child and is just as much still owned.
+	return row{
+		Semantic: "work the stopped turn still owns", Authority: crossAuthority,
+		Artifact:       "<stem>.execution.jsonl",
+		Reconstruction: "a turn that has ended owns nothing still open",
+		Before:         "the turn owned it when the stop was issued",
+		After:          orNone(reading) + " record=" + entryStanding(entry), Verdict: held(!(turnOver && open)),
+	}
+}
+
+func entryStanding(e execjournal.Entry) string {
+	if e.SettledAt.IsZero() {
+		return "still open"
+	}
+	return "settled"
+}
+
 // startedTerminalRow refuses the combination neither layer may produce: a child
 // record for work the journal proves was never admitted. A state comparison
 // shows that only as "cancelled came back failed"; this names the cause, which
@@ -479,8 +518,6 @@ func stoppedArmInvalid(arm string, before Observation) string {
 	switch {
 	case !ok:
 		return "the delegation was never recorded, so there is no ownership to read"
-	case entry.SettledAt.IsZero():
-		return "the stop never closed the delegation, so nothing about its ending is settled"
 	case beforeStartArm(arm) && entry.Started():
 		return "the delegation was granted a slot before the stop, so this is not a pre-start cancellation"
 	case !beforeStartArm(arm) && !entry.Started():

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/agentgraph"
 	"reasonix/internal/boot"
@@ -80,9 +81,16 @@ type graphSink struct {
 	// handed to a job publishes no graph node at all, so for those this is the
 	// only live evidence that anything happened.
 	phases map[string][]string
+	// tools is when each call was dispatched and when it answered. A stop that
+	// reached a running tool is visible as the second arriving early.
+	tools map[string][2]time.Time
 }
 
 func (s *graphSink) Emit(e event.Event) {
+	if e.Kind == event.ToolDispatch || e.Kind == event.ToolResult {
+		s.noteTool(e)
+		return
+	}
 	if id, phase, ok := progressPhase(e); ok {
 		s.mu.Lock()
 		if s.phases == nil {
@@ -114,6 +122,39 @@ func (s *graphSink) snapshot() (agentgraph.Graph, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.graph, s.deltas
+}
+
+// noteTool records the two edges of a tool call this probe may be asked about.
+func (s *graphSink) noteTool(e event.Event) {
+	if e.Tool.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tools == nil {
+		s.tools = map[string][2]time.Time{}
+	}
+	at := s.tools[e.Tool.ID]
+	if e.Kind == event.ToolDispatch {
+		at[0] = time.Now()
+	} else {
+		at[1] = time.Now()
+	}
+	s.tools[e.Tool.ID] = at
+}
+
+func (s *graphSink) toolDispatched(id string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.tools[id]
+	return at[0], ok && !at[0].IsZero()
+}
+
+func (s *graphSink) toolResult(id string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.tools[id]
+	return at[1], ok && !at[1].IsZero()
 }
 
 // phaseSeries is every status published for one call, in publication order.
@@ -166,7 +207,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // denied gate the dispatch is refused before any child starts and the arm
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
-	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) ||
+	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) || cancelRoutingArm(arm) ||
 		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) {
 		return control.ToolApprovalAuto
 	}

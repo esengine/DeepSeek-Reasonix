@@ -101,9 +101,11 @@ var subagentRefPattern = regexp.MustCompile(`sa_[A-Za-z0-9_-]+`)
 // so the child holds its scheduler slot until the process dies — a sleep long
 // enough to look the same would still be a race against the probe's deadline.
 func (s *scripted) childScript(ctx context.Context, sentinel string) []provider.Chunk {
-	// Reaching here is the child's own proof that it started: an arm asking
-	// whether the scheduler held one back has no other way to know.
+	// Reaching here is the child's own proof that it started, and returning is
+	// its proof that something let it go: an arm asking whether a cancellation
+	// reached a running child has no other way to know.
 	s.fleets.first(childEntered(sentinel))
+	defer s.fleets.first(childLeft(sentinel))
 	switch sentinel {
 	case childHold:
 		// Reaching a provider call means the slot is already held, which is the

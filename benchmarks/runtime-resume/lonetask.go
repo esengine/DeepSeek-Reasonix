@@ -82,6 +82,11 @@ func queuedTaskArm(name string) bool {
 // the probe can answer.
 func childEntered(sentinel string) string { return "child-entered:" + sentinel }
 
+// childLeft names the record a child leaves when it returns. Entered without
+// left is a child still inside the provider — the state a cancellation that
+// never arrived leaves behind.
+func childLeft(sentinel string) string { return "child-left:" + sentinel }
+
 // probeChildEntered is where that answer rides into the observation. It is not
 // a status the kernel emits: the key names the probe so no row reads it as one.
 const probeChildEntered = "probe:delegated-child-entered"
@@ -170,12 +175,14 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 			return err
 		}
 	}
+	stop := ""
 	if cancelTaskArm(arm) {
-		if err := stopDelegation(ctrl, arm); err != nil {
-			return err
-		}
+		stop = stopDelegation(ctrl, prov, arm)
 	}
 	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
+	if stop != "" {
+		obs.Progress[probeStopReached] = []string{stop}
+	}
 	if queuedTaskArm(arm) {
 		// Whether the delegation's own child ever ran is the fact the live rows
 		// are read against, and only the scripted provider knows it.
@@ -192,40 +199,37 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 // for a foreground run, the job list and a kill for a backgrounded one — and
 // waits for the orchestration to let go of it. What each layer holds then is
 // this arm's whole question, so nothing is read until the record closes.
-func stopDelegation(ctrl *control.Controller, arm string) error {
+func stopDelegation(ctrl *control.Controller, prov *scripted, arm string) string {
+	stopped := time.Now()
 	if backgroundTaskArm(arm) {
-		running := ctrl.Jobs()
-		if len(running) == 0 {
-			return errUnexpected("a background job to stop", "none running")
-		}
-		for _, job := range running {
+		for _, job := range ctrl.Jobs() {
 			ctrl.CancelJob(job.ID)
 		}
 	} else {
 		ctrl.Cancel()
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, e := range control.ExecutionHistory(ctrl.SessionPath()) {
-			if e.ID == parallelLoneNodeID && !e.SettledAt.IsZero() {
-				return nil
-			}
-		}
+	// Wait for the record to close, but do not demand it: whether a stop reaches
+	// the work it was aimed at is what this arm measures, and an arm that failed
+	// when it did not would report the finding as its own premise breaking.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && !settledLone(ctrl) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	return errUnexpected("the stopped delegation to be let go of",
-		fmt.Sprintf("still open: running=%v cancelRequested=%v journal=%v",
-			ctrl.Running(), ctrl.CancelRequested(), executionStanding(ctrl)))
+	live := "gone"
+	if prov.fleets.held(childEntered(childHang)) && !prov.fleets.held(childLeft(childHang)) {
+		live = "still running"
+	}
+	return fmt.Sprintf("turn=%s work=%s after=%s", turnStanding(ctrl), live,
+		time.Since(stopped).Round(time.Second))
 }
 
-// executionStanding is every delegation this session opened, with what the
-// journal last said about each: the reading an unexplained timeout needs.
-func executionStanding(ctrl *control.Controller) []string {
-	var out []string
+func settledLone(ctrl *control.Controller) bool {
 	for _, e := range control.ExecutionHistory(ctrl.SessionPath()) {
-		out = append(out, e.ID+":"+lifecycleOf(e))
+		if e.ID == parallelLoneNodeID && !e.SettledAt.IsZero() {
+			return true
+		}
 	}
-	return out
+	return false
 }
 
 // waitForLoneTask blocks until the delegation stands where this arm dies. The

@@ -148,6 +148,8 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 		return true, runTerminalConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	case schedulerWaitArm(arm):
 		return true, runSchedulerWaitConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
+	case cancelRoutingArm(arm):
+		return true, runCancelRoutingConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case loneTaskArm(arm):
 		return true, runLoneTaskConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case graphArm(arm) || uiArm(arm):

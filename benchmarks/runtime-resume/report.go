@@ -112,6 +112,8 @@ func classify(a arm, extra *Observation, before, after Observation) armResult {
 	case uiArm(a.name):
 		res.Rows = append(res.Rows, uiRows(before, after)...)
 		res.Invalid = uiArmInvalid(before, after)
+	case cancelRoutingArm(a.name):
+		res.Rows = append(res.Rows, cancelRoutingRows(a.name, before)...)
 	case loneTaskArm(a.name):
 		res.Rows = append(res.Rows, loneTaskRows(a.name, before, after)...)
 		res.Invalid = loneTaskArmInvalid(a.name, before)

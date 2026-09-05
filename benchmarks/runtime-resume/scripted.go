@@ -128,6 +128,9 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	if chunks, ok := s.fanOut(req); ok {
 		return chunks
 	}
+	if s.opens(req, sleepSentinel) {
+		return append(sleepCall(), done())
+	}
 	if s.opensRun(req, taskSentinel) {
 		if queuedTaskArm(s.arm) {
 			// The holder's own child says when the ceiling is occupied.

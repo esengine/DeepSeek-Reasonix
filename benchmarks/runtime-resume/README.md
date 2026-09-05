@@ -73,6 +73,8 @@ provider call*.
 | `task-background-queued-cancel` | the same, backgrounded: a job killed before admission | ceilings | the same, across the handoff |
 | `task-foreground-running-cancel` | stopped while its child was executing | none | who owns the ending of work that did run? |
 | `task-background-running-cancel` | the same, backgrounded | none | the same, across the handoff |
+| `cancel-ordinary-tool` | a plain shell the turn is waiting on, then a stop | none | does a stop reach an ordinary tool? |
+| `cancel-background-handoff` | a backgrounded child running, then a stop aimed at the turn | none | negative control: does it leave a job's work alone? |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -147,6 +149,21 @@ execution that never happened is what points at the cause.
 The two foreground arms are stopped through the turn's own cancel and the two
 background ones through the job list and a kill, which is what a person reaches
 for in each case.
+
+Two more ask where a stop goes, and they are a pair on purpose. A turn that
+returns while the work it owned is still running has not cancelled anything — it
+has stopped waiting, which looks identical from outside until a restart reads
+the record and calls the leftover an interruption. `cancel-ordinary-tool` runs a
+plain shell so the answer cannot be blamed on how a delegation derives its
+context, and `cancel-background-handoff` is the negative control that bounds any
+fix: work already handed to a job has an owner of its own, and a stop that
+reached into it would take back the handoff. A fix that cancels everything a
+session knows about passes the first and fails the second.
+
+The delegation arms carry the same question as an invariant rather than a
+premise: once the turn has ended, nothing it owned may still be open. An open
+record implies a live owner — nothing else closes one — so the child's own
+liveness is evidence in the reading, not the test.
 
 One of the five asks about now rather than about a restart.
 `task-foreground-queued` fills the ceiling first, so the scheduler has to refuse
