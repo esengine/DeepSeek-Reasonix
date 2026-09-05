@@ -171,5 +171,54 @@ App 领域仍需继续迁移。
 - 128/512轮、三独立进程的正式 App 长跑、原生 App soak、最终 Go/race/
   lint/CodeQL、CI 路径过滤和最终远端 head 检查均待完成。
 
+## 分层迁移 Runbook（待执行切片顺序）
+
+沿用已有 owner/adapter/region 模式，每个切片一次迁完「输入捕获 → 执行 →
+结果应用 → 失败 → 清理」，App.tsx 行号以当前工作区为准（结构盘点见会话
+inventory：30 个 effect、约 90 个状态/ref、44 处直接 bridge 调用、16 个大
+处理器、返回 JSX 3124-3667 与 8 个内联 JSX/属性块）。
+
+1. **Layout/Shell 生命周期**：effects #6/#8/#11/#22/#25/#26/#27（data-platform、
+   平台探测、resize viewport、activeTabIdRef、footer ResizeObserver、sidebar/
+   dock clamp）及其状态（desktopPlatform/viewport/footerHeight）先落共享
+   section hook 或既有 layout store，消费点（className、footer、terminal
+   clamp、conversation width）同步改读；随后迁三个 pointer resize 生命周期
+   （startSidebarResize/startWorkspacePanelResize/startTerminalResize 及键盘
+   调整）与 `toggleSidebar/pulseSidebarToggle`。
+2. **Banner/Overlay 栈**：config-warnings 横幅 JSX（3338-3372）、provider-setup
+   横幅、lease/startup-error IIFE（3314-3332）、RemoteReclaimBanner 内联
+   onReclaim（3308-3309 直接 bridge）、extension drain（effect #15）与
+   `app:open-settings` 事件（effect #10）、NeedsOnboarding（effect #24）。
+3. **Session actions（rewind/undo/delivery/clear/takeover/export）**：
+   handleMessageAction、handleEditPrompt、handleSessionRevertCommitted、
+   rewind 三状态（rewindStates/rewindCommitting/rewindSignal）、confirmClearContext、
+   handleDeliveryContinue（surface fence 已就绪）、exportSession + topic export
+   弹层（effect #20）与 sessionExportData 懒加载、openTurnVerification（#28）。
+   消费 JSX 在 DecisionFooter 属性构建块（2966-3122）。
+4. **Composer 剩余**：handleSend（118 行）/handleSteer/theme 路由/runShell/
+   插入请求（composerInsertRequestsByTab、selectedText、planRevisionInsert、
+   workspaceInsertTarget、dockRefreshKey/fileRefRefreshKey 刷新协调）。
+5. **Project/Topic**：topic summary（effect #12，需按 topic 身份的 single-flight）、
+   workspace focus 协调与 onProjectTreeChanged（effect #23）、handleRuntimeEvent/
+   handleRuntimeReady/handleRuntimeRebuilt 的 profile 恢复段、worktree merge
+   协调（2927-2955）、handleWorktreeMerged。
+6. **Navigation 剩余**：finishTabClose/handleTabClose/handleTabsClose/
+   handleTabsReorder/handleTabChange/pendingClose/revealBackgroundRuntime/
+   revealWorkspaceWriter/continueInDeliveryWorktree/openTaskMonitorSession
+   （tab chrome 与状态区调用点一起迁）。
+7. **Preferences/Overlays**：paletteItems memo（2511-2772）与 palette run、
+   openPalette、AppOverlayHost 属性构建（3604-3654）、topicbar 导出/主题开关。
+8. **组装**：chat-pane 主区块（3245-3528）拆 TranscriptSurface 等区域、模块级
+   残余（setRemoteComposerProfileForSessionAction、lazy loaders、isThemeMode
+   → lib/theme.ts）归位；App 收敛为纯组合。
+
+每个切片验收：确定性测试（沿用 app-lifecycle 模式）+ tsc（两套）+ AST 分层/
+hooks 门禁 + test:app-lifecycle + app-browser 回放；凡删除 App 源码字符串断言
+必须同步补行为替代（见第三节清单，未审计条目随所属切片核对），不能留宽松
+替代。已两次确认：bundle 余量小，不得提高预算；goalSubmit.ts 已无生产引用，
+随切片 3/4 删除并把 send-failed 中其场景改指 owner 测试。三区域会话内换
+WorkspacePanel 保真、Composer 审批覆盖下持续挂载两条不变式在每次浏览器回放
+中复核。
+
 后续应继续收敛共同资源/UI 所有权并纵向迁移完整领域；不得增加局部延时
 guard、强制重挂载、清缓存或放宽验收门槛。

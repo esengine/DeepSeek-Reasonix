@@ -224,6 +224,58 @@ source-only tests must be audited as their owning features migrate.
 - Formal 128/512-round, three-process App memory runs, native App soak, final
   Go/race/lint/CodeQL evidence, CI path filters and final-head checks are pending.
 
+## Layering migration runbook (pending slices, in order)
+
+Reuse the established owner/adapter/region pattern; each slice migrates one full
+chain (input capture, execution, result application, failure, cleanup). App.tsx
+line anchors refer to the current worktree (structure inventory: 30 effects, ~90
+state/refs, 44 direct bridge call sites, 16 orchestrating handlers, return JSX
+3124-3667 with eight inline JSX/prop-builder blocks).
+
+1. **Layout/Shell lifecycle**: effects #6/#8/#11/#22/#25/#26/#27 (data-platform,
+   platform probe, viewport resize, activeTabIdRef, footer ResizeObserver,
+   sidebar/dock clamps) with their state (desktopPlatform/viewport/footerHeight)
+   into a shared section hook or the existing layout store first, then the three
+   pointer-resize lifecycles and toggleSidebar/pulseSidebarToggle.
+2. **Banner/overlay stack**: config-warnings banner JSX (3338-3372),
+   provider-setup banner, lease/startup-error IIFE (3314-3332), inline
+   RemoteReclaimBanner onReclaim (3308-3309 direct bridge), extension drain
+   (effect #15), the `app:open-settings` event (effect #10) and NeedsOnboarding
+   (effect #24).
+3. **Session actions (rewind/undo/delivery/clear/takeover/export)**:
+   handleMessageAction, handleEditPrompt, handleSessionRevertCommitted, the
+   three rewind states, confirmClearContext, handleDeliveryContinue (surface
+   fence already in place), exportSession + topic export popover (effect #20)
+   with the sessionExportData lazy renderers, openTurnVerification (#28).
+   Consumers live in the DecisionFooter prop builders (2966-3122).
+4. **Composer remainder**: handleSend (118 lines)/handleSteer/theme routing/
+   runShell/insert requests (composerInsertRequestsByTab, selected text,
+   planRevisionInsert, workspaceInsertTarget, refresh coordination).
+5. **Project/Topic**: topic summary (effect #12, single-flight by topic
+   identity), workspace focus reconciliation with onProjectTreeChanged
+   (effect #23), the profile-restore parts of handleRuntimeEvent/Ready/Rebuilt,
+   worktree merge coordination (2927-2955).
+6. **Navigation remainder**: finishTabClose/handleTabClose/handleTabsClose/
+   handleTabsReorder/handleTabChange/pendingClose/revealBackgroundRuntime/
+   revealWorkspaceWriter/continueInDeliveryWorktree/openTaskMonitorSession,
+   together with their tab-chrome/status call sites.
+7. **Preferences/Overlays**: paletteItems memo (2511-2772) and palette runs,
+   openPalette, AppOverlayHost prop builders (3604-3654).
+8. **Assembly**: split the chat-pane block (3245-3528) into TranscriptSurface
+   and sibling regions, settle module-level residue
+   (setRemoteComposerProfileForSessionAction, lazy loaders, isThemeMode into
+   lib/theme.ts), then collapse App into pure composition.
+
+Per-slice acceptance: deterministic tests in the app-lifecycle pattern, both
+typechecks, AST layer/hooks gates, test:app-lifecycle and the app-browser
+replay; every retired App-source string assertion needs a behavioral
+replacement reviewed in that slice (the section-3 list is not fully audited).
+Bundle headroom is thin; never raise budgets. goalSubmit.ts has no production
+callers anymore - delete it with slices 3/4 and point send-failed's scenarios at
+the owner tests. Re-verify both invariants in every browser replay: real
+WorkspacePanel/tree/preview identity on same-project session switches, and
+Composer staying mounted while approval/decision overlays cover it.
+
 Continue with the common resource/UI ownership boundary and full vertical
 domain migration. Do not fix subsequent cases with local timing guards,
 forced remounts, cache clearing or weaker acceptance thresholds.
