@@ -1,4 +1,6 @@
-# Build artifacts
+# Build artifacts. A `go build` of one command writes its binary into the
+# working directory, so every main package in the root module can drop its own
+# name here; repolint's build-artifact rule holds the two lists together.
 /bin/
 /dist/
 /stage/
@@ -8,6 +10,16 @@
 /e2ebench
 /e2ebench.exe
 /context-retrieval
+/compaction
+/context-maintenance-e2e
+/runtime-resume
+/extension-protocol-gen
+/reasonix-plugin-example
+/reasonix-studio-host
+/signpath-contract
+/covergate
+/repolint
+/write_heartbeat
 
 # Website (Astro) build output
 /site/dist/

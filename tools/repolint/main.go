@@ -41,6 +41,7 @@ const (
 	ruleWireParity     = "wire-parity"
 	ruleFrontendParity = "frontend-parity"
 	ruleFlatView       = "flat-view"
+	ruleBuildArtifact  = "build-artifact"
 )
 
 var allRules = []string{
@@ -48,7 +49,7 @@ var allRules = []string{
 	ruleNarrative, ruleFileSize, ruleLayering,
 	ruleFuncSize, ruleComplexity, ruleStructState, ruleRefusalPath, ruleErrorText,
 	ruleClaudeDialect, ruleSpecParity, ruleWireParity, ruleOrphan,
-	ruleFrontendParity, ruleFlatView,
+	ruleFrontendParity, ruleFlatView, ruleBuildArtifact,
 }
 
 func main() {
@@ -177,6 +178,7 @@ func run(root string) ([]Finding, error) {
 	findings = append(findings, orphans.findings()...)
 	findings = append(findings, checkLayering(imports)...)
 	findings = append(findings, checkSpecParity(root)...)
+	findings = append(findings, checkBuildArtifacts(root)...)
 	findings = append(findings, wires.findings(root)...)
 	parity, err := checkFrontendParity(root)
 	if err != nil {
