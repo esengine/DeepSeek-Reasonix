@@ -67,7 +67,7 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the item after the one that hangs is refused: the death
 		// then holds a node that was queued and never admitted.
 		return 1, 1
-	case armHostQueued:
+	case armHostQueued, armHeadlessQueuedCancel:
 		// One slot, held by the fan-out dispatched ahead of the invocation.
 		return 1, 1
 	case armSkillQueued, armReadOnlySkillQueued:

@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/agentgraph"
@@ -21,14 +22,41 @@ const (
 	armHostQueued    = "interactive-host-skill-queued-crash"
 	armHostRunning   = "interactive-host-skill-running-crash"
 	armHostCancel    = "interactive-host-skill-cancel"
+	// The headless counterpart: the controller's own synchronous entry point,
+	// whose caller owns both the context and the cancellation. It is measured
+	// apart from the four above and compared to them, never read for them.
+	armHeadlessCompleted     = "headless-host-skill-completed"
+	armHeadlessRunningCancel = "headless-host-skill-running-cancel"
+	armHeadlessQueuedCancel  = "headless-host-skill-queued-cancel"
 )
+
+func headlessHostArm(name string) bool {
+	switch name {
+	case armHeadlessCompleted, armHeadlessRunningCancel, armHeadlessQueuedCancel:
+		return true
+	}
+	return false
+}
+
+// callerStopArm names the arms a caller stops through its own context. The
+// controller never admitted these turns, so its own cancel holds nothing for
+// them — reading one surface with the other's stop is a mistake this probe has
+// already made once.
+func callerStopArm(name string) bool {
+	return name == armHeadlessRunningCancel || name == armHeadlessQueuedCancel
+}
 
 func hostExecArm(name string) bool {
 	switch name {
 	case armHostCompleted, armHostQueued, armHostRunning, armHostCancel:
 		return true
 	}
-	return false
+	return headlessHostArm(name)
+}
+
+// queuedHostArm names the arms whose ceiling is filled before the invocation.
+func queuedHostArm(name string) bool {
+	return name == armHostQueued || name == armHeadlessQueuedCancel
 }
 
 // The four identities one host-started run can be known by. They are printed
@@ -44,16 +72,15 @@ const (
 	// probeHostStanding is what the call itself was doing at the reading:
 	// admitted or held back, its child in the provider or not.
 	probeHostStanding = "probe:host-standing"
+	// probeHostAuthority is the snapshot at the same instant: what a reader
+	// starting from the authority would hold, on either surface.
+	probeHostAuthority = "probe:host-authority"
 )
 
 // hostSlashInput is what a person types. The task carries the child sentinel so
 // the scripted provider knows how this arm's child behaves.
 func hostSlashInput(arm string) string {
-	child := childHang
-	if arm == armHostCompleted {
-		child = childDone
-	}
-	return "/" + probeSkillName + " " + child + " host-started work"
+	return "/" + probeSkillName + " " + hostChildSentinel(arm) + " host-started work"
 }
 
 // runHostExecConstruct drives one interactive slash invocation and dies where
@@ -61,19 +88,35 @@ func hostSlashInput(arm string) string {
 // fleet, which is dispatched through Run rather than Submit: Run is never
 // admitted through the turn gate, so the slash the arm measures can still be.
 func runHostExecConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, prov *scripted, turn int) error {
-	if arm == armHostQueued {
+	if queuedHostArm(arm) {
 		go func() { _ = ctrl.Run(ctx, fanOutTurn(turn+1, fleetHolderSentinel)) }()
 		if err := waitForCeiling(prov); err != nil {
 			return err
 		}
 	}
-	go ctrl.Submit(hostSlashInput(arm))
-	if err := waitForHostExec(ctrl, prov, arm); err != nil {
+	// Each surface is entered and stopped by the owner it has: the controller's
+	// gate for a turn it admitted, and the caller's own context for a
+	// synchronous call it never did.
+	callerCtx, stopCaller := context.WithCancel(ctx)
+	defer stopCaller()
+	var answered atomic.Bool
+	if headlessHostArm(arm) {
+		go func() {
+			_, _ = ctrl.RunSubagentProfile(callerCtx, probeSkillName, hostHeadlessTask(arm), false)
+			answered.Store(true)
+		}()
+	} else {
+		go ctrl.Submit(hostSlashInput(arm))
+	}
+	if err := waitForHostExec(ctrl, prov, arm, &answered); err != nil {
 		return err
 	}
 	stop := ""
-	if arm == armHostCancel {
+	switch {
+	case arm == armHostCancel:
 		stop = stopHostExec(ctrl, prov)
+	case callerStopArm(arm):
+		stop = stopHostCaller(ctrl, prov, arm, stopCaller)
 	}
 	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
 	recordHostIdentities(&obs, ctrl, sink, prov, arm)
@@ -97,10 +140,49 @@ func recordHostIdentities(obs *Observation, ctrl *control.Controller, sink *grap
 	obs.Progress[probeHostParentID] = []string{orNone(join(hostParentLineage(*obs)))}
 	obs.Progress[probeHostExecution] = []string{orNone(join(hostExecutions(*obs)))}
 	obs.Progress[probeHostStanding] = []string{hostStanding(ctrl, prov, arm)}
+	// The authority, read at the same instant. It is what a reader starts from
+	// on either surface, so it is where the two are compared — the delta stream
+	// exists only where a sink does, and a synchronous caller has none.
+	obs.Progress[probeHostAuthority] = []string{hostAuthorityNodes(ctrl)}
+}
+
+// hostHeadlessTask is what the controller's own entry point is asked to do.
+func hostHeadlessTask(arm string) string {
+	return hostChildSentinel(arm) + " host-started work"
+}
+
+func hostAuthorityNodes(ctrl *control.Controller) string {
+	var out []string
+	for _, n := range ctrl.ExecutionGraph().Graph.Nodes {
+		if ofHostExecution(n.ID) {
+			out = append(out, n.ID+":"+orDash(string(n.State)))
+		}
+	}
+	sort.Strings(out)
+	return orNone(join(out))
+}
+
+// stopHostCaller stops work through the only owner a synchronous call has: the
+// context its caller passed in. The controller's gate never admitted this turn,
+// so asking it to stop one would be reading a surface with another's stop.
+func stopHostCaller(ctrl *control.Controller, prov *scripted, arm string, stop func()) string {
+	stopped := time.Now()
+	stop()
+	child := hostChildSentinel(arm)
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) && !prov.fleets.held(childLeft(child)) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	live := "gone"
+	if prov.fleets.held(childEntered(child)) && !prov.fleets.held(childLeft(child)) {
+		live = "still running"
+	}
+	return fmt.Sprintf("turn=%s work=%s ctx=%t after=%s", turnStanding(ctrl, arm), live,
+		prov.fleets.held(childCtxDone(child)), time.Since(stopped).Round(time.Second))
 }
 
 func hostChildSentinel(arm string) string {
-	if arm == armHostCompleted {
+	if arm == armHostCompleted || arm == armHeadlessCompleted {
 		return childDone
 	}
 	return childHang
@@ -183,21 +265,28 @@ func waitForCeiling(prov *scripted) error {
 // waitForHostExec blocks until the invocation stands where this arm dies. The
 // queued arm asks a negative — the child never arrived while the ceiling was
 // full — so it settles and asks again rather than reading a race.
-func waitForHostExec(ctrl *control.Controller, prov *scripted, arm string) error {
+func waitForHostExec(ctrl *control.Controller, prov *scripted, arm string, answered *atomic.Bool) error {
 	child := hostChildSentinel(arm)
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		switch arm {
-		case armHostQueued:
-			if ctrl.Running() && !prov.fleets.held(childEntered(child)) {
+		switch {
+		case queuedHostArm(arm):
+			// In flight, read through whichever owner this surface has: a turn
+			// the controller admitted answers its gate, and a synchronous call
+			// it never admitted answers only by returning.
+			if hostInFlight(ctrl, arm, answered) && !prov.fleets.held(childEntered(child)) {
 				time.Sleep(2 * time.Second)
 				if prov.fleets.held(childEntered(child)) {
 					return errUnexpected("a host invocation the scheduler was still holding back", "its child ran")
 				}
 				return nil
 			}
-		case armHostCompleted:
+		case arm == armHostCompleted:
 			if prov.fleets.held(childLeft(child)) && !ctrl.Running() {
+				return nil
+			}
+		case arm == armHeadlessCompleted:
+			if prov.fleets.held(childLeft(child)) {
 				return nil
 			}
 		default:
@@ -210,12 +299,21 @@ func waitForHostExec(ctrl *control.Controller, prov *scripted, arm string) error
 	return errUnexpected("a host invocation "+hostWanted(arm), hostStanding(ctrl, prov, arm))
 }
 
+// hostInFlight reports that the invocation has not answered yet, asked of the
+// owner the surface actually has.
+func hostInFlight(ctrl *control.Controller, arm string, answered *atomic.Bool) bool {
+	if headlessHostArm(arm) {
+		return !answered.Load()
+	}
+	return ctrl.Running()
+}
+
 func hostWanted(arm string) string {
-	switch arm {
-	case armHostQueued:
+	switch {
+	case queuedHostArm(arm):
 		return "held back by a full ceiling"
-	case armHostCompleted:
-		return "that finished and closed its turn"
+	case arm == armHostCompleted || arm == armHeadlessCompleted:
+		return "that finished"
 	}
 	return "with its child inside the provider"
 }
@@ -270,9 +368,9 @@ func hostAdmissionRow(arm string, before Observation) row {
 	entered := firstProgress(before, probeChildEntered) == "true"
 	answer, verdict := "admitted: the child reached the provider", verdictHolds
 	switch {
-	case arm == armHostQueued && !entered:
+	case queuedHostArm(arm) && !entered:
 		answer = "refused: the ceiling was full and the child never arrived"
-	case arm == armHostQueued:
+	case queuedHostArm(arm):
 		answer, verdict = "not held back: the child ran with the ceiling full", verdictViolated
 	case !entered:
 		answer, verdict = "the child never arrived", verdictNotMeasured
@@ -309,11 +407,16 @@ func hostGraphRow(before Observation) row {
 		}
 	}
 	sort.Strings(drawn)
+	// The stream and the authority are reported together because only one of
+	// them is surface-independent: a synchronous caller has no sink to draw on,
+	// and a reader on either surface starts from the snapshot regardless.
+	authority := firstProgress(before, probeHostAuthority)
 	return row{
-		Semantic: "does the live graph hold it", Authority: liveAuthority,
-		Artifact: "none observed", Reconstruction: "in-process only",
-		Before: fmt.Sprintf("%s (graph held %d node(s))", orNone(join(drawn)), len(before.Graph.Nodes)),
-		After:  "—", Verdict: presenceVerdict(len(drawn) > 0),
+		Semantic:  "the graph, drawn and reconstructable",
+		Authority: liveAuthority + " and " + authorityName,
+		Artifact:  "<stem>.execution.jsonl", Reconstruction: "the stream where a sink exists; the authority always",
+		Before: fmt.Sprintf("stream=%s authority=%s", orNone(join(drawn)), authority),
+		After:  "—", Verdict: presenceVerdict(authority != "none"),
 	}
 }
 
@@ -382,7 +485,7 @@ func hostPreStartIdentityRow(arm string, before, after Observation) row {
 	if survives {
 		answer, verdict = "an execution the journal opened: "+join(hostExecutions(after)), verdictHolds
 	}
-	if arm != armHostQueued && firstProgress(before, probeChildEntered) != "true" {
+	if !queuedHostArm(arm) && firstProgress(before, probeChildEntered) != "true" {
 		verdict = verdictNotMeasured
 	}
 	return row{
@@ -394,17 +497,17 @@ func hostPreStartIdentityRow(arm string, before, after Observation) row {
 }
 
 func hostAtDeath(arm string) string {
-	switch arm {
-	case armHostQueued:
+	switch {
+	case queuedHostArm(arm):
 		return "admitted-domain work, held back, no child artifact yet"
-	case armHostCompleted:
+	case arm == armHostCompleted || arm == armHeadlessCompleted:
 		return "ran and returned"
 	}
 	return "executing inside the provider"
 }
 
 func hostCancelRow(arm string, before Observation) row {
-	if arm != armHostCancel {
+	if arm != armHostCancel && !callerStopArm(arm) {
 		return row{
 			Semantic: "what a stop reaches", Authority: "the turn's own cancel",
 			Artifact: "none observed", Reconstruction: "in-process only",
@@ -448,7 +551,7 @@ func hostRestartVerdict(arm string, before Observation, exec, children []string)
 		return verdictHolds
 	case len(children) > 0:
 		return verdictResultDurable
-	case firstProgress(before, probeChildEntered) == "true" || arm == armHostQueued:
+	case firstProgress(before, probeChildEntered) == "true" || queuedHostArm(arm):
 		return graphLostSilent
 	default:
 		return verdictNotMeasured
@@ -477,11 +580,13 @@ func hostRebuilt(o Observation) []string {
 func hostExecArmInvalid(arm string, before Observation) string {
 	entered := firstProgress(before, probeChildEntered) == "true"
 	switch {
-	case arm == armHostQueued && entered:
+	case queuedHostArm(arm) && entered:
 		return "the invocation ran while the ceiling was meant to be full"
-	case arm != armHostQueued && !entered:
+	case !queuedHostArm(arm) && !entered:
 		return "the invocation's child never reached the provider"
-	case len(hostDispatchIDs2(before)) == 0:
+	case headlessHostArm(arm) && len(hostDispatchIDs2(before)) > 0:
+		return "a synchronous call minted a dispatch id, so this was not the headless surface"
+	case !headlessHostArm(arm) && len(hostDispatchIDs2(before)) == 0:
 		return "the host minted no dispatch id, so this was not the slash surface"
 	}
 	return ""

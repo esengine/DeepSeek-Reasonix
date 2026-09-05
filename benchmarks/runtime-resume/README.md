@@ -105,6 +105,9 @@ provider call*.
 | `interactive-host-skill-queued-crash` | the same with the ceiling full, killed while held back | ceilings | what names work the scheduler is holding back? |
 | `interactive-host-skill-running-crash` | the same, killed with the child executing | none | what does a restart inherit? |
 | `interactive-host-skill-cancel` | the same, stopped through the turn that admitted it | none | what does the stop reach, and what history remains? |
+| `headless-host-skill-completed` | the controller's own synchronous entry point, finished | none | does the other host surface leave the same provenance? |
+| `headless-host-skill-running-cancel` | the same, stopped through the caller's context | none | the same, past a stop only its caller owns |
+| `headless-host-skill-queued-cancel` | the same while the scheduler holds it back | ceilings | is an execution named before any child exists? |
 
 ## The delegation matrix
 
@@ -578,6 +581,31 @@ Synthetic host id persisted as lineage: **no**, before and after. The queued arm
 is the one to read twice: the execution exists and is recorded while no child
 artifact does, which is the whole reason the identity could not have been the
 store's ref.
+
+### Two host surfaces, one provenance
+
+A person's `/<skill>` and the controller's own synchronous entry point are
+different surfaces, and they are measured apart and then compared — never read
+for one another. Every provenance row matches: the same host-owned execution
+shape, the same empty lineage, the same journal, the same store join, the same
+restart. Three things differ, and each follows from what the surface *is*:
+
+| | interactive slash | headless call |
+| --- | --- | --- |
+| cancellation owner | the turn's gate | the caller's context |
+| delta stream | draws the node | no sink to draw on |
+| synthetic dispatch id | `slash-skill-N` | none minted |
+
+So the contract is narrower than "the two are identical" and stronger than "both
+work":
+
+> **Host execution provenance is surface-independent. The live delta stream, the
+> synthetic dispatch id, and cancellation ownership are surface-specific.**
+
+The delta stream belongs on that list rather than in the parity failure column
+because the authority — the snapshot, rebuilt from durable facts — holds the node
+on both surfaces. The stream is where a sink exists; the account of what happened
+is not.
 
 ## The one arm that reads the frontend
 

@@ -321,7 +321,7 @@ func holderFleet(arm string) []provider.Chunk {
 // the only arrival that means anything — a filler that hung under the same
 // sentinel would be read as the subject having started.
 func bothHoldersReport(arm string) bool {
-	return queuedTaskArm(arm) || queuedSkillArm(arm) || arm == armHostQueued
+	return queuedTaskArm(arm) || queuedSkillArm(arm) || queuedHostArm(arm)
 }
 
 // refusedFleet asks for admission the scheduler must deny, with every check

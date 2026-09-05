@@ -145,6 +145,9 @@ func arms() []arm {
 		{name: armHostQueued, asks: "what names slash-started work the scheduler is holding back"},
 		{name: armHostCompleted, asks: "what a finished slash invocation leaves besides its answer"},
 		{name: armHostCancel, asks: "what a stop reaches, and what history it leaves"},
+		{name: armHeadlessCompleted, asks: "does the headless host surface leave the same provenance?"},
+		{name: armHeadlessRunningCancel, asks: "the same, stopped through the context its caller holds"},
+		{name: armHeadlessQueuedCancel, asks: "the same while the scheduler is still holding it back"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }
