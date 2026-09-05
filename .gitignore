@@ -20,6 +20,7 @@
 /covergate
 /repolint
 /write_heartbeat
+/catalog-detector
 
 # Website (Astro) build output
 /site/dist/
