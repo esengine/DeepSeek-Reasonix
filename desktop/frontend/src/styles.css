@@ -23842,20 +23842,13 @@ body > .mermaid-diagram--fullscreen {
   background: var(--button-bg);
 }
 
-/* ── Topic bar "More" overflow menu ──────────────────────────────── */
-.topicbar__more {
-  position: relative;
-  display: inline-flex;
-}
-
-/* Borderless icon-only entries: file opener, More menu, workspace toggle,
-/* Borderless icon-only entries: file opener, More menu, workspace toggle,
-   and the utility (search) button. Default state has no background/border —
+/* Borderless icon-only entries: file opener, session actions, workspace toggle,
+/* Borderless icon-only entries: file opener, session actions, workspace toggle,
+   and search. Default state has no background/border —
    hover/focus still highlight so the controls stay discoverable. */
 .topicbar__actions .external-opener,
 .topicbar__actions .external-opener__primary,
 .topicbar__actions .external-opener__menu-trigger,
-.topicbar__actions .topicbar__more .topicbar__action-btn,
 .topicbar__actions .topicbar__chrome-btn,
 .topicbar__actions .topicbar__action-btn--utility {
   border: none !important;
@@ -23867,8 +23860,6 @@ body > .mermaid-diagram--fullscreen {
   border-left: none !important;
 }
 
-.topicbar__actions .topicbar__more .topicbar__action-btn:hover:not(:disabled),
-.topicbar__actions .topicbar__more .topicbar__action-btn:focus-visible:not(:disabled),
 .topicbar__actions .external-opener__primary:hover:not(:disabled),
 .topicbar__actions .external-opener__primary:focus-visible:not(:disabled),
 .topicbar__actions .external-opener__menu-trigger:hover:not(:disabled),
@@ -35851,6 +35842,39 @@ body > .mermaid-diagram--fullscreen {
   pointer-events: none;
 }
 
+/* macOS keeps dock tabs and the fixed workspace toggle in one title row. The
+   toggle stays anchored to the window edge while this row reserves its hit
+   area; the four tabs share the remaining width instead of sliding under it. */
+.app--darwin.app--workbench .workbench-dock__tools,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tools {
+  padding-right: 48px;
+}
+
+.app--darwin.app--workbench .workbench-dock__tabs,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tabs {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  gap: 2px;
+}
+
+.app--darwin.app--workbench .workbench-dock__tab,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tab {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  padding: 0 5px;
+  gap: 4px;
+  justify-content: center;
+}
+
+.app--darwin.app--workbench .workbench-dock__tab-label,
+:root[data-theme-style] .app--darwin.app--workbench .workbench-dock__tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
 /* Workbench keeps its workspace toggle in the fixed top-right dock-toggle
    instead of an AppChrome rail; shift it left of the Windows caption strip
@@ -38436,8 +38460,7 @@ body > .mermaid-diagram--fullscreen {
 .theme-editor__live,
 .theme-gallery__editor > .theme-editor__actions,
 .provider-access-more__menu,
-.topicbar__more-menu,
-.topicbar__more-export-menu,
+.topicbar__export-menu,
 .heartbeat-filter-menu,
 .heartbeat-project-menu,
 .heartbeat-task-menu {

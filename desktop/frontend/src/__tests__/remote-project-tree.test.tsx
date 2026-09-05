@@ -30,7 +30,7 @@ const modeActionsSource = readFileSync(resolve(here, "../lib/useComposerModeActi
 const composerSource = readFileSync(resolve(here, "../components/Composer.tsx"), "utf8");
 const contentMenuSource = readFileSync(resolve(here, "../components/ComposerContentMenuActions.tsx"), "utf8");
 const remoteIntegrationSource = readFileSync(resolve(here, "../lib/useRemoteComposerIntegration.ts"), "utf8");
-const topicbarMenuSource = readFileSync(resolve(here, "../components/TopicbarMoreMenuContent.tsx"), "utf8");
+const topicbarMenuSource = readFileSync(resolve(here, "../components/TopicbarSessionActions.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/remoteProjectBridge.ts"), "utf8");
 const remoteOpenSource = readFileSync(resolve(here, "../../../remote_projects.go"), "utf8");
 const remotePendingSelectionSource = readFileSync(resolve(here, "../../../remote_tab_pending_selection.go"), "utf8");
@@ -205,7 +205,7 @@ ok(
   /if \(remoteSurfaceActive\) return;[\s\S]*?setTerminalPanelOpen/.test(appSource) &&
     /!remoteSurfaceActive && terminalContentVisible/.test(appSource) &&
     /disabled=\{!terminalEnabled\}/.test(topicbarMenuSource),
-  "remote surfaces disable terminal shortcuts, mounting, and menu actions",
+  "remote surfaces disable terminal shortcuts, mounting, and topic bar actions",
 );
 ok(
   /SetRemoteTabComposerProfile\(activeTabId, controllerMode, toolApprovalMode, ""\)/.test(modeActionsSource) &&

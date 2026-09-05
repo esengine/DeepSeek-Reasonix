@@ -192,9 +192,10 @@ console.log("\nbundle budgets");
 // calculation-only block window reduces the measured stable path to 426.0
 // KiB. The outcome envelope, recovery UI, and model-capability resolver from
 // current main-v2 are absorbed by the same reduced startup graph; retain the
-// existing bounded cross-platform metadata/toolchain allowance and let the
-// build gate enforce that the recovered capacity is not spent again.
-const initialJSBudgetKiB = 426.6;
+// existing bounded cross-platform metadata/toolchain allowance. Direct
+// topic-bar actions from the synced main-v2 add 0.186 KiB on the same
+// toolchain; retain only the next one-decimal ceiling on the reduced graph.
+const initialJSBudgetKiB = 426.8;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -353,8 +354,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // session-experience startup wiring and old transcript stack measured roughly
 // 2474 KiB; replacing it with the single-writer kernel measures below 2347.4
 // KiB. The model-capability helper and localized status copy from current
-// main-v2 add a measured 0.9 KiB to that reduced graph; retain only the next
-// one-decimal ceiling rather than restoring any of the removed capacity.
-const rawInitialBudgetKiB = 2_348.4;
+// main-v2 add a measured 0.9 KiB to that reduced graph. Direct topic-bar
+// actions and the macOS dock styling add 0.946 KiB on the same-toolchain base;
+// retain only the next one-decimal ceiling on the reduced graph.
+const rawInitialBudgetKiB = 2_349.4;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
