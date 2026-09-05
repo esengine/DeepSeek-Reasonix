@@ -156,7 +156,7 @@ Plan 修订由独立的源会话队列 owner 管理，仅原请求可释放其�
 当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调及其余
 App 领域仍需继续迁移。
 
-- App 仍3668行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。
+- App 仍3520行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。模块级代码已迁出：标题/topic 纯函数（`lib/sessionTitles.ts`）、浏览器 mock 场景（`lib/mockScenarios.ts`）、todo 折叠键持久化（`lib/todoDismissalStorage.ts`）、通知预览 seam（`app-shell/NoticePreviewPanel.tsx`）与 Shell/文本尺寸热键组件（`app-shell/HotkeyRegistrations.tsx`）；effect 数不变，全部浏览器回放与生命周期测试通过。
 - 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
   Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
   head 或原生平台验收。

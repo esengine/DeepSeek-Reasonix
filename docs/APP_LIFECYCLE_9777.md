@@ -195,8 +195,15 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,668 lines. Six domain owners, remaining effects, the pure shell
-  and removal of its size exception are not complete.
+- App is still 3,520 lines. Six domain owners, remaining effects, the pure shell
+  and removal of its size exception are not complete. Module-level code moved
+  out first: title/topic helpers (`lib/sessionTitles.ts`), browser mock
+  scenarios (`lib/mockScenarios.ts`), todo dismissal persistence
+  (`lib/todoDismissalStorage.ts`), the notice preview seam
+  (`app-shell/NoticePreviewPanel.tsx`) and the Shell/text-size hotkey
+  registrations (`app-shell/HotkeyRegistrations.tsx`). Effect count is
+  unchanged; typechecks, layer/hooks gates and the App lifecycle and browser
+  replays still pass.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,
   both Transcript browser suites, single-writer and repolint passed on this
