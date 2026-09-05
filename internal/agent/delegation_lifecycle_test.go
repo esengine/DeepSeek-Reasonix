@@ -333,3 +333,66 @@ func childrenInStore(t *testing.T, sessionPath string, status SubagentStatus) []
 	}
 	return out
 }
+
+// TestCancelledDelegationSettlesAndOwnsItsTerminal is the cancellation boundary
+// read at the source: with the call's own context cancelled, the orchestration
+// must let the execution go, and what the store holds afterwards depends on
+// whether the child ever ran.
+func TestCancelledDelegationSettlesAndOwnsItsTerminal(t *testing.T) {
+	prov := newLoneProvider()
+	task, ctx, sessionPath, _ := loneFixture(t, prov, 4)
+	ctx, cancel := context.WithCancel(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = task.Execute(ctx, json.RawMessage(`{"prompt":"work","description":"lone","read_only":true}`))
+	}()
+	<-prov.entered
+	cancel()
+	<-done
+
+	if got := journalStanding(sessionPath, loneNodeID); got != "opened+started+settled" {
+		t.Fatalf("journal = %q, want a started execution the orchestration let go of", got)
+	}
+	if cancelled := childrenInStore(t, sessionPath, SubagentCancelled); len(cancelled) == 0 {
+		t.Error("the child ran and was cancelled, and the store kept no cancelled record of it")
+	}
+}
+
+// TestRefusedAdmissionLeavesNoChildTerminal is the ownership line 8c drew. A
+// delegation the scheduler never admitted produced nothing, so the store is
+// owed no record of it — and a failed one there outranks the journal on a
+// rebuild, turning a cancellation into a failure that never happened.
+func TestRefusedAdmissionLeavesNoChildTerminal(t *testing.T) {
+	prov := newLoneProvider()
+	task, ctx, sessionPath, sink := loneFixture(t, prov, 1)
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctx = jobs.WithSession(jobs.WithManager(ctx, jm), "sess-lone")
+	hold, err := task.scheduler.Acquire(context.Background(), AcquireRequest{Writer: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
+
+	out, err := task.Execute(ctx, json.RawMessage(`{"prompt":"work","description":"lone","run_in_background":true,"read_only":true}`))
+	if err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	waitUntil(t, "the job to be refused a slot", func() bool { return sink.sawState(agentgraph.StateQueued) })
+
+	if jobID := extractJobID(out); jobID != "" {
+		jm.KillForSession("sess-lone", jobID)
+		jm.WaitForSession(context.Background(), "sess-lone", []string{jobID}, jobs.WaitOptions{Timeout: 5 * time.Second})
+	}
+	waitUntil(t, "the orchestration to let the refused delegation go", func() bool {
+		return journalStanding(sessionPath, loneNodeID) == "opened+queued:slots+settled"
+	})
+	artifacts, _ := ListSubagentsByParent(filepath.Dir(sessionPath), "probe")
+	for _, a := range artifacts {
+		if a.Meta.ParentToolCallID == loneNodeID {
+			t.Fatalf("store kept %q for a delegation that was never admitted", a.Meta.Status)
+		}
+	}
+}

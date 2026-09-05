@@ -69,6 +69,10 @@ provider call*.
 | `task-foreground-queued` | the ceiling is full when the delegation asks | ceilings | what is it drawn as while the scheduler holds it back? |
 | `task-background-queued` | a backgrounded delegation the ceiling refused, its job already handed over | ceilings | does the handoff reach the durable record? |
 | `task-background-running` | the same, with the slot granted | ceilings | the same, past the point ownership moves |
+| `task-foreground-queued-cancel` | stopped while the scheduler still held it | ceilings | who owns the ending of work that never ran? |
+| `task-background-queued-cancel` | the same, backgrounded: a job killed before admission | ceilings | the same, across the handoff |
+| `task-foreground-running-cancel` | stopped while its child was executing | none | who owns the ending of work that did run? |
+| `task-background-running-cancel` | the same, backgrounded | none | the same, across the handoff |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -130,6 +134,19 @@ its ceiling with a fan-out, and a fan-out records everything — the same journa
 the same scheduler, the same session — so that fleet rides along as the arm's
 positive control: whatever these rows report missing is missing at the entry
 point, not in the machinery.
+
+Four more ask who owns an ending. The boundary is the slot grant, and it is the
+whole answer: an execution the scheduler never admitted produced nothing, so the
+sub-agent store is owed no terminal for it, while one that ran owns its own —
+completed, failed or cancelled. Both halves are read against each other in a row
+that refuses the combination neither layer may produce, a child record for work
+the journal proves never started. A state comparison shows that only as
+"cancelled came back failed"; naming it as a store asked to speak for an
+execution that never happened is what points at the cause.
+
+The two foreground arms are stopped through the turn's own cancel and the two
+background ones through the job list and a kill, which is what a person reaches
+for in each case.
 
 One of the five asks about now rather than about a restart.
 `task-foreground-queued` fills the ceiling first, so the scheduler has to refuse

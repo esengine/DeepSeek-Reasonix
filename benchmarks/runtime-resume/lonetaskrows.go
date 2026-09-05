@@ -29,6 +29,7 @@ func loneTaskRows(arm string, before, after Observation) []row {
 		delegationInterruptionRow(before, after),
 		identityJoinRow(before),
 		heldBackRow(arm, before),
+		startedTerminalRow(before, after),
 		fanOutControlRow(before),
 	}
 }
@@ -42,6 +43,7 @@ func ofLoneTask(id string) bool {
 }
 
 const (
+	crossAuthority   = "the journal and the store, read against each other"
 	liveAuthority    = "event sink (GraphDelta), in-process"
 	journalAuthority = "execjournal, written by the orchestration"
 	storeAuthority   = "sub-agent store"
@@ -365,6 +367,38 @@ func loneStatus(o Observation) string {
 	return ""
 }
 
+// startedTerminalRow refuses the combination neither layer may produce: a child
+// record for work the journal proves was never admitted. A state comparison
+// shows that only as "cancelled came back failed"; this names the cause, which
+// is a store asked to speak for an execution that never happened.
+func startedTerminalRow(before, after Observation) row {
+	if startedAtDeath(before) {
+		return row{
+			Semantic: "a child record for work that never started", Authority: crossAuthority,
+			Artifact:       "subagents/<ref>.meta.json, <stem>.execution.jsonl",
+			Reconstruction: "this delegation was granted a slot, so the store owes a record",
+			Before:         "—", After: "—", Verdict: verdictNotMeasured,
+		}
+	}
+	kept := orNone(join(compact(childFacts(before), childFacts(after))))
+	return row{
+		Semantic: "a child record for work that never started", Authority: crossAuthority,
+		Artifact:       "subagents/<ref>.meta.json, <stem>.execution.jsonl",
+		Reconstruction: "no slot was ever granted, so nothing ran and nothing owes a terminal",
+		Before:         "none", After: kept, Verdict: held(kept == "none"),
+	}
+}
+
+func compact(parts ...string) []string {
+	var out []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // fanOutControlRow is the positive control the queued arm carries with it: the
 // fleet that fills its ceiling runs through the same scheduler in the same
 // session, and records everything. What this arm reports missing is missing at
@@ -431,5 +465,35 @@ func loneTaskArmInvalid(arm string, before Observation) string {
 			return "the delegation never entered its job: " + orNone(phases)
 		}
 	}
+	if cancelTaskArm(arm) {
+		return stoppedArmInvalid(arm, before)
+	}
 	return ""
+}
+
+// stoppedArmInvalid holds a cancellation arm to the side of the boundary it was
+// built for. An arm that stopped the work somewhere else measures a different
+// ownership question and must say so rather than reporting the answer.
+func stoppedArmInvalid(arm string, before Observation) string {
+	entry, ok := loneEntry(before)
+	switch {
+	case !ok:
+		return "the delegation was never recorded, so there is no ownership to read"
+	case entry.SettledAt.IsZero():
+		return "the stop never closed the delegation, so nothing about its ending is settled"
+	case beforeStartArm(arm) && entry.Started():
+		return "the delegation was granted a slot before the stop, so this is not a pre-start cancellation"
+	case !beforeStartArm(arm) && !entry.Started():
+		return "the delegation never held a slot, so this is not a cancellation of work that ran"
+	}
+	return ""
+}
+
+func loneEntry(o Observation) (execjournal.Entry, bool) {
+	for _, e := range o.Executions {
+		if ofLoneTask(e.ID) {
+			return e, true
+		}
+	}
+	return execjournal.Entry{}, false
 }

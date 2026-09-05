@@ -799,7 +799,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			if err := mutationObserver.RegisterWriter(recoveryTaskID, "background_subagent", turn); err != nil {
 				releaseStart()
 				run.Release()
-				return "", errors.Join(err, t.transcripts.SaveFailed(run))
+				return "", err
 			}
 			writerRegistered = true
 		}
@@ -832,11 +832,13 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			// so the parent tool call returns a job id immediately.
 			releaseSlot, slotErr := t.acquireSlot(jobCtx, slotReq, spec.Sched)
 			if slotErr != nil {
-				return FormatSubagentRunResult("", run, true), errors.Join(slotErr, t.transcripts.SaveFailed(run))
+				// A refusal is orchestration, not execution: nothing ran under
+				// this run, so the store is owed no terminal for it.
+				return FormatSubagentRunResult("", run, true), slotErr
 			}
 			defer releaseSlot()
 			if err := life.begin(trk, run); err != nil {
-				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
+				return FormatSubagentRunResult("", run, true), err
 			}
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
 			if err != nil {
@@ -864,7 +866,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	// Foreground: the slot has been held since before the transcript existed.
 	defer run.Release()
 	if err := life.begin(trk, run); err != nil {
-		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+		return "", err
 	}
 	answer, err := runSession(ctx, trk.wrap(), false)
 	if err != nil {

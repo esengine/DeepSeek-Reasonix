@@ -39,20 +39,42 @@ const (
 	// armTaskBgRunning is the same handoff with the slot granted, which is where
 	// ownership of the terminal moves from the caller to the job.
 	armTaskBgRunning = "task-background-running"
+	// The cancellation arms. They ask the one question the five before them
+	// cannot: who owns the ending when work is stopped, on each side of the
+	// boundary that decides whether it ever ran. A child the scheduler never
+	// admitted produced nothing, so the store owes it no terminal at all.
+	armTaskFgQueuedCancel  = "task-foreground-queued-cancel"
+	armTaskBgQueuedCancel  = "task-background-queued-cancel"
+	armTaskFgRunningCancel = "task-foreground-running-cancel"
+	armTaskBgRunningCancel = "task-background-running-cancel"
 )
+
+func cancelTaskArm(name string) bool {
+	switch name {
+	case armTaskFgQueuedCancel, armTaskBgQueuedCancel, armTaskFgRunningCancel, armTaskBgRunningCancel:
+		return true
+	}
+	return false
+}
+
+// beforeStartArm names the arms cancelled while the scheduler still held the
+// delegation, which is the half of the boundary the store must stay out of.
+func beforeStartArm(name string) bool {
+	return name == armTaskFgQueuedCancel || name == armTaskBgQueuedCancel
+}
 
 func loneTaskArm(name string) bool {
 	switch name {
 	case armTaskCompleted, armTaskRunning, armTaskFgQueued, armTaskBgQueued, armTaskBgRunning:
 		return true
 	}
-	return false
+	return cancelTaskArm(name)
 }
 
 // queuedTaskArm names the arms that fill the ceiling before delegating, so the
 // scheduler has to refuse the delegation admission.
 func queuedTaskArm(name string) bool {
-	return name == armTaskFgQueued || name == armTaskBgQueued
+	return name == armTaskFgQueued || name == armTaskBgQueued || beforeStartArm(name)
 }
 
 // childEntered names the record a child leaves when it reaches the provider.
@@ -65,7 +87,11 @@ func childEntered(sentinel string) string { return "child-entered:" + sentinel }
 const probeChildEntered = "probe:delegated-child-entered"
 
 func backgroundTaskArm(name string) bool {
-	return name == armTaskBgQueued || name == armTaskBgRunning
+	switch name {
+	case armTaskBgQueued, armTaskBgRunning, armTaskBgQueuedCancel, armTaskBgRunningCancel:
+		return true
+	}
+	return false
 }
 
 // The sentinels one turn carries. The queued arm names the holder as well: its
@@ -144,6 +170,11 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 			return err
 		}
 	}
+	if cancelTaskArm(arm) {
+		if err := stopDelegation(ctrl, arm); err != nil {
+			return err
+		}
+	}
 	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
 	if queuedTaskArm(arm) {
 		// Whether the delegation's own child ever ran is the fact the live rows
@@ -157,6 +188,46 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 	return nil
 }
 
+// stopDelegation stops the work the way a person does — the turn's own cancel
+// for a foreground run, the job list and a kill for a backgrounded one — and
+// waits for the orchestration to let go of it. What each layer holds then is
+// this arm's whole question, so nothing is read until the record closes.
+func stopDelegation(ctrl *control.Controller, arm string) error {
+	if backgroundTaskArm(arm) {
+		running := ctrl.Jobs()
+		if len(running) == 0 {
+			return errUnexpected("a background job to stop", "none running")
+		}
+		for _, job := range running {
+			ctrl.CancelJob(job.ID)
+		}
+	} else {
+		ctrl.Cancel()
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, e := range control.ExecutionHistory(ctrl.SessionPath()) {
+			if e.ID == parallelLoneNodeID && !e.SettledAt.IsZero() {
+				return nil
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return errUnexpected("the stopped delegation to be let go of",
+		fmt.Sprintf("still open: running=%v cancelRequested=%v journal=%v",
+			ctrl.Running(), ctrl.CancelRequested(), executionStanding(ctrl)))
+}
+
+// executionStanding is every delegation this session opened, with what the
+// journal last said about each: the reading an unexplained timeout needs.
+func executionStanding(ctrl *control.Controller) []string {
+	var out []string
+	for _, e := range control.ExecutionHistory(ctrl.SessionPath()) {
+		out = append(out, e.ID+":"+lifecycleOf(e))
+	}
+	return out
+}
+
 // waitForLoneTask blocks until the delegation stands where this arm dies. The
 // foreground arms read the live graph; the background ones cannot — a handed-off
 // run publishes no node — so they read the progress the parent was told.
@@ -167,7 +238,7 @@ func waitForLoneTask(sink *graphSink, prov *scripted, arm string) error {
 			// A refusal is a state nothing announces, so the arm holds still and
 			// asks again: a child that was merely slow to start would have
 			// arrived by now, and the death would be measuring a race.
-			if arm == armTaskFgQueued {
+			if beforeStartArm(arm) || arm == armTaskFgQueued {
 				time.Sleep(2 * time.Second)
 				return refusalHolding(prov, arm)
 			}
@@ -190,16 +261,15 @@ func refusalHolding(prov *scripted, arm string) error {
 }
 
 func loneTaskReady(sink *graphSink, prov *scripted, arm string) bool {
+	graph, _ := sink.snapshot()
 	switch arm {
-	case armTaskFgQueued:
+	case armTaskFgQueued, armTaskFgQueuedCancel:
 		// The node is drawn — the delegation reached the graph — and its child
 		// has not started, which with the ceiling full is the refusal.
-		graph, _ := sink.snapshot()
 		return loneNodeDrawn(graph) && !prov.fleets.held(childEntered(childHang))
-	case armTaskRunning:
-		graph, _ := sink.snapshot()
+	case armTaskRunning, armTaskFgRunningCancel, armTaskBgRunningCancel:
 		return holdsAll(graph, []agentgraph.NodeState{agentgraph.StateRunning})
-	case armTaskBgQueued:
+	case armTaskBgQueued, armTaskBgQueuedCancel:
 		phases := sink.phaseSeries()[taskCallID]
 		return len(phases) > 0 && phases[len(phases)-1] == string(subagentQueued)
 	case armTaskBgRunning:
@@ -224,9 +294,9 @@ const parallelLoneNodeID = taskCallID + "/sub-1"
 
 func loneTaskWanted(arm string) string {
 	switch arm {
-	case armTaskRunning:
+	case armTaskRunning, armTaskFgRunningCancel, armTaskBgRunningCancel:
 		return "running"
-	case armTaskFgQueued:
+	case armTaskFgQueued, armTaskFgQueuedCancel, armTaskBgQueuedCancel:
 		return "drawn while the scheduler holds it back"
 	case armTaskBgQueued:
 		return "queued for a slot and not started"
