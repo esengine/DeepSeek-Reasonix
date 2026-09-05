@@ -1,5 +1,10 @@
 # PR #9777 review closure and acceptance
 
+The later App-layer implementation status is tracked in
+[App lifecycle checkpoint](APP_LIFECYCLE_9777.md) and its
+[Chinese version](APP_LIFECYCLE_9777.zh-CN.md). Earlier measurements below are
+historical evidence, not final-head qualification.
+
 ## Reviewable slices
 
 1. `9cc1f4ef7`: source/generation/interaction ownership, terminal navigation, cancellable clocks and deterministic async behavior tests.

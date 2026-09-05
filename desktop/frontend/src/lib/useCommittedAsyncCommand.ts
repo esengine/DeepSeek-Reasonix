@@ -1,75 +1,47 @@
-import { useEffect, useInsertionEffect, useMemo, useRef } from "react";
-import type { CommandOutcome } from "./useCommittedCommand";
-import { trackAppOperation } from "../app-runtime/appLifecycleProbe";
+import { useMemo } from "react";
+import { CommandCancelled, executeCapturedCommand, type CommandAuthority, type CommandOutcome } from "./commandOutcome";
+import { useCommittedSlot, type CommittedSlot } from "./useCommittedSlot";
 
-type AsyncCommand<Args extends unknown[], Result> = (...args: Args) => Result;
-type AsyncCommandSlot<Args extends unknown[], Result> = {
-  command?: AsyncCommand<Args, Result>;
-  lifecycle: number;
-  requestId: number;
-  mounted: boolean;
-  disposed: boolean;
+type CommandDefinition<Args extends unknown[], Input, Result> = {
+  capture: (...args: Args) => Input;
+  execute: (input: Input, authority: CommandAuthority) => Result;
 };
 
-async function invokeCommittedAsync<Args extends unknown[], Result>(
-  slot: AsyncCommandSlot<Args, Result>,
-  args: Args,
-): Promise<CommandOutcome<Awaited<Result>>> {
-  const command = slot.command;
-  if (!command || !slot.mounted) {
-    return { status: "cancelled", reason: slot.disposed ? "disposed" : "not-ready" };
-  }
-  const lifecycle = slot.lifecycle;
+function captureAuthority(slot: CommittedSlot<unknown>): CommandAuthority {
+  const epoch = slot.epoch;
   const requestId = ++slot.requestId;
-  trackAppOperation(1);
-  try {
-    const value = await command(...args);
-    if (!slot.mounted || lifecycle !== slot.lifecycle) return { status: "cancelled", reason: "disposed" };
-    if (requestId !== slot.requestId) return { status: "cancelled", reason: "superseded" };
-    return { status: "completed", value: value as Awaited<Result> };
-  } catch (error) {
-    if (!slot.mounted || lifecycle !== slot.lifecycle) return { status: "cancelled", reason: "disposed" };
-    if (requestId !== slot.requestId) return { status: "cancelled", reason: "superseded" };
-    return { status: "failed", error };
-  } finally {
-    trackAppOperation(-1);
-  }
+  return {
+    checkpoint() {
+      if (slot.phase !== "ready" || slot.epoch !== epoch) throw new CommandCancelled("disposed");
+      if (slot.requestId !== requestId) throw new CommandCancelled("superseded");
+    },
+  };
 }
 
-function bindCommittedAsync<Args extends unknown[], Result>(slot: AsyncCommandSlot<Args, Result>) {
-  return (...args: Args) => invokeCommittedAsync(slot, args);
-}
-
-/** Async command authority with explicit terminal outcomes and last-call ownership. */
-export function useCommittedAsyncCommand<Args extends unknown[], Result>(
-  command: AsyncCommand<Args, Result>,
+function bindCommittedAsync<Args extends unknown[], Input, Result>(
+  slot: CommittedSlot<CommandDefinition<Args, Input, Result>>,
 ) {
-  const slotRef = useRef<AsyncCommandSlot<Args, Result>>({
-    lifecycle: 0,
-    requestId: 0,
-    mounted: false,
-    disposed: false,
-  });
-  const slot = slotRef.current;
-  useInsertionEffect(() => {
-    slot.command = command;
-    slot.mounted = true;
-    slot.disposed = false;
-  });
-  useEffect(() => {
-    slot.mounted = true;
-    slot.disposed = false;
-    slot.lifecycle += 1;
-    return () => {
-      slot.mounted = false;
-      slot.disposed = true;
-      slot.lifecycle += 1;
-      slot.requestId += 1;
-      const lifecycle = slot.lifecycle;
-      queueMicrotask(() => {
-        if (!slot.mounted && slot.lifecycle === lifecycle) slot.command = undefined;
-      });
-    };
-  }, [slot]);
+  return (...args: Args): Promise<CommandOutcome<Awaited<Result>>> => {
+    if (!slot.value || slot.phase !== "ready") {
+      return Promise.resolve({ status: "cancelled", reason: slot.phase === "disposed" ? "disposed" : "not-ready" });
+    }
+    const authority = captureAuthority(slot);
+    try {
+      const { capture, execute } = slot.value;
+      return executeCapturedCommand(capture(...args), execute, authority);
+    } catch (error) {
+      return Promise.resolve(error instanceof CommandCancelled
+        ? { status: "cancelled", reason: error.reason }
+        : { status: "failed", error });
+    }
+  };
+}
+
+/** One command lane. Use independent owners for unrelated resource operations. */
+export function useCommittedAsyncCommand<Args extends unknown[], Input, Result>(
+  capture: (...args: Args) => Input,
+  execute: (input: Input, authority: CommandAuthority) => Result,
+) {
+  const slot = useCommittedSlot({ capture, execute });
   return useMemo(() => bindCommittedAsync(slot), [slot]);
 }

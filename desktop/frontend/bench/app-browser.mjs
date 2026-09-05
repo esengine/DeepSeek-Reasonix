@@ -86,9 +86,9 @@ try {
     subscriptions: window.__reasonixAppLifecycle?.snapshot().activeSubscriptions,
     operations: window.__reasonixAppLifecycle?.snapshot().activeOperations,
   }));
-  assert(afterSwitch.projectTree, "same-project session switching does not remount the workspace tree");
-  assert(afterSwitch.subscriptions === 6, `app-wide subscriptions remain singular (${afterSwitch.subscriptions})`);
-  assert(afterSwitch.operations === 0, "settled navigation releases its operation ownership");
+  assert(afterSwitch.projectTree, "same-project session switching preserves the Sidebar project tree (not WorkspacePanel)");
+  assert(afterSwitch.subscriptions === 6, `the six AppRuntimeEffects subscriptions remain singular (${afterSwitch.subscriptions})`);
+  assert(afterSwitch.operations === 0, "instrumented operation owners report zero active operations (not yet all App operations)");
   assert(pageErrors.length === 0, `three-layout replay emits no page errors (${pageErrors.length})`);
 
   const classicPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

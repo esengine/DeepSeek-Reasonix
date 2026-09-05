@@ -1,4 +1,4 @@
-import { useEffect, useInsertionEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Item } from "./useController";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
@@ -48,6 +48,7 @@ export function useNavigationSurface(target: {
       setPreserved(rendered?.items.length ? rendered : null);
       setSurface(beginNavigationSurfaceState(nextIntent));
     });
+    renderedRef.current = null;
   });
   const maskTarget = useCommittedCommand((completedIntent: number) => {
     setSurface((current) => markNavigationTargetMasked(current, completedIntent));
@@ -61,15 +62,20 @@ export function useNavigationSurface(target: {
       outcome,
     });
     setSurface((current) => settleNavigationSurfaceState(current, completedIntent));
+    setPreserved(null);
   });
   const ticket = useMemo<NavigationSurfaceTicket | null>(() => {
     if (!dataReady || intent === null || !target.activeTabId) return null;
     return createNavigationSurfaceTicket(intent, target.activeTabId, target.sessionKey);
   }, [dataReady, intent, target.activeTabId, target.sessionKey]);
   const committedTicketRef = useRef<NavigationSurfaceTicket | null>(null);
-  useInsertionEffect(() => {
+  useLayoutEffect(() => {
     committedTicketRef.current = ticket;
   }, [ticket]);
+  useLayoutEffect(() => () => {
+    committedTicketRef.current = null;
+    renderedRef.current = null;
+  }, []);
   const commitPaint = useCommittedCommand((token: string, outcome: "ready" | "degraded") => {
     const committedTicket = committedTicketRef.current;
     if (!matchesNavigationSurfaceTicket(
@@ -78,9 +84,10 @@ export function useNavigationSurface(target: {
       surface?.intent ?? null,
       target.activeTabId,
       target.sessionKey,
-    )) return false;
+    )) return null;
+    committedTicketRef.current = null;
     settle(committedTicket!.intent, outcome);
-    return true;
+    return committedTicket;
   });
   const commitRendered = useCommittedCommand((rendered: PreservedTranscriptSurface | null) => {
     renderedRef.current = rendered;

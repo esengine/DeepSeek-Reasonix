@@ -59,6 +59,8 @@ export type NavigationSurfaceTicket = Readonly<{
   targetSessionKey: string;
 }>;
 
+let nextPaintReceipt = 0;
+
 /** Opaque public token plus the complete internal target identity. */
 export function createNavigationSurfaceTicket(
   intent: number,
@@ -66,7 +68,7 @@ export function createNavigationSurfaceTicket(
   targetSessionKey: string,
 ): NavigationSurfaceTicket {
   return Object.freeze({
-    token: `navigation-${intent}`,
+    token: `navigation-${intent}-${++nextPaintReceipt}`,
     intent,
     targetTabId,
     targetSessionKey,

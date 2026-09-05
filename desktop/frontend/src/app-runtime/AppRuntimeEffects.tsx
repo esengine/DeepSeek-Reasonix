@@ -11,6 +11,7 @@ import {
 import { generativeMusic, isGenerativeMusicEnabled } from "../lib/generative-music";
 import { startTerminalEventBridge } from "../lib/terminalEvents";
 import { trackAppSubscription } from "./appLifecycleProbe";
+import { createSubscriptionScope } from "../lib/subscriptionScope";
 
 export type RuntimeEventListener = Parameters<typeof onEvent>[0];
 export type RuntimeReadyListener = Parameters<typeof onReady>[0];
@@ -31,46 +32,40 @@ type AppRuntimeEffectsProps = {
   onInitialRemoteStatuses: (statuses: Awaited<ReturnType<typeof app.RemoteConnectionStatuses>>) => void;
 };
 
-function tracked(unsubscribe: () => void): () => void {
-  trackAppSubscription(1);
-  return () => {
-    unsubscribe();
-    trackAppSubscription(-1);
-  };
-}
-
 /** Owns app-wide bridge subscriptions; App regions never subscribe directly. */
 export function AppRuntimeEffects(props: AppRuntimeEffectsProps) {
+  const { onEvent: eventListener, onReady: readyListener, onRebuilt, onRemoteStatus: statusListener,
+    onRemoteForwards: forwardsListener, onRemoteServer: serverListener,
+    onInitialRemoteHosts, onInitialRemoteStatuses, running } = props;
+  useEffect(startTerminalEventBridge, []);
   useEffect(() => {
-    startTerminalEventBridge();
-    const stop = [
-      tracked(onEvent((event) => {
-        props.onEvent(event);
+    const scope = createSubscriptionScope(trackAppSubscription);
+    scope.listen(onEvent, (event) => {
+        eventListener(event);
         if (event.kind === "text" || event.kind === "reasoning" || event.kind === "tool_dispatch") {
           generativeMusic.playTokenNote();
         }
-      })),
-      tracked(onReady(props.onReady)),
-      tracked(onRuntimeRebuilt(props.onRebuilt)),
-      tracked(onRemoteStatus(props.onRemoteStatus)),
-      tracked(onRemoteForwards(props.onRemoteForwards)),
-      tracked(onRemoteServer(props.onRemoteServer)),
-    ];
-    return () => stop.forEach((unsubscribe) => unsubscribe());
-  }, [props.onEvent, props.onReady, props.onRebuilt, props.onRemoteForwards, props.onRemoteServer, props.onRemoteStatus]);
+    });
+    scope.listen(onReady, readyListener);
+    scope.listen(onRuntimeRebuilt, onRebuilt);
+    scope.listen(onRemoteStatus, statusListener);
+    scope.listen(onRemoteForwards, forwardsListener);
+    scope.listen(onRemoteServer, serverListener);
+    return () => scope.dispose();
+  }, [eventListener, readyListener, onRebuilt, forwardsListener, serverListener, statusListener]);
 
   useEffect(() => {
     let disposed = false;
-    void app.RemoteHosts().then((hosts) => { if (!disposed) props.onInitialRemoteHosts(hosts); }).catch(() => {});
-    void app.RemoteConnectionStatuses().then((statuses) => { if (!disposed) props.onInitialRemoteStatuses(statuses); }).catch(() => {});
+    void app.RemoteHosts().then((hosts) => { if (!disposed) onInitialRemoteHosts(hosts); }).catch(() => {});
+    void app.RemoteConnectionStatuses().then((statuses) => { if (!disposed) onInitialRemoteStatuses(statuses); }).catch(() => {});
     return () => { disposed = true; };
-  }, [props.onInitialRemoteHosts, props.onInitialRemoteStatuses]);
+  }, [onInitialRemoteHosts, onInitialRemoteStatuses]);
 
   useEffect(() => {
-    if (props.running && isGenerativeMusicEnabled()) generativeMusic.start();
+    if (running && isGenerativeMusicEnabled()) generativeMusic.start();
     else generativeMusic.stop();
     return () => generativeMusic.stop();
-  }, [props.running]);
+  }, [running]);
 
   return null;
 }

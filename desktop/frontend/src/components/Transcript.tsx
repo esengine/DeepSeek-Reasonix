@@ -37,6 +37,7 @@ import {
   writeTranscriptFoldOverride,
 } from "../lib/transcriptFoldOverrides";
 import { useTranscriptCommand } from "../lib/useTranscriptCommand";
+import { composeDomRef } from "../lib/composeDomRef";
 import { useTranscriptKernel } from "../lib/useTranscriptKernel";
 import { TranscriptHistoryRequest } from "../lib/transcriptHistoryRequest";
 import type { TranscriptQuestionNavigatorHandle } from "./TranscriptQuestionNavigator";
@@ -291,10 +292,7 @@ export function Transcript(props: TranscriptProps) {
     finishProgrammaticScroll: endGesture,
   });
 
-  const setScroller = useTranscriptCommand((node: HTMLDivElement | null) => {
-    setKernelScroller(node);
-    entranceRef.current = node;
-  });
+  const setScroller = useMemo(() => composeDomRef(setKernelScroller, entranceRef), [setKernelScroller, entranceRef]);
   const previousFooterHeight = useRef(footerHeight);
   useLayoutEffect(() => {
     if (previousFooterHeight.current === footerHeight) return;

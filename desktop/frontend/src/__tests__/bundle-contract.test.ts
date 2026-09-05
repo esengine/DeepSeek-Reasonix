@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 let passed = 0;
 let failed = 0;
@@ -18,6 +19,21 @@ function ok(cond: boolean, label: string) {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
+function lazyRuntimeImport(owner: string, target: string): boolean {
+  const file = resolve(here, owner);
+  const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+  let dynamic = false;
+  let eager = false;
+  function visit(node: ts.Node) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)
+      && node.moduleSpecifier.text === target && !node.importClause?.isTypeOnly) eager = true;
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === target) dynamic = true;
+    ts.forEachChild(node, visit);
+  }
+  visit(tree);
+  return dynamic && !eager;
+}
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
@@ -48,17 +64,17 @@ ok(
   "App keeps secondary drawers out of the initial chunk",
 );
 ok(
-  appSource.includes('import("./components/SettingsPanelEntry")') &&
-    appSource.includes('import("./components/HistoryPanel")'),
-  "App loads secondary drawers on demand",
+  lazyRuntimeImport("../app-shell/AppOverlayHost.tsx", "../components/SettingsPanelEntry") &&
+    lazyRuntimeImport("../app-shell/AppOverlayHost.tsx", "../components/HistoryPanel"),
+  "Overlay Host owns lazy secondary drawer imports without an eager runtime edge",
 );
 ok(
   !/import\s+\{\s*ProjectTree\s*\}\s+from\s+["']\.\/components\/ProjectTree["']/.test(appSource),
   "App keeps the project tree out of the first-paint bundle",
 );
 ok(
-  appSource.includes('import("./components/ProjectTree")'),
-  "App loads the project tree when the sidebar mounts",
+  lazyRuntimeImport("../app-shell/SidebarRegion.tsx", "../components/ProjectTree"),
+  "Sidebar Region owns the lazy project tree import without an eager runtime edge",
 );
 ok(
   settingsEntrySource.includes('import "./CompactRatioSettings.css"') &&

@@ -1,4 +1,4 @@
-import React, { StrictMode, Suspense } from "react";
+import React, { StrictMode, Suspense, startTransition } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -31,8 +31,11 @@ function CommandProbe({ revision, suspend = false }: { revision: number; suspend
   return null;
 }
 
+async function executeAddition(input: { base: number; gate: Promise<number> }) {
+  return input.base + await input.gate;
+}
 function AsyncCommandProbe({ revision }: { revision: number }) {
-  asyncCommand = useCommittedAsyncCommand(async (value: number) => revision + value + await asyncGate);
+  asyncCommand = useCommittedAsyncCommand((value: number) => ({ base: revision + value, gate: asyncGate }), executeAddition);
   return null;
 }
 
@@ -49,7 +52,7 @@ try {
   const retainedCommand = command;
   assert.equal(retainedCommand(4), 5);
 
-  for (let revision = 2; revision <= 128; revision += 1) {
+  for (let revision = 2; revision <= 512; revision += 1) {
     await act(async () => root.render(
       <StrictMode><Suspense><CommandProbe revision={revision} /></Suspense></StrictMode>,
     ));
@@ -57,10 +60,16 @@ try {
     assert.equal(retainedCommand(4), revision + 4, "only committed input owns command dispatch");
   }
 
-  await act(async () => root.render(
+  await act(async () => startTransition(() => root.render(
     <StrictMode><Suspense><CommandProbe revision={999} suspend /></Suspense></StrictMode>,
-  ));
-  assert.equal(retainedCommand(4), 132, "abandoned render input never becomes authoritative");
+  )));
+  assert.equal(retainedCommand(4), 516, "abandoned render input never becomes authoritative");
+
+  await act(async () => root.render(<StrictMode><Suspense><CommandProbe revision={999} suspend /></Suspense></StrictMode>));
+  assert.equal(retainedCommand(4), undefined, "a hidden Suspense subtree has no layout-owned command authority");
+  await act(async () => root.render(<StrictMode><Suspense><CommandProbe revision={512} /></Suspense></StrictMode>));
+  assert.equal(command, retainedCommand, "revealing a suspended surface preserves the stable entry");
+  assert.equal(retainedCommand(4), 516, "revealing publishes the current committed input in a fresh lifecycle");
 
   await act(async () => root.unmount());
   assert.equal(retainedCommand(4), undefined, "a retained command is inert after its owner unmounts");

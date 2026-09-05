@@ -387,7 +387,7 @@ eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer h
   await submitPlanDecision(target, {
     action: "exit_plan", leavePlanMode: true, remote: false, goal: "", toolApprovalMode: "ask",
   }, ports);
-  eq(calls.at(-1), "resolve:tab-source:approval-7:exit_plan", "exit-without-executing records the explicit source-bound plan exit last");
+  eq(calls[calls.length - 1], "resolve:tab-source:approval-7:exit_plan", "exit-without-executing records the explicit source-bound plan exit last");
 
   calls.length = 0;
   await submitPlanDecision(target, {

@@ -2781,8 +2781,8 @@ export default function App() {
   const visibleTranscriptTabId = visibleTranscriptSurface?.tabId ?? activeTabId;
   const visibleTranscriptGeometryKey = visibleTranscriptSurface?.geometrySessionKey ?? transcriptGeometrySessionKey;
   const handleSurfacePaintReady = useCommittedCommand((token: string, outcome: "ready" | "degraded") => {
-    if (!commitNavigationSurfacePaint(token, outcome)) return;
-    if (singleSurfaceLayout && activeTabId) commitSingleSurfaceNavigation(activeTabId);
+    const receipt = commitNavigationSurfacePaint(token, outcome);
+    if (singleSurfaceLayout && receipt) commitSingleSurfaceNavigation(receipt.targetTabId);
   });
   const latestGuidanceConsumed = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {

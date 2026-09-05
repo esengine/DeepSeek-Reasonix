@@ -1,4 +1,4 @@
-import React, { act, Suspense } from "react";
+import React, { act, Suspense, startTransition } from "react";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import assert from "node:assert/strict";
@@ -26,7 +26,7 @@ try {
     assert.equal(latest, retainedCommand, "commands retain identity across presentation commits");
     assert.equal(retainedCommand(10), revision + 10, "old holders dispatch to only the latest committed presentation");
   }
-  await act(async () => root.render(<Suspense><Probe revision={999} suspend /></Suspense>));
+  await act(async () => startTransition(() => root.render(<Suspense><Probe revision={999} suspend /></Suspense>)));
   assert.equal(retainedCommand(10), 110, "an abandoned/suspended render cannot acquire command authority");
   console.log("PASS stable Transcript commands use committed state without cross-render callback chains");
 } finally {

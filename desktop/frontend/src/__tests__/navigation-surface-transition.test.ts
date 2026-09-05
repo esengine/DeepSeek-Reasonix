@@ -118,11 +118,9 @@ ok(appSource.includes("items={visibleTranscriptItems}"), "the visible transcript
 ok(appSource.includes("transcript-navigation-overlay"), "navigation renders a blocking transcript overlay");
 ok(/\.transcript-navigation-overlay\s*\{[\s\S]*?background:\s*var\(--chat-bg, var\(--bg\)\)/.test(stylesSource), "the navigation overlay is opaque while target rows settle");
 ok(appSource.includes("live={runtimeTransitioning ? undefined : state.live}"), "App removes source live output during navigation");
-ok(appSource.includes("composer-decision-host--footprint-hidden"), "App preserves the composer footprint during navigation");
 ok(!appSource.includes("hidden={composerSurfaceHidden || undefined}"), "navigation no longer collapses the composer footprint");
-ok(appSource.includes("inert={composerSurfaceHidden ? true : undefined}"), "the hidden composer is inert during navigation");
-ok(appSource.includes("{showTodos && ("), "target Todo footprint is laid out below the mask");
-ok(appSource.includes("{rewindState && ("), "target rewind footprint is laid out below the mask");
+// Masked Composer/Todo/rewind layout is exercised through the mounted production
+// DecisionFooterRegion in decision-footer-lifecycle.test.tsx, not App source text.
 ok(/\.footer--navigation-hidden\s*\{[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;/.test(stylesSource), "masked target footer cannot paint or receive input");
 ok(appSource.includes('style={navigationSurface?.phase === "source-retained"') && appSource.includes("const visibleDecisionSurface = decisionSurface"), "target-masked paint uses the target footer geometry");
 ok((appSource.match(/guardBackendNavigationResult\(\{/g) ?? []).length === 2, "both Reveal paths guard stale backend activation results");
@@ -149,7 +147,7 @@ currentWorkspaceIntent = 31;
 releaseWorkspace("/workspace-a");
 ok(await staleWorkspace === "/workspace-a", "source workspace data may finish after a newer navigation");
 ok(!workspaceCalls.includes("changed") && !workspaceCalls.some((call) => call.startsWith("refresh:")), "stale workspace completion cannot mutate current UI");
-ok(workspaceCalls.at(-1) === "mask:30", "old workspace finally addresses only its own surface intent");
+ok(workspaceCalls[workspaceCalls.length - 1] === "mask:30", "old workspace finally addresses only its own surface intent");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

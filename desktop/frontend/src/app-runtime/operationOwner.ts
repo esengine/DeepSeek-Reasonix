@@ -34,7 +34,7 @@ export type OperationOwner = ReturnType<typeof createOperationOwner>;
  * Owns a last-request-wins interaction without retaining request payloads.
  * Resource data may complete independently; `owns` governs current UI rights.
  */
-export function createOperationOwner() {
+export function createOperationOwner(trackOperation: (delta: 1 | -1) => void = () => {}) {
   let ownerEpoch = 0;
   let requestId = 0;
   let mounted = false;
@@ -58,7 +58,7 @@ export function createOperationOwner() {
       if (!mounted || epoch !== ownerEpoch) return;
       if (active) {
         terminalCounts.cancelled += 1;
-        trackAppOperation(-1);
+        trackOperation(-1);
       }
       active = undefined;
       mounted = false;
@@ -67,7 +67,7 @@ export function createOperationOwner() {
     begin(target: OperationTarget, navigationIntent?: number): OperationIdentity {
       if (!mounted) throw new Error("operation owner is not mounted");
       if (active) terminalCounts.cancelled += 1;
-      else trackAppOperation(1);
+      else trackOperation(1);
       active = freezeIdentity({
         ownerEpoch,
         requestId: ++requestId,
@@ -91,7 +91,7 @@ export function createOperationOwner() {
     finish(identity: OperationIdentity, status: OperationTerminalStatus = "completed"): boolean {
       if (!this.owns(identity)) return false;
       active = undefined;
-      trackAppOperation(-1);
+      trackOperation(-1);
       terminalCounts[status] += 1;
       return true;
     },
@@ -109,4 +109,3 @@ export function createOperationOwner() {
     },
   };
 }
-import { trackAppOperation } from "./appLifecycleProbe";
