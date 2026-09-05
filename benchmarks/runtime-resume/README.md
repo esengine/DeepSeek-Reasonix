@@ -167,10 +167,23 @@ execution is the one shape no later reader can place.
 ### Open, and deliberately not closed here
 
 **Delivery obligations across invocation surfaces.** `run_skill(review)` requires
-a typed verdict; `task(profile=review)` does not. That divergence is about what a
-profile name carries, not about how an execution is owned, so the convergence
-deliberately left it alone: deriving the obligation from the worker's name would
-have changed a delivery contract as a side effect of unifying a lifecycle.
+a typed verdict; `task(profile=review)` does not. Asking why the second one lacks
+it turned out to be the wrong question — `internal/boot/review_obligation_test.go`
+traced the requirement to its source and found none.
+
+Neither `skill.Skill` nor `agent.ProfileDefinition` has a field that could
+express it, checked over the types so a field added later is caught too. What is
+left is a switch on the worker's *name*, and the cross-wiring shows the name is
+the whole of it: an ordinary worker that borrows the name acquires the
+obligation, and the reviewer renamed loses it. One surface projects that switch
+and the other never did.
+
+So there is nothing for `task(profile=review)` to inherit. The requirement is not
+a property of the reviewer; it is something one compiler adds on recognising a
+word — the phrase-table shape this repo retires wherever it finds one. The
+tempting fix is also the bug: `if worker.Name == "review"` in the task compiler
+would not close a gap, it would put the same undeclared derivation in a second
+place. An owner has to exist before either surface can project it.
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
