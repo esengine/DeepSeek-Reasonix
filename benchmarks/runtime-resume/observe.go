@@ -73,6 +73,9 @@ type Observation struct {
 	// which cannot say whether a cause was reported once or replaced.
 	WaitCauses map[string]int      `json:"wait_causes,omitempty"`
 	WaitSeries map[string][]string `json:"wait_series,omitempty"`
+	// Progress is every parent-facing subagent status, per call. A background
+	// delegation draws no node, so this is where its live evidence is.
+	Progress map[string][]string `json:"progress,omitempty"`
 	// SettledWorkers and QueuedWorkers are the transition arm's evidence that
 	// capacity was actually freed while a refusal still stood.
 	SettledWorkers int           `json:"settled_workers"`
@@ -316,6 +319,7 @@ func capture(phase, arm, bootSystem string, ctrl *control.Controller, sink *grap
 		Graph:                 graphObs(graph, deltas),
 		WaitCauses:            waitCauseCounts(graph),
 		WaitSeries:            sink.waitSeries(),
+		Progress:              sink.phaseSeries(),
 		SettledWorkers:        settledWorkers(graph),
 		QueuedWorkers:         queuedWorkers(graph),
 		Children:              childrenObs(root, path),

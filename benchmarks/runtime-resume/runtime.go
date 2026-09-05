@@ -76,9 +76,22 @@ type graphSink struct {
 	// only the latest, which cannot say whether a cause was reported once or
 	// replaced — and that is exactly what the transition arm asks.
 	waits map[string][]string
+	// phases is every subagent status the parent was told, per call. A run
+	// handed to a job publishes no graph node at all, so for those this is the
+	// only live evidence that anything happened.
+	phases map[string][]string
 }
 
 func (s *graphSink) Emit(e event.Event) {
+	if id, phase, ok := progressPhase(e); ok {
+		s.mu.Lock()
+		if s.phases == nil {
+			s.phases = map[string][]string{}
+		}
+		s.phases[id] = append(s.phases[id], phase)
+		s.mu.Unlock()
+		return
+	}
 	if e.Kind != event.GraphDelta || e.Graph == nil {
 		return
 	}
@@ -101,6 +114,17 @@ func (s *graphSink) snapshot() (agentgraph.Graph, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.graph, s.deltas
+}
+
+// phaseSeries is every status published for one call, in publication order.
+func (s *graphSink) phaseSeries() map[string][]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string][]string{}
+	for id, seq := range s.phases {
+		out[id] = append([]string(nil), seq...)
+	}
+	return out
 }
 
 // waitSeries is every cause published for one node, in publication order.
@@ -142,7 +166,8 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // denied gate the dispatch is refused before any child starts and the arm
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
-	if graphArm(arm) || uiArm(arm) || schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) {
+	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) ||
+		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"

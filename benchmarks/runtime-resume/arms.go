@@ -28,7 +28,7 @@ type arm struct {
 // effect cannot be read out of the result.
 func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
-		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name)
+		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) && !loneTaskArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -101,6 +101,10 @@ func arms() []arm {
 		{name: armGraphRunning, asks: "a fan-out with a child still executing when the process died"},
 		{name: armGraphMixed, asks: "a fan-out holding completed, failed, adopted and running at once"},
 		{name: armUIGraphMixed, asks: "which door each fact reaches the frontend through, after a death"},
+		{name: armTaskCompleted, asks: "a lone delegation that finished, in a turn that closed"},
+		{name: armTaskRunning, asks: "a lone delegation still executing when the process died"},
+		{name: armTaskBgQueued, asks: "a backgrounded delegation the ceiling refused, with its job already handed over"},
+		{name: armTaskBgRunning, asks: "a backgrounded delegation executing inside its job"},
 		{name: armWaitSlots, asks: "an item the session's total ceiling refused"},
 		{name: armWaitWriters, asks: "an item the writer ceiling refused, with total capacity free"},
 		{name: armWaitClaim, asks: "an item a path conflict refused, with both ceilings free"},

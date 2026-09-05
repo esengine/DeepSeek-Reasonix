@@ -1,0 +1,191 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"slices"
+	"time"
+
+	"reasonix/internal/agentgraph"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/provider"
+)
+
+// The four single-delegation arms. A lone task is not another executor: it
+// reaches the same RunProfileSpec a fleet item does and asks the same scheduler
+// for a slot. What these ask is whether that shared chain is wired to the
+// durable authority the fan-out arms established — and where, exactly, it stops
+// being wired, which is a different question from "does it have a graph".
+const (
+	// armTaskCompleted lets the delegation finish and the turn close. Nothing is
+	// interrupted, so a loss here is not about interruption: it says the run's
+	// provenance was never durable at all.
+	armTaskCompleted = "task-completed"
+	// armTaskRunning kills the process with the child mid-execution, the same
+	// death the fan-out arms take.
+	armTaskRunning = "task-running"
+	// armTaskBgQueued is the one the foreground arms cannot stand in for: a
+	// background run hands its execution to a job and asks for a slot inside it,
+	// so the parent tool call has already returned when the refusal happens.
+	armTaskBgQueued = "task-background-queued"
+	// armTaskBgRunning is the same handoff with the slot granted, which is where
+	// ownership of the terminal moves from the caller to the job.
+	armTaskBgRunning = "task-background-running"
+)
+
+func loneTaskArm(name string) bool {
+	switch name {
+	case armTaskCompleted, armTaskRunning, armTaskBgQueued, armTaskBgRunning:
+		return true
+	}
+	return false
+}
+
+func backgroundTaskArm(name string) bool {
+	return name == armTaskBgQueued || name == armTaskBgRunning
+}
+
+// The sentinels one turn carries. The queued arm names the holder as well: its
+// ceiling has to be occupied before the delegation asks for a slot, or the
+// refusal it is built to record never happens.
+const (
+	taskSentinel   = "PROBE-TASK"
+	taskCallID     = "probe_task"
+	taskHoldsFirst = fleetHolderSentinel + " " + taskSentinel
+)
+
+// loneTaskCall is the delegation itself, dispatched through the tool a model
+// calls. Nothing here reaches past the tool's own arguments: the probe measures
+// the production path, so it must enter it the way a model does.
+func loneTaskCall(arm string) []provider.Chunk {
+	prompt, description := childDone+" lone task", "completes"
+	if arm != armTaskCompleted {
+		prompt, description = childHang+" lone task", "still executing at death"
+	}
+	args, _ := json.Marshal(map[string]any{
+		"prompt": prompt, "description": description,
+		"run_in_background": backgroundTaskArm(arm),
+	})
+	return []provider.Chunk{{
+		Type:     provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{ID: taskCallID, Name: "task", Arguments: string(args)},
+	}}
+}
+
+// probeStepIDs are the host's open steps, in the order they have to be signed.
+// The arm whose turn ends has to close them: a delivery is refused while the
+// list is open, and a todo_write that marks an item completed on its own is
+// refused too — the sign-off is the only door.
+func probeStepIDs() []string { return []string{"probe_step_01", "probe_step_02", "probe_step_03"} }
+
+// signStep signs off one step per round, which is what the host accepts: the
+// sign-off promotes the next item, so two in one round sign against a list that
+// no longer stands.
+func signStep(id string) []provider.Chunk {
+	args, _ := json.Marshal(map[string]any{
+		"step_id": id,
+		"result":  "the probe drove this step to its end",
+		"evidence": []map[string]any{
+			{"kind": "manual", "summary": "the probe established this state directly"},
+		},
+	})
+	return []provider.Chunk{{
+		Type:     provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{ID: "probe_sign_" + id, Name: "complete_step", Arguments: string(args)},
+	}}
+}
+
+// loneTaskSentinels is what this arm's one prompt carries.
+func loneTaskSentinels(arm string) string {
+	if arm == armTaskBgQueued {
+		return taskHoldsFirst
+	}
+	return taskSentinel
+}
+
+// runLoneTaskConstruct drives one delegation and dies at the moment this arm is
+// about. The completed arm is the exception that proves the rest: it lets the
+// turn close, so what it loses was never about dying inside one.
+func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, turn int) error {
+	// One turn, whatever the arm needs in it: a session admits no second one. The
+	// queued arm's ceiling is filled by a background fleet named in the same
+	// prompt, whose own child says when the slot is taken.
+	prompt := fanOutTurn(turn+1, loneTaskSentinels(arm))
+	if arm == armTaskCompleted {
+		if err := ctrl.Run(ctx, prompt); err != nil {
+			return fmt.Errorf("delegating turn: %w", err)
+		}
+	} else {
+		go func() { _ = ctrl.Run(ctx, prompt) }()
+		if err := waitForLoneTask(sink, arm); err != nil {
+			return err
+		}
+	}
+	if err := writeObservation(root, capture("construct", arm, bootSystem, ctrl, sink, root)); err != nil {
+		return err
+	}
+	os.Exit(0)
+	return nil
+}
+
+// waitForLoneTask blocks until the delegation stands where this arm dies. The
+// foreground arms read the live graph; the background ones cannot — a handed-off
+// run publishes no node — so they read the progress the parent was told.
+func waitForLoneTask(sink *graphSink, arm string) error {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if loneTaskReady(sink, arm) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	graph, _ := sink.snapshot()
+	return errUnexpected("a lone delegation "+loneTaskWanted(arm),
+		nodeStates(graph)+" progress="+fmt.Sprint(sink.phaseSeries()))
+}
+
+func loneTaskReady(sink *graphSink, arm string) bool {
+	switch arm {
+	case armTaskRunning:
+		graph, _ := sink.snapshot()
+		return holdsAll(graph, []agentgraph.NodeState{agentgraph.StateRunning})
+	case armTaskBgQueued:
+		phases := sink.phaseSeries()[taskCallID]
+		return len(phases) > 0 && phases[len(phases)-1] == string(subagentQueued)
+	case armTaskBgRunning:
+		return slices.Contains(sink.phaseSeries()[taskCallID], subagentRunning)
+	}
+	return false
+}
+
+func loneTaskWanted(arm string) string {
+	switch arm {
+	case armTaskRunning:
+		return "running"
+	case armTaskBgQueued:
+		return "queued for a slot and not started"
+	}
+	return "running in its job"
+}
+
+// The two phases the probe waits on. They are the parent-facing statuses a
+// background delegation emits, and for a handed-off run they are the only live
+// evidence there is.
+const (
+	subagentQueued  = "queued"
+	subagentRunning = "running"
+)
+
+// progressPhase reads one subagent status event. The tool id is the parent call
+// the delegation was made from, which is also what the graph node hangs under
+// and what the sub-agent store records as its parent — the join this arm exists
+// to check rather than assume.
+func progressPhase(e event.Event) (id, phase string, ok bool) {
+	if e.Kind != event.ToolProgress || e.Tool.Name != event.SubagentProgressStatusName {
+		return "", "", false
+	}
+	return e.Tool.ID, e.Tool.Output, e.Tool.ID != ""
+}

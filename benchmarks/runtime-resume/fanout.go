@@ -289,6 +289,12 @@ func holderFleet(arm string) []provider.Chunk {
 		// while the writer ceiling stays full is how the blocker changes.
 		tasks[1] = map[string]any{"id": "h2", "prompt": childRelease + " releasable", "description": "released mid-wait", "read_only": true}
 	}
+	if arm == armTaskBgQueued {
+		// Either item may win the one slot this arm leaves, so both report
+		// holding it: waiting on the wrong one is waiting on a child the
+		// scheduler queued behind the other.
+		tasks[1] = map[string]any{"id": "h2", "prompt": childHold + " second holder", "description": "holds the ceiling", "read_only": true}
+	}
 	return backgroundFleetCall("probe_fleet_holder", tasks)
 }
 

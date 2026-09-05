@@ -64,6 +64,10 @@ provider call*.
 | `graph-running` | a fan-out with one item still executing, then die | none | what does a restart believe about work whose owner is gone? |
 | `graph-mixed` | completed, failed, adopted and running at once, then die | none | the same, with every reachable state and both grants in one death |
 | `ui-graph-mixed` | a settled fan-out and a mid-flight one, then die; a frontend attaches to the resumed process | none | through which door does each fact reach the view? |
+| `task-completed` | one lone delegation, finished, in a turn that closed | none | is a single worker's provenance durable at all? |
+| `task-running` | the same, killed with the child executing | none | what can a restart say about work nobody is running? |
+| `task-background-queued` | a backgrounded delegation the ceiling refused, its job already handed over | ceilings | does the handoff reach the durable record? |
+| `task-background-running` | the same, with the slot granted | ceilings | the same, past the point ownership moves |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -101,6 +105,39 @@ had removed — a different rule answering instead of the one under test.
 `system-swap` pins its fact deliberately: only a **pinned body** rides the
 stable prefix. The saved-fact index is retrieval-only and reached through the
 `memory` tool, so a relevant-activation fact moves nothing.
+
+## The lone-delegation arms
+
+A lone `task` is not a second executor. It reaches the same `RunProfileSpec` a
+fleet item does, asks the same scheduler for a slot, and — since the live graph
+was unified — draws a node through the same publication. So the question these
+four ask is not "does a single task have a graph". It is: **where does that
+shared chain stop being wired to the durable authority the fan-out arms
+established?**
+
+They separate the four deaths that can answer differently. A delegation that
+finished in a turn that closed loses nothing to interruption, so what it cannot
+say afterwards was never durable at all. One killed mid-execution is the
+fan-out arms' death, one entry point over. And the two background arms are the
+ones the foreground cannot stand in for: a backgrounded run hands its execution
+to a job and asks for a slot *inside* it, so the parent tool call has already
+returned when the refusal happens, and the terminal belongs to the job rather
+than to the caller.
+
+Every row is filtered to the delegation under measurement. The queued arm fills
+its ceiling with a fan-out, and a fan-out records everything — the same journal,
+the same scheduler, the same session — so that fleet rides along as the arm's
+positive control: whatever these rows report missing is missing at the entry
+point, not in the machinery.
+
+The identity row is the one that decides how much Step 8 can cost. Four
+spellings are in play — the live node, the call it hangs under, the parent the
+sub-agent store recorded, and the execution a journal would open — and if they
+are already one identity, nothing here needs a new one invented for it.
+
+`read_only_task` is deliberately out of scope: it declares itself ephemeral and
+carries no durable host side effects, so demanding a journal entry from it would
+break a contract rather than close a gap.
 
 ## The one arm that reads the frontend
 

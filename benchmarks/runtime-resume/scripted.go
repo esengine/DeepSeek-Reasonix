@@ -119,6 +119,24 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 	if chunks, ok := s.fanOut(req); ok {
 		return chunks
 	}
+	if s.opensRun(req, taskSentinel) {
+		if s.arm == armTaskBgQueued {
+			// The holder's own child says when the ceiling is occupied.
+			// Dispatching before that lets the delegation win the race and start.
+			<-s.held
+		}
+		return append(loneTaskCall(s.arm), done())
+	}
+	// The one arm whose turn has to close signs the host's steps off first, one
+	// per round, because a turn that called a tool cannot deliver while the list
+	// is open. The latch is read last: a round that could not answer keeps it.
+	if s.arm == armTaskCompleted && s.opened.Load() && hasTool(req.Tools, "complete_step") {
+		for _, id := range probeStepIDs() {
+			if s.fleets.first("sign-" + id) {
+				return append(signStep(id), done())
+			}
+		}
+	}
 	// A terminal arm needs its fan-out to finish and its turn to stay open: a
 	// closed turn would settle the marker, and the process would no longer be
 	// dying inside one.
