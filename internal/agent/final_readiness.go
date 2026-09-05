@@ -489,3 +489,51 @@ func (a *Agent) prepareEvidenceContinuation() bool {
 	a.pending.deliveryRecovery = false
 	return true
 }
+
+// ReadinessResult is the host-consumable outcome of the Delivery final-answer
+// readiness check. The Controller reads it after each goal turn; plain turns
+// receive the same outcome as a FinalReadinessError.
+type ReadinessResult struct {
+	// Ready is true when no missing requirement remains.
+	Ready bool
+	// Missing lists stable category ids of the missing requirements
+	// (project_check, todo, criteria, verification, review, signoff, action,
+	// mutation, capability). Empty when Ready.
+	Missing []string
+	// Reason is the user-facing summary of what is still missing.
+	Reason string
+	// ProgressKey is the host-verifiable progress signature of the current
+	// evidence state. Identical ProgressKey across consecutive goal turns
+	// means no host-observable progress was made.
+	ProgressKey string
+	// Why a candidate on the ledger does not close an obligation. Orthogonal to
+	// Missing: "nothing offered" and "offered, unattributable" differ, and no
+	// candidate means no entry. Reason is one sentence for the model, not this.
+	Proofs []evidence.ReviewProof
+}
+
+// ReadinessResult returns the current final-readiness outcome for the host.
+func (a *Agent) ReadinessResult() ReadinessResult {
+	check := a.finalReadinessCheckFor()
+	out := ReadinessResult{Ready: check.reason == "", ProgressKey: check.progressSignature(), Proofs: a.reviewProofs()}
+	if !out.Ready {
+		out.Missing, out.Reason = check.missingIDs(), check.reason
+	}
+	return out
+}
+
+// reviewProofs reads the ledger's classification of every candidate that failed
+// to prove — independent of readiness, because a run that owes nothing today
+// may owe something after its next write.
+func (a *Agent) reviewProofs() []evidence.ReviewProof {
+	if a == nil || a.task.ledger == nil {
+		return nil
+	}
+	var out []evidence.ReviewProof
+	for _, kind := range evidence.ReviewKinds() {
+		if proof := a.task.ledger.ReviewProofFor(kind); proof.Gap != evidence.ReviewProofNone {
+			out = append(out, proof)
+		}
+	}
+	return out
+}

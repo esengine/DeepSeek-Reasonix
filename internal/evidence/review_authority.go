@@ -50,27 +50,44 @@ const (
 	ReviewProofUngranted
 )
 
+// ReviewProof is why the most recent report of a kind does not close its
+// obligation, and which run submitted it. The id is what makes the gap
+// actionable — "some report did not count" and "the report execution-3 filed
+// carries no grant for this" are different things to be told.
+type ReviewProof struct {
+	Kind              ReviewKind
+	Gap               ReviewProofGap
+	SourceExecutionID string
+}
+
 // ReviewProofGapFor classifies the most recent report of this kind that failed
 // to prove. A report that did prove leaves no gap.
 func (l *Ledger) ReviewProofGapFor(kind ReviewKind) ReviewProofGap {
+	return l.ReviewProofFor(kind).Gap
+}
+
+// ReviewProofFor is the same classification with the offending run named. One
+// walk, one rule: the gap and the id must describe the same receipt, and two
+// passes over the ledger could disagree about which one that was.
+func (l *Ledger) ReviewProofFor(kind ReviewKind) ReviewProof {
+	out := ReviewProof{Kind: kind}
 	if l == nil {
-		return ReviewProofNone
+		return out
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	gap := ReviewProofNone
 	for _, r := range l.receipts {
 		if !r.Success || r.ToolName != reviewReportTool || r.ReportKind != kind {
 			continue
 		}
 		switch {
 		case ReceiptProves(r, kind):
-			gap = ReviewProofNone
+			out.Gap, out.SourceExecutionID = ReviewProofNone, ""
 		case strings.TrimSpace(r.SourceExecutionID) == "":
-			gap = ReviewProofUnattributed
+			out.Gap, out.SourceExecutionID = ReviewProofUnattributed, ""
 		default:
-			gap = ReviewProofUngranted
+			out.Gap, out.SourceExecutionID = ReviewProofUngranted, strings.TrimSpace(r.SourceExecutionID)
 		}
 	}
-	return gap
+	return out
 }

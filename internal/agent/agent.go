@@ -1018,34 +1018,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	return a.runToolLoop(ctx, state)
 }
 
-// ReadinessResult is the host-consumable outcome of the Delivery final-answer
-// readiness check. The Controller reads it after each goal turn; plain turns
-// receive the same outcome as a FinalReadinessError.
-type ReadinessResult struct {
-	// Ready is true when no missing requirement remains.
-	Ready bool
-	// Missing lists stable category ids of the missing requirements
-	// (project_check, todo, criteria, verification, review, signoff, action,
-	// mutation, capability). Empty when Ready.
-	Missing []string
-	// Reason is the user-facing summary of what is still missing.
-	Reason string
-	// ProgressKey is the host-verifiable progress signature of the current
-	// evidence state. Identical ProgressKey across consecutive goal turns
-	// means no host-observable progress was made.
-	ProgressKey string
-}
-
-// ReadinessResult returns the current final-readiness outcome for the host.
-func (a *Agent) ReadinessResult() ReadinessResult {
-	check := a.finalReadinessCheckFor()
-	out := ReadinessResult{Ready: check.reason == "", ProgressKey: check.progressSignature()}
-	if !out.Ready {
-		out.Missing, out.Reason = check.missingIDs(), check.reason
-	}
-	return out
-}
-
 func boolInt(v bool) int {
 	if v {
 		return 1
