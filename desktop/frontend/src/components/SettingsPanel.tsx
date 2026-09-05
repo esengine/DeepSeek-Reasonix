@@ -51,8 +51,8 @@ import {
   type FontFamily,
   type MonoFontFamily,
 } from "../lib/fontFamily";
-import { applySessionExperience, getSessionExperience, type SessionExperience } from "../lib/sessionExperience";
-import { hydrateReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { SessionExperienceSettings } from "./SessionExperienceSettings";
+import { SettingsField, SettingsSection } from "./SettingsForm";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { normalizeToolApprovalMode } from "../lib/types";
 import {
@@ -478,82 +478,6 @@ function settingsPageKind(tab: SettingsTab): "form" | "manager" {
   }
 }
 
-function SettingsSection({
-  title,
-  description,
-  actions,
-  children,
-}: {
-  title?: ReactNode;
-  description?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
-  const hasHead = Boolean(title || description || actions);
-  return (
-    <section className="settings-section">
-      {hasHead && (
-        <div className="settings-section__head">
-          <div>
-            {title && <div className="settings-section__title">{title}</div>}
-            {description && (
-              <div className="settings-section__desc">
-                <SettingsHint hint={description} />
-              </div>
-            )}
-          </div>
-          {actions && <div className="settings-section__actions">{actions}</div>}
-        </div>
-      )}
-      <div className="settings-section__body">{children}</div>
-    </section>
-  );
-}
-
-function SettingsField({
-  label,
-  hint,
-  icon,
-  children,
-  className,
-  stacked = false,
-}: {
-  label: ReactNode;
-  hint?: ReactNode;
-  icon?: ReactNode;
-  children: ReactNode;
-  className?: string;
-  stacked?: boolean;
-}) {
-  return (
-    <div className={`settings-field${stacked ? " settings-field--stacked" : ""}${className ? ` ${className}` : ""}`}>
-      <div className={`settings-field__copy${icon ? " settings-field__copy--icon" : ""}`}>
-        {icon && <span className="settings-field__icon" aria-hidden="true">{icon}</span>}
-        <div className="settings-field__copy-body">
-          <div className="settings-field__label">{label}</div>
-          {hint && (
-            <div className="settings-field__hint">
-              <SettingsHint hint={hint} />
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="settings-field__control">{children}</div>
-    </div>
-  );
-}
-
-function SettingsHint({ hint }: { hint: ReactNode }) {
-  if (typeof hint === "string" || typeof hint === "number") {
-    const label = String(hint);
-    return (
-      <Tooltip label={label} fill block className="settings-field__hint-tooltip">
-        <span className="settings-field__hint-line">{label}</span>
-      </Tooltip>
-    );
-  }
-  return hint;
-}
 
 function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): string {
   switch (id) {
@@ -1644,32 +1568,8 @@ function thinkingModeLabel(mode: string, t: ReturnType<typeof useT>): string {
 function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
-  const [sessionExperience, setSessionExperience] = useState<SessionExperience>(
-    () => getSessionExperience(),
-  );
   const soundPanelId = useId();
-  useEffect(() => {
-    const authoritative = s.sessionExperience === "deep" ? "deep" : "standard";
-    setSessionExperience(authoritative);
-    // Settings reloads are authoritative. This also repairs an optimistic
-    // local value when an older backend or a failed persistence operation
-    // returns a different snapshot.
-    applySessionExperience(authoritative);
-    hydrateReasoningDisplayMode(authoritative === "deep" ? "expanded" : "auto", authoritative === "deep");
-  // Depend on the authoritative snapshot identity as well as its value: a
-  // failed save can reload the same backend value that was present before the
-  // optimistic click, and that reload must still repair local presentation.
-  }, [s]);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
-  const saveSessionExperience = useCallback(async (mode: SessionExperience) => {
-    setSessionExperience(mode);
-    applySessionExperience(mode);
-    hydrateReasoningDisplayMode(mode === "deep" ? "expanded" : "auto", mode === "deep");
-    // apply always reloads Settings on both success and failure. The effect
-    // above reconciles this optimistic presentation to that authoritative
-    // snapshot; never guess a rollback from the pre-save frontend value.
-    await apply(() => app.SetSessionExperience(mode));
-  }, [apply]);
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
@@ -1748,25 +1648,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       </SettingsField>
       </SettingsSection>
 
-      <SettingsSection title={t("settings.general.sectionConversation")} description={t("settings.sessionExperienceHint")}>
-        <SettingsField label={t("settings.sessionExperience")} hint={sessionExperience === "deep" ? t("settings.sessionExperience.deepHint") : t("settings.sessionExperience.standardHint")} icon={<PanelBottom size={18} />}>
-          <div className="set-seg" role="radiogroup" aria-label={t("settings.sessionExperience")}>
-            {(["standard", "deep"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`set-seg__btn${sessionExperience === mode ? " set-seg__btn--on" : ""}`}
-                role="radio"
-                aria-checked={sessionExperience === mode}
-                disabled={busy}
-                onClick={() => void saveSessionExperience(mode)}
-              >
-                {t(`settings.sessionExperience.${mode}`)}
-              </button>
-            ))}
-          </div>
-        </SettingsField>
-      </SettingsSection>
+      <SessionExperienceSettings snapshot={s} busy={busy} apply={apply} />
 
       <SettingsSection title={t("settings.general.sectionSystem")} description={t("settings.general.sectionSystemHint")}>
       <SettingsField label={t("settings.closeBehavior")} hint={<DesktopCloseBehaviorHint backgroundSelected={closeBehavior === "background"} hint={t("settings.closeBehaviorHint")} unavailableHint={t("settings.closeBehaviorUnavailable")} />} icon={<Power size={18} />}>

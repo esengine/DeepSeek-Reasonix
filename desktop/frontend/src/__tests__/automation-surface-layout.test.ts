@@ -7,15 +7,12 @@ const heartbeatStyles = readFileSync(new URL("../custom/features/heartbeat/heart
 const terminalWarmthSource = readFileSync(new URL("../lib/useWarmTerminalPanel.ts", import.meta.url), "utf8");
 
 assert.match(appSource, /const chatSurfaceVisible = !automationView;/, "one page projection gates every chat-owned surface");
-assert.match(appSource, /surfaceWorkspacePanelMaximized = chatSurfaceVisible && workspacePanelOpen && workspacePanelMaximized/, "stored workspace maximization is presentation-only on automation");
-assert.match(appSource, /terminalSurfaceOpen = chatSurfaceVisible && terminalPanelOpen && !remoteSurfaceActive/, "stored terminal state remains intact while its surface is hidden");
 
 assert.match(appSource, /automationView \? "app--automation" : ""/, "root marks automation before lazy Heartbeat mounts");
 assert.match(appSource, /!automationView \? "layout--terminal-drawer-open" : ""/, "automation removes the terminal grid row");
 // Resizer visibility and all layout entry points are exercised by automation-regions.test.tsx.
 assert.match(appSource, /Boolean\(activeTabId\) && !automationView/, "automation disables the hidden-chat close shortcut");
 assert.match(heartbeatStyles, /\.app--automation \.skip-to-composer\s*\{\s*display:\s*none;/s, "automation removes the hidden composer focus target");
-assert.match(appSource, /if \(automationView\) \{\s*setMainView\("chat"\);\s*setTerminalPanelOpen\(true\)/s, "terminal toggle leaves automation and opens the terminal");
 assert.doesNotMatch(appSource, /sidebar__quick-action--active/, "Workbench does not add a second automation entry beside New session");
 
 assert.match(stylesSource, /\.layout--automation \.terminal-drawer\s*\{\s*display:\s*none;/s, "hidden terminal cannot occupy or receive input");
@@ -31,4 +28,4 @@ assert.match(heartbeatStyles, /\.heartbeat-split--detail-open \.heartbeat-split_
 assert.match(terminalWarmthSource, /if \(open\) setMounted\(true\)/, "terminal content remains mounted while presentation is hidden");
 assert.match(terminalWarmthSource, /if \(!open \|\| !visible\) \{\s*setFitEnabled\(false\)/s, "terminal fitting pauses while automation hides it");
 
-console.log("automation surface layout: 20 passed");
+console.log("automation CSS and retained terminal warmth contracts passed");

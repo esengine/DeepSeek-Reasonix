@@ -31,6 +31,8 @@ try {
     "alias, re-export and lazy edges cannot conceal a transitive React dependency");
   write("lib/leaf.ts", "export const value = document.title;");
   assert.ok(checkAppLayers(fixture, options).some((failure) => failure.includes("domain reaches DOM")));
+  write("lib/leaf.ts", "export interface Size { window: number }; export const value = 1;");
+  assert.deepEqual(checkAppLayers(fixture, options), [], "DTO field names are not browser runtime references");
   write("lib/leaf.ts", "import type { ReactNode } from 'react'; export const value = 1;");
   assert.deepEqual(checkAppLayers(fixture, options), []);
   write("lib/leaf.ts", "export const load = (name: string) => import(name);");

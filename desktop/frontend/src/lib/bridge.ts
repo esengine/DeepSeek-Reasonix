@@ -13,7 +13,7 @@ import { t } from "./i18n";
 import { makeMockForkBindings } from "./forkWorktree";
 import { makeMockWorktreeMergeBindings } from "./worktreeMergeMock";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
-import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
+import { DEFAULT_STATUS_BAR_ITEMS } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode } from "./types";
 import { makeMockProjectTreeOrganizationBindings } from "./mockProjectTreeOrganization";
@@ -28,7 +28,7 @@ import type { RemoteProjectBindings } from "./remoteProjectBridge";
 import type { ScrollDiagnosticBindings } from "./scrollDiagnosticBridge";
 import { makeMockMCPAppBindings, type MCPAppBindings } from "./mcpAppBridge";
 import { makeMockPinnedContextBindings, type PinnedContextBindings } from "./pinnedContextBridge";
-import { applyMockLegacyReasoningMode, applyMockSessionExperience } from "./sessionExperienceMock";
+import { createDesktopPreferencesMock } from "./desktopPreferencesMock";
 import type {
   RemoteHostView,
   RemoteHostInput,
@@ -1434,7 +1434,23 @@ function mockExternalOpenerIconDataURL(color: string, label: string): string {
 }
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
-  const remoteProjects = createMockRemoteProjects();
+  // Both bridge families publish into the same catalog, as ListTabs does in
+  // the desktop backend. A remote event is not a second source of tab state.
+  const remoteProjects = createMockRemoteProjects({
+    get: id => { const tab = mockTabs.find(item => item.id === id); return tab && { ...tab }; },
+    publish: tab => {
+      const existing = mockTabs.some(item => item.id === tab.id);
+      mockTabs = mockTabs.map(item => item.id === tab.id ? { ...tab } : tab.active ? { ...item, active: false } : item);
+      if (!existing) mockTabs.push({ ...tab });
+    },
+    remove: id => {
+      if (!mockTabs.some(tab => tab.id === id)) return;
+      if (mockTabs.length === 1) throw new Error("cannot close the last tab");
+      const index = mockTabs.findIndex(tab => tab.id === id), active = mockTabs[index].active;
+      mockTabs = mockTabs.filter(tab => tab.id !== id);
+      if (active) setMockActiveTab(mockTabs[Math.min(index, mockTabs.length - 1)].id);
+    },
+  });
   const freshMock = scenario === "fresh";
   const guidanceMock = scenario === "guidance", recoveryMock = typeof import.meta.env !== "undefined" && import.meta.env.DEV && scenario === "recovery";
   const runningMock = scenario === "running" || guidanceMock;
@@ -4870,22 +4886,7 @@ function makeMockApp(): AppBindings {
           const occurredAt = new Date().toISOString();
           return { id: "dingtalk", label: "DingTalk", status: "ok", message: "Mock dingtalk test sent", messageId: "mock-dingtalk-id", phase: "send", code: "dingtalk_test_send_ok", reportKind: "", reportDetail: "", occurredAt };
         },
-        async SetCloseBehavior(mode: string) {
-          settings.closeBehavior = mode === "quit" ? "quit" : "background";
-        },
-        async SetDisplayMode() { applyMockSessionExperience(settings, "standard"); },
-        async SetStatusBarStyle(style: string) {
-          settings.statusBarStyle = style === "text" ? "text" : "icon";
-        },
-        async SetStatusBarItems(items: string[]) {
-          settings.statusBarItems = normalizeStatusBarItems(items);
-        },
-        async SetDesktopLanguage(lang: string) {
-          settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
-        },
-        async SetDesktopCurrency(currency: string) {
-          settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";
-        },
+        ...createDesktopPreferencesMock(settings),
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
@@ -5029,30 +5030,6 @@ function makeMockApp(): AppBindings {
         },
         async GetDesktopShellStatus() {
           return { trayState: "ready", backgroundCloseAvailable: true } as DesktopShellStatusView;
-        },
-        async SetDesktopCheckUpdates(enabled: boolean) {
-          settings.checkUpdates = enabled;
-        },
-        async SetDesktopUpdateChannel(channel: string) {
-          void channel;
-          settings.updateChannel = "stable";
-        },
-        async SetDesktopTelemetry(enabled: boolean) {
-          settings.telemetry = enabled;
-        },
-        async SetDesktopMetrics(enabled: boolean) {
-          settings.metrics = enabled;
-        },
-    async SetDesktopConversationWidth(width: string) { settings.conversationWidth = width; },
-    async SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto" | "expanded") { applyMockLegacyReasoningMode(settings, mode); },
-    async SetSessionExperience(mode: "standard" | "deep") { applyMockSessionExperience(settings, mode); },
-        async SetExpandThinking() { applyMockSessionExperience(settings, "standard"); },
-        async MigrateDesktopPreferences(language: string, theme: string, style: string) {
-          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
-          if (!settings.desktopTheme && !settings.desktopThemeStyle) {
-            settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
-            settings.desktopThemeStyle = style;
-          }
         },
     async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
       settings.agent = { ...settings.agent, temperature, maxSteps, plannerMaxSteps, systemPrompt };
@@ -5337,9 +5314,10 @@ function makeMockApp(): AppBindings {
       return { ...mockTabs[0] };
     },
     async SetActiveTab(_tabID: string) {
-      setMockActiveTab(_tabID);
       const tab = mockTabs.find((item) => item.id === _tabID);
-      if (tab) queueMockTopicRuntime(tab);
+      if (!tab) throw new Error(`tab ${_tabID} not found`);
+      setMockActiveTab(_tabID);
+      if (!tab.remote) queueMockTopicRuntime(tab);
     },
     async ReorderTabs(_tabIDs: string[]) {
       const byId = new Map(mockTabs.map((tab) => [tab.id, tab]));

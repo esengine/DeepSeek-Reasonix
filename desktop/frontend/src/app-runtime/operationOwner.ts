@@ -8,6 +8,7 @@ export type OperationIdentity = {
   requestId: number;
   target: OperationTarget;
   navigationIntent?: number;
+  channel: string;
 };
 
 export type OperationTerminalStatus = "completed" | "failed" | "cancelled";
@@ -38,7 +39,7 @@ export function createOperationOwner(trackOperation: (delta: 1 | -1) => void = (
   let ownerEpoch = 0;
   let requestId = 0;
   let mounted = false;
-  let active: OperationIdentity | undefined;
+  const active = new Map<string, OperationIdentity>();
   const terminalCounts: Record<OperationTerminalStatus, number> = {
     completed: 0,
     failed: 0,
@@ -50,47 +51,50 @@ export function createOperationOwner(trackOperation: (delta: 1 | -1) => void = (
       if (mounted) return ownerEpoch;
       ownerEpoch += 1;
       mounted = true;
-      active = undefined;
+      active.clear();
       return ownerEpoch;
     },
 
     unmount(epoch: number): void {
       if (!mounted || epoch !== ownerEpoch) return;
-      if (active) {
+      for (const _identity of active.values()) {
         terminalCounts.cancelled += 1;
         trackOperation(-1);
       }
-      active = undefined;
+      active.clear();
       mounted = false;
     },
 
-    begin(target: OperationTarget, navigationIntent?: number): OperationIdentity {
+    begin(target: OperationTarget, navigationIntent?: number, channel = "navigation"): OperationIdentity {
       if (!mounted) throw new Error("operation owner is not mounted");
-      if (active) terminalCounts.cancelled += 1;
+      if (active.has(channel)) terminalCounts.cancelled += 1;
       else trackOperation(1);
-      active = freezeIdentity({
+      const identity = freezeIdentity({
         ownerEpoch,
         requestId: ++requestId,
         target,
+        channel,
         ...(navigationIntent === undefined ? {} : { navigationIntent }),
       });
-      return active;
+      active.set(channel, identity);
+      return identity;
     },
 
     owns(identity: OperationIdentity): boolean {
+      const current = active.get(identity.channel);
       return Boolean(
         mounted
-        && active
+        && current
         && identity.ownerEpoch === ownerEpoch
-        && identity.requestId === active.requestId
-        && operationTargetsEqual(identity.target, active.target)
-        && identity.navigationIntent === active.navigationIntent,
+        && identity === current
+        && operationTargetsEqual(identity.target, current.target)
+        && identity.navigationIntent === current.navigationIntent,
       );
     },
 
     finish(identity: OperationIdentity, status: OperationTerminalStatus = "completed"): boolean {
       if (!this.owns(identity)) return false;
-      active = undefined;
+      active.delete(identity.channel);
       trackOperation(-1);
       terminalCounts[status] += 1;
       return true;
@@ -101,7 +105,7 @@ export function createOperationOwner(trackOperation: (delta: 1 | -1) => void = (
     },
 
     get activeCount(): number {
-      return active ? 1 : 0;
+      return active.size;
     },
 
     get diagnostics(): Readonly<Record<OperationTerminalStatus, number>> {

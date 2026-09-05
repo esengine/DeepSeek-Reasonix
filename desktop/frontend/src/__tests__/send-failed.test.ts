@@ -376,7 +376,7 @@ eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer h
   const target = { tabId: "tab-source", sessionKey: "session-source:1", promptId: "approval-7" };
   await submitPlanDecision(target, {
     action: "start_execution", leavePlanMode: true, remote: false, goal: "", toolApprovalMode: "ask",
-  }, ports);
+  }, ports, { checkpoint() {}, ownsUI: () => true });
   eq(
     calls.join("|"),
     "mode:tab-source:normal|plan:tab-source:false|profile:tab-source:normal|resolve:tab-source:approval-7:start_execution",
@@ -386,13 +386,13 @@ eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer h
   calls.length = 0;
   await submitPlanDecision(target, {
     action: "exit_plan", leavePlanMode: true, remote: false, goal: "", toolApprovalMode: "ask",
-  }, ports);
+  }, ports, { checkpoint() {}, ownsUI: () => true });
   eq(calls[calls.length - 1], "resolve:tab-source:approval-7:exit_plan", "exit-without-executing records the explicit source-bound plan exit last");
 
   calls.length = 0;
   await submitPlanDecision(target, {
     action: "revise_plan", leavePlanMode: false, remote: false, goal: "", toolApprovalMode: "ask",
-  }, ports);
+  }, ports, { checkpoint() {}, ownsUI: () => true });
   eq(calls.join("|"), "resolve:tab-source:approval-7:revise_plan", "plan revision records only the source-bound revise decision");
 }
 eq(

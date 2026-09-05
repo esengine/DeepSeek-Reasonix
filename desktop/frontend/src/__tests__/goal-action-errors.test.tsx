@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useGoalActionHandler } from "../lib/goalAction";
+import { useComposerGoalCommands } from "../app-runtime/useComposerGoalCommands";
 import { ToastProvider } from "../lib/toast";
 
 let passed = 0;
@@ -46,6 +47,10 @@ window.addEventListener("unhandledrejection", onWindowUnhandledRejection);
 
 function Probe() {
   const { runGoalAction } = useGoalActionHandler();
+  const { clearGoalFromUi, setCollaborationModeFromUi } = useComposerGoalCommands({
+    applyGoal: async (goal) => { if (goal !== "") throw new Error("wrong goal capture"); throw new Error("stop goal bridge failed"); },
+    applyCollaborationMode: async (mode) => { if (mode !== "plan") throw new Error("wrong mode capture"); throw new Error("switch mode bridge failed"); },
+  });
   const run = (label: string) => {
     runGoalAction(async () => {
       throw new Error(`${label} bridge failed`);
@@ -53,8 +58,8 @@ function Probe() {
   };
   return (
     <>
-      <button type="button" data-action="stop" onClick={() => run("stop goal")}>stop</button>
-      <button type="button" data-action="mode" onClick={() => run("switch mode")}>mode</button>
+      <button type="button" data-action="stop" onClick={clearGoalFromUi}>stop</button>
+      <button type="button" data-action="mode" onClick={() => setCollaborationModeFromUi("plan")}>mode</button>
       <button type="button" data-action="resync" onClick={() => run("background goal resync")}>resync</button>
     </>
   );
@@ -90,8 +95,8 @@ ok(
   /runGoalAction\(async \(\) => \{[\s\S]{0,260}setControllerComposerProfileForTab\([\s\S]{0,260}propagateError: true/.test(appSource),
   "background Goal resync routes through the rejection handler",
 );
-ok(appSource.includes("onClearGoal={clearGoalFromUi}"), "Composer Stop Goal routes through the rejection handler");
-ok(appSource.includes("onSetCollaborationMode={setCollaborationModeFromUi}"), "Composer mode changes route through the rejection handler");
+ok(errors.filter(error => error === "stop goal bridge failed").length === 1, "production Composer Stop Goal adapter presents the failure exactly once");
+ok(errors.filter(error => error === "switch mode bridge failed").length === 1, "production Composer mode adapter presents the failure exactly once");
 ok(/if \(model\) \{\s*await switchModel\(model\[1\]\);/.test(appSource), "/model awaits Goal restoration failures");
 ok(
   /await \(trimmed \? setControllerGoalForTab\(tabId, trimmed\) : clearControllerGoalForTab\(tabId\)\);\s*patchActivatedGoalForTab\(tabId, trimmed\)/.test(appSource),

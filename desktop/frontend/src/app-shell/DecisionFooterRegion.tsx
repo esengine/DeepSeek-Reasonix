@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentProps, type CSSProperties } from "react";
+import { lazy, Suspense, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 
 import { Composer } from "../components/Composer";
 
@@ -28,6 +28,15 @@ export type DecisionFooterSurface =
   | { kind: "extension"; identity: string; props: ExtensionProps }
   | { kind: "runtime"; identity: string; props: RuntimeDecisionProps }
   | { kind: "clear-context"; identity: string; props: ClearContextProps };
+
+/** Loading one decision cannot hide an already available sibling or its focus. */
+export function DecisionFooterSlots({ todo, undo, decision }: { todo: ReactNode; undo: ReactNode; decision: ReactNode }) {
+  return <>
+    <Suspense fallback={null}>{todo}</Suspense>
+    <Suspense fallback={null}>{undo}</Suspense>
+    <Suspense fallback={null}>{decision}</Suspense>
+  </>;
+}
 
 type DecisionFooterRegionProps = {
   hidden: boolean;
@@ -77,11 +86,11 @@ export function DecisionFooterRegion({
 
   return (
     <footer className={className} ref={footerRef} style={style} inert={composer.inert || undefined} aria-hidden={composer.inert || undefined}>
-      <Suspense fallback={null}>
-        {todo ? <TodoPanel key={todo.identity} {...todo.props} /> : null}
-        {undo ? <UndoRewindBanner key={undo.identity} {...undo.props} /> : null}
-        {decision ? <DecisionSurface surface={decision} /> : null}
-      </Suspense>
+      <DecisionFooterSlots
+        todo={todo ? <TodoPanel key={todo.identity} {...todo.props} /> : null}
+        undo={undo ? <UndoRewindBanner key={undo.identity} {...undo.props} /> : null}
+        decision={decision ? <DecisionSurface surface={decision} /> : null}
+      />
       {/* Composer remains mounted while decisions are visible so session-scoped drafts survive. */}
       <div
         className={[

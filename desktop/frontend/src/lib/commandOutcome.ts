@@ -15,10 +15,10 @@ export type CommandAuthority = {
 };
 
 /** Standalone execution holds captured input, never the capture callback or DOM event. */
-export async function executeCapturedCommand<Input, Result>(
+export async function executeCapturedCommand<Input, Result, Authority extends CommandAuthority>(
   input: Input,
-  execute: (input: Input, authority: CommandAuthority) => Result,
-  authority: CommandAuthority,
+  execute: (input: Input, authority: Authority) => Result,
+  authority: Authority,
 ): Promise<CommandOutcome<Awaited<Result>>> {
   try {
     authority.checkpoint();

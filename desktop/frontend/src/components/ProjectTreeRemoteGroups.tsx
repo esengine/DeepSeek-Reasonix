@@ -6,6 +6,7 @@ import type { Translator } from "../lib/i18n";
 import type { ProjectNode, RemoteServerView, RemoteSessionView, RemoteTabRefView } from "../lib/types";
 import type { ToastContextValue } from "../lib/toast";
 import { loadRemoteSessionCache, removeRemoteSessionCache, saveRemoteSessionCache } from "../lib/remoteSessionCache";
+import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
 import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
 import type { ContextMenuItem } from "./ContextMenu";
@@ -122,6 +123,7 @@ export function useRemoteProjectGroups(
   expanded: Set<string>,
   query: string,
 ) {
+  const navigateRemote = useRemoteNavigationCommand();
   const statuses = useRemoteStore((state) => state.statuses);
   const servers = useRemoteStore((state) => state.servers);
   const [sessions, setSessions] = useState<Record<string, RemoteSessionView[]>>({});
@@ -166,18 +168,19 @@ export function useRemoteProjectGroups(
     if (opening.current.has(key)) return;
     opening.current.add(key);
     try {
-      await publishNavigationIntent("remote-project");
-      await app.OpenRemoteProjectTab(ref.hostId, ref.workspace,
+      const outcome = await navigateRemote(ref,
         opts?.focus ? {} : opts?.sessionName || opts?.sessionPath
           ? { sessionName: opts.sessionName, sessionPath: opts.sessionPath, sessionTitle: opts.sessionTitle }
           : { newSession: true });
+      if (outcome.status === "cancelled") return;
+      if (outcome.status === "failed") throw outcome.error;
       if (!opts?.focus) setRevision((current) => current + 1);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       opening.current.delete(key);
     }
-  }, [showToast]);
+  }, [navigateRemote, showToast]);
 
   const ensureRemoteGroupSessions = useCallback(async (hostId: string, workspace: string) => {
     const key = `${hostId}\u0000${workspace}`;

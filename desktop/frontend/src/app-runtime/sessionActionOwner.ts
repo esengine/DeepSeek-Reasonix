@@ -1,4 +1,5 @@
 import type { CollaborationMode, QuestionAnswer, ToolApprovalMode } from "../lib/types";
+import type { SessionOperationAuthority } from "./useSessionOperations";
 
 export type SessionPromptTarget = Readonly<{
   tabId: string;
@@ -47,18 +48,26 @@ export async function submitPlanDecision(
     toolApprovalMode: ToolApprovalMode;
   },
   ports: SessionActionPorts,
+  authority: SessionOperationAuthority,
 ): Promise<void> {
+  authority.checkpoint();
   if (input.leavePlanMode) {
     if (input.remote) {
       const drained = await ports.setRemoteComposerProfile(target.tabId, "normal", input.toolApprovalMode, "");
-      ports.drainRemoteApprovals(target.tabId, drained);
+      authority.checkpoint();
+      if (authority.ownsUI()) ports.drainRemoteApprovals(target.tabId, drained);
     } else {
-      if (input.goal.trim()) await ports.clearGoalForTab(target.tabId);
+      if (input.goal.trim()) {
+        await ports.clearGoalForTab(target.tabId);
+        authority.checkpoint();
+      }
       await ports.setCollaborationModeForTab(target.tabId, "normal");
+      authority.checkpoint();
     }
     ports.notePlanMode(target.tabId, false);
     ports.patchComposerProfile(target.tabId, "normal");
   }
+  authority.checkpoint();
   ports.resolvePlanForTab(target.tabId, target.promptId, input.action);
 }
 

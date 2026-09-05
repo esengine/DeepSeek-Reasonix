@@ -51,14 +51,9 @@ const remoteMeta: TabMeta = {
 };
 
 function Harness() {
-  const activeTabIdRef = useRef<string | undefined>("local-1");
   useRemoteTabOpened(
-    activeTabIdRef,
     (meta) => seeded.push(meta.id),
     (meta) => updated.push(meta.id),
-    async (meta) => {
-      switched.push(meta.id);
-    },
   );
   return null;
 }
@@ -67,11 +62,11 @@ const root = createRoot(document.getElementById("root")!);
 await act(async () => root.render(<Harness />));
 await act(async () => __emitMockRemoteTabOpened(remoteMeta));
 eq(seeded.join(","), "remote-1", "opened events seed the new remote tab metadata");
-eq(switched.join(","), "remote-1", "opened events activate through the dedicated remote switch");
+eq(switched.join(","), "", "opened notifications cannot acquire navigation ownership");
 
 await act(async () => __emitMockRemoteTabUpdated({ ...remoteMeta, topicTitle: "Background title" }));
 eq(updated.join(","), "remote-1", "metadata updates patch the remote tab");
-eq(switched.join(","), "remote-1", "metadata updates never steal focus");
+eq(switched.join(","), "", "metadata updates never steal focus");
 
 await act(async () => root.unmount());
 

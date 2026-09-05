@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:fs";
+import { once } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
+import { buildIdentity, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(frontendDir, ".pw-browsers");
@@ -19,7 +21,8 @@ const CYCLES = integerEnv("REASONIX_APP_MEMORY_CYCLES", 128);
 const MIXED_CYCLES = integerEnv("REASONIX_APP_MEMORY_MIXED_CYCLES", 512);
 const PROCESSES = integerEnv("REASONIX_APP_MEMORY_PROCESSES", 3);
 const PORT = integerEnv("REASONIX_APP_MEMORY_PORT", 4647);
-const MAX_RETIRED_RENDER_TOKENS = 4;
+const artifacts = path.resolve(process.env.REASONIX_APP_MEMORY_ARTIFACTS ?? path.join(frontendDir, "bench/app-memory-artifacts"));
+mkdirSync(artifacts, { recursive: true });
 
 const fixtures = {
   full: { label: "bench:small-6t", marker: "ASYNC LAYOUT EXPANSION COMPLETE" },
@@ -28,7 +31,7 @@ const fixtures = {
 };
 
 async function ensureBuild() {
-  if (existsSync(path.join(frontendDir, "dist/index.html")) && process.env.REASONIX_APP_MEMORY_BUILD !== "1") return;
+  // Each run owns a fresh production build; an unverified dist is not evidence.
   await new Promise((resolve, reject) => {
     const child = spawn("pnpm", ["build"], { cwd: frontendDir, stdio: "inherit" });
     child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`pnpm build exited ${code}`)));
@@ -44,9 +47,8 @@ async function settleFrames(page, count = 6) {
 
 async function selectFixture(page, fixture) {
   const active = await page.locator(".project-tree__topic--active .project-tree__topic-label").textContent().catch(() => "");
-  if (!active?.includes(fixture.label)) {
-    await page.locator(`.project-tree__topic-main:has-text("${fixture.label}")`).click();
-  }
+  if (active?.includes(fixture.label)) throw new Error(`invalid repeated navigation: ${fixture.label}`);
+  await page.locator(`.project-tree__topic-main:has-text("${fixture.label}")`).click();
   await page.waitForFunction(({ label, marker }) => {
     const activeLabel = document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent ?? "";
     const transcript = document.querySelector(".transcript");
@@ -63,13 +65,14 @@ async function forceGc(cdp, page) {
   await settleFrames(page, 2);
   await cdp.send("HeapProfiler.collectGarbage");
   await settleFrames(page, 2);
-  const [heap, dom, lifecycle] = await Promise.all([
+  const [heap, dom, lifecycle, performance] = await Promise.all([
     cdp.send("Runtime.getHeapUsage"),
     cdp.send("Memory.getDOMCounters"),
     page.evaluate(() => window.__reasonixAppLifecycle?.snapshot()),
+    page.evaluate(() => ({ entries: window.performance.getEntries().length, attachedElements: document.querySelectorAll("*").length })),
   ]);
   if (!lifecycle) throw new Error("App lifecycle probe was not published by the production build");
-  return { heap, dom, lifecycle };
+  return { heap, dom, lifecycle, performance };
 }
 
 async function enterSafety(page) {
@@ -90,10 +93,17 @@ async function enterSafety(page) {
   await settleFrames(page);
 }
 
-async function runAlternating(page, count, left, right) {
-  for (let index = 0; index < count; index += 1) {
-    await selectFixture(page, index % 2 === 0 ? left : right);
-  }
+async function heapSnapshot(cdp, name) {
+  const file = path.join(artifacts, `${name}.heapsnapshot`);
+  const output = createWriteStream(file);
+  const listener = ({ chunk }) => output.write(chunk);
+  cdp.on("HeapProfiler.addHeapSnapshotChunk", listener);
+  try { await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false, captureNumericValue: true }); }
+  finally { cdp.off("HeapProfiler.addHeapSnapshotChunk", listener); output.end(); }
+  await once(output, "finish");
+  const summary = summarizeHeap(JSON.parse(readFileSync(file, "utf8")));
+  writeFileSync(path.join(artifacts, `${name}.summary.json`), JSON.stringify(summary, null, 2));
+  return { file: path.basename(file), summary };
 }
 
 async function runProcess(index) {
@@ -108,43 +118,50 @@ async function runProcess(index) {
   const cdp = await context.newCDPSession(page);
   try {
     await page.goto(`http://127.0.0.1:${PORT}/?mock=bench&bench=1&app-lifecycle-probe=1`, { waitUntil: "domcontentloaded" });
+    await page.locator("textarea.composer__input:not([aria-hidden=true])").waitFor();
+    await selectFixture(page, fixtures.geometry);
     await selectFixture(page, fixtures.full);
-    await runAlternating(page, 8, fixtures.geometry, fixtures.full);
-    const baseline = await forceGc(cdp, page);
-
-    await runAlternating(page, CYCLES, fixtures.geometry, fixtures.full);
-    const full = await forceGc(cdp, page);
-    await runAlternating(page, CYCLES, fixtures.windowed, fixtures.full);
-    const windowed = await forceGc(cdp, page);
-    for (let cycle = 0; cycle < CYCLES; cycle += 1) {
-      await enterSafety(page);
-      await selectFixture(page, fixtures.full);
-    }
-    const safety = await forceGc(cdp, page);
-    const mixedFixtures = [fixtures.geometry, fixtures.windowed, fixtures.full];
-    for (let cycle = 0; cycle < MIXED_CYCLES; cycle += 1) {
-      if (cycle % 11 === 10) await enterSafety(page);
-      else await selectFixture(page, mixedFixtures[cycle % mixedFixtures.length]);
-    }
+    await enterSafety(page);
     await selectFixture(page, fixtures.full);
-    const mixed = await forceGc(cdp, page);
-
-    const samples = { baseline, full, windowed, safety, mixed };
-    const maxTokens = Math.max(...Object.values(samples).map((sample) => sample.lifecycle.liveRenderTokens));
-    const tokenGrowth = mixed.lifecycle.liveRenderTokens - baseline.lifecycle.liveRenderTokens;
-    const activeOperations = mixed.lifecycle.activeOperations;
-    const detachedDomGrowth = mixed.dom.nodes - baseline.dom.nodes;
+    for (const [label, className] of [["Creation", "app--creation"], ["Workbench", "app--workbench"]]) {
+      await page.locator("button:has(svg.lucide-settings)").last().click();
+      await page.locator(".settings-modal .set-seg__btn").filter({ hasText: new RegExp(`^${label}$`) }).click();
+      await page.locator(`.app.${className}`).waitFor();
+      await page.locator(".settings-modal .modal-close-button").click();
+      await page.locator(".settings-modal").waitFor({ state: "detached" });
+      await settleFrames(page);
+    }
+    const samples = [{ phase: "baseline", roundTrips: 0, ...await forceGc(cdp, page) }];
+    const snapshots = [await heapSnapshot(cdp, `${index}-baseline`)];
+    for (const phase of ["full", "windowed", "safety", "mixed"]) {
+      const count = phase === "mixed" ? MIXED_CYCLES : CYCLES;
+      for (let round = 1; round <= count; round++) {
+        const safety = phase === "safety" || phase === "mixed" && round % 3 === 0;
+        if (safety) await enterSafety(page);
+        else await selectFixture(page, phase === "full" || phase === "mixed" && round % 3 === 1 ? fixtures.geometry : fixtures.windowed);
+        await selectFixture(page, fixtures.full);
+        if (round % 32 === 0 || round === count) {
+          const sample = { phase, roundTrips: round, ...await forceGc(cdp, page) };
+          samples.push(sample);
+          writeFileSync(path.join(artifacts, `${index}-samples.json`), JSON.stringify(samples, null, 2));
+          process.stdout.write(`[app-memory] process=${index} phase=${phase} roundTrips=${round} nodes=${sample.dom.nodes} listeners=${sample.dom.jsEventListeners} tokens=${sample.lifecycle.liveRenderTokens}\n`);
+        }
+      }
+      snapshots.push(await heapSnapshot(cdp, `${index}-${phase}`));
+    }
     return {
       process: index,
       browser: browser.version(),
       samples,
+      snapshots,
+      cohorts: retainedCohorts(samples),
+      attribution: "REQUIRED",
       checks: {
-        renderTokensBounded: tokenGrowth <= MAX_RETIRED_RENDER_TOKENS,
-        activeOperationsReleased: activeOperations === 0,
-        domNodesBounded: detachedDomGrowth <= Math.ceil(baseline.dom.nodes * 0.1),
+        evidenceIntegrity: evidenceIntegrity(samples),
+        instrumentedOperationsReleased: samples.every(sample => sample.lifecycle.activeOperations === 0),
         noPageErrors: pageErrors.length === 0,
       },
-      metrics: { maxTokens, tokenGrowth, activeOperations, detachedDomGrowth, pageErrors },
+      metrics: { pageErrors },
     };
   } finally {
     await context.close();
@@ -154,18 +171,22 @@ async function runProcess(index) {
 
 await ensureBuild();
 const preview = await startPreviewServer(frontendDir, PORT);
-const report = { startedAt: new Date().toISOString(), cycles: CYCLES, mixedCycles: MIXED_CYCLES, processes: [] };
+const report = { identity: buildIdentity(frontendDir), fixtures, startedAt: new Date().toISOString(), cycles: CYCLES, mixedCycles: MIXED_CYCLES, processes: [] };
 try {
   for (let index = 1; index <= PROCESSES; index += 1) {
     const result = await runProcess(index);
     report.processes.push(result);
     process.stdout.write(`[app-memory] process ${index}: ${JSON.stringify({ checks: result.checks, metrics: result.metrics })}\n`);
   }
+} catch (error) {
+  report.failure = error.message;
 } finally {
   await preview.close();
 }
 report.finishedAt = new Date().toISOString();
-report.verdict = report.processes.every((run) => Object.values(run.checks).every(Boolean)) ? "PASS" : "FAIL";
-writeFileSync(path.join(frontendDir, "bench/app-memory-results.json"), JSON.stringify(report, null, 2));
+report.protocolComplete = CYCLES >= 128 && MIXED_CYCLES >= 512 && report.processes.length >= 3;
+report.verdict = !report.failure && report.processes.every((run) => Object.values(run.checks).every(Boolean)) ? "NEEDS_ATTRIBUTION" : "FAIL";
+writeFileSync(path.join(artifacts, "report.json"), JSON.stringify(report, null, 2));
 process.stdout.write(`[app-memory] verdict ${report.verdict}\n`);
-if (report.verdict !== "PASS") process.exitCode = 1;
+// Totals cannot certify owner-level retention. Keep qualification closed until attribution is complete.
+process.exitCode = 1;

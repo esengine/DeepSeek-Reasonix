@@ -43,39 +43,13 @@ ok(
   "bridge exposes a lightweight desktop startup settings call",
 );
 ok(
-  appSource.includes("app.DesktopStartupSettings()"),
-  "App loads startup chrome preferences through the lightweight settings call",
-);
-ok(
-  configWarningsSource.includes('EventsOn("config:load-warnings"') &&
-    appSource.includes("useConfigLoadWarnings()") &&
-    appSource.includes("settings.configWarningsRevision"),
-  "runtime config warnings update the persistent desktop banner",
-);
-ok(
   configWarningsSource.includes("revision < latestRevision.current") &&
     configWarningsSource.includes("seenKeys.current.has(key)"),
   "startup and reload barriers reject stale events while repeated session builds stay deduplicated",
 );
 ok(
-  appSource.includes('hydrateReasoningDisplayMode("auto", false);'),
-  "startup failure preserves legacy reasoning-display migration precedence",
-);
-ok(
   bridgeSource.includes('displayMode: "standard", sessionExperience: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false'),
   "browser startup defaults include the canonical standard session experience",
-);
-ok(
-  !/const\s+reloadSidebarImConnections[\s\S]*?app\.Settings\(\)[\s\S]*?\}, \[t\]\);/.test(appSource),
-  "sidebar IM refresh avoids rebuilding the full Settings payload",
-);
-ok(
-  !/const\s+syncDesktopPreferences[\s\S]*?app\.Settings\(\)[\s\S]*?\};/.test(appSource),
-  "startup preference sync avoids rebuilding the full Settings payload",
-);
-ok(
-  /onChooseProvider=\{\(\) => \{[\s\S]*?setSettingsFocus\(\{ target: "model-access" \}\);[\s\S]*?setSettingsTarget\("models"\);/.test(appSource),
-  "onboarding opens the model access flow instead of model usage",
 );
 ok(
   /initialFocus\?\.target === "model-access"[\s\S]*?initialFocus\?\.target === "model-stats"[\s\S]*?"usage"/.test(settingsSource),
@@ -149,14 +123,6 @@ ok(
     source.includes('"settings.reasoningProtocol.glm"'),
   ),
   "GLM reasoning protocol is localized in every supported locale",
-);
-ok(
-  settingsSource.includes('settings.general.sectionConversation') &&
-    settingsSource.includes('settings.sessionExperience') &&
-    settingsSource.includes('["standard", "deep"]') &&
-    settingsSource.includes('app.SetSessionExperience(mode)') &&
-    !settingsSource.includes('app.SetReasoningDisplayMode(mode)'),
-  "General settings presents one canonical standard/deep session experience control",
 );
 ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>

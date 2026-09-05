@@ -14,7 +14,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { create } from "zustand";
 
 import type { SettingsInitialFocus } from "../components/SettingsPanel";
-import { shouldShowStartupSplash } from "../components/StartupSplash";
+import { shouldShowStartupSplash } from "../lib/startupSplashState";
 import type { ExtensionActionView, SessionMeta, SettingsTab } from "../lib/types";
 
 import { applySetState } from "./setState";

@@ -3,6 +3,7 @@
 // render the active tab's state.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
+import { createControllerModelCommands } from "./controllerModelCommands";
 import { compactArchivedToolItems } from "./archivedToolItems";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
@@ -3904,6 +3905,9 @@ export function useController() {
     return cancelForTab(tabId, inboxItemIDs);
   }, [activeTabId, cancelForTab]);
 
+  const isPromptCurrentForTab = useCallback((tabId: string, kind: "approval" | "ask" | "mcpInteraction", id: string) => (
+    statesRef.current.get(tabId)?.[kind]?.id === id
+  ), []);
   const approveForTab = useCallback((tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => {
     if (!tabId) return;
     // Pin the failure callback to the prompt-id epoch the RPC was issued in:
@@ -4420,67 +4424,12 @@ export function useController() {
     });
   }, []);
 
-  const setModel = useCallback(async (name: string) => {
-    if (!activeTabId) return false;
-    const tabId = activeTabId;
-    const switchSeq = (modelSwitchSeqByTab.current.get(tabId) ?? 0) + 1;
-    const successVersion = modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0;
-    const existingQueue = modelSwitchQueueByTab.current.get(tabId);
-    // Every attempt in one queued burst shares the balance that was visible
-    // before the first switch cleared it. Otherwise a later queued failure
-    // captures the placeholder and cannot restore the outgoing provider.
-    const fallbackBalance = existingQueue
-      ? existingQueue.fallbackBalance
-      : statesRef.current.get(tabId)?.balance;
-    modelSwitchSeqByTab.current.set(tabId, switchSeq);
-    // Hide the outgoing provider's wallet as soon as the user starts a hot
-    // switch. If the rebuild fails, the catch path re-queries the still-active
-    // provider and restores its balance.
-    clearBalanceForTab(tabId);
-    try {
-      const result = await enqueueModelSwitch(tabId, name, fallbackBalance);
-      if (result === "superseded") return false;
-      modelSwitchSuccessVersionByTab.current.set(
-        tabId,
-        (modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0) + 1,
-      );
-    } catch (err) {
-      if (modelSwitchSeqByTab.current.get(tabId) !== switchSeq) return false;
-      const { modelSwitchNoticeText } = await import("./controllerSwitchNotices");
-      if (modelSwitchSeqByTab.current.get(tabId) !== switchSeq) return false;
-      dispatchTo(tabId, { type: "local_notice", level: "warn", text: modelSwitchNoticeText(err) });
-      const olderSwitchSucceeded =
-        (modelSwitchSuccessVersionByTab.current.get(tabId) ?? 0) !== successVersion;
-      // Restore the known balance only when no older overlapping switch
-      // completed after this attempt began. Otherwise the backend now owns a
-      // different provider and the refresh below must establish its balance.
-      if (fallbackBalance && !olderSwitchSucceeded) {
-        dispatchTo(tabId, { type: "balance", balance: fallbackBalance });
-      }
-      void refreshBalanceForTab(tabId);
-      // A superseded success deliberately skips its own UI reconciliation.
-      // If this latest queued switch then fails, reconcile the model metadata
-      // to the provider that actually became active in the backend.
-      if (olderSwitchSucceeded) await refreshMetaForTab(tabId);
-      return false;
-    }
-    if (modelSwitchSeqByTab.current.get(tabId) !== switchSeq) return false;
-    void refreshBalanceForTab(tabId);
-    await refreshMetaForTab(tabId);
-    return modelSwitchSeqByTab.current.get(tabId) === switchSeq;
-  }, [activeTabId, clearBalanceForTab, dispatchTo, enqueueModelSwitch, refreshBalanceForTab, refreshMetaForTab]);
-
-  const setEffort = useCallback(async (level: string) => {
-    if (!activeTabId) return;
-    try {
-      await app.SetEffortForTab(activeTabId, level);
-    } catch (err) {
-      const { effortSwitchNoticeText } = await import("./controllerSwitchNotices");
-      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: effortSwitchNoticeText(err) });
-      return;
-    }
-    await refreshMetaForTab(activeTabId);
-  }, [activeTabId, dispatchTo, refreshMetaForTab]);
+  const { setModelForTab, setEffortForTab } = useMemo(() => createControllerModelCommands({
+    statesRef, modelSwitchSeqByTab, modelSwitchSuccessVersionByTab, modelSwitchQueueByTab,
+    enqueueModelSwitch, clearBalanceForTab, dispatchTo, refreshBalanceForTab, refreshMetaForTab,
+  }), [enqueueModelSwitch, clearBalanceForTab, dispatchTo, refreshBalanceForTab, refreshMetaForTab]);
+  const setModel = useCallback((name: string) => activeTabId ? setModelForTab(activeTabId, name) : Promise.resolve(false), [activeTabId, setModelForTab]);
+  const setEffort = useCallback((level: string) => activeTabId ? setEffortForTab(activeTabId, level) : Promise.resolve(), [activeTabId, setEffortForTab]);
 
   const cancelJob = useCallback(async (jobID: string): Promise<boolean> => {
     const tabId = activeTabId;
@@ -5032,7 +4981,7 @@ export function useController() {
     liveStore,
     activeTabId,
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice,
-    cancel, cancelForTab, approve, approveForTab, resolvePlanDecision, resolvePlanDecisionForTab,
+    cancel, cancelForTab, approve, approveForTab, isPromptCurrentForTab, resolvePlanDecision, resolvePlanDecisionForTab,
     resolveRecovery, resolveRecoveryForTab, answerQuestion, answerQuestionForTab,
     answerMCPInteraction, answerMCPInteractionForTab, setControllerMode, setControllerModeForTab,
     dismissExtensionForm, drainExtensionNotifications,
@@ -5040,7 +4989,7 @@ export function useController() {
     newSession, clearSession, listSessions, listTrashedSessions, retrySessionHistory, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
     requestHistoryFullContent,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, cancelJob,
+    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setModelForTab, setEffort, setEffortForTab, cancelJob,
     fetchMemory, remember, forget, saveDoc,
     switchTab, switchRemoteTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createIsolatedWorktree, commitSingleSurfaceNavigation, closeTab, reorderTabs,
     // Invalidate in-flight navigation completions (activateTopic's stale

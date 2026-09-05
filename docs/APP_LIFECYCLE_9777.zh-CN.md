@@ -5,7 +5,7 @@
 ## 状态与范围
 
 本文是实施检查点，不是合并验收结论。保留现有 PR 历史，通过
-`a2a4895ba` 合并主线 `86051290b`。完整 App 分层和原生平台验收仍未完成。
+`5cb605a4d` 合并主线 `f12cbdd2f`。完整 App 分层和原生平台验收仍未完成。
 
 ## 已实现的共同契约
 
@@ -47,27 +47,88 @@ AST 门禁解析 import、re-export、别名和动态 import，区分 type-only 
 reader 回放、前端及测试类型检查、hooks、含负例的 AST 门禁、single-writer
 和 diff 空白检查。
 
-当前生产 bundle（KiB）：初始 JS 418.4 / 426.8；外壳 CSS 115.8 / 116.0；
-简中60.5 / 60.6；繁中61.3 / 61.5；初始原始资源2313.5 / 2349.4。
+最近已检查生产 bundle（KiB）：初始 JS 423.7 / 426.8；外壳 CSS 116.0 / 116.0；
+简中60.5 / 60.6；繁中61.3 / 61.5；初始原始资源2332.3 / 2349.4。
 未提高容量预算。仅设置页使用的图片控件 CSS 移入既有懒加载样式表；三语
 删除了已移除密度/reasoning/fold 控件的无引用文案。旧配置字段、setter、
 事件和镜像的一版兼容政策不变。
 
+## 9月5日系统性修复与诊断回放
+
+DOM/监听器线性增长的保留路径已经定位：ExternalOpener 与
+TopicbarSessionActions 是不同类型的兄弟组件，却共用 tab key；React 协调后
+遗留仍附着的 ExternalOpener。使用角色隔离的 Fragment 保留原有资源重挂载语义，
+不增加 DOM 包装。恢复旧结构时，真实128次替换测试在第一次切换即失败：
+出现2个 opener，而非1个。
+
+单独诊断进程对 full/windowed/safety/mixed 各完成32次 A→B→A 往返。
+修复前每阶段增加832个节点、256个监听器；修复后基线及四阶段采样均保持
+5980个节点、501个监听器。该增长不是 detached DOM。修复后脏工作区构建指纹为
+`f3720e364bcafaf85eed6a7bf1a797ea17b13e8a6d51fb44152240374f76aed5`，
+不是最终 head 验收。render token 基线12个、各阶段结束13个，不能据此设置新上限。
+堆边仍显示项目导航、工作区回调引用退役 App 上下文，完整分层仍需继续。
+
+共同操作 owner 已支持按源资源/类别隔离的请求通道。Composer 模式和审批
+每个 await 后检查凭据；审批额外检查原提示 ID。远端 topic 重命名使用捕获的
+session path，不使用异步列表返回时的 current 标记；旧实现已复现“A 发起却改名 B”。
+合法源数据完成与当前 UI 权限分开，A→B→A 不恢复旧 UI 权限。
+
+设置、引导、项目/topic、终端和远端 Composer 已有窄 committed 输入。
+共同展示投影为 Composer、Context、StatusBar 选择同一运行时；远端字段缺失
+不会回退到本地遥测、附件、固定文件或 inbox。以上是部分纵向迁移，不代表剩余 App 合格。
+
+导航复用既有合并队列，由独立 executor 处理本地 topic、空白会话、历史、IM、
+工作树与远端工作区。每个请求拥有自身结果、失败与 finally 清理；远端 opened
+事件只登记资源，不能获取导航权。本地和远端复用同一 surface ticket 与 Kernel
+paint 确认。真实 App 回放曾出现远端已 hydrate、Composer 仍禁用：只有本地
+Transcript 确认导航。现在共同投影从实际展示的运行时取得 readiness，并将
+Serve generation 纳入绘制身份；确定性测试拒绝旧回执，远端失败正常终结，
+不依赖超时解锁。
+
+完整 App 浏览器回放已覆盖远端项目选择、远端全局“新建会话”、返回本地历史，
+Composer 持续挂载。验收前先修复 fixture：远端 open 与 ListTabs 共用目录，
+snapshot/status 返回同一完整 profile。旧目录在真实 bridge 测试的第一次刷新
+即失败；没有放宽生产状态校验。
+
+Workspace 命令统一拥有项目偏好恢复、远端 explorer 请求及模式/最大化操作。
+运行时轮询采用注入时钟的 single-flight owner：刷新合并、卸载撤销排队结果、
+旧源 finally 不能释放新请求。这些是共同生命周期变更，不是新增轮询延时或平台补偿。
+
+### 旧断言到行为证据的替代清单
+
+| 旧源码断言 | 实际生产行为验证 |
+| --- | --- |
+| Goal 清理/模式 JSX | `goal-action-errors.test.tsx` 挂载真实命令 hook，失败只提示一次 |
+| 启动 snapshot、警告、失败默认值、IM 刷新 | `desktop-preferences-lifecycle.test.tsx` 验证 bridge 调用、revision、后端权威及卸载 |
+| 引导回调文本 | `onboarding-commands.test.tsx` 验证 overlay 与 dismissal 状态 |
+| General standard/deep JSX | 既有 `settings-refresh-snapshot.test.tsx` 挂载 SettingsPanel；新增控件测试覆盖 busy、键盘、同值失败回读 |
+| Theme 回调位置 | `theme-pack.test.ts` 的真实 appearance 测试，加设置 hook 挂载测试 |
+| 工作树合并变量拼写 | 既有 `worktree-merge-lifecycle.test.ts` 验证源/intent 与终态 |
+| 远端模式/回滚字符串 | `composer-source-operations.test.tsx` 检查完整原子参数并禁止调用本地模式/goal 接口 |
+| 远端发送、slash、Goal 操作字符串 | `remote-composer-commands.test.tsx` 验证生产 hook、源 continuation 和发送字节不变 |
+| 远端附件/指导消息 JSX | `remote-composer-presentation.test.tsx` 挂载真实 Composer，验证本地文件/inbox 零写入及远端指导发送 |
+| 远端遥测/布局 JSX | `conversation-projection.test.ts` 验证生产投影和真实 dock 隐藏呈现 |
+| 远端终端 JSX/快捷键字符串 | `terminal-panel-commands.test.tsx` 驱动原生 key 事件、实际按钮及 warm host 挂载排除 |
+| 工作树创建队列、脏目录提示字符串 | `project-topic-lifecycle.test.tsx` 与 `desktop-navigation-lifecycle.test.tsx` 驱动实际队列、源操作和提示端口 |
+| Automation/dock 可见性回调字符串 | 共同展示投影与终端命令测试验证真实呈现、存储偏好及原生快捷键效果 |
+| 远端向导 canonical 路径字符串 | `remote-connect-wizard.test.tsx` 经真实导航 owner 完成合并后的 canonical 项目 |
+| 远端全局新建 helper 字符串 | `test:app-browser` 点击远端项目后的全局按钮，验证 hydrate、Composer 身份和返回导航 |
+
+这不代表此前所有断言退役都已经审计；其余要求随所属领域迁移继续核对。
+
 ## 仍阻塞完整验收
 
-- App 仍4582行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。
-- `test:all` 当前停在 `goal-action-errors.test.tsx` 的2项旧 JSX 字符串断言。
-  应用真实迁移后的 Composer owner/交互测试替代，不能只修改期待的标点。
-- repolint 仍报告集成后的 SettingsPanel、bridge、useController、desktop
-  settings 和 config 尺寸超限；未扩大 baseline。
+- App 仍3922行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。
+- 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
+  Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
+  head 或原生平台验收。
+- SettingsPanel、bridge、useController、desktop settings 和 config 通过
+  设置/模型命令职责抽离，repolint 已通过。App 尺寸豁免尚未删除；没有扩大 baseline。
 - 现有 App 浏览器回放检查的是 Sidebar 项目树，不是 WorkspacePanel/编辑器。
   6项订阅及0个已登记操作不能代表全部剩余 App 流程。
-- 探针已经按弱引用身份去重，并暴露溢出、负计数；内存 runner 仍缺构建来源、
-  完整预热、统一往返计数、每32轮采样及保留路径分析，旧固定数量/百分比
-  断言不可作为正式验收证据。
-- 最新24轮 Transcript safety 回放几何指标通过，但总 DOM/监听器计数继续
-  增加。这不是 detached DOM 统计；归因尚未完成，不能仅凭计数判定泄漏
-  或正常预热。
+- 内存 runner 现在重新构建生产资源、记录源码/构建指纹、统计完整往返，
+  每32轮采样并保存 heap 分类和弱引用身份 cohort。尚未归因时返回
+  NEEDS_ATTRIBUTION 而非 PASS。最终结构的完整预热、对照构建与保留路径分类待完成。
 - 128/512轮、三独立进程的正式 App 长跑、原生 App soak、最终 Go/race/
   lint/CodeQL、CI 路径过滤和最终远端 head 检查均待完成。
 

@@ -89,6 +89,21 @@ try {
   assert(afterSwitch.projectTree, "same-project session switching preserves the Sidebar project tree (not WorkspacePanel)");
   assert(afterSwitch.subscriptions === 6, `the six AppRuntimeEffects subscriptions remain singular (${afterSwitch.subscriptions})`);
   assert(afterSwitch.operations === 0, "instrumented operation owners report zero active operations (not yet all App operations)");
+
+  await page.locator('.project-tree__folder-main:has(svg.lucide-cloud)').click();
+  await page.locator('.project-tree__topic-main:has-text("Remote demo session")').click();
+  await page.locator('.remote-surface--ready').waitFor();
+  await page.waitForFunction(() => document.querySelector('textarea.composer__input:not([aria-hidden=true])')?.disabled === false);
+  assert((await page.locator('.topicbar').textContent()).includes('Remote demo session'), "remote project selection adopts its source workspace and authoritative hydrated surface");
+  await page.locator('.sidebar__quick-action').click();
+  await page.waitForFunction(() => document.querySelector('.topicbar')?.textContent?.includes('New session'));
+  await page.locator('.remote-surface--ready').waitFor();
+  await page.waitForFunction(() => document.querySelector('textarea.composer__input:not([aria-hidden=true])')?.disabled === false);
+  assert(await page.locator('.remote-surface').count() === 1, "global New Session stays on the remote workspace instead of opening a local blank");
+  assert(await page.evaluate(() => window.__appBrowserIdentity.composer === document.querySelector('textarea.composer__input:not([aria-hidden=true])')), "local/remote navigation and remote New Session preserve the Composer DOM identity");
+  await page.locator('.project-tree__topic-main:has-text("bench:geometry")').click();
+  await page.waitForFunction(() => document.querySelector('.transcript')?.textContent?.includes('Geometry contract fixture complete.'));
+  assert(await page.locator('.remote-surface').count() === 0, "subsequent local navigation owns the surface; remote events do not reclaim it");
   assert(pageErrors.length === 0, `three-layout replay emits no page errors (${pageErrors.length})`);
 
   const classicPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

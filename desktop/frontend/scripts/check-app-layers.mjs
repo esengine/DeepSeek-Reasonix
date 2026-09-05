@@ -21,7 +21,8 @@ export function moduleEdges(code, file) {
   const namedTypesOnly = (bindings) => bindings && ts.isNamedImports(bindings)
     && bindings.elements.length > 0 && bindings.elements.every((entry) => entry.isTypeOnly);
   function visit(node) {
-    if (ts.isIdentifier(node)) identifiers.add(node.text);
+    // A DTO field named `window` is not a reference to the browser global.
+    if (ts.isIdentifier(node) && !(ts.isPropertySignature(node.parent) && node.parent.name === node)) identifiers.add(node.text);
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;
       edges.push({ specifier: node.moduleSpecifier.text,

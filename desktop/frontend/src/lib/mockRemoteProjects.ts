@@ -2,7 +2,13 @@ import type { ProjectNode, RemoteProjectView, RemoteSessionView, TabMeta } from 
 import type { RemoteProjectBindings } from "./remoteProjectBridge";
 import { __emitMockRemoteTab, __emitMockRemoteTabOpened } from "./remoteTabEvents";
 
-export function createMockRemoteProjects(): {
+export type MockRemoteTabCatalog = {
+  get(id: string): TabMeta | undefined;
+  publish(tab: TabMeta): void;
+  remove(id: string): void;
+};
+
+export function createMockRemoteProjects(tabs: MockRemoteTabCatalog): {
   bindings: RemoteProjectBindings;
   appendToTree: (tree: ProjectNode[]) => ProjectNode[];
 } {
@@ -13,8 +19,11 @@ export function createMockRemoteProjects(): {
     ],
   };
   const key = (hostId: string, workspace: string) => `${hostId}\u0000${workspace}`;
-  const tabs = new Map<string, TabMeta>();
   const tabIdFor = (hostId: string, workspace: string) => `remote-mock-${hostId}-${workspace}`.replace(/[^a-z0-9-]/gi, "_");
+  const status = (tabId: string) => ({
+    label: tabs.get(tabId)?.label ?? "", running: false, pendingPrompt: false,
+    backgroundJobs: 0, plan: false, toolApprovalMode: "ask", goal: "",
+  });
 
   const bindings: RemoteProjectBindings = {
     async AddRemoteProject(hostId, workspace) {
@@ -51,7 +60,6 @@ export function createMockRemoteProjects(): {
           remote: { hostId, workspace },
           remoteState: "ready",
         };
-        tabs.set(id, tab);
       }
       if (opts?.newSession) tab.topicTitle = "New session";
       if (opts?.sessionName) {
@@ -59,6 +67,7 @@ export function createMockRemoteProjects(): {
         tab.topicTitle = rows.find((row) => row.name === opts.sessionName)?.title || tab.workspaceName;
         for (const row of rows) row.current = row.name === opts.sessionName;
       }
+      tabs.publish(tab);
       __emitMockRemoteTab(id, "state", { state: "ready" });
       __emitMockRemoteTabOpened({ ...tab });
       return { ...tab };
@@ -84,7 +93,7 @@ export function createMockRemoteProjects(): {
     async DeleteRemoteProjectSession(hostId, workspace, name) {
       sessions[key(hostId, workspace)] = (sessions[key(hostId, workspace)] ?? []).filter((item) => item.name !== name);
     },
-    async CloseRemoteTab(tabId) { tabs.delete(tabId); },
+    async CloseRemoteTab(tabId) { tabs.remove(tabId); },
     async SubmitRemoteTab(tabId, text) {
       __emitMockRemoteTab(tabId, "event", { kind: "turn_started" });
       __emitMockRemoteTab(tabId, "event", { kind: "message", text: `Mock remote reply: ${text}` });
@@ -104,15 +113,16 @@ export function createMockRemoteProjects(): {
       const tab = tabs.get(tabId);
       if (tab) {
         tab.label = ref;
+        tabs.publish(tab);
         __emitMockRemoteTabOpened({ ...tab });
       }
     },
     async RewindRemoteTab() {},
     async SetRemoteTabGoal() {},
     async RemoteTabSnapshot(tabId) {
-      return { history: [], status: { label: tabs.get(tabId)?.label ?? "" } };
+      return { history: [], status: status(tabId) };
     },
-    async RemoteTabStatus() { return { running: false, pendingPrompt: false, backgroundJobs: 0 }; },
+    async RemoteTabStatus(tabId) { return status(tabId); },
     async SetRemoteTabEffort() {},
     async PauseRemoteTabGoal() {},
     async ResumeRemoteTabGoal() {},

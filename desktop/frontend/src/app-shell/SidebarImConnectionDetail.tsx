@@ -1,7 +1,7 @@
 import { MessageSquare, Settings as SettingsIcon } from "lucide-react";
 import { CopyButton } from "../components/CopyButton";
 import { useT, type Translator } from "../lib/i18n";
-import { sidebarImScopeLabel, sidebarImSessionTarget, type SidebarImConnection } from "./SidebarIm";
+import { sidebarImScopeLabel, sidebarImSessionTarget, type SidebarImConnection } from "../app-runtime/sidebarImProjection";
 
 type SidebarImConnectionDetailProps = {
   connection: SidebarImConnection;

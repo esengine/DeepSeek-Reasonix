@@ -1,6 +1,5 @@
-// Run: tsx src/__tests__/remote-session-surface.test.tsx
-
 import React from "react";
+import { RemoteNavigationHarness } from "./helpers/RemoteNavigationHarness";
 import { JSDOM } from "jsdom";
 import { act } from "react";
 
@@ -260,7 +259,7 @@ async function flush(ticks = 4) {
 // in the shell).
 function RemoteSurfaceHarness({ tab }: { tab: TabMeta }) {
   const session = useRemoteSession(tab.id);
-  return <RemoteSessionSurface tab={tab} session={session} />;
+  return <RemoteNavigationHarness><RemoteSessionSurface tab={tab} session={session} /></RemoteNavigationHarness>;
 }
 
 // ── Surface: shared Transcript renders reducer-driven items ──
@@ -457,7 +456,7 @@ await act(async () => {
     await flush();
   });
   ok(tape.includes("open:gpu-box:~/app:"), "serve_down retry preserves the backend's parked session target");
-  const reconnectNavigation = tape.findIndex((entry) => entry.startsWith("navigation:nav-remote-reconnect-")); ok(reconnectNavigation >= 0 && reconnectNavigation < tape.indexOf("open:gpu-box:~/app:"), "serve_down retry registers navigation before reopening the remote tab");
+  const reconnectNavigation = tape.findIndex((entry) => entry.startsWith("navigation:nav-")); ok(reconnectNavigation >= 0 && reconnectNavigation < tape.indexOf("open:gpu-box:~/app:"), "serve_down retry registers navigation before reopening the remote tab");
   failOpen = true;
   await act(async () => {
     warning?.querySelector<HTMLButtonElement>("button")?.click();

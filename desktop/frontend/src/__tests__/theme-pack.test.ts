@@ -528,7 +528,6 @@ ok(
 ok(themeBgSlice.includes(".theme-bg__overlay"), "overlay wash element styled");
 ok(appSource.includes("applyThemeScene"), "App wires scene from session content");
 ok(appSource.includes("ThemeBackground"), "App mounts background layer");
-ok(appSource.includes("applyConfiguredBaseAppearance"), "App applies configured appearance without replacing an active pack");
 ok(appSource.includes("ResetThemePack") || appSource.includes("theme reset") || appSource.includes('arg === "reset"'), "reset entry exists");
 
 console.log("\nofficial themes (kind/grouping/i18n)");

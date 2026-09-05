@@ -21,3 +21,4 @@ package-lock.json
 .pw-browsers
 bench/results.json
 bench/app-memory-results.json
+bench/app-memory-artifacts/

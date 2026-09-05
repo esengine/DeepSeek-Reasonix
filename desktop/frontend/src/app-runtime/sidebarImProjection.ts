@@ -112,11 +112,11 @@ function sidebarImQQAdded(qq: BotSettingsView["qq"]): boolean {
   return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
 }
 
-function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatusView | null | undefined): SidebarImStatus {
+function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatusView | null | undefined, nativeRuntime: boolean): SidebarImStatus {
   const appId = bot.qq.appId.trim();
   if (!bot.enabled || !bot.qq.enabled) return "disabled";
   if (!appId || !bot.qq.secretSet) return "disconnected";
-  if (typeof window !== "undefined" && !window.runtime) return "pending";
+  if (!nativeRuntime) return "pending";
   if (!runtimeStatus) return "pending";
   const status = runtimeStatus.status.trim().toLowerCase();
   if (runtimeStatus.running && runtimeStatus.connections > 0 && status === "running") {
@@ -127,10 +127,10 @@ function sidebarImQQStatus(bot: BotSettingsView, runtimeStatus: BotRuntimeStatus
   return "pending";
 }
 
-function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runtimeStatus?: BotRuntimeStatusView | null): SidebarImConnection | null {
+function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runtimeStatus: BotRuntimeStatusView | null | undefined, nativeRuntime: boolean): SidebarImConnection | null {
   if (!sidebarImQQAdded(bot.qq)) return null;
   const remoteId = bot.qq.appId.trim();
-  const status = sidebarImQQStatus(bot, runtimeStatus);
+  const status = sidebarImQQStatus(bot, runtimeStatus, nativeRuntime);
   const statusLabel = sidebarImStatusLabel(status, translate);
   const allowlistUsers = sidebarImAllowlistUsers(bot, "qq");
   const subtitleParts = [
@@ -161,10 +161,11 @@ function sidebarImQQConnection(bot: BotSettingsView, translate: Translator, runt
 export function sidebarImConnectionsFromBot(
   bot: BotSettingsView | null | undefined,
   translate: Translator,
-  runtimeStatus?: BotRuntimeStatusView | null,
+  runtimeStatus: BotRuntimeStatusView | null | undefined,
+  nativeRuntime: boolean,
 ): SidebarImConnection[] {
   if (!bot) return [];
-  const qqConnection = sidebarImQQConnection(bot, translate, runtimeStatus);
+  const qqConnection = sidebarImQQConnection(bot, translate, runtimeStatus, nativeRuntime);
   const connectionItems: SidebarImConnection[] = [];
   for (const connection of asArray(bot.connections)) {
     if (!isSidebarImConnection(connection)) continue;
