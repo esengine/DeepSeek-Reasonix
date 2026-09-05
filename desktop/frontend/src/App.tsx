@@ -9,7 +9,6 @@ import {
   Search,
   Server,
   SquarePen,
-  PanelLeft,
   PanelRight,
   Settings as SettingsIcon,
   RotateCw,
@@ -60,7 +59,7 @@ import { Tooltip } from "./components/Tooltip";
 import { shouldOpenOnboarding } from "./lib/onboarding";
 import { useOnboardingCommands } from "./app-runtime/useOnboardingCommands";
 import { AppChrome } from "./components/AppChrome";
-import { WorktreeBadge } from "./components/WorktreeBadge";
+import { TopicbarRegion } from "./app-shell/TopicbarRegion";
 import { shouldMountExternalOpener } from "./components/ExternalOpener";
 import { TopicbarActionsRegion } from "./app-shell/TopicbarActionsRegion";
 import { RemoteReclaimBanner } from "./components/RemoteReclaimBanner";
@@ -3403,93 +3402,21 @@ export default function App() {
         />
 
         <section className={`chat-pane${creationEmptyHero ? " chat-pane--creation-empty" : ""}`}>
-          <header className="topicbar">
-            {automationReturn && <button className="btn btn--small" type="button" onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); openPage({ kind: "automation" }); }}>{locale === "en" ? "Back to automation" : locale === "zh-TW" ? "返回自動化" : "返回自动化"}</button>}
-            {workbenchChromeHidden && (
-              <Tooltip label={sidebarToggleTitle}>
-                <button
-                  className={[
-                    "topicbar__chrome-btn",
-                    sidebarExpandBlocked ? "topicbar__chrome-btn--blocked" : "",
-                    sidebarTogglePressed ? "topicbar__chrome-btn--pressed" : "",
-                  ].filter(Boolean).join(" ")}
-                  type="button"
-                  onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
-                  aria-label={sidebarToggleTitle}
-                  aria-pressed={!sidebarCollapsed}
-                  aria-disabled={sidebarExpandBlocked}
-                >
-                  <PanelLeft size={15} />
-                </button>
-              </Tooltip>
-            )}
-            <div className="topicbar__identity">
-              <div className="topicbar__title-row">
-                {topicbarEditing ? (
-                  <div className="topicbar__title-edit">
-                    <input
-                      autoFocus
-                      className="topicbar__title-input"
-                      aria-label={t("topicBar.renameSession")}
-                      size={sidebarCreation ? topicbarTitleEditSize : undefined}
-                      value={topicTitleDraft}
-                      onChange={(event) => setTopicTitleDraft(event.target.value)}
-                      onFocus={(event) => event.currentTarget.select()}
-                      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void commitActiveTopicRename();
-                        }
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          cancelActiveTopicRename();
-                        }
-                      }}
-                      onBlur={() => void commitActiveTopicRename()}
-                    />
-                  </div>
-                ) : topicbarCanRename ? (
-                  <h1 title={topicTitle(activeTab)}>
-                    <button
-                      className="topicbar__title-button"
-                      type="button"
-                      onClick={startActiveTopicRename}
-                      aria-label={t("topicBar.renameSession")}
-                    >
-                      {topicbarTitle}
-                    </button>
-                  </h1>
-                ) : (
-                  <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>{topicbarTitle}</h1>
-                )}
-                {topicbarWorkspaceLabel && (
-                  <span className="topicbar__workspace-label" title={topicbarWorkspaceLabel}>
-                    {topicbarWorkspaceLabel}
-                  </span>
-                )}
-              </div>
-              {topicbarSubtitleVisible && (
-                <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
-                  {activeTab?.isolatedWorktree && <WorktreeBadge size={11} />}
-                  {activeTab?.isolatedWorktree && (
-                    <button
-                      type="button"
-                      className="topicbar__worktree-btn"
-                      onClick={() => setWorktreeMergeTabId(activeTab.id)}
-                      title={t("worktree.mergeButtonTooltip")}
-                    >
-                      <span>{t("worktree.mergeAction")}</span>
-                    </button>
-                  )}
-                  {topicbarImSourcePlatform && (
-                    <span className={`topicbar__source-chip topicbar__source-chip--${topicbarImSourcePlatform}`}>
-                      {topicbarImSourceLabel}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="topicbar__spacer" />
+          <TopicbarRegion view={{
+            automationReturn, automationReturnLabel: locale === "en" ? "Back to automation" : locale === "zh-TW" ? "返回自動化" : "返回自动化",
+            chromeHidden: workbenchChromeHidden,
+            sidebar: { title: sidebarToggleTitle, blocked: sidebarExpandBlocked, pressed: sidebarTogglePressed, collapsed: sidebarCollapsed },
+            title: { text: topicbarTitle, hover: !topicbarCanRename && sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab),
+              renameLabel: t("topicBar.renameSession"), editing: topicbarEditing, draft: topicTitleDraft,
+              editSize: sidebarCreation ? topicbarTitleEditSize : undefined, canRename: topicbarCanRename, workspaceLabel: topicbarWorkspaceLabel },
+            subtitle: { visible: topicbarSubtitleVisible, title: topicbarSubtitleTitle, worktreeTabId: activeTab?.isolatedWorktree ? activeTab.id : undefined,
+              mergeLabel: t("worktree.mergeAction"), mergeTooltip: t("worktree.mergeButtonTooltip"),
+              sourcePlatform: topicbarImSourcePlatform, sourceLabel: topicbarImSourceLabel },
+          }} commands={{
+            openAutomation: () => openPage({ kind: "automation" }), toggleSidebar,
+            setTitleDraft: setTopicTitleDraft, commitRename: commitActiveTopicRename, cancelRename: cancelActiveTopicRename,
+            startRename: startActiveTopicRename, openWorktree: setWorktreeMergeTabId,
+          }}>
             <div className="topicbar__actions">
               <Tooltip label={`${t("shortcuts.action.commandPalette")} ${commandPaletteShortcut}`}>
                 <button
@@ -3528,7 +3455,7 @@ export default function App() {
                 </div>
               )}
             </div>
-          </header>
+          </TopicbarRegion>
 
           {activeTab?.takenOver ? (
             <RemoteReclaimBanner

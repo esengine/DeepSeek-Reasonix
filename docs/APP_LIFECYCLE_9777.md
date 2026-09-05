@@ -59,9 +59,9 @@ browser replay, Transcript unit tests, Chromium selection/scroll/composer replay
 Chromium and Playwright WebKit reader replay, frontend/test typechecks, hooks,
 AST gate with negative fixtures, single writer and diff whitespace checks.
 
-Latest checked production bundle measurements (KiB): initial JS 425.0 / 426.8; shell
+Latest checked production bundle measurements (KiB): initial JS 425.2 / 426.8; shell
 CSS 115.9 / 116.0; Chinese 60.5 / 60.6; Traditional Chinese 61.4 / 61.5; raw
-initial assets 2329.8 / 2349.4. No capacity limit was increased. Settings-only
+initial assets 2330.8 / 2349.4. No capacity limit was increased. Settings-only
 image-control CSS moved to the existing lazy settings stylesheet. The unused
 labels for removed density/reasoning/fold controls were deleted in all three
 locales; legacy configuration fields, setters, events and mirrors are unchanged.
@@ -130,6 +130,13 @@ discovery now shares one CSS-asset loader instead of a filename allowlist that
 missed transitive imports introduced by the management shell. This does not
 replace real CSS or browser verification.
 
+Topicbar identity, rename input and source controls now live in a presentation
+region with display data separate from commands. Its mounted test verifies the
+original DOM structure, synchronous focus, keyboard cancellation and action
+subtree identity; the production App replay still preserves Composer and actual
+workspace file-preview nodes. This is a presentation boundary, not completion
+of model switching or controller-profile rebuild ownership.
+
 ### Retired assertion → behavioral evidence
 
 | Former source assertion | Production behavior exercised |
@@ -156,7 +163,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,900 lines. Six domain owners, remaining effects, the pure shell
+- App is still 3,827 lines. Six domain owners, remaining effects, the pure shell
   and removal of its size exception are not complete.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,
