@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"time"
 )
@@ -63,7 +64,7 @@ func percentile(samples []time.Duration, p float64) time.Duration {
 	if len(samples) == 0 {
 		return 0
 	}
-	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	slices.Sort(samples)
 	idx := int(float64(len(samples)-1) * p)
 	return samples[idx]
 }

@@ -2460,7 +2460,6 @@ func (c *Controller) ReloadCommands(ctx context.Context) error {
 		})
 	}
 	c.mcp.registerTool(command.NewSlashCommandTool(entries))
-	c.skills.publishCatalog(c.skills.list()) // reachable next turn, without reopening
 	cmdSlice := cmds
 	c.commands.Store(&cmdSlice)
 	return loadErr

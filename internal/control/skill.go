@@ -23,36 +23,40 @@ type skillSet struct {
 	allStore             *skill.Store  // reloadable all-skill store; nil falls back to all/enabled
 	noImplicitInvocation bool          // the model may not reach a skill on its own; slash still does
 	slashSeq             atomic.Uint64 // numbers the synthetic call a slash-invoked skill reports under
-	// catalog is the listing owed to the next real turn, nil once delivered. It
-	// rides the turn instead of the prefix: a per-project catalog in the prefix
-	// diverges it, and one rewritten mid-session moves it under a live cache.
-	catalog atomic.Pointer[string]
+	// delivered is the listing the model has, nil when it has none — the state
+	// a new session and a completed fold are both in. It rides the turn, never
+	// the prefix, which a per-project catalog would diverge.
+	delivered atomic.Pointer[string]
 }
 
 func newSkillSet(enabled, all []skill.Skill, store, allStore *skill.Store, noImplicit bool) skillSet {
 	return skillSet{enabled: enabled, all: all, store: store, allStore: allStore, noImplicitInvocation: noImplicit}
 }
 
-// publishCatalog owes the listing to the next real turn. It is called with what
-// the caller already discovered — never a fresh List(), which walks the disk —
-// so a turn costs nothing when the catalog has not changed.
-func (s *skillSet) publishCatalog(skills []skill.Skill) {
+// owedCatalog returns the listing this turn owes and records it as delivered,
+// empty when the model already has the current one. It asks the canonical
+// registry rather than a flag, so a writer that never announced itself cannot
+// leave the model's view stale — the reason this is a question and not a
+// notification is benchmarks/catalog-detector.
+func (s *skillSet) owedCatalog() string {
 	if s.noImplicitInvocation {
-		return
+		return ""
 	}
-	block := skill.IndexBlock(skills)
+	block := skill.IndexBlock(s.list())
 	if block == "" {
-		return
+		return ""
 	}
-	s.catalog.Store(&block)
+	if prev := s.delivered.Load(); prev != nil && *prev == block {
+		return ""
+	}
+	s.delivered.Store(&block)
+	return block
 }
 
-// drainCatalog returns the listing owed to this turn, once.
-func (s *skillSet) drainCatalog() string {
-	if block := s.catalog.Swap(nil); block != nil {
-		return *block
-	}
-	return ""
+// forgetDeliveredCatalog returns the listing to the unknown state: what the
+// model was sent is no longer in the context it samples from.
+func (s *skillSet) forgetDeliveredCatalog() {
+	s.delivered.Store(nil)
 }
 
 // list returns the enabled skills, preferring the live store.
@@ -121,19 +125,15 @@ func (s *skillSet) writer() *skill.Store {
 }
 
 // CreateSkill writes a new skill file at the given scope and returns its path.
-// The live store makes it usable by name at once, and republishSkillCatalog
-// tells the model it exists on the next turn. A config activation change still
+// The live store makes it usable by name at once, and the next turn's listing
+// carries it without this having to say so. A config activation change still
 // needs a rebuild: the store's disabled set is bound at construction.
 func (c *Controller) CreateSkill(name string, scope skill.Scope, content string) (string, error) {
 	w := c.skills.writer()
 	if w == nil {
 		return "", fmt.Errorf("no writable skill store in this session")
 	}
-	path, err := w.CreateWithContent(name, scope, content)
-	if err == nil {
-		c.republishSkillCatalog()
-	}
-	return path, err
+	return w.CreateWithContent(name, scope, content)
 }
 
 // UpdateSkill overwrites an existing user-authored skill file in place. See
@@ -143,11 +143,7 @@ func (c *Controller) UpdateSkill(name string, scope skill.Scope, content string)
 	if w == nil {
 		return fmt.Errorf("no writable skill store in this session")
 	}
-	err := w.UpdateContent(name, scope, content)
-	if err == nil {
-		c.republishSkillCatalog()
-	}
-	return err
+	return w.UpdateContent(name, scope, content)
 }
 
 // DeleteSkill removes a user-authored skill file at the given scope. See
@@ -157,18 +153,5 @@ func (c *Controller) DeleteSkill(name string, scope skill.Scope) error {
 	if w == nil {
 		return fmt.Errorf("no writable skill store in this session")
 	}
-	err := w.Delete(name, scope)
-	if err == nil {
-		c.republishSkillCatalog()
-	}
-	return err
-}
-
-// republishSkillCatalog re-owes the listing after a write changed the canonical
-// registry. The listing is delivered once, so a change nothing re-owes is one
-// the model does not hear about until something else happens to re-owe it — a
-// fold, or the next session. The fresh List() walks the disk, which is why this
-// sits on the write and never on the turn.
-func (c *Controller) republishSkillCatalog() {
-	c.skills.publishCatalog(c.skills.list())
+	return w.Delete(name, scope)
 }

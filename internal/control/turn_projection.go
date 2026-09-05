@@ -49,7 +49,7 @@ func (c *Controller) turnBlocksFor(source string, includeOwed bool, notes []stri
 		// the user's next message is owed.
 		blocks = append(blocks,
 			turnBlock{hookContextTag, c.drainHookContextBlock()},
-			turnBlock{"available-skills", wrapTurnBlock("available-skills", c.skills.drainCatalog())},
+			turnBlock{"available-skills", wrapTurnBlock("available-skills", c.skills.owedCatalog())},
 			turnBlock{"project-instructions", wrapTurnBlock("project-instructions", c.memory.drainInstructions())},
 		)
 	}

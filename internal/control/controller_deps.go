@@ -156,6 +156,5 @@ func newControllerDeps(opts Options, sink event.Sink, usageTee *goalUsageTee, ru
 // real turn: the skills catalog and the standing instructions. Neither is in
 // the cached prefix — that is what makes the prefix identical across projects.
 func (c *Controller) publishPerProjectContext(opts Options) {
-	c.skills.publishCatalog(opts.Skills)
 	c.memory.publishInstructions(opts.Memory)
 }

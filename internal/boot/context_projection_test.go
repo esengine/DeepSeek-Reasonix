@@ -6,10 +6,13 @@ package boot
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -278,6 +281,47 @@ func blockOf(projection, tag string) string {
 		return projection[i:]
 	}
 	return projection[i : i+j+len(close)]
+}
+
+// Arm 6: an editor, a script and the model's own write tool all reach the
+// registry, and the listing is owed by asking it rather than by being told, so
+// a write nobody announced still lands on the next turn. The second half reads
+// the rule backwards: a turn that changed nothing must not re-send the listing,
+// or freshness is bought by destroying the stability it rides on.
+func TestProjectionOutOfBandSkillWriteReachesTheNextTurn(t *testing.T) {
+	h := newProjectionHarness(t, "ctxproj-outofband", "", "")
+	before := h.turn("turn-alpha")
+
+	dir := filepath.Join(h.dir, ".reasonix", "skills", "outside-audit")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("make the skill directory: %v", err)
+	}
+	file := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(file, []byte(strings.ReplaceAll(projectionSkillFile, "ledger-audit", "outside-audit")), 0o644); err != nil {
+		t.Fatalf("write the skill past every API: %v", err)
+	}
+
+	after := h.turn("turn-beta")
+	if listing := blockOf(projectionOf(t, after, "turn-beta"), "available-skills"); !strings.Contains(listing, "outside-audit") {
+		t.Errorf("freshness: a skill written past the host's writers never reached the model:\n%s", listing)
+	}
+	if a, b := systemOf(before), systemOf(after); a != b {
+		t.Errorf("cache-boundary: an out-of-band skill write moved the prefix:\nfirst diff site: %q", firstDivergence(a, b))
+	}
+
+	if listing := blockOf(projectionOf(t, h.turn("turn-gamma"), "turn-gamma"), "available-skills"); listing != "" {
+		t.Errorf("the listing was re-sent although the registry did not change:\n%s", listing)
+	}
+
+	// A touch is the case a metadata fingerprint gets wrong: the file moved,
+	// the line the model reads did not.
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(file, later, later); err != nil {
+		t.Fatalf("touch the skill file: %v", err)
+	}
+	if listing := blockOf(projectionOf(t, h.turn("turn-delta"), "turn-delta"), "available-skills"); listing != "" {
+		t.Errorf("a touched mtime re-sent a listing that did not change:\n%s", listing)
+	}
 }
 
 // Arm 5 is the declared exception, stated so that changing it is a decision
