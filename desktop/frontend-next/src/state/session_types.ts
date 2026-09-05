@@ -90,8 +90,21 @@ export interface RuntimeNotice {
   detail?: string;
 }
 
+/** TurnTerminal is how the turn in front of you ended, or null while it has not.
+ *  Four judgements rather than a flag: only one of them is a delivery, and a
+ *  turn that stopped short of its obligations reads nothing like one that
+ *  finished. The label beside it is presentation and says less than this. */
+export type TurnTerminal =
+  | { kind: "completed" }
+  | { kind: "failed"; err: string }
+  | { kind: "cancelled" }
+  | { kind: "incomplete"; outcome: string }
+  | null;
+
 export interface SessionState {
   error: string;
+  // How this turn ended, cleared when the next one starts.
+  terminal: TurnTerminal;
   // Notices about the machine running this conversation rather than about the
   // conversation. They describe something that is still true — which model was
   // resolved, which server failed to start — so, like a standing extension

@@ -555,7 +555,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // Chinese literals that the reducer had written — a translation key deciding
   // whether the run reads as moving.
   const blocked = hasPendingDecision(status);
-  const run = runState({ blocked, running: s.running, hasItems: s.items.length > 0, finished: s.doing === "已完成" });
+  const run = runState({ blocked, running: s.running, hasItems: s.items.length > 0, terminal: s.terminal });
   const cost = money(s.metrics.cost, s.metrics.currency);
 
   // The chrome reads the focused pane. Reporting from an effect keeps it out of

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Decision, SessionStatus } from "../port/session";
+import type { TurnTerminal } from "../state/session_types";
 import { hasPendingDecision, runState } from "./decisions";
+
+const DONE: TurnTerminal = { kind: "completed" };
 
 const KINDS: Decision["kind"][] = ["tool_approval", "plan_approval", "recovery_approval", "ask"];
 
@@ -20,7 +23,7 @@ describe("pending decisions, not localized doing text, own blocked state", () =>
   it("does not read the old label as a reason to wait", () => {
     for (const label of LABELS) {
       const blocked = hasPendingDecision(status([]));
-      const run = runState({ blocked, running: true, hasItems: true, finished: label === "已完成" });
+      const run = runState({ blocked, running: true, hasItems: true, terminal: label === "已完成" ? DONE : null });
       expect(blocked, `label ${JSON.stringify(label)}`).toBe(false);
       expect(run, `label ${JSON.stringify(label)}`).toBe("running");
     }
@@ -32,7 +35,7 @@ describe("pending decisions, not localized doing text, own blocked state", () =>
     for (const kind of KINDS) {
       for (const label of [...LABELS, "已完成"]) {
         const blocked = hasPendingDecision(status([waiting(kind)]));
-        const run = runState({ blocked, running: true, hasItems: true, finished: label === "已完成" });
+        const run = runState({ blocked, running: true, hasItems: true, terminal: label === "已完成" ? DONE : null });
         expect(blocked, `${kind} / ${JSON.stringify(label)}`).toBe(true);
         expect(run, `${kind} / ${JSON.stringify(label)}`).toBe("halt");
       }
@@ -62,17 +65,17 @@ describe("pending decisions, not localized doing text, own blocked state", () =>
 describe("runState", () => {
   // Facts in, verdict out. Nothing here can be told what the screen says.
   it("puts waiting on a person ahead of every other state", () => {
-    expect(runState({ blocked: true, running: true, hasItems: true, finished: true })).toBe("halt");
-    expect(runState({ blocked: true, running: false, hasItems: false, finished: false })).toBe("halt");
+    expect(runState({ blocked: true, running: true, hasItems: true, terminal: DONE })).toBe("halt");
+    expect(runState({ blocked: true, running: false, hasItems: false, terminal: null })).toBe("halt");
   });
 
   it("reads an empty session as idle and a live one as running", () => {
-    expect(runState({ blocked: false, running: false, hasItems: false, finished: false })).toBe("idle");
-    expect(runState({ blocked: false, running: true, hasItems: false, finished: false })).toBe("running");
+    expect(runState({ blocked: false, running: false, hasItems: false, terminal: null })).toBe("idle");
+    expect(runState({ blocked: false, running: true, hasItems: false, terminal: null })).toBe("running");
   });
 
   it("separates a turn that ended from one that stopped part way", () => {
-    expect(runState({ blocked: false, running: false, hasItems: true, finished: true })).toBe("done");
-    expect(runState({ blocked: false, running: false, hasItems: true, finished: false })).toBe("halt");
+    expect(runState({ blocked: false, running: false, hasItems: true, terminal: DONE })).toBe("done");
+    expect(runState({ blocked: false, running: false, hasItems: true, terminal: null })).toBe("halt");
   });
 });

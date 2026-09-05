@@ -2,19 +2,20 @@ import type { Receipt, Tool, WireEvent } from "../port/wire";
 import { estimateTokens, sample } from "../port/tokens";
 import type { HistoryMessage } from "../port/port";
 import { plural, t } from "../i18n";
-import type { Item, Metrics, PlanStep, RememberedFact, RuntimeNotice, SessionState, Waiting } from "./session_types";
+import type { Item, Metrics, PlanStep, RememberedFact, RuntimeNotice, SessionState, TurnTerminal, Waiting } from "./session_types";
 import { foldUsage, quoteAmount } from "./usage";
 import { showsReceipt } from "./prefs";
 
 // The types live next door; this stays their way in, so no reader of a
 // session has to know they were split off.
-export type { Item, Metrics, PlanStep, RememberedFact, RuntimeNotice, SessionState, Waiting };
+export type { Item, Metrics, PlanStep, RememberedFact, RuntimeNotice, SessionState, TurnTerminal, Waiting };
 import { promptOpen, prompted, sealByReceipt } from "./prompts";
 export { quoteAmount };
 export { showsReceipt };
 
 export const initialState: SessionState = {
   error: "",
+  terminal: null,
   runtime: [],
   items: [],
   revision: 0,
@@ -370,7 +371,11 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
   if ("decisionReceipt" in ev && ev.decisionReceipt) s = sealByReceipt(s, ev.decisionReceipt);
   switch (ev.kind) {
     case "turn_started":
-      return { ...s, running: true, doing: "运行中", waiting: { ttftSince: Date.now() } };
+      // A new turn clears how the last one ended. Terminal is a fact about the
+      // turn in front of you, not a record that one ever finished — without
+      // this it would be the latter, and the tick from an hour ago would still
+      // be on screen over work that is running now.
+      return { ...s, running: true, doing: "运行中", terminal: null, waiting: { ttftSince: Date.now() } };
 
     case "reasoning":
       return {
@@ -599,6 +604,7 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
       return {
         ...s,
         running: false,
+        terminal: turnTerminal(ev),
         doing: ev.err ? "已中断" : "已完成",
         waiting: {},
         plan: s.plan.length > 0 && s.plan.every((p) => p.done) ? [] : s.plan,
@@ -608,6 +614,18 @@ function apply(s: SessionState, ev: SessionEvent): SessionState {
     default:
       return s;
   }
+}
+
+// turnTerminal reads how a turn ended off the frame that ended it. Four
+// judgements, not a bool: a turn that stopped because obligations are missing
+// delivered nothing, and folding it in with a clean finish is what let it claim
+// the tick. Cancellation carries an err of its own — the kernel says so — so
+// the flag is what tells a stop apart from a dropped connection.
+function turnTerminal(ev: WireEvent): TurnTerminal {
+  if (ev.cancelled) return { kind: "cancelled" };
+  if (ev.err) return { kind: "failed", err: ev.err };
+  if (ev.outcome) return { kind: "incomplete", outcome: ev.outcome };
+  return { kind: "completed" };
 }
 
 // withReceipt appends the turn's completion record when the kernel says it has
