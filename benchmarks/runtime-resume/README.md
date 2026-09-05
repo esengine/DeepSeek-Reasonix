@@ -76,6 +76,9 @@ provider call*.
 | `cancel-ordinary-tool` | a plain shell the turn is waiting on, then a stop | none | does a stop reach an ordinary tool? |
 | `cancel-background-handoff` | a backgrounded child running, then a stop aimed at the turn | none | negative control: does it leave a job's work alone? |
 | `cancel-headless-owner` | a synchronous Run, stopped first by the controller and then by its caller | none | whose cancellation is it? |
+| `lineage-foreground-cancel` | a foreground delegation, then the turn's own stop | none | control: does the reading see a cancellation arrive? |
+| `lineage-background-cancel` | a backgrounded one, then the turn's own stop | ceilings | does the stop stay out of the tree it handed away? |
+| `lineage-job-kill` | the same, stopped through the job that owns it | ceilings | control: does the job's own stop reach its tree? |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -161,6 +164,30 @@ ownership from the only holder that has it. Reading one surface with the other's
 stop is how the first version of this probe reported a cancellation defect that
 was an ownership boundary: `Running()` answers for the gate, and a turn the gate
 was never told about reads as ended the whole time.
+
+Three read both trees at once, because "the work stopped" and "the stop reached
+it" are different claims and only the pair of them says which happened. Each
+reading keeps five facts apart at one instant: the turn's gate, the job's own
+liveness, whether the child's context closed, whether its call returned, and
+what the durable record says. A context that closed and a call that returned are
+separate events — work whose caller stopped waiting leaves the same absence
+behind as work that was cancelled, and only the first is a cancellation.
+
+The three expectations are deliberately opposite, which is what makes them a
+matrix rather than three tests:
+
+```
+                     turn      job        child ctx    record
+parent stop (fg)     ends      —          closes       settled
+parent stop (bg)     ends      running    open         still open
+the job's own stop   active    gone       closes       settled
+```
+
+A fix that closed everything on a stop would satisfy the first row and violate
+the third. The manager's own root needs no separate question: a job still
+running with its child's context open is the root answering directly, and an
+extra experiment there would only add a mechanism the probe would have to
+explain when it failed.
 
 Two more ask where a stop goes, and they are a pair on purpose. A turn that
 returns while the work it owned is still running has not cancelled anything — it

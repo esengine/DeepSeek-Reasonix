@@ -29,7 +29,7 @@ type arm struct {
 func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
 		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) &&
-		!loneTaskArm(name) && !cancelRoutingArm(name)
+		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -110,6 +110,9 @@ func arms() []arm {
 		{name: armCancelTool, asks: "whether a stop reaches an ordinary tool the turn is waiting on"},
 		{name: armCancelBackground, asks: "whether a stop leaves work already handed to a job alone"},
 		{name: armCancelHeadlessOwner, asks: "who owns the cancellation of a turn the controller never admitted"},
+		{name: armLineageForeground, asks: "control: does a stop reach the tree the turn owns?"},
+		{name: armLineageBackground, asks: "does it also reach the tree it handed away?"},
+		{name: armLineageJobKill, asks: "control: does a job's own stop reach its tree?"},
 		{name: armTaskFgQueuedCancel, asks: "a delegation stopped while the scheduler still held it back"},
 		{name: armTaskBgQueuedCancel, asks: "the same, backgrounded: a job killed before it was ever admitted"},
 		{name: armTaskFgRunningCancel, asks: "a delegation stopped while its child was executing"},

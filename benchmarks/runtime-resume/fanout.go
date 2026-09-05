@@ -122,6 +122,9 @@ func (s *scripted) childScript(ctx context.Context, sentinel string) []provider.
 		return []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("probe child failed on release")}}
 	case childHang:
 		<-ctx.Done()
+		// The context closed, and this is the only place that can say so: a
+		// caller that stopped waiting leaves the same absence behind.
+		s.fleets.first(childCtxDone(sentinel))
 		return nil
 	case childFail:
 		return []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("probe child failed on purpose")}}

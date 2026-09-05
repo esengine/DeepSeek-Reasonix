@@ -87,13 +87,19 @@ func childEntered(sentinel string) string { return "child-entered:" + sentinel }
 // never arrived leaves behind.
 func childLeft(sentinel string) string { return "child-left:" + sentinel }
 
+// childCtxDone names the record a child leaves when its own context closes,
+// which is a different fact from having returned: a run whose caller stopped
+// waiting returns to nobody with its context still open.
+func childCtxDone(sentinel string) string { return "child-ctxdone:" + sentinel }
+
 // probeChildEntered is where that answer rides into the observation. It is not
 // a status the kernel emits: the key names the probe so no row reads it as one.
 const probeChildEntered = "probe:delegated-child-entered"
 
 func backgroundTaskArm(name string) bool {
 	switch name {
-	case armTaskBgQueued, armTaskBgRunning, armTaskBgQueuedCancel, armTaskBgRunningCancel:
+	case armTaskBgQueued, armTaskBgRunning, armTaskBgQueuedCancel, armTaskBgRunningCancel,
+		armLineageBackground, armLineageJobKill, armCancelBackground:
 		return true
 	}
 	return false

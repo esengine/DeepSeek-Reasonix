@@ -54,6 +54,11 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the group has an item running and items that never got
 		// one — the split a cancellation is reported against.
 		return 1, 1
+	case armLineageBackground, armLineageJobKill:
+		// Room for a second run: the alive check asks whether the manager can
+		// still start anything, and a ceiling of one would answer for the
+		// hanging child instead.
+		return 4, 4
 	case armTaskFgQueued, armTaskBgQueued, armTaskFgQueuedCancel, armTaskBgQueuedCancel:
 		// One slot, held by the fleet dispatched ahead of the delegation, so the
 		// refusal the arm records is the scheduler's and not a race.
