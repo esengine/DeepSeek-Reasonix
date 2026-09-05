@@ -22,9 +22,10 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   `ContextRequest` what it starts from, `SchedulerPolicy` when it runs. Put a
   field in whichever member decides its value — profiles carry ceilings, never
   per-call values. `internal/agent/profile_boundary_test.go` enforces it.
-- Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
-  byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
-  mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+- Cache-first: the system-prompt prefix (base prompt, tools, declared prefix
+  configuration) must stay byte-stable across turns so DeepSeek's automatic
+  prefix cache stays warm. Never mutate it mid-session — ride the turn tail
+  instead (see `control.Compose`), under the rules in *Context projection*.
 - Performance features land with an effect test at their final boundary
   (`internal/boot/effect_test.go` pattern): assert what actually reaches the
   provider request, frontend sink, or trajectory through the real `boot.Build`
@@ -127,6 +128,31 @@ without `-allow-widen`, so carrying debt through a rename or an extraction is
 asked for in the command and justified in the PR. A clean run also reports
 budget the tree stopped using: it is only reclaimed by an `-update`, and until
 then it is room a file can grow back into.
+
+## Context projection
+
+Canonical dynamic state — the skill registry, the memory store — lives in its own
+owner, and what the model sees is a projection of it onto each request.
+
+- **Prefix ownership.** Only declared prefix configuration may move the
+  cache-stable prefix; ordinary memory writes, skill writes and runtime facts
+  ride the turn. Pinned memory bodies are the one declared exception, because
+  pinning is a request to pay one cold start.
+- **Projection freshness.** When canonical state changes, the next eligible turn
+  carries the new projection or can say why it is not owed. "Right after a fold,
+  or in the next session" is not an answer.
+- **Projection ownership.** Whoever owns a dynamic fact owns the invalidation
+  that makes its projection owed again. A projection kept fresh because every
+  writer remembered to announce itself is one forgotten call from stale —
+  `skillSet.owedCatalog` asks the registry rather than waiting to be told.
+- **Determinism.** The same canonical state and the same projection state
+  produce byte-identical model-visible bytes.
+
+`internal/boot/context_projection_test.go` holds all four at the provider
+boundary. One row is open: standing instructions reach a live session only
+through the writers that publish them, so an edit to `REASONIX.md` made outside
+them waits for the next build. The skills listing was that shape until it
+started asking.
 
 ## Memory
 
