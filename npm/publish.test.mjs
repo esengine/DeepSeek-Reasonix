@@ -119,7 +119,7 @@ function fixture(
     });
   }
 
-  return { packages, registry, calls, publish, addVersion };
+  return { packages, registry, calls, publish, addVersion, hiddenReads };
 }
 
 test("reuses a fully published npm candidate without republishing", (t) => {
@@ -247,4 +247,97 @@ test("compares channel versions without integer truncation", () => {
     compareDistTagVersions("next", "1.5.0-rc.10", "1.5.0-rc.2"),
     1,
   );
+});
+
+test("accepts a raced publish when a concurrent publisher wins", (t) => {
+  const fx = fixture(t);
+  // The version already exists in the registry, but the first read is hidden
+  // so ensurePackage attempts to publish and hits "version already exists";
+  // the follow-up read then proves the winner belongs to this candidate.
+  fx.addVersion(fx.packages[0].name);
+  fx.hiddenReads.set(`${fx.packages[0].name}@1.5.0-canary.42`, 1);
+  for (const { name } of fx.packages) {
+    fx.registry.get(name).tags.set("canary", "1.5.0-canary.41");
+  }
+
+  assert.deepEqual(fx.publish(), {
+    distTag: "canary",
+    version: "1.5.0-canary.42",
+  });
+  const publishes = fx.calls.filter(({ args }) => args[0] === "publish");
+  assert.equal(publishes.length, 2); // one rejected race attempt + one real publish
+  assert.equal(publishes[0].cwd, fx.packages[0].dir);
+  for (const { name } of fx.packages) {
+    assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
+  }
+});
+
+test("throws when a published version never becomes visible", (t) => {
+  const fx = fixture(t, "1.5.0-canary.42", { visibilityDelayReads: 1 });
+
+  assert.throws(
+    () => fx.publish({ attempts: 1 }),
+    /did not become visible in the npm registry/,
+  );
+});
+
+test("rejects an empty package list", () => {
+  assert.throws(
+    () =>
+      publishPackages({
+        packages: [],
+        version: "1.5.0-canary.42",
+        candidateSha,
+        runner: () => {
+          throw new Error("runner should not be called");
+        },
+      }),
+    /npm publication requires at least one package/,
+  );
+});
+
+test("rejects an invalid release candidate SHA", () => {
+  assert.throws(
+    () =>
+      publishPackages({
+        packages: [{ name: "reasonix", dir: "." }],
+        version: "1.5.0-canary.42",
+        candidateSha: "z".repeat(40),
+        runner: () => {
+          throw new Error("runner should not be called");
+        },
+      }),
+    /invalid release candidate SHA/,
+  );
+});
+
+test("rejects a registry package with no candidate provenance", (t) => {
+  const fx = fixture(t);
+  fx.registry.get(fx.packages[0].name).versions.set("1.5.0-canary.42", {
+    name: fx.packages[0].name,
+    version: "1.5.0-canary.42",
+  });
+
+  assert.throws(() => fx.publish(), /has no candidate provenance/);
+});
+
+test("publishes a first version when no dist-tag is set", (t) => {
+  const fx = fixture(t);
+
+  assert.deepEqual(fx.publish(), {
+    distTag: "canary",
+    version: "1.5.0-canary.42",
+  });
+  for (const { name } of fx.packages) {
+    assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
+    assert.equal(fx.registry.get(name).tags.has("canary-staging"), false);
+  }
+  assert.ok(
+    fx.calls.some(
+      ({ args }) =>
+        args[0] === "dist-tag" && args[1] === "add" && args[3] === "canary",
+    ),
+  );
+  // An unset dist-tag is older than any valid candidate.
+  assert.equal(compareDistTagVersions("latest", "2.0.0", ""), 1);
 });
