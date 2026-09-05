@@ -195,15 +195,21 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,520 lines. Six domain owners, remaining effects, the pure shell
-  and removal of its size exception are not complete. Module-level code moved
-  out first: title/topic helpers (`lib/sessionTitles.ts`), browser mock
-  scenarios (`lib/mockScenarios.ts`), todo dismissal persistence
-  (`lib/todoDismissalStorage.ts`), the notice preview seam
-  (`app-shell/NoticePreviewPanel.tsx`) and the Shell/text-size hotkey
-  registrations (`app-shell/HotkeyRegistrations.tsx`). Effect count is
-  unchanged; typechecks, layer/hooks gates and the App lifecycle and browser
-  replays still pass.
+- App is still 3,466 lines (30 -> 25 effects). Six domain owners, remaining
+  effects, the pure shell and removal of its size exception are not complete.
+  Already moved out: module-level code (title/topic helpers
+  `lib/sessionTitles.ts`, browser mock scenarios `lib/mockScenarios.ts`, todo
+  dismissal persistence `lib/todoDismissalStorage.ts`, the notice preview seam
+  `app-shell/NoticePreviewPanel.tsx`, Shell/text-size hotkey registrations
+  `app-shell/HotkeyRegistrations.tsx`) and the window-chrome lifecycle
+  (platform type/detection now in `lib/desktopPlatform.ts`,
+  `app-shell/NativeWindowChrome.tsx` deleted; platform/viewport state in
+  `store/windowChrome.ts`; the data-platform attribute, platform probe,
+  viewport resize and both layout minimum-width guard effects now live in
+  `app-runtime/WindowChromeLifecycle.tsx`). The footer ResizeObserver, the
+  three pointer-resize lifecycles and the maximised sync remain for the
+  chrome/footer region slices. Typechecks, layer/hooks gates and the App
+  lifecycle and browser replays all pass.
 - The old goal assertions and remote JSX assertions now have behavioral
   replacements. Cumulative `test:all`, App lifecycle/browser, Transcript unit,
   both Transcript browser suites, single-writer and repolint passed on this
@@ -232,11 +238,13 @@ line anchors refer to the current worktree (structure inventory: 30 effects, ~90
 state/refs, 44 direct bridge call sites, 16 orchestrating handlers, return JSX
 3124-3667 with eight inline JSX/prop-builder blocks).
 
-1. **Layout/Shell lifecycle**: effects #6/#8/#11/#22/#25/#26/#27 (data-platform,
-   platform probe, viewport resize, activeTabIdRef, footer ResizeObserver,
-   sidebar/dock clamps) with their state (desktopPlatform/viewport/footerHeight)
-   into a shared section hook or the existing layout store first, then the three
-   pointer-resize lifecycles and toggleSidebar/pulseSidebarToggle.
+1. **Layout/Shell lifecycle (partly done)**: effects #6/#8/#11/#26/#27 and the
+   platform/viewport state are done (`lib/desktopPlatform.ts`,
+   `store/windowChrome.ts`, `app-runtime/WindowChromeLifecycle.tsx`); the footer
+   ResizeObserver (#25) moves with the footer region, activeTabIdRef (#22) with
+   its callers, and the three pointer-resize lifecycles with
+   toggleSidebar/pulseSidebarToggle with the sidebar/chrome regions while their
+   consumers read the same store.
 2. **Banner/overlay stack**: config-warnings banner JSX (3338-3372),
    provider-setup banner, lease/startup-error IIFE (3314-3332), inline
    RemoteReclaimBanner onReclaim (3308-3309 direct bridge), extension drain

@@ -195,13 +195,9 @@ import { AppOverlayHost } from "./app-shell/AppOverlayHost";
 import { WorkspaceDockRegion } from "./app-shell/WorkspaceDockRegion";
 import { AppBottomRegions } from "./app-shell/AppBottomRegions";
 import { SidebarRegion } from "./app-shell/SidebarRegion";
-import {
-  browserPlatformOverride,
-  detectBrowserPlatform,
-  isMacOSWorkbenchSidebarTitlebar,
-  normalizeDesktopPlatform,
-  type DesktopPlatform,
-} from "./app-shell/NativeWindowChrome";
+import { isMacOSWorkbenchSidebarTitlebar } from "./lib/desktopPlatform";
+import { useWindowChromeStore } from "./store/windowChrome";
+import { WindowChromeLifecycle } from "./app-runtime/WindowChromeLifecycle";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
 import {
   sidebarImScopeLabel,
@@ -390,8 +386,8 @@ export default function App() {
   const [takeoverDialogTab, setTakeoverDialogTab] = useState<string | null>(null);
   const [reclaimBusyTab, setReclaimBusyTab] = useState<string | null>(null);
   const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null);
-  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
-  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 720 : window.innerHeight));
+  const viewportWidth = useWindowChromeStore((state) => state.viewportWidth);
+  const viewportHeight = useWindowChromeStore((state) => state.viewportHeight);
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
@@ -435,7 +431,7 @@ export default function App() {
   const [workspaceInsertTarget, setWorkspaceInsertTarget] = useState<WorkspaceInsertTarget>("composer");
   const transientOverlayDismissSignal = useOverlayStore((s) => s.transientOverlayDismissSignal);
   const setTransientOverlayDismissSignal = useOverlayStore((s) => s.setTransientOverlayDismissSignal);
-  const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
+  const desktopPlatform = useWindowChromeStore((state) => state.platform);
   const windowsFramelessChrome = desktopPlatform === "windows";
   const [mainWindowMaximised, syncMainWindowMaximised] = useWindowsMaximised(windowsFramelessChrome);
   useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
@@ -462,9 +458,6 @@ export default function App() {
   useWindowStatePersistence();
   useViewportHeightVar();
   useEffect(() => () => workspacePanelResizeFinishRef.current?.(), []);
-  useEffect(() => {
-    document.documentElement.setAttribute("data-platform", desktopPlatform);
-  }, [desktopPlatform]);
 
   const { backgroundRuntimes, workspaceConflict, setWorkspaceConflict, refreshBackgroundRuntimes } = useRuntimeStatus({
     tabId: activeTabId, sessionKey: activeSessionIdentity, running: state.running,
@@ -522,28 +515,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const override = browserPlatformOverride();
-    if (override) {
-      setDesktopPlatform(override);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void app.Platform()
-      .then((value) => {
-        if (!cancelled) setDesktopPlatform(normalizeDesktopPlatform(value));
-      })
-      .catch((e) => {
-        console.warn("platform probe failed", e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-
-  useEffect(() => {
     setSidebarImDetailConnectionId((current) => {
       if (!current) return "";
       return sidebarImConnections.some((connection) => connection.id === current) ? current : "";
@@ -558,15 +529,6 @@ export default function App() {
       setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
     });
   }, [closeTransientOverlays]);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onResize = () => {
-      setViewportWidth(window.innerWidth);
-      setViewportHeight(window.innerHeight);
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   const [invocationMetadataByTab, setInvocationMetadataByTab] = useState<Record<string, InvocationMetadataMap>>({});
   const [footerHeight, setFooterHeight] = useState(0);
@@ -1506,23 +1468,6 @@ export default function App() {
   const sidebarRenderWidth = liveSidebarWidth ?? sidebarWidth;
   const sidebarResizeMinWidth = desktopLayoutStyle === "creation" ? CREATION_SIDEBAR_MIN_WIDTH : SIDEBAR_MIN_WIDTH;
 
-  useEffect(() => {
-    if (desktopLayoutStyle === "creation" || sidebarWidth >= SIDEBAR_MIN_WIDTH) return;
-    setSidebarWidth(SIDEBAR_MIN_WIDTH);
-    saveSidebarWidth(SIDEBAR_MIN_WIDTH);
-  }, [desktopLayoutStyle, sidebarWidth]);
-
-  useEffect(() => {
-    if (desktopLayoutStyle === "creation") {
-      if (rightDockTreeWidth >= CREATION_RIGHT_DOCK_TREE_MIN_WIDTH) return;
-      setRightDockTreeWidth(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH);
-      saveRightDockTreeWidth(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH);
-      return;
-    }
-    if (rightDockTreeWidth >= RIGHT_DOCK_TREE_MIN_WIDTH) return;
-    setRightDockTreeWidth(RIGHT_DOCK_TREE_MIN_WIDTH);
-    saveRightDockTreeWidth(RIGHT_DOCK_TREE_MIN_WIDTH);
-  }, [desktopLayoutStyle, rightDockTreeWidth]);
 
   const setExpandedSidebarWidth = useCommittedCommand((width: number) => {
     closeTransientOverlays();
@@ -2979,6 +2924,7 @@ export default function App() {
     <UpdaterProvider>
     <ShellHotkeys />
     <TextSizeHotkeys />
+    <WindowChromeLifecycle />
     <AppRuntimeEffects
       running={state.running}
       onEvent={handleRuntimeEvent}

@@ -156,7 +156,7 @@ Plan 修订由独立的源会话队列 owner 管理，仅原请求可释放其�
 当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调及其余
 App 领域仍需继续迁移。
 
-- App 仍3520行；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。模块级代码已迁出：标题/topic 纯函数（`lib/sessionTitles.ts`）、浏览器 mock 场景（`lib/mockScenarios.ts`）、todo 折叠键持久化（`lib/todoDismissalStorage.ts`）、通知预览 seam（`app-shell/NoticePreviewPanel.tsx`）与 Shell/文本尺寸热键组件（`app-shell/HotkeyRegistrations.tsx`）；effect 数不变，全部浏览器回放与生命周期测试通过。
+- App 仍3466行（30→25 个 effect）；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。已迁出：模块级代码（标题/topic 纯函数 `lib/sessionTitles.ts`、mock 场景 `lib/mockScenarios.ts`、todo 折叠持久化 `lib/todoDismissalStorage.ts`、通知预览 `app-shell/NoticePreviewPanel.tsx`、Shell/文本尺寸热键 `app-shell/HotkeyRegistrations.tsx`）；窗口 chrome 生命周期（平台类型与探测下沉 `lib/desktopPlatform.ts`，`app-shell/NativeWindowChrome.tsx` 删除；platform/viewport 状态进 `store/windowChrome.ts`，data-platform 属性、平台探测、resize、sidebar/dock 最小宽度守卫五个 effect 迁入 `app-runtime/WindowChromeLifecycle.tsx`）。footer ResizeObserver、三个 pointer resize 生命周期与 maximised 同步仍随后续 chrome/footer 区域切片迁移。全部浏览器回放与生命周期测试通过。
 - 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
   Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
   head 或原生平台验收。
@@ -178,13 +178,12 @@ App 领域仍需继续迁移。
 inventory：30 个 effect、约 90 个状态/ref、44 处直接 bridge 调用、16 个大
 处理器、返回 JSX 3124-3667 与 8 个内联 JSX/属性块）。
 
-1. **Layout/Shell 生命周期**：effects #6/#8/#11/#22/#25/#26/#27（data-platform、
-   平台探测、resize viewport、activeTabIdRef、footer ResizeObserver、sidebar/
-   dock clamp）及其状态（desktopPlatform/viewport/footerHeight）先落共享
-   section hook 或既有 layout store，消费点（className、footer、terminal
-   clamp、conversation width）同步改读；随后迁三个 pointer resize 生命周期
-   （startSidebarResize/startWorkspacePanelResize/startTerminalResize 及键盘
-   调整）与 `toggleSidebar/pulseSidebarToggle`。
+1. ✅ **Layout/Shell 生命周期（部分完成）**：effects #6/#8/#11/#26/#27 与
+   platform/viewport 状态已迁（`lib/desktopPlatform.ts` + `store/windowChrome.ts`
+   + `app-runtime/WindowChromeLifecycle.tsx`）；剩余：footer ResizeObserver
+   （#25）随 footer 区域、activeTabIdRef（#22）随调用方、三个 pointer resize
+   生命周期与 `toggleSidebar/pulseSidebarToggle` 随 sidebar/chrome 区域，消费点
+   （terminal clamp、conversation width、className）改读同一 store。
 2. **Banner/Overlay 栈**：config-warnings 横幅 JSX（3338-3372）、provider-setup
    横幅、lease/startup-error IIFE（3314-3332）、RemoteReclaimBanner 内联
    onReclaim（3308-3309 直接 bridge）、extension drain（effect #15）与
