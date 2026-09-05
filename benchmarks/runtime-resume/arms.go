@@ -30,7 +30,7 @@ func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
 		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) &&
 		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name) && !activeStoreArm(name) &&
-		!skillArm(name)
+		!skillArm(name) && !ephemeralArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -139,6 +139,8 @@ func arms() []arm {
 		{name: armReadOnlySkillQueued, asks: "whether the read-only skill entry point asks the same scheduler"},
 		{name: armReadOnlySkillRunning, asks: "what names a read-only skill while its child is executing"},
 		{name: armReadOnlySkillCompleted, asks: "what a finished read-only skill leaves behind, if anything"},
+		{name: armEphemeralTask, asks: "can the execution authority account for what read_only_task draws?"},
+		{name: armEphemeralSkill, asks: "the same of read_only_skill, the other ephemeral entry point"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

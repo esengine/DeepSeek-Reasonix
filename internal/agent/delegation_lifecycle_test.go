@@ -294,11 +294,12 @@ func TestBackgroundDelegationIsNotMarkedRunningWhileQueued(t *testing.T) {
 	close(prov.release)
 }
 
-// TestEphemeralDelegationRecordsNothing is the line this seam must not cross.
-// read_only_task promises no durable host side effects, so wiring a lifecycle
-// into the runner it shares must leave its research children out of the history
-// a restart rebuilds from — a promise, not an omission to tidy up later.
-func TestEphemeralDelegationRecordsNothing(t *testing.T) {
+// TestEphemeralDelegationOpensNothing is the line this seam must not cross, and
+// the graph is on the far side of it. The run graph projects durable facts and a
+// reader returns to the snapshot after a gap, so a node no record justifies is
+// one the snapshot cannot produce: drawing it puts research on screen that the
+// next resync erases while its child still holds a slot.
+func TestEphemeralDelegationOpensNothing(t *testing.T) {
 	prov := newLoneProvider()
 	close(prov.release)
 	task, ctx, sessionPath, sink := loneFixture(t, prov, 4)
@@ -309,8 +310,14 @@ func TestEphemeralDelegationRecordsNothing(t *testing.T) {
 	if entries := execjournal.History(sessionPath); len(entries) > 0 {
 		t.Fatalf("ephemeral delegation wrote %d execution records, want none", len(entries))
 	}
-	if !sink.sawState(agentgraph.StatePending) {
-		t.Errorf("ephemeral delegation was drawn %v, want the caller still shown what it delegated", sink.drawn())
+	if drawn := sink.drawn(); len(drawn) > 0 {
+		t.Errorf("ephemeral delegation drew %v; no snapshot can produce those nodes", drawn)
+	}
+	// The caller is still told what it delegated. That surface is honestly
+	// live-only — a tool call and its status — and claims nothing a later
+	// reader is owed.
+	if told := sink.told(); len(told) == 0 {
+		t.Error("the caller was told nothing about the research it delegated")
 	}
 }
 

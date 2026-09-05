@@ -209,7 +209,7 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 func approvalMode(arm string) string {
 	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) || cancelRoutingArm(arm) || lineageArm(arm) ||
 		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) || activeStoreArm(arm) ||
-		skillArm(arm) {
+		skillArm(arm) || ephemeralArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"

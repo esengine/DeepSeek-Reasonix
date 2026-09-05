@@ -14,16 +14,12 @@ import (
 // writes each down before drawing it. A fan-out's items are excluded — their
 // group opened them, and a second opening would redraw a worker as a group.
 type delegationLifecycle struct {
-	tool   *TaskTool
-	sink   event.Sink
-	track  *subagentProgressTracker
-	id     string
-	parent string
-	// ephemeral entry points promise no durable host side effects, so the
-	// record half is skipped while the picture stays: a read-only research
-	// child must not appear in the execution history a restart rebuilds from.
-	ephemeral bool
-	settled   atomic.Bool
+	tool    *TaskTool
+	sink    event.Sink
+	track   *subagentProgressTracker
+	id      string
+	parent  string
+	settled atomic.Bool
 }
 
 // openDelegation records that work entered orchestration and draws it pending.
@@ -33,13 +29,15 @@ type delegationLifecycle struct {
 func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, req *AcquireRequest, trk *subagentProgressTracker) (*delegationLifecycle, error) {
 	parentID, sink, _, ok := CallContext(ctx)
 	_, declared := graphNodeDeclared(ctx)
-	if declared || spec.Context.TopLevel || !ok || sink == nil || parentID == "" {
+	// An ephemeral run opens nothing, picture included: the graph projects
+	// durable facts, so a node no record justifies leaves the screen at the
+	// next resync while the work it named still holds a slot.
+	if declared || spec.Context.Ephemeral || spec.Context.TopLevel || !ok || sink == nil || parentID == "" {
 		return nil, nil
 	}
 	life := &delegationLifecycle{
 		tool: t, sink: sink, track: trk, parent: parentID,
-		id:        parallelNodeID(parentID, 0),
-		ephemeral: spec.Context.Ephemeral,
+		id: parallelNodeID(parentID, 0),
 	}
 	opening := fanOutOpeningDelta(parentID, delegationLabel(*spec), []agentgraph.Node{{
 		ID: life.id, ParentID: parentID, Kind: agentgraph.KindWorker,
@@ -51,10 +49,8 @@ func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, re
 	}})
 	// The same fact, twice: the journal is written from the delta the graph is
 	// drawn from, so the two cannot come to disagree about what was opened.
-	if !life.ephemeral {
-		if err := t.openExecutions(ctx, parentID, fanOutOpenings(opening)); err != nil {
-			return nil, err
-		}
+	if err := t.openExecutions(ctx, parentID, fanOutOpenings(opening)); err != nil {
+		return nil, err
 	}
 	publishGraph(sink, opening)
 	// The scheduler's two moments belong to this delegation now. The request
@@ -94,26 +90,16 @@ func (d *delegationLifecycle) hooks(ctx context.Context) (func(agentgraph.WaitCa
 		return nil, nil
 	}
 	return func(cause agentgraph.WaitCause) error {
-			if err := d.record(ctx, func() error { return d.tool.queueExecution(ctx, d.id, cause) }); err != nil {
-				return err
-			}
-			publishGraph(d.sink, delegationQueuedDelta(d.id, cause))
-			// The parent hears "queued" from the refusal and from nowhere else:
-			// a status set because a job was registered says nothing about
-			// whether the scheduler ever held this run back.
-			d.track.queued()
-			return nil
-		}, func() error {
-			return d.record(ctx, func() error { return d.tool.startExecution(ctx, d.id) })
+		if err := d.tool.queueExecution(ctx, d.id, cause); err != nil {
+			return err
 		}
-}
-
-// record runs the durable half unless this delegation promised none.
-func (d *delegationLifecycle) record(_ context.Context, write func() error) error {
-	if d.ephemeral {
+		publishGraph(d.sink, delegationQueuedDelta(d.id, cause))
+		// The parent hears "queued" from the refusal and from nowhere else:
+		// a status set because a job was registered says nothing about
+		// whether the scheduler ever held this run back.
+		d.track.queued()
 		return nil
-	}
-	return write()
+	}, func() error { return d.tool.startExecution(ctx, d.id) }
 }
 
 // beginExecution is the boundary a run crosses once it holds a slot and has a
@@ -161,9 +147,7 @@ func (d *delegationLifecycle) settle(ctx context.Context, out string, err error)
 	}
 	state := delegationState(ctx, err)
 	_, ref := splitSubagentRunResult(out)
-	if !d.ephemeral {
-		d.tool.settleExecution(ctx, d.id)
-	}
+	d.tool.settleExecution(ctx, d.id)
 	publishGraph(d.sink, fanOutItemSettledDelta(d.id, state, ref, err))
 	publishGraph(d.sink, fanOutOutcomeDelta(d.parent, state, nil))
 }

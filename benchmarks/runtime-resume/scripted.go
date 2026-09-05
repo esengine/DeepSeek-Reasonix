@@ -139,6 +139,9 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 		}
 		return append(loneTaskCall(s.arm), done())
 	}
+	if s.opensRun(req, ephemeralSentinel) {
+		return append(ephemeralCall(s.arm), done())
+	}
 	if s.opensRun(req, skillSentinel) {
 		if queuedSkillArm(s.arm) {
 			// The holder's own child says when the ceiling is occupied.

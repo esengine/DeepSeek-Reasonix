@@ -99,6 +99,8 @@ provider call*.
 | `readonly-skill-queued` | the same ceiling, the read-only entry point | ceilings | does the other runner ask the same scheduler? |
 | `readonly-skill-running` | its child executing, then die | none | is durable absence its contract, and is anything watching? |
 | `readonly-skill-completed` | it finishes, then die | none | does a run that really happened leave anything at all? |
+| `ephemeral-task-authority` | a read-only research child executing, read against the snapshot | none | can the execution authority account for what it draws? |
+| `ephemeral-skill-authority` | the same of the other ephemeral entry point | none | do the two agree on what they claim? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -399,6 +401,53 @@ readings and only the second is what the row means.
 no reconstruction names. That a store remembers a child finished is not that a
 restart can place the delegated execution: the first is a record, the second is
 provenance, and folding them would report a run nothing can situate as recovered.
+
+## The ephemeral authority arms
+
+The execution graph is a projection of durable facts. A reader starts from
+`Controller.ExecutionGraph` and returns to it whenever the stream drops, and the
+delta stream is a low-latency view of the same facts rather than a history to
+replay into a state. That makes a node's provenance checkable: whatever the
+snapshot cannot produce, a reader keeps only until its next resync.
+
+These two arms hold both ephemeral entry points to that. Each dispatches a
+research child that hangs, and reads three surfaces **at one instant** while it
+is inside the provider — what the stream drew, what the authority held, and what
+a reader is left with once a gap makes it start from the authority again. The
+last is not a separate mechanism: a resync replaces the folded state rather than
+merging into it, so it is the snapshot and nothing else.
+
+The judgement is a conjunction, and the third clause is what makes it a defect
+rather than a display choice:
+
+```text
+the stream drew a node
++ the authority cannot account for it
++ the child it named is still executing
+→ a node that leaves the screen at the next resync
+  while the work it names goes on holding a slot
+```
+
+Two rows read `absent` on a healthy run, which is the point: absence of a node
+is what an entry point promising no durable side effects is entitled to. The
+durable row is read rather than assumed, because a convergence that made an
+ephemeral run visible by recording it would satisfy every row above and break
+that promise instead.
+
+### What it settled
+
+`read_only_task` drew a group and a worker the authority could not produce; a
+resync erased both while the child held its slot. `read_only_skill` drew nothing.
+The two ephemeral entry points now agree: neither opens a delegation, so neither
+claims anything a snapshot cannot justify, and both stay out of the journal and
+the store as they always did.
+
+That fixes an inconsistency rather than choosing a look. Which work is *drawn*
+follows from which work the authority can account for, and an ephemeral run
+cannot be — across a gap, a bootstrap, or a restart. Who is currently occupying
+a scheduler slot is a real question and a different one; answering it belongs to
+a live-only read model that can say plainly that it does not survive the
+process, not to a graph that promises it does.
 
 ## The one arm that reads the frontend
 
