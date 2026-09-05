@@ -132,7 +132,8 @@ then it is room a file can grow back into.
 ## Context projection
 
 Canonical dynamic state — the skill registry, the memory store — lives in its own
-owner, and what the model sees is a projection of it onto each request.
+owner, and what the model sees is a projection of it onto each request. The
+prefix was never where these belonged wrongly; freshness ownership was missing.
 
 - **Prefix ownership.** Only declared prefix configuration may move the
   cache-stable prefix; ordinary memory writes, skill writes and runtime facts
@@ -147,8 +148,12 @@ owner, and what the model sees is a projection of it onto each request.
   `skillSet.owedCatalog` asks the registry rather than waiting to be told.
 - **Determinism.** The same canonical state and the same projection state
   produce byte-identical model-visible bytes.
+- **Detection is semantic.** Freshness may not rest on writer notification, on
+  mtime, or on which call path made the change. The registry answers from
+  canonical state, so a switch flipped and a file edited past every API are the
+  same question, and a change no projection renders is not a change.
 
-`internal/boot/context_projection_test.go` holds all four at the provider
+`internal/boot/context_projection_test.go` holds all five at the provider
 boundary. One row is open: standing instructions reach a live session only
 through the writers that publish them, so an edit to `REASONIX.md` made outside
 them waits for the next build. The skills listing was that shape until it
