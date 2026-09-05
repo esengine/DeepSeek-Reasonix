@@ -57,6 +57,10 @@ class BenchPort extends MockPort {
   }
 
   feed(ev: WireEvent) {
+    // The driver's frames are the fixture's own frames: a fed approval has to
+    // move /status the way a scripted one does, or a guard reads a card sitting
+    // over a status that still says the turn is running.
+    this.openGate(ev);
     this.subs.forEach((f) => f(ev));
   }
 

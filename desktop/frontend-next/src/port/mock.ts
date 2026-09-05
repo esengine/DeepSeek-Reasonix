@@ -6,6 +6,7 @@ import { MockTheme } from "./mock_theme";
 import { SCRIPT } from "./fixture";
 import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
+import { MEMORIES, USAGE_PRICED, USAGE_TOKENS } from "./mock_memory";
 
 
 
@@ -118,44 +119,15 @@ export class MockPort extends MockTheme implements AgentPort {
     ];
   }
 
-  private mem: MemoryEntry[] = [
-    {
-      name: "no-coauthored-by", title: "提交信息不带 Co-Authored-By",
-      description: "也不要 Generated with 之类的署名脚注", activation: "pinned",
-      scope: "project", type: "feedback", updatedAt: "2026-06-11",
-      body: "提交信息里不要出现 Co-Authored-By，PR 描述里也不要生成署名脚注。",
-      path: "~/.reasonix/projects/reasonix/memory/no-coauthored-by.md",
-    },
-    {
-      name: "reply-language", title: "回复用中文",
-      description: "跟着用户每条消息的语言走", activation: "pinned",
-      scope: "global", type: "user", updatedAt: "2026-05-02",
-      body: "回复语言跟随用户当前这条消息的语言。",
-    },
-    {
-      name: "v2-rewrite", title: "v2 是从零重写的 Go 内核",
-      description: "没有 web，桌面端重做；main-v2 是默认分支", activation: "relevant",
-      scope: "project", type: "project", updatedAt: "2026-05-30",
-      body: "v2 = 从零重写的 Go 内核。不带 web；桌面端重做。main-v2 是默认分支。",
-      usedLastTurn: true, why: "问题里提到了 main-v2 和分支",
-    },
-    {
-      name: "old-build-flag", title: "构建用 -tags legacy",
-      description: "迁移前的构建方式", activation: "relevant",
-      scope: "project", type: "reference", updatedAt: "2025-11-02", expired: true,
-      body: "构建时加 -tags legacy。",
-    },
-  ];
+  private mem: MemoryEntry[] = MEMORIES.map((m) => ({ ...m }));
 
   // A fortnight with the shape a real one has: a couple of heavy days, a
   // quiet stretch, and an early span the recorder priced before cost was
   // persisted — those days carry tokens and no cost, which the panel must not
   // render as free.
   async usage(days: number): Promise<UsageReport> {
-    const shape = [0, 34_429_281, 106_429_066, 45_257_473, 0, 178_805, 795_413,
-      5_910_837, 27_075_946, 8_447_084, 31_405_730, 1_672_731, 4_319_099];
-    const priced = [null, null, null, null, null, "0.028", "0.204", "1.107",
-      "1.778", "0.440", "5.749", "0.330", "0.853"];
+    const shape = USAGE_TOKENS;
+    const priced = USAGE_PRICED;
     // Index against the full arrays, not the slice: taking 7 of 13 days shifted
     // both the dates and the cost column by six.
     const from = shape.length - Math.min(days, shape.length);
@@ -549,17 +521,31 @@ export class MockPort extends MockTheme implements AgentPort {
       this.state.running = false;
       return;
     }
-    if (beat.ev.kind === "approval_request" || beat.ev.kind === "ask_request") {
-      this.gated = true;
-      return;
-    }
+    if (this.openGate(beat.ev)) return;
     const next = SCRIPT[this.at];
     if (next) this.timer = window.setTimeout(this.step, next.wait);
   };
 
+  /** openGate records that this frame stopped the run for a person, and answers
+   *  whether it did. The event stream and /status are two views of one fact: a
+   *  fixture that raises the card and leaves the decision list empty lets a
+   *  guard measure the card while the state under it says the turn is moving.
+   *  Driver-fed frames go through here for the same reason scripted ones do. */
+  protected openGate(ev: WireEvent): boolean {
+    if (ev.kind !== "approval_request" && ev.kind !== "ask_request") return false;
+    this.gated = true;
+    this.state.decisions = [
+      ev.kind === "ask_request"
+        ? { id: ev.ask?.id ?? "ask", kind: "ask" as const }
+        : { id: ev.approval?.id ?? "apv", kind: approvalKind(ev) },
+    ];
+    return true;
+  }
+
   private ungate() {
     if (!this.gated) return;
     this.gated = false;
+    this.state.decisions = [];
     this.state.running = true;
     const next = SCRIPT[this.at];
     if (next) this.timer = window.setTimeout(this.step, next.wait);
@@ -794,4 +780,15 @@ export class MockPort extends MockTheme implements AgentPort {
   async setGoal(text: string) {
     this.state.goal = text;
   }
+}
+
+// Which owner answers a pending approval. The kernel decides it from the
+// approval itself — a recovery gate, the plan tool, otherwise the tool gate —
+// and the fixture reads the same fields the card does rather than inventing a
+// third rule.
+function approvalKind(ev: WireEvent): "plan_approval" | "recovery_approval" | "tool_approval" {
+  const a = ev.approval;
+  if (a?.kind === "plan" || a?.tool === "exit_plan_mode") return "plan_approval";
+  if (a?.kind === "recovery") return "recovery_approval";
+  return "tool_approval";
 }

@@ -200,6 +200,16 @@ await page.evaluate(() => {
   window.__feed({ kind: "approval_request", approval: { id: "a1", tool: "bash", subject: "rm -rf build/", risk: "high" } });
 });
 await page.waitForTimeout(400);
+// 「等人」这件事归内核的 decision 列表，不归窗口画的那句话。这一条量的是整条
+// 链真的接上了：卡片出现的同一时刻，壳上的运行态就该说它停下来等人了 —— 而在
+// 这之前，它是拿 s.doing 跟两句中文比出来的。
+const waitOnPerson = await page.evaluate(() => ({
+  run: document.querySelector(".app")?.dataset.run ?? "",
+  card: !!document.querySelector(".apv-ft .btn, .apv"),
+}));
+check("等人时运行态是 halt", waitOnPerson.run === "halt", `data-run=${waitOnPerson.run}`);
+check("而且确实有一张卡在等", waitOnPerson.card);
+
 const apv = page.locator(".call").filter({ hasText: "bash" }).last();
 check("审批卡出现", await page.locator("text=/批准|允许|拒绝/").first().isVisible().catch(() => false));
 

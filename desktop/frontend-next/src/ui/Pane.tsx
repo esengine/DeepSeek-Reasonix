@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, us
 import { money } from "../i18n/format";
 import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
+import { hasPendingDecision, runState } from "./decisions";
 import { createPortal } from "react-dom";
 import { HttpError } from "../port/port";
 import type { AgentPort, ApprovalVerdict, Checkpoint, ContextBreakdown, JobEntry, McpEntry, Queue as QueueSnapshot, RewindScope, SessionStatus, WorkspaceChanges } from "../port/port";
@@ -125,6 +126,17 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       .catch(() => {});
   }, [port]);
 
+  // /status is polled four times a second while a turn runs, and most of those
+  // answers are word-for-word the previous one. Swapping in an equal object
+  // would repaint the rail and the composer for no news at all.
+  const applyStatus = useCallback((next: SessionStatus) => {
+    setStatus((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+  }, []);
+
+  const refreshStatus = useCallback(() => {
+    port.status().then(applyStatus).catch(() => {});
+  }, [port, applyStatus]);
+
   // A hole in the stream is the transport's fact; which authority answers it is
   // each model's own. The transcript is rebuilt from /history, the run graph
   // from the read the kernel rebuilds — one gap, two different re-reads.
@@ -139,6 +151,14 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           // is the only precise signal for it — the turn boundary below is the
           // fallback for changes that arrive without an event.
           if (ev.kind === "mcp_surface_ready" || ev.kind === "extension_status") reloadMcp();
+          // A prompt opening or closing changes who the turn is waiting on, and
+          // the kernel answers that in /status rather than in the frame. Same
+          // shape the queue uses: the event says something moved, the read says
+          // what is true. Without it the run keeps glowing until the next poll.
+          if (ev.kind === "approval_request" || ev.kind === "ask_request") refreshStatus();
+          // Settling one is the other half of the same move, and the receipt
+          // rides as a field rather than a kind of its own.
+          else if ("decisionReceipt" in ev && ev.decisionReceipt) refreshStatus();
         },
         () => {
           rebuild();
@@ -146,7 +166,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         },
         () => graphStore.bootstrap(readGraph),
       ),
-    [port, reloadMcp, rebuild, graphStore, readGraph],
+    [port, reloadMcp, rebuild, graphStore, readGraph, refreshStatus],
   );
 
   useEffect(() => {
@@ -171,17 +191,6 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       alive = false;
     };
   }, [port]);
-
-  // /status is polled four times a second while a turn runs, and most of those
-  // answers are word-for-word the previous one. Swapping in an equal object
-  // would repaint the rail and the composer for no news at all.
-  const applyStatus = useCallback((next: SessionStatus) => {
-    setStatus((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
-  }, []);
-
-  const refreshStatus = useCallback(() => {
-    port.status().then(applyStatus).catch(() => {});
-  }, [port, applyStatus]);
 
   // The wallet only moves when a turn spends, so its clock is the turn — not
   // /status's 250ms poll, which is what it used to ride. A provider with no
@@ -541,10 +550,12 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // transcript to follow again and lets it scroll itself into place.
   const toLatest = () => setJump((n) => n + 1);
 
-  // A turn blocked on you is not a turn in motion: the glow says "it is moving"
-  // and has to go out, and the action slot goes back to send so you can talk.
-  const blocked = s.doing === "等你批准" || s.doing === "等你决定";
-  const run = blocked ? "halt" : s.running ? "running" : s.items.length ? (s.doing === "已完成" ? "done" : "halt") : "idle";
+  // Who is waited on is the kernel's answer, read from the decision list it
+  // already publishes. This used to compare the label on screen against two
+  // Chinese literals that the reducer had written — a translation key deciding
+  // whether the run reads as moving.
+  const blocked = hasPendingDecision(status);
+  const run = runState({ blocked, running: s.running, hasItems: s.items.length > 0, finished: s.doing === "已完成" });
   const cost = money(s.metrics.cost, s.metrics.currency);
 
   // The chrome reads the focused pane. Reporting from an effect keeps it out of
