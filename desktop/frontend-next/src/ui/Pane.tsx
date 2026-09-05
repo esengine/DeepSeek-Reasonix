@@ -663,52 +663,60 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         <span className="glowring" aria-hidden="true">
           <i />
         </span>
-        {/* What was said and not yet read. It sits above the composer for the
-            same reason the extension rail does: the input box is the one thing
-            nothing else may push off the screen. */}
-        <Queue
-          queue={queue}
-          onRead={onQueueRead}
-          onEdit={onQueueEdit}
-          onMove={onQueueMove}
-          onCancel={onQueueCancel}
-          onRetry={onQueueRetry}
-          onRefresh={onQueueRefresh}
-          onPause={onQueuePause}
-        />
+        {/* Everything that stacks above the input box shares one ceiling. Each
+            of these was bounded on its own or not at all, and "not at all" is
+            what let the queue grow until the transcript had no height left —
+            the next child to do it would have been a different one. */}
+        <div className="composeaux">
+          <Queue
+            queue={queue}
+            onRead={onQueueRead}
+            onEdit={onQueueEdit}
+            onMove={onQueueMove}
+            onCancel={onQueueCancel}
+            onRetry={onQueueRetry}
+            onRefresh={onQueueRefresh}
+            onPause={onQueuePause}
+          />
         {/* Views the user (or the extension) put next to the composer. They sit
             above it rather than inside it: the input box is the one thing an
             extension must never be able to crowd out. */}
-        {atComposer.length > 0 && (
-          <div className="slotrail">
-            {atComposer.map((ext) => (
-              <SlottedView
-                key={slotKey(ext)}
-                ext={ext}
-                assigned={slots}
-                onAction={(id) => void port.invokeExtensionAction(id).catch(fail)}
-                onMove={(slot) => void moveSurface(ext, slot)}
-              />
-            ))}
-          </div>
-        )}
+          {atComposer.length > 0 && (
+            <div className="slotrail">
+              {atComposer.map((ext) => (
+                <SlottedView
+                  key={slotKey(ext)}
+                  ext={ext}
+                  assigned={slots}
+                  onAction={(id) => void port.invokeExtensionAction(id).catch(fail)}
+                  onMove={(slot) => void moveSurface(ext, slot)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         <Composer port={port} status={status} running={s.running && !blocked} focus={askFocus} onSubmit={submit} onChanged={refreshStatus} onError={fail} />
-        {s.error && (
-          <div className="errbar" role="alert">
-            <span>{s.error}</span>
-            <button onClick={() => dispatch({ kind: "__error", text: "" } as never)}>{t("知道了")}</button>
-          </div>
-        )}
-        {/* Something the runtime has to report about itself. It sits with the
-            composer rather than in the transcript because it was not said by
-            anyone in the conversation — and it is dismissible, because reading
-            it is the whole of the response it needs. */}
-        {s.runtime.map((n) => (
-          <div key={n.id} className="rtbar" data-lvl={n.level} role="status">
-            <span className="t">{[n.text, n.detail].filter(Boolean).join(" — ")}</span>
-            <button onClick={() => dispatch({ kind: "__runtime_seen", id: n.id } as never)}>{t("知道了")}</button>
-          </div>
-        ))}
+        {/* Below the box, under a ceiling of their own. Both arrive unbidden and
+            both are dismissed one at a time, so nothing else bounds how many can
+            be on screen at once. */}
+        <div className="composenotes">
+          {s.error && (
+            <div className="errbar" role="alert">
+              <span>{s.error}</span>
+              <button onClick={() => dispatch({ kind: "__error", text: "" } as never)}>{t("知道了")}</button>
+            </div>
+          )}
+          {/* Something the runtime has to report about itself. It sits with the
+              composer rather than in the transcript because it was not said by
+              anyone in the conversation — and it is dismissible, because reading
+              it is the whole of the response it needs. */}
+          {s.runtime.map((n) => (
+            <div key={n.id} className="rtbar" data-lvl={n.level} role="status">
+              <span className="t">{[n.text, n.detail].filter(Boolean).join(" — ")}</span>
+              <button onClick={() => dispatch({ kind: "__runtime_seen", id: n.id } as never)}>{t("知道了")}</button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {active &&

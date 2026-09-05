@@ -42,6 +42,7 @@ node perf/tokens.mjs     # 变量的守卫：样式里不带兜底的 var(--x)�
 node perf/idle.mjs       # 闲置的守卫：看不见的东西不许动，闲着的窗口不许烧 CPU
 node perf/shipped.mjs    # 产物的守卫：dist 里的东西必须比源码新（构建可以成功而编的是别的树）
 node perf/reason.mjs     # 内核拒绝的双语落地：同一个码，中英各说各的
+node perf/budget.mjs     # 预算的守卫：输入框上下堆满东西时，转录还剩多少
 ```
 
 `lang.mjs` 从仓库外跑时用 `PERF_SRC` 指向 `src/`（它要读固件源码来决定

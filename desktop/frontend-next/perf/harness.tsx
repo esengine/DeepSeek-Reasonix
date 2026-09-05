@@ -67,6 +67,31 @@ class BenchPort extends MockPort {
     return storedHistory();
   }
 
+  // ?queue= fills the pending queue to the count under measurement. Seeded
+  // here rather than by calling steer sixty-four times: what the guard asks is
+  // what a full queue does to the layout, not how it got full.
+  async queue() {
+    const q = await super.queue();
+    if (!QUEUE) return q;
+    const items = Array.from({ length: QUEUE }, (_, i) => ({
+      id: `seed-${i}`,
+      intent: "followup" as const,
+      origin: "host" as const,
+      state: "queued" as const,
+      // 三种长度，各有各的对照：第一条没被截断（不该弹），第二条长到撞天花板
+      // （浮层要自己滚），其余是寻常的被截断行。内核把 preview 截到 120 runes，
+      // 所以第二条在队列里到不了 —— 但 .ovf 是通用的，天花板得有人证明它在。
+      preview:
+        i === 0
+          ? "bash-1 — failed"
+          : i === 1
+            ? `bash-2 — failed: ${"error[E0308]: mismatched types in the trait implementation; ".repeat(14)}`
+            : `bash-${i + 1} (cargo build --release --target x86_64-pc-windows-msvc 2>&1 | Select-Object -Last 30 | Select-String -Pattern "error\\[E[0-9]+\\]") — failed`,
+      createdAt: new Date().toISOString(),
+    }));
+    return { ...q, items, capacity: { ...q.capacity, items: QUEUE, maxItems: 64 } };
+  }
+
   // ?statusms= stands in for what the kernel's /status really costs when the
   // provider declares a wallet endpoint: that read goes out to the network.
   async status() {
@@ -103,6 +128,8 @@ const SESSIONS = Number(query.get("sess") ?? 0);
 // ?turns= is how long the conversation being opened already is.
 const TURNS = Number(query.get("turns") ?? 0);
 const STATUS_MS = Number(query.get("statusms") ?? 0);
+// ?queue= is how many lines are already waiting when the window opens.
+const QUEUE = Number(query.get("queue") ?? 0);
 
 class BenchHub extends MockHub {
   readonly feeds = new Map<string, BenchPort>();

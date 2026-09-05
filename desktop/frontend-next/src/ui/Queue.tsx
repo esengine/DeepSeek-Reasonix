@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 import { t } from "../i18n";
+import { Overflow } from "./Overflow";
 
 interface Props {
   queue: QueueSnapshot | null;
@@ -160,9 +161,9 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
                   }}
                 />
               ) : (
-                <span className="pv" title={it.preview}>
-                  {it.preview}
-                </span>
+                // 「改」走 onRead 读回整条正文，但已结算的行没有那个按钮。
+                // 被截断时看得见全文，是每一行都该有的，而不是可编辑的那些。
+                <Overflow className="pv" text={it.preview} />
               )}
               {!!it.refs?.length && <span className="rf">{t("冻结 {n} 文件", { n: it.refs.length })}</span>}
               {it.blockReason && <span className="qwhy">{it.blockReason}</span>}

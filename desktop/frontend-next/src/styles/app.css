@@ -586,6 +586,7 @@
      end of it. Empty and unheld renders nothing at all. */
   .queue {
     display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px;
+    min-height: 0;
     font: var(--w-reg) 11px var(--mono);
     animation: qin .22s var(--ease-out) both;
   }
@@ -616,12 +617,12 @@
   .qhold:hover:not(:disabled) { color: var(--text); border-color: var(--border) }
   .qhold:disabled { opacity: .45; cursor: default }
 
-  /* 队列有上限（64 条），这块地方没有。一次失败的构建能让三十多条续接同时排
-     在这里，而 .compose 是 flex: none —— 它要多高有多高，转录就被挤成零。
-     输入框不能被挤掉，转录也不能：所以长出去的那部分自己滚。 */
+  /* 队列的**条目**有上限（64），它的**高度**没有 —— 两者从来不是同一个限制。
+     头留在原地，长出去的是行；总高度由 .composeaux 给，这里只负责「滚的是行，
+     不是连头一起滚走」。 */
   .qitems {
-    display: grid; gap: 4px;
-    max-height: min(30vh, 264px); overflow-y: auto; overscroll-behavior: contain;
+    display: grid; gap: 4px; min-height: 0;
+    overflow-y: auto; overscroll-behavior: contain;
   }
   .qi {
     display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px;
@@ -843,6 +844,24 @@
      不断重启，主线程被占死，setTimeout 全被推迟。滚动改由 JS 直接赋值。 */
   /* flex:1 是承重的：流为空时若不撑开，输入框会被顶到顶部去 */
   .scroll { flex: 1; overflow: auto; min-height: 0 }
+
+  /* 被截断的那一行才有的东西。原生 title 的延迟、位置、宽高和滚不滚都归浏览器，
+     一条长 preview 就是一块盖不住边界的浮层；这一个是我们自己的，所以它有上限、
+     自己滚、里面的字能选。位置由 place.ts 量出来写进行内样式，这里只管长相。 */
+  .ovf {
+    position: fixed; z-index: 70;
+    max-width: min(52ch, calc(100vw - 24px));
+    max-height: min(calc(30vh / var(--zoom, 1)), 220px);
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--float); box-shadow: var(--shadow-float); color: var(--text);
+    font: var(--w-reg) 11.5px/1.65 var(--mono);
+    overflow: auto; overscroll-behavior: contain;
+    white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+    animation: card .14s var(--ease-out) both;
+  }
+  /* 有东西可看，才提示可以看。没被截断的那些一个记号都不该多。 */
+  [data-cut] { cursor: help }
+  [data-cut]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: var(--r-xs) }
 
   .lbl { display: flex; align-items: baseline; gap: 9px; font: var(--w-med) 10px var(--mono); letter-spacing: var(--track-cap); text-transform: uppercase; color: var(--ghost) }
   .lbl .c { margin-left: auto; letter-spacing: 0; font-variant-numeric: tabular-nums }
@@ -2118,12 +2137,28 @@
      因此仍然是同一条线 —— 只是这条线现在落在轨道的左边，而不是它的下面。 */
   .compose {
     position: relative; flex: none; margin: 0 var(--srail-w) 16px 18px;
+    /* 输入框以外堆在这儿的东西**合起来**最多这么高。写成一个数，是因为不变量
+       只有一个：转录不能被挤没 —— 两个各自限高的区域加起来照样能超，46vh 的
+       那一版实测就把 900px 窗口的转录压到了 36%。 */
+    --aux-budget: min(calc(34vh / var(--zoom, 1)), 320px);
     max-width: calc(var(--doc) - 18px - var(--srail-w));
     border-radius: var(--r-md); padding: 12px 14px 10px;
     background: linear-gradient(180deg,
       color-mix(in srgb, var(--raised) 94%, var(--text) 6%), var(--raised));
     box-shadow: 0 1px 2px rgba(0, 0, 0, .13);
     transition: box-shadow .22s var(--ease);
+  }
+
+  /* 孩子各自滚，和不超过预算。 */
+  .composeaux {
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    max-height: calc(var(--aux-budget) * .72);
+  }
+  .composeaux > * { min-height: 0 }
+  /* 通知分得少的那一份：它们是一条条读完就点掉的，不是一直要看的东西。 */
+  .composenotes {
+    max-height: calc(var(--aux-budget) * .28);
+    overflow-y: auto; overscroll-behavior: contain;
   }
 
   /* 静态描边单独一层，好让流光那层压在上面 */
@@ -2791,6 +2826,16 @@
      起藏掉，就是块首那条规矩说的「拿掉」—— 而它是回来的唯一一条路。 */
   /* 收起时整块让开，别在流底下留一条一像素的空行 */
   [data-fold~="side"] [data-side="off"] .side { display: none }
+
+  /* 窗口矮下来时，按窗口比例分掉的那些高度加起来就是转录本身。让的顺序是离
+     输入框最近的先让 —— 右栏在这一档已经横在流下面，它也是其中一份。 */
+  [data-fold~="short"] .compose { --aux-budget: min(calc(26vh / var(--zoom, 1)), 190px) }
+  [data-fold~="short"][data-fold~="side"] .side { max-height: calc(26vh / var(--zoom, 1)) }
+  /* 运行头收成一行：说明和时间戳是第二眼才读的，标题和状态记号不是。 */
+  [data-fold~="short"] .runhead { margin-top: 8px; padding: 9px 12px 10px; gap: 10px }
+  [data-fold~="short"] .runhead .sub, [data-fold~="short"] .runhead .at { display: none }
+  [data-fold~="short"] .runhead .tile { min-width: 62px; padding: 4px 9px 5px }
+  [data-fold~="short"] .runhead .tile dd { font-size: 12.5px }
 
   /* ── 首次引导：一屏，一件事 ──────────────────────────────────────── */
   /* 连接卡片长在开场场景里，不另起一屏：介绍语收在上方仍然在场。所以这里
@@ -3996,6 +4041,8 @@
     .fan::before, .slot, .slot .val, .rpick, .mgrp {
       animation: none !important; animation-delay: 0s !important;
     }
+    /* 队列一次能进来几十行，逐行入场就是几十次移动。行在不在是状态，动不动不是。 */
+    .queue, .qi, .ovf { animation: none !important }
   }
 
   .ws[data-busy] { opacity: .5; pointer-events: none }

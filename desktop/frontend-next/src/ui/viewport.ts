@@ -14,11 +14,18 @@ const FOLDS = [
   { upTo: 640, fold: "scene" }, // the opening scene tightens
 ] as const;
 
-/** foldsAt names every column given up at this width, widest fold first. */
-export function foldsAt(width: number): string {
-  return FOLDS.filter((f) => width <= f.upTo)
-    .map((f) => f.fold)
-    .join(" ");
+// Height folds the same way width does, and for the same reason: every surface
+// that stacks above or below the transcript is budgeted as a fraction of the
+// window, and on a short one those fractions add up to the transcript. Under
+// "side" the metrics column is one of them — it moved *under* the flow.
+const TALL = [{ downTo: 720, fold: "short" }] as const;
+
+/** foldsAt names everything given up at this size, widest fold first. Height is
+ *  optional so a caller asking only about columns still reads. */
+export function foldsAt(width: number, height = Infinity): string {
+  const cols = FOLDS.filter((f) => width <= f.upTo).map((f) => f.fold);
+  const rows = TALL.filter((f) => height <= f.downTo).map((f) => f.fold);
+  return [...cols, ...rows].join(" ");
 }
 
 const subs = new Set<(folds: string) => void>();
@@ -28,7 +35,7 @@ const subs = new Set<(folds: string) => void>();
  *  keeping its own copy of the thresholds. */
 export function refresh() {
   publishShape();
-  const now = foldsAt(document.body.clientWidth);
+  const now = foldsAt(document.body.clientWidth, document.body.clientHeight);
   // Only on a real change: writing the attribute is a style invalidation, and an
   // unconditional write inside the observer is how a resize loop starts.
   if (document.documentElement.dataset.fold === now) return;

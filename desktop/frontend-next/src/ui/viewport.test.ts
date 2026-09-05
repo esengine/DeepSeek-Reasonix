@@ -27,3 +27,23 @@ describe("layout folds", () => {
     expect(foldsAt(1920 / 2.4)).toBe("rail side");
   });
 });
+
+describe("height folds", () => {
+  // Everything stacked above or below the transcript is budgeted as a fraction
+  // of the window. On a short one those fractions are the transcript.
+  it("names short only once the window is short", () => {
+    expect(foldsAt(1920, 900)).toBe("");
+    expect(foldsAt(1920, 720)).toBe("short");
+    expect(foldsAt(1920, 500)).toBe("short");
+  });
+
+  it("keeps asking about width, so a short narrow window gives up both", () => {
+    expect(foldsAt(800, 600)).toBe("rail side short");
+  });
+
+  // Callers that only ask about columns must read the same as before.
+  it("answers width alone the way it always did", () => {
+    expect(foldsAt(1200)).toBe("rail");
+    expect(foldsAt(1920)).toBe("");
+  });
+});
