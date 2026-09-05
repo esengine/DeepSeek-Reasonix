@@ -8,7 +8,10 @@ import type { WireEvent } from "./wire";
 type Feed = (raw: string) => void;
 type ReplyBody = { frames?: unknown[]; complete?: boolean } | null;
 
-function attach(reply: (after: number) => ReplyBody = () => ({ frames: [], complete: true })) {
+function attach(
+  reply: (after: number) => ReplyBody = () => ({ frames: [], complete: true }),
+  bootstrap?: () => Promise<number>,
+) {
   let feed: Feed = () => {};
   const seen: WireEvent[] = [];
   const asked: string[] = [];
@@ -35,11 +38,13 @@ function attach(reply: (after: number) => ReplyBody = () => ({ frames: [], compl
     () => {
       gaps++;
     },
+    bootstrap,
   );
   return {
     feed: (kind: string, seq?: number) => feed(JSON.stringify({ kind, ...(seq ? { seq } : {}) })),
     seen,
     kinds: () => seen.map((e) => e.kind),
+    seqs: () => seen.map((e) => e.seq),
     replays: () => asked.filter((u) => u.includes("/events/replay")),
     gaps: () => gaps,
     stop,
@@ -181,6 +186,166 @@ describe("recovering the event stream", () => {
     await settle();
     expect(s.gaps()).toBeGreaterThanOrEqual(1);
     expect(s.replays().some((u) => u.includes("lastEventId=2"))).toBe(true);
+    s.stop();
+  });
+
+  // The log holds everything after the cursor, the frame that exposed the gap
+  // included, so the replay answers with a copy of it. Folding both is what put
+  // the same tool result on screen twice.
+  it("folds a frame the replay and the live stream both carried exactly once", async () => {
+    const s = attach(() => ({
+      frames: [
+        { kind: "tool_dispatch", seq: 2 },
+        { kind: "approval_request", seq: 3 },
+        { kind: "turn_done", seq: 4 },
+      ],
+      complete: true,
+    }));
+    s.feed("turn_started", 1);
+    s.feed("turn_done", 4);
+    await settle();
+    expect(s.seqs()).toEqual([1, 2, 3, 4]);
+    s.stop();
+  });
+});
+
+// A snapshot read out of band is the other way onto this stream: a model starts
+// from what an authority answered and the numbers carry it from there. The cut
+// between the two is where the shell's bus loses frames — it has no reconnect
+// to make the handover atomic — so every case here is built out of that cut.
+describe("bootstrapping a read model onto the stream", () => {
+  const snapshot = () => {
+    let land!: (watermark: number) => void;
+    const read = new Promise<number>((r) => (land = r));
+    return { read: () => read, land };
+  };
+
+  const unreadable = () => {
+    let refuse!: (why: Error) => void;
+    const read = new Promise<number>((_, r) => (refuse = r));
+    return { read: () => read, refuse: () => refuse(new Error("unreadable")) };
+  };
+
+  it("merges the replay with what arrived while it was in flight", async () => {
+    const snap = snapshot();
+    const s = attach(
+      () => ({
+        frames: [
+          { kind: "graph_delta", seq: 101 },
+          { kind: "tool_result", seq: 102 },
+          { kind: "graph_delta", seq: 103 },
+        ],
+        complete: true,
+      }),
+      snap.read,
+    );
+    // The bus never stopped while the snapshot was being read. 101 landed
+    // before this subscriber attached, so only the replay can bring it back;
+    // 102 and 103 arrive down both paths and may be folded only once.
+    s.feed("tool_result", 102);
+    s.feed("graph_delta", 103);
+    snap.land(100);
+    await settle();
+    await settle();
+    s.feed("turn_done", 104);
+    await settle();
+
+    expect(s.seqs()).toEqual([101, 102, 103, 104]);
+    expect(s.replays()).toHaveLength(1);
+    expect(s.replays()[0]).toContain("lastEventId=100");
+    expect(s.gaps()).toBe(0);
+    s.stop();
+  });
+
+  // 101 is a graph frame, 102 is not, 103 is again. A cursor that only moved on
+  // the model's own kind would read 102 as a hole it never had, ask for it
+  // back, and fold everything after it a second time.
+  it("carries the cursor past frames the model ignores", async () => {
+    const snap = snapshot();
+    const s = attach(() => ({ frames: [], complete: true }), snap.read);
+    snap.land(100);
+    await settle();
+    await settle();
+    s.feed("graph_delta", 101);
+    s.feed("tool_result", 102);
+    s.feed("stream_watermark", 102);
+    await settle();
+    expect(s.replays()).toHaveLength(1);
+
+    s.feed("turn_done", 104); // 103 really is missing
+    await settle();
+    expect(s.replays()[1]).toContain("lastEventId=102");
+    s.stop();
+  });
+
+  it("does not fold what the snapshot already holds", async () => {
+    const snap = snapshot();
+    const s = attach(() => ({ frames: [{ kind: "graph_delta", seq: 101 }], complete: true }), snap.read);
+    s.feed("graph_delta", 99);
+    s.feed("graph_delta", 100);
+    snap.land(100);
+    await settle();
+    await settle();
+    expect(s.seqs()).toEqual([101]);
+    s.stop();
+  });
+
+  // A watermark states where a subscriber attached, and a bootstrap states that
+  // from the snapshot instead. Taken from the watermark, the cursor would sit
+  // ahead of frames this subscriber is holding but has not folded — and those
+  // are then dropped as duplicates of nothing.
+  it("does not take a watermark as its position while a snapshot is in flight", async () => {
+    const snap = unreadable();
+    const s = attach(undefined, snap.read);
+    s.feed("stream_watermark", 103);
+    s.feed("graph_delta", 101);
+    snap.refuse();
+    await settle();
+    await settle();
+    expect(s.seqs()).toEqual([101]);
+    s.stop();
+  });
+
+  it("announces a hole without taking its number as a position", async () => {
+    const snap = unreadable();
+    const s = attach(undefined, snap.read);
+    s.feed("stream_gap", 103);
+    s.feed("graph_delta", 101);
+    snap.refuse();
+    await settle();
+    await settle();
+    expect(s.gaps()).toBe(2);
+    expect(s.seqs()).toEqual([101]);
+    s.stop();
+  });
+
+  // The hole is a transport fact; which authority a model re-reads to close it
+  // is the model's own business. Saying so is all this layer can do about it.
+  it("reports a hole the replay could not close and still delivers what it had", async () => {
+    const snap = snapshot();
+    const s = attach(() => ({ frames: [{ kind: "graph_delta", seq: 140 }], complete: false }), snap.read);
+    snap.land(100);
+    await settle();
+    await settle();
+    expect(s.gaps()).toBe(1);
+    expect(s.seqs()).toEqual([140]);
+    s.stop();
+  });
+
+  // A stream held for a snapshot that never comes is worse than a stale one:
+  // the pane stops moving and nothing on it says why.
+  it("runs live when the snapshot cannot be read", async () => {
+    const snap = unreadable();
+    const s = attach(undefined, snap.read);
+    s.feed("graph_delta", 101);
+    snap.refuse();
+    await settle();
+    await settle();
+    expect(s.gaps()).toBe(1);
+    expect(s.seqs()).toEqual([101]);
+    s.feed("turn_done", 102);
+    await settle();
+    expect(s.seqs()).toEqual([101, 102]);
     s.stop();
   });
 });

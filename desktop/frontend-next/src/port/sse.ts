@@ -433,22 +433,45 @@ export class SsePort extends SseTheme implements AgentPort {
    *  quiet turn — and the two transports differ only in how they fetch the
    *  missing frames back, not in what a gap means.
    *
-   *  onGap fires when the replay log can no longer close one, which is the
-   *  caller's cue to rebuild from the transcript. */
-  subscribe(onEvent: (ev: WireEvent) => void, onGap?: () => void) {
+   *  onGap fires when the replay log can no longer close one. The hole is the
+   *  transport's fact; which authority each read model returns to — /history,
+   *  the run graph — is the caller's.
+   *
+   *  bootstrap is how a read model with a snapshot of its own joins without a
+   *  seam: it reads one and answers with the frame that snapshot is at least as
+   *  new as. Frames are held from before the transport is attached until the
+   *  replay after that number has landed, so nothing between the two is
+   *  skipped. The number is the whole stream's, never one model's — a frame of
+   *  any kind carries the cursor past it, or the next number reads as a hole. */
+  subscribe(onEvent: (ev: WireEvent) => void, onGap?: () => void, bootstrap?: () => Promise<number>) {
     // Frames arriving while a recovery request is in flight wait for it: the
     // whole point is that the reducer sees one ordered stream, and delivering
     // the new frame first would put a result ahead of the dispatch it answers.
     // null until the stream states a position: 0 cannot tell a subscriber that
     // just attached from one that has seen the stream start.
     let seen: number | null = null;
-    let recovering = false;
+    // A bootstrapping subscription holds from before the transport is attached:
+    // the shell's bus has no connection to open, so it is already delivering,
+    // and a frame taken live here would be folded ahead of the replay's.
+    let booting = !!bootstrap;
+    let recovering = booting;
     let held: WireEvent[] = [];
     let live = true;
 
     const deliver = (ev: WireEvent) => {
+      // The cursor is the record of what has been folded, and the replay and
+      // the live stream reach the same frames — a snapshot's own watermark
+      // included. Whichever arrives second is the same fact twice.
+      if (ev.seq && seen !== null && ev.seq <= seen) return;
       if (ev.seq) seen = Math.max(seen ?? 0, ev.seq);
       onEvent(ev);
+    };
+
+    const flush = () => {
+      recovering = false;
+      const queued = held;
+      held = [];
+      for (const ev of queued) deliver(ev);
     };
 
     const recover = async (after: number) => {
@@ -465,11 +488,31 @@ export class SsePort extends SseTheme implements AgentPort {
         // transcript is the one source that can still answer.
         if (live) onGap?.();
       } finally {
-        recovering = false;
-        const queued = held;
-        held = [];
-        for (const ev of queued) deliver(ev);
+        flush();
       }
+    };
+
+    // What the snapshot and the replay overlap on folds twice onto the same
+    // state; what falls between them is gone for good. So the read names where
+    // it stands, and the stream resumes from there — one number, one stream.
+    const bootstrapFrom = async (read: () => Promise<number>) => {
+      let at: number | null = null;
+      try {
+        at = await read();
+      } catch {
+        // Nothing to resume onto. Holding the stream any longer would stall the
+        // view rather than repair it, so it runs live and says it is behind.
+        if (live) onGap?.();
+      }
+      if (!live) return;
+      if (at === null) {
+        booting = false;
+        flush();
+        return;
+      }
+      seen = at;
+      booting = false;
+      await recover(at);
     };
 
     const accept = (ev: WireEvent) => {
@@ -479,15 +522,20 @@ export class SsePort extends SseTheme implements AgentPort {
       if (ev.kind === "stream_watermark") {
         // The first one states where this subscriber attached: a live-only
         // subscription replays nothing before it, so nothing before it was lost.
+        // A bootstrap states that position from its snapshot instead, and taking
+        // it from here would baseline the cursor over frames already held.
         if (seen === null) {
-          seen = ev.seq ?? 0;
+          if (!booting) seen = ev.seq ?? 0;
           return;
         }
         if (!recovering && ev.seq && ev.seq > seen) void recover(seen);
         return;
       }
       if (ev.kind === "stream_gap") {
-        seen = Math.max(seen ?? 0, ev.seq ?? 0);
+        // The hole reaches the caller either way — it is the whole stream's,
+        // not the bootstrapping model's — but the number it carries is not a
+        // position this subscriber reached.
+        if (!booting) seen = Math.max(seen ?? 0, ev.seq ?? 0);
         onGap?.();
         return;
       }
@@ -526,25 +574,25 @@ export class SsePort extends SseTheme implements AgentPort {
     // SSE stream never reaches the page inside the shell. There it pushes the
     // same frames over its own bus; the payload is identical.
     const bus = (window as unknown as { runtime?: WailsBus }).runtime;
+    let detach: () => void;
     if (bus?.EventsOn) {
       const off = bus.EventsOn(this.rt ? `${WAILS_EVENT}:${this.rt}` : WAILS_EVENT, feed);
       // Subscribing to the bus is not the handshake /events is: ask the shell
       // to replay whatever prompt is already waiting for an answer.
       void fetch(this.base + WAILS_REPLAY, { method: "POST" }).catch(() => {});
-      return () => {
-        live = false;
-        off();
-      };
+      detach = off;
+    } else {
+      // EventSource resumes on its own: it reconnects carrying the last id it
+      // saw, and the server replays from there. Recovery here is for the frames
+      // shed without the connection ever dropping.
+      const es = new EventSource(this.base + "/events", { withCredentials: true });
+      es.onmessage = (m) => feed(m.data);
+      detach = () => es.close();
     }
-
-    // EventSource resumes on its own: it reconnects carrying the last id it
-    // saw, and the server replays from there. Recovery here is for the frames
-    // shed without the connection ever dropping.
-    const es = new EventSource(this.base + "/events", { withCredentials: true });
-    es.onmessage = (m) => feed(m.data);
+    if (bootstrap) void bootstrapFrom(bootstrap);
     return () => {
       live = false;
-      es.close();
+      detach();
     };
   }
 

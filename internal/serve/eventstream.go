@@ -19,8 +19,9 @@ import (
 const SSEWatermarkInterval = sseKeepaliveInterval
 
 // eventsReplay answers what a client missed. `complete` false means the log no
-// longer reaches that far back, so the client has to rebuild from /history —
-// said plainly, because a hole in a transcript looks like a quiet turn.
+// longer reaches that far back, so each read model has to be re-read from the
+// authority that answers it — the transcript for one, the run graph for
+// another. Said plainly, because a hole looks like a quiet turn.
 func (s *Server) eventsReplay(w http.ResponseWriter, r *http.Request) {
 	frames, complete := s.bc.Replay(lastEventID(r))
 	writeJSON(w, struct {

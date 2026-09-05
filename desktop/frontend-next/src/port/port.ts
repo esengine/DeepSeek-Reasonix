@@ -323,10 +323,16 @@ export interface AgentPort {
   attach(blob: Blob, name?: string): Promise<Attachment>;
   // Names what dropped paths are called inside a turn, in the order given.
   dropRefs(paths: string[]): Promise<DroppedRef[]>;
-  // onGap fires when frames were lost beyond what the stream can replay, which
-  // is the caller's cue to rebuild from the transcript rather than to keep
+  // onGap fires when frames were lost beyond what the stream can replay: the
+  // cue to re-read each model from its own authority rather than to keep
   // rendering a conversation with a hole in it.
-  subscribe(onEvent: (ev: WireEvent) => void, onGap?: () => void): () => void;
+  // bootstrap lets a read model that has its own snapshot join without a seam:
+  // it reads one and answers with the frame that snapshot is at least as new
+  // as. Live frames are held until the replay after that number lands, so the
+  // model folds one ordered stream and folds nothing twice. The number belongs
+  // to the stream, not to the model — several snapshots resume from the lowest
+  // of their watermarks, because a duplicate folds and a gap does not.
+  subscribe(onEvent: (ev: WireEvent) => void, onGap?: () => void, bootstrap?: () => Promise<number>): () => void;
 
   submit(text: string): Promise<void>;
   // /submit 409s once a turn holds the session. Mid-turn input is durable and

@@ -71,6 +71,7 @@ var apiPaths = map[string]bool{
 	"/tool-approval-mode": true, "/auto-approve-tools": true, "/bypass": true,
 	"/provider-setup": true, "/delete-session": true, "/inbox": true, "/inbox/items": true,
 	"/trajectory": true, "/slash": true, "/complete": true,
+	"/execution-graph": true, "/adjudications": true,
 	"/workspace": true, "/workspaces": true,
 	"/mcp": true, "/skills": true, "/capability-scope": true, "/account": true, "/hooks": true,
 	"/memory": true, "/network": true, "/shell": true, "/todos": true, "/providers": true,
@@ -87,7 +88,7 @@ var apiPaths = map[string]bool{
 // endpoint from silently answering with index.html instead of JSON — and
 // TestEveryPathTheFrontendCallsIsRouted is what keeps this list honest, because
 // the comment alone did not.
-var apiPrefixes = []string{"/asks/", "/tray/", "/update/", "/mcp/", "/skills/", "/inbox/", "/account/", "/hooks/", "/memory/", "/network/", "/providers/", "/rewind/", "/extensions/", "/themes/", "/plugins/", "/appearance/", "/storage/", "/changes/", "/studio/"}
+var apiPrefixes = []string{"/asks/", "/tray/", "/update/", "/mcp/", "/skills/", "/inbox/", "/account/", "/hooks/", "/memory/", "/network/", "/providers/", "/rewind/", "/extensions/", "/themes/", "/plugins/", "/appearance/", "/storage/", "/changes/", "/context/", "/studio/"}
 
 // splitRuntimePath separates a pane's address from the route it is asking for:
 // /rt/r2/status is runtime r2 asking for /status. An unprefixed path belongs to
