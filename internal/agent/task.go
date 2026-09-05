@@ -679,10 +679,6 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		}
 		trk.finish(ctx.Err(), err)
 	}()
-	if !spec.Sched.RunInBackground {
-		trk.running()
-	}
-	defer openDelegationGraph(ctx, spec)(&result, &err)
 	if err := t.settleSpecPrompts(&spec); err != nil {
 		return "", err
 	}
@@ -729,6 +725,15 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	if err != nil {
 		return "", err
 	}
+	// Every deterministic refusal has answered by here, so this is where work
+	// enters orchestration: recorded, drawn pending, and handed the scheduler's
+	// two moments. A fan-out item's group opened it already.
+	life, err := t.openDelegation(ctx, &spec, &acquireReq, trk)
+	if err != nil {
+		return "", err
+	}
+	// A handoff moves the ending to the job, which is where the child stops.
+	defer life.settleOnReturn(ctx, &backgroundHandoff, &result, &err)
 	// Prove, admit, allocate: a foreground run holds its slot from here because
 	// the transcript below is the first thing it reserves, and a fan-out with
 	// sixty queued items must not hold sixty of them open.
@@ -739,7 +744,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		}
 		defer releaseSlot()
 	}
-	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), parentID, spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
+	run, err := t.prepareTranscriptRunWithPrompt(withUpstream(ctx, spec.Context.Upstream), subReg, modelRef, effortRef, spec.Context.parentSession(ctx), life.executionID(parentID), spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
 	if err != nil {
 		return "", err
 	}
@@ -788,13 +793,6 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			releaseStart = func() {}
 		}
 		label := firstNonEmpty(spec.Task.Description, spec.Worker.Name, "task")
-		if t.transcripts != nil && run != nil && run.Ref != "" {
-			if err := t.transcripts.MarkRunning(run); err != nil {
-				releaseStart()
-				run.Release()
-				return "", err
-			}
-		}
 		writerRegistered := false
 		if mutationObserver != nil && backgroundWriter {
 			turn := mutationObserver.OwnershipTurn()
@@ -809,9 +807,6 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		backgroundEvidence := evidence.NewLedger()
 		// Capture acquire request by value for the job goroutine.
 		slotReq := acquireReq
-		// Emit queued before the job goroutine can start so the status slot
-		// never regresses to a stale queued after running.
-		trk.queued()
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
 			if writerRegistered {
 				defer mutationObserver.UnregisterWriter(recoveryTaskID)
@@ -826,6 +821,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 					result = FormatSubagentRunResult("", run, true)
 					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
 				}
+				// The job owns the ending after the handoff, and settles the
+				// delegation where it can see the child stop.
+				life.settle(jobCtx, result, err)
 				// The job owns the terminal status: the parent tool call has
 				// already returned its job id by now.
 				trk.finish(jobCtx.Err(), err)
@@ -837,7 +835,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 				return FormatSubagentRunResult("", run, true), errors.Join(slotErr, t.transcripts.SaveFailed(run))
 			}
 			defer releaseSlot()
-			trk.running()
+			if err := life.begin(trk, run); err != nil {
+				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
+			}
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
 			if err != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(err, t.saveRunTerminal(run, err))
@@ -863,6 +863,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 
 	// Foreground: the slot has been held since before the transcript existed.
 	defer run.Release()
+	if err := life.begin(trk, run); err != nil {
+		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+	}
 	answer, err := runSession(ctx, trk.wrap(), false)
 	if err != nil {
 		return "", errors.Join(err, t.saveRunTerminal(run, err))

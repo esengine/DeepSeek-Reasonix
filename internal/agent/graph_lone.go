@@ -22,37 +22,6 @@ func graphNodeDeclared(ctx context.Context) bool {
 	return declared
 }
 
-// openDelegationGraph draws the delegation nothing else draws. fleet and
-// parallel_tasks publish their own items; a lone task, a run_skill, a review
-// capability published nothing at all — so a sub-agent could run eight steps
-// and leave the run graph reading "nothing was delegated". Returns the closure
-// that settles the node, so one deferred line covers every exit.
-func openDelegationGraph(ctx context.Context, spec ProfileExecSpec) func(*string, *error) {
-	noop := func(*string, *error) {}
-	// A background run is handed off and settles somewhere this return never
-	// sees; drawing it here would mark it done the moment it started.
-	if graphNodeDeclared(ctx) || spec.Sched.RunInBackground {
-		return noop
-	}
-	parentID, sink, _, ok := CallContext(ctx)
-	if !ok || sink == nil || parentID == "" {
-		return noop
-	}
-	subID := parallelNodeID(parentID, 0)
-	publishGraph(sink, fanOutOpeningDelta(parentID, delegationLabel(spec), []agentgraph.Node{{
-		ID: subID, ParentID: parentID, Kind: agentgraph.KindWorker,
-		State: agentgraph.StateRunning, Label: delegationTaskLabel(spec),
-		Profile: spec.Worker.Profile, Model: spec.Worker.Model, Effort: spec.Worker.Effort,
-		Grant: grantOf(spec.Grant.ReadOnly), StartedAt: nowMilli(),
-	}}))
-	return func(out *string, err *error) {
-		state := delegationState(ctx, *err)
-		_, ref := splitSubagentRunResult(*out)
-		publishGraph(sink, fanOutItemSettledDelta(subID, state, ref, *err))
-		publishGraph(sink, fanOutOutcomeDelta(parentID, state, nil))
-	}
-}
-
 // delegationState reads one run's ending the way a fan-out reads its items', so
 // a lone worker and a fleet member cannot disagree about what cancelled means.
 func delegationState(ctx context.Context, err error) agentgraph.NodeState {

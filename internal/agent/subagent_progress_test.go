@@ -785,16 +785,23 @@ func TestBackgroundTaskEmitsQueuedRunningCompleted(t *testing.T) {
 		t.Fatal("background task did not return a job id while the slot was held")
 	}
 
-	// Registered but not yet executing: the queued status is emitted
-	// synchronously at registration and must never be merged away.
-	queued := false
-	for _, e := range rec.kinds(event.ToolProgress) {
-		if progressName(e) == event.SubagentProgressStatusName && progressOutput(e) == string(subagentPhaseQueued) && e.Tool.ID == "bg-task" {
-			queued = true
+	// Held out of a slot by the scheduler, which is the only thing that may say
+	// queued: the job asks after the parent call has already returned its id,
+	// so the status arrives when the refusal does rather than at registration.
+	waitFor := func(want string) bool {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, e := range rec.kinds(event.ToolProgress) {
+				if progressName(e) == event.SubagentProgressStatusName && progressOutput(e) == want && e.Tool.ID == "bg-task" {
+					return true
+				}
+			}
+			time.Sleep(time.Millisecond)
 		}
+		return false
 	}
-	if !queued {
-		t.Fatal("background task never emitted a queued status at registration")
+	if !waitFor(string(subagentPhaseQueued)) {
+		t.Fatal("background task never emitted a queued status while the ceiling held it")
 	}
 
 	// Free the slot: the job acquires it, runs, and emits its terminal.

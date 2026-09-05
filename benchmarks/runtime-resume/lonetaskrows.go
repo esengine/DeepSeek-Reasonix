@@ -24,7 +24,7 @@ func loneTaskRows(arm string, before, after Observation) []row {
 		durableStartRow(before, after),
 		durableSettleRow(before, after),
 		delegationStoreRow(before, after),
-		rebuiltDelegationRow(after),
+		rebuiltDelegationRow(before, after),
 		rebuiltDelegationIdentityRow(after),
 		delegationInterruptionRow(before, after),
 		identityJoinRow(before),
@@ -121,7 +121,7 @@ func delegationStoreRow(before, after Observation) row {
 		childFacts(before), childFacts(after), true)
 }
 
-func rebuiltDelegationRow(after Observation) row {
+func rebuiltDelegationRow(before, after Observation) row {
 	rebuilt := rebuiltGraph(after)
 	var nodes []string
 	for _, n := range rebuilt.Graph.Nodes {
@@ -131,7 +131,7 @@ func rebuiltDelegationRow(after Observation) row {
 	}
 	sort.Strings(nodes)
 	return valueRow("the node a restart rebuilds", rebuildAuthority, "<stem>.execution.jsonl",
-		"execgraph.Rebuild", liveWorkers(after), join(nodes), false)
+		"execgraph.Rebuild", loneDelegationAtDeath(before), join(nodes), false)
 }
 
 // rebuiltDelegationIdentityRow is what a reader sees on the rebuilt node beyond
@@ -198,10 +198,14 @@ func interruptionKind(i execgraph.Interruption) string {
 // and the execution the journal opened. Four spellings, or one identity.
 func identityJoinRow(before Observation) row {
 	live, call, stored, opened := identitiesAtDeath(before)
-	joined := stored != "" && (stored == call || strings.HasPrefix(live, stored))
 	verdict := verdictViolated
-	if joined {
+	switch {
+	case stored != "" && (stored == opened || stored == call || strings.HasPrefix(live, stored)):
 		verdict = verdictHolds
+	case stored == "" && !startedAtDeath(before):
+		// Nothing executed, so the store owes no record and there is no join to
+		// make. A missing artifact here is the arm's own premise, not a defect.
+		verdict = verdictNotMeasured
 	}
 	return row{
 		Semantic: "one identity or four", Authority: "the graph, the call, the store and the journal",
@@ -240,6 +244,16 @@ func identitiesAtDeath(o Observation) (live, call, stored, opened string) {
 		}
 	}
 	return live, call, stored, opened
+}
+
+// startedAtDeath reports whether the delegation was ever granted a slot.
+func startedAtDeath(o Observation) bool {
+	for _, e := range o.Executions {
+		if ofLoneTask(e.ID) && e.Started() {
+			return true
+		}
+	}
+	return false
 }
 
 func executionIDs(o Observation) string {
