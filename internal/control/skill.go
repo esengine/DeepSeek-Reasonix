@@ -1,6 +1,7 @@
 package control
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"reasonix/internal/skill"
@@ -117,4 +118,57 @@ func (s *skillSet) writer() *skill.Store {
 		return s.allStore
 	}
 	return s.store
+}
+
+// CreateSkill writes a new skill file at the given scope and returns its path.
+// The live store makes it usable by name at once, and republishSkillCatalog
+// tells the model it exists on the next turn. A config activation change still
+// needs a rebuild: the store's disabled set is bound at construction.
+func (c *Controller) CreateSkill(name string, scope skill.Scope, content string) (string, error) {
+	w := c.skills.writer()
+	if w == nil {
+		return "", fmt.Errorf("no writable skill store in this session")
+	}
+	path, err := w.CreateWithContent(name, scope, content)
+	if err == nil {
+		c.republishSkillCatalog()
+	}
+	return path, err
+}
+
+// UpdateSkill overwrites an existing user-authored skill file in place. See
+// skill.Store.UpdateContent for the builtin-refusal and scope-match rules.
+func (c *Controller) UpdateSkill(name string, scope skill.Scope, content string) error {
+	w := c.skills.writer()
+	if w == nil {
+		return fmt.Errorf("no writable skill store in this session")
+	}
+	err := w.UpdateContent(name, scope, content)
+	if err == nil {
+		c.republishSkillCatalog()
+	}
+	return err
+}
+
+// DeleteSkill removes a user-authored skill file at the given scope. See
+// skill.Store.Delete for the builtin-refusal and scope-match rules.
+func (c *Controller) DeleteSkill(name string, scope skill.Scope) error {
+	w := c.skills.writer()
+	if w == nil {
+		return fmt.Errorf("no writable skill store in this session")
+	}
+	err := w.Delete(name, scope)
+	if err == nil {
+		c.republishSkillCatalog()
+	}
+	return err
+}
+
+// republishSkillCatalog re-owes the listing after a write changed the canonical
+// registry. The listing is delivered once, so a change nothing re-owes is one
+// the model does not hear about until something else happens to re-owe it — a
+// fold, or the next session. The fresh List() walks the disk, which is why this
+// sits on the write and never on the turn.
+func (c *Controller) republishSkillCatalog() {
+	c.skills.publishCatalog(c.skills.list())
 }

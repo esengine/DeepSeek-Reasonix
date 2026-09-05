@@ -2570,40 +2570,6 @@ func (c *Controller) canonicalSkillName(name string) (string, error) {
 	return "", fmt.Errorf("unknown skill: %s", name)
 }
 
-// CreateSkill writes a new skill file at the given scope and returns its
-// path. Skills()/AllSkills()/RunSkill() read the live store on demand, so the
-// new skill is usable (by name) immediately with no rebuild; the caller
-// should still rebuild the controller for the pinned Skills index and tool
-// registry to reflect it on the model's next turn, mirroring how
-// SetSkillEnabled's callers already rebuild after a config change.
-func (c *Controller) CreateSkill(name string, scope skill.Scope, content string) (string, error) {
-	w := c.skills.writer()
-	if w == nil {
-		return "", fmt.Errorf("no writable skill store in this session")
-	}
-	return w.CreateWithContent(name, scope, content)
-}
-
-// UpdateSkill overwrites an existing user-authored skill file in place. See
-// skill.Store.UpdateContent for the builtin-refusal and scope-match rules.
-func (c *Controller) UpdateSkill(name string, scope skill.Scope, content string) error {
-	w := c.skills.writer()
-	if w == nil {
-		return fmt.Errorf("no writable skill store in this session")
-	}
-	return w.UpdateContent(name, scope, content)
-}
-
-// DeleteSkill removes a user-authored skill file at the given scope. See
-// skill.Store.Delete for the builtin-refusal and scope-match rules.
-func (c *Controller) DeleteSkill(name string, scope skill.Scope) error {
-	w := c.skills.writer()
-	if w == nil {
-		return fmt.Errorf("no writable skill store in this session")
-	}
-	return w.Delete(name, scope)
-}
-
 // HookRunner returns the session's hook runner (nil-safe; may hold zero hooks),
 // so a frontend can list the active hooks via `/hooks`.
 func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
