@@ -75,6 +75,7 @@ provider call*.
 | `task-background-running-cancel` | the same, backgrounded | none | the same, across the handoff |
 | `cancel-ordinary-tool` | a plain shell the turn is waiting on, then a stop | none | does a stop reach an ordinary tool? |
 | `cancel-background-handoff` | a backgrounded child running, then a stop aimed at the turn | none | negative control: does it leave a job's work alone? |
+| `cancel-headless-owner` | a synchronous Run, stopped first by the controller and then by its caller | none | whose cancellation is it? |
 | `wait-slots` | fill the total ceiling, refuse one more, die | ceilings, via project config | can a restart say which ceiling refused it? |
 | `wait-writers` | fill the writer ceiling with total capacity free, die | ceilings | the same, one check further down |
 | `wait-claim` | overlap two write paths with both ceilings free, die | ceilings | the same, at the last check |
@@ -149,6 +150,17 @@ execution that never happened is what points at the cause.
 The two foreground arms are stopped through the turn's own cancel and the two
 background ones through the job list and a kill, which is what a person reaches
 for in each case.
+
+A stop has an owner before it has an effect, and the arms name it. A turn the
+controller admitted itself — what `Send` opens, and what a person's Stop reaches
+— is cancelled by `Controller.Cancel`. A synchronous `Run(ctx)` is never
+admitted through that gate, so the controller holds no cancel for it and the
+caller's own context holds the only one. `cancel-headless-owner` asserts both
+halves, because a controller that started claiming the second would be taking
+ownership from the only holder that has it. Reading one surface with the other's
+stop is how the first version of this probe reported a cancellation defect that
+was an ownership boundary: `Running()` answers for the gate, and a turn the gate
+was never told about reads as ended the whole time.
 
 Two more ask where a stop goes, and they are a pair on purpose. A turn that
 returns while the work it owned is still running has not cancelled anything — it

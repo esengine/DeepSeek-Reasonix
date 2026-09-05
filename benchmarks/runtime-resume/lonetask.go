@@ -165,11 +165,19 @@ func runLoneTaskConstruct(ctx context.Context, root armRoot, arm, bootSystem str
 	// queued arm's ceiling is filled by a background fleet named in the same
 	// prompt, whose own child says when the slot is taken.
 	prompt := fanOutTurn(turn+1, loneTaskSentinels(arm))
-	if arm == armTaskCompleted {
+	switch {
+	case arm == armTaskCompleted:
 		if err := ctrl.Run(ctx, prompt); err != nil {
 			return fmt.Errorf("delegating turn: %w", err)
 		}
-	} else {
+	case guardedArm(arm):
+		// A stop belongs to whoever admitted the turn, so an arm that is going
+		// to be stopped is admitted the way a person's input is.
+		ctrl.Send(prompt)
+		if err := waitForLoneTask(sink, prov, arm); err != nil {
+			return err
+		}
+	default:
 		go func() { _ = ctrl.Run(ctx, prompt) }()
 		if err := waitForLoneTask(sink, prov, arm); err != nil {
 			return err
@@ -219,7 +227,7 @@ func stopDelegation(ctrl *control.Controller, prov *scripted, arm string) string
 	if prov.fleets.held(childEntered(childHang)) && !prov.fleets.held(childLeft(childHang)) {
 		live = "still running"
 	}
-	return fmt.Sprintf("turn=%s work=%s after=%s", turnStanding(ctrl), live,
+	return fmt.Sprintf("turn=%s work=%s after=%s", turnStanding(ctrl, arm), live,
 		time.Since(stopped).Round(time.Second))
 }
 

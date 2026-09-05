@@ -109,6 +109,7 @@ func arms() []arm {
 		{name: armTaskBgRunning, asks: "a backgrounded delegation executing inside its job"},
 		{name: armCancelTool, asks: "whether a stop reaches an ordinary tool the turn is waiting on"},
 		{name: armCancelBackground, asks: "whether a stop leaves work already handed to a job alone"},
+		{name: armCancelHeadlessOwner, asks: "who owns the cancellation of a turn the controller never admitted"},
 		{name: armTaskFgQueuedCancel, asks: "a delegation stopped while the scheduler still held it back"},
 		{name: armTaskBgQueuedCancel, asks: "the same, backgrounded: a job killed before it was ever admitted"},
 		{name: armTaskFgRunningCancel, asks: "a delegation stopped while its child was executing"},

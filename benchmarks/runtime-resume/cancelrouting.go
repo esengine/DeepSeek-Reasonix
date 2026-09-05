@@ -12,11 +12,10 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Where a stop goes. The arms above measure who owns an ending; these ask
-// something earlier: when a person cancels a turn, does the cancellation reach
-// the work that turn owns? A turn that returns while its own work still runs
-// has not cancelled it — it has stopped waiting, which looks the same until a
-// restart reads the record.
+// Where a stop goes — and, first, whose stop it is. A controller owns the turns
+// it admits itself and cancels those; a synchronous Run belongs to the caller
+// that passed the context. Measuring the second with the first says nothing
+// about either.
 const (
 	// armCancelTool is the control that says where a defect lives. If an
 	// ordinary tool's context is cancelled and a delegation's is not, the fault
@@ -25,25 +24,41 @@ const (
 	armCancelTool = "cancel-ordinary-tool"
 	// armCancelBackground is the negative control, and the one that decides what
 	// a fix may do: work already handed to a job has an owner of its own, and a
-	// cancel that reached into it would take back the handoff this step built.
+	// cancel that reached into it would take back the handoff.
 	armCancelBackground = "cancel-background-handoff"
+	// armCancelHeadlessOwner reads the other surface. A synchronous Run is never
+	// admitted through the gate, so the controller holds no cancel for it and
+	// the caller's own context holds the only one. Both halves are asserted: a
+	// controller that started claiming this would be taking ownership from the
+	// only holder that has it.
+	armCancelHeadlessOwner = "cancel-headless-owner"
 )
 
 func cancelRoutingArm(name string) bool {
-	return name == armCancelTool || name == armCancelBackground
+	switch name {
+	case armCancelTool, armCancelBackground, armCancelHeadlessOwner:
+		return true
+	}
+	return false
+}
+
+// guardedArm names the arms driven through a turn the controller admits itself,
+// which is the surface a person's Stop reaches.
+func guardedArm(name string) bool {
+	return cancelTaskArm(name) || name == armCancelTool || name == armCancelBackground
 }
 
 const (
 	sleepSentinel = "PROBE-SLEEP"
 	sleepCallID   = "probe_sleep"
-	// sleepSeconds outlasts any settling this probe waits through, so a shell
+	// sleepSeconds outlasts the settling this probe waits through, so a shell
 	// that ends promptly ended because something ended it.
 	sleepSeconds = 30
 )
 
 // sleepCall is an ordinary foreground tool that does nothing but wait. It is
-// the same shell every turn can call, which is the point: it derives its
-// context the way every other tool does.
+// the shell every turn can call, which is the point: it derives its context the
+// way every other tool does.
 func sleepCall() []provider.Chunk {
 	args, _ := json.Marshal(map[string]any{
 		"command":     fmt.Sprintf("sleep %d", sleepSeconds),
@@ -55,28 +70,28 @@ func sleepCall() []provider.Chunk {
 	}}
 }
 
-// runCancelRoutingConstruct drives the arm's work, stops the turn the way a
-// person does, and records what the stop reached. Nothing waits for the work to
-// end: whether it ends at all is the measurement.
+// runCancelRoutingConstruct drives the arm's work, stops it the way that
+// surface's owner stops it, and records what the stop reached. Nothing waits
+// for the work to end: whether it ends at all is the measurement.
 func runCancelRoutingConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctrl *control.Controller, sink *graphSink, prov *scripted, turn int) error {
 	sentinel := sleepSentinel
 	if arm == armCancelBackground {
 		sentinel = taskSentinel
 	}
-	go func() { _ = ctrl.Run(ctx, fanOutTurn(turn+1, sentinel)) }()
+	prompt := fanOutTurn(turn+1, sentinel)
+	ctx, cancelCaller := context.WithCancel(ctx)
+	defer cancelCaller()
+	if guardedArm(arm) {
+		ctrl.Send(prompt)
+	} else {
+		go func() { _ = ctrl.Run(ctx, prompt) }()
+	}
 	if err := waitForCancelSubject(sink, prov, arm); err != nil {
 		return err
 	}
 
-	stopped := time.Now()
-	ctrl.Cancel()
-	waitForTurnToEnd(ctrl)
-	// Long enough that a context which was going to arrive has, and short
-	// enough that the shell's own sleep cannot be what ended the wait.
-	time.Sleep(3 * time.Second)
-
 	obs := capture("construct", arm, bootSystem, ctrl, sink, root)
-	obs.Progress[probeStopReached] = []string{stopReading(ctrl, prov, sink, arm, stopped)}
+	obs.Progress[probeStopReached] = stopReadings(ctrl, sink, prov, arm, cancelCaller)
 	if err := writeObservation(root, obs); err != nil {
 		return err
 	}
@@ -84,26 +99,62 @@ func runCancelRoutingConstruct(ctx context.Context, root armRoot, arm, bootSyste
 	return nil
 }
 
-// probeStopReached carries what the stop reached into the observation. The key
+// probeStopReached carries what each stop reached into the observation. The key
 // names the probe so no row reads it as a status the kernel emitted.
 const probeStopReached = "probe:stop-reached"
 
-// stopReading is what the arm saw, in the terms its row is judged on: whether
-// the turn ended, and whether the work it owned is still live.
-func stopReading(ctrl *control.Controller, prov *scripted, sink *graphSink, arm string, stopped time.Time) string {
+// stopReadings issues this surface's stop and reports what it reached. The
+// headless arm issues both in order — the controller's, which owns nothing
+// there, and then the caller's, which owns everything.
+func stopReadings(ctrl *control.Controller, sink *graphSink, prov *scripted, arm string, cancelCaller context.CancelFunc) []string {
+	// What the stop found before it was issued. Work already ended would make
+	// every answer below meaningless, and this probe has made that mistake once.
+	before := "live"
+	if !workLive(sink, prov, arm) {
+		before = "already gone"
+	}
+	ctrl.Cancel()
+	first := "controller-cancel before=" + before + " " + reachedAfter(ctrl, sink, prov, arm)
+	if arm != armCancelHeadlessOwner {
+		return []string{first}
+	}
+	cancelCaller()
+	return []string{first, "caller-cancel " + reachedAfter(ctrl, sink, prov, arm)}
+}
+
+// reachedAfter waits out the settling this probe allows and reports what is
+// still live. The wait stays well below the shell's own sleep, so work that has
+// ended was ended by the stop rather than by finishing.
+func reachedAfter(ctrl *control.Controller, sink *graphSink, prov *scripted, arm string) string {
+	stopped := time.Now()
+	deadline := stopped.Add(8 * time.Second)
+	for time.Now().Before(deadline) && workLive(sink, prov, arm) {
+		time.Sleep(100 * time.Millisecond)
+	}
 	live := "gone"
-	if arm == armCancelTool {
-		if _, ended := sink.toolResult(sleepCallID); !ended {
-			live = "still running"
-		}
-	} else if prov.fleets.held(childEntered(childHang)) && !prov.fleets.held(childLeft(childHang)) {
+	if workLive(sink, prov, arm) {
 		live = "still running"
 	}
 	return fmt.Sprintf("turn=%s work=%s after=%s",
-		turnStanding(ctrl), live, time.Since(stopped).Round(time.Second))
+		turnStanding(ctrl, arm), live, time.Since(stopped).Round(time.Second))
 }
 
-func turnStanding(ctrl *control.Controller) string {
+func workLive(sink *graphSink, prov *scripted, arm string) bool {
+	if arm == armCancelBackground {
+		return prov.fleets.held(childEntered(childHang)) && !prov.fleets.held(childLeft(childHang))
+	}
+	_, ended := sink.toolResult(sleepCallID)
+	return !ended
+}
+
+// turnStanding reports the gate only where the gate is the authority. A
+// synchronous Run is never admitted through it, so reading it there would say
+// "ended" about a turn it was never told about — which is how this probe first
+// mistook an ownership boundary for a cancellation defect.
+func turnStanding(ctrl *control.Controller, arm string) string {
+	if !guardedArm(arm) {
+		return "not admitted (caller-owned)"
+	}
 	if ctrl.Running() {
 		return "still active"
 	}
@@ -115,14 +166,14 @@ func turnStanding(ctrl *control.Controller) string {
 func waitForCancelSubject(sink *graphSink, prov *scripted, arm string) error {
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if arm == armCancelTool {
-			if _, seen := sink.toolDispatched(sleepCallID); seen {
-				// The shell is started by the dispatch, not by the event; a
-				// moment's grace keeps the stop from racing its own subject.
-				time.Sleep(500 * time.Millisecond)
+		if arm == armCancelBackground {
+			if prov.fleets.held(childEntered(childHang)) {
 				return nil
 			}
-		} else if prov.fleets.held(childEntered(childHang)) {
+		} else if _, seen := sink.toolDispatched(sleepCallID); seen {
+			// The shell starts with the dispatch, not with the event; a moment's
+			// grace keeps the stop from racing its own subject.
+			time.Sleep(500 * time.Millisecond)
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -130,48 +181,49 @@ func waitForCancelSubject(sink *graphSink, prov *scripted, arm string) error {
 	return errUnexpected("work under way to stop", "nothing started")
 }
 
-// waitForTurnToEnd gives the cancelled turn its own time to unwind. What the
-// arm reports is read after this: a turn still active would say the stop is
-// still in flight, not that it failed to reach anything.
-func waitForTurnToEnd(ctrl *control.Controller) {
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if !ctrl.Running() {
-			return
+// cancelRoutingRows read the arm's own readings. The three arms want different
+// answers to the same question, which is why they run together: a fix that
+// cancels everything a session knows about passes one and fails two.
+func cancelRoutingRows(arm string, before Observation) []row {
+	readings := before.Progress[probeStopReached]
+	first, second := reading(readings, 0), reading(readings, 1)
+	switch arm {
+	case armCancelHeadlessOwner:
+		return []row{
+			ownershipRow("a controller stop on a turn it never admitted", first,
+				"leaves the caller's work alone", stillRunning(first)),
+			ownershipRow("the caller's own stop", second,
+				"ends the work it owns", !stillRunning(second)),
 		}
-		time.Sleep(50 * time.Millisecond)
+	case armCancelBackground:
+		return []row{
+			ownershipRow("the turn after a stop", first, "a cancelled turn ends",
+				strings.Contains(first, "turn=ended")),
+			ownershipRow("work already handed to a job", first,
+				"a stop aimed at the turn leaves work the turn no longer owns", stillRunning(first)),
+		}
+	}
+	return []row{
+		ownershipRow("the turn after a stop", first, "a cancelled turn ends",
+			strings.Contains(first, "turn=ended")),
+		ownershipRow("the tool the turn was waiting on", first,
+			"a stop reaches the work its turn is waiting on", !stillRunning(first)),
 	}
 }
 
-// cancelRoutingRows read one reading two ways: whether the turn ended, and
-// whether what it was waiting on ended with it. The tool arm and the background
-// arm want opposite answers to the second, which is the whole point of running
-// both — a fix that cancels everything a session knows about passes one and
-// fails the other.
-func cancelRoutingRows(arm string, before Observation) []row {
-	reading := ""
-	if seen := before.Progress[probeStopReached]; len(seen) > 0 {
-		reading = seen[0]
+func ownershipRow(semantic, got, want string, ok bool) row {
+	return row{
+		Semantic: semantic, Authority: "the surface that owns this cancellation",
+		Artifact: "none: in-process state", Reconstruction: want,
+		Before: want, After: orNone(got), Verdict: held(ok),
 	}
-	ended := strings.Contains(reading, "turn=ended")
-	live := strings.Contains(reading, "work=still running")
-	rows := []row{{
-		Semantic: "the turn after a stop", Authority: "control.Controller",
-		Artifact: "none: in-process state", Reconstruction: "a cancelled turn ends",
-		Before: "active, with work under way", After: orNone(reading), Verdict: held(ended),
-	}}
-	if arm == armCancelBackground {
-		return append(rows, row{
-			Semantic: "work already handed to a job", Authority: "jobs.Manager, the owner after the handoff",
-			Artifact:       "none: in-process state",
-			Reconstruction: "a stop aimed at the turn does not reach work the turn no longer owns",
-			Before:         "running under its own owner", After: orNone(reading), Verdict: held(live),
-		})
-	}
-	return append(rows, row{
-		Semantic: "the tool the turn was waiting on", Authority: "the tool's own context",
-		Artifact:       "none: in-process state",
-		Reconstruction: "a stop reaches the work its turn is waiting on",
-		Before:         "running under the turn", After: orNone(reading), Verdict: held(!live),
-	})
 }
+
+func reading(readings []string, at int) string {
+	if at < len(readings) {
+		return readings[at]
+	}
+	return ""
+}
+
+func stillRunning(reading string) bool { return strings.Contains(reading, "work=still running") }
