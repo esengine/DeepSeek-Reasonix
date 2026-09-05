@@ -221,18 +221,10 @@ func TestToolArgumentsCorrectedAfterStopWithoutRepeatingSuccess(t *testing.T) {
 	good := provider.ToolCall{ID: "good", Name: "echo", Arguments: `{"text":"first"}`}
 	bad := provider.ToolCall{ID: "bad", Name: "echo", Arguments: `{"text":123}`}
 	fixed := provider.ToolCall{ID: "fixed", Name: "echo", Arguments: `{"text":"second"}`}
-	p := testutil.NewMock("test", testutil.Turn{Chunks: []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &good}, {Type: provider.ChunkToolCall, ToolCall: &bad}, {Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "stop"}}, {Type: provider.ChunkDone}}}, testutil.Turn{ToolCalls: []provider.ToolCall{fixed}}, testutil.Turn{Text: "done"})
+	p := &argumentBudgetProvider{MockProvider: testutil.NewMock("test", testutil.Turn{Chunks: []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &good}, {Type: provider.ChunkToolCall, ToolCall: &bad}, {Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "stop"}}, {Type: provider.ChunkDone}}}, testutil.Turn{ToolCalls: []provider.ToolCall{fixed}}, testutil.Turn{Text: "done"})}
 	sink := &recordSink{}
 	a := New(p, echoRegistry(), NewSession("system"), Options{ModelRef: t.Name()}, sink)
-	key := a.softBudgetHistoryKey()
-	for range softBudgetHistorySamples {
-		recordReadonlySoftBudgetDuration(key, 1)
-	}
-	t.Cleanup(func() {
-		readonlySoftBudgetHistory.Lock()
-		delete(readonlySoftBudgetHistory.byKey, key)
-		readonlySoftBudgetHistory.Unlock()
-	})
+	p.before = func() { a.turn.budget.rounds = readonlySoftBudgetRounds }
 	if err := a.Run(withNoClosedLoop(context.Background()), "use echo"); err != nil {
 		t.Fatal(err)
 	}
@@ -264,4 +256,17 @@ func TestToolArgumentsCorrectedAfterStopWithoutRepeatingSuccess(t *testing.T) {
 	if results["good"] != "echoed: first" || results["fixed"] != "echoed: second" || !strings.Contains(results["bad"], "text") {
 		t.Fatalf("results=%+v", results)
 	}
+}
+
+// The stream boundary runs after turn initialization, without a clock dependency.
+type argumentBudgetProvider struct {
+	*testutil.MockProvider
+	before func()
+}
+
+func (p *argumentBudgetProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	if p.CallCount() == 0 {
+		p.before()
+	}
+	return p.MockProvider.Stream(ctx, req)
 }
