@@ -102,6 +102,57 @@ provider call*.
 | `ephemeral-task-authority` | a read-only research child executing, read against the snapshot | none | can the execution authority account for what it draws? |
 | `ephemeral-skill-authority` | the same of the other ephemeral entry point | none | do the two agree on what they claim? |
 
+## The delegation matrix
+
+What the arms below establish, frozen. Every surface that spawns a child belongs
+to one of two classes, and a class is a contract about what a run leaves behind
+rather than a family resemblance.
+
+| execution class | scheduler | Graph | journal | store | restart |
+| --- | :--: | :--: | :--: | :--: | :--: |
+| `task` | ✓ | ✓ | ✓ | after STARTED | ✓ |
+| `fleet` | ✓ | ✓ | ✓ | after STARTED | ✓ |
+| `parallel_tasks` | ✓ | ✓ | ✓ | after STARTED | ✓ |
+| `run_skill` **(model-invoked)** | ✓ | ✓ | ✓ | after STARTED | ✓ |
+| `read_only_task` | ✓ | — | — | — | — |
+| `read_only_skill` | ✓ | — | — | — | — |
+
+The dashes are a promise, not a gap. An ephemeral run asks the same scheduler and
+holds real capacity; what it declines to do is claim anything a snapshot cannot
+justify, because the graph projects durable facts and it writes none.
+
+`run_skill` is listed as the **model-invoked** entry point only. A slash
+invocation reaches the same runner without a provider-visible parent call, so it
+is not a delegation and this table makes no claim about it — see the open
+questions below.
+
+`TestDelegationClassesStayApart` in `internal/boot` holds the classification, and
+holds it where a completed run cannot: what the store answers at the one instant
+a child is inside the provider. A check made afterwards cannot tell a recorded
+execution from an unrecorded one that happened to finish, because completion
+writes a record either way. Two mutations are runnable against it — an ephemeral
+entry point that opens a delegation again, and a fan-out item that skips the
+store — and each turns exactly the rows that would drift red.
+
+The evidence for every cell is the arms in this probe, not that test. It freezes
+the classification; they are what established it.
+
+### Open, and deliberately not closed here
+
+**Host-initiated top-level execution.** A slash-invoked subagent skill records
+nothing: no journal, no graph, no store. The contract it honours is narrow and
+real — a synthetic slash event id must not be persisted as though the model had
+made that call — but that is not the same claim as "a host-started execution
+deserves no durable provenance", and only the first has been established. The
+shape worth falsifying next is an execution identity the host owns with an empty
+parent call, rather than either of the two answers in play today.
+
+**Delivery obligations across invocation surfaces.** `run_skill(review)` requires
+a typed verdict; `task(profile=review)` does not. That divergence is about what a
+profile name carries, not about how an execution is owned, so the convergence
+deliberately left it alone: deriving the obligation from the worker's name would
+have changed a delivery contract as a side effect of unifying a lifecycle.
+
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
 lever's own effect cannot be read out of the result.
