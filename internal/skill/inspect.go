@@ -4,6 +4,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"reasonix/internal/config"
 )
 
 // CandidateStatus is the diagnostic disposition of one skill candidate.
@@ -48,6 +50,7 @@ func (s *Store) Inspect() Inspection {
 	roots := s.Roots()
 	var candidates []Candidate
 	winnerByName := map[string]Candidate{}
+	disabled := s.disabledSet()
 
 	// Scan roots highest-priority first (same as List).
 	for _, r := range s.roots() {
@@ -55,8 +58,8 @@ func (s *Store) Inspect() Inspection {
 			continue
 		}
 		for _, sk := range s.discoverRoot(r) {
-			candidates = append(candidates, classifyCandidate(sk, s.disabledName(sk.Name), winnerByName)...)
-			if !s.disabledName(sk.Name) {
+			candidates = append(candidates, classifyCandidate(sk, disabled[config.SkillNameKey(sk.Name)], winnerByName)...)
+			if !disabled[config.SkillNameKey(sk.Name)] {
 				if _, ok := winnerByName[sk.Name]; !ok {
 					winnerByName[sk.Name] = Candidate{
 						Name: sk.Name, Description: sk.Description, Scope: sk.Scope,
@@ -69,8 +72,8 @@ func (s *Store) Inspect() Inspection {
 
 	if !s.disableBuiltins {
 		for _, sk := range builtinSkills() {
-			candidates = append(candidates, classifyCandidate(sk, s.disabledName(sk.Name), winnerByName)...)
-			if !s.disabledName(sk.Name) {
+			candidates = append(candidates, classifyCandidate(sk, disabled[config.SkillNameKey(sk.Name)], winnerByName)...)
+			if !disabled[config.SkillNameKey(sk.Name)] {
 				if _, ok := winnerByName[sk.Name]; !ok {
 					winnerByName[sk.Name] = Candidate{
 						Name: sk.Name, Description: sk.Description, Scope: sk.Scope,

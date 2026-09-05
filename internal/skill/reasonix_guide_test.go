@@ -91,7 +91,7 @@ func TestReasonixGuideOverriddenByProject(t *testing.T) {
 func TestReasonixGuideDisabled(t *testing.T) {
 	store := skill.New(skill.Options{
 		HomeDir:       testenv.TempDir(t),
-		DisabledNames: []string{"reasonix-guide"},
+		DisabledNames: skill.StaticDisabled("reasonix-guide"),
 	})
 	if _, ok := store.Read("reasonix-guide"); ok {
 		t.Fatal("disabled builtin should not be readable")

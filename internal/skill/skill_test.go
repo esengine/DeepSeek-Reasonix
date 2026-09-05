@@ -781,7 +781,7 @@ func TestDisabledSkillsAreFilteredFromListAndRead(t *testing.T) {
 	writeSkill(t, home, ".reasonix/skills/active.md", "---\ndescription: active\n---\nbody")
 	writeSkill(t, home, ".reasonix/skills/hidden.md", "---\ndescription: hidden\n---\nbody")
 
-	st := New(Options{HomeDir: home, DisabledNames: []string{"hidden", "review"}})
+	st := New(Options{HomeDir: home, DisabledNames: StaticDisabled("hidden", "review")})
 	if _, ok := find(st.List(), "active"); !ok {
 		t.Fatal("active skill should be listed")
 	}

@@ -170,7 +170,7 @@ func collectSkills(root, home, reasonixHome string, cfg *config.Config, disp fun
 		ProjectRoot:     root,
 		CustomPaths:     cfg.SkillCustomPaths(),
 		ExcludedPaths:   cfg.SkillExcludedPaths(),
-		DisabledNames:   cfg.DisabledSkillNames(),
+		DisabledNames:   skill.StaticDisabled(cfg.DisabledSkillNames()...),
 		MaxDepth:        cfg.SkillMaxDepth(),
 		Stderr:          ioDiscard(),
 	})

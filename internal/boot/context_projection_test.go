@@ -325,35 +325,60 @@ func TestProjectionOutOfBandSkillWriteReachesTheNextTurn(t *testing.T) {
 	}
 }
 
-// Arm 7 is a lifecycle contract, not a freshness row, and is pinned as one. An
-// activation change is written to config and does not reach the live session:
-// both surfaces that make it say so, in the API response and in the notice. The
-// second half is what makes the first half mean anything — after a rebuild the
-// change is there, so the live session's silence is a boundary and not a no-op.
-func TestProjectionActivationChangeIsRebuildScoped(t *testing.T) {
+// Arm 7: the durable switch is canonical registry state, so it answers in the
+// session that flipped it. The rows are the toggle in both directions, the
+// listing owed exactly once for each, the negative control that an unchanged
+// registry re-sends nothing, and a rebuild landing on the same bytes the live
+// session ended with.
+func TestProjectionActivationChangeReachesTheLiveSession(t *testing.T) {
 	h := newProjectionHarness(t, "ctxproj-activation", "", "")
 	// The entry line, never the bare name: the index preamble names a built-in
 	// as its own call example, so matching the name matches the boilerplate.
 	const entry = "\n- explore "
-	if listing := blockOf(projectionOf(t, h.turn("turn-alpha"), "turn-alpha"), "available-skills"); !strings.Contains(listing, entry) {
-		t.Fatalf("the skill this arm disables is not in the listing to begin with:\n%s", listing)
+	before := h.turn("turn-alpha")
+	if listing := blockOf(projectionOf(t, before, "turn-alpha"), "available-skills"); !strings.Contains(listing, entry) {
+		t.Fatalf("the skill this arm toggles is not in the listing to begin with:\n%s", listing)
+	}
+
+	// A toggle that changes nothing writes a durable row and still owes nothing:
+	// the debt is against the listing, not against the file that decides it.
+	if err := h.ctrl.SetSkillEnabled("explore", config.ActivationProject, true); err != nil {
+		t.Fatalf("SetSkillEnabled(no-op): %v", err)
+	}
+	if listing := blockOf(projectionOf(t, h.turn("turn-beta"), "turn-beta"), "available-skills"); listing != "" {
+		t.Errorf("a toggle that changed no listing re-sent one:\n%s", listing)
 	}
 
 	if err := h.ctrl.SetSkillEnabled("explore", config.ActivationProject, false); err != nil {
-		t.Fatalf("SetSkillEnabled: %v", err)
+		t.Fatalf("SetSkillEnabled(off): %v", err)
+	}
+	off := blockOf(projectionOf(t, h.turn("turn-beta2"), "turn-beta2"), "available-skills")
+	if off == "" {
+		t.Fatalf("the switch changed the registry and the turn owed no listing")
+	}
+	if strings.Contains(off, entry) {
+		t.Errorf("freshness: a disabled skill is still listed to the model:\n%s", off)
 	}
 
-	if listing := blockOf(projectionOf(t, h.turn("turn-beta"), "turn-beta"), "available-skills"); listing != "" {
-		t.Errorf("an activation change reached the live session, which both surfaces that make it promise it does not:\n%s", listing)
+	if again := blockOf(projectionOf(t, h.turn("turn-gamma"), "turn-gamma"), "available-skills"); again != "" {
+		t.Errorf("the listing was re-sent although nothing changed after the toggle:\n%s", again)
+	}
+
+	if err := h.ctrl.SetSkillEnabled("explore", config.ActivationProject, true); err != nil {
+		t.Fatalf("SetSkillEnabled(on): %v", err)
+	}
+	on := blockOf(projectionOf(t, h.turn("turn-delta"), "turn-delta"), "available-skills")
+	if !strings.Contains(on, entry) {
+		t.Errorf("freshness: re-enabling did not put the skill back in the listing:\n%s", on)
 	}
 
 	h.restart()
-	listing := blockOf(projectionOf(t, h.turn("turn-gamma"), "turn-gamma"), "available-skills")
-	if listing == "" {
-		t.Fatal("the rebuilt session owes a listing and sent none, so this arm cannot say the change took")
+	rebuilt := blockOf(projectionOf(t, h.turn("turn-epsilon"), "turn-epsilon"), "available-skills")
+	if rebuilt != on {
+		t.Errorf("a rebuilt session does not agree with the live one it replaced:\nfirst diff site: %q", firstDivergence(on, rebuilt))
 	}
-	if strings.Contains(listing, entry) {
-		t.Errorf("the activation change did not take effect on a rebuild either, so nothing here was measured:\n%s", listing)
+	if a, b := systemOf(before), systemOf(h.turn("turn-zeta")); a != b {
+		t.Errorf("cache-boundary: toggling a skill moved the prefix:\nfirst diff site: %q", firstDivergence(a, b))
 	}
 }
 

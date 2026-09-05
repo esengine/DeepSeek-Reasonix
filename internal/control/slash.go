@@ -459,8 +459,7 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			if err := c.SetSkillEnabled(fields[2], scope, enabled); err != nil {
 				c.notice("skill " + sub + ": " + err.Error())
 			} else {
-				c.notice(sub + "d skill " + fields[2] + " " + where +
-					" — restart or refresh the session for the prompt and tools to update")
+				c.notice(sub + "d skill " + fields[2] + " " + where + " — in effect from your next message")
 			}
 			return true
 		}

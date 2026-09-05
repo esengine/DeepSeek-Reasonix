@@ -167,7 +167,7 @@ func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{
-			"enabled": s.ctl().SkillEnabled(name), "cleared": true, "restartRequired": true,
+			"enabled": s.ctl().SkillEnabled(name), "cleared": true, "restartRequired": false,
 		})
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"enabled": body.Enabled, "scope": string(scope), "restartRequired": true,
+		"enabled": body.Enabled, "scope": string(scope), "restartRequired": false,
 	})
 }
 

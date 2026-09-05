@@ -147,7 +147,7 @@ type Options struct {
 	PluginPaths      map[string][]string // canonical custom root -> installed plugin package names
 	PluginAgentPaths map[string][]string // plugin roots whose flat Markdown files are Claude agents
 	ExcludedPaths    []string
-	DisabledNames    []string
+	DisabledNames    func() []string
 	MaxDepth         int
 	DisableBuiltins  bool // suppress shipped built-ins (test-only knob)
 	// DisableDiscovery returns an empty store without probing project, custom,
@@ -168,7 +168,7 @@ type Store struct {
 	pluginPaths      map[string][]string
 	pluginAgentPaths map[string][]string
 	excludedPaths    map[string]bool
-	disabled         map[string]bool
+	disabled         func() []string
 	maxDepth         int
 	disableBuiltins  bool
 	disableDiscovery bool
@@ -225,7 +225,7 @@ func New(opts Options) *Store {
 		pluginPaths:      pluginPaths,
 		pluginAgentPaths: pluginAgentPaths,
 		excludedPaths:    excluded,
-		disabled:         disabledNameSet(opts.DisabledNames),
+		disabled:         opts.DisabledNames,
 		maxDepth:         normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins:  opts.DisableBuiltins,
 		disableDiscovery: opts.DisableDiscovery,
@@ -487,9 +487,16 @@ func (s *Store) Roots() []Root {
 	return out
 }
 
-func disabledNameSet(names []string) map[string]bool {
+// disabledSet answers who is switched off right now. It is resolved once per
+// pass rather than bound at construction: the durable switch is canonical state
+// that changes while a session runs, and a store holding the set it started
+// with answers for a session that has already ended.
+func (s *Store) disabledSet() map[string]bool {
 	out := map[string]bool{}
-	for _, name := range names {
+	if s == nil || s.disabled == nil {
+		return out
+	}
+	for _, name := range s.disabled() {
 		if key := config.SkillNameKey(name); key != "" {
 			out[key] = true
 		}
@@ -497,8 +504,10 @@ func disabledNameSet(names []string) map[string]bool {
 	return out
 }
 
-func (s *Store) disabledName(name string) bool {
-	return s.disabled[config.SkillNameKey(name)]
+// StaticDisabled is the switch that never moves, for callers whose disabled set
+// is a literal rather than a decision someone can change.
+func StaticDisabled(names ...string) func() []string {
+	return func() []string { return names }
 }
 
 func normalizeMaxDepth(depth int) int {
@@ -544,12 +553,13 @@ func (s *Store) discoveredSkills() []Skill {
 		return nil
 	}
 	var out []Skill
+	disabled := s.disabledSet()
 	for _, r := range s.roots() {
 		if r.Status != StatusOK {
 			continue
 		}
 		for _, sk := range s.discoverRoot(r) {
-			if s.disabledName(sk.Name) {
+			if disabled[config.SkillNameKey(sk.Name)] {
 				continue
 			}
 			if len(r.plugins) == 0 {
@@ -568,7 +578,7 @@ func (s *Store) discoveredSkills() []Skill {
 	}
 	if !s.disableBuiltins {
 		for _, sk := range builtinSkills() {
-			if !s.disabledName(sk.Name) {
+			if !disabled[config.SkillNameKey(sk.Name)] {
 				out = append(out, sk)
 			}
 		}
@@ -666,9 +676,6 @@ func ResolveSlashSkill(skills []Skill, name string) (Skill, bool) {
 // built-ins. ok is false when no such skill exists or the file is unreadable.
 func (s *Store) Read(name string) (Skill, bool) {
 	if !IsValidName(name) {
-		return Skill{}, false
-	}
-	if s.disabledName(name) {
 		return Skill{}, false
 	}
 	for _, sk := range s.enabledSkills() {

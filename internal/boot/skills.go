@@ -38,7 +38,7 @@ func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit 
 	a.store = skill.New(skill.Options{
 		ProjectRoot: root, ReasonixHomeDir: home, CustomPaths: cfg.SkillCustomPaths(), PluginPaths: cfg.PluginPackageSkillOwners(),
 		PluginAgentPaths: cfg.PluginPackageAgentOwners(), ExcludedPaths: cfg.SkillExcludedPaths(),
-		DisabledNames: disabledSkillNames(cfg, root), MaxDepth: cfg.SkillMaxDepth(), Stderr: opts.Stderr,
+		DisabledNames: func() []string { return disabledSkillNames(cfg, root) }, MaxDepth: cfg.SkillMaxDepth(), Stderr: opts.Stderr,
 	})
 	a.store.ConfigureInvocationPolicy(nil)
 	a.skills = a.store.List()
@@ -49,9 +49,8 @@ func buildSkillAssembly(opts Options, cfg *config.Config, root string, implicit 
 
 // disabledSkillNames is what discovery must not surface: the hand-written
 // config list, plus what the durable switch turned off for this workspace,
-// minus what it turned back on. Reading only the config list made the switch a
-// label — every reporting surface said "disabled" while the model kept the
-// skill in its listing and could still run it.
+// minus what it turned back on. It is called per discovery pass, so a switch
+// flipped mid-session answers on the next turn rather than the next build.
 func disabledSkillNames(cfg *config.Config, root string) []string {
 	declared := cfg.DisabledSkillNames()
 	resolver, err := config.DefaultActivationStore().SkillResolverFor(root)
