@@ -58,3 +58,44 @@ func TestContextReportLeavesThresholdsZeroWhenDisabled(t *testing.T) {
 		t.Errorf("disabled maintenance reported thresholds: %+v", rep)
 	}
 }
+
+// The breakdown classifies the same visible messages the maintenance decision
+// sees: tool-role output versus chat, with the per-request schema mass counted
+// separately because compaction can never reclaim it. The estimator
+// (estimateMessagesTokens) prices ASCII text at one token per rune, adds 4
+// framing tokens per message and 8 + id + name + arguments per tool call, so
+// the fixture arithmetic is exact:
+//
+//	tool message   = 4 framing + 8000 content + 2 ("c1") + 4 ("dump") = 8010
+//	assistant call = 4 framing + 8 call framing + 2 + 4 + 2 = 20
+//	chat messages  = (4+4000) system + (4+4000) user + 20 + (4+4000) user = 12032
+//
+// The LocalOnly user turn must land in neither bucket. It is excluded twice —
+// by the loop guard in ContextReport and again by estimateMessagesTokens —
+// so deleting either guard alone stays green; removing both (or breaking the
+// LocalOnly contract anywhere on the path) adds 4004 to ChatTokens and turns
+// this test red.
+func TestContextReportBreakdownClassifiesToolResultsAndChat(t *testing.T) {
+	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
+	msgs := []provider.Message{
+		{Role: provider.RoleSystem, Content: strings.Repeat("s", 4_000)},
+		{Role: provider.RoleUser, Content: strings.Repeat("u", 4_000)},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c1", Name: "dump", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "dump", Content: strings.Repeat("t", 8_000)},
+		{Role: provider.RoleUser, Content: strings.Repeat("v", 4_000)},
+		{Role: provider.RoleUser, Content: strings.Repeat("l", 4_000), LocalOnly: true}, // local-only: neither bucket
+	}
+	a := agentOverForceWindow(t, prov, &Session{Messages: msgs}, 50_000)
+	a.SetTools(echoRegistry()) // agentOverForceWindow starts with an empty registry; schemas must exist
+
+	rep := a.ContextReport()
+	if rep.ToolResultTokens != 8_010 {
+		t.Fatalf("ToolResultTokens = %d, want 8010", rep.ToolResultTokens)
+	}
+	if rep.ChatTokens != 12_032 { // ChatTokens includes the system message
+		t.Fatalf("ChatTokens = %d, want 12032", rep.ChatTokens)
+	}
+	if rep.SchemaTokens <= 0 {
+		t.Fatalf("SchemaTokens = %d, want > 0 (registry has schemas)", rep.SchemaTokens)
+	}
+}

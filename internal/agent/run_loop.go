@@ -585,6 +585,8 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		return false, batch.err
 	}
 	results, images := batch.results, batch.images
+	stride := a.placementCheckStrideBytes()
+	placementBytes := 0
 	for i, call := range calls {
 		msg := provider.Message{
 			Role:       provider.RoleTool,
@@ -602,6 +604,15 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 			msg.ToolExecution = toProviderToolExecution(batch.executions[i])
 		}
 		a.sess.conversation.Add(msg)
+		// Placement governance: the estimate is a full-view scan, so gate it on
+		// accumulated new bytes (window-scaled stride, see placementCheckStrideBytes)
+		// rather than every result. Crossing the soft line folds now, so the next
+		// result never rides in on a context already past the maintenance threshold.
+		placementBytes += len(msg.Content)
+		if placementBytes >= stride {
+			placementBytes = 0
+			a.maintainForPlacement(ctx)
+		}
 	}
 	if cont, boundaryErr, handled := a.resolveIncompleteReadToolRoundBoundary(ctx, state, usage); handled {
 		return cont, boundaryErr

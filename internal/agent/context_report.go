@@ -17,6 +17,25 @@ type ContextReport struct {
 	ProjectionTokens int
 	Projected        bool
 
+	// Breakdown classifies the current model-visible view so maintainers can
+	// see who consumes the window before tuning any governance. ChatTokens
+	// includes the (pinned) system message; SchemaTokens is the per-request
+	// tool-schema mass that compaction can never reclaim.
+	//
+	// Units: ToolResultTokens and ChatTokens are measured by the planning
+	// estimator (estimateMessagesTokens) — the "for internal planning budgets
+	// only; against the window it would compact 4x early" unit documented on
+	// estimatedPromptTokens in output_budget.go. It reads up to ~4x high next
+	// to the window-denominated fields (ProjectionTokens, Window,
+	// FoldThreshold), so never sum these into or compare them against those;
+	// only ratios between the two message buckets carry meaning. SchemaTokens
+	// is in a third unit, the request estimator (estimatedRequestTokens),
+	// which session calibration re-scales even though the message buckets
+	// stay deterministic — it is not comparable with either bucket either.
+	ToolResultTokens int // planning tokens (estimateMessagesTokens): deterministic, calibration-free
+	ChatTokens       int // planning tokens (estimateMessagesTokens): deterministic, calibration-free
+	SchemaTokens     int // request tokens (estimatedRequestTokens): re-scaled by session calibration
+
 	SoftThreshold  int
 	SnipThreshold  int
 	FoldThreshold  int
@@ -52,6 +71,19 @@ func (a *Agent) ContextReport() ContextReport {
 	visible := a.modelVisibleMessages()
 	rep.ProjectionTokens = a.estimatedPromptTokens(provider.ModelMessages(visible))
 	rep.Projected = rep.ProjectionTokens != rep.CanonicalTokens
+	for _, m := range visible {
+		if m.LocalOnly {
+			continue
+		}
+		if m.Role == provider.RoleTool {
+			rep.ToolResultTokens += estimateMessagesTokens([]provider.Message{m})
+			continue
+		}
+		rep.ChatTokens += estimateMessagesTokens([]provider.Message{m})
+	}
+	if schemas := a.providerToolSchemas(); len(schemas) > 0 {
+		rep.SchemaTokens = a.estimatedRequestTokens(provider.Request{Tools: schemas})
+	}
 
 	if a.contextWindow > 0 {
 		rep.FoldThreshold = a.compactTrigger()

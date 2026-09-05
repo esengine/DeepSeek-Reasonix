@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,39 @@ import (
 // maxToolOutputBytes bounds the stable provider-visible Content. RawContent
 // retains the complete local result for explicit session-scoped paging.
 const maxToolOutputBytes = 32 * 1024
+
+// maintainForPlacement is the per-result placement check: the moment a tool
+// result lands the view past the fold trigger, maintenance runs before the
+// next result rides in — instead of bouncing off the hard ceiling at the next
+// sampling request. No-op below the trigger (one estimate); the blocked
+// receipt backoff keeps repeated calls from thrashing.
+func (a *Agent) maintainForPlacement(ctx context.Context) {
+	if a == nil || a.contextWindow <= 0 {
+		return
+	}
+	if a.estimatedVisibleRequestTokens(a.modelVisibleMessages()) < a.compactTrigger() {
+		return
+	}
+	if _, err := a.contextManager().Prepare(ctx, ContextPreparePolicy{Trigger: CompactionTriggerPressure}); err != nil {
+		slog.Debug("agent: placement maintenance skipped", "err", err)
+	}
+}
+
+// placementCheckStrideBytes is the byte budget that may accumulate between
+// full-view estimates: a quarter of the soft-to-hard safety band, so the
+// check can never skip past more than a fraction of the band regardless of
+// window size. Scales with the window by construction (128K → ~25KB,
+// 1M → ~200KB).
+func (a *Agent) placementCheckStrideBytes() int {
+	if a == nil || a.contextWindow <= 0 {
+		return 64 * 1024 // no window configured: fixed fallback
+	}
+	strideTokens := (a.hardInputCeiling() - a.compactTrigger()) / 4
+	if strideTokens < 2_048 {
+		return 8 * 1024 // degenerate tiny windows: small floor
+	}
+	return strideTokens * 4 // ~4 chars per token
+}
 
 var deprecatedContextRetentionWarning sync.Once
 
