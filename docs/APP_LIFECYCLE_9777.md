@@ -195,19 +195,24 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,157 lines (25 -> 23 effects). Six domain owners, remaining
+- App is still 3,072 lines (25 -> 23 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
   `app-shell/NoticePreviewPanel.tsx`, `app-shell/HotkeyRegistrations.tsx`);
   the window-chrome lifecycle (`lib/desktopPlatform.ts`,
   `store/windowChrome.ts`, `app-runtime/WindowChromeLifecycle.tsx`,
-  NativeWindowChrome deleted); and shell geometry - the sidebar/right-dock/
+  NativeWindowChrome deleted); shell geometry - the sidebar/right-dock/
   terminal pointer and keyboard resize lifecycles, toggleSidebar/pulse/anchor
   and every width projection now live in `app-runtime/useShellGeometry.ts`,
   with the transient drag state (resizing flags, live widths, toggle-pressed)
-  on `store/layout.ts`; the old flush and timer-cleanup effects are gone. The
-  footer ResizeObserver, activeTabIdRef and the maximised sync remain for the
+  on `store/layout.ts`; and the session status banner stack
+  (reclaim/lease/startup-error banners, takeover dialog, config warnings,
+  provider prompt, UpdateBanner) through `app-shell/SessionStatusBanners.tsx`
+  with commands in `app-runtime/useSessionBannerCommands.ts`, the takeover/
+  reclaim/provider gate state on `store/overlays.ts` and the startup
+  onboarding probe in `app-runtime/StartupGateLifecycle.tsx`. The footer
+  ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App
   lifecycle and browser replays all pass.
 - The old goal assertions and remote JSX assertions now have behavioral

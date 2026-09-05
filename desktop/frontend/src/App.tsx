@@ -43,7 +43,6 @@ import { useDesktopPreferences } from "./app-runtime/useDesktopPreferences";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { decisionSurfaceMockFromInput, type DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
-const SessionTakeoverDialog = lazy(() => import("./components/SessionTakeoverDialog").then((module) => ({ default: module.SessionTakeoverDialog })));
 const RemoteSessionSurface = lazy(() => import("./components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
 const SidebarImConnectionDetail = lazy(() => import("./app-shell/SidebarImConnectionDetail").then((module) => ({ default: module.SidebarImConnectionDetail })));
 const WindowsWindowControls = lazy(() => import("./app-shell/WindowsWindowControls").then((module) => ({ default: module.WindowsWindowControls })));
@@ -53,16 +52,13 @@ type DecisionSurfaceKind = MockDecisionSurfaceKind | "extension_form";
 import { RemoteConnectionTimeoutError, useRemoteStore, waitForRemoteConnection } from "./store/remote";
 import { RemoteWorkspaceLaunchGate, resolveRemoteWorkspace } from "./lib/remoteWorkspace";
 import type { PaletteItem } from "./components/CommandPalette";
-import { UpdateBanner } from "./components/UpdateBanner";
 import { UpdaterProvider } from "./lib/useUpdater";
 import { Tooltip } from "./components/Tooltip";
-import { shouldOpenOnboarding } from "./lib/onboarding";
 import { useOnboardingCommands } from "./app-runtime/useOnboardingCommands";
 import { AppChrome } from "./components/AppChrome";
 import { TopicbarRegion } from "./app-shell/TopicbarRegion";
 import { shouldMountExternalOpener } from "./components/ExternalOpener";
 import { TopicbarActionsRegion } from "./app-shell/TopicbarActionsRegion";
-import { RemoteReclaimBanner } from "./components/RemoteReclaimBanner";
 import { formatTerminalOutputForComposer } from "./lib/terminalOutput";
 import { setReasoningDisplayPending } from "./lib/reasoningDisplayPreference";
 import { parseTodos } from "./lib/tools";
@@ -181,6 +177,9 @@ import { SidebarRegion } from "./app-shell/SidebarRegion";
 import { isMacOSWorkbenchSidebarTitlebar } from "./lib/desktopPlatform";
 import { useWindowChromeStore } from "./store/windowChrome";
 import { WindowChromeLifecycle } from "./app-runtime/WindowChromeLifecycle";
+import { StartupGateLifecycle, probeProviderSetupState } from "./app-runtime/StartupGateLifecycle";
+import { useSessionBannerCommands } from "./app-runtime/useSessionBannerCommands";
+import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
 import {
@@ -311,8 +310,8 @@ export default function App() {
   const setStartupSplashVisible = useOverlayStore((s) => s.setStartupSplashVisible);
   // null until the mount probe resolves; true shows the first-run guide.
   const needsOnboarding = useOverlayStore((s) => s.needsOnboarding);
-  const setNeedsOnboarding = useOverlayStore((s) => s.setNeedsOnboarding);
-  const [providerSetupNeeded, setProviderSetupNeeded] = useState(false);
+  const providerSetupNeeded = useOverlayStore((s) => s.providerSetupNeeded);
+  const setProviderSetupNeeded = useOverlayStore((s) => s.setProviderSetupNeeded);
   const page = useAppNavigationStore((s) => s.page);
   const managementActive = page.kind !== "workspace";
   const settingsTarget = page.kind === "settings" ? page.tab : null;
@@ -364,8 +363,8 @@ export default function App() {
   }, [topicTimeFilter]);
   const sidebarResizing = useLayoutStore((state) => state.sidebarResizing);
   const [tasksOpen, setTasksOpen] = useState<false | "session" | "all">(false);
-  const [takeoverDialogTab, setTakeoverDialogTab] = useState<string | null>(null);
-  const [reclaimBusyTab, setReclaimBusyTab] = useState<string | null>(null);
+  const takeoverDialogTab = useOverlayStore((s) => s.takeoverDialogTab);
+  const reclaimBusyTab = useOverlayStore((s) => s.reclaimBusyTab);
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
@@ -1308,31 +1307,14 @@ export default function App() {
   const handleInitialRemoteHosts = useCommittedCommand((hosts: Awaited<ReturnType<typeof app.RemoteHosts>>) => setRemoteHosts(hosts));
   const handleInitialRemoteStatuses = useCommittedCommand((statuses: Awaited<ReturnType<typeof app.RemoteConnectionStatuses>>) => hydrateRemoteStatuses(statuses));
 
-  const refreshProviderSetupState = useCommittedCommand(async () => {
-    const needs = await app.NeedsOnboarding();
-    setProviderSetupNeeded(needs);
-    return needs;
-  });
+  const refreshProviderSetupState = useCommittedCommand(() => probeProviderSetupState());
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const needs = await app.NeedsOnboarding();
-        if (!cancelled) {
-          setProviderSetupNeeded(needs);
-          setNeedsOnboarding(shouldOpenOnboarding(needs));
-        }
-      } catch {
-        // Bridge unavailable (browser dev seam) — skip the gate; a real key
-        // failure still surfaces via the topbar startupError banner.
-        if (!cancelled) setNeedsOnboarding(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [setNeedsOnboarding]);
+  const leaseBlockedTab = activeLeaseBlockedTab(tabMetas, activeTab?.id ?? activeTabId);
+  const bannerCommands = useSessionBannerCommands({
+    remote: Boolean(activeTab?.remote),
+    reloadConfigWarnings,
+  });
+  const { reclaimSession, openTakeoverDialog, closeTakeoverDialog, openConfigFile, reloadConfigFile, showReleaseNotes } = bannerCommands;
 
   useEffect(() => {
     const el = footerRef.current;
@@ -2616,6 +2598,7 @@ export default function App() {
     <ShellHotkeys />
     <TextSizeHotkeys />
     <WindowChromeLifecycle />
+    <StartupGateLifecycle />
     <AppRuntimeEffects
       running={state.running}
       onEvent={handleRuntimeEvent}
@@ -2787,97 +2770,29 @@ export default function App() {
             </div>
           </TopicbarRegion>
 
-          {activeTab?.takenOver ? (
-            <RemoteReclaimBanner
-              tabId={activeTab.id}
-              busyTabId={reclaimBusyTab}
-              onReclaim={(tabId) => {
-                if (reclaimBusyTab) return;
-                setReclaimBusyTab(tabId);
-                (activeTab.remote ? app.ReclaimRemoteTabSession(tabId) : app.TakeoverSession(tabId, "wait"))
-                  .catch((error) => console.warn("[takeover] reclaim failed", error))
-                  .finally(() => setReclaimBusyTab(null));
-              }}
-            />
-          ) : null}
-          {(() => {
-            const blocked = activeLeaseBlockedTab(tabMetas, activeTab?.id ?? activeTabId);
-            if (blocked) {
-              return (
-                <div className="banner banner--error">
-                  <span className="banner__msg">{t("topbar.startupError", { msg: blocked.runtime!.issue!.message })}</span>
-                  <span className="banner__spacer" />
-                  <button type="button" className="btn btn--small" onClick={() => setTakeoverDialogTab(blocked.id)}>
-                    {t("takeover.bannerButton")}
-                  </button>
-                </div>
-              );
-            }
-            return state.meta?.startupErr ? (
-              <div className="banner banner--error">
-                <span className="banner__msg">{t("topbar.startupError", { msg: state.meta.startupErr })}</span>
-              </div>
-            ) : null;
-          })()}
-          {takeoverDialogTab ? (
-            <Suspense fallback={null}>
-              <SessionTakeoverDialog tabId={takeoverDialogTab} onClose={() => setTakeoverDialogTab(null)} />
-            </Suspense>
-          ) : null}
-          {configLoadWarnings.length > 0 && (
-            <div className="banner banner--warning banner--actionable">
-              <span className="banner__msg" title={configLoadWarnings.join("\n")}>
-                {t("config.loadWarning", { msg: configLoadWarnings[0] })}
-              </span>
-              <span className="banner__spacer" />
-              <button
-                type="button"
-                className="btn btn--small"
-                onClick={() => void app.OpenUserConfigPath?.().catch(() => {})}
-              >
-                {t("config.openConfig")}
-              </button>
-              <button
-                type="button"
-                className="btn btn--small"
-                onClick={() => {
-                  void (async () => {
-                    try {
-                      const view = await app.ReloadUserConfig?.();
-                      reloadConfigWarnings(view?.configWarnings, view?.configWarningsRevision);
-                    } catch {
-                      /* keep banner */
-                    }
-                  })();
-                }}
-              >
-                {t("config.reloadConfig")}
-              </button>
-              <span className="banner__hint">{t("config.doctorHint")}</span>
-              <button type="button" className="btn btn--small" onClick={dismissConfigWarnings}>
-                {t("updater.dismiss")}
-              </button>
-            </div>
-          )}
-          {providerSetupNeeded && !needsOnboarding && (
-            <div className="banner banner--warning banner--actionable">
-              <span className="banner__msg">{t("onboarding.inlinePrompt")}</span>
-              <span className="banner__spacer" />
-              <button type="button" className="btn btn--small" onClick={() => {
-                setSettingsFocus({ target: "model-access" });
-                setSettingsTarget("models");
-              }}>
-                {t("onboarding.configureProvider")}
-              </button>
-            </div>
-          )}
-
-          <UpdateBanner
-            enabled={startupUpdateChecksEnabled === true}
-            onShowReleaseNotes={(latest) => {
-              const version = latest.replace(/^(?:desktop-)?v/, "");
-              void openExternal(`https://reasonix.io/changelog/v${version}/`);
+          <SessionStatusBanners
+            t={t}
+            takenOver={Boolean(activeTab?.takenOver)}
+            reclaimTabId={activeTab?.id ?? ""}
+            reclaimBusyTabId={reclaimBusyTab}
+            onReclaim={reclaimSession}
+            leaseBlocked={leaseBlockedTab ? { tabId: leaseBlockedTab.id, message: leaseBlockedTab.runtime!.issue!.message } : null}
+            startupError={state.meta?.startupErr}
+            takeoverDialogTabId={takeoverDialogTab}
+            onOpenTakeover={openTakeoverDialog}
+            onCloseTakeover={closeTakeoverDialog}
+            configWarnings={configLoadWarnings}
+            onOpenConfigFile={openConfigFile}
+            onReloadConfigFile={reloadConfigFile}
+            onDismissConfigWarnings={dismissConfigWarnings}
+            providerSetupNeeded={providerSetupNeeded}
+            needsOnboarding={needsOnboarding}
+            onConfigureProvider={() => {
+              setProviderSetupNeeded(false);
+              chooseOnboardingProvider();
             }}
+            updateChecksEnabled={startupUpdateChecksEnabled === true}
+            onShowReleaseNotes={showReleaseNotes}
           />
 
           <main className="main">
