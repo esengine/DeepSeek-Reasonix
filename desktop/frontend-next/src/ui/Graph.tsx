@@ -4,14 +4,15 @@ import { t } from "../i18n";
 import type { Item } from "../state/session";
 import type { GraphState, Lane } from "../state/graph";
 import { lanesOf } from "../state/graph";
-import type { GraphNode } from "../port/wire";
-import { callsIn, slotWaitOf, spanOf, stateWord } from "./gnode";
+import type { ExecutionState } from "../state/execution";
+import type { ExecutionInterruption, GraphNode } from "../port/wire";
+import { callsIn, slotWaitOf, spanOf, stateWord, waitWord } from "./gnode";
 import { H, W, layout, pairKey, wirePath, type PlacedNode } from "./glayout";
 
 // Geometry, ordering and edge routing live in glayout: a lane's arrangement is
 // arithmetic over what the kernel published, and keeping it out of the view is
 // what lets it be checked without rendering anything.
-function Node({ p, lane, ms, on, chosen }: { p: PlacedNode; lane: Lane; ms?: number; on: () => void; chosen: boolean }) {
+function Node({ p, lane, ms, on, chosen, unknown }: { p: PlacedNode; lane: Lane; ms?: number; on: () => void; chosen: boolean; unknown: boolean }) {
   const { node } = p;
   const state = node.state ?? "pending";
   const waiting = lane.blocked[node.id];
@@ -21,7 +22,11 @@ function Node({ p, lane, ms, on, chosen }: { p: PlacedNode; lane: Lane; ms?: num
   const reused = lane.reuse[node.id];
   // The state is a word on every card, so the colour repeats it rather than
   // being the only thing that carries it.
-  const meta = [node.profile, node.model, ms != null ? seconds(ms, ms < 10_000 ? 1 : 0) : ""].filter(Boolean).join(" · ");
+  // An identity nothing recorded is not an inherited one: the first was never
+  // observed, the second is the session's own. Drawing both blank would claim
+  // an observation the host never made.
+  const identity = unknown ? t("身份未记录") : node.model;
+  const meta = [node.profile, identity, ms != null ? seconds(ms, ms < 10_000 ? 1 : 0) : ""].filter(Boolean).join(" · ");
   return (
     <button
       className="gnode"
@@ -72,11 +77,13 @@ function LaneView({
   calls,
   chosen,
   onChoose,
+  unknown,
 }: {
   lane: Lane;
   calls: Map<string, number | undefined>;
   chosen: string | null;
   onChoose: (id: string) => void;
+  unknown: Set<string>;
 }) {
   const { nodes, wires, w, h } = useMemo(() => layout(lane), [lane]);
   const state = lane.group.state ?? "running";
@@ -119,6 +126,7 @@ function LaneView({
               lane={lane}
               ms={spanOf(p.node, calls)}
               chosen={chosen === p.node.id}
+              unknown={unknown.has(p.node.id)}
               on={() => onChoose(p.node.id)}
             />
           ))}
@@ -128,7 +136,7 @@ function LaneView({
   );
 }
 
-function Detail({ node, lane, ms, onOpen }: { node: GraphNode; lane: Lane; ms?: number; onOpen?: () => void }) {
+function Detail({ node, lane, ms, onOpen, unknown }: { node: GraphNode; lane: Lane; ms?: number; onOpen?: () => void; unknown: boolean }) {
   const waiting = lane.blocked[node.id];
   // Slot wait is time the run spent ready and not running, so it belongs beside
   // the time it spent working: together they say where the node's span went.
@@ -136,10 +144,11 @@ function Detail({ node, lane, ms, onOpen }: { node: GraphNode; lane: Lane; ms?: 
   const rows: [string, string | undefined][] = [
     [t("状态"), stateWord(node.state ?? "pending")],
     [t("画像"), node.profile],
-    [t("模型"), [node.model, node.effort].filter(Boolean).join(" · ")],
+    [t("模型"), unknown ? t("没有记录过，不是继承") : [node.model, node.effort].filter(Boolean).join(" · ")],
     [t("权限"), node.grant === "write" ? t("可写") : node.grant === "read" ? t("只读") : undefined],
     [t("耗时"), ms != null ? seconds(ms, 2) : undefined],
     [t("等空位"), wait != null ? seconds(wait, 2) : undefined],
+    [t("入队时被挡"), waitWord(node.wait)],
     [t("等待"), waiting && namesOf(lane, waiting)],
     [t("复用自"), lane.reuse[node.id]],
     [t("记录"), node.ref],
@@ -170,10 +179,41 @@ function Detail({ node, lane, ms, onOpen }: { node: GraphNode; lane: Lane; ms?: 
   );
 }
 
-export function Graph({ graph, items, onOpen }: { graph: GraphState; items: Item[]; onOpen: (call: string) => void }) {
+// What the host found open with nobody running it. It stands beside the graph
+// rather than inside a node state because the vocabulary has no word for work
+// whose owner is gone — and none of it picks up where it left off.
+function Interruptions({ list, graph }: { list: ExecutionInterruption[]; graph: GraphState }) {
+  if (list.length === 0) return null;
+  return (
+    <section className="ginter">
+      <header>{t("{n} 项执行已经没有人在跑了", { n: list.length })}</header>
+      <ul>
+        {list.map((cut) => (
+          <li key={cut.execution}>
+            <b>{labelOfId(graph, cut.execution)}</b>
+            <span>
+              {cut.kind === "interrupted-during-execution"
+                ? t("已经开工，做到哪一步没有记录")
+                : t("还没拿到空位，什么都没做")}
+            </span>
+            <em>{t("不会自己接着跑")}</em>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function labelOfId(graph: GraphState, id: string): string {
+  const at = graph.at.get(id);
+  return (at !== undefined && graph.nodes[at].label) || id;
+}
+
+export function Graph({ run, items, onOpen }: { run: ExecutionState; items: Item[]; onOpen: (call: string) => void }) {
   const [chosen, setChosen] = useState<string | null>(null);
-  const lanes = useMemo(() => lanesOf(graph), [graph]);
+  const lanes = useMemo(() => lanesOf(run.graph), [run.graph]);
   const calls = useMemo(() => callsIn(items), [items]);
+  const unknown = useMemo(() => new Set(run.identityUnknown), [run.identityUnknown]);
 
   const picked = useMemo(() => {
     for (const lane of lanes) {
@@ -184,7 +224,14 @@ export function Graph({ graph, items, onOpen }: { graph: GraphState; items: Item
     return null;
   }, [lanes, chosen]);
 
-  if (lanes.length === 0) {
+  // Nothing of the conversation being left is drawn while the next one is being
+  // read: a graph under a name it no longer belongs to is a lie the eye cannot
+  // catch, and the read is one round trip.
+  if (run.phase === "loading") {
+    return <p className="gempty">{t("正在读取这一轮的运行图…")}</p>;
+  }
+
+  if (lanes.length === 0 && run.interruptions.length === 0) {
     return (
       <p className="gempty">
         {t(
@@ -203,35 +250,39 @@ export function Graph({ graph, items, onOpen }: { graph: GraphState; items: Item
 
   return (
     <>
-      <div className="gsum">
-        <span className="gb-n">
-          {t("{n} 个子代理", { n: ran + reused })}
-          {reused > 0 && <em>{t("· {n} 个没有重跑", { n: reused })}</em>}
-          {waiting > 0 && <em className="on">{t("· {n} 个在等上游", { n: waiting })}</em>}
-          {queued > 0 && <em className="on">{t("· {n} 个在等空位", { n: queued })}</em>}
-        </span>
-        {/* 边有两种,靠线型分,不靠颜色分 —— 排了序和真把答案交过去是两件事。 */}
-        <span className="gkey">
-          <span className="gk">
-            <i className="gk-line" data-carried="" />
-            {t("依赖 · 答案已交付")}
+      <Interruptions list={run.interruptions} graph={run.graph} />
+      {lanes.length > 0 && (
+        <div className="gsum">
+          <span className="gb-n">
+            {t("{n} 个子代理", { n: ran + reused })}
+            {reused > 0 && <em>{t("· {n} 个没有重跑", { n: reused })}</em>}
+            {waiting > 0 && <em className="on">{t("· {n} 个在等上游", { n: waiting })}</em>}
+            {queued > 0 && <em className="on">{t("· {n} 个在等空位", { n: queued })}</em>}
           </span>
-          <span className="gk">
-            <i className="gk-line" />
-            {t("只排了序")}
+          {/* 边有两种,靠线型分,不靠颜色分 —— 排了序和真把答案交过去是两件事。 */}
+          <span className="gkey">
+            <span className="gk">
+              <i className="gk-line" data-carried="" />
+              {t("依赖 · 答案已交付")}
+            </span>
+            <span className="gk">
+              <i className="gk-line" />
+              {t("只排了序")}
+            </span>
+            <span className="gk">
+              <b className="gk-re">⟲</b>
+              {t("复用了已完成的结果")}
+            </span>
           </span>
-          <span className="gk">
-            <b className="gk-re">⟲</b>
-            {t("复用了已完成的结果")}
-          </span>
-        </span>
-      </div>
+        </div>
+      )}
       <div className="glanes">
         {lanes.map((lane) => (
           <LaneView
             key={lane.group.id}
             lane={lane}
             calls={calls}
+            unknown={unknown}
             chosen={chosen}
             onChoose={(id) => setChosen((was) => (was === id ? null : id))}
           />
@@ -241,6 +292,7 @@ export function Graph({ graph, items, onOpen }: { graph: GraphState; items: Item
         <Detail
           node={picked.node}
           lane={picked.lane}
+          unknown={unknown.has(picked.node.id)}
           ms={spanOf(picked.node, calls)}
           // Only a node this transcript actually holds can be shown in it: an
           // adopted answer was produced by a run that is not in this one.

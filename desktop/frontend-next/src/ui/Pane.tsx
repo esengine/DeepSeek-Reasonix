@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { money } from "../i18n/format";
 import { reason } from "../i18n/kernel";
 import { t } from "../i18n";
@@ -9,7 +9,7 @@ import type { RuntimeView } from "../port/hub";
 import { fromHistory, initialState, localId, quoteAmount, reduce } from "../state/session";
 import { pairCheckpoints } from "../state/checkpoints";
 import { initialTraj, reduceTraj } from "../state/trajectory";
-import { initialGraph, reduceGraph } from "../state/graph";
+import { ExecutionStore } from "../state/execution";
 import { Transcript } from "./Transcript";
 import { Trajectory } from "./Trajectory";
 import { Graph } from "./Graph";
@@ -77,7 +77,12 @@ interface Props {
 function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, pulse, onSettings, needsProject, onOpenProject, onKeepHere }: Props) {
   const [s, dispatch] = useReducer(reduce, initialState);
   const [traj, trajDispatch] = useReducer(reduceTraj, initialTraj);
-  const [graph, graphDispatch] = useReducer(reduceGraph, initialGraph);
+  // The run graph is read, never accumulated: the kernel answers with what its
+  // durable facts justify, and the stream folds onto that answer. One store per
+  // port, because what it describes is that pane's session.
+  const graphStore = useMemo(() => new ExecutionStore(), [port]);
+  const exec = useSyncExternalStore(graphStore.subscribe, graphStore.read);
+  const readGraph = useCallback(() => port.executionGraph(), [port]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [tab, setTab] = useState<"flow" | "line" | "traj" | "graph" | "task">("flow");
   const [pinned, setPinned] = useState(true);
@@ -120,23 +125,33 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       .catch(() => {});
   }, [port]);
 
+  // A hole in the stream is the transport's fact; which authority answers it is
+  // each model's own. The transcript is rebuilt from /history, the run graph
+  // from the read the kernel rebuilds — one gap, two different re-reads.
   useEffect(
     () =>
-      port.subscribe((ev) => {
-        dispatch(ev);
-        trajDispatch(ev);
-        graphDispatch(ev);
-        // A server finishing its handshake changes what /mcp answers, and this
-        // is the only precise signal for it — the turn boundary below is the
-        // fallback for changes that arrive without an event.
-        if (ev.kind === "mcp_surface_ready" || ev.kind === "extension_status") reloadMcp();
-      }, rebuild),
-    [port, reloadMcp, rebuild],
+      port.subscribe(
+        (ev) => {
+          dispatch(ev);
+          trajDispatch(ev);
+          graphStore.onEvent(ev);
+          // A server finishing its handshake changes what /mcp answers, and this
+          // is the only precise signal for it — the turn boundary below is the
+          // fallback for changes that arrive without an event.
+          if (ev.kind === "mcp_surface_ready" || ev.kind === "extension_status") reloadMcp();
+        },
+        () => {
+          rebuild();
+          void graphStore.recoverFromGap(readGraph);
+        },
+        () => graphStore.bootstrap(readGraph),
+      ),
+    [port, reloadMcp, rebuild, graphStore, readGraph],
   );
 
   useEffect(() => {
     let alive = true;
-    port.trajectory().then((evs) => alive && evs.forEach((e) => { trajDispatch(e); graphDispatch(e); })).catch(() => {});
+    port.trajectory().then((evs) => alive && evs.forEach((e) => trajDispatch(e))).catch(() => {});
     port.checkpoints().then((cps) => alive && setCheckpoints(cps)).catch(() => {});
     // The record and the numbers over it are two reads, not one. /status can go
     // to the network — the provider's wallet endpoint rides it — and pairing the
@@ -198,8 +213,12 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // be re-read rather than patched.
   const reloadSession = useCallback(() => {
     trajDispatch({ kind: "__clear" } as never);
-    graphDispatch({ kind: "__clear" });
-    port.trajectory().then((evs) => evs.forEach((e) => { trajDispatch(e); graphDispatch(e); })).catch(() => {});
+    // The graph is not replayed out of the trajectory: it goes back to the
+    // authority for the conversation this pane now holds, and shows nothing of
+    // the one it left while that read is in flight.
+    graphStore.resetForSession();
+    void graphStore.bootstrap(readGraph).catch(() => {});
+    port.trajectory().then((evs) => evs.forEach((e) => trajDispatch(e))).catch(() => {});
     port.checkpoints().then(setCheckpoints).catch(() => setCheckpoints([]));
     // Two reads, the same way the first mount takes them: the record does not
     // wait behind the numbers over it.
@@ -213,7 +232,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
     });
     refreshWallet();
     onSessionChanged();
-  }, [port, applyStatus, refreshWallet, onSessionChanged]);
+  }, [port, applyStatus, refreshWallet, onSessionChanged, graphStore, readGraph]);
 
   // A rewind rewrites the transcript and the files under it, so the whole
   // session is re-read rather than patched — the same treatment a session
@@ -515,8 +534,8 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
   // that delegated nothing is not offered an empty page. Leaving someone parked
   // on a tab that just lost its button is the other half of that.
   useEffect(() => {
-    if (tab === "line" && graph.nodes.length === 0) setTab("flow");
-  }, [tab, graph.nodes.length]);
+    if (tab === "line" && exec.graph.nodes.length === 0) setTab("flow");
+  }, [tab, exec.graph.nodes.length]);
 
   // Where the bottom is moves as blocks mount under it, so this only asks the
   // transcript to follow again and lets it scroll itself into place.
@@ -549,16 +568,16 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
         <button className="tab" role="tab" aria-selected={tab === "flow"} onClick={() => swapping(() => setTab("flow"), "tab")}>
           {t("活动")}<span className="n">{s.items.length}</span>
         </button>
-        {graph.nodes.length > 0 && (
+        {exec.graph.nodes.length > 0 && (
           <button className="tab" role="tab" aria-selected={tab === "line"} onClick={() => swapping(() => setTab("line"), "tab")}>
-            {t("时间线")}<span className="n">{graph.nodes.length}</span>
+            {t("时间线")}<span className="n">{exec.graph.nodes.length}</span>
           </button>
         )}
         <button className="tab" role="tab" aria-selected={tab === "traj"} onClick={() => swapping(() => setTab("traj"), "tab")}>
           {t("轨迹")}<span className="n">{traj.rows.length}</span>
         </button>
         <button className="tab" role="tab" aria-selected={tab === "graph"} onClick={() => swapping(() => setTab("graph"), "tab")}>
-          {t("图")}{graph.nodes.length > 0 && <span className="n">{graph.nodes.length}</span>}
+          {t("图")}{exec.graph.nodes.length > 0 && <span className="n">{exec.graph.nodes.length}</span>}
         </button>
                 <button className="tab" role="tab" aria-selected={tab === "task"} onClick={() => swapping(() => setTab("task"), "tab")}>
           {t("任务")}{s.plan.length > 0 && <span className="n">{s.plan.filter((x) => x.done).length}/{s.plan.length}</span>}
@@ -599,7 +618,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
           attribute left every row of it being rebuilt on each streamed
           delta — a second transcript's worth of work, drawn for nobody. */}
       <div className="scroll" data-pane="line" hidden={tab !== "line"}>
-        {tab === "line" && <Timeline graph={graph} items={s.items} onOpen={toCall} />}
+        {tab === "line" && <Timeline graph={exec.graph} items={s.items} onOpen={toCall} />}
       </div>
 
       <div className="scroll" data-pane="traj" hidden={tab !== "traj"}>
@@ -609,7 +628,7 @@ function PaneView({ port, rt, title, active, visible, sideHost, side, onFocus, o
       <div className="scroll" data-pane="graph" hidden={tab !== "graph"}>
         {tab === "graph" && (
           <Graph
-            graph={graph}
+            run={exec}
             items={s.items}
             onOpen={toCall}
           />

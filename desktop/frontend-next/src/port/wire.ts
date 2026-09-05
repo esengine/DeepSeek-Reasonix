@@ -501,6 +501,41 @@ export interface GraphDelta {
   edges?: GraphEdge[];
 }
 
+// The folded graph, as the kernel's durable facts justify it. Same two arrays a
+// delta carries and a different thing entirely: this one is a state, not a
+// publication, and it is replaced rather than folded.
+export interface ExecutionGraph {
+  nodes?: GraphNode[];
+  edges?: GraphEdge[];
+}
+
+// One execution the host found open with nobody running it. kind separates work
+// that may be half-done from work that never began; neither resumes.
+export interface ExecutionInterruption {
+  execution: string;
+  kind: "interrupted-before-start" | "interrupted-during-execution";
+}
+
+// The whole execution read model, and the only authority for the two lists
+// beside the graph: no delta carries them, so nothing can patch them in later.
+export interface ExecutionGraphSnapshot {
+  graph: ExecutionGraph;
+  interruptions?: ExecutionInterruption[];
+  // Executions whose worker layer was never recorded. Their model reads empty
+  // because nothing was observed, which an inherited one does not.
+  identityUnknown?: string[];
+}
+
+// The envelope the snapshot arrives in: which conversation it describes, and
+// the frame it is at least as new as.
+export interface ExecutionGraphView {
+  schemaVersion: number;
+  sessionId: string;
+  watermark: number;
+}
+
+export type ExecutionGraphRead = ExecutionGraphView & ExecutionGraphSnapshot;
+
 export interface WireEvent {
   kind: Kind;
   text?: string;

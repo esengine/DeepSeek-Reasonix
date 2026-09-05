@@ -1441,6 +1441,20 @@
 
   .gempty { padding: 24px 20px; max-width: 60ch; font: var(--w-reg) 12px/1.75 var(--ui); color: var(--ghost) }
 
+  /* 主人没了的执行。它站在图旁边而不是图里 —— 图的词汇里没有「没人在跑的活」，
+     所以硬塞进某个节点状态就等于替它编一个。 */
+  .ginter {
+    margin: 14px 14px 0; padding: 10px 13px;
+    border: 1px solid var(--hair); border-left: 2px solid var(--warn-ink);
+    border-radius: var(--r-lg); background: var(--surface);
+    font: var(--w-reg) 11px/1.7 var(--mono);
+  }
+  .ginter > header { margin-bottom: 6px; font: var(--w-med) 12px var(--ui); color: var(--text) }
+  .ginter ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none }
+  .ginter li { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--muted) }
+  .ginter li b { font-weight: var(--w-med); color: var(--text) }
+  .ginter li em { font-style: normal; color: var(--warn-ink) }
+
   /* 一次调用 */
   .call { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 14px; }
   .call > .g { display: flex; flex-direction: column; align-items: center }

@@ -4,7 +4,7 @@ import { HttpError, type Attachment, type ChangeDiff, type DroppedRef, type Work
 import { SseTheme } from "./sse_theme";
 import type { WailsBind } from "./wails";
 import type { StoragePlan, StorageState } from "./storage";
-import type { WireEvent } from "./wire";
+import type { ExecutionGraphRead, WireEvent } from "./wire";
 import { host } from "./host";
 
 // The running project is the default, so its requests stay the bare path they
@@ -405,6 +405,10 @@ export class SsePort extends SseTheme implements AgentPort {
 
   trajectory() {
     return this.get<WireEvent[]>("/trajectory");
+  }
+
+  executionGraph() {
+    return this.get<ExecutionGraphRead>("/execution-graph");
   }
 
   history() {

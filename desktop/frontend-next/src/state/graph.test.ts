@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { initialGraph, lanesOf, reduceGraph, type GraphState } from "./graph";
-import type { GraphDelta, WireEvent } from "../port/wire";
+import { foldDelta, graphOf, initialGraph, lanesOf, type GraphState } from "./graph";
+import type { GraphDelta } from "../port/wire";
 
-const delta = (g: GraphDelta): WireEvent => ({ kind: "graph_delta", graph: g }) as WireEvent;
-const run = (deltas: GraphDelta[]): GraphState =>
-  deltas.reduce<GraphState>((s, g) => reduceGraph(s, delta(g)), initialGraph);
+const run = (deltas: GraphDelta[]): GraphState => deltas.reduce<GraphState>(foldDelta, initialGraph);
 
 const group = (id: string, label = "fleet(2)") => ({ id, kind: "group" as const, state: "running" as const, label });
 const worker = (id: string, parentId: string, label: string) => ({
@@ -59,9 +57,13 @@ describe("folding the published graph", () => {
     expect(s.nodes[0]).toMatchObject({ state: "running", wait: "claim", queuedAt: 1000, startedAt: 1500 });
   });
 
-  it("clears on a new conversation", () => {
-    const s = reduceGraph(run([{ nodes: [group("g")] }]), { kind: "__clear" });
-    expect(s.nodes).toHaveLength(0);
+  // The authority is indexed, not folded onto what was there: a reader that
+  // merged the two would keep a node the rebuild no longer justifies.
+  it("takes the kernel's own fold as the whole picture", () => {
+    const s = graphOf({ nodes: [worker("c", "g", "third")], edges: [depends("a", "c"), depends("a", "c")] });
+    expect(s.nodes.map((n) => n.id)).toEqual(["c"]);
+    expect(s.edges).toHaveLength(1);
+    expect(lanesOf(graphOf({ nodes: [] })).length).toBe(0);
   });
 });
 
@@ -111,7 +113,7 @@ describe("arranging a fan-out for reading", () => {
     // the node it is blocked on rather than showing it as merely not started.
     expect(lanesOf(s)[0].blocked).toEqual({ "g/2": ["g/1"] });
 
-    const after = reduceGraph(s, delta({ nodes: [{ id: "g/1", state: "completed" }] }));
+    const after = foldDelta(s, { nodes: [{ id: "g/1", state: "completed" }] });
     expect(lanesOf(after)[0].blocked).toEqual({});
   });
 

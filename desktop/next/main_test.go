@@ -40,10 +40,10 @@ func TestEveryPathTheFrontendCallsIsRouted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Anchoring on the call is what keeps a concatenated segment out:
-	// this.base + "/plugins/" + name + "/export" would otherwise read as a
-	// request for "/export", which no one ever makes.
-	literal := regexp.MustCompile(`this\.(?:\w+\(|base \+ )\s*"(/[a-z0-9][a-z0-9/-]*)"`)
+	// Anchored on the call, so this.base + "/plugins/" + name + "/export" does
+	// not read as a request for "/export". The type argument is not cosmetic:
+	// without it this.get<T>("/x") matched nothing — 24 of 60 paths went unseen.
+	literal := regexp.MustCompile(`this\.(?:\w+(?:<[^()"]*>)?\(|base \+ )\s*"(/[a-z0-9][a-z0-9/-]*)"`)
 	seen := map[string]bool{}
 	for _, m := range literal.FindAllStringSubmatch(string(src), -1) {
 		// A trailing slash means an id follows, so probe the family rather

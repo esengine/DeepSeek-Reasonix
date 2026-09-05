@@ -30,6 +30,13 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/agentgraph/graph.go", "Node", tsWireFile, "GraphNode"},
 	{"internal/agentgraph/graph.go", "Edge", tsWireFile, "GraphEdge"},
 	{"internal/agentgraph/graph.go", "Delta", tsWireFile, "GraphDelta"},
+	// The snapshot is the execution model's whole authority: no delta carries an
+	// interruption or an unrecorded identity, and a watermark the page cannot
+	// find is a bootstrap that resumes from zero.
+	{"internal/agentgraph/graph.go", "Graph", tsWireFile, "ExecutionGraph"},
+	{"internal/control/execution_graph.go", "ExecutionGraphSnapshot", tsWireFile, "ExecutionGraphSnapshot"},
+	{"internal/control/execution_graph.go", "ExecutionInterruption", tsWireFile, "ExecutionInterruption"},
+	{"internal/serve/executiongraph.go", "executionGraphView", tsWireFile, "ExecutionGraphView"},
 	{"internal/control/boundary.go", "SandboxSettings", tsBoundaryFile, "SandboxSettings"},
 	// The fold bounds and the one in force: a field the panel cannot read is a
 	// threshold a user sets and never sees applied.

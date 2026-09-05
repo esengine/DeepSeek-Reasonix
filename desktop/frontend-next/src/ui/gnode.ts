@@ -50,6 +50,22 @@ export function stateWord(state: string): string {
   }
 }
 
+/** What held this node out of a slot when it queued. The kernel keeps it after
+ *  the node starts, so it is read as the refusal that was recorded then — not
+ *  as what the node is waiting for now, which for a running one is nothing. */
+export function waitWord(cause?: string): string | undefined {
+  switch (cause) {
+    case "slots":
+      return t("没有空位");
+    case "writers":
+      return t("同时写的名额满了");
+    case "claim":
+      return t("要写的路径被占着");
+    default:
+      return undefined;
+  }
+}
+
 /** How long this node sat waiting for a concurrency slot. A wait of nothing is
  *  not one: every node passes through the queue, and only a node the ceiling
  *  actually held back has anything to say about where the run's time went. */

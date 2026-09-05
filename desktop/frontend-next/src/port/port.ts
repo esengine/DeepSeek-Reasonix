@@ -32,7 +32,7 @@ export type { AccountState, AccountUser, ApprovalMode, ApprovalVerdict, Capabili
   ShellOption, ShellSettings, SkillCatalog, SkillEntry, UpdateProgress, VersionEntry,
   VersionHub, WalletLine, WalletReading, ChangeDiff, WorkspaceChange, WorkspaceChanges, WorkspaceEntry, WorkspaceInfo };
 
-import type { WireEvent } from "./wire";
+import type { ExecutionGraphRead, WireEvent } from "./wire";
 import type { PluginExport, PluginInstallRequest, PluginPackage, PluginPlan } from "./plugin";
 import type { Appearance, ThemePack } from "./look";
 import type { ConfigProblem, ConfigRepair, PermissionLists, PermissionRules, SandboxSettings } from "./boundary";
@@ -306,6 +306,11 @@ export interface AgentPort {
   // Replaying the persisted wire frames rebuilds the trajectory pane row for
   // row; the live stream only ever covers the current connection.
   trajectory(): Promise<WireEvent[]>;
+  /** The run graph as the kernel's durable facts justify it, with the frame it
+   *  is at least as new as. This is the execution model's authority: it is what
+   *  a view is built from, and what it goes back to after a hole — the delta
+   *  stream carries the same facts sooner, never instead. */
+  executionGraph(): Promise<ExecutionGraphRead>;
   // What the working tree actually differs by. Tool events cannot answer it: a
   // file created and then removed by a shell command leaves both events behind
   // and nothing on disk.

@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphNode, WireEvent } from "../port/wire";
+import type { ExecutionGraph, GraphDelta, GraphEdge, GraphNode } from "../port/wire";
 
 // The run graph, folded the way internal/agentgraph folds it. The kernel is the
 // only thing that knows a dependency from a delivered answer, so this reducer
@@ -43,16 +43,17 @@ function merge(old: GraphNode, update: GraphNode): GraphNode {
 
 const edgeKey = (e: GraphEdge) => JSON.stringify([e.from, e.to, e.kind]);
 
-export function reduceGraph(s: GraphState, ev: WireEvent | { kind: "__clear" }): GraphState {
-  if (ev.kind === "__clear") return initialGraph;
-  if (ev.kind !== "graph_delta" || !ev.graph) return s;
+/** foldDelta folds one publication into the state. Additive by construction —
+ *  a node named again updates the one already there, a repeated edge is the
+ *  same edge — which is what makes a frame delivered twice harmless. */
+export function foldDelta(s: GraphState, delta: GraphDelta): GraphState {
   // Copied on the first record worth keeping, so a delta that says nothing new
   // returns the state it was given and every memo downstream holds.
   let next: GraphState | null = null;
   const open = () =>
     (next ??= { nodes: s.nodes.slice(), edges: s.edges.slice(), at: new Map(s.at), seen: new Set(s.seen) });
 
-  for (const incoming of ev.graph.nodes ?? []) {
+  for (const incoming of delta.nodes ?? []) {
     if (!incoming.id) continue;
     const g = open();
     const at = g.at.get(incoming.id);
@@ -62,7 +63,7 @@ export function reduceGraph(s: GraphState, ev: WireEvent | { kind: "__clear" }):
       g.nodes.push(incoming);
     }
   }
-  for (const edge of ev.graph.edges ?? []) {
+  for (const edge of delta.edges ?? []) {
     if (!edge.from || !edge.to || !edge.kind || edge.from === edge.to) continue;
     const key = edgeKey(edge);
     if ((next ?? s).seen.has(key)) continue;
@@ -71,6 +72,26 @@ export function reduceGraph(s: GraphState, ev: WireEvent | { kind: "__clear" }):
     g.edges.push(edge);
   }
   return next ?? s;
+}
+
+/** graphOf indexes the kernel's own fold. It is not a delta applied to an empty
+ *  state: the snapshot replaces what a view holds rather than being folded into
+ *  it, and none of it is a transition that just happened. */
+export function graphOf(graph: ExecutionGraph): GraphState {
+  const out: GraphState = { nodes: [], edges: [], at: new Map(), seen: new Set() };
+  for (const node of graph.nodes ?? []) {
+    if (!node.id || out.at.has(node.id)) continue;
+    out.at.set(node.id, out.nodes.length);
+    out.nodes.push(node);
+  }
+  for (const edge of graph.edges ?? []) {
+    if (!edge.from || !edge.to || !edge.kind || edge.from === edge.to) continue;
+    const key = edgeKey(edge);
+    if (out.seen.has(key)) continue;
+    out.seen.add(key);
+    out.edges.push(edge);
+  }
+  return out;
 }
 
 // One fan-out, arranged for reading. A rank is a column: everything in it was

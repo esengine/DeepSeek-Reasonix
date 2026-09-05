@@ -1,9 +1,10 @@
 import type { PlanAction } from "./session";
 import { HttpError } from "./port";
 import type { AccountState, AgentPort, ChangeDiff, CompactionSettings, Completion, CompletionItem, DeviceGrant, VersionHub, ApprovalMode, ApprovalVerdict, Checkpoint, RewindPlan, RewindResult, RewindScope, HistoryMessage, ModelEntry, Preset, ProviderSetup, RoleAssignments, SessionEntry, SessionStatus, WalletReading, MemoryCatalog, MemoryEdit, UsageReport, MemoryEntry, WorkspaceInfo, WorkspaceChanges, Attachment, DroppedRef, Queue, QueueItem, Queued, TrayPrefs } from "./port";
-import type { WireEvent } from "./wire";
+import type { ExecutionGraphRead, WireEvent } from "./wire";
 import { MockTheme } from "./mock_theme";
 import { SCRIPT } from "./fixture";
+import { MockExecutionHold, mockExecutionGraph } from "./mock_graph";
 import { mockStorage, mockStoragePlan } from "./mock_storage";
 
 
@@ -15,6 +16,10 @@ export class MockPort extends MockTheme implements AgentPort {
   private prompts: string[] = [];
   private undone: string[] | null = null;
   private at = 0;
+  // The kernel numbers every frame a client cannot afford to miss, and a
+  // bootstrap cut is read against those numbers.
+  private seq = 0;
+  private hold = new MockExecutionHold();
   private timer: number | undefined;
   // The script pauses on approval_request/ask_request the same way the real
   // run blocks on Approve()/AnswerQuestion(); nothing advances until answered.
@@ -470,6 +475,10 @@ export class MockPort extends MockTheme implements AgentPort {
     return [];
   }
 
+  async executionGraph(): Promise<ExecutionGraphRead> {
+    return mockExecutionGraph(this.log, this.session?.name ?? "", this.seq);
+  }
+
   async history(): Promise<HistoryMessage[]> {
     return [];
   }
@@ -510,14 +519,21 @@ export class MockPort extends MockTheme implements AgentPort {
     if (this.undone) this.prompts = this.undone;
   }
 
-  subscribe(onEvent: (ev: WireEvent) => void) {
+  subscribe(onEvent: (ev: WireEvent) => void, _onGap?: () => void, bootstrap?: () => Promise<number>) {
     this.listeners.add(onEvent);
+    if (bootstrap) {
+      this.hold.begin();
+      void bootstrap().finally(() => this.hold.release((ev) => this.listeners.forEach((l) => l(ev))));
+    }
     return () => this.listeners.delete(onEvent);
   }
 
   private emit(ev: WireEvent) {
-    this.log.push(ev);
-    this.listeners.forEach((l) => l(ev));
+    const numbered = { ...ev, seq: ++this.seq };
+    // Recorded either way: a snapshot read mid-flight answers with this frame
+    // folded in, which is what makes the held copy a duplicate to drop.
+    this.log.push(numbered);
+    if (!this.hold.take(numbered)) this.listeners.forEach((l) => l(numbered));
   }
 
   private step = () => {
