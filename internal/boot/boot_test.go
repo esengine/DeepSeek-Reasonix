@@ -105,9 +105,11 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 		!strings.Contains(turn, "always run go vet before committing") {
 		t.Fatalf("the first turn does not carry the discovered instructions:\n%s", turn)
 	}
-	// Owed once: a second turn does not re-send them.
-	if again := ctrl.Compose("and now?"); strings.Contains(again, "always run go vet before committing") {
-		t.Fatalf("instructions were re-sent on a later turn:\n%s", again)
+	// Composing does not settle the debt: bytes a blocked turn never delivered
+	// are not delivered. Delivery is measured through real turns in
+	// context_projection_test.go.
+	if again := ctrl.Compose("and now?"); !strings.Contains(again, "always run go vet before committing") {
+		t.Fatalf("a composed-but-undelivered turn cleared the instruction debt:\n%s", again)
 	}
 }
 

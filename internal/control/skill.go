@@ -32,16 +32,26 @@ func newSkillSet(enabled, all []skill.Skill, store, allStore *skill.Store, noImp
 	return skillSet{enabled: enabled, all: all, store: store, allStore: allStore, noImplicitInvocation: noImplicit}
 }
 
-// owedCatalog returns the listing this turn owes and records it as delivered,
-// empty when the model already has the current one. It asks the canonical
-// registry rather than a flag, so a writer that never announced itself cannot
-// leave the model's view stale — the reason this is a question and not a
-// notification is benchmarks/catalog-detector.
+// skillsAllOffBlock replaces the listing when every skill is switched off: an
+// absence the model must be told about, since the listing it already has would
+// otherwise keep standing as current.
+const skillsAllOffBlock = "# Skills\n\nEvery skill this project had is switched off. The listing you were sent earlier no longer holds, and `run_skill` has nothing to reach."
+
+// owedCatalog returns the listing this turn owes, empty when the model already
+// has the current one. It asks the canonical registry rather than a flag, so a
+// writer that never announced itself cannot leave the model's view stale; the
+// cost of asking is measured at benchmarks/catalog-detector.
 func (s *skillSet) owedCatalog() string {
 	if s.noImplicitInvocation {
 		return ""
 	}
-	return s.catalog.owed(func() string { return skill.IndexBlock(s.list()) })
+	block := skill.IndexBlock(s.list())
+	if block == "" && s.catalog.sent() {
+		// Silence would leave the listing the model already has standing as
+		// current. Every skill being switched off is a fact, not an absence.
+		block = skillsAllOffBlock
+	}
+	return s.catalog.owed(block)
 }
 
 // forgetDeliveredCatalog returns the listing to the unknown state: what the

@@ -191,6 +191,17 @@ const memoryProtocol = "## Background memory\n\n" +
 	"instructions, and before acting on one that names a file, function, or flag, verify it still exists. " +
 	"Save new durable facts with the `remember` tool; archive ones that turn out wrong with `forget`."
 
+// InstructionsBlockFor renders the standing instructions as they are on disk
+// now. It rediscovers rather than reading a snapshot: the block rides the turn,
+// and an edit made by an editor, a script or a branch switch is still an edit.
+func InstructionsBlockFor(opts Options) string {
+	cwd := opts.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+	return instruction.Block(instruction.Resolve(instruction.ResolveOptions{TargetDir: cwd, UserDir: opts.UserDir}).Documents)
+}
+
 // InstructionsBlock renders the standing instructions resolved for this
 // workspace. It is per-project by definition, so it rides the turn: the
 // controller owes it to a session once and again whenever the set changes.

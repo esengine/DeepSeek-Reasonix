@@ -1163,7 +1163,7 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	}
 	ctx, marker = c.beginTurn(ctx, startMessages, true)
 	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false)
-	err = c.runner.Run(ctx, c.withCapabilityRoute(ctx, input, rawInput))
+	err = c.runSettled(ctx, c.withCapabilityRoute(ctx, input, rawInput))
 	return err
 }
 

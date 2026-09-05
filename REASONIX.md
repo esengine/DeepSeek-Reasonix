@@ -154,10 +154,12 @@ prefix was never where these belonged wrongly; freshness ownership was missing.
   same question, and a change no projection renders is not a change.
 
 `internal/boot/context_projection_test.go` holds all five at the provider
-boundary. One row is open: standing instructions reach a live session only
-through the writers that publish them, so an edit to `REASONIX.md` made outside
-them waits for the next build. The skills listing was that shape until it
-started asking.
+boundary, with the skills listing and the standing instructions as the two
+worked examples. A block is settled only once the turn carrying it reaches the
+runner: a turn blocked by a hook or refused by an extension after composing put
+those bytes nowhere, and clearing the debt there would leave the model holding
+state nobody sent it. A projection that has become empty is still owed once —
+otherwise the block the model already has goes on reading as current.
 
 ## Memory
 

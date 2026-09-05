@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"strings"
 
 	"reasonix/internal/ablation"
@@ -50,7 +51,7 @@ func (c *Controller) turnBlocksFor(source string, includeOwed bool, notes []stri
 		blocks = append(blocks,
 			turnBlock{hookContextTag, c.drainHookContextBlock()},
 			turnBlock{"available-skills", wrapTurnBlock("available-skills", c.skills.owedCatalog())},
-			turnBlock{"project-instructions", wrapTurnBlock("project-instructions", c.memory.drainInstructions())},
+			turnBlock{"project-instructions", wrapTurnBlock("project-instructions", c.memory.owedInstructions())},
 		)
 	}
 	return append(blocks,
@@ -127,4 +128,18 @@ func (c *Controller) recallTail(source string, hasNotes bool) string {
 	result := c.memory.recall(source)
 	event.RecordMemoryRecall(c.sink, memoryRecallAudit(result))
 	return result.Block()
+}
+
+// runSettled hands the composed turn to the runner and settles what it carried.
+// Settling happens here and nowhere earlier: between composing and this line a
+// turn can still be refused by an extension or blocked by a hook, and a debt
+// cleared by one of those leaves the model holding state nobody sent it.
+func (c *Controller) runSettled(ctx context.Context, input string) error {
+	c.settleTurnProjections()
+	return c.runner.Run(ctx, input)
+}
+
+func (c *Controller) settleTurnProjections() {
+	c.skills.catalog.settle()
+	c.memory.instructions.settle()
 }
