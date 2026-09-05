@@ -11,6 +11,7 @@ type SidebarRegionProps = {
   className: string;
   workbench: boolean;
   creation: boolean;
+  automation?: boolean;
   collapsed: boolean;
   navTooltipDisabled: boolean;
   searchOpen: boolean;
@@ -70,7 +71,7 @@ export function SidebarRegion(props: SidebarRegionProps) {
               <FeatureButton icon={<Command size={14} />} label={t("creation.sidebar.skills")} onClick={() => props.onOpenSettings("skills")} />
               <FeatureButton icon={<Brain size={14} />} label={t("settings.tab.memory")} onClick={() => props.onOpenSettings("memory")} />
               <FeatureButton icon={<MessageSquare size={14} />} label={t("creation.sidebar.messageChannels")} onClick={() => props.onOpenSettings("bots")} />
-              <FeatureButton icon={<AlarmClock size={14} />} label={t("sidebar.automation")} onClick={props.onOpenAutomation} />
+              <FeatureButton active={props.automation} icon={<AlarmClock size={14} />} label={t("sidebar.automation")} onClick={props.onOpenAutomation} />
             </div>
           </section>
         )}
@@ -96,7 +97,7 @@ export function SidebarRegion(props: SidebarRegionProps) {
               </Tooltip>
             )}
             <NavButton label={t("sidebar.trash")} icon={<Trash2 size={15} />} disabledTooltip={props.navTooltipDisabled} onClick={props.onOpenTrash} />
-            {!props.creation && <NavButton label={t("heartbeat.scheduler")} icon={<AlarmClock size={15} />} disabledTooltip={props.navTooltipDisabled} onClick={props.onOpenAutomation} />}
+            {!props.creation && <NavButton active={props.automation} label={t("heartbeat.scheduler")} icon={<AlarmClock size={15} />} disabledTooltip={props.navTooltipDisabled} onClick={props.onOpenAutomation} />}
             <NavButton label={t("topbar.settings")} icon={<Settings size={15} />} disabledTooltip={props.navTooltipDisabled} onClick={() => props.onOpenSettings("general")} />
           </nav>
         )}
@@ -104,7 +105,7 @@ export function SidebarRegion(props: SidebarRegionProps) {
       <button className="sidebar-resizer" type="button" role="separator" aria-orientation="vertical" aria-label={t("sidebar.resize")}
         aria-valuemin={props.resize.min} aria-valuemax={props.resize.max} aria-valuenow={props.resize.value}
         onPointerDown={props.resize.onPointerDown} onKeyDown={props.resize.onKeyDown} onDoubleClick={props.resize.onReset} />
-      {props.creation && (
+      {props.creation && !props.automation && (
         <button className={`sidebar-collapse-toggle${props.collapsed ? " sidebar-collapse-toggle--collapsed" : ""}${props.togglePressed ? " sidebar-collapse-toggle--pressed" : ""}`}
           type="button" onClick={props.onToggle} aria-label={props.toggleTitle} aria-pressed={!props.collapsed} title={props.toggleTitle}>
           {props.collapsed ? <PanelRight size={14} /> : <PanelLeft size={14} />}
@@ -114,14 +115,14 @@ export function SidebarRegion(props: SidebarRegionProps) {
   );
 }
 
-function FeatureButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
-  return <button className="sidebar-feature-zone__item" type="button" onClick={onClick}>{icon}<span>{label}</span></button>;
+function FeatureButton({ icon, label, onClick, active }: { icon: ReactNode; label: string; onClick: () => void; active?: boolean }) {
+  return <button className={`sidebar-feature-zone__item${active ? " sidebar-feature-zone__item--active" : ""}`} aria-current={active ? "page" : undefined} type="button" onClick={onClick}>{icon}<span>{label}</span></button>;
 }
 
 function UtilityButton({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return <Tooltip label={label} fill side="top"><button className="sidebar__utility-button" type="button" onClick={onClick}>{icon}<span className="sr-only">{label}</span></button></Tooltip>;
 }
 
-function NavButton({ icon, label, disabledTooltip, onClick }: { icon: ReactNode; label: string; disabledTooltip: boolean; onClick: () => void }) {
-  return <Tooltip label={label} fill side="right" disabled={disabledTooltip}><button className="sidebar__navitem" onClick={onClick}>{icon}<span>{label}</span></button></Tooltip>;
+function NavButton({ icon, label, disabledTooltip, onClick, active }: { icon: ReactNode; label: string; disabledTooltip: boolean; onClick: () => void; active?: boolean }) {
+  return <Tooltip label={label} fill side="right" disabled={disabledTooltip}><button className={`sidebar__navitem${active ? " sidebar__navitem--active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>{icon}<span>{label}</span></button></Tooltip>;
 }

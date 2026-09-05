@@ -22,7 +22,7 @@ assert.match(
 );
 assert.match(
   appSource,
-  /const surfaceWorkspacePanelRenderable = effectiveWorkspacePanelRenderable && !localWorkspaceDockBlocked;/,
+  /const surfaceWorkspacePanelRenderable = chatSurfaceVisible && workspacePanelRenderable && !localWorkspaceDockBlocked;/,
   "the topic bar projects the workspace toggle through the active surface boundary",
 );
 assert.ok(!sessionActionsSource.includes('aria-label="Session summary"'), "Session summary does not use a hard-coded English label");

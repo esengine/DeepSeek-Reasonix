@@ -7,7 +7,7 @@ const TERMINAL_TRANSITION_MS = 220;
 // Load xterm lazily, then keep it mounted so closing the drawer does not lose
 // its live canvas. Fit is paused while the grid row animates because fitting
 // every intermediate height also emits redundant PTY resize traffic.
-export function useWarmTerminalPanel(open: boolean, resizing: boolean): {
+export function useWarmTerminalPanel(open: boolean, resizing: boolean, visible = true): {
   mounted: boolean;
   fitEnabled: boolean;
   prefetch: () => void;
@@ -18,7 +18,7 @@ export function useWarmTerminalPanel(open: boolean, resizing: boolean): {
     if (open) setMounted(true);
   }, [open]);
   useEffect(() => {
-    if (!open) {
+    if (!open || !visible) {
       setFitEnabled(false);
       return;
     }
@@ -29,7 +29,7 @@ export function useWarmTerminalPanel(open: boolean, resizing: boolean): {
     const delay = prefersReducedMotion() ? 0 : TERMINAL_TRANSITION_MS;
     const timer = window.setTimeout(() => setFitEnabled(true), delay);
     return () => window.clearTimeout(timer);
-  }, [open, resizing]);
+  }, [open, resizing, visible]);
   const prefetch = useCallback(() => {
     void import("../components/TerminalPanel");
   }, []);

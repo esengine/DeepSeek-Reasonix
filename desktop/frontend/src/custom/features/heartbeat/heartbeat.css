@@ -26,6 +26,7 @@
   overflow: hidden;
   background: var(--bg);
   position: relative;
+  container: heartbeat-page / inline-size;
 }
 
 /* ── split layout ─────────────────────────────────────────────── */
@@ -290,6 +291,21 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--heartbeat-split-bg);
+}
+
+/* Use the actual task-page width, not the app viewport. At narrow widths the
+   existing editor fills the page without remounting or changing split prefs. */
+@container heartbeat-page (max-width: 559px) {
+  .heartbeat-split--detail-open .heartbeat-split__left,
+  .heartbeat-split--detail-open .heartbeat-split__divider {
+    display: none;
+  }
+
+  .heartbeat-split--detail-open .heartbeat-split__right {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .heartbeat-split__right .heartbeat-editor {
@@ -1876,4 +1892,75 @@
 }
 .heartbeat-task-menu__item--danger {
   color: var(--danger);
+}
+
+/* Shared automation shell: it owns the collapsed-sidebar recovery control and
+   a native drag-safe title strip without changing Heartbeat's task state. */
+.automation-surface {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app--automation .skip-to-composer {
+  display: none;
+}
+
+.automation-surface > .heartbeat-page {
+  flex: 1;
+  width: 100%;
+}
+
+.layout--sidebar-collapsed .automation-surface {
+  padding-top: 44px;
+}
+
+.automation-surface__drag-region {
+  display: none;
+}
+
+.layout--sidebar-collapsed .automation-surface__drag-region {
+  --wails-draggable: drag;
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: var(--z-app-chrome);
+  display: block;
+  height: 44px;
+  user-select: none;
+}
+
+.automation-sidebar-toggle {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: var(--z-dock);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+}
+
+.layout--sidebar-collapsed .automation-sidebar-toggle {
+  display: inline-flex;
+}
+
+.automation-sidebar-toggle:hover,
+.automation-sidebar-toggle:focus-visible {
+  border-color: var(--border-soft);
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+
+.app--darwin .automation-sidebar-toggle {
+  left: 96px;
 }

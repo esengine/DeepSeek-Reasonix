@@ -6,6 +6,7 @@ const TerminalPanel = lazy(() => import("../components/TerminalPanel").then((mod
 
 type AppBottomRegionsProps = {
   terminal: {
+    surfaceVisible?: boolean;
     open: boolean;
     contentVisible: boolean;
     remoteSurface: boolean;
@@ -34,14 +35,14 @@ export function AppBottomRegions({ terminal, status }: AppBottomRegionsProps) {
           </Suspense>
         )}
       </aside>
-      <button
+      {terminal.surfaceVisible !== false && <button
         className="terminal-drawer-resizer" type="button" role="separator" aria-orientation="horizontal"
         aria-label={terminal.t("terminal.resize")} aria-valuemin={terminal.resizer.min}
         aria-valuemax={terminal.resizer.max} aria-valuenow={terminal.resizer.value}
         aria-hidden={!terminal.open} tabIndex={terminal.open ? 0 : -1}
         onPointerDown={terminal.resizer.onPointerDown} onKeyDown={terminal.resizer.onKeyDown}
         onDoubleClick={terminal.resizer.onReset}
-      />
+      />}
       {status && <StatusBar {...status} />}
     </>
   );

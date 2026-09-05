@@ -25,6 +25,7 @@ function finalDeclaration(selector: string, property: string): string | undefine
 }
 
 const windowsPreviewSelector = ".app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls";
+const windowsAutomationSelector = ".app--windows-frameless.app--automation > .windows-window-controls";
 
 assert.equal(finalDeclaration(".image-viewer__close", "right"), "16px");
 assert.equal(finalDeclaration(".app--windows-frameless .image-viewer__close", "right"), undefined);
@@ -32,4 +33,10 @@ assert.equal(finalDeclaration(windowsPreviewSelector, "opacity"), "0");
 assert.equal(finalDeclaration(windowsPreviewSelector, "visibility"), "hidden");
 assert.equal(finalDeclaration(windowsPreviewSelector, "pointer-events"), "none");
 
-console.log("image viewer window controls: 5 passed");
+// The entire automation page (list, editor, and loading fallback) owns this
+// region. Hiding only the icon would leave invisible caption click targets.
+assert.equal(finalDeclaration(windowsAutomationSelector, "opacity"), "0");
+assert.equal(finalDeclaration(windowsAutomationSelector, "visibility"), "hidden");
+assert.equal(finalDeclaration(windowsAutomationSelector, "pointer-events"), "none");
+
+console.log("image viewer and automation window controls: 8 passed");

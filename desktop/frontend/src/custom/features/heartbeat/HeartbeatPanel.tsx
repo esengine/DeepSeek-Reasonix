@@ -1,8 +1,3 @@
-// Heartbeat Panel — Modal for configuring scheduled heartbeat tasks.
-//
-// Renders a list of tasks with add/edit/delete controls, plus a manual
-// "run now" button for each. The panel is opened from the sidebar nav item.
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -42,6 +37,7 @@ import "./heartbeat.css";
 import { formatInterval, formatTaskNextRun, prepareTasksByNextRun } from "./heartbeat.presentation";
 import { TaskEditor } from "./HeartbeatTaskEditor";
 import { CirclePlaySolid, mergeEngineRunState } from "./HeartbeatShared";
+import { AutomationSurface } from "./AutomationSurface";
 export { changeHeartbeatFrequency, cronToInterval, heartbeatNextRunAt, intervalToCron, nextCycleRunAt, prepareTasksByNextRun } from "./heartbeat.presentation";
 export { heartbeatBuildCycleInterval } from "./HeartbeatCycleEditor";
 export { TaskEditor } from "./HeartbeatTaskEditor";
@@ -49,9 +45,10 @@ export { mergeEngineRunState } from "./HeartbeatShared";
 
 interface HeartbeatPanelProps {
   onOpenTopic?: (scope: string, workspaceRoot: string, topicId: string) => void;
+  onToggleSidebar?: () => void;
 }
 
-export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
+export function HeartbeatView({ onOpenTopic, onToggleSidebar }: HeartbeatPanelProps) {
   const t = useHeartbeatT();
   const [tasks, setTasks] = useState<HeartbeatTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -432,10 +429,11 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
   };
 
   return (
-    <div className="heartbeat-page">
+    <AutomationSurface onToggleSidebar={onToggleSidebar} sidebarLabel={t("sidebar.expand")}>
+      <div className="heartbeat-page">
       {/* 无详情时：页面顶部一条全宽透明窗口拖拽条 */}
       {!detailOpen && <div className="heartbeat-drag-strip" />}
-      <div className="heartbeat-split">
+      <div className={`heartbeat-split${detailOpen ? " heartbeat-split--detail-open" : ""}`}>
           {/* ── Left column: task list（含列表区头部工具栏） ── */}
           <div className={`heartbeat-split__left${detailOpen ? "" : " heartbeat-split__left--full"}`} style={{ width: detailOpen ? `${listWidthPct}%` : "100%" }}>
             {!detailOpen && (
@@ -932,6 +930,7 @@ export function HeartbeatView({ onOpenTopic }: HeartbeatPanelProps) {
           </div>
         )}
       </div>
+    </AutomationSurface>
   );
 }
 

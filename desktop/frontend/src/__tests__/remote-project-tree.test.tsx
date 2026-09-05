@@ -188,7 +188,7 @@ ok(
 );
 ok(
   /localWorkspaceDockBlocked = remoteSurfaceActive && \(rightDockMode === "files" \|\| rightDockMode === "changed"\)/.test(appSource) &&
-    /surfaceWorkspacePanelRenderable = effectiveWorkspacePanelRenderable && !localWorkspaceDockBlocked/.test(appSource) &&
+    /surfaceWorkspacePanelRenderable = chatSurfaceVisible && workspacePanelRenderable && !localWorkspaceDockBlocked/.test(appSource) &&
     /\{surfaceWorkspacePanelRenderable && \([\s\S]*?<WorkspacePanel/.test(appSource),
   "remote surfaces do not mount the local Files or Changes workspace panel",
 );

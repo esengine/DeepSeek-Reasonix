@@ -2105,6 +2105,12 @@ a[href] {
   --statusbar-height: 0px;
 }
 
+/* Automation is a focused main page. These rules only remove presentation
+   rows; workspace and terminal preferences remain in their stores. */
+.layout--automation .terminal-drawer {
+  display: none;
+}
+
 .app--darwin .layout {
   --app-chrome-height: 44px;
   --chrome-toggle-size: 36px;
@@ -22993,11 +22999,12 @@ body > .mermaid-diagram--fullscreen {
   transition: opacity var(--dur-base) ease;
 }
 
-/* The image viewer is an app-level fullscreen surface. Hide the custom
-/* The image viewer is an app-level fullscreen surface. Hide the custom
-   Windows caption controls while it is open so the preview owns the only
-   visible close affordance; native shortcuts such as Alt+F4 remain intact. */
-.app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls {
+/* Image previews and the automation page own their close affordances.
+   Hide Windows caption controls while either surface is mounted, including
+   the automation loading fallback, so they cannot cover or intercept clicks
+   on page controls. Native shortcuts such as Alt+F4 remain intact. */
+.app--windows-frameless:has(.image-viewer-backdrop) > .windows-window-controls,
+.app--windows-frameless.app--automation > .windows-window-controls {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -33480,8 +33487,10 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .sidebar-feature-zone__item:hover,
 .app--creation .sidebar-feature-zone__item:focus-visible,
+.app--creation .sidebar-feature-zone__item--active,
 :root[data-theme-style] .app--creation .sidebar-feature-zone__item:hover,
-:root[data-theme-style] .app--creation .sidebar-feature-zone__item:focus-visible {
+:root[data-theme-style] .app--creation .sidebar-feature-zone__item:focus-visible,
+:root[data-theme-style] .app--creation .sidebar-feature-zone__item--active {
   border-color: color-mix(in srgb, var(--accent) 12%, transparent);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--fg);
@@ -36013,6 +36022,28 @@ body > .mermaid-diagram--fullscreen {
   :root[data-theme-style] .app .topicbar {
     grid-column: 1 !important;
     min-width: 0;
+  }
+
+  /* Automation can restore an explicitly expanded sidebar even at the app's
+     minimum width. The task editor responds to the remaining content width. */
+  .app .layout--automation:not(.layout--sidebar-collapsed),
+  :root[data-theme-style] .app .layout--automation:not(.layout--sidebar-collapsed) {
+    grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) !important;
+  }
+
+  .app .layout--automation:not(.layout--sidebar-collapsed) .sidebar,
+  :root[data-theme-style] .app .layout--automation:not(.layout--sidebar-collapsed) .sidebar {
+    display: flex !important;
+  }
+
+  .app .layout--automation:not(.layout--sidebar-collapsed) .sidebar-resizer,
+  :root[data-theme-style] .app .layout--automation:not(.layout--sidebar-collapsed) .sidebar-resizer {
+    display: block !important;
+  }
+
+  .app .layout--automation:not(.layout--sidebar-collapsed) .chat-pane,
+  :root[data-theme-style] .app .layout--automation:not(.layout--sidebar-collapsed) .chat-pane {
+    grid-column: 2 !important;
   }
 }
 
