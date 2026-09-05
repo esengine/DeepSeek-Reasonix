@@ -32,7 +32,8 @@ type delegationLifecycle struct {
 // ever held, and a journal that said otherwise would be inventing history.
 func (t *TaskTool) openDelegation(ctx context.Context, spec *ProfileExecSpec, req *AcquireRequest, trk *subagentProgressTracker) (*delegationLifecycle, error) {
 	parentID, sink, _, ok := CallContext(ctx)
-	if graphNodeDeclared(ctx) || !ok || sink == nil || parentID == "" {
+	_, declared := graphNodeDeclared(ctx)
+	if declared || !ok || sink == nil || parentID == "" {
 		return nil, nil
 	}
 	life := &delegationLifecycle{
@@ -115,34 +116,40 @@ func (d *delegationLifecycle) record(_ context.Context, write func() error) erro
 	return write()
 }
 
-// begin is the boundary a run crosses once it holds a slot and has a transcript
-// to write into: the store records it, the picture shows it, and only then may
-// the child act. A fan-out item has no lifecycle of its own here — its group
-// owns that — so for one this is only the parent-facing status.
-func (d *delegationLifecycle) begin(trk *subagentProgressTracker, run *SubagentRun) error {
-	if err := d.running(run); err != nil {
-		return err
+// beginExecution is the boundary a run crosses once it holds a slot and has a
+// transcript to write into. Every delegated execution crosses it, whoever
+// opened it: the store is what an execution is addressed by afterwards, and an
+// entry point that skipped this left work that had really run absent from every
+// surface the host can be asked about.
+func (t *TaskTool) beginExecution(ctx context.Context, life *delegationLifecycle, ephemeral bool, trk *subagentProgressTracker, run *SubagentRun) error {
+	// Recorded before drawn, so nothing shows a run as executing that the store
+	// has no record of. A refusal stops the run before its child acts, leaving a
+	// start on disk nothing used — honest residue, not a state to roll back.
+	if !ephemeral && t != nil && t.transcripts != nil {
+		if err := t.transcripts.MarkRunning(run); err != nil {
+			return err
+		}
+	}
+	if node, drawn := executionNode(ctx, life); drawn {
+		publishGraph(node.sink, fanOutItemRunningDelta(node.id))
 	}
 	trk.running()
 	return nil
 }
 
-// running is the other half of the slot grant, and it waits for the transcript
-// the child writes into: the store is marked first and the picture second, so
-// nothing shows a run as executing that the store has no record of. A store
-// that refuses stops the run, leaving a start on disk nothing used — the honest
-// residue of an append-only journal, not a state to roll back.
-func (d *delegationLifecycle) running(run *SubagentRun) error {
-	if d == nil {
-		return nil
+// executionNode is the node this run is drawn as, from whichever side drew it: a
+// fan-out declares its item's on the group's own sink, and a lone delegation's
+// lifecycle holds its own. The boundary asks both rather than assuming one —
+// neither is reachable from the other, because the sink a fan-out item runs
+// under forwards tool events and drops graph deltas.
+func executionNode(ctx context.Context, life *delegationLifecycle) (declaredGraphNode, bool) {
+	if node, declared := graphNodeDeclared(ctx); declared {
+		return node, true
 	}
-	if !d.ephemeral && d.tool != nil && d.tool.transcripts != nil {
-		if err := d.tool.transcripts.MarkRunning(run); err != nil {
-			return err
-		}
+	if life == nil {
+		return declaredGraphNode{}, false
 	}
-	publishGraph(d.sink, fanOutItemRunningDelta(d.id))
-	return nil
+	return declaredGraphNode{sink: life.sink, id: life.id}, true
 }
 
 // settle closes the delegation once, whoever owns it by then. A foreground run

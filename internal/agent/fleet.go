@@ -365,7 +365,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 		wg.Go(func() {
 			// Each fleet item runs as its own task-shaped execution so
 			// transcripts, evidence, and scheduler claims stay independent.
-			itemCtx := withDeclaredGraphNode(withCallContext(ctx, subID, subSinkFor(subID, sink), nil, false))
+			itemCtx := withDeclaredGraphNode(withCallContext(ctx, subID, subSinkFor(subID, sink), nil, false), sink, subID)
 			out, err := f.taskTool.RunProfileSpec(itemCtx, spec)
 			answer, ref := splitSubagentRunResult(out)
 			res := fleetItemResult{index: idx, profile: spec.Worker.Profile, output: answer, ref: ref, err: err}

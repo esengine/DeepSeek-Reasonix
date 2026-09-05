@@ -81,19 +81,29 @@ func TestALoneDelegationReachesTheRunGraph(t *testing.T) {
 	}
 }
 
-// A fan-out chose its items' ids and kinds. A second declaration from the
-// shared runner would redraw a worker as a group of one.
-func TestAFanOutItemIsNotRedeclared(t *testing.T) {
+// A fan-out chose its items' ids and kinds. The shared runner moves the node
+// its group declared to running and declares nothing of its own: a second
+// declaration would redraw a worker as a group of one.
+func TestAFanOutItemMovesTheNodeItsGroupDeclared(t *testing.T) {
 	task := loneTaskTool(t)
-	g := graphOf(t, func(ctx context.Context, _ event.Sink) {
-		if _, err := task.RunProfileSpec(withDeclaredGraphNode(ctx), ProfileExecSpec{
+	const itemID = "call-1/fleet-1"
+	g := graphOf(t, func(ctx context.Context, sink event.Sink) {
+		if _, err := task.RunProfileSpec(withDeclaredGraphNode(ctx, sink, itemID), ProfileExecSpec{
 			Task:   TaskSpec{Objective: "one item of a fleet"},
 			Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 		}); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 	})
-	if len(g.Nodes) != 0 {
-		t.Fatalf("a fan-out item redeclared itself: %+v", g.Nodes)
+	if len(g.Nodes) != 1 || g.Nodes[0].ID != itemID {
+		t.Fatalf("a fan-out item drew something other than its own node: %+v", g.Nodes)
+	}
+	// Kind and parent are the group's to declare; a state alone cannot invent
+	// a worker, which is what a redeclaration here would do.
+	if node := g.Nodes[0]; node.Kind != "" || node.ParentID != "" || node.State != agentgraph.StateRunning {
+		t.Fatalf("item node = %+v, want only a running state on the declared id", node)
+	}
+	if len(g.Edges) != 0 {
+		t.Fatalf("a fan-out item drew edges of its own: %+v", g.Edges)
 	}
 }

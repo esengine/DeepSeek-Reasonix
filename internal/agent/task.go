@@ -837,7 +837,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 				return FormatSubagentRunResult("", run, true), slotErr
 			}
 			defer releaseSlot()
-			if err := life.begin(trk, run); err != nil {
+			if err := t.beginExecution(jobCtx, life, spec.Context.Ephemeral, trk, run); err != nil {
 				return FormatSubagentRunResult("", run, true), err
 			}
 			answer, err := runSession(jobCtx, trk.wrap(), writerRegistered)
@@ -865,7 +865,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 
 	// Foreground: the slot has been held since before the transcript existed.
 	defer run.Release()
-	if err := life.begin(trk, run); err != nil {
+	if err := t.beginExecution(ctx, life, spec.Context.Ephemeral, trk, run); err != nil {
 		return "", err
 	}
 	answer, err := runSession(ctx, trk.wrap(), false)

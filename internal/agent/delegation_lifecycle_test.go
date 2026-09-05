@@ -3,8 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +37,7 @@ func loneFixture(t *testing.T, prov *loneProvider, total int) (*TaskTool, contex
 		WithTranscripts(NewSubagentStore(filepath.Join(sessions, "subagents")), root, "base", "high").
 		WithScheduler(NewSubagentScheduler(total, total))
 	sessionPath := filepath.Join(sessions, "probe.jsonl")
-	sink := &loneSink{sessionPath: sessionPath}
+	sink := &loneSink{sessionPath: sessionPath, node: loneNodeID}
 	ctx := withCallContext(context.Background(), "lone-call", sink, nil, false)
 	ctx = WithTurnIdentity(WithParentSession(ctx, "probe"), "turn-1")
 	return task, ctx, sessionPath, sink
@@ -48,9 +51,12 @@ const loneNodeID = "lone-call/sub-1"
 type loneSink struct {
 	mu          sync.Mutex
 	sessionPath string
-	states      []agentgraph.NodeState
-	durable     []string
-	statuses    []string
+	// node is the id family this sink watches, matched by prefix so a fan-out's
+	// items are covered by the one the group drew them under.
+	node     string
+	states   []agentgraph.NodeState
+	durable  []string
+	statuses []string
 }
 
 func (s *loneSink) Emit(e event.Event) {
@@ -64,7 +70,7 @@ func (s *loneSink) Emit(e event.Event) {
 		return
 	}
 	for _, n := range e.Graph.Nodes {
-		if n.ID != loneNodeID || n.State == "" {
+		if !strings.HasPrefix(n.ID, s.node) || n.State == "" {
 			continue
 		}
 		s.states = append(s.states, n.State)
@@ -394,5 +400,106 @@ func TestRefusedAdmissionLeavesNoChildTerminal(t *testing.T) {
 		if a.Meta.ParentToolCallID == loneNodeID {
 			t.Fatalf("store kept %q for a delegation that was never admitted", a.Meta.Status)
 		}
+	}
+}
+
+// A store that cannot record an execution stops it, at both entry points. The
+// store is what an execution is addressed by once its call has returned, so a
+// child allowed to act without one would have done work nothing can be asked
+// about afterwards. The two are asserted together because drifting apart is
+// exactly what put them on different sides of this boundary before.
+func TestAStoreThatCannotRecordAnExecutionStopsIt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only directory does not refuse writes on Windows")
+	}
+	t.Run("lone delegation", func(t *testing.T) {
+		task, ctx, sessionPath, sink, prov := refusingStoreFixture(t, loneNodeID, 1)
+		if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{
+			Task:   TaskSpec{Objective: "work the store cannot record"},
+			Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
+			Grant:  CapabilityGrant{ReadOnly: true},
+		}); err == nil {
+			t.Fatal("a delegation the store could not record ran anyway")
+		}
+		assertRefusedBeforeActing(t, task, prov, sink, sessionPath, loneNodeID)
+	})
+
+	t.Run("fan-out item", func(t *testing.T) {
+		task, ctx, sessionPath, sink, prov := refusingStoreFixture(t, fanOutCall+"/fleet-", 2)
+		out, err := NewFleetTool(task).Execute(ctx, json.RawMessage(
+			`{"tasks":[{"prompt":"one","read_only":true},{"prompt":"two","read_only":true}]}`))
+		if err != nil {
+			t.Fatalf("fleet: %v", err)
+		}
+		if !strings.Contains(out, "status: failed") {
+			t.Fatalf("aggregate = %q, want items the store refused reported as failed", out)
+		}
+		assertRefusedBeforeActing(t, task, prov, sink, sessionPath, fanOutCall+"/fleet-1")
+	})
+}
+
+const fanOutCall = "fanout-call"
+
+// refusingStoreFixture is an ordinary world with one thing broken: the store's
+// directory cannot be written to. The journal is reachable and the scheduler has
+// capacity, so only the record of the execution itself is refused.
+func refusingStoreFixture(t *testing.T, node string, total int) (*TaskTool, context.Context, string, *loneSink, *loneProvider) {
+	t.Helper()
+	root := testenv.TempDir(t)
+	sessions := testenv.TempDir(t)
+	storeDir := filepath.Join(sessions, "subagents")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Restored before the temp dir's own cleanup, which runs after this one and
+	// cannot remove a directory it may not write to.
+	t.Cleanup(func() { _ = os.Chmod(storeDir, 0o700) })
+	if err := os.Chmod(storeDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	prov := newLoneProvider()
+	// Released up front: a child that reaches the provider must fail the test
+	// rather than hold it open until the deadline.
+	close(prov.release)
+	reg := tool.NewRegistry()
+	reg.Add(fakeReadFileTool{})
+	task := NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(storeDir), root, "base", "high").
+		WithScheduler(NewSubagentScheduler(total, total))
+	sessionPath := filepath.Join(sessions, "probe.jsonl")
+	sink := &loneSink{sessionPath: sessionPath, node: node}
+	callID := fanOutCall
+	if node == loneNodeID {
+		callID = "lone-call"
+	}
+	ctx := withCallContext(context.Background(), callID, sink, nil, false)
+	ctx = WithTurnIdentity(WithParentSession(ctx, "probe"), "turn-1")
+	return task, ctx, sessionPath, sink, prov
+}
+
+// assertRefusedBeforeActing is the whole contract of a refused record: the child
+// never acted, nothing drew it running, the slot came back, and the journal
+// keeps the start it honestly wrote — a residue nothing used, not a state to
+// roll back.
+func assertRefusedBeforeActing(t *testing.T, task *TaskTool, prov *loneProvider, sink *loneSink, sessionPath, execution string) {
+	t.Helper()
+	select {
+	case <-prov.entered:
+		t.Fatal("a child acted under an execution the store has no record of")
+	default:
+	}
+	if sink.sawState(agentgraph.StateRunning) {
+		t.Fatalf("drawn %v, want nothing running behind a store that refused the record", sink.drawn())
+	}
+	if got := journalStanding(sessionPath, execution); !strings.Contains(got, "+started") {
+		t.Fatalf("journal = %q, want the slot grant kept as written", got)
+	}
+	total, _ := task.scheduler.Limits()
+	for slot := range total {
+		release, err := task.scheduler.Acquire(context.Background(), AcquireRequest{Nested: true})
+		if err != nil {
+			t.Fatalf("slot %d did not come back after the refusal: %v", slot+1, err)
+		}
+		defer release()
 	}
 }

@@ -6,20 +6,30 @@ import (
 	"strings"
 
 	"reasonix/internal/agentgraph"
+	"reasonix/internal/event"
 )
 
 type declaredGraphNodeKey struct{}
 
+// declaredGraphNode is the node a fan-out drew for one of its items: the sink
+// it was drawn on and the id it was drawn under. Both travel, because the sink
+// the item itself runs under is a nesting sink that forwards tool events and
+// drops graph deltas — the picture is reachable only through the group's.
+type declaredGraphNode struct {
+	sink event.Sink
+	id   string
+}
+
 // withDeclaredGraphNode marks a run whose graph node its caller already
 // published. Only a fan-out can say this: it chose the node's id and kind, and
 // a second declaration would redraw its worker as a group of one.
-func withDeclaredGraphNode(ctx context.Context) context.Context {
-	return context.WithValue(ctx, declaredGraphNodeKey{}, true)
+func withDeclaredGraphNode(ctx context.Context, sink event.Sink, id string) context.Context {
+	return context.WithValue(ctx, declaredGraphNodeKey{}, declaredGraphNode{sink: sink, id: id})
 }
 
-func graphNodeDeclared(ctx context.Context) bool {
-	declared, _ := ctx.Value(declaredGraphNodeKey{}).(bool)
-	return declared
+func graphNodeDeclared(ctx context.Context) (declaredGraphNode, bool) {
+	node, ok := ctx.Value(declaredGraphNodeKey{}).(declaredGraphNode)
+	return node, ok
 }
 
 // delegationState reads one run's ending the way a fan-out reads its items', so

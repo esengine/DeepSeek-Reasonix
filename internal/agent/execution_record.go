@@ -58,24 +58,20 @@ func (t *TaskTool) openExecutions(ctx context.Context, group string, openings []
 	return nil
 }
 
-// itemHooks are the scheduler's two moments with the durable record placed
-// ahead of the second. A granted slot is the point the child becomes able to
-// act, so STARTED reaches disk before anything observes it running and before
-// the run does anything at all.
+// itemHooks are the scheduler's two moments. A granted slot is the point the
+// child becomes able to act, so STARTED reaches disk before anything observes
+// it and before the run does anything at all — and that is all the grant does
+// here. What the store and the picture then say comes from the boundary the run
+// crosses next, the same one a lone delegation crosses.
 func (t *TaskTool) itemHooks(ctx context.Context, sink event.Sink, id string) (func(agentgraph.WaitCause) error, func() error) {
-	onWait, onSlot := fanOutItemHooks(sink, id)
+	onWait := fanOutItemWaitHook(sink, id)
 	queued := func(cause agentgraph.WaitCause) error {
 		if err := t.queueExecution(ctx, id, cause); err != nil {
 			return err
 		}
 		return onWait(cause)
 	}
-	return queued, func() error {
-		if err := t.startExecution(ctx, id); err != nil {
-			return err
-		}
-		return onSlot()
-	}
+	return queued, func() error { return t.startExecution(ctx, id) }
 }
 
 // queueExecution records the scheduler's first refusal. An item reaches the

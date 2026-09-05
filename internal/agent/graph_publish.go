@@ -84,19 +84,20 @@ func fanOutItemWaitDelta(id string, cause agentgraph.WaitCause) agentgraph.Delta
 	return agentgraph.Delta{Nodes: []agentgraph.Node{{ID: id, Wait: cause}}}
 }
 
-// fanOutItemHooks are the two moments of an item's wait that only the scheduler
-// can report: what held it out of a slot, and the grant that ended that. The
-// second never refuses; a caller that has something to persist first wraps it.
-func fanOutItemHooks(sink event.Sink, id string) (func(agentgraph.WaitCause) error, func() error) {
+// fanOutItemWaitHook is the one moment of an item's wait only the scheduler can
+// report: what held it out of a slot. The grant is not drawn here — an item is
+// shown running from the boundary its run crosses, behind the store's own
+// record of it. It never refuses; a caller with something to persist wraps it.
+func fanOutItemWaitHook(sink event.Sink, id string) func(agentgraph.WaitCause) error {
 	return func(cause agentgraph.WaitCause) error {
-			publishGraph(sink, fanOutItemWaitDelta(id, cause))
-			return nil
-		},
-		func() error { publishGraph(sink, fanOutItemRunningDelta(id)); return nil }
+		publishGraph(sink, fanOutItemWaitDelta(id, cause))
+		return nil
+	}
 }
 
-// fanOutItemRunningDelta reports the slot being granted. The gap back to
-// QueuedAt is what the concurrency ceiling cost this item.
+// fanOutItemRunningDelta reports a run beginning: it holds a slot, the store has
+// recorded it, and its child may act. The gap back to QueuedAt is what the wait
+// for capacity cost this item.
 func fanOutItemRunningDelta(id string) agentgraph.Delta {
 	return agentgraph.Delta{Nodes: []agentgraph.Node{
 		{ID: id, State: agentgraph.StateRunning, StartedAt: nowMilli()},

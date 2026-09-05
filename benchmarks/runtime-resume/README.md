@@ -300,11 +300,11 @@ Reads as:    whether the store can be asked about that execution, not whether
              the two disagree
 ```
 
-Measured on the current tree: the settled item is `completed` in both processes
-and the lone delegation is `running` then `interrupted`, while the executing
-fan-out item is `no record` in both — and `list_subagents` shows the delegation
-running and the fan-out item not at all. The refused item is absent from the
-store, as it should be, and the rebuild names both cuts without a ghost.
+Measured on the current tree: the settled item is `completed` in both processes,
+and the executing fan-out item and the lone delegation both read `running` then
+`interrupted` — one store, one contract, whichever entry point opened the work.
+`list_subagents` shows all three. The refused item is absent from the store, as
+it should be, and the rebuild names both cuts without a ghost.
 
 ## The one arm that reads the frontend
 
