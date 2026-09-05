@@ -29,7 +29,8 @@ type arm struct {
 func appendsAfterFold(name string) bool {
 	return name != "exact" && name != armRefoldIntoBody && !graphArm(name) && !uiArm(name) &&
 		!schedulerWaitArm(name) && !terminalArm(name) && !deriveArm(name) &&
-		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name) && !activeStoreArm(name)
+		!loneTaskArm(name) && !cancelRoutingArm(name) && !lineageArm(name) && !activeStoreArm(name) &&
+		!skillArm(name)
 }
 
 // armAppendAfterFold separates the two ways a projection can fail validation
@@ -131,6 +132,13 @@ func arms() []arm {
 		{name: armIdentitySemantics, asks: "what a node's model and effort report, across two producers and the store"},
 		{name: armDeriveAnswered, asks: "a dependent whose upstreams answered, one by completing and one by adopting"},
 		{name: armFleetActiveStore, asks: "whether the store can be asked about a fan-out item that is executing"},
+		{name: armSkillQueued, asks: "whether a subagent skill asks the same scheduler as every other delegation"},
+		{name: armSkillRunning, asks: "what names a subagent skill while its child is executing"},
+		{name: armSkillCompleted, asks: "what a finished subagent skill leaves, through both entry points"},
+		{name: armSkillCancel, asks: "what a stop reaches when a subagent skill is running"},
+		{name: armReadOnlySkillQueued, asks: "whether the read-only skill entry point asks the same scheduler"},
+		{name: armReadOnlySkillRunning, asks: "what names a read-only skill while its child is executing"},
+		{name: armReadOnlySkillCompleted, asks: "what a finished read-only skill leaves behind, if anything"},
 		{name: "covered-mutation", asks: "the covered conversation changed, against the surviving baseline", lever: mutateCoveredRow},
 	}
 }

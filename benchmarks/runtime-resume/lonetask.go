@@ -161,6 +161,14 @@ func signStep(id string) []provider.Chunk {
 	}}
 }
 
+// closesItsTurn names the arms whose turn has to reach its end. A turn that
+// called a tool cannot deliver while the host's step list is open, so these
+// sign it off one step per round — the sign-off promotes the next item, and two
+// in one round would sign against a list that no longer stands.
+func closesItsTurn(arm string) bool {
+	return arm == armTaskCompleted || arm == armSkillCompleted || arm == armReadOnlySkillCompleted
+}
+
 // loneTaskSentinels is what this arm's one prompt carries.
 func loneTaskSentinels(arm string) string {
 	if queuedTaskArm(arm) {

@@ -208,7 +208,8 @@ func buildRuntime(ctx context.Context, root armRoot, arm string, sink event.Sink
 // measures a permission decision instead of a process boundary.
 func approvalMode(arm string) string {
 	if graphArm(arm) || uiArm(arm) || loneTaskArm(arm) || cancelRoutingArm(arm) || lineageArm(arm) ||
-		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) || activeStoreArm(arm) {
+		schedulerWaitArm(arm) || terminalArm(arm) || deriveArm(arm) || activeStoreArm(arm) ||
+		skillArm(arm) {
 		return control.ToolApprovalAuto
 	}
 	return "deny"

@@ -92,6 +92,13 @@ provider call*.
 | `derive-skip-flip` | the same, failures in the other order | none | does the named cause move while the durable facts do not? |
 | `derive-answered` | one completed and one adopted upstream, dependent runs, die | none | do the delivery edges follow from the durable facts? |
 | `fleet-active-store` | one delegation and one fan-out sharing a ceiling: an item settled, one executing, one refused, the delegation still running | ceilings | can the store be asked about a fan-out item that is executing? |
+| `skill-queued` | the ceiling is full when a subagent skill asks | ceilings | does a skill ask the same scheduler as every other delegation? |
+| `skill-running` | a subagent skill's child executing, then die | none | what names it while it is happening? |
+| `skill-completed` | one finished through the tool a model calls, one through the controller's own entry point | none | what does a finished skill leave, and whose lineage does it carry? |
+| `skill-cancel` | a running skill, then the turn's own stop | none | what does the stop reach, and is the terminal the one that happened? |
+| `readonly-skill-queued` | the same ceiling, the read-only entry point | ceilings | does the other runner ask the same scheduler? |
+| `readonly-skill-running` | its child executing, then die | none | is durable absence its contract, and is anything watching? |
+| `readonly-skill-completed` | it finishes, then die | none | does a run that really happened leave anything at all? |
 
 The three lever arms all append after the fold on purpose. Without it the
 projection is already gone at the boundary for an unrelated reason, and the
@@ -305,6 +312,82 @@ and the executing fan-out item and the lone delegation both read `running` then
 `interrupted` — one store, one contract, whichever entry point opened the work.
 `list_subagents` shows all three. The refused item is absent from the store, as
 it should be, and the rebuild names both cuts without a ghost.
+
+## The skill classification arms
+
+These ask what kind of execution a `runAs: subagent` skill is. The question is
+not rhetorical: the answer decides whether it belongs to the delegation class the
+task and fan-out arms established, or is an execution class of its own — and
+those lead to opposite work. Nothing here is a fix. A classification that guessed
+would be answered by whichever plumbing happened to exist.
+
+Two runners are measured apart rather than averaged, because they are different
+surfaces and not two settings of one. `run_skill` prepares a transcript, supports
+continuation, and saves a terminal; `read_only_skill` builds a session in memory,
+refuses continuation, and stores nothing. Asking the second for durability would
+be demanding it break its own contract, so the arms ask what it *is* instead.
+
+Each arm answers seven dimensions, one row each, because a skill can share one
+domain and not another — which is the whole reason this is a classification:
+
+| Dimension | What it asks |
+| --- | --- |
+| scheduler | does it ask for admission the way every other delegation does? |
+| graph | is anything drawn while it runs? |
+| journal | is the execution recorded before it acts? |
+| store | is there a record, and does it say the right thing? |
+| cancel | does a stop reach it, and is the terminal the one that happened? |
+| restart | can the next process explain it? |
+| identity | does the record join the call that made it? |
+
+The scheduler dimension has no refusal hook to read — a skill's acquire carries
+none — so it is established as an A/B rather than from a record: the queued arm
+proves the call went out, has not answered, the ceiling is occupied and no child
+of its own reached the provider, while the running arm is the same dispatch with
+capacity free and its child inside the provider. Only the slots check is reached
+this way. A skill writer's whole-workspace claim is visible in the code and is
+**not** measured here; separating writers from slots needs the shape
+`wait-writers` uses, and this arm does not build it.
+
+The identity row reads the two entry points apart on purpose. A model-invoked
+skill has a tool call to join to; the controller's own entry point drops that id
+deliberately, so an empty one there is top-level provenance rather than a lost
+join. Both run in the same death in `skill-completed`, so the comparison is
+between two lineages rather than between a value and an expectation.
+
+The cancel row judges the terminal against an observed cause, never against
+wording: the child's own context closed, which is what a cancellation does to it
+and what a failure does not, so a record filing that as failed is naming the
+wrong ending.
+
+`skill-queued` is the negative control for everything below it, and it bounds any
+convergence these arms could support. An execution the scheduler never admitted
+produced nothing, so no layer owes it a record — a change that satisfied the
+running arm by preparing a transcript at dispatch would break this one, which is
+the proxy the delegation arms removed.
+
+### The judgement
+
+```text
+the scheduler admitted it
++ its child reached the provider
++ no live graph, no journal entry and no store record names it
+→ LOST-SILENT
+```
+
+For the read-only entry point that conjunction is not a defect: durable absence
+is its contract, and the row says so. What remains worth naming there is
+different — it holds a scheduler slot that nothing draws — so its verdicts are
+`ephemeral-seen` and `ephemeral-unseen`, a classification rather than a pass.
+
+The graph row carries the whole graph's node count beside its own answer,
+because "the filter found nothing" and "there was nothing to find" are different
+readings and only the second is what the row means.
+
+`record-only` is the restart verdict for a child the store kept whose execution
+no reconstruction names. That a store remembers a child finished is not that a
+restart can place the delegated execution: the first is a record, the second is
+provenance, and folding them would report a run nothing can situate as recovered.
 
 ## The one arm that reads the frontend
 

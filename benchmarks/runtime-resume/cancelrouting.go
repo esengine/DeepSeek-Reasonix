@@ -45,7 +45,8 @@ func cancelRoutingArm(name string) bool {
 // guardedArm names the arms driven through a turn the controller admits itself,
 // which is the surface a person's Stop reaches.
 func guardedArm(name string) bool {
-	return cancelTaskArm(name) || name == armCancelTool || name == armCancelBackground
+	return cancelTaskArm(name) || name == armCancelTool || name == armCancelBackground ||
+		name == armSkillCancel
 }
 
 const (

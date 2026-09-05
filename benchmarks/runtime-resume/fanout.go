@@ -310,14 +310,17 @@ func holderFleet(arm string) []provider.Chunk {
 		// while the writer ceiling stays full is how the blocker changes.
 		tasks[1] = map[string]any{"id": "h2", "prompt": childRelease + " releasable", "description": "released mid-wait", "read_only": true}
 	}
-	if queuedTaskArm(arm) {
-		// Either item may win the one slot these arms leave, so both report
-		// holding it, and the delegation's own child is then the only arrival
-		// that means anything.
+	if bothHoldersReport(arm) {
 		tasks[1] = map[string]any{"id": "h2", "prompt": childHold + " second holder", "description": "holds the ceiling", "read_only": true}
 	}
 	return backgroundFleetCall("probe_fleet_holder", tasks)
 }
+
+// bothHoldersReport names the arms that leave one slot free. Either holder may
+// win it, so both report holding, and the refused delegation's own child is then
+// the only arrival that means anything — a filler that hung under the same
+// sentinel would be read as the subject having started.
+func bothHoldersReport(arm string) bool { return queuedTaskArm(arm) || queuedSkillArm(arm) }
 
 // refusedFleet asks for admission the scheduler must deny, with every check
 // above this arm's cause already cleared.

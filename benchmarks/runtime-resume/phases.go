@@ -156,6 +156,8 @@ func armConstruct(ctx context.Context, root armRoot, arm, bootSystem string, ctr
 		return true, runLoneTaskConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case activeStoreArm(arm):
 		return true, runActiveStoreConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
+	case skillArm(arm):
+		return true, runSkillClassConstruct(ctx, root, arm, bootSystem, ctrl, sink, prov, turn)
 	case graphArm(arm) || uiArm(arm):
 		return true, runFanOutConstruct(ctx, root, arm, bootSystem, ctrl, sink, turn)
 	}
@@ -170,6 +172,11 @@ func runConstruct(dir, arm string) error {
 	root := rootFor(dir)
 	if err := root.create(); err != nil {
 		return err
+	}
+	if skillArm(arm) {
+		if err := writeProbeSkill(root.Workspace); err != nil {
+			return fmt.Errorf("probe skill: %w", err)
+		}
 	}
 	if total, writers := schedulerLimits(arm); total > 0 {
 		if err := root.writeProjectConfig(total, writers); err != nil {

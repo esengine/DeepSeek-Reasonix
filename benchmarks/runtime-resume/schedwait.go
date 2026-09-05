@@ -67,6 +67,10 @@ func schedulerLimits(arm string) (total, writers int) {
 		// One slot, so the item after the one that hangs is refused: the death
 		// then holds a node that was queued and never admitted.
 		return 1, 1
+	case armSkillQueued, armReadOnlySkillQueued:
+		// One slot, held by the fleet dispatched ahead of the skill, so the
+		// refusal the arm reads is the scheduler's and not a race.
+		return 1, 1
 	case armFleetActiveStore:
 		// Two slots: the delegation holds one to the death, and the fan-out's
 		// first item frees the other for exactly one of the two behind it.

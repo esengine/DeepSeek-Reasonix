@@ -139,10 +139,18 @@ func (s *scripted) script(ctx context.Context, req provider.Request) []provider.
 		}
 		return append(loneTaskCall(s.arm), done())
 	}
+	if s.opensRun(req, skillSentinel) {
+		if queuedSkillArm(s.arm) {
+			// The holder's own child says when the ceiling is occupied.
+			// Dispatching before that lets the skill win the race and start.
+			<-s.held
+		}
+		return append(skillCall(s.arm), done())
+	}
 	// The one arm whose turn has to close signs the host's steps off first, one
 	// per round, because a turn that called a tool cannot deliver while the list
 	// is open. The latch is read last: a round that could not answer keeps it.
-	if s.arm == armTaskCompleted && s.opened.Load() && hasTool(req.Tools, "complete_step") {
+	if closesItsTurn(s.arm) && s.opened.Load() && hasTool(req.Tools, "complete_step") {
 		for _, id := range probeStepIDs() {
 			if s.fleets.first("sign-" + id) {
 				return append(signStep(id), done())
