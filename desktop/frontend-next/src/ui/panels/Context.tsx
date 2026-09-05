@@ -10,13 +10,20 @@ import { Row } from "./kit";
 // The order is the order they arrive in a prompt, so the bar reads the way the
 // request is built rather than by size — a class that grows is easier to spot
 // when its neighbours stay put.
-const PARTS: [keyof ContextBreakdown, string, string][] = [
-  ["system", t("系统提示"), t("基础指令、记忆、技能清单")],
-  ["tools", t("工具定义"), t("发给模型的工具清单")],
-  ["user", t("你说的话"), t("这一会话里你输入的部分")],
-  ["reply", t("模型回复"), t("模型说过的话")],
-  ["output", t("工具输出"), t("命令、读取、检索返回的内容")],
-];
+//
+// Read at render, not at import. t() answers out of a dictionary boot() installs,
+// and a module body runs before it — so a table built here froze five labels in
+// the source language and never followed the interface into English again. The
+// literals stay inside t() so the catalogue scanner still sees them.
+function parts(): [keyof ContextBreakdown, string, string][] {
+  return [
+    ["system", t("系统提示"), t("基础指令、记忆、技能清单")],
+    ["tools", t("工具定义"), t("发给模型的工具清单")],
+    ["user", t("你说的话"), t("这一会话里你输入的部分")],
+    ["reply", t("模型回复"), t("模型说过的话")],
+    ["output", t("工具输出"), t("命令、读取、检索返回的内容")],
+  ];
+}
 
 
 // Gap between the bar and the bubble. It lives here rather than in CSS because
@@ -95,8 +102,8 @@ export function Context({ ctx, row = true, legend = false, port, onCtx }: {
     return legend ? <div className="block" data-b="ctx">{missing}</div> : missing;
   }
   const pct = Math.min((used / ctx.window) * 100, 100);
-  const parts = PARTS.map(([k, label, why]) => ({ k, label, why, n: ctx[k] || 0 })).filter((p) => p.n > 0);
-  const sum = parts.reduce((a, p) => a + p.n, 0) || 1;
+  const shown = parts().map(([k, label, why]) => ({ k, label, why, n: ctx[k] || 0 })).filter((p) => p.n > 0);
+  const sum = shown.reduce((a, p) => a + p.n, 0) || 1;
 
   const body = (
     <>
@@ -137,13 +144,13 @@ export function Context({ ctx, row = true, legend = false, port, onCtx }: {
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
       >
-        {parts.map((p) => (
+        {shown.map((p) => (
           <i key={p.k} data-p={p.k} style={{ width: `${(p.n / sum) * pct}%` }} />
         ))}
       </div>
       {legend && (
         <div className="ctxlg">
-          {parts.map((p) => (
+          {shown.map((p) => (
             <div className="r" key={p.k} title={p.why}>
               <i data-p={p.k} />
               <span className="t">{p.label}</span>
@@ -159,7 +166,7 @@ export function Context({ ctx, row = true, legend = false, port, onCtx }: {
             <span>{t("上下文构成")}</span>
             <span className="n">{percent(pct / 100)}</span>
           </div>
-          {parts.map((p) => (
+          {shown.map((p) => (
             <div className="row" key={p.k} title={p.why}>
               <i data-p={p.k} />
               <span className="t">{p.label}</span>

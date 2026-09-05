@@ -47,11 +47,14 @@ const FIXTURE_TEXT = new Set(
   [...fixtureSrc.matchAll(/(["'`])((?:[^"'`\\]|\\.)*?)\1/g)].map((m) => m[2]).filter((x) => /[一-鿿]/.test(x)),
 );
 const isFixture = (s) => s === "中文" || [...FIXTURE_TEXT].some((f) => f.includes(s) || s.includes(f));
-check("侧栏译成英文", await seen("Metrics"));
+// 判据认的是右栏各块自己的标题。原来认的三个（Metrics / Pending changes /
+// Agents and tools）在 src/ui 里已经一处都不剩，只活在词表里 —— 面板改过名，
+// 而判据没跟，于是这几条对着不存在的字红了很久。
+check("侧栏译成英文", await seen("Prefix cache"));
 check("标签页译成英文", await seen("Activity"));
 check("会话树译成英文", await seen("Workspaces"));
-check("面板译成英文", await seen("Pending changes"));
-check("代理面板译成英文", await seen("Agents and tools"));
+check("改动面板译成英文", await seen("Worktree changes"));
+check("外部服务面板译成英文", await seen("External services"));
 await page.screenshot({ path: `${SHOTS}/lang-en.png` });
 
 // 设置页：逐个分区看有没有漏译
@@ -124,7 +127,30 @@ await zh.addInitScript(() => localStorage.setItem("rx-lang", "zh"));
 await zh.goto(`${PAGE}?pref=zh`, { waitUntil: "networkidle" });
 await zh.waitForSelector(".app", { timeout: 20000 });
 await zh.waitForTimeout(700);
-check("切回中文", await zh.locator("text=运行指标").first().isVisible().catch(() => false));
+check("切回中文", await zh.locator("text=前缀缓存").first().isVisible().catch(() => false));
+
+// 上下文构成那五行是这条守卫最初红在的地方：表在模块作用域里就把 t() 求了值，
+// 而模块体先于 boot() 跑，于是标签把源语言冻住了，界面换了它们不换。翻的是标签，
+// 不是数据 —— 所以两边都读，一边要求全变，一边要求逐位不变。
+const legend = (pg) =>
+  pg.evaluate(() =>
+    [...document.querySelectorAll('[data-b="ctx"] .ctxlg .r')].map((r) => ({
+      label: r.querySelector(".t")?.textContent?.trim() ?? "",
+      value: r.querySelector("b")?.textContent?.trim() ?? "",
+    })),
+  );
+const enParts = await legend(page);
+const zhParts = await legend(zh);
+check("上下文构成读得到", enParts.length > 0 && enParts.length === zhParts.length,
+  `en ${enParts.length} 行 / zh ${zhParts.length} 行`);
+const han = /[一-鿿]/;
+check("英文窗口里这几行没有中文", enParts.every((p) => !han.test(p.label)),
+  enParts.map((p) => p.label).join(" / "));
+check("中文窗口里这几行是中文", zhParts.every((p) => han.test(p.label)),
+  zhParts.map((p) => p.label).join(" / "));
+check("换语言换的是标签，不是数据",
+  enParts.every((p, i) => p.value === zhParts[i]?.value),
+  enParts.map((p, i) => `${p.value}|${zhParts[i]?.value}`).join(" "));
 check("<html lang> 回到 zh-CN", (await zh.evaluate(() => document.documentElement.lang)) === "zh-CN");
 await zh.screenshot({ path: `${SHOTS}/lang-zh.png` });
 

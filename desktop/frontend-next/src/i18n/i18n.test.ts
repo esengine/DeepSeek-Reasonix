@@ -68,7 +68,11 @@ describe("English catalogue", () => {
   // session". Text between tags and text in a rendered attribute are the two
   // places that always reach the screen.
   it("routes rendered Chinese through the catalogue", () => {
-    const JSX_TEXT = />([^<>{}]*[一-鿿][^<>{}]*)</g;
+    // Not after "=": a fat arrow is not a tag opening, and an arrow returning
+    // Chinese before the next "<" in the file reads to this pattern as markup
+    // — which is a false positive on ordinary code, and a guard that cries on
+    // valid source is one people learn to edit around.
+    const JSX_TEXT = /(?<!=)>([^<>{}]*[一-鿿][^<>{}]*)</g;
     const ATTR = /\b(title|placeholder|aria-label|label|alt)="([^"]*[一-鿿][^"]*)"/g;
     const raw: string[] = [];
     for (const [file, body] of Object.entries(SOURCES)) {
