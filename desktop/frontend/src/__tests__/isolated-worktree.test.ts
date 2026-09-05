@@ -9,7 +9,6 @@ const source = (path: string) => readFileSync(resolve(dir, path), "utf8");
 const bridge = source("../lib/bridge.ts");
 const tree = source("../components/ProjectTree.tsx");
 const tabs = source("../components/TabBar.tsx");
-const app = source("../App.tsx");
 const badge = source("../components/WorktreeBadge.tsx");
 const forkAction = source("../lib/forkWorktree.ts");
 const message = source("../components/Message.tsx");
@@ -37,7 +36,8 @@ ok(/onCreateIsolatedWorktree\?\.\(workspaceRoot\)/.test(tree), "project menu del
 // in project-topic-lifecycle.test.tsx; callback location is not a contract.
 // desktop-navigation-lifecycle.test.tsx verifies the actual dirty-worktree notice.
 ok(/isolatedWorktree && <WorktreeBadge/.test(tabs), "tab strip identifies isolated worktrees");
-ok(/activeTab\?\.isolatedWorktree && <WorktreeBadge/.test(app), "topic bar identifies isolated worktrees");
+// topicbar-region.test.tsx mounts the real badge and verifies conditional identity,
+// accessible labeling and source-bound merge actions for isolated/ordinary topics.
 ok(/node\.isolatedWorktree && <WorktreeBadge/.test(tree), "project tree identifies isolated worktrees");
 ok(/GitBranch/.test(badge) && /#6119/.test(badge), "shared badge preserves the credited #6119 design contribution");
 ok(/bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkAction) && /makeMockForkBindings/.test(bridge) && !/async ForkWorktreeForTab\(tabID, turn\)/.test(bridge), "isolated conversation fork and browser mock use the extracted two-argument binding");

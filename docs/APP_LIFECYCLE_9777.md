@@ -141,6 +141,7 @@ of model switching or controller-profile rebuild ownership.
 
 | Former source assertion | Production behavior exercised |
 | --- | --- |
+| Worktree badge JSX inside App | `topicbar-region.test.tsx` mounts isolated/ordinary topics and verifies accessible badge visibility and source-bound merge actions |
 | Goal clear/mode JSX wiring | `goal-action-errors.test.tsx` mounts the real goal-command hook; failures are presented once |
 | Startup snapshot, warnings, failed startup, IM reload | `desktop-preferences-lifecycle.test.tsx` checks bridge calls, revision fencing, backend authority and disposal |
 | Onboarding model-access callback text | `onboarding-commands.test.tsx` checks actual overlay/dismissal state |

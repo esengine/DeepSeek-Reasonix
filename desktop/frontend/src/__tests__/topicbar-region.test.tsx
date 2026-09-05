@@ -32,6 +32,8 @@ try {
   assert.deepEqual([...document.querySelector("header")!.children].map(node => node.className),
     ["btn btn--small", "tooltip-trigger", "topicbar__identity", "topicbar__spacer", "topicbar__actions"], "region extraction adds no DOM wrapper");
   const action = document.querySelector(".topicbar__actions button");
+  assert.equal(document.querySelectorAll(".topicbar__subtitle .worktree-badge").length, 1);
+  assert.ok(document.querySelector(".worktree-badge")!.getAttribute("aria-label"), "isolated worktree identity is accessible");
   await click(".topicbar__title-button");
   await click(".topicbar__worktree-btn");
   await click(".topicbar__chrome-btn");
@@ -60,6 +62,9 @@ try {
   await act(async () => input.blur());
   assert.equal(calls.at(-1), "commit", "blur retains the existing rename commit contract");
   assert.equal(action, document.querySelector(".topicbar__actions button"), "title editing preserves action subtree identity");
+  await paint({ ...view, subtitle: { ...view.subtitle, worktreeTabId: undefined } });
+  assert.equal(document.querySelector(".worktree-badge"), null, "ordinary topics do not claim isolated worktree identity");
+  assert.equal(document.querySelector(".topicbar__worktree-btn"), null, "ordinary topics expose no worktree merge action");
   await act(async () => root.unmount());
   console.log("topicbar region: DOM structure, source commands, focus, rename keys and action identity passed");
 } finally { dom.window.close(); }

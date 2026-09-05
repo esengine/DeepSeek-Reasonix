@@ -105,6 +105,7 @@ Node 组件发现器统一加载 CSS 资源桩，不再维护易遗漏传递依�
 
 | 旧源码断言 | 实际生产行为验证 |
 | --- | --- |
+| WorktreeBadge 必须写在 App 的 JSX | `topicbar-region.test.tsx` 挂载隔离/普通会话，验证标识可达性、条件显隐和合并按钮的源 tab |
 | Goal 清理/模式 JSX | `goal-action-errors.test.tsx` 挂载真实命令 hook，失败只提示一次 |
 | 启动 snapshot、警告、失败默认值、IM 刷新 | `desktop-preferences-lifecycle.test.tsx` 验证 bridge 调用、revision、后端权威及卸载 |
 | 引导回调文本 | `onboarding-commands.test.tsx` 验证 overlay 与 dismissal 状态 |
