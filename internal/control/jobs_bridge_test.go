@@ -266,3 +266,62 @@ func TestUnappliedHostSteerKeepsHostAttribution(t *testing.T) {
 	}
 	t.Fatal("the unapplied host steer was not recorded at all")
 }
+
+// Display is persisted as the turn's RawContent and is what the pending queue
+// and the transcript render. Host markup there reads as something the user
+// typed — which is how rows of literal <background-jobs> filled the queue
+// panel until it had pushed the transcript off the screen.
+func TestBackgroundCompletionDisplayCarriesNoHostMarkup(t *testing.T) {
+	display, submit := backgroundCompletionTexts(backgroundJobEvent("task-7"))
+	if strings.ContainsAny(display, "<>") {
+		t.Errorf("display = %q, want no markup", display)
+	}
+	if !strings.Contains(display, "task-7") || !strings.Contains(display, string(jobs.Done)) {
+		t.Errorf("display = %q, want the job and its outcome", display)
+	}
+	if !strings.Contains(submit, "<background-jobs>") || !strings.Contains(submit, display) {
+		t.Errorf("submit = %q, want the tagged block around %q", submit, display)
+	}
+}
+
+// A failing build finishes thirty jobs in a few seconds. One turn per job is
+// thirty turns each reporting one of them, and thirty rows in a queue that has
+// no height of its own. While a continuation is still unread, later completions
+// stay in the manager's note and ride that turn's <background-jobs> block.
+func TestJobBurstFoldsIntoOneContinuation(t *testing.T) {
+	c, _, _ := newInboxDispatchController(t)
+	held := make(chan struct{}, 1)
+	c.inbox.mu.Lock()
+	c.inbox.beforeDispatchSubmit = func(string) error {
+		select {
+		case held <- struct{}{}:
+		default:
+		}
+		return errors.New("held for inspection")
+	}
+	c.inbox.scheduleDispatchRetry = func(time.Duration, func()) {}
+	c.inbox.mu.Unlock()
+
+	if err := c.OnJobCompletion(context.Background(), backgroundJobEvent("burst-1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first continuation never reached dispatch")
+	}
+	// An error is the contract with the manager: it keeps its own note, so the
+	// folded job still reaches the model on the turn the queued item starts.
+	for _, id := range []string{"burst-2", "burst-3"} {
+		if err := c.OnJobCompletion(context.Background(), backgroundJobEvent(id)); err == nil {
+			t.Fatalf("OnJobCompletion(%s) = nil, want a refusal so the note survives", id)
+		}
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := st.Snapshot().Items; len(items) != 1 {
+		t.Fatalf("queue has %d items, want 1 for a burst of three", len(items))
+	}
+}

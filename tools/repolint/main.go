@@ -180,6 +180,7 @@ func run(root string) ([]Finding, error) {
 	findings = append(findings, checkSpecParity(root)...)
 	findings = append(findings, checkBuildArtifacts(root)...)
 	findings = append(findings, wires.findings(root)...)
+	findings = append(findings, checkTransientTagParity(root)...)
 	parity, err := checkFrontendParity(root)
 	if err != nil {
 		return nil, err

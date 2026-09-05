@@ -616,7 +616,13 @@
   .qhold:hover:not(:disabled) { color: var(--text); border-color: var(--border) }
   .qhold:disabled { opacity: .45; cursor: default }
 
-  .qitems { display: grid; gap: 4px }
+  /* 队列有上限（64 条），这块地方没有。一次失败的构建能让三十多条续接同时排
+     在这里，而 .compose 是 flex: none —— 它要多高有多高，转录就被挤成零。
+     输入框不能被挤掉，转录也不能：所以长出去的那部分自己滚。 */
+  .qitems {
+    display: grid; gap: 4px;
+    max-height: min(30vh, 264px); overflow-y: auto; overscroll-behavior: contain;
+  }
   .qi {
     display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px;
     border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--raised);

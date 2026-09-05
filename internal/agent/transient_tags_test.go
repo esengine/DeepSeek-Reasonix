@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"reasonix/internal/provider"
 )
 
 // Every tag the host prepends must strip cleanly, whatever else precedes it.
@@ -70,5 +72,32 @@ func TestHasLeadingInjectedBlockIgnoresUserProse(t *testing.T) {
 	}
 	if hasLeadingInjectedBlock("<active-goal>\ng\n</active-goal>\n\nplain text", "reasoning-language") {
 		t.Fatal("walking past other blocks must not invent a target block")
+	}
+}
+
+// RawContent is meant to hold what a person typed, so UserMessageText used to
+// return it untouched. A host-authored turn writes its own composed text to the
+// same field, and the untouched path is what put literal <background-jobs>
+// markup in the transcript and the pending queue as if the user had sent it.
+func TestUserMessageTextStripsHostBlocksFromRawContent(t *testing.T) {
+	const said = "A background job you started has finished."
+	for _, tag := range TransientUserBlockTags {
+		t.Run(tag, func(t *testing.T) {
+			raw := "<" + tag + ">\njob-17 — failed\n</" + tag + ">\n\n" + said
+			got := UserMessageText(provider.Message{Role: provider.RoleUser, Content: raw, RawContent: raw})
+			if got != said {
+				t.Fatalf("UserMessageText = %q, want %q", got, said)
+			}
+		})
+	}
+}
+
+// What a person actually typed still comes back byte for byte, including prose
+// that merely mentions one of the tags.
+func TestUserMessageTextKeepsAuthoredRawContent(t *testing.T) {
+	const typed = "why does <background-jobs> show up in the queue?"
+	got := UserMessageText(provider.Message{Role: provider.RoleUser, Content: "wrapped", RawContent: typed})
+	if got != typed {
+		t.Fatalf("UserMessageText = %q, want %q", got, typed)
 	}
 }

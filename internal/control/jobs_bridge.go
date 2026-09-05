@@ -53,17 +53,40 @@ func (c *Controller) OnJobCompletion(_ context.Context, ev jobs.CompletionEvent)
 	if c.SessionPath() == "" {
 		return fmt.Errorf("control: session has no durable inbox")
 	}
-	text := backgroundCompletionPrompt(ev)
-	if text == "" {
+	// A burst is one interruption, not one per job: thirty failing jobs queued
+	// thirty turns. While a continuation is still unread, later completions stay
+	// in the manager's note and ride that turn's <background-jobs> block.
+	if c.hostContinuationPending() {
+		return fmt.Errorf("control: job %s folds into a queued continuation", ev.JobID)
+	}
+	display, submit := backgroundCompletionTexts(ev)
+	if submit == "" {
 		return fmt.Errorf("control: job %s produced no continuation", ev.JobID)
 	}
 	_, err := c.EnqueueHostContinuation(InboxRequest{
-		Display:     text,
-		Submit:      text,
+		Display:     display,
+		Submit:      submit,
 		Source:      hostContinuationSource,
 		Idempotency: ev.ID,
 	})
 	return err
+}
+
+// hostContinuationPending reports whether a runtime-authored continuation is
+// still waiting for a turn to read it. Consumed and running items are past
+// that point, so a completion arriving after one of those opens its own turn.
+func (c *Controller) hostContinuationPending() bool {
+	for _, it := range c.InboxSnapshot().Items {
+		if it.Source != hostContinuationSource {
+			continue
+		}
+		switch it.State {
+		case sessioninbox.StateQueued, sessioninbox.StateSteerAccepted,
+			sessioninbox.StateBlocked, sessioninbox.StateUncertain:
+			return true
+		}
+	}
+	return false
 }
 
 // EnqueueHostContinuation durably queues runtime-authored work and delivers it
@@ -90,20 +113,24 @@ func (c *Controller) EnqueueHostContinuation(req InboxRequest) (sessioninbox.Inb
 	return steered, nil
 }
 
-// backgroundCompletionPrompt is the host's own account of what finished. It
-// states the outcome and leaves to the model whether anything is unblocked.
-func backgroundCompletionPrompt(ev jobs.CompletionEvent) string {
+// backgroundCompletionTexts is the host's own account of what finished, in the
+// two forms it is read in. The model gets the tagged block; the queue row and
+// the transcript get the fact alone, because Display is persisted as the turn's
+// RawContent — one string for both is how <background-jobs> markup reached the
+// pending-queue rows as if the user had typed it.
+func backgroundCompletionTexts(ev jobs.CompletionEvent) (display, submit string) {
 	tag := ev.JobID
 	if ev.Label != "" {
 		tag = fmt.Sprintf("%s (%s)", ev.JobID, ev.Label)
 	}
 	if tag == "" {
-		return ""
+		return "", ""
 	}
+	display = fmt.Sprintf("%s — %s", tag, ev.Status)
 	var b strings.Builder
 	b.WriteString("<background-jobs>\n")
-	fmt.Fprintf(&b, "%s — %s\n", tag, ev.Status)
+	b.WriteString(display + "\n")
 	b.WriteString("</background-jobs>\n\n")
 	b.WriteString("A background job you started has finished. Read its result with wait or bash_output, then continue the work it was part of. Do not redo what it already did, and end the turn if nothing is left to do.")
-	return b.String()
+	return display, b.String()
 }

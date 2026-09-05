@@ -244,7 +244,10 @@ func StripPasteDisplayLabel(content string) string {
 // deterministic wrapper stripping.
 func UserMessageText(msg provider.Message) string {
 	if msg.RawContent != "" {
-		return strings.TrimSpace(msg.RawContent)
+		// Stripped here too: RawContent is meant to hold what a person typed,
+		// but a host-authored turn writes its own composed text to it, and
+		// returning that verbatim put <background-jobs> in the transcript.
+		return strings.TrimSpace(StripTransientUserBlocks(msg.RawContent))
 	}
 	return UserPreviewText(msg.Content)
 }

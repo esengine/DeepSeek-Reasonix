@@ -623,10 +623,15 @@ function withReceipt(items: Item[], r?: Receipt): Item[] {
   return [...items, { t: "receipt", id: nextId(), r }];
 }
 
-// The kernel wraps each user turn in control-plane blocks (language policy,
-// execution policy). They are instructions to the model, not something the
-// user said, so they never reach the transcript.
-const CONTROL = /<(reasoning-language|response-language|execution-policy)[\s\S]*?<\/\1>\s*/g;
+// The kernel wraps each user turn in control-plane blocks. They are
+// instructions to the model, not something the user said, so they never reach
+// the transcript. This list mirrors agent.TransientUserBlockTags by hand, and
+// naming a subset of it is how <background-jobs> rendered as a user message:
+// the same drift internal/history/strip.go records having had with five of
+// eleven. The server strips these before /history now — this is what covers
+// sessions already on disk.
+const CONTROL =
+  /<(reasoning-language|response-language|execution-policy|memory-update|background-jobs|active-goal|autoresearch-runtime|hook-context|available-skills|project-instructions|capability-route|interrupted-turn-recovery|workspace)[\s\S]*?<\/\1>\s*/g;
 const stripControl = (s: string) => s.replace(CONTROL, "").trim();
 
 // todo_write carries the plan as its payload; the panel needs it as state, not
