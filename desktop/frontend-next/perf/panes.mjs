@@ -10,7 +10,10 @@ const browser = await chromium.launch();
 const rows = [];
 
 for (const panes of [1, 2]) {
-  const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+// 判据里拿中文比 DOM，所以语种要钉住 —— 不钉就跟着运行环境走，在英文机器
+// 上红的是台架没说自己要哪一种语言。locale.mjs 一直是这么开页面的。
+  const ctx = await browser.newContext({ locale: "zh-CN", viewport: { width: 1600, height: 900 } });
+  const page = await ctx.newPage();
   const cdp = await page.context().newCDPSession(page);
   if (CPU > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU });
   await cdp.send("Performance.enable");

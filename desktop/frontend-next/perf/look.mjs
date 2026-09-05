@@ -14,7 +14,10 @@ const check = (name, ok, detail = "") => {
 };
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// 判据里拿中文比 DOM，所以语种要钉住 —— 不钉就跟着运行环境走，在英文机器
+// 上红的是台架没说自己要哪一种语言。locale.mjs 一直是这么开页面的。
+const ctx = await browser.newContext({ locale: "zh-CN", viewport: { width: 1440, height: 900 } });
+const page = await ctx.newPage();
 page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
 
 await page.goto(PAGE, { waitUntil: "networkidle" });

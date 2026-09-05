@@ -11,11 +11,32 @@ const check = (name, ok, detail = "") => {
 };
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1400, height: 950 } });
+// 判据里拿中文比 DOM，所以语种要钉住 —— 不钉就跟着运行环境走，在英文机器
+// 上红的是台架没说自己要哪一种语言。locale.mjs 一直是这么开页面的。
+const ctx = await browser.newContext({ locale: "zh-CN", viewport: { width: 1400, height: 950 } });
+const page = await ctx.newPage();
 page.on("pageerror", (e) => fails.push("页面异常: " + e.message));
 
+// 等不到也是这条守卫的结论，不是它退出的方式。抛出去的话退出码归 node，报的是
+// 一段栈 —— 而「这一屏不再长这样」正是它该说清楚的那一件事。
+const appear = async (sel, ms, what) => {
+  try {
+    await page.waitForSelector(sel, { timeout: ms });
+    return true;
+  } catch {
+    check(`${what}还在这条守卫认识的位置`, false, `等不到 ${sel}（${ms}ms）`);
+    return false;
+  }
+};
+
+const giveUp = async () => {
+  await browser.close();
+  console.log(`\n${fails.length} 项不合格:\n  ` + fails.join("\n  ") + "\n  这一屏的结构变了，先更新判据再谈通过");
+  process.exit(1);
+};
+
 await page.goto(PAGE, { waitUntil: "networkidle" });
-await page.waitForSelector(".app", { timeout: 20000 });
+if (!(await appear(".app", 20000, "工作台"))) await giveUp();
 
 await page.keyboard.press("Meta+Comma");
 await page.waitForTimeout(500);
@@ -29,7 +50,7 @@ await page.evaluate(() => {
   edit?.scrollIntoView({ block: "center" });
   edit?.click();
 });
-await page.waitForSelector(PANEL, { timeout: 5000 });
+if (!(await appear(PANEL, 5000, "连接的编辑面板"))) await giveUp();
 await page.evaluate(() => {
   [...document.querySelectorAll(".addp[data-edit] button")]
     .find((b) => b.textContent.trim() === "重新问一次有哪些模型")?.click();
