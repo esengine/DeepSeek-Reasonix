@@ -63,7 +63,11 @@ const (
 	// published only in the closing delta; the turn is then held open so the
 	// process still dies mid-turn.
 	fleetTerminalSentinel = "PROBE-FLEET-TERMINAL"
-	parallelSentinel      = "PROBE-PARALLEL"
+	// Named so it is not contained in PROBE-PARALLEL-IDENTITY. Sentinels are
+	// matched by substring, so one inside another dispatches a fan-out its arm
+	// never asked for — this pair silently ran cancelParallel in the identity
+	// arm, whose rows then read a scenario nobody wrote.
+	parallelSentinel      = "PROBE-PARALLEL-CANCEL"
 	fleetOutcomesSentinel = "PROBE-FLEET-OUTCOMES"
 	fleetDeriveSentinel   = "PROBE-FLEET-DERIVE"
 	fleetIdentitySentinel = "PROBE-FLEET-IDENTITY"
