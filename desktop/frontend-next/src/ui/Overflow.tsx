@@ -66,14 +66,21 @@ export function Overflow({ text, className }: { text: string; className?: string
   useEffect(() => {
     if (!open) return;
     const shut = () => setOpen(false);
-    const key = (e: KeyboardEvent) => e.key === "Escape" && shut();
+    // Capture, and stopped there — the convention useDismiss set. A transient
+    // surface owns Escape while it is up, and the window's own handler (which
+    // stops a turn, or leaves focus) must not also act on the same press.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      shut();
+    };
     addEventListener("scroll", shut, true);
     addEventListener("resize", shut);
-    addEventListener("keydown", key);
+    addEventListener("keydown", key, true);
     return () => {
       removeEventListener("scroll", shut, true);
       removeEventListener("resize", shut);
-      removeEventListener("keydown", key);
+      removeEventListener("keydown", key, true);
     };
   }, [open]);
 

@@ -43,12 +43,15 @@ interface Props {
   run: string;
   theme: string;
   onTheme: (t: string) => void;
+  // 临时观看状态，不是偏好：窗口决定它，这里只负责把开关画出来。
+  focus: boolean;
+  onFocus: () => void;
   onSettings: (section?: string) => void;
   account: AccountState | null;
   onChanged: () => void;
 }
 
-export function Chrome({ port, status, title, steer, run, theme, onTheme, onSettings, onChanged, account, host }: Props) {
+export function Chrome({ port, status, title, steer, run, theme, onTheme, onSettings, onChanged, account, host, focus, onFocus }: Props) {
   const root = status?.workspaceRoot || status?.cwd || "";
   const project = root ? base(root) : "—";
   // Only for the "隔离" tag: the folder list and the switch itself moved to the
@@ -125,6 +128,27 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
         </button>
         {/* Same class as the theme toggle on purpose: settings belongs in the
             icon cluster's weight class, not competing with the preset control. */}
+        {/* 进出都是这一枚。专注不是模式切换到别处去了，是同一个会话把外围收起来
+            —— 所以按钮留在原地，只换它说的话。 */}
+        <button
+          className="thbtn"
+          onClick={onFocus}
+          aria-pressed={focus}
+          aria-label={focus ? t("退出专注") : t("专注")}
+          title={focus ? t("退出专注") : t("专注：收起两侧的栏")}
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.3">
+            {focus ? (
+              <>
+                <path d="M6.4 2.2v4.2H2.2M9.6 2.2v4.2h4.2M6.4 13.8V9.6H2.2M9.6 13.8V9.6h4.2" />
+              </>
+            ) : (
+              <>
+                <path d="M2.2 6.4V2.2h4.2M13.8 6.4V2.2H9.6M2.2 9.6v4.2h4.2M13.8 9.6v4.2H9.6" />
+              </>
+            )}
+          </svg>
+        </button>
         <button className="thbtn" onClick={() => onSettings()} aria-label={t("设置")} title={`${t("设置")}　${chord(",")}`}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2" />

@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const GUARDS = ["verify", "look", "lang", "panels", "pick", "side", "models", "reason", "locale", "idle", "fold", "budget"];
+const GUARDS = ["verify", "look", "lang", "panels", "pick", "side", "models", "reason", "locale", "idle", "fold", "budget", "focus"];
 const rows = [];
 for (const g of GUARDS) {
   const path = `perf/${g}.mjs`;

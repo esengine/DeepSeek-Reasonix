@@ -705,6 +705,15 @@
   }
   .app[data-rail="off"] { --rail-w: 0px }
   .app[data-side="off"] { --side-w: 0px }
+  /* 专注：把外围收走，别的什么都不动。栏是收起不是卸载 —— 卸掉就丢了侧栏的滚
+     动位置和 Inspector 的展开，而这是个临时状态，退出后世界要跟进来时一模一样。
+     用的还是收起那条路（宽度归零、内容被裁掉），所以补间、边框、透明度全都沿用。 */
+  .app[data-focus="true"] { --rail-w: 0px; --side-w: 0px }
+  [data-focus="true"] .rail, [data-focus="true"] .side { opacity: 0; border: 0 }
+  /* 缝、把手、横过来那一档的标签：看不见的栏不该还留着能抓的边。 */
+  [data-focus="true"] .gutter-l, [data-focus="true"] .gutter-r, [data-focus="true"] .sidepeek { display: none }
+  /* 右栏在窄档是横在流下面的一整行，宽度归零对它没有意义。 */
+  [data-focus="true"][data-fold~="side"] .side { max-height: 0; border-top: 0 }
   .app[data-drag] { transition: none }
   .app[data-drag="pointer"] { user-select: none; cursor: col-resize }
   .app[data-drag="pointer"] * { cursor: col-resize }
@@ -2831,11 +2840,13 @@
      输入框最近的先让 —— 右栏在这一档已经横在流下面，它也是其中一份。 */
   [data-fold~="short"] .compose { --aux-budget: min(calc(26vh / var(--zoom, 1)), 190px) }
   [data-fold~="short"][data-fold~="side"] .side { max-height: calc(26vh / var(--zoom, 1)) }
-  /* 运行头收成一行：说明和时间戳是第二眼才读的，标题和状态记号不是。 */
-  [data-fold~="short"] .runhead { margin-top: 8px; padding: 9px 12px 10px; gap: 10px }
-  [data-fold~="short"] .runhead .sub, [data-fold~="short"] .runhead .at { display: none }
-  [data-fold~="short"] .runhead .tile { min-width: 62px; padding: 4px 9px 5px }
-  [data-fold~="short"] .runhead .tile dd { font-size: 12.5px }
+  /* 运行头收成一行：说明和时间戳是第二眼才读的，标题和状态记号不是。同一套规则
+     两个来源 —— 窗口矮，或者人要求专注。两套 header 会漂，一套不会。 */
+  [data-fold~="short"] .runhead, [data-focus="true"] .runhead { margin-top: 8px; padding: 9px 12px 10px; gap: 10px }
+  [data-fold~="short"] .runhead .sub, [data-focus="true"] .runhead .sub,
+  [data-fold~="short"] .runhead .at, [data-focus="true"] .runhead .at { display: none }
+  [data-fold~="short"] .runhead .tile, [data-focus="true"] .runhead .tile { min-width: 62px; padding: 4px 9px 5px }
+  [data-fold~="short"] .runhead .tile dd, [data-focus="true"] .runhead .tile dd { font-size: 12.5px }
 
   /* ── 首次引导：一屏，一件事 ──────────────────────────────────────── */
   /* 连接卡片长在开场场景里，不另起一屏：介绍语收在上方仍然在场。所以这里

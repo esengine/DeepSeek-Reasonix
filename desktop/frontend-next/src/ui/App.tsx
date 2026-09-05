@@ -81,6 +81,11 @@ export function App({ hub }: { hub: HubPort }) {
       return next;
     });
   }, []);
+  // 三层所有权，只在用的地方相乘：wanted（用户的选择，rail 在 useFoldAway 的
+  // 记忆里、side 还在盘上）、allowed（当前视口，useFoldAway 管）、focus（临时
+  // 观看状态）。focus 绝不调 setRail/chooseSide —— 那会把临时状态写回偏好，退
+  // 出后就恢复不了了。它也不存盘：重开一次窗口不该还在专注里。
+  const [focus, setFocus] = useState(false);
   const [railW, setRailW] = useState(() => widthOf(RAIL));
   const [sideW, setSideW] = useState(() => widthOf(SIDE));
   const [report, setReport] = useState<PaneReport>(NO_REPORT);
@@ -418,7 +423,15 @@ export function App({ hub }: { hub: HubPort }) {
       // Escape stops the turn you are looking at, not every live turn in the
       // window — the other panes are someone else's work in progress. A pane
       // over that turn owns the press first: closing it is not stopping it.
-      if (e.key === "Escape" && running && !settings) activePort?.cancel();
+      // Anything transient above this — a menu, a picker, the overflow bubble —
+      // takes the press in the capture phase and stops it there (see
+      // useDismiss), so a press that reaches this listener is one nothing else
+      // wanted. Leaving focus is last: stopping a turn is the more urgent of
+      // the two, and doing both on one press would be neither.
+      if (e.key === "Escape" && !settings) {
+        if (running) activePort?.cancel();
+        else setFocus(false);
+      }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
@@ -517,6 +530,7 @@ export function App({ hub }: { hub: HubPort }) {
       data-run={report.run}
       data-rail={rail ? "on" : "off"}
       data-side={side ? "on" : "off"}
+      data-focus={focus ? "true" : undefined}
       data-plan={report.status?.plan ? "on" : "off"}
       data-apv={report.status?.toolApprovalMode ?? "ask"}
       data-prefs={settings ? "" : undefined}
@@ -537,6 +551,8 @@ export function App({ hub }: { hub: HubPort }) {
         onSettings={showPrefs}
         onChanged={onSessionSettingChanged}
         account={account}
+        focus={focus}
+        onFocus={() => setFocus((v) => !v)}
       />
 
       {pack?.sky && <Sky />}
@@ -547,7 +563,10 @@ export function App({ hub }: { hub: HubPort }) {
           onGo={showPrefs}
           onHome={hidePrefs}
         />
-        <div className="rail">
+        {/* 收起而不是卸载：卸掉就丢了侧栏的滚动位置、Inspector 的展开、当前选
+            中的面板。inert 是「看不见就够不着」那一半 —— 只做视觉隐藏的话，
+            屏幕上没有的栏还能被 Tab 走进去。 */}
+        <div className="rail" inert={focus}>
           <div className="railscroll">
           <Workspaces
             hub={hub}
@@ -686,7 +705,7 @@ export function App({ hub }: { hub: HubPort }) {
           </span>
         </button>
 
-        <div className="side" ref={setSideHost} />
+        <div className="side" ref={setSideHost} inert={focus} />
       </div>
 
       {settings && activePort && (
