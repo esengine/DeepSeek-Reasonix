@@ -156,7 +156,7 @@ Plan 修订由独立的源会话队列 owner 管理，仅原请求可释放其�
 当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调及其余
 App 领域仍需继续迁移。
 
-- App 仍3466行（30→25 个 effect）；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。已迁出：模块级代码（标题/topic 纯函数 `lib/sessionTitles.ts`、mock 场景 `lib/mockScenarios.ts`、todo 折叠持久化 `lib/todoDismissalStorage.ts`、通知预览 `app-shell/NoticePreviewPanel.tsx`、Shell/文本尺寸热键 `app-shell/HotkeyRegistrations.tsx`）；窗口 chrome 生命周期（平台类型与探测下沉 `lib/desktopPlatform.ts`，`app-shell/NativeWindowChrome.tsx` 删除；platform/viewport 状态进 `store/windowChrome.ts`，data-platform 属性、平台探测、resize、sidebar/dock 最小宽度守卫五个 effect 迁入 `app-runtime/WindowChromeLifecycle.tsx`）。footer ResizeObserver、三个 pointer resize 生命周期与 maximised 同步仍随后续 chrome/footer 区域切片迁移。全部浏览器回放与生命周期测试通过。
+- App 仍3157行（25→23 个 effect）；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。已迁出：模块级代码（`lib/sessionTitles.ts`、`lib/mockScenarios.ts`、`lib/todoDismissalStorage.ts`、`app-shell/NoticePreviewPanel.tsx`、`app-shell/HotkeyRegistrations.tsx`）；窗口 chrome（`lib/desktopPlatform.ts`、`store/windowChrome.ts`、`app-runtime/WindowChromeLifecycle.tsx`，NativeWindowChrome 删除）；shell 几何（sidebar/right-dock/terminal 三个 pointer+键盘 resize、toggleSidebar/pulse/anchor 与全部宽度投影迁入 `app-runtime/useShellGeometry.ts`；拖拽瞬态状态 sidebarResizing/live 宽度/liveTerminalHeight/togglePressed 进 `store/layout.ts`；原 #5 flush、#7 timer 清理 effect 删除）。footer ResizeObserver、activeTabIdRef 与 maximised 同步仍随后续区域切片迁移。全部浏览器回放与生命周期测试通过。
 - 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
   Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
   head 或原生平台验收。

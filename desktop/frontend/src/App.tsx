@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { useManagementWorkspace } from "./lib/useManagementWorkspace";
 import { useAppNavigationStore } from "./store/appNavigation";
 import { useAutomationNavigation } from "./app-runtime/useAutomationNavigation";
@@ -127,29 +127,13 @@ import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
 import {
-  CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH,
-  CREATION_RIGHT_DOCK_TREE_MIN_WIDTH,
-  CREATION_SIDEBAR_MIN_WIDTH,
-  RIGHT_DOCK_MIN_RENDER_WIDTH,
-  RIGHT_DOCK_TREE_MIN_WIDTH,
   SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH,
   TERMINAL_DEFAULT_HEIGHT,
   TERMINAL_MIN_HEIGHT,
-  clampCreationRightDockTreeWidth,
-  clampCreationSidebarWidth,
-  clampRightDockTreeWidth,
-  clampSidebarWidth,
-  clampTerminalHeight,
   defaultCreationRightDockTreeWidth,
   defaultCreationSidebarWidth,
   defaultRightDockTreeWidth,
   defaultSidebarWidth,
-  saveRightDockTreeWidth,
-  saveSidebarCollapsed,
-  saveSidebarWidth,
-  saveTerminalHeight,
-  terminalMaxHeight,
   useLayoutStore,
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
@@ -175,8 +159,7 @@ import { loadDismissedTodoKeys, saveDismissedTodoKeys } from "./lib/todoDismissa
 import { NoticePreviewPanel, noticePreviewMockEnabled } from "./app-shell/NoticePreviewPanel";
 import { ShellHotkeys, TextSizeHotkeys } from "./app-shell/HotkeyRegistrations";
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
-import { availableWorkspacePanelWidth, resolveLiveWorkspacePanelWidth, resolveWorkspacePanelPlacement, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
-import { createPointerResizeLifecycle, createRafResizeUpdater } from "./lib/resizeDrag";
+import { workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { formatShortcutCombo, resolvedShortcutCombo, useGlobalShortcut } from "./lib/keyboardShortcuts";
 import { useWarmTerminalPanel } from "./lib/useWarmTerminalPanel";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
@@ -198,6 +181,7 @@ import { SidebarRegion } from "./app-shell/SidebarRegion";
 import { isMacOSWorkbenchSidebarTitlebar } from "./lib/desktopPlatform";
 import { useWindowChromeStore } from "./store/windowChrome";
 import { WindowChromeLifecycle } from "./app-runtime/WindowChromeLifecycle";
+import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
 import {
   sidebarImScopeLabel,
@@ -237,7 +221,7 @@ function lazyNavigateWorkspace(
 ) {
   return loadNavigationOwner().then(({ navigateWorkspace }) => navigateWorkspace(path, ports));
 }
-const CHAT_MIN_WIDTH = 400;
+
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function isThemeMode(value: string): value is Theme {
@@ -367,7 +351,6 @@ export default function App() {
   const setPaletteSessions = useOverlayStore((s) => s.setPaletteSessions);
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
-  const setSidebarCollapsed = useLayoutStore((s) => s.setSidebarCollapsed);
   type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
   const [topicTimeFilter, setTopicTimeFilter] = useState<TimeFilter>(() => {
     try {
@@ -379,20 +362,14 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem("projectTree:timeFilter", topicTimeFilter); } catch { /* ignore */ }
   }, [topicTimeFilter]);
-  const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
-  const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
-  const [sidebarResizing, setSidebarResizing] = useState(false);
+  const sidebarResizing = useLayoutStore((state) => state.sidebarResizing);
   const [tasksOpen, setTasksOpen] = useState<false | "session" | "all">(false);
   const [takeoverDialogTab, setTakeoverDialogTab] = useState<string | null>(null);
   const [reclaimBusyTab, setReclaimBusyTab] = useState<string | null>(null);
-  const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null);
-  const viewportWidth = useWindowChromeStore((state) => state.viewportWidth);
-  const viewportHeight = useWindowChromeStore((state) => state.viewportHeight);
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
   const rightDockPreviewWidth = useLayoutStore((s) => s.rightDockPreviewWidth);
-  const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const attentionChimeEvents = useRef(new Set<string>());
   const workspaceScopeActiveTabRef = useRef(activeTabId);
   const [workspaceControllerEpoch, setWorkspaceControllerEpoch] = useState(0);
@@ -404,16 +381,14 @@ export default function App() {
     });
   }, [activeTabId, tabMetas.length]);
 
-  const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
-  const [liveWorkspacePanelRenderWidth, setLiveWorkspacePanelRenderWidth] = useState<number | null>(null);
-  const [liveTerminalHeight, setLiveTerminalHeight] = useState<number | null>(null);
+  const workspacePanelResizing = useLayoutStore((state) => state.workspacePanelResizing);
+  const liveTerminalHeight = useLayoutStore((state) => state.liveTerminalHeight);
+  const setLiveWorkspacePanelRenderWidth = useLayoutStore((state) => state.setLiveWorkspacePanelRenderWidth);
   const terminalResizing = liveTerminalHeight !== null;
   const workspacePanelMaximized = useLayoutStore((s) => s.workspacePanelMaximized);
   const rightDockMode = useLayoutStore((s) => s.rightDockMode);
   const terminalPanelOpen = useLayoutStore((s) => s.terminalPanelOpen);
   const { mounted: terminalContentVisible, fitEnabled: terminalFitEnabled, prefetch: prefetchTerminalPanel } = useWarmTerminalPanel(terminalPanelOpen, terminalResizing, !managementActive);
-  const terminalHeight = useLayoutStore((s) => s.terminalHeight);
-  const setTerminalHeight = useLayoutStore((s) => s.setTerminalHeight);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [fileRefRefreshKey, setFileRefRefreshKey] = useState(0);
   const refreshComposerFileRefs = useCommittedCommand(() => setFileRefRefreshKey((value) => value + 1));
@@ -442,7 +417,7 @@ export default function App() {
 
   const sidebarSearchFocusSignal = useOverlayStore((s) => s.sidebarSearchFocusSignal);
   const setSidebarSearchFocusSignal = useOverlayStore((s) => s.setSidebarSearchFocusSignal);
-  const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
+  const sidebarTogglePressed = useLayoutStore((state) => state.sidebarTogglePressed);
   const [clearContextPending, setClearContextPending] = useState(false);
   const [pendingClose, setPendingClose] = useState<{ tabId: string; work: ActiveWorkView; stopping: boolean } | null>(null);
   const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
@@ -451,13 +426,10 @@ export default function App() {
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   useManagementWorkspace(layoutRef, managementActive);
-  const workspacePanelResizeFinishRef = useRef<(() => void) | null>(null);
-  const sidebarTogglePressTimerRef = useRef<number | null>(null);
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
   useViewportHeightVar();
-  useEffect(() => () => workspacePanelResizeFinishRef.current?.(), []);
 
   const { backgroundRuntimes, workspaceConflict, setWorkspaceConflict, refreshBackgroundRuntimes } = useRuntimeStatus({
     tabId: activeTabId, sessionKey: activeSessionIdentity, running: state.running,
@@ -481,38 +453,6 @@ export default function App() {
     setSettingsFocus({ target: "bot-allowlist", connectionId });
     setSettingsTarget("bots");
   });
-
-  const pulseSidebarToggle = useCommittedCommand(() => {
-    if (typeof window === "undefined") return;
-    if (sidebarTogglePressTimerRef.current !== null) {
-      window.clearTimeout(sidebarTogglePressTimerRef.current);
-    }
-    setSidebarTogglePressed(true);
-    sidebarTogglePressTimerRef.current = window.setTimeout(() => {
-      sidebarTogglePressTimerRef.current = null;
-      setSidebarTogglePressed(false);
-    }, 260);
-  });
-
-  const anchorAppScrollToChat = useCommittedCommand(() => {
-    if (typeof window === "undefined") return;
-    const el = appRef.current;
-    if (!el) return;
-    const pin = () => {
-      el.scrollLeft = 0;
-    };
-    pin();
-    window.requestAnimationFrame(pin);
-    window.setTimeout(pin, 300);
-  });
-
-  useEffect(() => {
-    return () => {
-      if (sidebarTogglePressTimerRef.current !== null) {
-        window.clearTimeout(sidebarTogglePressTimerRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     setSidebarImDetailConnectionId((current) => {
@@ -558,52 +498,15 @@ export default function App() {
       return { ...current, [sourceTabId]: metadata };
     });
   });
-  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
-  // The dock keeps one width across tab switches (context/files/changed):
-  // the tree width is the single source so toggling tabs never resizes the
-  // sidebar. Preview detail stays inside the dock without widening it.
-  const preferredWorkspacePanelWidth = rightDockTreeWidth;
-  const rightDockTreeMinWidth = desktopLayoutStyle === "creation" ? CREATION_RIGHT_DOCK_TREE_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
-  const rightDockTreeWidthClamp = desktopLayoutStyle === "creation" ? clampCreationRightDockTreeWidth : clampRightDockTreeWidth;
-  const rightDockMinRenderWidth = desktopLayoutStyle === "creation" && !rightDockDetailActive
-    ? CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH
-    : RIGHT_DOCK_MIN_RENDER_WIDTH;
-  const workspacePanelMinWidth = rightDockTreeMinWidth;
-  const chatReservedWidth = CHAT_MIN_WIDTH;
-  const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
-    viewportWidth,
-    sidebarCollapsed,
-    sidebarWidth,
-    chatMinWidth: chatReservedWidth,
-    resizerWidth: WORKSPACE_RESIZER_WIDTH,
-  });
   const {
-    renderWidth: workspacePanelRenderWidth,
-    overlay: workspacePanelOverlay,
-    // The automation page fills the main content area; the workbench dock must
-    // not overlay it. main-v2 keeps automation as a popup so its placement
-    // helper has no view concept — apply the exclusion here on top.
-    renderable: workspacePanelRenderable,
-    gridOpen: workspacePanelGridOpen,
-  } = resolveWorkspacePanelPlacement({
-    viewportWidth, sidebarCollapsed, sidebarWidth, chatMinWidth: chatReservedWidth,
-    resizerWidth: WORKSPACE_RESIZER_WIDTH, open: workspacePanelOpen,
-    maximized: workspacePanelMaximized, preferredWidth: preferredWorkspacePanelWidth,
-    minWidth: workspacePanelMinWidth, minRenderWidth: rightDockMinRenderWidth,
-    liveWidth: liveWorkspacePanelRenderWidth,
-  });
-  const resolveLiveWorkspacePanelRenderWidth = useCommittedCommand((preferredWidth: number, nextSidebarWidth = sidebarWidth) =>
-      resolveLiveWorkspacePanelWidth({
-        viewportWidth,
-        sidebarCollapsed,
-        sidebarWidth: nextSidebarWidth,
-        chatMinWidth: chatReservedWidth,
-        resizerWidth: WORKSPACE_RESIZER_WIDTH,
-        open: workspacePanelOpen,
-        maximized: workspacePanelMaximized,
-        preferredWidth,
-        minWidth: workspacePanelMinWidth,
-      }));
+    toggleSidebar, setExpandedSidebarWidth, startSidebarResize, resizeSidebarWithKeyboard,
+    setSavedWorkspacePanelWidth, ensureWorkspacePanelWidth, startWorkspacePanelResize, resizeWorkspacePanelWithKeyboard,
+    setSavedTerminalHeight, startTerminalResize, resizeTerminalWithKeyboard,
+    rightDockTreeWidthClamp, workspacePanelMinWidth, chatReservedWidth,
+    workspacePanelAvailableWidth, workspacePanelRenderWidth, workspacePanelOverlay, workspacePanelRenderable,
+    workspacePanelGridOpen, sidebarRenderWidth, sidebarResizeMinWidth,
+    terminalRenderHeight, terminalResizeMaxHeight,
+  } = useShellGeometry({ appRef, layoutRef });
 
   // Remote tab became ready: refresh the tab list so the spectator banner
   // (takenOver) renders. The agent:ready event only fires for local tabs;
@@ -1453,218 +1356,6 @@ export default function App() {
       observer.disconnect();
     };
   }, []);
-
-  const toggleSidebar = useCommittedCommand(() => {
-    closeTransientOverlays();
-    pulseSidebarToggle();
-    anchorAppScrollToChat();
-    const nextCollapsed = !sidebarCollapsed;
-    if (nextCollapsed) setSidebarSearchOpen(false);
-    setSidebarCollapsed(nextCollapsed);
-    saveSidebarCollapsed(nextCollapsed);
-  });
-
-  const sidebarWidthClamp = desktopLayoutStyle === "creation" ? clampCreationSidebarWidth : clampSidebarWidth;
-  const sidebarRenderWidth = liveSidebarWidth ?? sidebarWidth;
-  const sidebarResizeMinWidth = desktopLayoutStyle === "creation" ? CREATION_SIDEBAR_MIN_WIDTH : SIDEBAR_MIN_WIDTH;
-
-
-  const setExpandedSidebarWidth = useCommittedCommand((width: number) => {
-    closeTransientOverlays();
-    const next = sidebarWidthClamp(width);
-    setSidebarWidth(next);
-    saveSidebarWidth(next);
-  });
-
-  const startSidebarResize = useCommittedCommand((event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (sidebarCollapsed) return;
-      const layout = layoutRef.current;
-      if (!layout) return;
-      event.preventDefault();
-      closeTransientOverlays();
-      setSidebarResizing(true);
-      let nextWidth = sidebarWidth;
-      const liveResize = createRafResizeUpdater({
-        target: layout,
-        separator: event.currentTarget,
-        cssVar: "--sidebar-expanded-width",
-        onApply: setLiveSidebarWidth,
-      });
-      const dockLiveResize = createRafResizeUpdater({
-        target: layout,
-        cssVar: "--workspace-width",
-        onApply: setLiveWorkspacePanelRenderWidth,
-      });
-      const onMove = (moveEvent: PointerEvent) => {
-        nextWidth = sidebarWidthClamp(moveEvent.clientX);
-        liveResize.schedule(nextWidth);
-        dockLiveResize.schedule(resolveLiveWorkspacePanelRenderWidth(preferredWorkspacePanelWidth, nextWidth));
-      };
-      const onDone = () => {
-        liveResize.flush();
-        dockLiveResize.flush();
-        setSidebarWidth(nextWidth);
-        saveSidebarWidth(nextWidth);
-        setLiveSidebarWidth(null);
-        setLiveWorkspacePanelRenderWidth(null);
-        setSidebarResizing(false);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onDone);
-        window.removeEventListener("pointercancel", onDone);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onDone);
-      window.addEventListener("pointercancel", onDone);
-    });
-
-  const resizeSidebarWithKeyboard = useCommittedCommand((event: KeyboardEvent<HTMLButtonElement>) => {
-      if (sidebarCollapsed) return;
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        setExpandedSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setExpandedSidebarWidth(sidebarResizeMinWidth);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setExpandedSidebarWidth(SIDEBAR_MAX_WIDTH);
-      }
-    });
-
-  const setSavedWorkspacePanelWidth = useCommittedCommand((width: number) => {
-      closeTransientOverlays();
-      const next = rightDockTreeWidthClamp(width, workspacePanelAvailableWidth);
-      setRightDockTreeWidth(next);
-      saveRightDockTreeWidth(next);
-    });
-
-  const ensureWorkspacePanelWidth = useCommittedCommand((width: number) => {
-      closeTransientOverlays();
-      if (rightDockMode === "context") return;
-      const next = rightDockTreeWidthClamp(width, workspacePanelAvailableWidth);
-      setRightDockTreeWidth(next);
-      saveRightDockTreeWidth(next);
-    });
-
-  const startWorkspacePanelResize = useCommittedCommand((event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0 || !workspacePanelOpen) return;
-      const layout = layoutRef.current;
-      if (!layout) return;
-      event.preventDefault();
-      workspacePanelResizeFinishRef.current?.();
-      closeTransientOverlays();
-      setWorkspacePanelResizing(true);
-      const separator = event.currentTarget;
-      const pointerId = event.pointerId;
-      const startX = event.clientX;
-      const startDockWidth = workspacePanelRenderWidth;
-      let nextDockWidth = startDockWidth;
-      const liveResize = createRafResizeUpdater({
-        target: layout,
-        separator,
-        cssVar: "--workspace-width",
-        onApply: setLiveWorkspacePanelRenderWidth,
-      });
-      const onMove = (moveEvent: PointerEvent) => {
-        const delta = moveEvent.clientX - startX;
-        nextDockWidth = startDockWidth - delta;
-        nextDockWidth = rightDockTreeWidthClamp(nextDockWidth, workspacePanelAvailableWidth);
-        liveResize.schedule(resolveLiveWorkspacePanelRenderWidth(nextDockWidth));
-      };
-      const lifecycle = createPointerResizeLifecycle({
-        separator,
-        pointerId,
-        onMove,
-        onFinish: () => {
-          liveResize.flush();
-          setSavedWorkspacePanelWidth(nextDockWidth);
-          setLiveWorkspacePanelRenderWidth(null);
-          setWorkspacePanelResizing(false);
-          workspacePanelResizeFinishRef.current = null;
-          document.body.style.cursor = "";
-          document.body.style.userSelect = "";
-        },
-      });
-      workspacePanelResizeFinishRef.current = lifecycle.finish;
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-    });
-
-  const resizeWorkspacePanelWithKeyboard = useCommittedCommand((event: KeyboardEvent<HTMLButtonElement>) => {
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockTreeMinWidth);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setSavedWorkspacePanelWidth(workspacePanelAvailableWidth);
-      }
-    });
-
-  const terminalRenderHeight = clampTerminalHeight(terminalHeight, viewportHeight);
-  const terminalResizeMaxHeight = terminalMaxHeight(viewportHeight);
-  const setSavedTerminalHeight = useCommittedCommand((height: number) => {
-      const next = clampTerminalHeight(height, viewportHeight);
-      setTerminalHeight(next);
-      saveTerminalHeight(next);
-    });
-
-  const startTerminalResize = useCommittedCommand((event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (!terminalPanelOpen) return;
-      const layout = layoutRef.current;
-      if (!layout) return;
-      event.preventDefault();
-      closeTransientOverlays();
-      const startY = event.clientY;
-      const startHeight = terminalRenderHeight;
-      let nextHeight = startHeight;
-      const liveResize = createRafResizeUpdater({
-        target: layout,
-        separator: event.currentTarget,
-        cssVar: "--terminal-height",
-        onApply: setLiveTerminalHeight,
-      });
-      const onMove = (moveEvent: PointerEvent) => {
-        const delta = startY - moveEvent.clientY;
-        nextHeight = clampTerminalHeight(startHeight + delta, viewportHeight);
-        liveResize.schedule(nextHeight);
-      };
-      const onDone = () => {
-        liveResize.flush();
-        setLiveTerminalHeight(null);
-        setSavedTerminalHeight(nextHeight);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onDone);
-        window.removeEventListener("pointercancel", onDone);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-      document.body.style.cursor = "row-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onDone);
-      window.addEventListener("pointercancel", onDone);
-    });
-
-  const resizeTerminalWithKeyboard = useCommittedCommand((event: KeyboardEvent<HTMLButtonElement>) => {
-      if (!terminalPanelOpen) return;
-      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-        event.preventDefault();
-        setSavedTerminalHeight(terminalRenderHeight + (event.key === "ArrowUp" ? 16 : -16));
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        setSavedTerminalHeight(TERMINAL_MIN_HEIGHT);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        setSavedTerminalHeight(terminalResizeMaxHeight);
-      }
-    });
 
   const { openRightDockMode, closeWorkspacePanel, toggleWorkspacePanel, toggleWorkspaceMaximized,
     handleWorkspacePreviewModeChange, openRemoteDock } = useWorkspacePanelCommands({

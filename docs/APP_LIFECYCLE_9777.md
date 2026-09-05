@@ -195,19 +195,19 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 3,466 lines (30 -> 25 effects). Six domain owners, remaining
+- App is still 3,157 lines (25 -> 23 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
-  Already moved out: module-level code (title/topic helpers
-  `lib/sessionTitles.ts`, browser mock scenarios `lib/mockScenarios.ts`, todo
-  dismissal persistence `lib/todoDismissalStorage.ts`, the notice preview seam
-  `app-shell/NoticePreviewPanel.tsx`, Shell/text-size hotkey registrations
-  `app-shell/HotkeyRegistrations.tsx`) and the window-chrome lifecycle
-  (platform type/detection now in `lib/desktopPlatform.ts`,
-  `app-shell/NativeWindowChrome.tsx` deleted; platform/viewport state in
-  `store/windowChrome.ts`; the data-platform attribute, platform probe,
-  viewport resize and both layout minimum-width guard effects now live in
-  `app-runtime/WindowChromeLifecycle.tsx`). The footer ResizeObserver, the
-  three pointer-resize lifecycles and the maximised sync remain for the
+  Already moved out: module-level code (`lib/sessionTitles.ts`,
+  `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
+  `app-shell/NoticePreviewPanel.tsx`, `app-shell/HotkeyRegistrations.tsx`);
+  the window-chrome lifecycle (`lib/desktopPlatform.ts`,
+  `store/windowChrome.ts`, `app-runtime/WindowChromeLifecycle.tsx`,
+  NativeWindowChrome deleted); and shell geometry - the sidebar/right-dock/
+  terminal pointer and keyboard resize lifecycles, toggleSidebar/pulse/anchor
+  and every width projection now live in `app-runtime/useShellGeometry.ts`,
+  with the transient drag state (resizing flags, live widths, toggle-pressed)
+  on `store/layout.ts`; the old flush and timer-cleanup effects are gone. The
+  footer ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App
   lifecycle and browser replays all pass.
 - The old goal assertions and remote JSX assertions now have behavioral
