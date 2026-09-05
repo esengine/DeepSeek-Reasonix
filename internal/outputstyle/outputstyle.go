@@ -153,7 +153,7 @@ func parseFile(path string) (OutputStyle, bool) {
 	if err != nil {
 		return OutputStyle{}, false
 	}
-	meta, body := frontmatter.Split(string(b))
+	meta, body := frontmatter.SplitLegacy(string(b))
 	name := meta["name"]
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(path), ".md")

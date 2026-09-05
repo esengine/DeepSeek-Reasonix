@@ -806,7 +806,7 @@ func (s Store) scopeForPath(path string) FactScope {
 // splitFrontmatter is a thin wrapper; the real parser lives in
 // internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	return frontmatter.Split(s)
+	return frontmatter.SplitLegacy(s)
 }
 
 // slugRe strips everything but Unicode letters and digits.

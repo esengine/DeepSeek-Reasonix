@@ -574,7 +574,7 @@ type SkillFileOptions struct {
 // yaml.v3 so free-text fields with colons, '#', quotes, or newlines are
 // escaped correctly instead of corrupting the block — an unparseable
 // frontmatter would make the loader fall back to an EMPTY field map, silently
-// resetting runAs to inline and invocation to auto (see frontmatter.Split).
+// resetting runAs to inline and invocation to auto (see frontmatter.SplitLegacy).
 type skillFileFrontmatter struct {
 	Name         string   `yaml:"name"`
 	Description  string   `yaml:"description"`

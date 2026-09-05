@@ -198,7 +198,7 @@ func parseSkillContent(content, fallbackName, source string, strict bool) (skill
 	if err != nil {
 		return skillCandidate{}, newErr(ErrInvalidManifest, "skill frontmatter at %s is invalid YAML: %v", source, err)
 	}
-	fm, _ := frontmatter.Split(content)
+	fm, _ := frontmatter.SplitLegacy(content)
 	name := strings.TrimSpace(fallbackName)
 	if v := strings.TrimSpace(meta.Name); v != "" {
 		name = v

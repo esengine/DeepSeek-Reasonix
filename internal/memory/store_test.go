@@ -14,7 +14,7 @@ import (
 // TestRenderEscapesYAMLMetacharacters pins the frontmatter-corruption fix: a
 // title or description with YAML metacharacters must survive a save→load
 // round-trip. The previous hand-concatenated renderer produced unparseable
-// YAML for "Plan: step one"-style titles; frontmatter.Split then returned an
+// YAML for "Plan: step one"-style titles; frontmatter.SplitLegacy then returned an
 // empty map and the reloaded memory silently lost its name, title, and type.
 func TestRenderEscapesYAMLMetacharacters(t *testing.T) {
 	cases := []struct {

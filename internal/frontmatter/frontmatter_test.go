@@ -6,7 +6,7 @@ import (
 )
 
 func TestSplitNoFence(t *testing.T) {
-	fm, body := Split("just body text\nno fence")
+	fm, body := SplitLegacy("just body text\nno fence")
 	if len(fm) != 0 {
 		t.Errorf("expected empty fm, got %v", fm)
 	}
@@ -16,7 +16,7 @@ func TestSplitNoFence(t *testing.T) {
 }
 
 func TestSplitUnclosedFence(t *testing.T) {
-	fm, body := Split("---\nkey: val\n\nno closing fence")
+	fm, body := SplitLegacy("---\nkey: val\n\nno closing fence")
 	if len(fm) != 0 {
 		t.Errorf("unclosed fence should return empty fm, got %v", fm)
 	}
@@ -26,7 +26,7 @@ func TestSplitUnclosedFence(t *testing.T) {
 }
 
 func TestSplitEmptyBody(t *testing.T) {
-	fm, body := Split("---\nkey: val\n---\n")
+	fm, body := SplitLegacy("---\nkey: val\n---\n")
 	if fm["key"] != "val" {
 		t.Errorf("key = %q", fm["key"])
 	}
@@ -36,7 +36,7 @@ func TestSplitEmptyBody(t *testing.T) {
 }
 
 func TestSplitNestedMetadata(t *testing.T) {
-	fm, body := Split("---\nname: test\ndescription: desc\nmetadata:\n  type: user\n---\n\nbody here")
+	fm, body := SplitLegacy("---\nname: test\ndescription: desc\nmetadata:\n  type: user\n---\n\nbody here")
 	if fm["name"] != "test" {
 		t.Errorf("name = %q", fm["name"])
 	}
@@ -52,7 +52,7 @@ func TestSplitNestedMetadata(t *testing.T) {
 }
 
 func TestSplitCRLF(t *testing.T) {
-	fm, body := Split("---\r\nname: test\r\n---\r\nbody\r\n")
+	fm, body := SplitLegacy("---\r\nname: test\r\n---\r\nbody\r\n")
 	if fm["name"] != "test" {
 		t.Errorf("name = %q", fm["name"])
 	}
@@ -62,21 +62,21 @@ func TestSplitCRLF(t *testing.T) {
 }
 
 func TestSplitQuotedValues(t *testing.T) {
-	fm, _ := Split("---\nname: test\ndescription: \"quoted desc\"\n---\n")
+	fm, _ := SplitLegacy("---\nname: test\ndescription: \"quoted desc\"\n---\n")
 	if fm["description"] != "quoted desc" {
 		t.Errorf("description should be unquoted: %q", fm["description"])
 	}
 }
 
 func TestSplitSingleQuotes(t *testing.T) {
-	fm, _ := Split("---\nname: test\ndescription: 'single quoted'\n---\n")
+	fm, _ := SplitLegacy("---\nname: test\ndescription: 'single quoted'\n---\n")
 	if fm["description"] != "single quoted" {
 		t.Errorf("description should be unquoted: %q", fm["description"])
 	}
 }
 
 func TestSplitEmptyInput(t *testing.T) {
-	fm, body := Split("")
+	fm, body := SplitLegacy("")
 	if len(fm) != 0 {
 		t.Errorf("empty input should return empty fm, got %v", fm)
 	}
@@ -86,7 +86,7 @@ func TestSplitEmptyInput(t *testing.T) {
 }
 
 func TestSplitOnlyFence(t *testing.T) {
-	fm, body := Split("---\n---\n")
+	fm, body := SplitLegacy("---\n---\n")
 	if len(fm) != 0 {
 		t.Errorf("empty fence should return empty fm, got %v", fm)
 	}
@@ -96,14 +96,14 @@ func TestSplitOnlyFence(t *testing.T) {
 }
 
 func TestSplitMultipleKeys(t *testing.T) {
-	fm, _ := Split("---\na: 1\nb: 2\nc: 3\n---\n")
+	fm, _ := SplitLegacy("---\na: 1\nb: 2\nc: 3\n---\n")
 	if fm["a"] != "1" || fm["b"] != "2" || fm["c"] != "3" {
 		t.Errorf("fm = %v", fm)
 	}
 }
 
 func TestSplitCaseInsensitive(t *testing.T) {
-	fm, _ := Split("---\nName: Test\nDESCRIPTION: desc\n---\n")
+	fm, _ := SplitLegacy("---\nName: Test\nDESCRIPTION: desc\n---\n")
 	if fm["name"] != "Test" {
 		t.Errorf("name = %q", fm["name"])
 	}
@@ -113,7 +113,7 @@ func TestSplitCaseInsensitive(t *testing.T) {
 }
 
 func TestSplitYAMLScalarsWithColonAndMultiline(t *testing.T) {
-	fm, body := Split("---\n" +
+	fm, body := SplitLegacy("---\n" +
 		"name: test\n" +
 		"description: \"run: with colon\"\n" +
 		"notes: |\n" +

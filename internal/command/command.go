@@ -201,7 +201,7 @@ func parseFile(root, path string) (Command, error) {
 
 	// Normalise line endings and strip a leading UTF-8 BOM if present.
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), string(rune(0xFEFF)))
-	fm, body := frontmatter.Split(content)
+	fm, body := frontmatter.SplitLegacy(content)
 	return Command{
 		Name:        name,
 		Description: fm["description"],
@@ -214,5 +214,5 @@ func parseFile(root, path string) (Command, error) {
 // splitFrontmatter is a thin wrapper kept for test compatibility; the real
 // parser lives in internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	return frontmatter.Split(s)
+	return frontmatter.SplitLegacy(s)
 }

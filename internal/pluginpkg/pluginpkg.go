@@ -1122,7 +1122,7 @@ func parseSkillRef(path, stem string) (SkillRef, bool) {
 		return SkillRef{}, false
 	}
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\uFEFF")
-	fm, _ := frontmatter.Split(content)
+	fm, _ := frontmatter.SplitLegacy(content)
 	name := stem
 	if v := strings.TrimSpace(fm["name"]); IsValidName(v) {
 		name = v

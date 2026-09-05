@@ -4,7 +4,6 @@ package frontmatter
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -14,28 +13,18 @@ type DecodeOptions struct {
 	KnownFields bool
 }
 
-// Split separates an optional leading ---fenced block from the body. It returns
-// the parsed keys (lowercased) and the remaining body. With no opening/closing
-// fence the whole input is the body. An opened but never closed fence treats the
-// entire input as body (no partial parse).
-//
-// Scalar values are converted to strings. Mapping values are flattened one level
-// so "metadata:\n  type: user" becomes fm["type"] = "user", matching the legacy
-// parser. Sequence values are joined comma-separated (allowed-tools →
-// "read_file, grep"), so list-valued keys from skills authored for other agent
-// tools survive. The last write wins for duplicate keys.
-func Split(s string) (map[string]string, string) {
-	fm := map[string]string{}
-	raw, body, ok := splitRaw(s)
-	if !ok {
-		return fm, body
-	}
-	parseYAMLFrontmatter(raw, fm)
-	return fm, body
+// SplitLegacy is the historic flat view: Parse followed by LegacyFlat, so nested
+// mappings collapse onto their leaf keys ("metadata:\n  type: user" becomes
+// fm["type"]) and sequences join comma-separated. Existing vocabularies read it.
+// A new one must read Parse instead — the collapse drops which key a field was
+// written under, and that is what a namespace is made of.
+func SplitLegacy(s string) (map[string]string, string) {
+	doc, body := Parse(s)
+	return doc.LegacyFlat(), body
 }
 
 // Decode separates frontmatter and decodes the YAML block into out. It is for
-// callers that need typed schema validation; Split remains the permissive
+// callers that need typed schema validation; SplitLegacy remains the permissive
 // compatibility parser for legacy metadata consumers.
 func Decode(s string, out any, opts DecodeOptions) (string, error) {
 	raw, body, ok := splitRaw(s)
@@ -64,27 +53,6 @@ func splitRaw(s string) (raw, body string, ok bool) {
 	return "", s, false // opened but never closed: treat all as body
 }
 
-func parseYAMLFrontmatter(content string, out map[string]string) {
-	if strings.TrimSpace(content) == "" {
-		return
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
-		return
-	}
-	root := mappingRoot(&doc)
-	if root == nil {
-		return
-	}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		key := normalizeKey(root.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		addYAMLValue(out, key, root.Content[i+1])
-	}
-}
-
 func mappingRoot(doc *yaml.Node) *yaml.Node {
 	if doc == nil {
 		return nil
@@ -98,49 +66,6 @@ func mappingRoot(doc *yaml.Node) *yaml.Node {
 	return doc
 }
 
-func addYAMLValue(out map[string]string, key string, value *yaml.Node) {
-	switch {
-	case value == nil:
-		return
-	case value.Kind == yaml.MappingNode:
-		for i := 0; i+1 < len(value.Content); i += 2 {
-			nestedKey := normalizeKey(value.Content[i].Value)
-			if nestedKey == "" {
-				continue
-			}
-			addYAMLValue(out, nestedKey, value.Content[i+1])
-		}
-	case value.Kind == yaml.SequenceNode:
-		items := make([]string, 0, len(value.Content))
-		for _, item := range value.Content {
-			if s := yamlScalarString(item); s != "" {
-				items = append(items, s)
-			}
-		}
-		if len(items) > 0 {
-			joined := strings.Join(items, ", ")
-			if key == "argument-hint" {
-				joined = "[" + joined + "]"
-			}
-			out[key] = joined
-		}
-	default:
-		if s := yamlScalarString(value); s != "" {
-			out[key] = s
-		}
-	}
-}
-
 func normalizeKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
-}
-
-func yamlScalarString(node *yaml.Node) string {
-	if node == nil {
-		return ""
-	}
-	if node.Kind != yaml.ScalarNode {
-		return strings.TrimSpace(fmt.Sprint(node.Value))
-	}
-	return strings.TrimSpace(node.Value)
 }

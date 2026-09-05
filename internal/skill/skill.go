@@ -816,7 +816,8 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		return Skill{}, false
 	}
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\uFEFF")
-	fm, body := splitFrontmatter(content)
+	doc, body := frontmatter.Parse(content)
+	fm := doc.LegacyFlat()
 	if requireSkillMarker && !hasSkillMarker(content, fm) {
 		return Skill{}, false
 	}
@@ -1332,5 +1333,5 @@ func dedupePaths(paths []string) []string {
 // splitFrontmatter is a thin wrapper kept for internal use; the real parser
 // lives in internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	return frontmatter.Split(s)
+	return frontmatter.SplitLegacy(s)
 }

@@ -69,7 +69,7 @@ func loadSkill(embedPath string) (SkillMarkdown, error) {
 // (embedded skills ship a single file).
 func ParseSkillMarkdown(sourcePath, content string) (SkillMarkdown, error) {
 	content = strings.TrimPrefix(strings.ReplaceAll(content, "\r\n", "\n"), "\uFEFF")
-	fm, body := frontmatter.Split(content)
+	fm, body := frontmatter.SplitLegacy(content)
 	name := strings.TrimSpace(fm["name"])
 	if name == "" {
 		// Fall back to directory name: reasonix-guide/SKILL.md → reasonix-guide

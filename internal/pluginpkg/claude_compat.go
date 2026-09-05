@@ -498,7 +498,7 @@ func loadAgentRefs(dir string) []AgentRef {
 		if err != nil {
 			continue
 		}
-		fm, _ := frontmatter.Split(string(body))
+		fm, _ := frontmatter.SplitLegacy(string(body))
 		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 		if declared := strings.TrimSpace(fm["name"]); IsValidName(declared) {
 			name = declared

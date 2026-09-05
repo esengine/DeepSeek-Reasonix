@@ -565,7 +565,7 @@ func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
 // TestRenderSkillFileEscapesYAMLMetacharacters pins the security contract the
 // reviewer flagged: free text with YAML metacharacters must round-trip intact.
 // Before the yaml.v3 renderer, a description like "Review code: focus on
-// security" produced an unparseable block; frontmatter.Split then returned an
+// security" produced an unparseable block; frontmatter.SplitLegacy then returned an
 // EMPTY map and the loader silently fell back to runAs=inline +
 // invocation=auto — dissolving both the isolation boundary and the
 // no-autodiscovery guarantee.
@@ -610,7 +610,7 @@ func TestRenderSkillFileEscapesYAMLMetacharacters(t *testing.T) {
 			}
 			wantDesc := strings.TrimSpace(tc.desc)
 			if tc.label == "newline" {
-				// frontmatter.Split returns the scalar as parsed; the multi-line
+				// frontmatter.SplitLegacy returns the scalar as parsed; the multi-line
 				// value survives YAML round-trip intact.
 				wantDesc = "First line\nsecond line"
 			}

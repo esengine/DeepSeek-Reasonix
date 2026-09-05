@@ -69,7 +69,7 @@ func ValidateEditableSubagentProfile(sk Skill) error {
 	if err != nil {
 		return err
 	}
-	fm, _ := frontmatter.Split(string(raw))
+	fm, _ := frontmatter.SplitLegacy(string(raw))
 	for key := range fm {
 		if !subagentProfileManagedKeys[key] {
 			return fmt.Errorf("%q carries frontmatter this editor does not manage (%s) and would silently drop — edit it as a skill file instead", sk.Name, key)

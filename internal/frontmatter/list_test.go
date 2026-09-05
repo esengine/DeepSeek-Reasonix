@@ -14,7 +14,7 @@ func TestSplitParsesYAMLList(t *testing.T) {
 		"  - grep\n" +
 		"---\n" +
 		"body here\n"
-	fm, body := Split(in)
+	fm, body := SplitLegacy(in)
 	if fm["name"] != "review" {
 		t.Fatalf("name = %q", fm["name"])
 	}

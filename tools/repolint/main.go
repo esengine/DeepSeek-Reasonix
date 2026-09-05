@@ -40,6 +40,7 @@ const (
 	ruleSpecParity     = "spec-parity"
 	ruleWireParity     = "wire-parity"
 	ruleFrontendParity = "frontend-parity"
+	ruleFlatView       = "flat-view"
 )
 
 var allRules = []string{
@@ -47,7 +48,7 @@ var allRules = []string{
 	ruleNarrative, ruleFileSize, ruleLayering,
 	ruleFuncSize, ruleComplexity, ruleStructState, ruleRefusalPath, ruleErrorText,
 	ruleClaudeDialect, ruleSpecParity, ruleWireParity, ruleOrphan,
-	ruleFrontendParity,
+	ruleFrontendParity, ruleFlatView,
 }
 
 func main() {
@@ -165,6 +166,7 @@ func run(root string) ([]Finding, error) {
 		findings = append(findings, checkStructState(src)...)
 		findings = append(findings, checkRefusalPath(src)...)
 		findings = append(findings, checkErrorText(src)...)
+		findings = append(findings, checkFlatView(src)...)
 		orphans.observe(src)
 		wires.observe(src)
 		entries, vars := dialectRefs(src)
