@@ -9183,6 +9183,22 @@ body > .mermaid-diagram--fullscreen {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+.prompt-shelf--todo .prompt-shelf__card--collapsed {
+  padding: 4px 10px;
+  border-radius: 14px;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__header {
+  gap: 10px;
+  padding: 4px 2px;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__heading,
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__meta {
+  font-size: 12px;
+}
+.prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__header-button {
+  min-height: 26px;
+  padding: 0 8px;
+}
 
 .prompt-shelf--todo:hover .prompt-shelf__header-actions,
 .prompt-shelf--todo .prompt-shelf__header-button:focus-visible {
