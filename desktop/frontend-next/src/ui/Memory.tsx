@@ -131,7 +131,7 @@ export function Memory({ port }: { port: AgentPort }) {
                   {m.expired && <i className="stale">{t("已过期")}</i>}
                   <span className="sc">{t(SCOPE[m.scope ?? ""] ?? m.scope ?? "")}</span>
                   <span className="at">{m.updatedAt || m.createdAt}</span>
-                  <button className="act ghost" disabled={busy === m.name} onClick={() => void forget(m.name)}>
+                  <button className="act ghost" data-action="memory.forget" data-target={m.name} disabled={busy === m.name} onClick={() => void forget(m.name)}>
                     {t(busy === m.name ? "…" : "忘掉")}
                   </button>
                 </div>
@@ -160,7 +160,7 @@ export function Memory({ port }: { port: AgentPort }) {
                           </select>
                         </label>
                         <div className="row">
-                          <button className="act" disabled={busy === m.name} onClick={() => void save()}>
+                          <button className="act" data-action="memory.save" data-target={m.name} disabled={busy === m.name} onClick={() => void save()}>
                             {t(busy === m.name ? "正在保存…" : "保存")}
                           </button>
                           <button className="act ghost" onClick={() => setEdit(null)}>{t("取消")}</button>
@@ -227,7 +227,7 @@ function History({ list, current, busy, onRestore }: {
           <span className="rev">{t("第 {n} 版", { n: m.revision ?? 1 })}</span>
           <span className="at">{m.updatedAt || m.createdAt}</span>
           <span className="ds" title={m.title}>{m.title}</span>
-          <button className="act ghost" disabled={busy} onClick={() => onRestore(m.revision ?? 1)}>
+          <button className="act ghost" data-action="memory.restore" data-target={m.name} disabled={busy} onClick={() => onRestore(m.revision ?? 1)}>
             {t(busy ? "…" : "恢复这版")}
           </button>
           <pre>{clip2(m.body)}</pre>

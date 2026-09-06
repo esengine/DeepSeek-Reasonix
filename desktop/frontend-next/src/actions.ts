@@ -89,6 +89,21 @@ export const ACTIONS: UIAction[] = [
   { id: "window.maximize", kind: "shell-native", target: "none", proof: "browser" },
   { id: "window.close", kind: "shell-native", target: "none", proof: "browser" },
 
+  // ── Tier A: a click that writes. Which of the surface is here was decided
+  //    by the transport verb behind it — a port method reaching post/patch/del
+  //    changes canonical state, one reaching get does not, and no name or
+  //    return type says which.
+  { id: "account.sign-in", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "account.sign-out", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "ask.answer", kind: "interaction", target: "none", proof: "authority-effect" },
+  { id: "memory.save", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "memory.restore", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "memory.forget", kind: "destructive", target: "entity", proof: "interaction" },
+  { id: "config.repair", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "extensions.reload", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "storage.move", kind: "kernel-mutation", target: "none", proof: "interaction" },
+  { id: "network.diagnose", kind: "repeatable", target: "none", proof: "interaction" },
+
   // ── The two side panels. Reached from the keyboard here, and from each
   //    gutter's own grip, which this pass has not annotated yet.
   { id: "rail.toggle", kind: "view", target: "none", proof: "interaction" },

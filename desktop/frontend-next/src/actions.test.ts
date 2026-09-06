@@ -107,7 +107,7 @@ const rendered = new Set(declared.flatMap((s) => s.ids ?? []));
 // Interactive sites this pass has not given an identity. It may fall and never
 // rise: the number is what stops the registry from reading as the whole set
 // while most of the surface is still anonymous.
-const UNNAMED_CEILING = 249;
+const UNNAMED_CEILING = 237;
 
 describe("the actions Studio says a person can perform", () => {
   it("names every action it renders", () => {

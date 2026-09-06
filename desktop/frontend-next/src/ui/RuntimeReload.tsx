@@ -47,7 +47,7 @@ export function useRuntimeReload(port: AgentPort, onDone: () => void) {
 
   return {
     action: (
-      <button className="act reload" data-s={state || undefined} disabled={state === "run"} onClick={go}>
+      <button className="act reload" data-action="extensions.reload" data-s={state || undefined} disabled={state === "run"} onClick={go}>
         <i className="rdot" />
         {state === "run" ? t("重载中") : state === "ok" ? t("已生效") : t("重载运行时")}
       </button>

@@ -39,7 +39,7 @@ export function UserCard({
             </span>
           )}
           {queued && onCancelQueued && (
-            <button className="pcancel" onClick={() => onCancelQueued(item.id, queued)}>
+            <button className="pcancel" data-action="queue.cancel" data-target={item.id} onClick={() => onCancelQueued(item.id, queued)}>
               {t("撤回")}
             </button>
           )}

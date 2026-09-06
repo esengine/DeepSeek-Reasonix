@@ -71,7 +71,7 @@ export function ConfigTrouble({ port, onRepaired }: { port: AgentPort; onRepaire
       </div>
       <div className="acts">
         {problem.repair && (
-          <button className="act" disabled={busy} onClick={() => void repair()}>
+          <button className="act" data-action="config.repair" disabled={busy} onClick={() => void repair()}>
             {busy ? t("正在修…") : t("备份原文件并修好")}
           </button>
         )}

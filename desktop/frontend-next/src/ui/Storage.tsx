@@ -251,7 +251,7 @@ function Row({
             <button className="btn" onClick={onCancel}>
               {t("取消")}
             </button>
-            <button className="btn pri" disabled={!plan?.ok} onClick={onStart}>
+            <button className="btn pri" data-action="storage.move" disabled={!plan?.ok} onClick={onStart}>
               {t(plan?.adopt ? "指向这里" : "开始搬迁")}
             </button>
           </div>

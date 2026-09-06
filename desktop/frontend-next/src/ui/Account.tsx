@@ -82,7 +82,7 @@ export function Account({ port, state, reload }: { port: AgentPort; state: Accou
         </div>
         {state.error && <p className="acct-note">连不上身份服务：{state.error}</p>}
         <div className="acct-act">
-          <button className="btn" onClick={signOut} disabled={busy} onMouseLeave={() => setConfirm(false)}>
+          <button className="btn" data-action="account.sign-out" onClick={signOut} disabled={busy} onMouseLeave={() => setConfirm(false)}>
             {t(confirm ? "确认退出" : "退出登录")}
           </button>
           <span className="acct-note">{t("只清除本地登录凭证，不影响会话、记忆和配置")}</span>
@@ -109,7 +109,7 @@ export function Account({ port, state, reload }: { port: AgentPort; state: Accou
         </div>
       ) : (
         <div className="acct-act">
-          <button className="btn" onClick={signIn} disabled={busy}>
+          <button className="btn" data-action="account.sign-in" onClick={signIn} disabled={busy}>
             {t(busy ? "正在打开…" : "登录")}
           </button>
         </div>
