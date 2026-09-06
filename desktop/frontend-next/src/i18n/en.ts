@@ -354,7 +354,6 @@ export const EN: Record<string, string> = {
   "忘掉": "Forget",
   "重连": "Reconnect",
   "立即连接": "Connect now",
-  "重新授权": "Re-authorise",
   "记的是 {had}，但它答的是 {got}。": "Recorded as {had}, but it answers as {got}.",
   // 收工回执
   "没有未经验证的部分": "nothing left unverified",

@@ -82,6 +82,17 @@ func newStartupFailure(stage string, started time.Time, stderr string, err error
 	}
 }
 
+// terminalHTTPStatus reads the status off a failure that ended at one. Asked
+// only where a failure is known to be terminal: a status the transport answered
+// and then recovered from never gets here.
+func terminalHTTPStatus(err error) int {
+	var status *httpStatusError
+	if errors.As(err, &status) {
+		return status.Status
+	}
+	return 0
+}
+
 func startupFailureDetails(err error) (stage string, elapsed time.Duration, stderr string) {
 	var startupErr *startupFailure
 	if !errors.As(err, &startupErr) || startupErr == nil {

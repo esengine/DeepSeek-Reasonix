@@ -19,6 +19,7 @@ const (
 	tsSessionFile  = "desktop/frontend-next/src/port/session.ts"
 	tsVersionFile  = "desktop/frontend-next/src/port/version.ts"
 	tsModelFile    = "desktop/frontend-next/src/port/model.ts"
+	tsMcpFile      = "desktop/frontend-next/src/port/mcp.ts"
 )
 
 // mirroredWireTypes are the Go types the desktop keeps a second, hand-written
@@ -38,6 +39,9 @@ var mirroredWireTypes = []wireMirror{
 	{"internal/control/execution_graph.go", "ExecutionInterruption", tsWireFile, "ExecutionInterruption"},
 	{"internal/serve/executiongraph.go", "executionGraphView", tsWireFile, "ExecutionGraphView"},
 	{"internal/control/boundary.go", "SandboxSettings", tsBoundaryFile, "SandboxSettings"},
+	// The MCP row: a status the host answered with and the page cannot read is a
+	// row that goes back to reading the server's own prose for it.
+	{"internal/serve/catalog.go", "mcpEntry", tsMcpFile, "McpEntry"},
 	// The fold bounds and the one in force: a field the panel cannot read is a
 	// threshold a user sets and never sees applied.
 	{"internal/control/compaction_settings.go", "CompactionSettings", tsModelFile, "CompactionSettings"},

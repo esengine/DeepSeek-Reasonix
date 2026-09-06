@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
 	"reasonix/internal/testenv"
 )
@@ -123,4 +125,48 @@ func postSwitch(t *testing.T, base, body string) catalogAnswer {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return catalogAnswer{Status: resp.StatusCode, Code: out.Code}
+}
+
+// A field both sides declare is not a field either side fills. wire-parity
+// compares the two type declarations, so dropping the assignment that populates
+// this one passes every other check in the tree.
+func TestTheStatusAHostRecordedReachesTheRow(t *testing.T) {
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "go away", http.StatusUnauthorized)
+	}))
+	defer endpoint.Close()
+
+	host, _, _ := plugin.Start(context.Background(),
+		[]plugin.Spec{{Name: "github", Type: "http", URL: endpoint.URL}},
+		plugin.StartPolicy{Concurrency: 1})
+	if host == nil {
+		t.Fatal("no host came back to record the failure on")
+	}
+	defer host.Close()
+
+	ctrl := control.New(control.Options{Host: host})
+	defer ctrl.Close()
+	srv := httptest.NewServer(New(ctrl, NewBroadcaster(), config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Servers []mcpEntry `json:"servers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range got.Servers {
+		if e.Name == "github" {
+			if e.HTTPStatus != http.StatusUnauthorized {
+				t.Fatalf("httpStatus = %d, want 401 — the row is back to reading it out of %q", e.HTTPStatus, e.Error)
+			}
+			return
+		}
+	}
+	t.Fatalf("the failure did not reach the listing: %+v", got.Servers)
 }

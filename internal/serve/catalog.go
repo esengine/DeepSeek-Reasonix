@@ -241,6 +241,10 @@ type mcpEntry struct {
 	Remembered bool   `json:"remembered,omitempty"`
 	Stale      bool   `json:"stale,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// HTTPStatus is what the endpoint answered, or absent when the failure was
+	// not one. It travels as the number the host held: a row that had to read it
+	// back out of Error was reading text the server itself wrote.
+	HTTPStatus int `json:"httpStatus,omitempty"`
 	// LocalOverride marks a switch this project set for itself instead of
 	// inheriting the global one, which the surface shows as a local exception.
 	LocalOverride bool `json:"localOverride,omitempty"`
@@ -340,6 +344,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			out = append(out, remembered(declared[f.Name], mcpEntry{
 				Name: f.Name, State: "failed", Enabled: on(f.Name), LocalOverride: declared[f.Name].LocalOverride,
 				Transport: f.Transport, Source: string(declared[f.Name].Entry.Source), Error: f.Error,
+				HTTPStatus: f.HTTPStatus,
 			}))
 		}
 	}

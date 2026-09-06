@@ -14,6 +14,10 @@ export interface McpEntry {
   remembered?: boolean; // recovered from the last handshake, nothing is connected
   stale?: boolean; // and the declaration changed since that cache was written
   error?: string;
+  // What the endpoint answered, when the failure was an HTTP one. A fact and
+  // not a verdict: whether a 401 means the user has to authorise again depends
+  // on whether the automatic recovery ran, which nothing here knows yet.
+  httpStatus?: number;
   // This project decided the switch for itself instead of inheriting it.
   localOverride?: boolean;
 }

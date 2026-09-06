@@ -29,10 +29,12 @@ export function ServerRow({
   const [busy, setBusy] = useState("");
   const [failed, setFailed] = useState("");
   const [confirming, setConfirming] = useState(false);
-  // 401/403 is not a broken server, it is a server that stopped trusting this
-  // machine — retrying without saying so sends the user around the same loop.
-  const auth = /\b(401|403|unauthorized|forbidden|auth)/i.test(m.error ?? failed);
-  const meta = [t(MCP_STATE[m.state] ?? m.state), m.transport, m.source].filter(Boolean).join(" · ");
+  // 状态码是主机答上来的事实，画出来即可；它是不是「需要你重新认证」还要看自动
+  // 刷新有没有跑过，那件事目前无人知道。m.error 是外部服务器自己写的文本，只作
+  // 详情显示,不参与任何判断。
+  const meta = [t(MCP_STATE[m.state] ?? m.state), m.transport, m.source, m.httpStatus ? `HTTP ${m.httpStatus}` : ""]
+    .filter(Boolean)
+    .join(" · ");
 
   const run = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -52,7 +54,7 @@ export function ServerRow({
     <span className="acts">
       {live && m.enabled && m.state !== "ready" && (
         <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
-          {t(busy === "retry" ? "连接中…" : auth ? "重新授权" : m.state === "standby" ? "立即连接" : "重连")}
+          {t(busy === "retry" ? "连接中…" : m.state === "standby" ? "立即连接" : "重连")}
         </button>
       )}
       {/* Removal is the one action here that cannot be undone by clicking again,
