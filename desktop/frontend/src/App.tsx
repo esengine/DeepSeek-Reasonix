@@ -110,7 +110,8 @@ import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowSta
 import { workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { formatShortcutCombo, resolvedShortcutCombo } from "./lib/keyboardShortcuts";
 import { useWarmTerminalPanel } from "./lib/useWarmTerminalPanel";
-import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
+import type { TopicShortcutEntry } from "./lib/topicShortcuts";
+import { useTopicNavigationShortcuts } from "./app-runtime/useTopicNavigationShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { useSessionSubmission } from "./lib/useSessionSubmission";
 import { usePendingPlanRevisions, reportPendingRevisionFailure } from "./lib/usePendingPlanRevisions";
@@ -1364,30 +1365,14 @@ export default function App() {
   });
 
   // --- Topic shortcut navigation (Cmd/Ctrl+1-9) ---
-  const visibleTopicsRef = useRef<TopicShortcutEntry[]>([]);
-  const handleVisibleTopicsChange = useCommittedCommand((topics: TopicShortcutEntry[]) => {
-    visibleTopicsRef.current = topics;
-  });
   const handleNavigateTopic = useCommittedCommand((entry: TopicShortcutEntry) => {
     void handleOpenTopic(entry.scope, entry.workspaceRoot, entry.topicId, entry.sessionPath);
   });
-  const { showBadges: showTopicBadges } = useTopicShortcuts(!sidebarCollapsed && !managementActive, desktopPlatform);
-
-  // Register Cmd/Ctrl+1-9 shortcuts for topic navigation
-  useEffect(() => {
-    if (sidebarCollapsed || managementActive) return;
-    const onKeydown = (event: globalThis.KeyboardEvent) => {
-      const idx = topicShortcutIndexFromEvent(event, desktopPlatform);
-      if (idx === null) return;
-      event.preventDefault();
-      const topics = visibleTopicsRef.current;
-      if (idx < topics.length) {
-        handleNavigateTopic(topics[idx]);
-      }
-    };
-    document.addEventListener("keydown", onKeydown);
-    return () => document.removeEventListener("keydown", onKeydown);
-  }, [sidebarCollapsed, managementActive, desktopPlatform, handleNavigateTopic]);
+  const { showBadges: showTopicBadges, setVisibleTopics: handleVisibleTopicsChange } = useTopicNavigationShortcuts({
+    enabled: !sidebarCollapsed && !managementActive,
+    platform: desktopPlatform,
+    onNavigate: handleNavigateTopic,
+  });
 
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   // Workspace: open the folder chooser and switch projects. The hook resets the
