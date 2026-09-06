@@ -199,8 +199,10 @@ console.log("\nbundle budgets");
 // Durable protocol recovery controls and search-source status add 1.2 KiB
 // over the same-environment main-v2 build (465.4 -> 466.6 KiB gzip).
 // Keep one decimal of cross-platform headroom for this measured shell change.
-// Integrating main-v2 rich-link menus measures 466.905 KiB combined.
-const initialJSBudgetKiB = 467.0;
+// Integrating main-v2 rich-link menus measures 466.905 KiB combined. The
+// session-runtime ordering fence adds 56 bytes in the initial path; retain the
+// smallest one-decimal ratchet that covers the measured 467.055 KiB result.
+const initialJSBudgetKiB = 467.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -376,7 +378,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Retain the upstream updater ceiling and independent chunk gates.
 // Recovery controls add 3.6 KiB raw over the measured 2480.9 KiB base;
 // current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
-// With the current-base rich-link menus: 2485.715 KiB raw.
-const rawInitialBudgetKiB = 2_485.9;
+// With the current-base rich-link menus: 2485.715 KiB raw. The session-runtime
+// ordering fence adds a measured 0.7 KiB raw; retain the smallest bounded
+// cross-platform ceiling for the resulting 2486.4 KiB payload.
+const rawInitialBudgetKiB = 2_486.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

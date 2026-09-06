@@ -417,8 +417,7 @@ export interface State {
   turnDoneAt: number;
   turnLifecycleObservedAt?: number;
   /** Last runtime snapshot sequence accepted for this tab/epoch. */
-  runtimeStatusEpoch?: string;
-  runtimeStatusSeq?: number;
+  runtimeStatusEpoch?: string; runtimeStatusSeq?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -840,8 +839,7 @@ function backendStatusFromRuntimeMeta(meta: RuntimeMetaSnapshot): Extract<Action
     cancellable: foregroundRunning,
     turnId: meta.turnId,
     turnStatus: meta.turnStatus,
-    runtimeEpoch: meta.runtime?.epoch,
-    turnEventSeq: meta.turnEventSeq,
+    runtimeEpoch: meta.runtime?.epoch, turnEventSeq: meta.turnEventSeq,
   };
 }
 
@@ -2090,18 +2088,9 @@ export function reducer(s: State, a: Action): State {
       return withRemoteTurnInterrupted(s);
     }
     case "backend_status": {
-      // Runtime snapshots are monotonic within one controller epoch. An older
-      // idle snapshot must never hide a newer running turn.
       const incomingEpoch = a.runtimeEpoch?.trim();
       const storedEpoch = s.runtimeStatusEpoch?.trim();
-      if (incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) {
-        // A rebuilt controller starts a new sequence; accept its first
-        // observation and replace the old epoch anchor.
-      } else if (
-        a.turnEventSeq !== undefined &&
-        s.runtimeStatusSeq !== undefined &&
-        a.turnEventSeq <= s.runtimeStatusSeq
-      ) {
+      if (!(incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) && a.turnEventSeq !== undefined && s.runtimeStatusSeq !== undefined && a.turnEventSeq <= s.runtimeStatusSeq) {
         return s;
       }
       // Reject snapshots that began before newer prompt or turn lifecycle evidence.
@@ -2127,17 +2116,12 @@ export function reducer(s: State, a: Action): State {
         turnStartedAt === s.turnStartAt &&
         activeTurnId === s.activeTurnId &&
         !clearsRetry
-      ) {
-        if (incomingEpoch || a.turnEventSeq !== undefined) {
-          return { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq };
-        }
-        return s;
-      }
+      ) return incomingEpoch || a.turnEventSeq !== undefined
+        ? { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq } : s;
       if (foregroundRunning) {
         return {
           ...s,
-          runtimeStatusEpoch: incomingEpoch ?? storedEpoch,
-          runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+          runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
           running: true,
           turnActive: true,
           pendingPrompt,
@@ -2157,8 +2141,7 @@ export function reducer(s: State, a: Action): State {
       }));
       return endPromptWait({
         ...telemetry,
-        runtimeStatusEpoch: incomingEpoch ?? storedEpoch,
-        runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+        runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
         items: finalized,
         running: false,
         turnActive: false,
@@ -3521,11 +3504,7 @@ export function useController() {
         if (!acceptedEpoch) runtimeEpochByTabRef.current.set(targetTabId, e.runtimeEpoch);
       }
       const currentMeta = statesRef.current.get(targetTabId)?.meta;
-      if (
-        e.sessionGeneration !== undefined &&
-        (!currentMeta || currentMeta.sessionGeneration === undefined ||
-          e.sessionGeneration !== currentMeta.sessionGeneration)
-      ) return;
+      if (e.sessionGeneration !== undefined && (!currentMeta || currentMeta.sessionGeneration === undefined || e.sessionGeneration !== currentMeta.sessionGeneration)) return;
       if (!turnEventProjector.acceptLive(targetTabId, e, acceptedEpoch)) return;
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
