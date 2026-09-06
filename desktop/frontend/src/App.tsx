@@ -179,6 +179,7 @@ import { StartupGateLifecycle, probeProviderSetupState } from "./app-runtime/Sta
 import { useSessionBannerCommands } from "./app-runtime/useSessionBannerCommands";
 import { useSessionExportCommands } from "./app-runtime/useSessionExportCommands";
 import { useSessionUndo } from "./app-runtime/useSessionUndo";
+import { useExtensionSurface } from "./app-runtime/useExtensionSurface";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -662,45 +663,14 @@ export default function App() {
   // to the owning sidecar; cancel reports values{"cancelled": true} over the
   // same channel. A failed cancel still dismisses — the sidecar that could not
   // be reached is gone either way.
-  const [extensionFormBusy, setExtensionFormBusy] = useState(false);
-  const submitExtensionForm = useCommittedCommand(async (values: Record<string, unknown>) => {
-    const pending = state.extensionForm;
-    if (!pending || !activeTabId || extensionFormBusy) return;
-    setExtensionFormBusy(true);
-    try {
-      await app.SubmitExtensionForm(activeTabId, pending.pluginId, pending.surfaceId, values);
-      dismissExtensionForm();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setExtensionFormBusy(false);
-    }
+  const { extensionFormBusy, submitExtensionForm, cancelExtensionForm } = useExtensionSurface({
+    activeTabId,
+    form: state.extensionForm,
+    notifications: state.extensionNotifications,
+    dismissForm: dismissExtensionForm,
+    drainNotifications: drainExtensionNotifications,
+    showToast,
   });
-  const cancelExtensionForm = useCommittedCommand(async () => {
-    const pending = state.extensionForm;
-    if (!pending || extensionFormBusy) return;
-    setExtensionFormBusy(true);
-    try {
-      if (activeTabId) {
-        await app.SubmitExtensionForm(activeTabId, pending.pluginId, pending.surfaceId, { cancelled: true }).catch(() => {});
-      }
-      dismissExtensionForm();
-    } finally {
-      setExtensionFormBusy(false);
-    }
-  });
-
-  // Extension notifications queue in per-tab state (the reducer cannot reach
-  // the toast context); drain the active tab's queue into toasts here.
-  useEffect(() => {
-    const pending = state.extensionNotifications;
-    if (!pending || pending.length === 0) return;
-    for (const notification of pending) {
-      const level = notification.severity === "error" ? "error" : notification.severity === "warn" ? "warn" : "info";
-      showToast(notification.body ? `${notification.title} — ${notification.body}` : notification.title, level);
-    }
-    drainExtensionNotifications();
-  }, [state.extensionNotifications, showToast, drainExtensionNotifications]);
   const extensionStatusList = useMemo(() => Object.values(state.extensionStatuses ?? {}), [state.extensionStatuses]);
   const patchActiveComposerProfile = useCommittedCommand((patch: Partial<Omit<ComposerProfile, "pending">>, pendingFields: ComposerProfileField[]) => {
       if (!activeTabId) return;
