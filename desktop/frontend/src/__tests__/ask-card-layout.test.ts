@@ -714,5 +714,40 @@ console.log("\nask card layout");
   dom.window.close();
 }
 
+// Collapsing an Ask keeps the pending card header visible, while interactive
+// controls continue to work without toggling the card accidentally.
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const ask: WireAsk = {
+    id: "ask-collapse",
+    questions: [{ id: "q1", prompt: "Choose one", options: [{ label: "Keep" }] }],
+  };
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null,
+      React.createElement(AskCard, { ask, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+    ));
+    await flushTimers();
+  });
+  const card = document.querySelector(".prompt-shelf__card") as HTMLElement | null;
+  const option = document.querySelector(".prompt-action") as HTMLButtonElement | null;
+  const collapse = [...document.querySelectorAll<HTMLButtonElement>(".prompt-shelf__header-button")]
+    .find((button) => button.getAttribute("aria-label") === "Collapse" || button.getAttribute("aria-label") === "收起");
+  if (!card || !option || !collapse) throw new Error("collapse controls did not render");
+  ok(card.classList.contains("prompt-shelf__card--collapsible"), "Ask exposes the shared collapsible shelf contract");
+  ok(!card.classList.contains("prompt-shelf__card--collapsed"), "Ask starts expanded");
+  await act(async () => { collapse.click(); await flushTimers(); });
+  ok(card.classList.contains("prompt-shelf__card--collapsed"), "collapse action hides the Ask body");
+  ok(Boolean(document.querySelector(".prompt-shelf__header")), "collapsed Ask keeps its header visible");
+  await act(async () => { collapse.click(); await flushTimers(); });
+  ok(!card.classList.contains("prompt-shelf__card--collapsed"), "expand action restores the Ask body");
+  await act(async () => { option.click(); await flushTimers(); });
+  ok(!card.classList.contains("prompt-shelf__card--collapsed"), "clicking an option does not collapse the Ask");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

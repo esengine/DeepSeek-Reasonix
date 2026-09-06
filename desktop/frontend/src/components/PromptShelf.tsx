@@ -82,8 +82,14 @@ export function PromptShelf({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         tabIndex={cardCollapsible ? 0 : -1}
-        onClick={cardCollapsible ? onToggleCollapse : undefined}
+        onClick={cardCollapsible ? (event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("button, input, textarea, select, a, [role='button'], [role='option'], [role='radio'], [role='checkbox']")) return;
+          onToggleCollapse?.();
+        } : undefined}
         onKeyDown={cardCollapsible && onToggleCollapse ? (event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("button, input, textarea, select, a, [role='button'], [role='option'], [role='radio'], [role='checkbox']")) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             onToggleCollapse();

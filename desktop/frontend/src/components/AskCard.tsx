@@ -35,6 +35,7 @@ export function AskCard({
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
   const instanceId = useId();
@@ -257,6 +258,9 @@ export function AskCard({
     <PromptShelf
       decision
       className="prompt-shelf--ask"
+      cardCollapsible
+      collapsed={collapsed}
+      onToggleCollapse={() => setCollapsed((value) => !value)}
       barRef={shelfRef}
       titleId="ask-shelf-title"
       title={t("ask.title")}
@@ -272,9 +276,18 @@ export function AskCard({
       }
       meta={q.prompt}
       headerActions={
-        <PromptHeaderAction onClick={onStop} ariaLabel={t("decision.stopTask")} disabled={submitting}>
-          {t("decision.stopTask")}
-        </PromptHeaderAction>
+        <>
+          <PromptHeaderAction
+            onClick={() => setCollapsed((value) => !value)}
+            ariaLabel={collapsed ? t("common.expand") : t("common.collapse")}
+            disabled={submitting}
+          >
+            {collapsed ? t("common.expand") : t("common.collapse")}
+          </PromptHeaderAction>
+          <PromptHeaderAction onClick={onStop} ariaLabel={t("decision.stopTask")} disabled={submitting}>
+            {t("decision.stopTask")}
+          </PromptHeaderAction>
+        </>
       }
       actions={
         <>
