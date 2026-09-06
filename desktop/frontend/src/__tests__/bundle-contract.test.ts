@@ -35,6 +35,9 @@ function lazyRuntimeImport(owner: string, target: string): boolean {
   return dynamic && !eager;
 }
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const exportOwnerSource = readFileSync(resolve(here, "../app-runtime/useSessionExportCommands.ts"), "utf8");
+const historyOwnerSource = readFileSync(resolve(here, "../app-runtime/useHistoryCommands.ts"), "utf8");
+const paletteOwnerSource = readFileSync(resolve(here, "../app-runtime/usePaletteCommands.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
@@ -54,8 +57,8 @@ ok(
   "App keeps session export code out of the initial chunk",
 );
 ok(
-  appSource.includes('import("./lib/sessionExportData")') &&
-    appSource.includes('import("./lib/sessionExport")'),
+  exportOwnerSource.includes('import("../lib/sessionExportData")') &&
+    exportOwnerSource.includes('import("../lib/sessionExport")'),
   "App loads session export code on demand",
 );
 ok(
@@ -98,9 +101,9 @@ ok(
   "App has no dedicated history-page entry points",
 );
 ok(
-  appSource.includes('id: "cmd-trash"') &&
-    appSource.includes("openTrash") &&
-    appSource.includes("paletteSessions.slice(0, 12)") &&
+  paletteOwnerSource.includes('id: "cmd-trash"') &&
+    historyOwnerSource.includes("openTrash") &&
+    paletteOwnerSource.includes("paletteSessions.slice(0, 12)") &&
     projectTreeSource.includes('t("projectTree.searchPlaceholder")'),
   "Trash and existing session search remain available",
 );
