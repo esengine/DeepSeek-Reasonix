@@ -237,6 +237,15 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) (runErr err
 		}
 
 		// Commit boundary: only a clean terminal attempt reaches here.
+		// A server-side output-limit truncation (finish_reason="length", e.g.
+		// MiMo's 128K cap vs DeepSeek's 384K) ends the SSE stream cleanly, so
+		// the assembled tool calls are committed even when the stream cut one
+		// off mid-arguments. The stored fragment is illegal JSON, and the next
+		// request replays it inside the assistant message — strict
+		// OpenAI-compatible backends (MiMo) reject the whole body with
+		// HTTP 400 "Invalid request parameters" (#9566). Repair the arguments
+		// before the commit so the replayed body stays legal.
+		calls = repairTruncatedToolCallArgs(calls)
 		// Keep reasoning_content on the assistant turn for display and session
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
@@ -448,6 +457,28 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 // cancellation, todo stall tracking, recovery finalization pause, and the
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
+// repairTruncatedToolCallArgs rewrites tool-call arguments that are not valid
+// JSON before the assistant message is committed to the session. A
+// server-side output-limit truncation (finish_reason="length") ends the SSE
+// stream cleanly, so a tool_call cut off mid-arguments is assembled and
+// committed verbatim; replaying that assistant message sends an illegal JSON
+// fragment in the request body, which strict OpenAI-compatible backends (MiMo)
+// reject with HTTP 400 "Invalid request parameters" (#9566). Rewriting the
+// fragment to `{}` keeps the body legal: the tool then fails with a normal
+// missing-parameter error result and the model can retry or the user can
+// switch models, instead of every continuation failing with a malformed-body
+// 400. Calls whose arguments are already valid (the overwhelmingly common
+// case) are returned unchanged.
+func repairTruncatedToolCallArgs(calls []provider.ToolCall) []provider.ToolCall {
+	for i := range calls {
+		if calls[i].Arguments == "" || json.Valid([]byte(calls[i].Arguments)) {
+			continue
+		}
+		calls[i].Arguments = "{}"
+	}
+	return calls
+}
+
 func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
 	state.terminal.emptyFinalBlocks = 0
 	state.usedAnyTool = true

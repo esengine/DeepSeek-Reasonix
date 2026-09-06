@@ -616,3 +616,27 @@ func TestRunResetsEvidenceLedger(t *testing.T) {
 		t.Fatal("new user turn should not inherit previous receipts")
 	}
 }
+
+func TestRepairTruncatedToolCallArgs(t *testing.T) {
+	calls := []provider.ToolCall{
+		{Name: "write_file", Arguments: `{"content": "unclosed`},                    // truncated mid-string
+		{Name: "bash", Arguments: `{"command":"ls",`},                               // truncated mid-object
+		{Name: "read_file", Arguments: `{"path":"a.go"}`},                           // valid: untouched
+		{Name: "complete_step", Arguments: ""},                                      // empty: untouched
+	}
+	got := repairTruncatedToolCallArgs(calls)
+	if got[0].Arguments != "{}" || got[1].Arguments != "{}" {
+		t.Fatalf("truncated args not repaired: %q / %q", got[0].Arguments, got[1].Arguments)
+	}
+	if got[2].Arguments != `{"path":"a.go"}` {
+		t.Fatalf("valid args must stay verbatim, got %q", got[2].Arguments)
+	}
+	if got[3].Arguments != "" {
+		t.Fatalf("empty args must stay empty, got %q", got[3].Arguments)
+	}
+	for i, c := range got {
+		if c.Arguments != "" && !json.Valid([]byte(c.Arguments)) {
+			t.Fatalf("call %d arguments still invalid after repair: %q", i, c.Arguments)
+		}
+	}
+}
