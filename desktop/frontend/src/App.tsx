@@ -66,6 +66,7 @@ import {
 } from "./lib/types";
 import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { useWorktreeMergeCommands } from "./app-runtime/useWorktreeMergeCommands";
+import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -407,8 +408,9 @@ export default function App() {
 
   const [invocationMetadataByTab, setInvocationMetadataByTab] = useState<Record<string, InvocationMetadataMap>>({});
   const [footerHeight, setFooterHeight] = useState(0);
-  const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
+  const commitFooterHeight = useCommittedCommand((height: number) => setFooterHeight(height));
+  useFooterHeightLifecycle(footerRef, commitFooterHeight);
   const activeTabIdRef = useRef(activeTabId);
   const handleInvocationMetadataChange = useCommittedCommand((metadata: InvocationMetadataMap) => {
     const sourceTabId = activeTabIdRef.current;
@@ -1015,29 +1017,6 @@ export default function App() {
     reloadConfigWarnings,
   });
   const { reclaimSession, openTakeoverDialog, closeTakeoverDialog, openConfigFile, reloadConfigFile, showReleaseNotes } = bannerCommands;
-
-  useEffect(() => {
-    const el = footerRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    let frame = 0;
-    const update = () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const next = Math.round(el.getBoundingClientRect().height);
-        if (Math.abs(footerHeightRef.current - next) < 2) return;
-        footerHeightRef.current = next;
-        setFooterHeight(next);
-      });
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, []);
 
   const { openRightDockMode, closeWorkspacePanel, toggleWorkspacePanel, toggleWorkspaceMaximized,
     handleWorkspacePreviewModeChange, openRemoteDock } = useWorkspacePanelCommands({
