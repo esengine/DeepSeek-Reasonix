@@ -2125,7 +2125,7 @@ func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
 func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) error {
 	t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
-	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
+	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed, RunState: string(provider.ToolRunPending)}
 	ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
 	if ok && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
 		if ch, ok := tool.PreviewChange(ctx, t, json.RawMessage(c.Arguments)); ok {
@@ -2164,6 +2164,7 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall) {
 		CapabilityID: c.CapabilityID,
 		ReadOnly:     *c.ResolvedReadOnly,
 		Refreshed:    true,
+		RunState:     string(provider.ToolRunPending),
 		FileDiff: event.FileDiff{
 			Diff: c.Diff, Added: c.Added, Removed: c.Removed,
 		},
