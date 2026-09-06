@@ -9,6 +9,7 @@ const shell = read("../components/ManagementPageShell.tsx");
 const css = read("../components/ManagementPageShell.css");
 const heartbeat = read("../custom/features/heartbeat/HeartbeatPanel.tsx");
 const warmth = read("../lib/useWarmTerminalPanel.ts");
+const palette = read("../app-runtime/usePaletteCommands.tsx");
 
 // The shared full-window shell replaces the old chat-pane projection. Background
 // geometry and component identity survive while all workspace input is inert.
@@ -19,7 +20,7 @@ assert.doesNotMatch(app, /mainView === "automation"/);
 assert.match(app, /inert=\{managementActive\}/);
 assert.match(css, /\.management-screen \{[^}]*position: fixed;[^}]*inset: 0;/);
 assert.match(shell, /hidden=\{!active\} inert=\{!active\}/);
-assert.match(app, /if \(managementActive\) returnToWorkspace\(\)/);
+assert.match(palette, /if \(managementActive\) ports\.returnToWorkspace\(\)/);
 assert.match(heartbeat, /<ManagementPageShell active=\{active\}/);
 assert.match(css, /management-titlebar-height: 48px/);
 assert.match(app, /useWarmTerminalPanel\(terminalPanelOpen, terminalResizing, !managementActive\)/);
