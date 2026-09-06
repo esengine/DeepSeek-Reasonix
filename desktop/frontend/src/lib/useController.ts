@@ -416,6 +416,8 @@ export interface State {
   turnStartAt: number;
   turnDoneAt: number;
   turnLifecycleObservedAt?: number;
+  /** Last runtime snapshot sequence accepted for this tab/epoch. */
+  runtimeStatusEpoch?: string; runtimeStatusSeq?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -786,7 +788,7 @@ type Action =
   | { type: "turn_submit_rejected"; submissionId: string; error: string }
   | { type: "send_failed"; submissionId: string; error: string }
   | { type: "turn_interrupted" }
-  | { type: "backend_status"; running: boolean; turnStartedAt?: number; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; turnId?: string; turnStatus?: string; snapshotAt?: number }
+  | { type: "backend_status"; running: boolean; turnStartedAt?: number; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; turnId?: string; turnStatus?: string; snapshotAt?: number; runtimeEpoch?: string; turnEventSeq?: number }
   | { type: "cancel_requested" }
   | { type: "meta"; meta: Meta }
   | { type: "optimistic_meta"; meta: Meta }
@@ -837,6 +839,7 @@ function backendStatusFromRuntimeMeta(meta: RuntimeMetaSnapshot): Extract<Action
     cancellable: foregroundRunning,
     turnId: meta.turnId,
     turnStatus: meta.turnStatus,
+    runtimeEpoch: meta.runtime?.epoch, turnEventSeq: meta.turnEventSeq,
   };
 }
 
@@ -2085,6 +2088,11 @@ export function reducer(s: State, a: Action): State {
       return withRemoteTurnInterrupted(s);
     }
     case "backend_status": {
+      const incomingEpoch = a.runtimeEpoch?.trim();
+      const storedEpoch = s.runtimeStatusEpoch?.trim();
+      if (!(incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) && a.turnEventSeq !== undefined && s.runtimeStatusSeq !== undefined && a.turnEventSeq <= s.runtimeStatusSeq) {
+        return s;
+      }
       // Reject snapshots that began before newer prompt or turn lifecycle evidence.
       if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt) || snapshotPredatesTurnLifecycle(s.turnLifecycleObservedAt, a.snapshotAt)) return s;
       const pendingPrompt = Boolean(a.pendingPrompt);
@@ -2108,10 +2116,12 @@ export function reducer(s: State, a: Action): State {
         turnStartedAt === s.turnStartAt &&
         activeTurnId === s.activeTurnId &&
         !clearsRetry
-      ) return s;
+      ) return incomingEpoch || a.turnEventSeq !== undefined
+        ? { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq } : s;
       if (foregroundRunning) {
         return {
           ...s,
+          runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
           running: true,
           turnActive: true,
           pendingPrompt,
@@ -2131,6 +2141,7 @@ export function reducer(s: State, a: Action): State {
       }));
       return endPromptWait({
         ...telemetry,
+        runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
         items: finalized,
         running: false,
         turnActive: false,
@@ -3189,6 +3200,8 @@ export function useController() {
       cancellable: foregroundRunning,
       turnId: tab.turnId,
       turnStatus: tab.turnStatus,
+      runtimeEpoch,
+      turnEventSeq: latestEventSeq,
       snapshotAt,
     });
     // backend_status reconciliation can clear a live prompt from frontend state.
@@ -3490,6 +3503,8 @@ export function useController() {
         if (!acceptsRuntimeEventEpoch(acceptedEpoch, e.runtimeEpoch)) return;
         if (!acceptedEpoch) runtimeEpochByTabRef.current.set(targetTabId, e.runtimeEpoch);
       }
+      const currentMeta = statesRef.current.get(targetTabId)?.meta;
+      if (e.sessionGeneration !== undefined && (!currentMeta || currentMeta.sessionGeneration === undefined || e.sessionGeneration !== currentMeta.sessionGeneration)) return;
       if (!turnEventProjector.acceptLive(targetTabId, e, acceptedEpoch)) return;
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());

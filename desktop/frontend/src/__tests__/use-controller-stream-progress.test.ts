@@ -424,6 +424,27 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(s.retry, undefined, "fresh idle snapshot clears the retry indicator");
 }
 
+// --- 4b. runtime status sequence is monotonic within a controller epoch ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = reducer(s, {
+    type: "backend_status", running: true, turnId: "turn-new", runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  const stale = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 11,
+  });
+  eq(stale.running, true, "older idle runtime snapshot cannot hide a newer running turn");
+  eq(stale.activeTurnId, "turn-new", "older runtime snapshot cannot clear the active turn");
+  const duplicate = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  eq(duplicate.running, true, "duplicate runtime sequence cannot mutate turn state");
+  const rebuilt = reducer(stale, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-b", turnEventSeq: 1,
+  });
+  eq(rebuilt.running, false, "a new controller epoch may settle from its first snapshot");
+}
+
 // --- 5. TPS telemetry excludes tool gaps and preserves fallback estimates ---
 {
   const originalNow = Date.now;
