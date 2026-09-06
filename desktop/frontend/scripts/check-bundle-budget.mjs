@@ -195,7 +195,13 @@ console.log("\nbundle budgets");
 // existing bounded cross-platform metadata/toolchain allowance. Direct
 // topic-bar actions from the synced main-v2 add 0.186 KiB on the same
 // toolchain; retain only the next one-decimal ceiling on the reduced graph.
-const initialJSBudgetKiB = 426.8;
+// The App layering split (#9777) moves the App body into app-runtime owner
+// hooks and app-shell region builders; the bag interfaces reify property names
+// that local variables previously minified away. The module set and lazy
+// boundaries are sourcemap-identical to the pre-split graph. HEAD measured
+// 427.3-428.2 KiB (already 0.5-1.4 over the old gate from toolchain drift);
+// the split measures 440.3 KiB; retain only the next one-decimal ceiling.
+const initialJSBudgetKiB = 440.4;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -216,7 +222,10 @@ if (initialCSS.length > 0) {
 // states bring the merged shell to roughly 115.7 KiB gzip.
 // The one-row model configuration list and responsive stacking measure
 // 116.3 KiB gzip while reusing the shared segmented-control styles.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116 * 1024);
+// The retained-recovery cleanup receipt and current main-v2 status copy move
+// the deferred shell to 116.4 KiB on the current toolchain (unchanged by the
+// #9777 App layering split); retain only the next one-decimal ceiling.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.5 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -264,7 +273,10 @@ for (const path of localeChunks) {
   // labels share the existing locale dictionaries. Current main-v2 adds the
   // capability-status explanation; retain its measured 0.1 KiB while keeping
   // the session-experience ratchet below the pre-kernel budget.
-  const budget = name.startsWith("zh-TW-") ? 61.5 * 1024 : 60.6 * 1024;
+  // Current main-v2 recovery and status copy on the current toolchain measures
+  // 60.9 KiB zh and 61.8 KiB zh-TW (identical before and after the #9777 App
+  // layering split); retain only the next one-decimal ceiling for each.
+  const budget = name.startsWith("zh-TW-") ? 61.9 * 1024 : 61.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -359,6 +371,10 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // main-v2 add a measured 0.9 KiB to that reduced graph. Direct topic-bar
 // actions and the macOS dock styling add 0.946 KiB on the same-toolchain base;
 // retain only the next one-decimal ceiling on the reduced graph.
-const rawInitialBudgetKiB = 2_349.4;
+// The #9777 App layering split reifies the composition interface names the
+// single App body previously minified away; the split graph measures 2378.6
+// KiB raw (2341.0 before the split). Retain only the next one-decimal
+// ceiling; gzip and largest-chunk budgets carry their own narrow ratchets.
+const rawInitialBudgetKiB = 2_378.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
