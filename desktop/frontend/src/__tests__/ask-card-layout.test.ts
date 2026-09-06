@@ -754,6 +754,8 @@ console.log("\nask card layout");
   await act(async () => { collapse.click(); await flushTimers(); });
   ok(card.classList.contains("prompt-shelf__card--collapsed"), "collapse action hides the Ask body");
   ok(Boolean(document.querySelector(".prompt-shelf__header")), "collapsed Ask keeps its header visible");
+  eq(window.getComputedStyle(document.querySelector(".prompt-shelf__actions") as HTMLElement).display, "none", "collapsed Ask hides its option list");
+  eq(window.getComputedStyle(document.querySelector(".prompt-shelf__footer") as HTMLElement).display, "none", "collapsed Ask hides its footer");
   await act(async () => { collapse.click(); await flushTimers(); });
   ok(!card.classList.contains("prompt-shelf__card--collapsed"), "expand action restores the Ask body");
   await act(async () => { option.click(); await flushTimers(); });

@@ -10122,6 +10122,10 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev);
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border-soft));
 }
+.prompt-shelf--ask .prompt-shelf__card--collapsed .prompt-shelf__content > :not(.prompt-shelf__header),
+.prompt-shelf--ask .prompt-shelf__card--collapsed > .prompt-shelf__footer {
+  display: none !important;
+}
 .prompt-shelf--ask .prompt-shelf__content { gap: 0; padding: 0 2px; }
 .prompt-shelf--ask .prompt-shelf__header { align-items: center; padding: 18px 4px 14px; gap: 16px; }
 .prompt-shelf--ask .prompt-shelf__heading { font-size: 16px; font-weight: 650; }
