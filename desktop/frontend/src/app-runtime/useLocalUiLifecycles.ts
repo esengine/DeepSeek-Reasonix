@@ -21,25 +21,26 @@ export function useDecisionSurfaceFocus(input: {
   closeOverlays: () => void;
   activeTabRef: { current: string | null | undefined };
 }) {
+  const { surface, activeTabId, closeOverlays, activeTabRef } = input;
   const previous = useRef<string | null>(null);
-  const surfaceRef = useRef<string | null>(input.surface);
-  surfaceRef.current = input.surface;
+  const surfaceRef = useRef<string | null>(surface);
+  surfaceRef.current = surface;
   useEffect(() => {
-    if (input.surface) {
-      input.closeOverlays();
-      previous.current = input.surface;
+    if (surface) {
+      closeOverlays();
+      previous.current = surface;
       return;
     }
     const hadSurface = previous.current !== null;
     previous.current = null;
     if (!hadSurface) return;
-    const tabAtRelease = input.activeTabId;
+    const tabAtRelease = activeTabId;
     const frame = requestAnimationFrame(() => {
-      if (surfaceRef.current !== null || input.activeTabRef.current !== tabAtRelease) return;
+      if (surfaceRef.current !== null || activeTabRef.current !== tabAtRelease) return;
       (document.getElementById("composer-input") as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [input.activeTabId, input.closeOverlays, input.surface, input.activeTabRef]);
+  }, [activeTabId, activeTabRef, closeOverlays, surface]);
 }
 
 export function useActiveTabUiReset(input: {
@@ -48,9 +49,10 @@ export function useActiveTabUiReset(input: {
   setInsertTarget: (value: "composer") => void;
   activeTabRef: { current: string | null | undefined };
 }) {
+  const { activeTabId, activeTabRef, setClearPending, setInsertTarget } = input;
   useEffect(() => {
-    input.activeTabRef.current = input.activeTabId;
-    input.setClearPending(false);
-    input.setInsertTarget("composer");
-  }, [input.activeTabId, input.activeTabRef, input.setClearPending, input.setInsertTarget]);
+    activeTabRef.current = activeTabId;
+    setClearPending(false);
+    setInsertTarget("composer");
+  }, [activeTabId, activeTabRef, setClearPending, setInsertTarget]);
 }

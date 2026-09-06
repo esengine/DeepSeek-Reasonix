@@ -25,7 +25,8 @@ export function useSidebarConnectionValidity<T extends { id: string }>(input: {
   connections: readonly T[];
   setConnectionId: (update: (current: string) => string) => void;
 }) {
+  const { connections, setConnectionId } = input;
   useEffect(() => {
-    input.setConnectionId((current) => !current || input.connections.some((connection) => connection.id === current) ? current : "");
-  }, [input.connections, input.setConnectionId]);
+    setConnectionId((current) => !current || connections.some((connection) => connection.id === current) ? current : "");
+  }, [connections, setConnectionId]);
 }
