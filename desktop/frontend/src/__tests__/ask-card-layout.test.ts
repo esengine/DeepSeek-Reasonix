@@ -788,7 +788,7 @@ console.log("\nask card layout");
     ));
     await flushTimers();
   });
-  ok(Boolean(document.querySelector(".prompt-shelf__card--collapsed")), "Ask collapse state restores from the tab session");
+  ok(!document.querySelector(".prompt-shelf__card--collapsed"), "a remounted Ask starts expanded like harness");
   const restoredDraft = sessionStorage.getItem("reasonix.ask-draft:ask-session-draft") ?? "";
   ok(restoredDraft.includes("Change"), "Ask answer draft restores from the tab session");
   await act(async () => { remountRoot.unmount(); });

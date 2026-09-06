@@ -16,7 +16,6 @@ type AskDraft = {
   custom: Record<string, string>;
   active: number;
   selectedIndex: number;
-  collapsed: boolean;
 };
 
 function readAskDraft(id: string): AskDraft | undefined {
@@ -25,7 +24,7 @@ function readAskDraft(id: string): AskDraft | undefined {
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as Partial<AskDraft>;
     if (!parsed.sel || !parsed.custom || typeof parsed.active !== "number" || typeof parsed.selectedIndex !== "number") return undefined;
-    return { sel: parsed.sel, custom: parsed.custom, active: parsed.active, selectedIndex: parsed.selectedIndex, collapsed: parsed.collapsed === true };
+    return { sel: parsed.sel, custom: parsed.custom, active: parsed.active, selectedIndex: parsed.selectedIndex };
   } catch {
     return undefined;
   }
@@ -57,7 +56,9 @@ export function AskCard({
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => readAskDraft(ask.id)?.collapsed ?? false);
+  // A newly delivered Ask always starts expanded, matching harness. Collapse
+  // is presentation state and must not leak from an earlier request.
+  const [collapsed, setCollapsed] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
   const instanceId = useId();
@@ -89,16 +90,16 @@ export function AskCard({
     setActive(draft?.active ?? 0);
     setSelectedIndex(draft?.selectedIndex ?? 0);
     setSubmitting(false);
-    setCollapsed(draft?.collapsed ?? false);
+    setCollapsed(false);
   }, [ask.id]);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, active, selectedIndex, collapsed } satisfies AskDraft));
+      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, active, selectedIndex } satisfies AskDraft));
     } catch {
       // Session storage is best effort; the live pending ask remains authoritative.
     }
-  }, [active, ask.id, collapsed, custom, selectedIndex, sel]);
+  }, [active, ask.id, custom, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
