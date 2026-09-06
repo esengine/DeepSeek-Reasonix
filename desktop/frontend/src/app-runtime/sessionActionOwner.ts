@@ -1,5 +1,5 @@
 import type { CollaborationMode, QuestionAnswer, ToolApprovalMode } from "../lib/types";
-import type { SessionOperationAuthority, SessionResource } from "./useSessionOperations";
+import type { SessionOperationAuthority } from "./useSessionOperations";
 
 export type SessionPromptTarget = Readonly<{
   tabId: string;
@@ -11,70 +11,6 @@ export type PlanDecisionAction = "start_execution" | "revise_plan" | "exit_plan"
 export type RecoveryAction = "continue" | "continue_task" | "revise" | "stop";
 export type MCPInteractionAction = "accept" | "decline" | "cancel";
 
-export type ClearSessionPorts = {
-  clearSession: () => Promise<void>;
-  clearRemoteSession: (tabId: string) => Promise<void>;
-  retryRemoteHydration: () => Promise<void>;
-};
-
-/** Clears a captured session. Resource completion may finish after navigation,
- * but UI follow-up is only allowed while the captured session owns the surface. */
-export async function executeClearSession(
-  target: SessionResource,
-  input: { remote: boolean },
-  ports: ClearSessionPorts,
-  authority: SessionOperationAuthority,
-): Promise<void> {
-  authority.checkpoint();
-  if (input.remote) {
-    await ports.clearRemoteSession(target.tabId);
-    authority.checkpoint();
-    await ports.retryRemoteHydration();
-  } else {
-    await ports.clearSession();
-  }
-  authority.checkpoint();
-}
-
-export async function executeCancelRuntimeJob(
-  target: SessionResource,
-  jobId: string,
-  ports: { cancelForTab: (tabId: string, jobId: string) => Promise<boolean>; refresh: () => Promise<void> },
-  authority: SessionOperationAuthority,
-): Promise<boolean> {
-  authority.checkpoint();
-  const cancelled = await ports.cancelForTab(target.tabId, jobId);
-  authority.checkpoint();
-  if (authority.ownsUI()) await ports.refresh();
-  authority.checkpoint();
-  return cancelled;
-}
-
-export async function executeTerminalOutputInsertion(
-  target: SessionResource,
-  sessionId: string,
-  ports: { read: (tabId: string, sessionId: string) => Promise<string>; apply: (text: string) => void },
-  format: (output: string) => string,
-  authority: SessionOperationAuthority,
-): Promise<boolean> {
-  authority.checkpoint();
-  const text = format(await ports.read(target.tabId, sessionId));
-  authority.checkpoint();
-  if (!text) return false;
-  if (authority.ownsUI()) ports.apply(text);
-  return true;
-}
-
-export async function executeTodoDismissal(
-  target: SessionResource,
-  batchKey: string,
-  port: (tabId: string, batchKey: string) => Promise<void>,
-  authority: SessionOperationAuthority,
-): Promise<void> {
-  authority.checkpoint();
-  await port(target.tabId, batchKey);
-  authority.checkpoint();
-}
 
 export type SessionActionPorts = {
   approveForTab: (tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => void;

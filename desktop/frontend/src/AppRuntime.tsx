@@ -85,7 +85,6 @@ import {
 } from "./lib/toolApprovalMode";
 import { useComposerModeActions } from "./lib/useComposerModeActions";
 import { useSessionOperations } from "./app-runtime/useSessionOperations";
-import { executeCancelRuntimeJob, executeClearSession, executeTerminalOutputInsertion, executeTodoDismissal } from "./app-runtime/sessionActionOwner";
 import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
@@ -161,6 +160,7 @@ setReasoningDisplayPending();
 const TaskMonitorPanel = lazy(() => import("./components/TaskMonitorPanel").then((module) => ({ default: module.TaskMonitorPanel })));
 const loadNavigationOwner = () => import("./app-runtime/navigationOwner");
 const loadDeliveryContinue = () => import("./lib/deliveryContinue");
+const loadSessionRuntimeOwner = () => import("./app-runtime/sessionRuntimeOwner");
 function setRemoteComposerProfileForSessionAction(
   tabId: string,
   mode: CollaborationMode,
@@ -741,8 +741,8 @@ export function AppRuntime() {
       navigateRemote: useCommittedCommand<RemoteNavigationCommand>((remote, options) => openRemoteProject(remote, options)) });
   const cancelRuntimeJob = useCommittedCommand(async (tabId: string, jobId: string): Promise<boolean> => {
     const target = { tabId, sessionKey: tabId === activeTabId ? activeSessionIdentity : `tab:${tabId}` };
-    const outcome = await sessionOperations(target, `runtime-cancel:${jobId}`, {}, (_input, authority) =>
-      executeCancelRuntimeJob(target, jobId, {
+    const outcome = await sessionOperations(target, `runtime-cancel:${jobId}`, {}, async (_input, authority) =>
+      (await loadSessionRuntimeOwner()).executeCancelRuntimeJob(target, jobId, {
         cancelForTab: async (sourceTabId, sourceJobId) => desktopBridge.cancelJobForTab(sourceTabId, sourceJobId),
         refresh: refreshBackgroundRuntimes,
       }, authority),
@@ -809,7 +809,7 @@ export function AppRuntime() {
     });
     if (!remoteSurfaceActive && activeTabId && todoBatch) {
       const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
-      void sessionOperations(target, "todo-dismiss", {}, (_input, authority) => executeTodoDismissal(
+      void sessionOperations(target, "todo-dismiss", {}, async (_input, authority) => (await loadSessionRuntimeOwner()).executeTodoDismissal(
         target, todoBatch, (tabId, batchKey) => desktopBridge.dismissTodoBatchForTab(tabId, batchKey), authority,
       )).catch(() => undefined);
     }
@@ -856,8 +856,8 @@ export function AppRuntime() {
     const target = activeTabId ? { tabId: activeTabId, sessionKey: activeSessionIdentity } : null;
     if (!target) return;
     setClearContextPending(false);
-    const outcome = await sessionOperations(target, "clear-context", { remote: remoteSurfaceActive }, (input, authority) =>
-      executeClearSession(target, input, {
+    const outcome = await sessionOperations(target, "clear-context", { remote: remoteSurfaceActive }, async (input, authority) =>
+      (await loadSessionRuntimeOwner()).executeClearSession(target, input, {
         clearSession,
         clearRemoteSession: (tabId) => desktopBridge.clearRemoteTabSession(tabId),
         retryRemoteHydration: () => remoteSession.retryHydration(),
@@ -998,8 +998,8 @@ export function AppRuntime() {
   const addTerminalOutputToComposer = useCommittedCommand(async (sessionId: string) => {
     if (!activeTabId) return;
     const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
-    const outcome = await sessionOperations(target, `terminal-output:${sessionId}`, {}, (_input, authority) =>
-      executeTerminalOutputInsertion(target, sessionId, {
+    const outcome = await sessionOperations(target, `terminal-output:${sessionId}`, {}, async (_input, authority) =>
+      (await loadSessionRuntimeOwner()).executeTerminalOutputInsertion(target, sessionId, {
         read: (tabId, terminalSessionId) => desktopBridge.terminalOutputForTab(tabId, terminalSessionId),
         apply: addWorkspaceTextToComposer,
       }, formatTerminalOutputForComposer, authority),
