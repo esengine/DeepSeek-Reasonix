@@ -892,7 +892,7 @@ export default function App() {
     if (!remoteSurfaceActive && activeTabId && todoBatch) void app.DismissTodoBatchForTab(activeTabId, todoBatch).catch(() => undefined);
   });
   const handleTodoContinue = useCommittedCommand(() => {
-    const targetTabId = todoContinueTarget(activeTabId, activeTabIdRef.current, {
+    const targetTabId = todoContinueTarget(activeTabId, activeTabId, {
       ready: remoteSurfaceActive ? remoteComposerReady : controllerReady,
       readOnly: Boolean(activeTab?.readOnly),
       running: visibleRuntimeState.running,
