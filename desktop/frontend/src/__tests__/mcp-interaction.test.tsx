@@ -48,7 +48,7 @@ function ok(value: boolean, label: string) {
 
 type ControllerState = Parameters<typeof reducer>[0];
 
-const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../AppRuntime.tsx", import.meta.url), "utf8");
 ok(
   /\[clearContextPending, pendingClose, state\.approval, state\.ask, state\.extensionForm, state\.mcpInteraction, workspaceConflict\]/.test(appSource),
   "App decision surface recomputes when an MCP interaction arrives",
