@@ -201,8 +201,9 @@ console.log("\nbundle budgets");
 // Keep one decimal of cross-platform headroom for this measured shell change.
 // Integrating main-v2 rich-link menus measures 466.905 KiB combined. The
 // session-runtime ordering fence adds 56 bytes in the initial path; retain the
-// smallest one-decimal ratchet that covers the measured 467.055 KiB result.
-const initialJSBudgetKiB = 467.1;
+// smallest cross-platform one-decimal ratchet that covers the measured
+// 467.055 KiB result and zlib rounding on macOS.
+const initialJSBudgetKiB = 467.2;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
