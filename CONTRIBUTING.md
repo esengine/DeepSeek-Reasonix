@@ -5,7 +5,7 @@ everything you need to get started.
 
 ## Prerequisites
 
-- **Go 1.25+** — the project targets the latest stable Go release
+- **Go 1.26+** — the project targets the latest stable Go release
 - **Git** — for version control
 - **Node.js** (optional) — only if you work on the desktop app (`desktop/`)
 - **Wails CLI** (desktop only) — run `make wails-install` so the CLI matches
