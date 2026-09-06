@@ -11,7 +11,8 @@ import {
 } from "./PromptShelf";
 
 const askDrafts = new Map<string, AskDraft>();
-const askDraftKey = (scope: string, id: string) => `${scope}:${id}`;
+const askDraftKey = (scope: string, ask: WireAsk) =>
+  JSON.stringify([scope, ask.runtimeEpoch ?? "", ask.turnId ?? "", ask.id]);
 type AnswerMode = "option" | "custom";
 type AskDraft = {
   sel: Record<string, string[]>;
@@ -21,41 +22,45 @@ type AskDraft = {
   selectedIndex: number;
 };
 
-function readAskDraft(scope: string, id: string): AskDraft | undefined {
-  const draft = askDrafts.get(askDraftKey(scope, id));
+function readAskDraft(key: string): AskDraft | undefined {
+  const draft = askDrafts.get(key);
   return draft ? { ...draft, sel: { ...draft.sel }, custom: { ...draft.custom }, answerMode: { ...draft.answerMode } } : undefined;
 }
 
-function clearAskDraft(scope: string, id: string): void {
-  askDrafts.delete(askDraftKey(scope, id));
+function clearAskDraft(key: string): void {
+  askDrafts.delete(key);
 }
 
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
 // walks multi-question asks one at a time. Single-select choices advance to
 // the next question immediately; multi-select and custom answers wait for an
 // explicit confirm, and the final question still requires submission.
-export function AskCard({
-  ask,
-  onAnswer,
-  draftScope = "default",
-  onStop,
-}: {
+type AskCardProps = {
   ask: WireAsk;
   onAnswer: (id: string, answers: QuestionAnswer[]) => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   draftScope?: string;
   onStop: () => void;
-}) {
+};
+
+export function AskCard(props: AskCardProps) {
+  const draftKey = askDraftKey(props.draftScope ?? "default", props.ask);
+  // The same identity owns both cached drafts and live component state. A
+  // controller can reuse prompt IDs, so changing runtime or turn remounts it.
+  return <AskCardBody key={draftKey} {...props} draftKey={draftKey} />;
+}
+
+function AskCardBody({ ask, onAnswer, onStop, draftKey }: AskCardProps & { draftKey: string }) {
   const t = useT();
   // Per-question state: selected option labels, and an optional typed answer.
-  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(draftScope, ask.id)?.sel ?? {});
-  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(draftScope, ask.id)?.custom ?? {});
-  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(draftScope, ask.id)?.answerMode ?? {});
+  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(draftKey)?.sel ?? {});
+  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(draftKey)?.custom ?? {});
+  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(draftKey)?.answerMode ?? {});
   const [customOpen, setCustomOpen] = useState(false);
-  const [active, setActive] = useState(() => readAskDraft(draftScope, ask.id)?.active ?? 0);
+  const [active, setActive] = useState(() => readAskDraft(draftKey)?.active ?? 0);
   // Extra decision row after option labels: custom answer. Skip is a
   // secondary footer action rather than an answer choice.
-  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(draftScope, ask.id)?.selectedIndex ?? 0);
+  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(draftKey)?.selectedIndex ?? 0);
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -87,25 +92,15 @@ export function AskCard({
 
   useEffect(() => {
     shelfRef.current?.focus();
-    initializedActiveRef.current = false;
-    const draft = readAskDraft(draftScope, ask.id);
-    setSel(draft?.sel ?? {});
-    setCustom(draft?.custom ?? {});
-    setAnswerMode(draft?.answerMode ?? {});
-    setCustomOpen(false);
-    setActive(draft?.active ?? 0);
-    setSelectedIndex(draft?.selectedIndex ?? 0);
-    setSubmitting(false);
-    setCollapsed(false);
-  }, [ask.id, draftScope]);
+  }, []);
 
   useEffect(() => {
     try {
-      askDrafts.set(askDraftKey(draftScope, ask.id), { sel: { ...sel }, custom: { ...custom }, answerMode: { ...answerMode }, active, selectedIndex });
+      askDrafts.set(draftKey, { sel: { ...sel }, custom: { ...custom }, answerMode: { ...answerMode }, active, selectedIndex });
     } catch {
       // Draft storage is best effort; the live pending ask remains authoritative.
     }
-  }, [active, answerMode, ask.id, custom, draftScope, selectedIndex, sel]);
+  }, [active, answerMode, custom, draftKey, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
@@ -155,7 +150,7 @@ export function AskCard({
     if (submitting) return;
     if (isLast) {
       submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
-        clearAskDraft(draftScope, ask.id);
+        clearAskDraft(draftKey);
       }));
       return;
     }
@@ -175,6 +170,7 @@ export function AskCard({
   };
 
   const setTyped = (question: WireAskQuestion, text: string) => {
+    setSelectedIndex(customRowIndex);
     setAnswerMode((m) => ({ ...m, [question.id]: "custom" }));
     setCustom((c) => ({ ...c, [question.id]: text }));
     if (text.trim()) setSel((s) => ({ ...s, [question.id]: [] }));
@@ -186,7 +182,7 @@ export function AskCard({
   };
 
   const stopAsk = () => {
-    clearAskDraft(draftScope, ask.id);
+    clearAskDraft(draftKey);
     onStop();
   };
 
@@ -202,7 +198,7 @@ export function AskCard({
       return;
     }
     submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
-      clearAskDraft(draftScope, ask.id);
+      clearAskDraft(draftKey);
     }));
   };
 
@@ -398,6 +394,7 @@ export function AskCard({
               placeholder={t("ask.customPlaceholder")}
               value={answerMode[q.id] === "custom" ? custom[q.id] ?? "" : ""}
               disabled={submitting}
+              onFocus={() => setSelectedIndex(customRowIndex)}
               onChange={(e) => setTyped(q, e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canConfirm()) {

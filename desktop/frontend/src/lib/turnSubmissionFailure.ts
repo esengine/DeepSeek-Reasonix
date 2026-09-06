@@ -72,12 +72,11 @@ export async function findTabAfterSubmitFailure(
   for (const delay of delays) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
     try {
-      const tab = asArray(await binding.ListTabs()).find((candidate) => candidate.id === tabId);
-      // Sample after the authoritative read. A synchronous bridge may resolve
-      // within the same monotonic tick as the initiating lifecycle event; the
-      // tiny deterministic advance records that the read has completed without
-      // weakening the reducer's tie guard.
+      // Fence at read start, so a delayed response cannot override a turn or
+      // prompt observed while it was in flight. Preserve a sub-tick advance
+      // for synchronous bridges called in the initiating event's clock tick.
       const snapshotAt = clock() + 0.001;
+      const tab = asArray(await binding.ListTabs()).find((candidate) => candidate.id === tabId);
       return [tab, snapshotAt] as const;
     } catch {
       // The caller's stale-turn watchdog remains the long-tail backstop.
