@@ -277,7 +277,7 @@ func TestArgumentRecoveryCompileFailure(t *testing.T) {
 			reg.Add(target)
 			reg.Add(recoveryBash(t))
 			a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-			for range 3 {
+			for i := range 3 {
 				calls := []provider.ToolCall{{ID: fmt.Sprint(i), Name: "broken", Arguments: `{}`}}
 				if mixed {
 					calls = append(calls, provider.ToolCall{ID: fmt.Sprint(i, "bad"), Name: "bash", Arguments: `{}`})
@@ -430,7 +430,7 @@ func TestArgumentRecoveryPreservesProviderPrefix(t *testing.T) {
 	reg.Add(b)
 	var turns []testutil.Turn
 	raw := `{"arguments":{"command":"pwd"}}`
-	for range 3 {
+	for i := range 3 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{ID: fmt.Sprint(i), Name: "bash", Arguments: raw}}})
 	}
 	turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "fixed", Name: "bash", Arguments: `{"command":"pwd"}`}}}, testutil.Turn{Text: "done"})
