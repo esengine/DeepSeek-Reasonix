@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { lazy, Suspense, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { useManagementWorkspace } from "./lib/useManagementWorkspace";
 import { useAppNavigationStore } from "./store/appNavigation";
 import { useAutomationNavigation } from "./app-runtime/useAutomationNavigation";
@@ -70,7 +70,7 @@ import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle
 import { useNativeSettingsEvent } from "./app-runtime/useNativeSettingsEvent";
 import { useTabProjectionLifecycle } from "./app-runtime/useTabProjectionLifecycle";
 import { useAppDiagnostics, useSidebarConnectionValidity } from "./app-runtime/useAppEffectHosts";
-import { useActiveTabUiReset, useDecisionSurfaceFocus, useTopicTimeFilter } from "./app-runtime/useLocalUiLifecycles";
+import { useActiveTabUiReset, useDecisionSurfaceFocus, useTopicTimeFilter, useVerificationRevealReset } from "./app-runtime/useLocalUiLifecycles";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -958,7 +958,7 @@ export default function App() {
     });
   });
 
-  useEffect(() => { setVerificationRevealRequest(null); }, [activeTabId, state.completionSummary, state.turnStartAt]);
+  useVerificationRevealReset({ activeTabId, completionSummary: state.completionSummary, turnStartAt: state.turnStartAt, reset: setVerificationRevealRequest });
 
   const { toggleTerminalPanel, openTerminalForPath, closeTerminalPanel } = useTerminalPanelCommands({
     tabId: activeTabId, enabled: conversationView.localToolsEnabled, shortcutsEnabled: !managementActive,

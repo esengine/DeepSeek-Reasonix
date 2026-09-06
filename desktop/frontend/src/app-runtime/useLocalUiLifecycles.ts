@@ -56,3 +56,13 @@ export function useActiveTabUiReset(input: {
     setInsertTarget("composer");
   }, [activeTabId, activeTabRef, setClearPending, setInsertTarget]);
 }
+
+export function useVerificationRevealReset(input: {
+  activeTabId?: string | null;
+  completionSummary: unknown;
+  turnStartAt?: number | null;
+  reset: (value: null) => void;
+}) {
+  const { activeTabId, completionSummary, turnStartAt, reset } = input;
+  useEffect(() => { reset(null); }, [activeTabId, completionSummary, reset, turnStartAt]);
+}
