@@ -223,5 +223,27 @@ hooks 门禁 + test:app-lifecycle + app-browser 回放；凡删除 App 源码字
 WorkspacePanel 保真、Composer 审批覆盖下持续挂载两条不变式在每次浏览器回放
 中复核。
 
+### 组装切片（8）现状与架构边界
+
+切片 3-7 的命令/effect 纵向已按序迁出（undo/rewind、extension、tab-bar、
+runtime 事件面、palette、composer 路由、trash/history、远端工作区连接），
+App 现 2180 行、22 个 effect；返回 JSX 已全部由纯 props 区域组件承载
+（SidebarRegion/TopicbarRegion/SessionStatusBanners/DecisionFooterRegion/
+WorkspaceDockRegion/AppBottomRegions/AppOverlayHost/Transcript 等），余下
+body 为跨区域共享命令的接线与投影。
+
+**架构边界（已核实）**：`useController` 是单实例 hook（状态不在任何
+store），任何区域组件都无法自取 controller 派生态——"App ≤200 行纯组合"
+在当前架构下不可达：需要先做 controller 状态 store 化的独立长周期史诗
+（contributes 该 PR 之外的规模），随后区域自接线才成立。已按最小改动原则
+把可独立成 owner 的共同原语全部迁出；剩余同构接线（IM/bot 设置、worktree
+merge、topic 重命名残余、dock/status 投影与约 10 个展示 effect）在此边界内
+继续为纯搬移（可再收敛约 200-300 行），不改变结构性结论。
+
+遗留：`goalSubmit.ts` 无生产调用（其场景测试仍引用，随 controller-store
+史诗或 owner 化删除）；footer RO（#25）、activeTabIdRef（#22）、maximised
+同步、extension drain（#15）已迁（#15 在 useExtensionSurface；#22 仅剩 ref
+镜像）；bundle 预算保持未动。
+
 后续应继续收敛共同资源/UI 所有权并纵向迁移完整领域；不得增加局部延时
 guard、强制重挂载、清缓存或放宽验收门槛。

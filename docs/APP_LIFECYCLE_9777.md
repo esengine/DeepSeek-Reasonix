@@ -319,6 +319,29 @@ the owner tests. Re-verify both invariants in every browser replay: real
 WorkspacePanel/tree/preview identity on same-project session switches, and
 Composer staying mounted while approval/decision overlays cover it.
 
+### Assembly slice (8): current state and the architectural boundary
+
+Slices 3-7 command/effect verticals have been migrated in order (undo/rewind,
+extension surface, tab bar, runtime event surface, palette, composer router,
+trash/history, remote workspace connection); App is now 2,180 lines with 22
+effects and its returned JSX is entirely carried by pure prop-driven region
+components. The remaining body is wiring and projections for cross-region
+shared commands.
+
+Architectural boundary (verified): useController is a single-instance hook
+whose state lives in no store, so no region component can self-derive
+controller-backed views. The "App <= 200 line pure composition" target is not
+reachable under the current architecture: it requires first store-ifying
+controller state - an independent long-running epic beyond this PR's scope -
+after which section self-wiring becomes possible. All common primitives that
+could be owned independently have been extracted with minimal churn; the
+remaining homogeneous wiring (IM/bot settings, worktree merge, topic rename
+residue, dock/status projections and about ten presentation effects) could
+shed another 200-300 lines by pure relocation without changing that
+conclusion. goalSubmit.ts has no production callers (its scenario tests still
+reference it; deletion follows the controller-store epic or owner-ization).
+Bundle budgets are untouched.
+
 Continue with the common resource/UI ownership boundary and full vertical
 domain migration. Do not fix subsequent cases with local timing guards,
 forced remounts, cache clearing or weaker acceptance thresholds.
