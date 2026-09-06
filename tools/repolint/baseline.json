@@ -900,7 +900,7 @@
     "internal/control/controller.go": {
       "complexity": 12,
       "essay": 91,
-      "file-size": 5564,
+      "file-size": 5565,
       "function-size": 84,
       "narrative": 4,
       "struct-state": 17
