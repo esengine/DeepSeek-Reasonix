@@ -299,3 +299,53 @@ func TestSupersessionIsScopedToTheTurnThatInheritedIt(t *testing.T) {
 		t.Fatalf("journal = %+v, want the barrier superseded by the turn that took it", entries)
 	}
 }
+
+// TestLiveApprovalIsNotAnInterruptedBarrier covers the half of the live set the
+// ask path never reaches. A tool approval and a question are both prompts this
+// process is waiting on, and only the approvals map says so for the first: a
+// live set built from the asks alone reports every open tool approval as an
+// obligation nobody is waiting on, which is the state a crash leaves behind.
+func TestLiveApprovalIsNotAnInterruptedBarrier(t *testing.T) {
+	c := barrierController(t)
+	id, _ := c.approval.registerDecisionKind("bash", "ls", "reads the tree", true, false, "", nil)
+	if err := c.openBarrier(id, string(DecisionToolApproval), "bash ls"); err != nil {
+		t.Fatalf("openBarrier: %v", err)
+	}
+
+	if got := c.InterruptedAdjudications(); len(got) != 0 {
+		t.Fatalf("reported %d interrupted barriers while an approval is being waited on: %+v", len(got), got)
+	}
+	active, history := c.Adjudications()
+	if len(active) != 0 || len(history) != 0 {
+		t.Fatalf("active=%d history=%d, want a live approval in neither", len(active), len(history))
+	}
+
+	// The same record with nobody waiting on it is the interruption. Resolving
+	// the approval drops it from the live set without closing the barrier,
+	// which is exactly the shape a killed process leaves.
+	c.approval.resolve(id)
+	if got := c.InterruptedAdjudications(); len(got) != 1 || got[0].ID != id {
+		t.Fatalf("interrupted = %+v, want the abandoned approval %s", got, id)
+	}
+}
+
+// TestAskRefusesWhenTheBarrierCannotBeRecorded pins the ordering's failure
+// side. The record is what makes a question answerable, so a question that
+// could not be written down must not be asked: proceeding would put a prompt
+// in front of a person that no crash-recovery pass can ever find.
+func TestAskRefusesWhenTheBarrierCannotBeRecorded(t *testing.T) {
+	c := barrierController(t)
+	// A directory where the journal's file belongs: the append cannot open it,
+	// and nothing else about the session changes.
+	if err := os.MkdirAll(store.SessionAdjudication(c.SessionPath()), 0o755); err != nil {
+		t.Fatalf("stage an unwritable journal: %v", err)
+	}
+
+	ans, err := c.Ask(t.Context(), askQuestion())
+	if err == nil {
+		t.Fatalf("Ask returned %+v with no error while its barrier could not be recorded", ans)
+	}
+	if d := c.Decisions(); len(d) != 0 {
+		t.Fatalf("decisions = %+v, want the question never offered", d)
+	}
+}

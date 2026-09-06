@@ -274,16 +274,22 @@ func rebuiltWorkers(entries []execjournal.Entry, children []agent.SubagentArtifa
 }
 
 // matrixSink records the worker nodes published under this call, which is what
-// a reader would be shown while the run was happening.
+// a reader would be shown while the run was happening. A fan-out publishes from
+// every worker's goroutine and agentgraph.Graph folds a delta in place, so
+// holding one is the reader's job — production folds deltas on one goroutine.
 type matrixSink struct {
 	event.Sink
+	mu    sync.Mutex
 	graph agentgraph.Graph
 }
 
 func (s *matrixSink) Emit(e event.Event) {
-	if e.Kind == event.GraphDelta && e.Graph != nil {
-		s.graph.Apply(*e.Graph)
+	if e.Kind != event.GraphDelta || e.Graph == nil {
+		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.graph.Apply(*e.Graph)
 }
 
 // workers is every worker node drawn in this world. No id filter: one world runs
@@ -291,6 +297,8 @@ func (s *matrixSink) Emit(e event.Event) {
 // than anything under the call — filtering by call prefix reported that as
 // nothing drawn.
 func (s *matrixSink) workers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var out []string
 	for _, n := range s.graph.Nodes {
 		if n.Kind == agentgraph.KindWorker {

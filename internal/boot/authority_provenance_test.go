@@ -123,16 +123,23 @@ func TestDeniedAuthorityIsNotInheritedThroughADescriptor(t *testing.T) {
 	}
 	defer file.Close()
 
-	scan := `import os,stat
-for fd in range(3, 64):
-    try: st = os.fstat(fd)
-    except OSError: continue
-    if not stat.S_ISSOCK(st.st_mode): continue
-    try:
-        os.set_blocking(fd, False)
-        data = os.read(fd, 32)
-        if data: print("FD-DATA", data.decode(errors="replace"))
-    except OSError: pass`
+	// The scan keeps looking: one instant's read races the peer's write, and a
+	// miss then is the attacker having been early, not a boundary holding.
+	scan := `import os,stat,time
+deadline = time.time() + 5
+while time.time() < deadline:
+    for fd in range(3, 64):
+        try: st = os.fstat(fd)
+        except OSError: continue
+        if not stat.S_ISSOCK(st.st_mode): continue
+        try:
+            os.set_blocking(fd, False)
+            data = os.read(fd, 32)
+            if data:
+                print("FD-DATA", data.decode(errors="replace"))
+                raise SystemExit(0)
+        except OSError: pass
+    time.sleep(0.05)`
 
 	// Positive control: the same scan, unconfined, with the descriptor handed
 	// over deliberately. It has to find the marker, or a clean result below
