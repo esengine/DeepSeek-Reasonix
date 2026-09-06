@@ -6122,6 +6122,8 @@ type sessionRecoveryFailedEvent struct {
 	Reason          string `json:"reason,omitempty"`
 	ConversationID  string `json:"conversationId,omitempty"`
 	TopicID         string `json:"topicId,omitempty"`
+	RecoveryPath    string `json:"recoveryPath,omitempty"`
+	WorkspaceRoot   string `json:"workspaceRoot,omitempty"`
 	CanContinue     bool   `json:"canContinue"`
 	RecoveryPending bool   `json:"recoveryPending"`
 }

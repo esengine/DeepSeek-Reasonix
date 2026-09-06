@@ -60,7 +60,13 @@ export function SessionRecoveryVersionsHost({ sessions, onResumeSession, onRecov
   }, []);
 
   useEffect(() => onSessionRecoveryFailed((event) => {
-    showToast(event.recoveryPending ? t("recovery.failedPending") : t("recovery.failed"), "error");
+    showToast(event.recoveryPending ? t("recovery.failedPending") : t("recovery.failed"), "error", event.recoveryPending && event.recoveryPath && event.topicId ? {
+      actionLabel: t("recovery.retry"),
+      onAction: () => { void app.RetrySessionRecovery({
+        scope: event.workspaceRoot ? "project" : "global", workspaceRoot: event.workspaceRoot,
+        topicId: event.topicId!, path: event.recoveryPath!,
+      }); },
+    } : undefined);
   }), [showToast, t]);
 
   const inspectVersions = useCallback((session: SessionMeta, view: RecoveryLineageView) => {

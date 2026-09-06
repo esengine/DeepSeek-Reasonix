@@ -367,6 +367,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<RecoveryLineageView>;
   GetSessionVersionState(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<import("./types").SessionVersionStateView>;
   SetActiveSessionVersion(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  RetrySessionRecovery(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   ReconcileRecoveryVersions(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string }): Promise<void>;
   ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
@@ -3444,6 +3445,7 @@ function makeMockApp(): AppBindings {
       return { conversationId: key.topicId, canContinue: true, requiresChoice: lineage.state === "diverged" && lineage.unresolved > 0, lineage };
     },
     async SetActiveSessionVersion() {},
+    async RetrySessionRecovery() {},
     async ReconcileRecoveryVersions() {},
     async ChooseRecoveryBranch() {},
     async CleanRecoveryLineage(request) {

@@ -575,6 +575,7 @@ export interface ProjectNode extends RemoteProjectNodeFields {
   label: string;
   root?: string;
   topicId?: string;
+  recoveryPath?: string;
   sessionPath?: string;
   preview?: string;
   projectColor?: string;
@@ -699,6 +700,8 @@ export interface SessionRecoveryFailedEvent {
   topicId?: string;
   canContinue?: boolean;
   recoveryPending?: boolean;
+  recoveryPath?: string;
+  workspaceRoot?: string;
 }
 
 export interface ContextPanelInfo {
