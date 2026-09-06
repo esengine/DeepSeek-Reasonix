@@ -34,6 +34,8 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 			copy.SatisfiedWrites = append([]provider.InterruptedToolSummary(nil), copy.SatisfiedWrites...)
 			copy.CompletedTools = append([]provider.InterruptedToolSummary(nil), copy.CompletedTools...)
 			copy.FailedTools = append([]provider.InterruptedToolSummary(nil), copy.FailedTools...)
+			copy.UserConfirmedTools = append([]provider.InterruptedToolSummary(nil), copy.UserConfirmedTools...)
+			copy.UserConfirmations = append([]provider.UserToolConfirmation(nil), copy.UserConfirmations...)
 			copy.InterruptedTools = append([]string(nil), copy.InterruptedTools...)
 			copy.NotStartedTools = append([]provider.InterruptedToolSummary(nil), copy.NotStartedTools...)
 			copy.UnknownTools = append([]provider.InterruptedToolSummary(nil), copy.UnknownTools...)
@@ -96,6 +98,7 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 		}
 	}
 	writeRecoveryCalls(&b, "failed_tools", r.FailedTools)
+	writeRecoveryCalls(&b, "user_confirmed_effects_do_not_repeat", r.UserConfirmedTools)
 	if len(r.InterruptedTools) == 0 {
 		b.WriteString("interrupted_tools: none\n")
 	} else {
@@ -127,7 +130,7 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 			b.WriteString(" (assistant text)\n")
 		}
 	}
-	b.WriteString("Before continuing, inspect the current workspace and prior completed tool results. Do not blindly repeat completed writes. For outcome-unknown calls (including legacy interrupted calls without execution evidence), first inspect side effects and external state; never assume they did not run. Only retry after verifying it is safe. Calls marked cancelled or not_started may be planned again with complete arguments.\n")
+	b.WriteString("Before continuing, inspect the current workspace and prior completed tool results. Do not blindly repeat completed writes. For outcome-unknown calls (including legacy interrupted calls without execution evidence), first inspect side effects and external state; never assume they did not run. Only retry after verifying it is safe. Calls marked cancelled or not_started may be planned again with complete arguments. A user attested to the effects listed under user_confirmed_effects_do_not_repeat; the host never observed their results, so verify current state before depending on them and never repeat them.\n")
 	fmt.Fprintf(&b, "</%s>", interruptedRecoveryTag)
 	return b.String()
 }

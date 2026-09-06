@@ -1,7 +1,9 @@
 package control
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -54,9 +56,11 @@ func resumeAfterRestart(t *testing.T, dir, path string, msgs []provider.Message)
 	if _, err := agent.BeginSessionInFlightTurn(path, 1, true); err != nil {
 		t.Fatalf("mark in-flight turn: %v", err)
 	}
-	loaded := agent.NewSession("system")
-	for _, m := range msgs {
-		loaded.Add(m)
+	// Load from disk like a real resume: a hand-built session carries no
+	// persistence baseline, and the rewrite would fork as a foreign writer.
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
 	}
 	exec := agent.New(nil, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
 	c := New(Options{Runner: &fakeTurnRunner{}, Executor: exec, SessionDir: dir, SessionPath: path})
@@ -129,5 +133,42 @@ func TestRestartBeforeAnyOutputIsReportedAsSilent(t *testing.T) {
 	}
 	if recovery.Cause != "runtime_restart" {
 		t.Fatalf("cause = %q, want runtime_restart", recovery.Cause)
+	}
+}
+
+// Recovering an interrupted turn is a strip in place. Forking a session is
+// reserved for a genuine cross-process file conflict; doing it for an ordinary
+// tool interruption is what buried users under duplicate sessions.
+func TestRestartRecoveryDoesNotForkTheSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	commit := provider.ToolCall{ID: "commit", Name: "bash", Arguments: `{"command":"git commit"}`}
+	deadRuntimeLedger(t, path, map[string]bool{"commit": true}, commit)
+
+	c := resumeAfterRestart(t, dir, path, []provider.Message{
+		{Role: provider.RoleUser, Content: "ship it"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{commit}},
+	})
+	if pendingRecovery(t, c) == nil {
+		t.Fatal("no handoff produced")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forks := []string{}
+	for _, entry := range entries {
+		// The session's own .events/.turns sidecars are expected; a
+		// session-recovery-*.jsonl branch is the duplication being ruled out.
+		if strings.HasPrefix(entry.Name(), "session-recovery-") {
+			forks = append(forks, entry.Name())
+		}
+	}
+	if len(forks) != 0 {
+		t.Fatalf("ordinary tool interruption forked the session: %v", forks)
+	}
+	if got := c.SessionPath(); got != path {
+		t.Fatalf("controller moved to %q, want the original session", got)
 	}
 }

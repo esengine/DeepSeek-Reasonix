@@ -42,3 +42,22 @@ func TestToolCallRecordRoundTripsArgumentsLocally(t *testing.T) {
 		t.Fatalf("round trip = %#v", got)
 	}
 }
+
+// Loading a session backfills a placeholder for every unanswered call. Reading
+// it as a genuine unknown outcome would mask real proof of what actually ran.
+func TestInterruptedPlaceholderIsDistinguishableFromRealEvidence(t *testing.T) {
+	placeholder := Message{Role: RoleTool, ToolCallID: "a", Content: interruptedToolResult}
+	if !IsInterruptedPlaceholder(placeholder) {
+		t.Fatal("backfilled placeholder not recognized")
+	}
+	for name, m := range map[string]Message{
+		"real unknown":  {Role: RoleTool, ToolCallID: "a", Content: interruptedToolResult, ToolRunState: ToolRunUnknown},
+		"real output":   {Role: RoleTool, ToolCallID: "a", Content: "done"},
+		"assistant":     {Role: RoleAssistant, Content: interruptedToolResult},
+		"empty content": {Role: RoleTool, ToolCallID: "a"},
+	} {
+		if IsInterruptedPlaceholder(m) {
+			t.Fatalf("%s misread as a backfilled placeholder", name)
+		}
+	}
+}

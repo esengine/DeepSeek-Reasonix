@@ -66,6 +66,17 @@ branch.
   升级为 `recovery_required`，并把该证据交给下一回合，而不是把所有被中断的调用
   一视同仁。checkpoint 记录被中断尝试的身份（#9825）。
 
+- **Resolving an interrupted tool:** a user who inspected the workspace can now
+  mark an unverified effect as already done — recorded with provenance, never as
+  a fabricated tool result, and refused for calls the host already proved. Session
+  loads no longer mask that proof: the placeholder backfilled for an unanswered
+  call is no longer read as evidence of an unknown outcome. Ordinary tool
+  interruption never forks a session (#9825).
+- **解决被中断的工具：** 检查过工作区的用户现在可以把未经验证的副作用标记为已完成
+  ——记录出处、绝不伪造工具结果，对宿主已证明的调用则拒绝。会话加载不再掩盖该证明：
+  为未答复调用回填的占位结果不再被当作 unknown 结果的证据。普通工具中断永不 fork
+  会话（#9825）。
+
 - **Relay image input:** ID-only or invalid model metadata now stays unknown.
   Both Desktop model editors expose per-model Auto / On / Off overrides, with
   official protocol limits retained. A separate V2 discovery cache rejects stale

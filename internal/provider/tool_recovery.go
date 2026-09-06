@@ -19,6 +19,10 @@ const (
 	// ToolRunNotStarted is retained for old transcripts and recovery sidecars.
 	// New records use ToolRunCancelled or ToolRunPending.
 	ToolRunNotStarted ToolRunState = "not_started"
+	// ToolRunUserConfirmed is an unknown outcome a user attested to after
+	// inspecting the workspace. It is deliberately distinct from completed:
+	// the host never saw the result and must not claim it did.
+	ToolRunUserConfirmed ToolRunState = "completed_by_user_confirmation"
 )
 
 // ToolCallRecord is the local, provider-excluded execution receipt. Arguments
@@ -71,6 +75,8 @@ func RecordToolRecovery(r *InterruptedTurnRecovery, call InterruptedToolSummary,
 		r.CompletedTools = append(r.CompletedTools, call)
 	case ToolRunFailed:
 		r.FailedTools = append(r.FailedTools, call)
+	case ToolRunUserConfirmed:
+		r.UserConfirmedTools = append(r.UserConfirmedTools, call)
 	case ToolRunCancelled:
 		r.CancelledTools = append(r.CancelledTools, call)
 		r.NotStartedTools = append(r.NotStartedTools, call)
@@ -96,6 +102,8 @@ type InterruptedTurnRecovery struct {
 	Pending                 bool                     `json:"pending,omitempty"`
 	CompletedTools          []InterruptedToolSummary `json:"completed_tools,omitempty"`
 	FailedTools             []InterruptedToolSummary `json:"failed_tools,omitempty"`
+	UserConfirmedTools      []InterruptedToolSummary `json:"user_confirmed_tools,omitempty"`
+	UserConfirmations       []UserToolConfirmation   `json:"user_confirmations,omitempty"`
 	InterruptedTools        []string                 `json:"interrupted_tools,omitempty"`
 	NotStartedTools         []InterruptedToolSummary `json:"not_started_tools,omitempty"`
 	UnknownTools            []InterruptedToolSummary `json:"unknown_tools,omitempty"`
@@ -123,4 +131,20 @@ type WriteRecoveryCheck struct {
 	CallID string `json:"call_id"`
 	Path   string `json:"path"`
 	State  string `json:"state"`
+}
+
+// UserToolConfirmation is the durable provenance of one manual attestation.
+// It records who resolved an unknown outcome and when, never a tool result.
+type UserToolConfirmation struct {
+	CallID      string `json:"call_id"`
+	Source      string `json:"source"`
+	ConfirmedAt int64  `json:"confirmed_at"`
+}
+
+// IsInterruptedPlaceholder reports whether a tool result is the placeholder
+// normalization backfills for an unanswered call. It carries no evidence about
+// execution, so recovery must prefer any real proof over it rather than
+// reading it as a genuine unknown outcome.
+func IsInterruptedPlaceholder(m Message) bool {
+	return m.Role == RoleTool && m.ToolRunState == "" && strings.TrimSpace(m.Content) == interruptedToolResult
 }

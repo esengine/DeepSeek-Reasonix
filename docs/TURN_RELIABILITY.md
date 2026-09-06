@@ -53,6 +53,21 @@ listed as unknown.
 The controller stamps the ledger turn ID on the handoff and merges an
 earlier handoff when a turn is interrupted twice.
 
+## Resolving an unproven effect
+
+A user who inspected the workspace can attest that an `unknown` call already
+happened. That records who said so and when, moves the call out of the unknown
+bucket, and clears the decision requirement once none remain. It is deliberately
+not `completed`: the host never saw the result, so the model is still told to
+verify current state and never repeat the call.
+
+No tool result is synthesized. Attestation is refused for a call the host
+already proved (completed, failed, cancelled) and while a turn is running.
+
+The Desktop interruption card carries each call's proven state plus the local
+argument receipt, so a long write can be inspected or re-issued by hand. Those
+arguments are display state only and never enter the model-facing block.
+
 ## Terminal turn status
 
 Every turn ends in `completed`, `failed`, `interrupted`, or
@@ -108,10 +123,18 @@ Landed (Phase 2, persistence and recovery):
   facts
 - checkpoints carry the recovery identity of the first side-effecting call
 
+Landed (Phase 3, partial — resolution and card data):
+
+- user attestation for an unknown effect, with provenance and no fabricated
+  result; refused for calls the host already proved
+- structured interruption card data for Desktop, including local argument
+  receipts
+- ordinary tool interruption never forks a session; forking stays reserved for
+  a genuine cross-process file conflict
+
 Next:
 
-- Phase 3: Desktop recovery card with inspect, mark-completed, and re-run
-  (new attempt ID, original call ID never reused); silent-interruption notice;
-  no automatic session fork for ordinary tool interruptions
+- Phase 3 (remaining): the card UI itself, the read-only inspect action, and
+  re-run (new attempt ID, original call ID never reused)
 - Phase 4: postcondition checkers for `git commit` and `bash`, checkpoint GC,
   recovery metrics

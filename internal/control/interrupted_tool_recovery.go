@@ -55,7 +55,10 @@ func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msg
 	}
 	for _, call := range msgs[i].ToolCalls {
 		state := provider.ToolRunUnknown
-		if result, ok := results[call.ID+"\x00"+call.Name]; ok {
+		result, stored := results[call.ID+"\x00"+call.Name]
+		// Loading a session backfills a placeholder for every unanswered call,
+		// so a stored result only counts as evidence when it is a real one.
+		if stored && !provider.IsInterruptedPlaceholder(result) {
 			state = provider.ToolResultRunState(result)
 		} else if ev != nil {
 			if proven, ok := ev.states[call.ID]; ok {
