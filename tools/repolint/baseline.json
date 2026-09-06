@@ -159,7 +159,7 @@
       "file-size": 1599
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 4233
+      "file-size": 4248
     },
     "desktop/heartbeat.go": {
       "essay": 7
@@ -288,7 +288,7 @@
     "desktop/tabs.go": {
       "complexity": 42,
       "essay": 68,
-      "file-size": 7613,
+      "file-size": 7616,
       "function-size": 364,
       "struct-state": 23
     },
