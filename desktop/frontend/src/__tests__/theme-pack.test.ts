@@ -42,7 +42,7 @@ import {
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(testDir, "../AppRuntime.tsx"), "utf8");
 const exportOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useSessionExportCommands.ts"), "utf8");
 const composerRouterSource = readFileSync(resolve(testDir, "../app-runtime/useComposerRouter.ts"), "utf8");
 const librarySource = readFileSync(resolve(testDir, "../components/ThemeLibrary.tsx"), "utf8");
