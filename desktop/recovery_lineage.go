@@ -10,16 +10,19 @@ import (
 )
 
 type RecoveryLineageMember struct {
-	Path           string `json:"path"`
-	Role           string `json:"role"`
-	Canonical      bool   `json:"canonical"`
-	Turns          int    `json:"turns"`
-	Open           bool   `json:"open"`
-	Running        bool   `json:"running"`
-	VersionNote    string `json:"versionNote,omitempty"`
-	Preview        string `json:"preview,omitempty"`
-	CreatedAt      int64  `json:"createdAt,omitempty"`
-	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
+	Path            string `json:"path"`
+	VersionKind     string `json:"versionKind,omitempty"`
+	VersionState    string `json:"versionState,omitempty"`
+	ParentVersionID string `json:"parentVersionId,omitempty"`
+	Role            string `json:"role"`
+	Canonical       bool   `json:"canonical"`
+	Turns           int    `json:"turns"`
+	Open            bool   `json:"open"`
+	Running         bool   `json:"running"`
+	VersionNote     string `json:"versionNote,omitempty"`
+	Preview         string `json:"preview,omitempty"`
+	CreatedAt       int64  `json:"createdAt,omitempty"`
+	LastActivityAt  int64  `json:"lastActivityAt,omitempty"`
 }
 
 type RecoveryLineageView struct {
@@ -108,15 +111,22 @@ func (a *App) GetRecoveryLineage(key ProjectTopicKey) RecoveryLineageView {
 		}
 		overlay := overlays[sessionRuntimeKey(record.Path)]
 		versionNote := record.CustomTitle
+		versionKind := "recovery"
+		versionState := "active"
+		parentVersionID := record.ParentID
 		if meta, ok, err := agent.LoadBranchMeta(record.Path); err == nil && ok {
 			versionNote = meta.CustomTitle
+			versionKind = string(meta.EffectiveVersionKind())
+			versionState = string(meta.EffectiveVersionState())
+			parentVersionID = meta.ParentVersionID
 		}
 		canonical := record.RecoveryCanonical
 		if representativeInGroup {
 			canonical = sameRecoveryLineagePath(record.Path, topic.RepresentativePath)
 		}
 		out.Members = append(out.Members, RecoveryLineageMember{
-			Path: record.Path, Role: record.RecoveryRole, Canonical: canonical,
+			Path: record.Path, VersionKind: versionKind, VersionState: versionState,
+			ParentVersionID: parentVersionID, Role: record.RecoveryRole, Canonical: canonical,
 			Turns: record.Turns, Open: overlay.open, Running: overlay.running,
 			VersionNote: versionNote, Preview: record.Preview,
 			CreatedAt: record.CreatedAt, LastActivityAt: record.LastActivityAt,

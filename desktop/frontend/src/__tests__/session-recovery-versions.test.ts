@@ -26,6 +26,10 @@ const view = (overrides: Partial<RecoveryLineageView> = {}): RecoveryLineageView
 
 assert.deepEqual(normalizeRecoveryLineageView({ members: null }).members, [], "null Wails arrays normalize to []");
 assert.equal(userVisibleRecoveryVersions(view()).length, 2, "covered copies never enter the user-facing version list");
+assert.equal(userVisibleRecoveryVersions(view({ members: [
+  { path: "/s/root.jsonl", role: "normal", versionKind: "normal", canonical: true, turns: 3, open: true, running: false },
+  { path: "/s/child.jsonl", role: "diverged", versionKind: "subagent", canonical: false, turns: 1, open: false, running: false },
+] })).length, 1, "subagent transcripts never appear as recovery versions");
 assert.equal(recoveryLineageResolution(view()), "notify", "confirmed unique divergence notifies");
 assert.equal(recoveryLineageResolution(view({ state: "repairing" })), "wait", "catalog rebuilding waits for a later revision");
 assert.equal(recoveryLineageResolution(view({ state: "covered", unresolved: 0 })), "clear", "proven covered copies clear silently");
