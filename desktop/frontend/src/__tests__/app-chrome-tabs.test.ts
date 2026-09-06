@@ -511,6 +511,7 @@ ok(
     /!sidebarImDetailConnection/.test(appSource) &&
     /!transcriptHydrating/.test(appSource) &&
     /!hydratePlaceholderActive/.test(appSource) &&
+    /!state\.hydrateError/.test(appSource) &&
     /chat-pane\$\{creationEmptyHero \? " chat-pane--creation-empty" : ""\}/.test(appSource) &&
     /heroMode=\{creationEmptyHero\}/.test(appSource),
   "Creation empty hero waits for hydration and skips IM/Bot detail panels",

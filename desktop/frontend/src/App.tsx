@@ -3413,7 +3413,8 @@ export default function App() {
     !sidebarImDetailConnection &&
     !sessionHasContent &&
     !transcriptHydrating &&
-    !hydratePlaceholderActive;
+    !hydratePlaceholderActive &&
+    !state.hydrateError;
   const transcriptItems = hydratePlaceholderActive ? state.hydratePlaceholderItems! : state.items;
   const handleLoadOlderHistory = useCallback((targetTurn?: number, trigger: HistoryLoadTrigger = "retry") => {
     return activeTabId ? loadOlderHistory(activeTabId, targetTurn, trigger) : Promise.resolve(false);
