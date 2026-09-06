@@ -27,7 +27,6 @@ import { type HistoryLoadTrigger } from "./lib/useController";
 import { app, openExternal } from "./lib/bridge";
 import { useDesktopPreferences } from "./app-runtime/useDesktopPreferences";
 import { Transcript } from "./components/Transcript";
-import { decisionSurfaceMockFromInput, type DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
 const RemoteSessionSurface = lazy(() => import("./components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
 const SidebarImConnectionDetail = lazy(() => import("./app-shell/SidebarImConnectionDetail").then((module) => ({ default: module.SidebarImConnectionDetail })));
 const WindowsWindowControls = lazy(() => import("./app-shell/WindowsWindowControls").then((module) => ({ default: module.WindowsWindowControls })));
@@ -58,7 +57,6 @@ import {
   todoPanelScope,
 } from "./lib/todoVisibility";
 import {
-  type ActiveWorkView,
   type CollaborationMode,
   type ComposerInsertRequest,
   type RemoteHostView,
@@ -74,7 +72,8 @@ import { runWorktreeMergeLifecycle } from "./lib/worktreeMergeLifecycle";
 import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
-import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
+import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
+import type { InvocationMetadataMap } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import { resolveTaskMonitorSession } from "./lib/taskMonitorNavigation";
 import { composerProfileFromMeta, composerProfileFromTab, composerProfileMode, defaultComposerProfile, displayedComposerProfileCollaborationMode, hydrateComposerProfileFromMeta, hydrateComposerProfilesFromTabs, patchComposerProfile, pruneUserPlanModeIntents, updateUserPlanModeIntent, type ComposerProfile, type ComposerProfileField, type UserPlanModeIntents } from "./lib/composerProfile";
@@ -102,13 +101,7 @@ import { useOverlayStore } from "./store/overlays";
 import { recordFrontendDiagnostic } from "./lib/frontendDiagnosticBridge";
 import { useNavigationSurface } from "./lib/useNavigationSurface";
 import {
-  applyTheme,
-  getTheme,
-  getThemeStyle,
-  isThemeStyle,
-  type Theme,
 } from "./lib/theme";
-import { clearThemePack } from "./lib/themePack";
 import { ThemeBackground } from "./components/ThemeBackground";
 import { tabWorkspaceTitle, topicDisplayTitle, topicTitle } from "./lib/sessionTitles";
 import { GUIDANCE_QUEUE_MOCK_ITEMS, browserMockScenarioParam, isGuidanceMockScenario } from "./lib/mockScenarios";
@@ -124,7 +117,6 @@ import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { useSessionSubmission } from "./lib/useSessionSubmission";
 import { usePendingPlanRevisions, reportPendingRevisionFailure } from "./lib/usePendingPlanRevisions";
 import { createSubmissionPorts, projectSubmissionResources } from "./app-runtime/desktopSubmissionAdapter";
-import { goalCommand } from "./app-runtime/sessionSubmissionOwner";
 import { useCommittedCommand } from "./lib/useCommittedCommand";
 import { createSessionSurfaceFence, sessionIdentityKey } from "./app-runtime/sessionTarget";
 import { commitAppRenderToken, createAppRenderToken } from "./app-runtime/appLifecycleProbe";
@@ -146,6 +138,7 @@ import { useExtensionSurface } from "./app-runtime/useExtensionSurface";
 import { useTabBarCommands } from "./app-runtime/useTabBarCommands";
 import { useRuntimeEventHandlers } from "./app-runtime/useRuntimeEventHandlers";
 import { usePaletteCommands } from "./app-runtime/usePaletteCommands";
+import { useComposerRouter } from "./app-runtime/useComposerRouter";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -181,10 +174,6 @@ function lazyNavigateWorkspace(
 }
 
 const WORKSPACE_RESIZER_WIDTH = 8;
-
-function isThemeMode(value: string): value is Theme {
-  return value === "auto" || value === "light" || value === "dark";
-}
 
 const SHOW_CONTEXT_DOCK = true;
 type WorkspaceInsertTarget = "composer" | "planRevision";
@@ -964,135 +953,26 @@ export default function App() {
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
-  // handleSend reserves only commands that need a desktop-native UI action.
-  const handleSend = useCommittedCommand(async (displayText: string, submitText = displayText, requestedTabId = activeTabId, structured?: StructuredInvocationSubmit) => {
-      const sourceTabId = requestedTabId || activeTabId;
-      if (!sourceTabId) throw new Error(t("composer.workspaceStarting"));
-      const trimmed = displayText.trim();
-      // "!<cmd>" runs a shell command directly, bypassing the model.
-      if (trimmed.startsWith("!")) {
-        const cmd = trimmed.slice(1).trim();
-        if (!cmd) {
-          notice("usage: !<command>  (e.g. !ls -la)");
-          return;
-        }
-        await runShellForTab(sourceTabId, cmd);
-        return;
-      }
-      const model = /^\/model\s+(\S+)$/.exec(trimmed);
-      if (model) {
-        await switchModel(model[1], sourceTabId);
-        return;
-      }
-      if (trimmed === "/memory") {
-        if (activeTabIdRef.current !== sourceTabId) return;
-        closeTransientOverlays();
-        setSettingsTarget("memory");
-        return;
-      }
-      if (trimmed === "/clear") {
-        if (activeTabIdRef.current !== sourceTabId) return;
-        setClearContextPending(true);
-        return;
-      }
-      if (trimmed === "/new") {
-        if (activeTabIdRef.current !== sourceTabId) return;
-        await newSession();
-        return;
-      }
-      const decisionMock = typeof window !== "undefined" && !window.runtime
-        ? decisionSurfaceMockFromInput(trimmed)
-        : null;
-      if (decisionMock === "workspace_conflict" || decisionMock === "mode_jobs" || decisionMock === "close_active" || decisionMock === "clear_context") {
-        if (activeTabIdRef.current !== sourceTabId) return;
-        closeTransientOverlays();
-        setWorkspaceConflict(null);
-        setPendingClose(null);
-        setClearContextPending(false);
-        const mockWork: ActiveWorkView = {
-          running: true,
-          pendingPrompt: false,
-          cancellable: true,
-          jobs: [
-            { id: "mock-decision-build", kind: "bash", label: "pnpm build", status: "running", startedAt: Date.now() - 42_000 },
-            { id: "mock-decision-test", kind: "bash", label: "go test ./...", status: "running", startedAt: Date.now() - 18_000 },
-          ],
-        };
-        if (decisionMock === "workspace_conflict") {
-          setWorkspaceConflict({
-            state: "local",
-            ownerTabId: "mock-workspace-writer",
-            ownerTitle: t("mock.topicDevStandard"),
-            ownerWork: mockWork,
-            canReveal: true,
-            canCreateWorktree: true,
-          });
-        } else if (decisionMock === "close_active") {
-          setPendingClose({ tabId: sourceTabId, work: mockWork, stopping: false });
-        } else {
-          setClearContextPending(true);
-        }
-        return;
-      }
-      if (goalCommand(trimmed) || (collaborationMode === "goal" && !goal.trim())) {
-        await submitComposerTurn(sourceTabId, displayText, submitText, structured);
-        return;
-      }
-      const theme = /^\/theme(?:\s+(\S+))?$/.exec(trimmed);
-      if (theme) {
-        const arg = theme[1]?.toLowerCase();
-        if (!arg) {
-          const cur = getTheme();
-          notice(t("settings.themeCurrent", { theme: cur, style: getThemeStyle(cur) }));
-          return;
-        }
-        if (arg === "reset" || arg === "default" || arg === "clear") {
-          try {
-            await app.ResetThemePack();
-            clearThemePack();
-            notice(t("settings.themeReset"));
-          } catch (err) {
-            showToast(err instanceof Error ? err.message : String(err), "error");
-          }
-          return;
-        }
-        if (isThemeMode(arg)) {
-          const next = arg;
-          const style = getThemeStyle(next);
-          try {
-            await app.SetDesktopAppearance(next, style);
-            applyTheme(next, style);
-            notice(t("settings.themeChanged", { theme: next, style }));
-          } catch (err) {
-            showToast(err instanceof Error ? err.message : String(err), "error");
-          }
-          return;
-        }
-        if (isThemeStyle(arg)) {
-          const cur = getTheme();
-          try {
-            await app.SetDesktopAppearance(cur, arg);
-            applyTheme(cur, arg);
-            notice(t("settings.themeChanged", { theme: cur, style: arg }));
-          } catch (err) {
-            showToast(err instanceof Error ? err.message : String(err), "error");
-          }
-          return;
-        }
-        notice(t("settings.themeUnknown", { name: arg }), "warn");
-        return;
-      }
-      await submitComposerTurn(sourceTabId, displayText, submitText, structured);
-    });
-
-  const handleSteer = useCommittedCommand(async (text: string, requestedTabId = activeTabId) => {
-    const sourceTabId = requestedTabId || activeTabId;
-    if (!sourceTabId) throw new Error(t("composer.workspaceStarting"));
-    if (tabMetas.some((tab) => tab.id === sourceTabId && tab.remote)) {
-      await app.SteerRemoteTab(sourceTabId, text.trim());
-      return;
-    }
-    await steerForTab(sourceTabId, text.trim());
+  const { handleSend, handleSteer } = useComposerRouter({
+    activeTabId,
+    activeTabIdRef,
+    goalDraftActive: collaborationMode === "goal" && !goal.trim(),
+    t,
+    notice,
+    showToast,
+    ports: {
+      runShellForTab,
+      switchModel: (name, tabId) => switchModel(name, tabId),
+      newSession: () => newSession(),
+      setSettingsTarget: (tab) => setSettingsTarget(tab),
+      setClearContextPending,
+      clearWorkspaceConflict: () => setWorkspaceConflict(null),
+      setWorkspaceConflict: (value) => setWorkspaceConflict(value),
+      setPendingClose: (value) => setPendingClose(value),
+      submitComposerTurn: (tab, display, submit, structured) => submitComposerTurn(tab, display, submit, structured),
+      steerForTab,
+      isRemoteTab: (tabId) => tabMetas.some((tab) => tab.id === tabId && tab.remote),
+    },
   });
 
   const { setCollaborationModeFromUi, clearGoalFromUi } = useComposerGoalCommands({ applyCollaborationMode, applyGoal });
