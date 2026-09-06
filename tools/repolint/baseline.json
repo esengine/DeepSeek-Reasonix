@@ -65,9 +65,6 @@
     "desktop/external_opener_windows_test.go": {
       "essay": 2
     },
-    "desktop/frontend/src/App.tsx": {
-      "file-size": 4778
-    },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 27
     },
