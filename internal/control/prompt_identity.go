@@ -114,6 +114,26 @@ func (o *PendingPromptOwner) Restore(identity PromptIdentity) {
 		o.pending[identity.PromptID] = p
 	}
 }
+
+// BindRouting fills routing fields that were not available when a prompt was
+// queued behind another prompt. It never rewrites a captured identity: once a
+// turn or runtime epoch is known, a later event must use that same value.
+func (o *PendingPromptOwner) BindRouting(id, turnID, runtimeEpoch string) (PromptIdentity, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	prompt, ok := o.pending[id]
+	if !ok {
+		return PromptIdentity{}, false
+	}
+	if prompt.Identity.TurnID == "" && turnID != "" {
+		prompt.Identity.TurnID = turnID
+	}
+	if prompt.Identity.RuntimeEpoch == "" && runtimeEpoch != "" {
+		prompt.Identity.RuntimeEpoch = runtimeEpoch
+	}
+	o.pending[id] = prompt
+	return prompt.Identity, true
+}
 func (o *PendingPromptOwner) Resolve(identity PromptIdentity, answer PromptAnswer) error {
 	if err := o.BeginResolve(identity); err != nil {
 		return err
@@ -233,6 +253,17 @@ func (c *Controller) registerOwnedPrompt(id string, kind PromptKind) {
 	_ = c.promptOwner.RegisterPrompt(PendingPrompt{Identity: identity, State: PromptPending, Resolve: resolve, Cancel: cancel})
 }
 
+// bindOwnedPromptRouting completes an identity immediately before its request
+// event is emitted. This closes the startup window where the prompt is queued
+// before the turn ledger has published its active turn or runtime epoch.
+func (c *Controller) bindOwnedPromptRouting(id, turnID, runtimeEpoch string) PromptIdentity {
+	if c == nil {
+		return PromptIdentity{}
+	}
+	identity, _ := c.promptOwner.BindRouting(id, turnID, runtimeEpoch)
+	return identity
+}
+
 func (c *Controller) PendingPromptIdentities() []PromptIdentity { return c.promptOwner.Identities() }
 
 func (c *Controller) cancelOwnedPrompt(id string) {
@@ -288,7 +319,7 @@ func (c *Controller) ResolvePromptExact(identity PromptIdentity, answer PromptAn
 	if closed {
 		return ErrPromptNotPending
 	}
-	if identity.RuntimeEpoch != "" && identity.RuntimeEpoch != c.promptRuntimeEpoch {
+	if c.promptRuntimeEpoch != "" && (identity.RuntimeEpoch == "" || identity.RuntimeEpoch != c.promptRuntimeEpoch) {
 		return ErrPromptStaleRuntime
 	}
 	turnID, _, _, _ := c.turnEventRuntimeStatus()
@@ -304,6 +335,9 @@ func (c *Controller) ResolvePromptExact(identity PromptIdentity, answer PromptAn
 	}
 	if owned.TurnID != identity.TurnID || owned.Kind != identity.Kind {
 		return ErrPromptStaleTurn
+	}
+	if owned.RuntimeEpoch != identity.RuntimeEpoch {
+		return ErrPromptStaleRuntime
 	}
 	return c.promptOwner.Resolve(identity, answer)
 }

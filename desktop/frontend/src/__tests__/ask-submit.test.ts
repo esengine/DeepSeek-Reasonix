@@ -33,8 +33,8 @@ console.log("\nAsk prompt active-turn submission");
     ListTabs: async () => { listCalls += 1; return [tab]; },
     ResolvePromptForTab: async (tabId, promptId, turnId) => { exactCalls.push(`${tabId}:${turnId}:${promptId}`); },
   }), "tab-ask", "ask-1", answers, "turn-known");
-  eq(listCalls, 0, "card identity avoids an unnecessary ListTabs lookup");
-  eq(exactCalls.join("|"), "tab-ask:turn-known:ask-1", "card turn id fences the exact answer");
+  eq(listCalls, 1, "Ask refreshes the authoritative turn before submission");
+  eq(exactCalls.join("|"), "tab-ask:turn-authoritative:ask-1", "authoritative turn fences the exact answer");
 }
 
 {

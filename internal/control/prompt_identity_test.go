@@ -39,6 +39,16 @@ func TestResolvePromptExactRejectsStaleRuntime(t *testing.T) {
 	}
 }
 
+func TestResolvePromptExactRejectsLegacyIdentityAfterRuntimeEpochIsSet(t *testing.T) {
+	c := New(Options{})
+	t.Cleanup(c.Close)
+	c.SetTurnEventRoutingMetadata("runtime-current", "")
+	err := c.ResolvePromptExact(PromptIdentity{PromptID: "legacy", TurnID: "turn-any", Kind: PromptAsk}, PromptAnswer{})
+	if !errors.Is(err, ErrPromptStaleRuntime) {
+		t.Fatalf("legacy exact resolve error = %v, want ErrPromptStaleRuntime", err)
+	}
+}
+
 func TestResolvePromptExactRejectsClosedController(t *testing.T) {
 	c := New(Options{})
 	c.Close()
@@ -108,6 +118,22 @@ func TestPendingPromptOwnerResolveRestoresAfterFailure(t *testing.T) {
 	pending, ok := owner.Identity(id.PromptID)
 	if !ok || pending != id {
 		t.Fatalf("failed resolve did not restore pending identity: %+v %v", pending, ok)
+	}
+}
+
+func TestPendingPromptOwnerBindsMissingRoutingOnce(t *testing.T) {
+	var owner PendingPromptOwner
+	id := PromptIdentity{PromptID: "p-bind", Kind: PromptAsk}
+	if err := owner.Register(id); err != nil {
+		t.Fatal(err)
+	}
+	bound, ok := owner.BindRouting(id.PromptID, "turn-1", "runtime-1")
+	if !ok || bound.TurnID != "turn-1" || bound.RuntimeEpoch != "runtime-1" {
+		t.Fatalf("bound identity = %+v, %v", bound, ok)
+	}
+	again, ok := owner.BindRouting(id.PromptID, "turn-2", "runtime-2")
+	if !ok || again != bound {
+		t.Fatalf("routing identity was rewritten: first=%+v second=%+v ok=%v", bound, again, ok)
 	}
 }
 

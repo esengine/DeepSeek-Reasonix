@@ -2557,6 +2557,9 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 
 	c.approval.promptEmitMu.Lock()
 	turnID, _, _, _ = c.turnEventRuntimeStatus()
+	if identity := c.bindOwnedPromptRouting(id, turnID, runtimeEpoch); identity.TurnID != "" {
+		turnID = identity.TurnID
+	}
 	if err := event.EmitChecked(c.sink, event.Event{Kind: event.AskRequest, TurnID: turnID, ItemID: id, Ask: event.Ask{ID: id, Questions: questions, TurnID: turnID}}); err != nil {
 		c.approval.promptEmitMu.Unlock()
 		c.cancelOwnedPrompt(id)
@@ -6317,6 +6320,10 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 func (c *Controller) approvalRequestEvent(approval event.Approval) event.Event {
 	if approval.TurnID == "" {
 		approval.TurnID, _, _, _ = c.turnEventRuntimeStatus()
+	}
+	_, runtimeEpoch := c.promptIdentitySnapshot()
+	if identity := c.bindOwnedPromptRouting(approval.ID, approval.TurnID, runtimeEpoch); identity.TurnID != "" {
+		approval.TurnID = identity.TurnID
 	}
 	return event.Event{Kind: event.ApprovalRequest, TurnID: approval.TurnID, ItemID: approval.ID, Approval: approval}
 }

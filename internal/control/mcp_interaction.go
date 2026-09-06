@@ -150,6 +150,10 @@ func (c *Controller) Interact(ctx context.Context, req mcpinteraction.Request) (
 		URL:             req.URL, ElicitationID: req.ElicitationID,
 	}
 	payload.TurnID, _, _, _ = c.turnEventRuntimeStatus()
+	_, runtimeEpoch := c.promptIdentitySnapshot()
+	if identity := c.bindOwnedPromptRouting(id, payload.TurnID, runtimeEpoch); identity.TurnID != "" {
+		payload.TurnID = identity.TurnID
+	}
 	if err := event.EmitChecked(c.sink, event.Event{Kind: event.MCPInteractionRequest, TurnID: payload.TurnID, ItemID: id, MCPInteraction: payload}); err != nil {
 		c.approval.promptEmitMu.Unlock()
 		c.cancelOwnedPrompt(id)
