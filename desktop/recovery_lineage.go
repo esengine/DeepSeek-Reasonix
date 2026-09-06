@@ -75,6 +75,30 @@ func (a *App) GetSessionVersionState(key ProjectTopicKey) SessionVersionStateVie
 	return out
 }
 
+// ReconcileRecoveryVersions refreshes one logical conversation and applies the
+// existing covered-copy sweep. It is idempotent and keeps diverged content.
+func (a *App) ReconcileRecoveryVersions(key ProjectTopicKey) error {
+	catalog := a.sessionCatalog.Load()
+	if catalog == nil {
+		return errors.New("session catalog is unavailable")
+	}
+	topic, ok, err := catalog.GetTopic(a.bootContext(), sessioncatalog.TopicKey{Scope: key.Scope, WorkspaceRoot: key.WorkspaceRoot, TopicID: key.TopicID})
+	if err != nil || !ok {
+		return errors.New("session version lineage is unavailable")
+	}
+	_, dir, ok := recoveryLineageSelection(topic, key.Path)
+	if !ok {
+		return nil
+	}
+	target := sessioncatalog.DirectoryTarget{Path: dir, Scope: key.Scope, WorkspaceRoot: key.WorkspaceRoot}
+	if err := catalog.ReconcileDirectory(a.bootContext(), target); err != nil {
+		return err
+	}
+	a.sweepExcessRecoveryCopies(catalog, target)
+	a.emitProjectTreeChangedForSessionDirs(dir)
+	return nil
+}
+
 // SetActiveSessionVersion selects and opens a recovery version on the existing
 // topic tab. It rejects subagent transcripts and preserves the logical topic.
 func (a *App) SetActiveSessionVersion(req RecoveryPreferenceRequest) error {
