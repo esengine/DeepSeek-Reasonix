@@ -63,10 +63,9 @@ import {
   type TabMeta,
   type ToolApprovalMode,
   type WireCompletionSummary,
-  type WorktreeMergeResult,
 } from "./lib/types";
-import { runWorktreeMergeLifecycle } from "./lib/worktreeMergeLifecycle";
 import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
+import { useWorktreeMergeCommands } from "./app-runtime/useWorktreeMergeCommands";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -1499,34 +1498,12 @@ export default function App() {
     setSidebarSearchOpen((open) => !open);
     setSidebarSearchFocusSignal((signal) => signal + 1);
   });
-  const handleWorktreeMerged = useCommittedCommand(async (result: WorktreeMergeResult) => {
-    const tabToClose = worktreeMergeTabId;
-    if (!tabToClose || !result.sourceRoot || !result.worktreeRoot || !result.targetBranch || !result.mergedCommit || !result.worktreeBranch || !result.worktreeHead) {
-      throw new Error(result.error || t("worktree.mergeReceiptInvalid"));
-    }
-    const navigationIntentSeq = noteNavigationIntent();
-    try {
-      const navigationIntentToken = await registeredNavigationIntent(navigationIntentSeq);
-      if (!navigationIntentToken || !isNavigationIntentCurrent(navigationIntentSeq)) {
-        showToast(t("worktree.navigationChangedPreserved"), "error", { durationMs: 9000 });
-        return;
-      }
-      const lifecycle = await runWorktreeMergeLifecycle(result, tabToClose, navigationIntentToken, {
-        ensureSource: (sourceRoot) => singleSurfaceLayout
-          ? ensureBlankSurface("project", sourceRoot, navigationIntentSeq)
-          : ensureBlankTab("project", sourceRoot, navigationIntentSeq),
-        isNavigationCurrent: () => isNavigationIntentCurrent(navigationIntentSeq),
-        seedSource: seedActiveTabMeta,
-        listTabs: desktopBridge.listTabs,
-        closeWorktree: (request) => desktopBridge.closeMergedWorktreeTab(request),
-        finalize: (request) => desktopBridge.finalizeWorktreeMerge(request),
-        onNavigationPreserved: () => showToast(t("worktree.navigationChangedPreserved"), "error", { durationMs: 9000 }),
-        onCloseBlocked: () => showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 }),
-      });
-      if (lifecycle.phase === "finalized") showWorktreeCleanupNotice(lifecycle.cleanup, t, showToast);
-    } catch (caught: unknown) {
-      showToast(`${t("worktree.mergeDoneCleanupFailed")} ${caught instanceof Error ? caught.message : String(caught)}`, "error", { durationMs: 9000 });
-    }
+  const { handleWorktreeMerged } = useWorktreeMergeCommands({
+    worktreeTabId: worktreeMergeTabId, singleSurfaceLayout, noteNavigationIntent,
+    registeredNavigationIntent, isNavigationIntentCurrent, ensureBlankSurface, ensureBlankTab,
+    seedSource: seedActiveTabMeta, listTabs: desktopBridge.listTabs,
+    closeWorktree: desktopBridge.closeMergedWorktreeTab, finalize: desktopBridge.finalizeWorktreeMerge,
+    showToast, t, showCleanup: (cleanup, translate) => showWorktreeCleanupNotice(cleanup, translate, showToast),
   });
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
