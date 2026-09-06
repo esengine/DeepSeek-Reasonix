@@ -25,6 +25,7 @@ function ok(cond: boolean, label: string) {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const paletteSource = readFileSync(resolve(here, "../app-runtime/usePaletteCommands.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/bridge.ts"), "utf8");
 const configWarningsSource = readFileSync(resolve(here, "../lib/useConfigLoadWarnings.ts"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
@@ -60,7 +61,7 @@ ok(
   "each fresh model focus object can re-target the same subtab again",
 );
 ok(
-  /setSettingsFocus\(\(current\) => \(\{[\s\S]*?target: "model-stats",[\s\S]*?requestId: \(current\?\.requestId \?\? 0\) \+ 1,[\s\S]*?\}\)\)/.test(appSource) &&
+  /setSettingsFocus\(\(current\) => \(\{[\s\S]*?target: "model-stats",[\s\S]*?requestId: \(current\?\.requestId \?\? 0\) \+ 1,[\s\S]*?\}\)\)/.test(paletteSource) &&
     /initialFocus\?\.requestId/.test(settingsSource),
   "usage statistics commands derive a monotonic request id from the shared focus state",
 );
