@@ -81,7 +81,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { useComposerModeActions } from "./lib/useComposerModeActions";
 import { useSessionOperations } from "./app-runtime/useSessionOperations";
-import { executeClearSession } from "./app-runtime/sessionActionOwner";
+import { executeCancelRuntimeJob, executeClearSession } from "./app-runtime/sessionActionOwner";
 import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
@@ -812,14 +812,18 @@ export default function App() {
     { target: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, operations: sessionOperations,
       navigateRemote: useCommittedCommand<RemoteNavigationCommand>((remote, options) => openRemoteProject(remote, options)) });
   const cancelRuntimeJob = useCommittedCommand(async (tabId: string, jobId: string): Promise<boolean> => {
-    try {
-      const cancelled = await app.CancelJobForTab(tabId, jobId);
-      await refreshBackgroundRuntimes();
-      return cancelled;
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
+    const target = { tabId, sessionKey: tabId === activeTabId ? activeSessionIdentity : `tab:${tabId}` };
+    const outcome = await sessionOperations(target, `runtime-cancel:${jobId}`, {}, (_input, authority) =>
+      executeCancelRuntimeJob(target, jobId, {
+        cancelForTab: async (sourceTabId, sourceJobId) => app.CancelJobForTab(sourceTabId, sourceJobId),
+        refresh: refreshBackgroundRuntimes,
+      }, authority),
+    );
+    if (outcome.status === "failed") {
+      showToast(outcome.error instanceof Error ? outcome.error.message : String(outcome.error), "error");
       return false;
     }
+    return outcome.status === "completed" ? outcome.value : false;
   });
   // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
   // tool-permission axis while preserving the Ask/Auto base mode.

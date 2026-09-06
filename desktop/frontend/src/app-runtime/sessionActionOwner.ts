@@ -36,6 +36,20 @@ export async function executeClearSession(
   authority.checkpoint();
 }
 
+export async function executeCancelRuntimeJob(
+  target: SessionResource,
+  jobId: string,
+  ports: { cancelForTab: (tabId: string, jobId: string) => Promise<boolean>; refresh: () => Promise<void> },
+  authority: SessionOperationAuthority,
+): Promise<boolean> {
+  authority.checkpoint();
+  const cancelled = await ports.cancelForTab(target.tabId, jobId);
+  authority.checkpoint();
+  if (authority.ownsUI()) await ports.refresh();
+  authority.checkpoint();
+  return cancelled;
+}
+
 export type SessionActionPorts = {
   approveForTab: (tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => void;
   resolvePlanForTab: (tabId: string, id: string, action: PlanDecisionAction) => void;
