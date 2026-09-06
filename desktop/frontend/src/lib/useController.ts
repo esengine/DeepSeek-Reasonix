@@ -2100,7 +2100,7 @@ export function reducer(s: State, a: Action): State {
       } else if (
         a.turnEventSeq !== undefined &&
         s.runtimeStatusSeq !== undefined &&
-        a.turnEventSeq < s.runtimeStatusSeq
+        a.turnEventSeq <= s.runtimeStatusSeq
       ) {
         return s;
       }

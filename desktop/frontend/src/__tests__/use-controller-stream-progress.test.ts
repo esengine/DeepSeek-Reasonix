@@ -435,6 +435,10 @@ function ev(s: typeof initialState, e: WireEvent) {
   });
   eq(stale.running, true, "older idle runtime snapshot cannot hide a newer running turn");
   eq(stale.activeTurnId, "turn-new", "older runtime snapshot cannot clear the active turn");
+  const duplicate = reducer(s, {
+    type: "backend_status", running: false, runtimeEpoch: "epoch-a", turnEventSeq: 12,
+  });
+  eq(duplicate.running, true, "duplicate runtime sequence cannot mutate turn state");
   const rebuilt = reducer(stale, {
     type: "backend_status", running: false, runtimeEpoch: "epoch-b", turnEventSeq: 1,
   });
