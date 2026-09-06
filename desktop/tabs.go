@@ -47,6 +47,7 @@ type tabDisplayState struct {
 	executor       displayTurnBuffer
 	pendingWrites  []*pendingDisplayWrite
 	persistRunning bool
+	persistCond    *sync.Cond
 }
 
 const displayPersistRetryLimit = 4
@@ -1574,6 +1575,9 @@ func enqueuePendingDisplayWrite(state *tabDisplayState, write *pendingDisplayWri
 		return
 	}
 	state.mu.Lock()
+	if state.persistCond == nil {
+		state.persistCond = sync.NewCond(&state.mu)
+	}
 	state.pendingWrites = append(state.pendingWrites, write)
 	if state.persistRunning {
 		state.mu.Unlock()
@@ -1609,12 +1613,29 @@ func persistOrEnqueueDisplayWrite(state *tabDisplayState, write *pendingDisplayW
 	return true
 }
 
+func waitForPendingDisplayWrites(state *tabDisplayState) {
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	if state.persistCond == nil {
+		state.persistCond = sync.NewCond(&state.mu)
+	}
+	for state.persistRunning {
+		state.persistCond.Wait()
+	}
+	state.mu.Unlock()
+}
+
 func retryPendingDisplayWrites(state *tabDisplayState) {
 	failures := 0
 	for {
 		state.mu.Lock()
 		if len(state.pendingWrites) == 0 {
 			state.persistRunning = false
+			if state.persistCond != nil {
+				state.persistCond.Broadcast()
+			}
 			state.mu.Unlock()
 			return
 		}
@@ -1634,6 +1655,9 @@ func retryPendingDisplayWrites(state *tabDisplayState) {
 			}
 			state.mu.Lock()
 			state.persistRunning = false
+			if state.persistCond != nil {
+				state.persistCond.Broadcast()
+			}
 			state.mu.Unlock()
 			slog.Warn("desktop: display-only turn history remains pending after retries", "err", err)
 			return
@@ -1765,9 +1789,28 @@ func (s *tabEventSink) Emit(e event.Event) {
 	if app != nil {
 		s.recordDisplay(e)
 	}
-	// Persist after each turn so a force-kill loses at most the in-flight prompt.
-	if e.Kind == event.TurnDone && app != nil {
-		app.scheduleTabSnapshot(tabID)
+	// Checkpoint durable transcript transitions while a turn is in flight. Stream
+	// deltas intentionally stay out of this path so a long answer does not cause
+	// one disk write per token; TurnDone remains the final forced flush.
+	if app != nil {
+		switch e.Kind {
+		case event.ToolResult, event.ApprovalRequest, event.AskRequest, event.CompactionDone, event.TurnPhase:
+			app.scheduleTabSnapshot(tabID)
+		case event.TurnDone:
+			app.scheduleTabSnapshot(tabID)
+			// Persistence barrier for turn completion: wait until the final
+			// session snapshot (and any queued saveAgain pass) is written, and
+			// until the flushed display-only text finishes its current persist
+			// attempt including bounded retries. Without this, an immediate
+			// process exit after TurnDone could lose the last turn.
+			app.mu.RLock()
+			tab := app.tabByEventSinkIDLocked(tabID)
+			app.mu.RUnlock()
+			app.waitForTabSnapshot(tab)
+			if tab != nil {
+				waitForPendingDisplayWrites(tab.displayBufferState())
+			}
+		}
 	}
 	// Forward event to bot channels when a bot forwarder is attached.
 	// Read the sink under the read lock so SetBotSink can safely swap it
@@ -4661,6 +4704,29 @@ func (a *App) scheduleTabSnapshot(tabID string) {
 	go a.tabSnapshotLoop(tab)
 }
 
+// waitForTabSnapshot blocks until the tab's autosave loop is idle: the current
+// write has finished and no queued saveAgain work remains. TurnDone uses this to
+// give the caller a persistence barrier — a process exit immediately after the
+// turn completes can no longer lose the final transcript. Deferred snapshots
+// queued by later events after the wait returns are not included by design.
+func (a *App) waitForTabSnapshot(tab *WorkspaceTab) {
+	if a == nil || tab == nil {
+		return
+	}
+	tab.saveMu.Lock()
+	if tab.saveCond == nil && !tab.saving {
+		tab.saveMu.Unlock()
+		return
+	}
+	if tab.saveCond == nil {
+		tab.saveCond = sync.NewCond(&tab.saveMu)
+	}
+	for tab.saving || tab.saveAgain {
+		tab.saveCond.Wait()
+	}
+	tab.saveMu.Unlock()
+}
+
 // quiesceTabAutosave marks the tab as closing and blocks until any in-flight
 // tabSnapshotLoop has finished its current (and final) write. After it returns,
 // no background goroutine can call Snapshot on this tab's controller again, so
@@ -4727,6 +4793,9 @@ func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
 		}
 		if tab.saveAgain {
 			tab.saveAgain = false
+			// Waiting waiters care about the queued write too; the loop will
+			// broadcast again when that pass completes.
+			tab.saveCond.Broadcast()
 			tab.saveMu.Unlock()
 			if snapshotErr != nil {
 				slog.Warn("desktop: session autosave failed; newer snapshot queued", "tab", tab.ID, "err", snapshotErr)
