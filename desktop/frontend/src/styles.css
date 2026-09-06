@@ -10224,13 +10224,24 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 .prompt-shelf--ask .ask-shelf__custom-row {
-  margin-top: 4px;
-  display: grid;
-  gap: 4px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  min-height: 46px;
+  flex: 0 0 46px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .prompt-shelf--ask .ask-shelf__custom {
-  height: 30px;
-  padding: 0 9px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 24px;
 }
 .prompt-shelf--runtime-decision .prompt-shelf__note {
   overflow: hidden;
