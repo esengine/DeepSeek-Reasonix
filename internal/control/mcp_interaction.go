@@ -135,9 +135,10 @@ func (a *approvalManager) snapshotMCPInteractions() []event.MCPInteraction {
 // ride the resolve call only — nothing is logged from here.
 func (c *Controller) Interact(ctx context.Context, req mcpinteraction.Request) (mcpinteraction.Result, error) {
 	id, reply := c.approval.registerMCPInteraction(req)
+	c.registerOwnedPrompt(id, PromptMCP)
 
 	if !c.lockPromptFor(ctx, "mcp interaction") {
-		c.approval.cancelMCPInteraction(id)
+		c.cancelOwnedPrompt(id)
 		return mcpinteraction.Result{Action: mcpinteraction.ActionCancel}, ctx.Err()
 	}
 	defer c.approval.promptMu.Unlock()
@@ -148,9 +149,14 @@ func (c *Controller) Interact(ctx context.Context, req mcpinteraction.Request) (
 		RequestedSchema: append([]byte(nil), req.RequestedSchema...),
 		URL:             req.URL, ElicitationID: req.ElicitationID,
 	}
-	if err := event.EmitChecked(c.sink, event.Event{Kind: event.MCPInteractionRequest, ItemID: id, MCPInteraction: payload}); err != nil {
+	payload.TurnID, _, _, _ = c.turnEventRuntimeStatus()
+	_, runtimeEpoch := c.promptIdentitySnapshot()
+	if identity := c.bindOwnedPromptRouting(id, payload.TurnID, runtimeEpoch); identity.TurnID != "" {
+		payload.TurnID = identity.TurnID
+	}
+	if err := event.EmitChecked(c.sink, event.Event{Kind: event.MCPInteractionRequest, TurnID: payload.TurnID, ItemID: id, MCPInteraction: payload}); err != nil {
 		c.approval.promptEmitMu.Unlock()
-		c.approval.cancelMCPInteraction(id)
+		c.cancelOwnedPrompt(id)
 		return mcpinteraction.Result{Action: mcpinteraction.ActionCancel}, fmt.Errorf("persist elicitation request: %w", err)
 	}
 	c.approval.markMCPInteractionEmitted(id)
@@ -163,7 +169,7 @@ func (c *Controller) Interact(ctx context.Context, req mcpinteraction.Request) (
 	case res := <-reply:
 		return res, nil
 	case <-waitCtx.Done():
-		c.approval.cancelMCPInteraction(id)
+		c.cancelOwnedPrompt(id)
 		return mcpinteraction.Result{Action: mcpinteraction.ActionCancel}, waitCtx.Err()
 	}
 }
@@ -177,6 +183,12 @@ func (c *Controller) AnswerMCPInteraction(id, action string, content map[string]
 // AnswerMCPInteractionChecked persists the prompt transition before releasing
 // the blocked MCP call, so a crashed frontend cannot lose an answered decision.
 func (c *Controller) AnswerMCPInteractionChecked(id, action string, content map[string]any) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.answerMCPInteractionCheckedLocked(id, action, content)
+}
+
+func (c *Controller) answerMCPInteractionCheckedLocked(id, action string, content map[string]any) error {
 	switch action {
 	case mcpinteraction.ActionAccept, mcpinteraction.ActionDecline, mcpinteraction.ActionCancel:
 	default:
@@ -192,6 +204,7 @@ func (c *Controller) AnswerMCPInteractionChecked(id, action string, content map[
 		return err
 	}
 	if ok {
+		c.promptOwner.Remove(id)
 		c.recordMCPInteractionReceipt(id, pending, action)
 		pending.reply <- mcpinteraction.Result{Action: action, Content: content}
 	}

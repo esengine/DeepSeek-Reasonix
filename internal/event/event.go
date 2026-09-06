@@ -327,6 +327,7 @@ type AskQuestion struct {
 type Ask struct {
 	ID        string
 	Questions []AskQuestion
+	TurnID    string
 }
 
 // MCPInteraction carries one MCPInteractionRequest: a server-initiated
@@ -341,6 +342,7 @@ type MCPInteraction struct {
 	RequestedSchema json.RawMessage
 	URL             string
 	ElicitationID   string
+	TurnID          string
 }
 
 // Extension surface kind values carried by ExtensionSurfacePayload.Kind. They
@@ -506,6 +508,7 @@ const (
 // for Kind; the others are zero.
 type Event struct {
 	Kind             Kind
+	PromptKind       string                    // interactive prompt kind for lifecycle events
 	TurnID           string                    // stable id of the owning top-level turn
 	Sequence         uint64                    // monotonic session-local event sequence
 	Status           TurnStatus                // lifecycle state after this event

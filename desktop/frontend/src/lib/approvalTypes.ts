@@ -18,4 +18,6 @@ export interface WireApproval {
   kind?: "tool" | "plan" | "recovery" | "write_access" | string;
   recovery?: WireRecoveryApproval;
   write_access?: WireWriteAccessApproval;
+  turnId?: string;
+  runtimeEpoch?: string;
 }

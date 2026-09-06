@@ -14,6 +14,9 @@ import (
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
 	Kind             string                           `json:"kind"`
+	PromptID         string                           `json:"promptId,omitempty"`
+	PromptKind       string                           `json:"promptKind,omitempty"`
+	PromptLegacy     bool                             `json:"promptLegacy,omitempty"`
 	TurnID           string                           `json:"turnId,omitempty"`
 	Sequence         uint64                           `json:"seq,omitempty"`
 	Status           string                           `json:"status,omitempty"`
@@ -132,7 +135,30 @@ type StreamAttempt struct {
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
-	w := Event{Kind: kindNames[e.Kind], TurnID: e.TurnID, Sequence: e.Sequence, Status: string(e.Status), Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID, SessionPath: e.SessionPath, SessionReset: e.SessionReset}
+	w := Event{Kind: kindNames[e.Kind], PromptKind: e.PromptKind, TurnID: e.TurnID, Sequence: e.Sequence, Status: string(e.Status), Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID, SessionPath: e.SessionPath, SessionReset: e.SessionReset}
+	if e.ItemID != "" {
+		promptEvent := false
+		switch e.Kind {
+		case event.AskRequest:
+			promptEvent = true
+			w.PromptKind = "ask"
+		case event.ApprovalRequest:
+			promptEvent = true
+			w.PromptKind = e.Approval.Kind
+			if w.PromptKind == "" {
+				w.PromptKind = "approval"
+			}
+		case event.MCPInteractionRequest:
+			promptEvent = true
+			w.PromptKind = "mcp"
+		case event.PromptAnswered:
+			promptEvent = true
+		}
+		if promptEvent {
+			w.PromptID = e.ItemID
+			w.PromptLegacy = e.TurnID == ""
+		}
+	}
 	if len(e.MemoryCitations) > 0 {
 		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
 	}
@@ -358,6 +384,7 @@ type AskQuestion struct {
 type Ask struct {
 	ID        string        `json:"id"`
 	Questions []AskQuestion `json:"questions"`
+	TurnID    string        `json:"turnId,omitempty"`
 }
 
 // MCPInteraction is the JSON form of an event.MCPInteraction: one
@@ -372,6 +399,7 @@ type MCPInteraction struct {
 	RequestedSchema json.RawMessage `json:"requestedSchema,omitempty"`
 	URL             string          `json:"url,omitempty"`
 	ElicitationID   string          `json:"elicitationId,omitempty"`
+	TurnID          string          `json:"turnId,omitempty"`
 }
 
 // applyNotice fills the Notice-specific wire fields.
@@ -391,7 +419,7 @@ func (w *Event) applyNotice(e event.Event) {
 func ToWireMCPInteraction(i event.MCPInteraction) *MCPInteraction {
 	return &MCPInteraction{
 		ID: i.ID, Server: i.Server, Mode: i.Mode, Message: i.Message,
-		RequestedSchema: i.RequestedSchema, URL: i.URL, ElicitationID: i.ElicitationID,
+		RequestedSchema: i.RequestedSchema, URL: i.URL, ElicitationID: i.ElicitationID, TurnID: i.TurnID,
 	}
 }
 
@@ -573,7 +601,7 @@ func ToWireAsk(a event.Ask) *Ask {
 		}
 		qs[i] = AskQuestion{ID: q.ID, Header: q.Header, Prompt: q.Prompt, Options: opts, Multi: q.Multi}
 	}
-	return &Ask{ID: a.ID, Questions: qs}
+	return &Ask{ID: a.ID, Questions: qs, TurnID: a.TurnID}
 }
 
 // ToWireCacheDiagnostics converts cache diagnostics into their JSON wire form.
