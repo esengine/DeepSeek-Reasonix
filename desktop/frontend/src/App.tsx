@@ -81,7 +81,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { useComposerModeActions } from "./lib/useComposerModeActions";
 import { useSessionOperations } from "./app-runtime/useSessionOperations";
-import { executeCancelRuntimeJob, executeClearSession } from "./app-runtime/sessionActionOwner";
+import { executeCancelRuntimeJob, executeClearSession, executeTerminalOutputInsertion } from "./app-runtime/sessionActionOwner";
 import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
@@ -1093,17 +1093,15 @@ export default function App() {
 
   const addTerminalOutputToComposer = useCommittedCommand(async (sessionId: string) => {
     if (!activeTabId) return;
-    try {
-      const output = await app.TerminalOutputForTab(activeTabId, sessionId);
-      const formatted = formatTerminalOutputForComposer(output);
-      if (!formatted) {
-        showToast(t("terminal.noOutput"), "info");
-        return;
-      }
-      addWorkspaceTextToComposer(formatted);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), "error");
-    }
+    const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
+    const outcome = await sessionOperations(target, `terminal-output:${sessionId}`, {}, (_input, authority) =>
+      executeTerminalOutputInsertion(target, sessionId, {
+        read: (tabId, terminalSessionId) => app.TerminalOutputForTab(tabId, terminalSessionId),
+        apply: addWorkspaceTextToComposer,
+      }, formatTerminalOutputForComposer, authority),
+    );
+    if (outcome.status === "completed" && !outcome.value) showToast(t("terminal.noOutput"), "info");
+    if (outcome.status === "failed") showToast(outcome.error instanceof Error ? outcome.error.message : String(outcome.error), "error");
   });
 
   const addSelectedTextToComposer = useCommittedCommand((text: string, source?: SelectedTextInsertRequest["source"]) => {

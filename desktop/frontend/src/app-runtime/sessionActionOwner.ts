@@ -50,6 +50,21 @@ export async function executeCancelRuntimeJob(
   return cancelled;
 }
 
+export async function executeTerminalOutputInsertion(
+  target: SessionResource,
+  sessionId: string,
+  ports: { read: (tabId: string, sessionId: string) => Promise<string>; apply: (text: string) => void },
+  format: (output: string) => string,
+  authority: SessionOperationAuthority,
+): Promise<boolean> {
+  authority.checkpoint();
+  const text = format(await ports.read(target.tabId, sessionId));
+  authority.checkpoint();
+  if (!text) return false;
+  if (authority.ownsUI()) ports.apply(text);
+  return true;
+}
+
 export type SessionActionPorts = {
   approveForTab: (tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => void;
   resolvePlanForTab: (tabId: string, id: string, action: PlanDecisionAction) => void;
