@@ -179,6 +179,8 @@ type RecoveryBranchOptions struct {
 	Name         string
 	Reason       string
 	BranchMeta   BranchMeta
+	BaseRevision int64
+	DiskRevision int64
 }
 
 type RecoveryBranchInfo struct {
@@ -1441,22 +1443,26 @@ func loadSessionUnlocked(path string) (*Session, error) {
 // disk, when it was created/last active, the first user message as a preview, and
 // a rough turn count.
 type SessionInfo struct {
-	Path           string
-	CreatedAt      time.Time
-	LastActivityAt time.Time
-	ModTime        time.Time // compatibility alias for LastActivityAt
-	Preview        string
-	Turns          int
-	CountsKnown    bool
-	Scope          string
-	WorkspaceRoot  string
-	TopicID        string
-	TopicTitle     string
-	CustomTitle    string
-	Recovered      bool
-	RecoveryReason string
-	RecoveryDigest string
-	ParentID       string
+	Path                 string
+	CreatedAt            time.Time
+	LastActivityAt       time.Time
+	ModTime              time.Time // compatibility alias for LastActivityAt
+	Preview              string
+	Turns                int
+	CountsKnown          bool
+	Scope                string
+	WorkspaceRoot        string
+	TopicID              string
+	TopicTitle           string
+	CustomTitle          string
+	Recovered            bool
+	RecoveryReason       string
+	RecoveryDigest       string
+	ParentID             string
+	VersionKind          SessionVersionKind
+	VersionState         SessionVersionState
+	ParentConversationID string
+	ParentVersionID      string
 }
 
 // CleanupPendingMeta records that a session was logically removed but still has
@@ -1992,6 +1998,10 @@ func ListSessionOrderWithRecoveryPreferenceResolver(dir string, resolve Recovery
 		recoveryReason := ""
 		recoveryDigest := ""
 		parentID := ""
+		versionKind := VersionNormal
+		versionState := VersionActive
+		parentConversationID := ""
+		parentVersionID := ""
 		recoveryPreferred := false
 		turns := 0
 		preview := ""
@@ -2016,6 +2026,10 @@ func ListSessionOrderWithRecoveryPreferenceResolver(dir string, resolve Recovery
 			recoveryReason = meta.RecoveryReason
 			recoveryDigest = meta.RecoveryDigest
 			parentID = meta.ParentID
+			versionKind = meta.EffectiveVersionKind()
+			versionState = meta.EffectiveVersionState()
+			parentConversationID = meta.ParentConversationID
+			parentVersionID = meta.ParentVersionID
 			recoveryPreferred = resolve(full, meta)
 			turns = meta.Turns
 			preview = meta.Preview
@@ -2029,6 +2043,7 @@ func ListSessionOrderWithRecoveryPreferenceResolver(dir string, resolve Recovery
 		// automatic recovery lineage for catalog folding.
 		if !recovered && LooksLikeRecoveryFilename(full) {
 			recovered = true
+			versionKind = VersionRecovery
 			if parentID == "" {
 				if parent, ok := RecoveryFilenameParentID(full); ok {
 					parentID = parent
@@ -2049,6 +2064,10 @@ func ListSessionOrderWithRecoveryPreferenceResolver(dir string, resolve Recovery
 			RecoveryReason:       recoveryReason,
 			RecoveryDigest:       recoveryDigest,
 			ParentID:             parentID,
+			VersionKind:          versionKind,
+			VersionState:         versionState,
+			ParentConversationID: parentConversationID,
+			ParentVersionID:      parentVersionID,
 			RecoveryPreferred:    recoveryPreferred,
 			Turns:                turns,
 			Preview:              preview,

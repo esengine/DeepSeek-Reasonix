@@ -657,6 +657,9 @@ export interface TopicMeta {
 }
 
 export interface SessionRecoveryEvent {
+	conversationId?: string;
+	activeVersionId?: string;
+	recoveryVersionId?: string;
   originalPath?: string;
   recoveryPath: string;
   scope?: string;
@@ -666,7 +669,11 @@ export interface SessionRecoveryEvent {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
-  existing?: boolean;
+	existing?: boolean;
+	baseRevision?: number;
+	diskRevision?: number;
+	canContinue?: boolean;
+	requiresChoice?: boolean;
 }
 
 export interface SessionRecoveryFailedEvent {
