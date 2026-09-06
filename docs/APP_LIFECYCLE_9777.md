@@ -256,15 +256,16 @@ source-only tests must be audited as their owning features migrate.
   session switching. This is file-preview evidence, not every editing path.
   Its six tracked subscriptions and zero instrumented operations still do not
   represent every remaining App workflow.
-- The memory runner now rebuilds production assets, records source/build
+- The memory runner rebuilds production assets, records source/build
   fingerprints, counts completed round trips, samples every 32 and saves heap
-  categories/weak identity cohorts. It fails closed as NEEDS_ATTRIBUTION, not
-  PASS. Complete prewarming, control builds and retaining-path classification
-  for the final structure remain required.
-- Formal 128/512-round, three-process App memory runs, native App soak, final
-  Go/race/lint/CodeQL evidence and final-head checks are pending. CI now invokes
-  App lifecycle/browser/memory and the complete frontend suite; memory remains
-  fail-closed until retention paths are attributed.
+  categories/weak identity cohorts. The captured final-structure run completed
+  128 full/windowed/safety rounds plus 512 mixed rounds in three independent
+  processes; all evidence, operation-release and page-error checks passed, and
+  the retention classifier found no persistent post-baseline cohort.
+- Native App soak, final Go/race/lint/CodeQL evidence and final-head checks are
+  still pending. CI now invokes App lifecycle/browser/memory and the complete
+  frontend suite; memory qualification is PASS for the captured Darwin/Chromium
+  evidence but is not a substitute for native WebKit/WebView2 evidence.
 
 ## Layering migration runbook (pending slices, in order)
 

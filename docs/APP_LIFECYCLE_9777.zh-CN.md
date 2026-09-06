@@ -170,11 +170,12 @@ App 领域仍需继续迁移。
 - App 浏览器回放现已检查实际 WorkspacePanel、文件树、选中文件和预览 DOM，
   覆盖布局、设置页面往返及同项目会话切换。这是文件预览证据，不代表全部编辑路径。
   6项订阅及0个已登记操作仍不能代表全部剩余 App 流程。
-- 内存 runner 现在重新构建生产资源、记录源码/构建指纹、统计完整往返，
-  每32轮采样并保存 heap 分类和弱引用身份 cohort。尚未归因时返回
-  NEEDS_ATTRIBUTION 而非 PASS。最终结构的完整预热、对照构建与保留路径分类待完成。
-- 128/512轮、三独立进程的正式 App 长跑、原生 App soak、最终 Go/race/
-  lint/CodeQL、CI 路径过滤和最终远端 head 检查均待完成。
+- 内存 runner 会重建生产资源、记录源码/构建指纹、统计完整往返，每32轮采样并保存
+  heap 分类和弱引用身份 cohort。最终结构已在三个独立进程完成 full/windowed/safety
+  各128轮和 mixed 512轮；证据完整、操作已释放、无 page error，保留路径分类未发现
+  持续的 post-baseline cohort，捕获的 Darwin/Chromium 证据已 PASS。
+- 原生 App soak、最终 Go/race/lint/CodeQL 和最终远端 head 检查仍待完成。CI 已调用
+  App lifecycle/browser/memory 与完整 frontend suite；Chromium 证据不能替代 WebKit/WebView2。
 
 ## 分层迁移 Runbook（待执行切片顺序）
 
