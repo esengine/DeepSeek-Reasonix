@@ -438,7 +438,8 @@ export interface WireEvent extends RecoveryEventFields {
 export interface WireCompletionSummary {
   preset: string;
   verdict: string;
-  mutations: number;
+	mutations: number;
+	changed_files?: number;
   checks_passed: number;
   checks_failed: number;
   checks_suppressed: number;

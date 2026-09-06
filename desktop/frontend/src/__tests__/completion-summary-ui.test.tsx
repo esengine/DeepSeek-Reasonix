@@ -73,7 +73,7 @@ try {
   button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await harness.flush();
   ok(opens === 1, "View changes delegates to the workspace panel action");
-  const verifyButtons = Array.from(harness.container.querySelectorAll("button")).filter((node) => node.textContent?.includes("Turn verification"));
+  const verifyButtons = Array.from(harness.container.querySelectorAll("button")).filter((node) => /Turn verification|View failures|View verification/.test(node.textContent ?? ""));
   ok(verifyButtons.length === 2, "each completion notice offers a Turn verification action");
   verifyButtons[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   verifyButtons[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

@@ -158,6 +158,7 @@ type CompletionSummaryInfo struct {
 	Preset             string // deprecated wire-compat label; pinned to "balanced"
 	Verdict            string // complete | partial | blocked | continue
 	Mutations          int
+	ChangedFiles       int
 	ChecksPassed       int
 	ChecksFailed       int
 	ChecksSuppressed   int

@@ -73,6 +73,7 @@ type CompletionSummary struct {
 	Preset             string   `json:"preset"` // deprecated; pinned compat value
 	Verdict            string   `json:"verdict"`
 	Mutations          int      `json:"mutations"`
+	ChangedFiles       int      `json:"changed_files,omitempty"`
 	ChecksPassed       int      `json:"checks_passed"`
 	ChecksFailed       int      `json:"checks_failed"`
 	ChecksSuppressed   int      `json:"checks_suppressed"`
@@ -91,6 +92,7 @@ func toWireCompletionSummary(c *event.CompletionSummaryInfo) *CompletionSummary 
 		Preset:             c.Preset,
 		Verdict:            c.Verdict,
 		Mutations:          c.Mutations,
+		ChangedFiles:       c.ChangedFiles,
 		ChecksPassed:       c.ChecksPassed,
 		ChecksFailed:       c.ChecksFailed,
 		ChecksSuppressed:   c.ChecksSuppressed,
