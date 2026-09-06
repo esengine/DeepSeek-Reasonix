@@ -141,7 +141,7 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
             </span>
           </span>
         </span>
-        <button className="qhold" onClick={() => onPause(!queue.paused)} disabled={queue.readonly}>
+        <button className="qhold" data-action="queue.pause" onClick={() => onPause(!queue.paused)} disabled={queue.readonly}>
           {queue.paused ? t("继续派发") : t("暂停派发")}
         </button>
       </div>
@@ -188,30 +188,30 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
               )}
               {live && (
                 <span className="qacts">
-                  <button onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")}>
+                  <button data-action="queue.move" data-target={it.id} data-value="up" onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")}>
                     ↑
                   </button>
-                  <button onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("下移")}>
+                  <button data-action="queue.move" data-target={it.id} data-value="down" onClick={() => onMove(it.id, i + 1)} disabled={i === items.length - 1} title={t("下移")}>
                     ↓
                   </button>
-                  <button onClick={() => void open(it.id)} title={t("编辑")}>
+                  <button data-action="queue.edit" data-target={it.id} onClick={() => void open(it.id)} title={t("编辑")}>
                     {t("改")}
                   </button>
                   {it.state === "blocked" && (
-                    <button onClick={() => onRetry(it.id)} title={t("重试")}>
+                    <button data-action="queue.retry" data-target={it.id} onClick={() => onRetry(it.id)} title={t("重试")}>
                       {t("重试")}
                     </button>
                   )}
                   {/* Only an entry that quoted files has anything to re-freeze. */}
                   {!!it.refs?.length && (
-                    <button onClick={() => onRefresh(it.id)} title={t("重新冻结引用的文件")}>
+                    <button data-action="queue.refresh" data-target={it.id} onClick={() => onRefresh(it.id)} title={t("重新冻结引用的文件")}>
                       {t("刷新")}
                     </button>
                   )}
                 </span>
               )}
               {live && (
-                <button className="x" onClick={() => onCancel(it.id)} title={t("取回")}>
+                <button className="x" data-action="queue.cancel" data-target={it.id} onClick={() => onCancel(it.id)} title={t("取回")}>
                   ×
                 </button>
               )}

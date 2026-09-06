@@ -117,6 +117,8 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
           {PRESETS.map(([id, lb]) => (
             <button
               key={id}
+              data-action="chrome.preset"
+              data-value={id}
               aria-pressed={status?.preset === id}
               disabled={!port || !!asking}
               data-asking={asking === id ? "" : undefined}
@@ -131,6 +133,7 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
             runs fine without an account and must not imply otherwise. */}
         <button
           className="thbtn acct-btn"
+          data-action="chrome.account"
           data-on={account?.signedIn ? "" : undefined}
           onClick={() => onSettings("account")}
           aria-label={account?.signedIn ? t("账号：{name}", { name: account.user?.label ?? "" }) : t("登录")}
@@ -153,6 +156,7 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
             —— 所以按钮留在原地，只换它说的话。 */}
         <button
           className="thbtn"
+          data-action="chrome.focus"
           onClick={onFocus}
           aria-pressed={focus}
           aria-label={focus ? t("退出专注") : t("专注")}
@@ -170,7 +174,7 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
             )}
           </svg>
         </button>
-        <button className="thbtn" onClick={() => onSettings()} aria-label={t("设置")} title={`${t("设置")}　${chord(",")}`}>
+        <button className="thbtn" data-action="chrome.settings" onClick={() => onSettings()} aria-label={t("设置")} title={`${t("设置")}　${chord(",")}`}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2" />
             <path d="M12.7 9.8a1 1 0 0 0 .2 1.1l.04.04a1.2 1.2 0 1 1-1.7 1.7l-.04-.04a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9v.11a1.2 1.2 0 1 1-2.4 0v-.06a1 1 0 0 0-.65-.9 1 1 0 0 0-1.1.2l-.04.04a1.2 1.2 0 1 1-1.7-1.7l.04-.04a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6h-.11a1.2 1.2 0 0 1 0-2.4h.06a1 1 0 0 0 .9-.65 1 1 0 0 0-.2-1.1l-.04-.04a1.2 1.2 0 1 1 1.7-1.7l.04.04a1 1 0 0 0 1.1.2h.05a1 1 0 0 0 .6-.9v-.11a1.2 1.2 0 1 1 2.4 0v.06a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.04-.04a1.2 1.2 0 1 1 1.7 1.7l-.04.04a1 1 0 0 0-.2 1.1v.05a1 1 0 0 0 .9.6h.11a1.2 1.2 0 0 1 0 2.4h-.06a1 1 0 0 0-.9.6" />
@@ -178,6 +182,7 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
         </button>
         <button
           className="thbtn"
+          data-action="chrome.theme"
           data-th={theme}
           aria-label={t("主题")}
           title={t("主题：{name}", { name: t(THEME_LB[theme]) })}

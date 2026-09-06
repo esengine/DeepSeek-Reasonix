@@ -40,13 +40,16 @@ export function ApprovalCard({ item, onApprove, onPlan }: Props) {
             {item.a.reason && <div className="apv-dt">{item.a.reason}</div>}
             {!sealed && (
               <div className="apv-ft">
-                <button className="btn" data-primary onClick={() => onApprove(item.id, item.a.id, "once")}>
+                <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
+                  onClick={() => onApprove(item.id, item.a.id, "once")}>
                   {t("允许这一次")}
                 </button>
-                <button className="btn" onClick={() => onApprove(item.id, item.a.id, "always")}>
+                <button className="btn" data-action="decision.tool" data-target={item.a.id} data-value="always"
+                  onClick={() => onApprove(item.id, item.a.id, "always")}>
                   {t("这一类不再问")}
                 </button>
-                <button className="btn" onClick={() => onApprove(item.id, item.a.id, "deny")}>
+                <button className="btn" data-action="decision.tool" data-target={item.a.id} data-value="deny"
+                  onClick={() => onApprove(item.id, item.a.id, "deny")}>
                   {t("拒绝")}
                 </button>
               </div>
@@ -103,13 +106,16 @@ function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan
             {!sealed && (
               <>
                 <div className="apv-ft">
-                  <button className="btn" data-primary onClick={() => onPlan(item.id, item.a.id, "start")}>
+                  <button className="btn" data-primary data-action="decision.plan" data-target={item.a.id} data-value="start"
+                    onClick={() => onPlan(item.id, item.a.id, "start")}>
                     {t("开始执行")}
                   </button>
-                  <button className="btn" onClick={() => onPlan(item.id, item.a.id, "revise")}>
+                  <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="revise"
+                    onClick={() => onPlan(item.id, item.a.id, "revise")}>
                     {t("修改计划")}
                   </button>
-                  <button className="btn" onClick={() => onPlan(item.id, item.a.id, "exit")}>
+                  <button className="btn" data-action="decision.plan" data-target={item.a.id} data-value="exit"
+                    onClick={() => onPlan(item.id, item.a.id, "exit")}>
                     {t("暂不执行")}
                   </button>
                 </div>

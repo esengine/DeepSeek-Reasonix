@@ -41,13 +41,14 @@ export function WindowControls() {
   if (document.documentElement.dataset.platform !== "windows") return null;
   return (
     <div className="winctl" role="group" aria-label={t("窗口")}>
-      <button className="wc" onClick={() => host().minimiseWindow()} aria-label={t("最小化")}>
+      <button className="wc" data-action="window.minimize" onClick={() => host().minimiseWindow()} aria-label={t("最小化")}>
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <path d="M2 6h8" />
         </svg>
       </button>
       <button
         className="wc"
+        data-action="window.maximize"
         onClick={() => host().toggleMaximiseWindow()}
         aria-label={t(max ? "还原" : "最大化")}
       >
@@ -62,7 +63,7 @@ export function WindowControls() {
           )}
         </svg>
       </button>
-      <button className="wc close" onClick={() => host().closeWindow()} aria-label={t("关闭")}>
+      <button className="wc close" data-action="window.close" onClick={() => host().closeWindow()} aria-label={t("关闭")}>
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" />
         </svg>

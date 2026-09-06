@@ -343,7 +343,8 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
               <Group title={t("执行设定")} now={preset} hint={t("决定任务完成的判定标准。切换立刻生效，不会重建运行时。")}>
                 <div className="seg" data-text role="radiogroup" aria-label={t("执行设定")}>
                   {PRESETS.map(([id, name]) => (
-                    <button key={id} role="radio" aria-checked={status?.preset === id} disabled={!!busy}
+                    <button key={id} role="radio" data-action="chrome.preset" data-value={id}
+                      aria-checked={status?.preset === id} disabled={!!busy}
                       onClick={() => run(id, () => port.setPreset(id))}>
                       {t(name)}
                     </button>
@@ -363,6 +364,7 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                     </span>
                   </span>
                   <Switch
+                    data-action="plan.mode"
                     on={status?.plan === true}
                     busy={busy === "plan"}
                     label={t("计划模式")}

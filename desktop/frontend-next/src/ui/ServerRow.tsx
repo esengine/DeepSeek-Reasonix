@@ -51,18 +51,20 @@ export function ServerRow({
   const actions = (
     <span className="acts">
       {live && m.enabled && m.state !== "ready" && (
-        <button className="act" disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
+        <button className="act" data-action="mcp.retry" data-target={m.name} disabled={!!busy} onClick={() => void run("retry", () => port.reconnectMcp(m.name))}>
           {t(busy === "retry" ? "连接中…" : auth ? "重新授权" : m.state === "standby" ? "立即连接" : "重连")}
         </button>
       )}
       {/* Removal is the one action here that cannot be undone by clicking again,
           so it asks — and the question names the file it is about to edit. */}
       {live && (
-        <button className="act ghost" aria-label={t("移除 {name}", { name: m.name })} disabled={!!busy} onClick={() => setConfirming(true)}>
+        <button className="act ghost" data-action="mcp.remove" data-target={m.name} aria-label={t("移除 {name}", { name: m.name })} disabled={!!busy} onClick={() => setConfirming(true)}>
           {t("移除")}
         </button>
       )}
       <Switch
+        data-action="mcp.enabled"
+        data-target={m.name}
         on={m.enabled}
         busy={busy === "toggle"}
         label={t(m.enabled ? "关闭 {name}" : "启用 {name}", { name: m.name })}
@@ -76,11 +78,14 @@ export function ServerRow({
       <span className="q">
         {t("把 {name} 从 {where} 里删掉？只是想暂时不用的话，关掉开关就够了。", { name: m.name, where: m.source || t("配置") })}
       </span>
-      <button className="act" onClick={() => setConfirming(false)}>
+      <button className="act" data-action="mcp.remove" data-target={m.name} data-value="cancel" onClick={() => setConfirming(false)}>
         {t("算了")}
       </button>
       <button
         className="act danger"
+        data-action="mcp.remove"
+        data-target={m.name}
+        data-value="confirm"
         disabled={busy === "remove"}
         onClick={() =>
           void run("remove", async () => {

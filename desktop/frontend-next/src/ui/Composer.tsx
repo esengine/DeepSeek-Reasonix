@@ -511,6 +511,7 @@ export function Composer({ port, status, running, focus, onSubmit, onChanged, on
         )}
         <button
           className="mode tog"
+          data-action="plan.mode"
           aria-pressed={status?.plan ?? false}
           onClick={() => change(port.setPlanMode(!status?.plan))}
         >
@@ -556,6 +557,7 @@ export function Composer({ port, status, running, focus, onSubmit, onChanged, on
           <button
             className="btn send"
             data-primary
+            data-action={running ? "session.stop" : "session.send"}
             onClick={() => (running ? change(port.cancel()) : send())}
           >
             <span className="ic" aria-hidden="true">

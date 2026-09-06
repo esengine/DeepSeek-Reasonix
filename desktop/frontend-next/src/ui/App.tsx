@@ -409,16 +409,27 @@ export function App({ hub }: { hub: HubPort }) {
     return () => removeEventListener("click", onClick);
   }, [activePort, fail]);
 
+  // The window's shortcuts, named by the action each one performs — the same
+  // identity the control on screen carries, because they are the same thing
+  // asked for two ways. Written out rather than branched so the census can read
+  // the set: a chain of ifs is a set nothing can enumerate.
+  const shortcuts: { chord: string; shift?: boolean; action: string; run: () => void }[] = useMemo(
+    () => [
+      { chord: "\\", action: "rail.toggle", run: () => setRail((v) => !v) },
+      { chord: "\\", shift: true, action: "inspector.toggle", run: () => chooseSide((v) => !v) },
+      { chord: ",", action: "chrome.settings", run: showPrefs },
+    ],
+    [showPrefs, chooseSide],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
-        e.preventDefault();
-        if (e.shiftKey) chooseSide((v) => !v);
-        else setRail((v) => !v);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
-        e.preventDefault();
-        showPrefs();
+      if (e.metaKey || e.ctrlKey) {
+        const hit = shortcuts.find((s) => s.chord === e.key && !!s.shift === e.shiftKey);
+        if (hit) {
+          e.preventDefault();
+          hit.run();
+        }
       }
       // Escape stops the turn you are looking at, not every live turn in the
       // window — the other panes are someone else's work in progress. A pane
@@ -428,6 +439,8 @@ export function App({ hub }: { hub: HubPort }) {
       // useDismiss), so a press that reaches this listener is one nothing else
       // wanted. Leaving focus is last: stopping a turn is the more urgent of
       // the two, and doing both on one press would be neither.
+      // Escape is two actions on one key, the way send and stop share one
+      // button: session.stop while a turn is live, chrome.focus otherwise.
       if (e.key === "Escape" && !settings) {
         if (running) activePort?.cancel();
         else setFocus(false);
@@ -435,7 +448,7 @@ export function App({ hub }: { hub: HubPort }) {
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [activePort, running, settings, showPrefs, chooseSide]);
+  }, [activePort, running, settings, shortcuts]);
 
   // A setting changed in the pane is a fact about the session behind it, and
   // the pane is what holds that fact. Without a nudge it keeps polling only
