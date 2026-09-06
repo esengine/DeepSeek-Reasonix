@@ -291,6 +291,7 @@ type Agent struct {
 	executorHandoffGuard bool
 	responseLanguage     atomic.Value // string: auto|zh|en
 	reasoningLanguage    atomic.Value // string: auto|zh|en
+	sessionEffort        sessionEffortOverride
 
 	requireVisibleFinal bool // internal callers require final Content
 	continuationPolicy  ContinuationPolicy
