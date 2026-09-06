@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const controller = readFileSync(join(root, "lib/useController.ts"), "utf8");
 const store = readFileSync(join(root, "lib/transcriptStore.ts"), "utf8");
-const app = readFileSync(join(root, "App.tsx"), "utf8");
+const app = readFileSync(join(root, "AppRuntime.tsx"), "utf8");
 
 assert.match(controller, /deferResetUntilHistory \?\? true/, "history reset waits for successful load");
 assert.match(controller, /type: "hydrate_error"/, "history failure dispatches hydrate_error");
