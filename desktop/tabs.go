@@ -2342,10 +2342,10 @@ func (a *App) sessionGenerationForTab(tabID string) uint64 {
 // uses tabId to dispatch to the correct per-tab state.
 type wireEventTab struct {
 	eventwire.Event
-	TabID         string `json:"tabId"`
-	RuntimeEpoch  string `json:"runtimeEpoch,omitempty"`
+	TabID             string `json:"tabId"`
+	RuntimeEpoch      string `json:"runtimeEpoch,omitempty"`
 	SessionGeneration uint64 `json:"sessionGeneration,omitempty"`
-	TurnStartedAt int64  `json:"turnStartedAt,omitempty"`
+	TurnStartedAt     int64  `json:"turnStartedAt,omitempty"`
 	// Session-cumulative tokens per tab.
 	SessionHitTokens  int `json:"sessionHitTokens,omitempty"`
 	SessionMissTokens int `json:"sessionMissTokens,omitempty"`

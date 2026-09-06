@@ -1185,9 +1185,9 @@ func (m *takeoverMirror) emitNoticeSink(sink *tabEventSink, level event.Level, c
 	if sink == nil {
 		return
 	}
-	tabID, _ := sink.binding()
+	tabID, app := sink.binding()
 	e := event.Event{Kind: event.Notice, Level: level, Code: code, Text: text, SessionPath: m.sessionPath}
-	sink.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, sink.runtimeEpochSnapshot(), "", 0))
+	sink.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, sink.runtimeEpochSnapshot(), "", 0, app.sessionGenerationForTab(tabID)))
 }
 
 // mirrorEnd tells Serve the writer is gone so the remote side resumes without
