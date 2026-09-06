@@ -6111,7 +6111,11 @@ type sessionRecoveryEvent struct {
 }
 
 type sessionRecoveryFailedEvent struct {
-	Reason string `json:"reason,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	ConversationID  string `json:"conversationId,omitempty"`
+	TopicID         string `json:"topicId,omitempty"`
+	CanContinue     bool   `json:"canContinue"`
+	RecoveryPending bool   `json:"recoveryPending"`
 }
 
 func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionRecoveryRequest) agent.BranchMeta {

@@ -689,6 +689,10 @@ export interface SessionVersionStateView {
 
 export interface SessionRecoveryFailedEvent {
   reason?: "lease_held" | "lease_unavailable" | string;
+  conversationId?: string;
+  topicId?: string;
+  canContinue?: boolean;
+  recoveryPending?: boolean;
 }
 
 export interface ContextPanelInfo {

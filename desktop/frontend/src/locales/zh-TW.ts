@@ -1101,6 +1101,8 @@ export const zhTW: Record<DictKey, string> = {
   "recovery.lineageSummary": "{branches} 個版本 · {unresolved} 個含獨有內容",
   "recovery.lineageEmpty": "沒有其他會話版本。",
   "recovery.divergedToast": "偵測到另一個尚未合併的會話版本，所有內容均已保留。",
+  "recovery.failed": "會話復原失敗，請重試或重新開啟會話。",
+  "recovery.failedPending": "會話復原尚未完成，目前內容未覆蓋磁碟記錄；請重試或匯出後再繼續。",
   "recovery.defaultVersion": "預設版本",
   "recovery.alternateVersion": "另一個版本",
   "recovery.addVersionNote": "新增版本備註",
