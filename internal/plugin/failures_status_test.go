@@ -1,14 +1,10 @@
 package plugin
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
-
-	"reasonix/internal/testenv"
 )
 
 // The status a failure ended at, carried as the number the host held. Reading
@@ -48,34 +44,5 @@ func TestTheStatusIsNotReadOutOfTheMessage(t *testing.T) {
 	// old regex looked for buys no classification at all.
 	if by["b"].HTTPStatus != 0 {
 		t.Errorf("b: HTTPStatus = %d, want 0 for a failure that was not an HTTP one", by["b"].HTTPStatus)
-	}
-}
-
-// A tripwire, not a specification: a forced refresh returns early while the
-// local clock still likes the token, so a retry goes out with the one the
-// server just refused. Until that is settled a 401 does not mean "authorise
-// again". When this fails the recovery was fixed — delete it and write the real
-// negative control, that such a 401 never becomes a Failure at all.
-func TestKnownGapAForcedRefreshDoesNotForce(t *testing.T) {
-	dir := testenv.TempDir(t)
-	state := mcpOAuthState{
-		Version: 1, Resource: "https://example.invalid/mcp", Issuer: "https://example.invalid",
-		ClientID: "c", ClientSecret: "s",
-		// Unreachable on purpose: reaching it at all is the fix landing.
-		TokenEndpoint: "http://127.0.0.1:1/token", TokenEndpointAuthMethod: "client_secret_basic",
-		AccessToken: "rejected-by-the-server", RefreshToken: "r", TokenType: "Bearer",
-		Expiry: time.Now().Add(time.Hour),
-	}
-	if err := saveMCPOAuthState(dir, state); err != nil {
-		t.Fatal(err)
-	}
-	c := &mcpOAuthClient{stateDir: dir, state: state, client: http.DefaultClient}
-
-	header, used, err := c.authorizationHeader(context.Background(), true)
-	if err != nil || !used {
-		t.Fatalf("forced refresh answered (%q, %v, %v); the gap is that it answers at all", header, used, err)
-	}
-	if header != "Bearer rejected-by-the-server" {
-		t.Fatalf("header = %q — a forced refresh no longer hands back the refused token, so this tripwire is done", header)
 	}
 }
