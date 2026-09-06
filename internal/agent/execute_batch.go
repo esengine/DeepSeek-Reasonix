@@ -35,6 +35,10 @@ func (c *mutationBarrierCause) message() string {
 	if reason == "" {
 		reason = "state mutation whose effects cannot be proven read-only"
 	}
+	if c.blockingPhase == "unknown" {
+		return "blocked: skipped because an earlier modification (" + reason + ") has an unknown outcome in this tool batch. " +
+			"Inspect its effects with read-only tools before repeating or continuing; verification was not executed."
+	}
 	action := "failed"
 	if c.blockingPhase == "blocked" {
 		action = "was blocked"
@@ -190,14 +194,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	}
 	cancelled := false
 	markCancelled := func(start int) {
-		errMsg := context.Canceled.Error()
-		if err := ctx.Err(); err != nil {
-			errMsg = err.Error()
-		}
-		output := "cancelled: context cancelled before execution"
 		for j := start; j < len(calls); j++ {
-			results[j] = output
-			outcomes[j] = toolOutcome{output: output, errMsg: errMsg, cancelledBeforeExecution: true}
+			outcomes[j] = interruptedOutcome(startedAt[j] > 0, ctx.Err())
+			results[j] = outcomes[j].output
 		}
 		cancelled = true
 	}
@@ -372,7 +371,8 @@ func (a *Agent) commitBatchCallResolution(call provider.ToolCall) {
 // durable-state mutation failed or was blocked. Verification failures alone do
 // not open the dependency barrier.
 func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutcome) *mutationBarrierCause {
-	if o.errMsg == "" && !o.blocked {
+	unknown := toolOutcomeState(o) == provider.ToolRunUnknown
+	if o.errMsg == "" && !o.blocked && !unknown {
 		return nil
 	}
 	readOnly := false
@@ -402,8 +402,11 @@ func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutco
 		return nil
 	}
 	phase := "failed"
-	if o.blocked {
+	switch {
+	case o.blocked:
 		phase = "blocked"
+	case unknown:
+		phase = "unknown"
 	}
 	return &mutationBarrierCause{
 		callID:              call.ID,

@@ -1,6 +1,10 @@
 package control
 
-import "reasonix/internal/provider"
+import (
+	"strings"
+
+	"reasonix/internal/provider"
+)
 
 func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msgs []provider.Message, i int) {
 	results := make(map[string]provider.Message)
@@ -22,4 +26,54 @@ func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msg
 		}
 		r.ToolCalls = append(r.ToolCalls, record)
 	}
+}
+
+// mergeInterruptedRecovery folds an earlier local handoff into the one being
+// rebuilt after cancellation, so a second interruption keeps the first's facts.
+func mergeInterruptedRecovery(dst, src *provider.InterruptedTurnRecovery) {
+	dst.TurnID = src.TurnID
+	dst.AttemptID = src.AttemptID
+	dst.Cause = src.Cause
+	dst.RequiresUserDecision = dst.RequiresUserDecision || src.RequiresUserDecision
+	dst.SilentInterruption = dst.SilentInterruption || src.SilentInterruption
+	dst.CompletedTools = append(dst.CompletedTools, src.CompletedTools...)
+	dst.FailedTools = append(dst.FailedTools, src.FailedTools...)
+	dst.InterruptedTools = append(dst.InterruptedTools, src.InterruptedTools...)
+	dst.NotStartedTools = append(dst.NotStartedTools, src.NotStartedTools...)
+	dst.UnknownTools = append(dst.UnknownTools, src.UnknownTools...)
+	dst.CancelledTools = append(dst.CancelledTools, src.CancelledTools...)
+	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
+}
+
+// stampInterruptedTurnID binds the handoff to the ledger turn it interrupted.
+// The strip runs before TurnDone lands, so the active turn is still that one.
+func (c *Controller) stampInterruptedTurnID(r *provider.InterruptedTurnRecovery) {
+	if r.TurnID != "" {
+		return
+	}
+	if ledger := c.turnEventLedger(); ledger != nil {
+		r.TurnID = ledger.ActiveTurnID()
+	}
+}
+
+// localizeInterruptedMessage turns an unpaired assistant or tool message from
+// the cancelled turn into a display-only carrier. Partial assistant output is
+// recorded as dropped so the model-facing block can say it was excluded.
+func localizeInterruptedMessage(m provider.Message, r *provider.InterruptedTurnRecovery) (provider.Message, bool) {
+	local := m
+	switch m.Role {
+	case provider.RoleAssistant:
+		local.Role = provider.RoleTool
+		local.InterruptedTurn = nil
+		r.DroppedPartialText = r.DroppedPartialText || strings.TrimSpace(m.Content) != ""
+		r.DroppedPartialReasoning = r.DroppedPartialReasoning || strings.TrimSpace(m.ReasoningContent) != ""
+	case provider.RoleTool:
+		local.ToolCalls = []provider.ToolCall{{ID: m.ToolCallID, Name: m.Name}}
+	default:
+		return provider.Message{}, false
+	}
+	local.LocalOnly = true
+	local.ToolCallID = provider.LocalOnlyToolID
+	local.Name = provider.LocalOnlyToolName
+	return local, true
 }

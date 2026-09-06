@@ -22,7 +22,7 @@ export type EventKind =
   | "turn_status"
   | "prompt_answered" | "session_changed"
   | "mcp_interaction"
-  | "tool_progress"
+  | "tool_progress" | "tool_started"
   | "usage"
   | "notice"
   | "phase"

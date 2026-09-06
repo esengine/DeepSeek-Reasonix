@@ -33,6 +33,7 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 			copy.WriteChecks = append([]provider.WriteRecoveryCheck(nil), copy.WriteChecks...)
 			copy.SatisfiedWrites = append([]provider.InterruptedToolSummary(nil), copy.SatisfiedWrites...)
 			copy.CompletedTools = append([]provider.InterruptedToolSummary(nil), copy.CompletedTools...)
+			copy.FailedTools = append([]provider.InterruptedToolSummary(nil), copy.FailedTools...)
 			copy.InterruptedTools = append([]string(nil), copy.InterruptedTools...)
 			copy.NotStartedTools = append([]provider.InterruptedToolSummary(nil), copy.NotStartedTools...)
 			copy.UnknownTools = append([]provider.InterruptedToolSummary(nil), copy.UnknownTools...)
@@ -94,6 +95,7 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 			b.WriteByte('\n')
 		}
 	}
+	writeRecoveryCalls(&b, "failed_tools", r.FailedTools)
 	if len(r.InterruptedTools) == 0 {
 		b.WriteString("interrupted_tools: none\n")
 	} else {

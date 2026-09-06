@@ -4493,17 +4493,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 			recovery.DroppedPartialText = recovery.DroppedPartialText || strings.TrimSpace(m.Content) != ""
 			recovery.DroppedPartialReasoning = recovery.DroppedPartialReasoning || strings.TrimSpace(m.ReasoningContent) != ""
 			if previousRecovery != nil {
-				recovery.TurnID = previousRecovery.TurnID
-				recovery.AttemptID = previousRecovery.AttemptID
-				recovery.Cause = previousRecovery.Cause
-				recovery.RequiresUserDecision = recovery.RequiresUserDecision || previousRecovery.RequiresUserDecision
-				recovery.SilentInterruption = recovery.SilentInterruption || previousRecovery.SilentInterruption
-				recovery.CompletedTools = append(recovery.CompletedTools, previousRecovery.CompletedTools...)
-				recovery.InterruptedTools = append(recovery.InterruptedTools, previousRecovery.InterruptedTools...)
-				recovery.NotStartedTools = append(recovery.NotStartedTools, previousRecovery.NotStartedTools...)
-				recovery.UnknownTools = append(recovery.UnknownTools, previousRecovery.UnknownTools...)
-				recovery.CancelledTools = append(recovery.CancelledTools, previousRecovery.CancelledTools...)
-				recovery.ToolCalls = append(recovery.ToolCalls, previousRecovery.ToolCalls...)
+				mergeInterruptedRecovery(recovery, previousRecovery)
 			} else {
 				for _, call := range m.ToolCalls {
 					provider.RecordToolRecovery(recovery, interruptedToolSummary(call), provider.ToolRunUnknown)
@@ -4529,24 +4519,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 			i = end
 			continue
 		}
-		switch m.Role {
-		case provider.RoleAssistant:
-			local := m
-			local.Role = provider.RoleTool
-			local.LocalOnly = true
-			local.ToolCallID = provider.LocalOnlyToolID
-			local.Name = provider.LocalOnlyToolName
-			local.InterruptedTurn = nil
-			next = append(next, local)
-			localIndexes = append(localIndexes, len(next)-1)
-			recovery.DroppedPartialText = recovery.DroppedPartialText || strings.TrimSpace(local.Content) != ""
-			recovery.DroppedPartialReasoning = recovery.DroppedPartialReasoning || strings.TrimSpace(local.ReasoningContent) != ""
-		case provider.RoleTool:
-			local := m
-			local.LocalOnly = true
-			local.ToolCalls = []provider.ToolCall{{ID: m.ToolCallID, Name: m.Name}}
-			local.ToolCallID = provider.LocalOnlyToolID
-			local.Name = provider.LocalOnlyToolName
+		if local, ok := localizeInterruptedMessage(m, recovery); ok {
 			next = append(next, local)
 			localIndexes = append(localIndexes, len(next)-1)
 		}
@@ -4559,6 +4532,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 		})
 		localIndexes = append(localIndexes, len(next)-1)
 	}
+	c.stampInterruptedTurnID(recovery)
 	next[localIndexes[len(localIndexes)-1]].InterruptedTurn = recovery
 	c.replaceSessionAfterCancel(next)
 }

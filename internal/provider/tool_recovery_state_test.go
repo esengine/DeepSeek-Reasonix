@@ -17,6 +17,17 @@ func TestRecordToolRecoveryDistinguishesCancelledAndUnknown(t *testing.T) {
 	}
 }
 
+func TestRecordToolRecoveryKeepsFailedOutOfUnknown(t *testing.T) {
+	r := &InterruptedTurnRecovery{}
+	RecordToolRecovery(r, InterruptedToolSummary{ID: "fail", Name: "write_file"}, ToolRunFailed)
+	if len(r.FailedTools) != 1 || r.FailedTools[0].ID != "fail" {
+		t.Fatalf("failed tools = %#v", r.FailedTools)
+	}
+	if len(r.UnknownTools) != 0 || len(r.InterruptedTools) != 0 {
+		t.Fatalf("paired failure treated as interrupted: unknown=%#v interrupted=%#v", r.UnknownTools, r.InterruptedTools)
+	}
+}
+
 func TestToolCallRecordRoundTripsArgumentsLocally(t *testing.T) {
 	want := ToolCallRecord{ID: "call-1", Name: "bash", Arguments: json.RawMessage(`{"command":"git status"}`), State: ToolRunUnknown}
 	b, err := json.Marshal(want)

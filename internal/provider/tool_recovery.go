@@ -69,6 +69,8 @@ func RecordToolRecovery(r *InterruptedTurnRecovery, call InterruptedToolSummary,
 	switch state {
 	case ToolRunCompleted:
 		r.CompletedTools = append(r.CompletedTools, call)
+	case ToolRunFailed:
+		r.FailedTools = append(r.FailedTools, call)
 	case ToolRunCancelled:
 		r.CancelledTools = append(r.CancelledTools, call)
 		r.NotStartedTools = append(r.NotStartedTools, call)
@@ -93,6 +95,7 @@ type InterruptedTurnRecovery struct {
 	SatisfiedWrites         []InterruptedToolSummary `json:"satisfied_writes,omitempty"`
 	Pending                 bool                     `json:"pending,omitempty"`
 	CompletedTools          []InterruptedToolSummary `json:"completed_tools,omitempty"`
+	FailedTools             []InterruptedToolSummary `json:"failed_tools,omitempty"`
 	InterruptedTools        []string                 `json:"interrupted_tools,omitempty"`
 	NotStartedTools         []InterruptedToolSummary `json:"not_started_tools,omitempty"`
 	UnknownTools            []InterruptedToolSummary `json:"unknown_tools,omitempty"`

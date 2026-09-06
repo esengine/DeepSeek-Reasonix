@@ -44,6 +44,17 @@ branch.
 
 ### Fixed
 
+- **Interrupted turns:** a tool call cancelled after its start barrier is now
+  recorded as `unknown`, never `not_started`; an unknown side effect stops
+  later writers in the same batch; explicit failures stay `failed` instead of
+  reading as unknown in recovery; cancellation with an unproven side effect or
+  a silent interruption ends the turn as `recovery_required`; every provider
+  request passes a final transcript gate (#9825, #9566).
+- **回合中断：** 越过起始屏障后被取消的工具调用记为 `unknown`，不再是
+  `not_started`；unknown 副作用会阻止同一 batch 的后续写入；明确失败保持
+  `failed`，恢复块不再把它当作 unknown；存在未证明副作用或静默中断的取消以
+  `recovery_required` 结束回合；每次 provider 请求前都经过转录门（#9825、#9566）。
+
 - **Relay image input:** ID-only or invalid model metadata now stays unknown.
   Both Desktop model editors expose per-model Auto / On / Off overrides, with
   official protocol limits retained. A separate V2 discovery cache rejects stale

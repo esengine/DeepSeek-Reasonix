@@ -166,27 +166,7 @@ func ToWire(e event.Event) Event {
 	case event.Notice:
 		w.applyNotice(e)
 	case event.ToolDispatch, event.ToolStarted, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
-		wt := &Tool{
-			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
-			ResolvedName: e.Tool.ResolvedName, CapabilityID: e.Tool.CapabilityID,
-			Output: e.Tool.Output, Err: e.Tool.Err,
-			RunState: e.Tool.RunState,
-			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
-			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
-			StartedAt: e.Tool.StartedAt, EndedAt: e.Tool.EndedAt,
-			ArgChars: e.Tool.ArgChars, Refreshed: e.Tool.Refreshed,
-			ParentID: e.Tool.ParentID, AttemptID: e.Tool.AttemptID,
-			Diff: e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
-			SubagentRef: e.Tool.SubagentRef, SubagentStatus: e.Tool.SubagentStatus,
-			SubagentErrorCode: e.Tool.SubagentErrorCode, SubagentRetryable: e.Tool.SubagentRetryable,
-		}
-		if e.Tool.Profile != nil {
-			wt.Profile = &Profile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
-		}
-		if e.Tool.Execution != nil {
-			wt.Execution = toWireShellExecution(e.Tool.Execution)
-		}
-		w.Tool = wt
+		w.Tool = toWireTool(e.Tool)
 	case event.WorkspaceChanged:
 		ws := e.Workspace
 		if ws == nil {
@@ -264,6 +244,30 @@ func ToWire(e event.Event) Event {
 		w.Completion = toWireCompletionSummary(e.Completion)
 	}
 	return w
+}
+
+func toWireTool(t event.Tool) *Tool {
+	wt := &Tool{
+		ID: t.ID, Name: t.Name, Args: t.Args,
+		ResolvedName: t.ResolvedName, CapabilityID: t.CapabilityID,
+		Output: t.Output, Err: t.Err,
+		RunState: t.RunState,
+		ReadOnly: t.ReadOnly, Truncated: t.Truncated,
+		DurationMs: t.DurationMs, Partial: t.Partial,
+		StartedAt: t.StartedAt, EndedAt: t.EndedAt,
+		ArgChars: t.ArgChars, Refreshed: t.Refreshed,
+		ParentID: t.ParentID, AttemptID: t.AttemptID,
+		Diff: t.Diff, Added: t.Added, Removed: t.Removed,
+		SubagentRef: t.SubagentRef, SubagentStatus: t.SubagentStatus,
+		SubagentErrorCode: t.SubagentErrorCode, SubagentRetryable: t.SubagentRetryable,
+	}
+	if t.Profile != nil {
+		wt.Profile = &Profile{Model: t.Profile.Model, Effort: t.Profile.Effort}
+	}
+	if t.Execution != nil {
+		wt.Execution = toWireShellExecution(t.Execution)
+	}
+	return wt
 }
 
 func toWireUsage(e event.Event) *Usage {
@@ -644,48 +648,6 @@ func KindNames() []string {
 		}
 	}
 	return names
-}
-
-// KindName returns the stable wire name of one event kind, or false for a
-// kind outside the known set.
-func KindName(kind event.Kind) (string, bool) {
-	name, ok := kindNames[kind]
-	return name, ok
-}
-
-var kindNames = map[event.Kind]string{
-	event.TurnStarted:             "turn_started",
-	event.Reasoning:               "reasoning",
-	event.Text:                    "text",
-	event.Message:                 "message",
-	event.ToolDispatch:            "tool_dispatch",
-	event.ToolResult:              "tool_result",
-	event.Usage:                   "usage",
-	event.Notice:                  "notice",
-	event.Phase:                   "phase",
-	event.ApprovalRequest:         "approval_request",
-	event.AskRequest:              "ask_request",
-	event.TurnDone:                "turn_done",
-	event.CompactionStarted:       "compaction_started",
-	event.CompactionDone:          "compaction_done",
-	event.ToolProgress:            "tool_progress",
-	event.ToolStarted:             "tool_started",
-	event.MCPSurfaceReady:         "mcp_surface_ready",
-	event.Retrying:                "retrying",
-	event.Steer:                   "steer",
-	event.GuardianAssessment:      "guardian_assessment",
-	event.ExtensionSurface:        "extension_surface",
-	event.ExtensionStatus:         "extension_status",
-	event.StreamAttempt:           "stream_attempt",
-	event.ContextMaintenanceEvent: "context_maintenance",
-	event.WorkspaceChanged:        "workspace_changed",
-	event.TurnPhase:               "turn_phase",
-	event.CompletionSummary:       "completion_summary",
-	event.ToolResultPreview:       "tool_result_preview",
-	event.TurnStatusChanged:       "turn_status",
-	event.MCPInteractionRequest:   "mcp_interaction",
-	event.PromptAnswered:          "prompt_answered",
-	event.SessionChanged:          "session_changed",
 }
 
 // ContextMaintenance is the JSON form of event.ContextMaintenance.

@@ -290,6 +290,11 @@ func terminalTurnStatus(e event.Event) event.TurnStatus {
 	if errors.As(e.Err, &uncertain) {
 		return event.TurnRecoveryRequired
 	}
+	// An unproven side effect or a turn that died before producing anything
+	// is not merely interrupted: the next write-capable turn needs a decision.
+	if r := e.Recovery; r != nil && (r.RequiresUser || r.Silent) {
+		return event.TurnRecoveryRequired
+	}
 	if e.Cancelled || errors.Is(e.Err, context.Canceled) {
 		return event.TurnInterrupted
 	}

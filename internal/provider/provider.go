@@ -275,33 +275,6 @@ const interruptedToolResult = "[no result: the previous turn was interrupted bef
 // "defensive wire prep" rather than "session mutation".
 func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(msgs) }
 
-// ValidateTranscript is the final provider-facing safety gate. It rejects
-// malformed tool arguments and unpaired calls after normalization, without
-// mutating the stored session.
-func ValidateTranscript(msgs []Message) error {
-	open := map[string]struct{}{}
-	for _, m := range msgs {
-		if m.Role == RoleAssistant {
-			for _, c := range m.ToolCalls {
-				if c.ID == "" || json.Valid([]byte(c.Arguments)) == false {
-					return fmt.Errorf("invalid tool call %q", c.ID)
-				}
-				open[c.ID] = struct{}{}
-			}
-		}
-		if m.Role == RoleTool {
-			if _, ok := open[m.ToolCallID]; !ok {
-				return fmt.Errorf("orphan tool result %q", m.ToolCallID)
-			}
-			delete(open, m.ToolCallID)
-		}
-	}
-	if len(open) != 0 {
-		return fmt.Errorf("unpaired tool call")
-	}
-	return nil
-}
-
 // NormalizeMessages repairs a conversation history so it satisfies the tool-callcontract the
 // OpenAI-compatible and Anthropic APIs enforce:
 // everyassistanttool_callsentrymustbeansweredbyafollowingtoolmessage for its id,
