@@ -10144,12 +10144,15 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 46px;
   min-height: 46px;
+  flex: 0 0 46px;
   margin-top: 2px;
   padding: 9px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   background: var(--bg-soft);
+  overflow: hidden;
 }
 .prompt-shelf--ask .ask-shelf__custom-row:focus-within,
 .prompt-shelf--ask .ask-shelf__custom-row--active { border-color: var(--accent); }
