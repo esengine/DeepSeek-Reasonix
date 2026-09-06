@@ -86,8 +86,7 @@ func TestPendingPromptOwnerRejectsConcurrentResolveReservation(t *testing.T) {
 	results := make(chan error, 2)
 	var wg sync.WaitGroup
 	for range 2 {
-		wg.Add(1)
-		go func() { defer wg.Done(); <-start; results <- owner.BeginResolve(id) }()
+		wg.Go(func() { <-start; results <- owner.BeginResolve(id) })
 	}
 	close(start)
 	wg.Wait()
