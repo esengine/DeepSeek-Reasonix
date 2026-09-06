@@ -398,6 +398,11 @@ func (a *Agent) summaryRequest(region []provider.Message, instructions string) p
 		Tools:       schemas,
 		MaxTokens:   a.summaryOutputBudget(),
 		Temperature: provider.OptionalTemperature(a.temperature),
+		// The compaction prompt explicitly asks for a direct briefing with no
+		// thinking, and the summary budget must not be consumed by reasoning on
+		// thinking models. Force reasoning off so compaction works even when the
+		// user has a reasoning effort configured (#9613).
+		EffortOverride: "none",
 	}
 }
 

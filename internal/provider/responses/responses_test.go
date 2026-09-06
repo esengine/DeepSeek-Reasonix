@@ -116,6 +116,30 @@ func TestDeepSeekV4ResponsesEffortAliasesNormalizeToHigh(t *testing.T) {
 	}
 }
 
+// TestEffortOverrideWinsOverClientEffort covers #9613: a per-request
+// EffortOverride (used by compaction summary requests to force thinking off)
+// must override the client's configured effort in the serialized body, while a
+// request without an override still inherits the configured effort.
+func TestEffortOverrideWinsOverClientEffort(t *testing.T) {
+	message := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
+
+	// No override -> client effort (high) reaches the wire unchanged.
+	inherited := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "high"}).(*client)
+	body, _, _ := inherited.buildRequestBody(provider.Request{Messages: message})
+	if got, _ := body["reasoning"].(map[string]any)["effort"].(string); got != "high" {
+		t.Fatalf("no override inherited effort = %q, want high", got)
+	}
+
+	// Override "none" wins even when the client effort is high.
+	for _, clientEffort := range []string{"high", ""} {
+		overridden := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: clientEffort}).(*client)
+		b, _, _ := overridden.buildRequestBody(provider.Request{Messages: message, EffortOverride: "none"})
+		if got, _ := b["reasoning"].(map[string]any)["effort"].(string); got != "none" {
+			t.Fatalf("override none with client effort %q serialized as %q, want none", clientEffort, got)
+		}
+	}
+}
+
 func TestRequestSerializesExplicitMaxOutputTokens(t *testing.T) {
 	client := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{
