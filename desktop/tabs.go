@@ -791,6 +791,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.adoptDisplayState(source.displayBufferState())
 	if source.sink != nil {
 		source.sink.setBinding(target.ID, app)
+		source.sink.setSessionGeneration(target.SessionGeneration)
 		source.sink.setContext(wailsCtx)
 	}
 
@@ -1659,15 +1660,16 @@ func retryPendingDisplayWrites(state *tabDisplayState) {
 // live under mu like ctx does (a bare field write would data-race Emit). Read
 // them via binding(), write via setBinding().
 type tabEventSink struct {
-	tabID         string
-	app           *App
-	mu            sync.RWMutex
-	ctx           context.Context
-	runtimeEpoch  string
-	runtimeEvents asyncRuntimeEmitter
-	botSink       event.Sink // optional: when set, events are also forwarded here
-	botSinkGen    uint64
-	turn          turnSubmissionState // stays reserved through the end of TurnDone fan-out
+	tabID             string
+	app               *App
+	mu                sync.RWMutex
+	ctx               context.Context
+	runtimeEpoch      string
+	sessionGeneration uint64 // source session binding generation
+	runtimeEvents     asyncRuntimeEmitter
+	botSink           event.Sink // optional: when set, events are also forwarded here
+	botSinkGen        uint64
+	turn              turnSubmissionState // stays reserved through the end of TurnDone fan-out
 	// takeoverMirror, when set, forwards every event to the serve that used to
 	// own this session so the remote tab keeps rendering after a local
 	// takeover. Atomic so Emit reads it without the sink lock.
@@ -1741,7 +1743,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			persistMetricsEvent(app, m, tabID, e)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt, app.sessionGenerationForTab(tabID)))
+	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt, s.sessionGenerationSnapshot()))
 	if m := s.takeoverMirror.Load(); m != nil {
 		m.forwardEvent(e)
 	}
@@ -2324,18 +2326,6 @@ func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab
 		SessionCurrency:   "",
 		SessionCostUsd:    0, // deprecated compatibility alias
 	}
-}
-
-func (a *App) sessionGenerationForTab(tabID string) uint64 {
-	if a == nil || tabID == "" {
-		return 0
-	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if tab := a.tabByEventSinkIDLocked(tabID); tab != nil {
-		return tab.SessionGeneration
-	}
-	return 0
 }
 
 // wireEventTab extends the shared event wire with tab routing info. The frontend reducer
