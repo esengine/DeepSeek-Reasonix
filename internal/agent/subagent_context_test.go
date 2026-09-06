@@ -28,9 +28,33 @@ func TestComposeChildTaskPromptUsesFactsPack(t *testing.T) {
 
 func TestApplyReviewBudgetDefaults(t *testing.T) {
 	spec := ProfileExecSpec{Worker: WorkerSpec{Profile: "review"}}
-	applyReviewBudget(&spec)
+	applyReviewBudget(&spec, 0)
 	if spec.Sched.MaxSteps != defaultReviewMaxSteps || spec.Sched.MaxOutputTokens != defaultReviewOutputTokens {
 		t.Fatalf("budget = %+v", spec.Sched)
+	}
+}
+
+func TestApplyReviewBudgetConfiguredOverride(t *testing.T) {
+	spec := ProfileExecSpec{Worker: WorkerSpec{Profile: "review"}}
+	applyReviewBudget(&spec, 24)
+	if spec.Sched.MaxSteps != 24 {
+		t.Fatalf("configured review max steps = %d, want 24", spec.Sched.MaxSteps)
+	}
+	if spec.Sched.MaxOutputTokens != defaultReviewOutputTokens {
+		t.Fatalf("output budget = %+v", spec.Sched)
+	}
+	// An explicit spec max_steps still wins over the configured override.
+	explicit := ProfileExecSpec{Worker: WorkerSpec{Profile: "review"}}
+	explicit.Sched.MaxSteps = 12
+	applyReviewBudget(&explicit, 24)
+	if explicit.Sched.MaxSteps != 12 {
+		t.Fatalf("explicit max steps = %d, want 12", explicit.Sched.MaxSteps)
+	}
+	// Non-review profiles keep their existing budgets regardless.
+	other := ProfileExecSpec{Worker: WorkerSpec{Profile: "explore"}}
+	applyReviewBudget(&other, 24)
+	if other.Sched.MaxSteps != 0 || other.Sched.MaxOutputTokens != 0 {
+		t.Fatalf("non-review budget = %+v", other.Sched)
 	}
 }
 
@@ -83,7 +107,7 @@ func TestPrepareReviewSubagentContextAddsBoundedVerifiedFacts(t *testing.T) {
 		ToolName: "go_test", Success: true, Read: true, Paths: []string{"z.go", "a.go"},
 		OutputBytes: 42, OutputDigest: "0123456789abcdef", ExitCode: &exit, Verification: evidence.VerificationPassed,
 	})
-	prompt, steps, tokens, ok := PrepareReviewSubagentContext(evidence.WithLedger(context.Background(), ledger), "review", "review change")
+	prompt, steps, tokens, ok := PrepareReviewSubagentContext(evidence.WithLedger(context.Background(), ledger), "review", "review change", 0)
 	if !ok || steps != defaultReviewMaxSteps || tokens != defaultReviewOutputTokens {
 		t.Fatalf("review budget = ok:%v steps:%d tokens:%d", ok, steps, tokens)
 	}
@@ -92,7 +116,7 @@ func TestPrepareReviewSubagentContextAddsBoundedVerifiedFacts(t *testing.T) {
 			t.Fatalf("review prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	if _, _, _, ok := PrepareReviewSubagentContext(context.Background(), "explore", "look"); ok {
+	if _, _, _, ok := PrepareReviewSubagentContext(context.Background(), "explore", "look", 0); ok {
 		t.Fatal("non-review profile must retain its existing runner budget")
 	}
 }

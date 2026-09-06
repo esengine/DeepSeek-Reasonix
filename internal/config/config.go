@@ -1321,6 +1321,11 @@ type AgentConfig struct {
 	// declare non-overlapping write_paths. 0 means the default (3). Must not
 	// exceed MaxSubagentConcurrency after normalization.
 	MaxParallelWriters int `toml:"max_parallel_writers"`
+	// ReviewMaxSteps overrides the built-in step cap for review-family
+	// sub-agents (review / security-review / team-architect; built-in default
+	// is 8 rounds). 0 keeps the built-in default; an explicit task max_steps
+	// argument still wins over this value.
+	ReviewMaxSteps int `toml:"review_max_steps"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
