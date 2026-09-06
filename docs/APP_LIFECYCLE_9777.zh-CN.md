@@ -201,9 +201,10 @@ workspace scope 投影（`decisionSurfaceProjection.ts`、`controllerProfileOwne
 - 内存 runner 会重建生产资源、记录源码/构建指纹、统计完整往返，每32轮采样并保存
   heap 分类和弱引用身份 cohort。最终结构已在三个独立进程完成 full/windowed/safety
   各128轮和 mixed 512轮；证据完整、操作已释放、无 page error，保留路径分类未发现
-  持续的 post-baseline cohort。该分类器只是筛查门禁：它拦截持续 cohort、原生计数器
-  或订阅漂移、未释放操作；heap retainer 与对照构建归因仍是记录在案的离线职责，
-  自动化计数器永远无法自行完成。
+  持续的 post-baseline cohort。该分类器只是筛查门禁：它拦截持续 cohort、持续计数器
+  或订阅漂移（最终尾样偏离 baseline）、无效原生计数器、未释放操作；序列中途完全
+  回到预热 baseline 的偏移（Linux/Chromium 在阶段切换时可见）记录为观察项；heap
+  retainer 与对照构建归因仍是记录在案的离线职责，自动化计数器永远无法自行完成。
 - 原生 App soak、最终 Go/race/lint/CodeQL 和最终远端 head 检查仍待完成。CI 已调用
   App lifecycle/browser/memory 与完整 frontend suite；捕获的 Darwin/Chromium 筛查
   证据已 PASS，但不能替代 WebKit/WebView2 原生证据或离线 heap retainer 归因。

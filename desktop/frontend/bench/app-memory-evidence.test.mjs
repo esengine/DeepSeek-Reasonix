@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attributeRetention, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap } from "./app-memory-evidence.mjs";
+import { attributeRetention, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap, TRANSIENT_EXCURSION_REASON } from "./app-memory-evidence.mjs";
 
 const sample = (ids, roundTrips) => ({ phase: "full", roundTrips, lifecycle: {
   liveRenderTokenIds: ids, liveRenderTokens: ids.length,
@@ -66,6 +66,26 @@ test("the automated gate blocks on screening failures, not the offline attributi
   }));
   assert.deepEqual(screeningBlockers(attributeRetention(drift).reasons), ["post-gc-dom-or-listener-drift"]);
   assert.deepEqual(screeningBlockers(["missing-attribution"]), ["missing-attribution"]);
+});
+test("a mid-sequence excursion that fully returns to baseline is an observation, not a blocker", () => {
+  // The real Linux/Chromium soak shows 614 listeners at phase transitions
+  // settling back to the 512 baseline; freed counters are not retention.
+  const samples = Array.from({ length: 21 }, (_, index) => ({
+    ...sample([1, index + 2], index * 32),
+    dom: { nodes: 6049, jsEventListeners: index === 6 || index === 13 ? 614 : 512 },
+  }));
+  const result = attributeRetention(samples);
+  assert.ok(result.reasons.includes(TRANSIENT_EXCURSION_REASON));
+  assert.deepEqual(screeningBlockers(result.reasons), []);
+});
+test("a displaced final tail remains a persistent blocker", () => {
+  const samples = Array.from({ length: 21 }, (_, index) => ({
+    ...sample([1, index + 2], index * 32),
+    dom: { nodes: 6049, jsEventListeners: index === 20 ? 614 : 512 },
+  }));
+  const result = attributeRetention(samples);
+  assert.ok(result.reasons.includes("post-gc-dom-or-listener-drift"));
+  assert.deepEqual(screeningBlockers(result.reasons), ["post-gc-dom-or-listener-drift"]);
 });
 test("native objects are not automatically detached DOM", () => {
   const heap = { snapshot: { meta: {

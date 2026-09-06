@@ -297,9 +297,12 @@ source-only tests must be audited as their owning features migrate.
   128 full/windowed/safety rounds plus 512 mixed rounds in three independent
   processes; all evidence, operation-release and page-error checks passed, and
   the retention classifier found no persistent post-baseline cohort. The
-  classifier is a screening gate only: it blocks on persistent cohorts, native
-  counter or subscription drift, and unreleased operations, while heap-retainer
-  and control-build attribution remains a recorded offline duty that automated
+  classifier is a screening gate only: it blocks on persistent cohorts,
+  persistent counter or subscription drift (a displaced final tail), invalid
+  native counters, and unreleased operations. Mid-sequence excursions that
+  fully return to the warmed baseline - seen on Linux/Chromium at phase
+  transitions - are recorded as observations, while heap-retainer and
+  control-build attribution remains a recorded offline duty that automated
   counters can never discharge.
 - Native App soak, final Go/race/lint/CodeQL evidence and final-head checks are
   still pending. CI now invokes App lifecycle/browser/memory and the complete

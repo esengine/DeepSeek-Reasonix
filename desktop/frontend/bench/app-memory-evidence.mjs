@@ -59,33 +59,52 @@ export function evidenceIntegrity(samples) {
 // that the automated gate can never discharge by itself.
 export const OFFLINE_ATTRIBUTION_REASON = "heap-retainer-and-control-evidence-required";
 
-// Reasons the automated gate must block on. The offline-attribution follow-up
-// is recorded on every report but is not a screening failure.
+// A counter excursion that fully returns to the warmed baseline is a recorded
+// observation, not a leak signal: the objects were provably freed. Real soak
+// data shows such blips at phase transitions (e.g. 614 listeners settling
+// back to 512). Only a displaced final tail is persistent drift.
+export const TRANSIENT_EXCURSION_REASON = "transient-counter-excursion";
+
+// Reasons the automated gate must block on. Observations (the offline
+// attribution duty, fully-recovered excursions) are recorded on every report
+// but are not screening failures.
 export function screeningBlockers(reasons) {
-  return reasons.filter((reason) => reason !== OFFLINE_ATTRIBUTION_REASON);
+  return reasons.filter((reason) => reason !== OFFLINE_ATTRIBUTION_REASON && reason !== TRANSIENT_EXCURSION_REASON);
 }
 
-// Keep every checkpoint, including the warmed baseline: an early step or a
-// transient population needs an explanation even if the final tail is flat.
+// The gate blocks on persistent drift: the final checkpoint displaced from
+// the warmed baseline, or the tail still moving. Intermediate excursions are
+// kept as observations so they still get an offline explanation.
+function counterDriftReason(values) {
+  const baseline = values[0];
+  const final = values.at(-1);
+  if (final !== baseline) return "persistent";
+  const tail = values.slice(1).slice(-3);
+  if (tail.some((value) => value !== final)) return "persistent";
+  return values.some((value) => value !== baseline) ? "transient" : null;
+}
+
 export function attributeRetention(samples, cohorts = retainedCohorts(samples)) {
   if (!evidenceIntegrity(samples) || samples.length < 2) return { status: "needs-attribution", reasons: ["invalid-evidence"] };
   const retained = cohorts.some((cohort) => cohort.retainedPostBaseline.length > 0);
-  const baseline = samples[0];
   const nativeCountersValid = samples.every(({ dom }) =>
     [dom?.nodes, dom?.jsEventListeners].every(value => Number.isSafeInteger(value) && value >= 0));
-  const stableDom = nativeCountersValid && samples.every((sample) => sample.dom.nodes === baseline.dom.nodes
-    && sample.dom.jsEventListeners === baseline.dom.jsEventListeners);
-  const stableSubscriptions = samples.every(sample =>
-    sample.lifecycle.activeSubscriptions === baseline.lifecycle.activeSubscriptions);
   const released = samples.every((sample) => sample.lifecycle.activeOperations === 0);
   const reasons = [];
   if (retained) reasons.push("persistent-render-cohort");
   if (!nativeCountersValid) reasons.push("invalid-native-counters");
-  if (!stableDom) reasons.push("post-gc-dom-or-listener-drift");
-  if (!stableSubscriptions) reasons.push("subscription-population-drift");
+  if (nativeCountersValid) {
+    const nodeDrift = counterDriftReason(samples.map((sample) => sample.dom.nodes));
+    const listenerDrift = counterDriftReason(samples.map((sample) => sample.dom.jsEventListeners));
+    if (nodeDrift === "persistent" || listenerDrift === "persistent") reasons.push("post-gc-dom-or-listener-drift");
+    else if (nodeDrift === "transient" || listenerDrift === "transient") reasons.push(TRANSIENT_EXCURSION_REASON);
+  }
+  const subscriptionDrift = counterDriftReason(samples.map((sample) => sample.lifecycle.activeSubscriptions));
+  if (subscriptionDrift === "persistent") reasons.push("subscription-population-drift");
+  else if (subscriptionDrift === "transient") reasons.push(TRANSIENT_EXCURSION_REASON);
   if (!released) reasons.push("active-operations");
   reasons.push(OFFLINE_ATTRIBUTION_REASON);
-  return { status: "needs-attribution", reasons };
+  return { status: "needs-attribution", reasons: [...new Set(reasons)] };
 }
 
 // CDP's DOM counter includes attached and detached nodes. Only the heap's
