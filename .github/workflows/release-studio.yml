@@ -539,18 +539,23 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
+      # One directory per artifact, because both sets below are taken from the
+      # job that produced them. Merging them flattens that away, and the name
+      # alone cannot tell a package apart from an input to signing it.
       - uses: actions/download-artifact@v6
         with:
           path: staging
-          merge-multiple: true
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          find staging -type f -name 'ReasonixStudio-*' -exec mv {} dist/ \;
-          # The CLI archives and their digest list, taken from the job that
-          # produced them rather than by name — the signing flow leaves a
-          # reasonix-studio-host.exe in staging, and it matched reasonix-*.
+          # The packages, from the build jobs. The SignPath flow uploads the
+          # unsigned copies it hands over under their own artifacts, and those
+          # match ReasonixStudio-* as well — taking them by name would publish
+          # whichever the move happened to write last.
+          find staging/studio-* -type f -name 'ReasonixStudio-*' -exec mv {} dist/ \;
+          # The CLI archives and their digest list, from the job that produced
+          # them: a reasonix-studio-host.exe left in staging matched reasonix-*.
           find staging/cli-archives -type f -exec mv {} dist/ \;
           ls -la dist
           # Two Windows artifacts (installer, portable zip), two per macOS
