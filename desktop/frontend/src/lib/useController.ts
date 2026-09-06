@@ -2045,7 +2045,7 @@ export function reducer(s: State, a: Action): State {
         promptArrivedId: undefined,
         pendingUser: a.text,
         pendingSubmissionId: a.submissionId,
-        activeTurnId: undefined,
+        activeTurnId: s.turnActive ? s.activeTurnId : undefined,
         currentAssistant: undefined,
         assistantSegmentOrdinal: 0,
         live: undefined,
@@ -3190,9 +3190,9 @@ export function useController() {
     return tabs.find((tab) => tab.active) ?? tabs[0];
   }, []);
 
-  // snapshotAt is the promptEventClock() reading taken immediately before
-  // initiating the backend call that produced `tab`. The reducer uses it to
-  // ignore snapshots that predate a live approval/ask event (#6429).
+  // snapshotAt is the promptEventClock() reading taken after the backend call
+  // produced `tab`. The reducer uses it to ignore snapshots that predate a
+  // live approval/ask event (#6429).
   const dispatchRuntimeStatusForTab = useCallback((tabId: string, tab: RuntimeMetaSnapshot, snapshotAt?: number) => {
     const foregroundRunning = foregroundRunningFromRuntimeMeta(tab);
     const runtimeEpoch = tab.runtime?.epoch;
@@ -3213,7 +3213,7 @@ export function useController() {
       turnId: tab.turnId,
       turnStatus: tab.turnStatus,
       runtimeEpoch,
-      turnEventSeq: latestEventSeq,
+      turnEventSeq: tab.turnEventSeq,
       snapshotAt,
     });
     // backend_status reconciliation can clear a live prompt from frontend state.
@@ -3971,7 +3971,8 @@ export function useController() {
     return answerPromptForActiveTurn(app, tabId, id, answers, state?.ask?.turnId ?? state?.activeTurnId, state?.ask?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).then(
       () => dispatchTo(tabId, { type: "ask_submit_succeeded", id, epoch }),
       (error) => {
-        dispatchTo(tabId, { type: "local_notice", level: "warn", text: t("notice.askSubmitFailed", { error: errorMessage(error) }), preserveRuntime: true });
+        if (isStalePromptError(error)) dispatchTo(tabId, { type: "clearAsk" });
+        else dispatchTo(tabId, { type: "local_notice", level: "warn", text: t("notice.askSubmitFailed", { error: errorMessage(error) }), preserveRuntime: true });
         void reconcileRuntimeAfterRejectedMutation(tabId);
         throw error;
       },

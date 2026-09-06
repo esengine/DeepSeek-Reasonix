@@ -71,9 +71,13 @@ export async function findTabAfterSubmitFailure(
 ) {
   for (const delay of delays) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    const snapshotAt = clock();
     try {
       const tab = asArray(await binding.ListTabs()).find((candidate) => candidate.id === tabId);
+      // Sample after the authoritative read. A synchronous bridge may resolve
+      // within the same monotonic tick as the initiating lifecycle event; the
+      // tiny deterministic advance records that the read has completed without
+      // weakening the reducer's tie guard.
+      const snapshotAt = clock() + 0.001;
       return [tab, snapshotAt] as const;
     } catch {
       // The caller's stale-turn watchdog remains the long-tail backstop.
