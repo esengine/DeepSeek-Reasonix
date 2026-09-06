@@ -59,6 +59,14 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
       total: registration.occurrence,
     });
     options.onRecovered();
+    if (event.topicId && typeof app.ReconcileRecoveryVersions === "function") {
+      void app.ReconcileRecoveryVersions({
+        scope: event.scope || (event.workspaceRoot ? "project" : "global"),
+        workspaceRoot: event.workspaceRoot,
+        topicId: event.topicId,
+        path: event.recoveryPath,
+      });
+    }
   });
   const unsubscribeActiveVersion = onSessionActiveVersionChanged(() => {
     if (!stopped) options.onRecovered();
