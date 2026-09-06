@@ -27,6 +27,11 @@ func (s *Server) inboxAPI() control.SessionAPI {
 	return s.ctl()
 }
 
+// writeInboxError gives every condition the store refuses an identity a
+// frontend can branch on. Sharing one status left "the queue is paused" and
+// "that entry is gone" apart only in English, and three sentinels had no case
+// at all, so a known refusal answered as an internal fault. repolint reads this
+// switch against the store's exported family.
 func writeInboxError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, control.ErrSteerApplied):
@@ -34,14 +39,29 @@ func writeInboxError(w http.ResponseWriter, err error) {
 		// showing the line has to say that rather than a state name.
 		refuse(w, http.StatusConflict, "steer.already_applied", err.Error(), nil)
 	case errors.Is(err, sessioninbox.ErrItemTooLarge):
-		writeErr(w, http.StatusRequestEntityTooLarge, err) // 413
-	case errors.Is(err, sessioninbox.ErrCapacityItems), errors.Is(err, sessioninbox.ErrCapacityBytes),
-		errors.Is(err, sessioninbox.ErrInvalidState), errors.Is(err, sessioninbox.ErrPaused),
-		errors.Is(err, sessioninbox.ErrNotFound):
-		writeErr(w, http.StatusConflict, err) // 409
+		refuse(w, http.StatusRequestEntityTooLarge, "inbox.item_too_large", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrCapacityItems):
+		refuse(w, http.StatusConflict, "inbox.capacity_items", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrCapacityBytes):
+		refuse(w, http.StatusConflict, "inbox.capacity_bytes", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrInvalidState):
+		refuse(w, http.StatusConflict, "inbox.invalid_state", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrPaused):
+		refuse(w, http.StatusConflict, "inbox.paused", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrNotFound):
+		refuse(w, http.StatusConflict, "inbox.not_found", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrIdempotencyConflict):
+		refuse(w, http.StatusConflict, "inbox.idempotency_conflict", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrSchemaReadonly):
+		refuse(w, http.StatusConflict, "inbox.schema_readonly", err.Error(), nil)
+	case errors.Is(err, sessioninbox.ErrClosed):
+		refuse(w, http.StatusConflict, "inbox.closed", err.Error(), nil)
 	case errors.Is(err, sessioninbox.ErrEmpty):
-		writeErr(w, http.StatusBadRequest, err)
+		refuse(w, http.StatusBadRequest, "inbox.empty", err.Error(), nil)
 	default:
+		// Not a condition this package knows how to name. writeErr still
+		// renders an identity a deeper layer assigned, and falls back to prose
+		// for one carrying none — which is a diagnostic, not a user's answer.
 		writeErr(w, http.StatusInternalServerError, err)
 	}
 }

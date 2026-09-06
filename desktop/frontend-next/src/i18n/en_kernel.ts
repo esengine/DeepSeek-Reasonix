@@ -5,6 +5,17 @@
 export const EN_KERNEL: Record<string, string> = {
   "这个决定已经不是当前状态了——计划在你回答前已经变了": "That decision is no longer current - the plan changed before you answered",
   "这条已经送给模型了，收不回来了": "That line already reached the model - it cannot be taken back",
+  // 待送达：条目、队列、这份存档各自会拒
+  "这一条已经不在待送达里了": "That entry is no longer in the pending queue",
+  "这一条现在的状态不允许这个操作": "That entry's current state does not allow this",
+  "待送达已暂停，先继续派发再动它": "The pending queue is on hold - resume it first",
+  "待送达的条数满了，先让它发出去几条": "The pending queue is full - let a few go out first",
+  "待送达的总字数满了，先让它发出去几条": "The pending queue is out of room - let a few go out first",
+  "这一条太长了，单条有自己的上限": "That entry is too long - a single one has its own limit",
+  "这一条没有正文": "That entry has no body",
+  "这个会话的待送达已经关了": "This session's pending queue is closed",
+  "这份待送达是更新版本写的，当前版本只能读": "This queue was written by a newer version and is read-only here",
+  "这个提交标识用过了，而且当时的内容不一样": "That submission key was already used, with different content",
   // 配置文件本身坏了，以及每一个写设置的面板被它挡住时
   "配置文件读不了，所以这次没保存": "The config file does not parse, so nothing was saved",
   "这台服务器没有开放配置编辑": "This server does not allow editing its config",

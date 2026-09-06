@@ -142,6 +142,18 @@ const SAID: Record<string, string> = {
   // ── 来不及了 ──────────────────────────────────────
   "steer.already_applied": "这条已经送给模型了，收不回来了",
 
+  // ── 待送达：条目、队列、这份存档各自会拒 ─────────────────────────
+  "inbox.not_found": "这一条已经不在待送达里了",
+  "inbox.invalid_state": "这一条现在的状态不允许这个操作",
+  "inbox.paused": "待送达已暂停，先继续派发再动它",
+  "inbox.capacity_items": "待送达的条数满了，先让它发出去几条",
+  "inbox.capacity_bytes": "待送达的总字数满了，先让它发出去几条",
+  "inbox.item_too_large": "这一条太长了，单条有自己的上限",
+  "inbox.empty": "这一条没有正文",
+  "inbox.closed": "这个会话的待送达已经关了",
+  "inbox.schema_readonly": "这份待送达是更新版本写的，当前版本只能读",
+  "inbox.idempotency_conflict": "这个提交标识用过了，而且当时的内容不一样",
+
   // ── 配置文件本身坏了，以及每一个写设置的面板被它挡住时 ─────────
   "config.unparsed": "配置文件读不了，所以这次没保存",
   "changes.path_outside_tree": "{path} 不在这个工作树里，看不了它的改动",

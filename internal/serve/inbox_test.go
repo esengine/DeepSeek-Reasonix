@@ -13,7 +13,9 @@ import (
 
 // Deleting a queued line has two answers a frontend has to tell apart: it is
 // gone, or the turn read it a moment before you asked. Only one of them is
-// worth a word to the person waiting, and neither is a state name.
+// worth a word to the person waiting, and neither is a state name. This pinned
+// the second as coded and the first as not, which is the half that was wrong:
+// telling them apart is what the pair is for.
 func TestQueueRemovalRefusalsCarryTheirOwnCodes(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
@@ -22,7 +24,7 @@ func TestQueueRemovalRefusalsCarryTheirOwnCodes(t *testing.T) {
 	}{
 		{control.ErrSteerApplied, http.StatusConflict, "steer.already_applied"},
 		{fmt.Errorf("wrapped: %w", control.ErrSteerApplied), http.StatusConflict, "steer.already_applied"},
-		{sessioninbox.ErrNotFound, http.StatusConflict, ""},
+		{sessioninbox.ErrNotFound, http.StatusConflict, "inbox.not_found"},
 	} {
 		rec := httptest.NewRecorder()
 		writeInboxError(rec, tc.err)
