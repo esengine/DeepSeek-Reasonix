@@ -206,7 +206,8 @@ console.log("\nbundle budgets");
 // explicit budget rather than failing on a rounded 467.0 KiB display value.
 // The latest main-v2 session-runtime fence adds a small cross-platform zlib
 // rounding step; retain the next decimal ceiling for Windows and macOS.
-const initialJSBudgetKiB = 467.7;
+// The exact prompt protocol adds a measured 0.3 KiB gzip on this base.
+const initialJSBudgetKiB = 468.0;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -388,7 +389,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // With the current-base rich-link menus: 2485.715 KiB raw.
 // The shared harness decision surface adds a bounded startup stylesheet
 // payload. The session-runtime fence and current-base merge measure 2493.1 KiB
-// locally; retain the smallest bounded cross-platform ceiling.
-const rawInitialBudgetKiB = 2_494.3;
+// locally; exact prompt identity, stale-card recovery, and the browser mock
+// resolver add a measured 1.5 KiB raw; retain the smallest bounded ceiling.
+const rawInitialBudgetKiB = 2_495.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

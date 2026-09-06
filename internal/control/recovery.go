@@ -17,6 +17,12 @@ import (
 // action is continue|continue_task|revise. For revise, feedback is returned in the
 // blocked tool result so the same agent sees it exactly once before retrying.
 func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.resolveRecoveryLocked(id, action, feedback)
+}
+
+func (c *Controller) resolveRecoveryLocked(id string, action agent.RecoveryAction, feedback string) error {
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
@@ -64,6 +70,7 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	}); err != nil {
 		return err
 	}
+	c.promptOwner.Remove(id)
 
 	// Also resolve any matching approvalManager entry so legacy Approve paths
 	// and ReplayPending do not keep a stale prompt.
@@ -157,6 +164,7 @@ func (c *Controller) loadRecoveryState(path string) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
@@ -193,6 +201,7 @@ func (c *Controller) carryRecoveryState(path string) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
@@ -214,6 +223,7 @@ func (c *Controller) CarryRecoveryFrom(prev *Controller) {
 		return
 	}
 	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	c.promptOwner.RemoveKind(PromptRecovery)
 	prev.mu.Lock()
 	prevGate := prev.recoveryGate
 	prev.mu.Unlock()
@@ -315,6 +325,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		recovery.ApprovalKindRecovery,
 		ev.Recovery,
 	)
+	c.registerOwnedPrompt(id, PromptRecovery)
 	ev.ID = id
 	c.mu.Lock()
 	gate := c.recoveryGate
@@ -330,12 +341,12 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		select {
 		case <-reply:
 		case <-ctx.Done():
-			c.approval.cancel(id)
+			c.cancelOwnedPrompt(id)
 		}
 	}()
 
 	if err := event.EmitChecked(c.sink, c.approvalRequestEvent(ev)); err != nil {
-		c.approval.cancel(id)
+		c.cancelOwnedPrompt(id)
 		if gate != nil {
 			gate.UnbindApprovalID(taskID, id)
 		}

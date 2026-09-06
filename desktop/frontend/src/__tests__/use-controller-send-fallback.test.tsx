@@ -146,6 +146,10 @@ window.go = {
         exactAnswerCalls.push({ tabId, turnId, promptId, answers });
         if (rejectAnswer) throw new Error("prompt write failed");
       },
+      ResolvePromptForTab: async (tabId: string, promptId: string, turnId: string, _runtimeEpoch: string, _kind: string, answer: unknown) => {
+        exactAnswerCalls.push({ tabId, turnId, promptId, answers: answer });
+        if (rejectAnswer) throw new Error("prompt write failed");
+      },
     } as Partial<AppBindings> as AppBindings,
   },
 };

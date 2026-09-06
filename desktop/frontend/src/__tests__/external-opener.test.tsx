@@ -69,6 +69,7 @@ const bridge: ExternalOpenerBridge = {
 console.log("\nexternal opener");
 
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 const sharedControlRule = stylesSource.match(/(?:^|\n)\.external-opener\s*\{([^}]*)\}/)?.[1] ?? "";
 const sharedSegmentRule = stylesSource.match(
   /\.external-opener__primary,\s*\.external-opener__menu-trigger\s*\{([^}]*)\}/,

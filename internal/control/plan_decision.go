@@ -16,6 +16,12 @@ func (c *Controller) ResolvePlanDecision(id string, action PlanDecisionAction) e
 // ResolvePlanDecisionWithFeedback durably stages revision guidance before the
 // approval is removed. A persistence failure leaves the card pending for retry.
 func (c *Controller) ResolvePlanDecisionWithFeedback(id string, action PlanDecisionAction, feedback string) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.resolvePlanDecisionWithFeedbackLocked(id, action, feedback)
+}
+
+func (c *Controller) resolvePlanDecisionWithFeedbackLocked(id string, action PlanDecisionAction, feedback string) error {
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
@@ -56,6 +62,7 @@ func (c *Controller) ResolvePlanDecisionWithFeedback(id string, action PlanDecis
 		rollback()
 		return nil
 	}
+	c.promptOwner.Remove(id)
 	pending.kind = "plan"
 	c.recordDecisionReceipt(pending, string(action))
 	pending.reply <- approvalReply{allow: action == PlanDecisionStartExecution}

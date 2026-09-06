@@ -186,6 +186,7 @@ func (c *Controller) requestWriteAccessDecision(ctx context.Context, toolName, s
 
 	c.approval.promptEmitMu.Lock()
 	id, reply := c.approval.registerWriteAccess(toolName, subject, reason, args, payload)
+	c.registerOwnedPrompt(id, PromptApproval)
 	approval := event.Approval{
 		ID:          id,
 		Tool:        toolName,
@@ -206,13 +207,19 @@ func (c *Controller) requestWriteAccessDecision(ctx context.Context, toolName, s
 	case r := <-reply:
 		return r, nil
 	case <-waitCtx.Done():
-		c.approval.cancel(id)
+		c.cancelOwnedPrompt(id)
 		return approvalReply{}, waitCtx.Err()
 	}
 }
 
 // ResolveApproval answers a pending approval with an explicit scope.
 func (c *Controller) ResolveApproval(id string, allow bool, scope sandbox.ApprovalScope) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.resolveApprovalLocked(id, allow, scope)
+}
+
+func (c *Controller) resolveApprovalLocked(id string, allow bool, scope sandbox.ApprovalScope) error {
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
@@ -228,7 +235,7 @@ func (c *Controller) ResolveApproval(id string, allow bool, scope sandbox.Approv
 		if allow {
 			action = agent.RecoveryActionContinue
 		}
-		return c.ResolveRecovery(id, action, "")
+		return c.resolveRecoveryLocked(id, action, "")
 	}
 	pending := c.approval.peek(id)
 	if pending.reply == nil {
@@ -246,6 +253,7 @@ func (c *Controller) ResolveApproval(id string, allow bool, scope sandbox.Approv
 		if !ok {
 			return fmt.Errorf("approval %q is no longer pending", id)
 		}
+		c.promptOwner.Remove(id)
 		return c.resolveWriteAccess(pending, allow, scope)
 	}
 	session := allow && (scope == sandbox.ApprovalScopeSession || scope == sandbox.ApprovalScopeProject)
