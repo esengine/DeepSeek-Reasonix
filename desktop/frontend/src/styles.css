@@ -25117,6 +25117,48 @@ body > .mermaid-diagram--fullscreen {
   user-select: none;
 }
 
+/* Color filter: swatch + label menu options and the active filter button. */
+.project-tree__color-filter {
+  position: relative;
+}
+.project-tree__color-opt {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.project-tree__color-opt:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+.project-tree__color-opt--on {
+  color: var(--accent);
+}
+.project-tree__color-swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+.project-tree__action-btn--active {
+  color: var(--accent);
+}
+.project-tree__action-btn--active svg {
+  color: var(--accent);
+}
+
 /* Classic hover preview card: rendered through a body portal so the sidebar's
 /* Classic hover preview card: rendered through a body portal so the sidebar's
    overflow clipping cannot cut it off; pointer-events stay off so it never

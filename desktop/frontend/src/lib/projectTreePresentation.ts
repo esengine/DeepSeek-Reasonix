@@ -13,6 +13,17 @@ function topicSortValue(node: ProjectNode, sortMode: WorkbenchSortMode): number 
   return topicActivityTime(node);
 }
 
+// Color sort rank for project/folder nodes: uncolored projects sink last, and
+// matching colors cluster together in a stable order. `create`/`updated` modes
+// ignore color entirely so the existing activity ordering is preserved.
+const COLOR_SORT_ORDER = ["red", "orange", "amber", "green", "teal", "blue", "purple", "pink"];
+
+function projectColorRank(projectColor?: string): number {
+  if (!projectColor) return COLOR_SORT_ORDER.length;
+  const index = COLOR_SORT_ORDER.indexOf(projectColor);
+  return index < 0 ? COLOR_SORT_ORDER.length : index;
+}
+
 function projectSortValue(node: ProjectNode, sortMode: WorkbenchSortMode): number {
   return asArray(node.children).reduce((max, child) => {
     if (!isTopicNode(child)) return max;
@@ -49,7 +60,20 @@ export function arrangeWorkbenchTree(
     if (node.kind !== "project" && node.kind !== "global_folder") return node;
     return { ...node, children: sortWorkbenchChildren(asArray(node.children), sortMode) };
   });
-  if (organizeMode === "project") return arranged;
+  if (organizeMode === "project") {
+    if (sortMode !== "color") return arranged;
+    // Stable color grouping: uncolored sink last, same-color projects keep
+    // their current relative order (original index as the tie-breaker).
+    return arranged
+      .map((node, index) => ({ node, index }))
+      .sort((a, b) => {
+        const rankA = projectColorRank(a.node.projectColor);
+        const rankB = projectColorRank(b.node.projectColor);
+        if (rankA !== rankB) return rankA - rankB;
+        return a.index - b.index;
+      })
+      .map(({ node }) => node);
+  }
   const mode = organizeMode === "recent" ? "updated" : sortMode;
   return [...arranged].sort((a, b) => {
     if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;

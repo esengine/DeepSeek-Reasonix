@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch, Sparkles, Cloud } from "lucide-react";
+import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch, Sparkles, Cloud, SwatchBook } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
@@ -14,7 +14,7 @@ export * from "../lib/projectTreePresentation";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { useT, type Translator } from "../lib/i18n";
-import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
+import { PROJECT_COLOR_OPTIONS, projectColorValue, type ProjectColorKey, type ProjectColorOption } from "../lib/projectColors";
 import { projectTreeSessionArchiveTargetKey, projectTreeTopicArchiveTargetKey, projectTreeWithoutTopics, reloadProjectTreeTopics, useProjectTreeArchiveController, type ProjectTreeRefresh, type ProjectTreeRefreshOptions } from "../lib/projectTreeArchive";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -245,6 +245,8 @@ export function ProjectTree({
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [colorFilter, setColorFilter] = useState<ProjectColorKey[]>([]);
+  const [colorFilterMenuOpen, setColorFilterMenuOpen] = useState(false);
   const [editingTopic, setEditingTopic] = useState<string | null>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [menuNodeKey, setMenuNodeKey] = useState<string | null>(null);
@@ -268,6 +270,8 @@ export function ProjectTree({
   const [readBaselineAt] = useState(loadReadActivityBaselineAt);
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const colorFilterRef = useRef<HTMLDivElement>(null);
+  const colorFilterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const topicIndexRef = useRef(0);
   const visibleTopicsCollectorRef = useRef<TopicShortcutEntry[]>([]);
@@ -912,6 +916,11 @@ export function ProjectTree({
     const filterNode = (node: ProjectNode): ProjectNode | null => {
       // For folder nodes: always show when time filter is active (so the tree structure remains navigable).
       const isFolder = node.kind === "project" || node.kind === "global_folder";
+      // Color filter applies to colorable project nodes; only the project itself
+      // carries a color (its descendants are topics), so filter on projectColor.
+      if (colorFilter.length > 0 && node.kind === "project" && !colorFilter.includes((node.projectColor || "") as ProjectColorKey)) {
+        return null;
+      }
       const children = asArray(node.children)
         .map(filterNode)
         .filter((child): child is ProjectNode => child !== null);
@@ -934,7 +943,7 @@ export function ProjectTree({
     if (compactTopics) return arrangeWorkbenchTree(filtered, workbenchOrganizeMode, workbenchSortMode);
     if (creationTopics) return arrangeWorkbenchTree(filtered, "project", "updated");
     return arrangeClassicProjectTree(filtered, workbenchSortMode);
-  }, [compactTopics, creationTopics, query, timeFilter, treeWithRemoteSessions, workbenchOrganizeMode, workbenchSortMode]);
+  }, [compactTopics, creationTopics, query, colorFilter, timeFilter, treeWithRemoteSessions, workbenchOrganizeMode, workbenchSortMode]);
 
   const pinnedTreeSections = useMemo<PinnedTreeSections>(() => {
     if (creationTopics) return { pinned: [], projects: visibleTree };
@@ -1870,6 +1879,14 @@ export function ProjectTree({
         selectWorkbenchSortMode("updated");
       },
     },
+    {
+      key: "sort-color",
+      icon: <SwatchBook size={13} />,
+      label: menuLabelWithCheck(t("projectTree.sortByColor"), workbenchSortMode === "color"),
+      onSelect: () => {
+        selectWorkbenchSortMode("color");
+      },
+    },
   ];
 
   const addItemCallbacks = {
@@ -2008,8 +2025,79 @@ export function ProjectTree({
                   >
                     {t("projectTree.sortByCreatedAt")}
                   </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${workbenchSortMode === "color" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => selectWorkbenchSortMode("color")}
+                    role="menuitem"
+                  >
+                    {t("projectTree.sortByColor")}
+                  </button>
                 </>
               )}
+            </div>
+          )}
+        </div>
+      </Tooltip>
+    );
+  };
+
+  const colorFilterBadge = colorFilter.length === 1 ? colorFilter[0] : colorFilter.length > 1 ? String(colorFilter.length) : "";
+  const colorFilterActive = colorFilter.length > 0;
+  const renderColorFilterControl = (mode: "classic" | "workbench") => {
+    const buttonClassName = colorFilterActive
+      ? "project-tree__action-btn project-tree__action-btn--active"
+      : "project-tree__action-btn";
+    return (
+      <Tooltip label={t("projectTree.filterByColor")} className="project-tree__action-slot project-tree__action-slot--color-filter">
+        <div ref={colorFilterRef} className="project-tree__color-filter">
+          <button
+            ref={colorFilterTriggerRef}
+            type="button"
+            className={buttonClassName}
+            aria-label={t("projectTree.filterByColor")}
+            aria-haspopup="menu"
+            aria-expanded={colorFilterMenuOpen}
+            onClick={() => {
+              setWorkbenchHeaderMenu(null);
+              setMenuPoint(null);
+              setFilterMenuOpen(false);
+              setColorFilterMenuOpen(!colorFilterMenuOpen);
+            }}
+          >
+            <SwatchBook size={mode === "workbench" ? 15 : 14} aria-hidden="true" />
+            {colorFilterBadge && <span className="project-tree__time-filter-label">{colorFilterBadge}</span>}
+          </button>
+          {colorFilterMenuOpen && (
+            <div className="project-tree__time-filter-menu" role="menu" aria-label={t("projectTree.filterByColor")} onKeyDown={moveMenuFocus}>
+              <button
+                type="button"
+                className={`project-tree__time-filter-opt${!colorFilterActive ? " project-tree__time-filter-opt--on" : ""}`}
+                onClick={() => { setColorFilter([]); setColorFilterMenuOpen(false); }}
+                role="menuitem"
+              >
+                {t("projectTree.filterByColorAll")}
+              </button>
+              {PROJECT_COLOR_OPTIONS
+                .filter((option): option is ProjectColorOption & { key: Exclude<ProjectColorKey, ""> } => Boolean(option.key))
+                .map((option) => {
+                  const on = colorFilter.includes(option.key);
+                  return (
+                    <button
+                      type="button"
+                      key={option.key}
+                      className={`project-tree__color-opt${on ? " project-tree__color-opt--on" : ""}`}
+                      onClick={() => {
+                        setColorFilter(on ? [] : [option.key]);
+                        setColorFilterMenuOpen(false);
+                      }}
+                      role="menuitem"
+                    >
+                      <span className="project-tree__color-swatch" style={{ background: option.value }} aria-hidden="true" />
+                      {t(`projectTree.color.${option.key}`)}
+                    </button>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -2027,6 +2115,7 @@ export function ProjectTree({
         {mode === "workbench" ? (
           <>
             {renderTimeFilterControl("workbench")}
+            {renderColorFilterControl("workbench")}
             <Tooltip label={workbenchCollapseToggleLabel} className="project-tree__header-action-slot">
               <button
                 type="button"
@@ -2091,6 +2180,7 @@ export function ProjectTree({
         ) : (
           <>
             {renderTimeFilterControl("classic")}
+            {renderColorFilterControl("classic")}
             <Tooltip label={collapseToggleLabel} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
               <button
                 type="button"
