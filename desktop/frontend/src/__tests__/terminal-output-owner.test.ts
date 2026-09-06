@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { executeTerminalOutputInsertion } from "../app-runtime/sessionActionOwner";
+import { executeTerminalOutputInsertion } from "../app-runtime/sessionRuntimeOwner";
 
 const target = { tabId: "A", sessionKey: "A:1" };
 let owned = true;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { executeClearSession } from "../app-runtime/sessionActionOwner";
+import { executeClearSession } from "../app-runtime/sessionRuntimeOwner";
 
 const target = { tabId: "A", sessionKey: "A:1" };
 let owned = true;
