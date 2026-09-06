@@ -575,8 +575,8 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                 now={looseSkills.length ? t("{on}/{all} 开着", { on: looseOn, all: looseSkills.length }) : undefined}
                 hint={t(
                   implicit
-                    ? "工作目录与「我的」中的技能。带 / 的可以由你直接调用，其余的由模型根据任务判断是否使用。已关闭的技能两种方式都无法使用。改动将在下次新建会话时进入模型索引。"
-                    : "模型自动发现已关闭：现在只有你点名的技能会跑。改动在下一次新建会话时生效。",
+                    ? "工作目录与「我的」中的技能。带 / 的可以由你直接调用，其余的由模型根据任务判断是否使用。关掉一个立刻生效：从你的下一条消息起模型不再拿到它，直接点名也调不动，不用新建会话。"
+                    : "模型自动发现已关闭：现在只有你点名的技能会跑。开关立刻生效，从你的下一条消息起，不用新建会话。",
                 )}
               >
                 {looseSkills.map((sk) => (

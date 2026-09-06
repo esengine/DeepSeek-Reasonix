@@ -129,11 +129,11 @@ export interface AgentPort {
   // way slash() is.
   complete(line: string, cursor: number): Promise<Completion>;
   skills(root?: string): Promise<SkillCatalog>;
-  // Persisted, but the running session keeps the prompt index it was built
-  // with: the switch reaches the model on the next rebuild, not this turn.
-  // Flipping a skill this project inherits writes a project row by default: the
-  // user answered for this folder, and two projects may hold different skills
-  // of one name.
+  // Persisted, and live in the session that flips it: the next eligible turn
+  // owes the model a catalogue without the skill, and a slash invocation stops
+  // resolving at once. Flipping a skill this project inherits writes a project
+  // row by default: the user answered for this folder, and two projects may
+  // hold different skills of one name.
   setSkillEnabled(name: string, enabled: boolean, scope?: ScopeLayer, root?: string): Promise<void>;
   // Drops this project's exception so the skill inherits again.
   clearSkillOverride(name: string, root?: string): Promise<void>;

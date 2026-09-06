@@ -513,10 +513,10 @@ export const EN: Record<string, string> = {
   "一直生效": "Always on",
   "相关时才被想起": "Recalled when relevant",
   "只有这一轮看起来相关时才会被翻出来": "Only surfaced when this turn looks like it needs them",
-  "工作目录与「我的」中的技能。带 / 的可以由你直接调用，其余的由模型根据任务判断是否使用。已关闭的技能两种方式都无法使用。改动将在下次新建会话时进入模型索引。":
-    "Skills from the working directory and from My skills. Those with a / you can invoke yourself; the rest the model decides on per task. A disabled skill is unavailable both ways. Changes enter the model's index the next time you start a session.",
-  "模型自动发现已关闭：现在只有你点名的技能会跑。改动在下一次新建会话时生效。":
-    "Model discovery is off: only the skills you name by hand will run. Changes take effect at the next new session.",
+  "工作目录与「我的」中的技能。带 / 的可以由你直接调用，其余的由模型根据任务判断是否使用。关掉一个立刻生效：从你的下一条消息起模型不再拿到它，直接点名也调不动，不用新建会话。":
+    "Skills from the working directory and from My skills. Those with a / you can invoke yourself; the rest the model decides on per task. Switching one off takes effect at once: from your next message the model no longer has it, and naming it yourself stops working too — no new session needed.",
+  "模型自动发现已关闭：现在只有你点名的技能会跑。开关立刻生效，从你的下一条消息起，不用新建会话。":
+    "Model discovery is off: only the skills you name by hand will run. The switch takes effect at once, from your next message — no new session needed.",
   "每一轮都在提示词里，等同于你给它的长期指令":
     "In the prompt every turn — the same standing as an instruction you gave it yourself",
   "，用上了 {n} 条": " · {n} of them used",

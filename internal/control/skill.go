@@ -14,8 +14,8 @@ import (
 // (alongside mcpManager).
 //
 // No lock: every field but slashSeq and catalog is set once at construction and
-// read thereafter — SetSkillEnabled persists a preference a rebuild picks up —
-// and those two carry their own synchronisation.
+// read thereafter — SetSkillEnabled writes the activation store, which the live
+// store consults per call — and those two carry their own synchronisation.
 type skillSet struct {
 	enabled              []skill.Skill // discovered + enabled skills (the live store supersedes when set)
 	all                  []skill.Skill // every discoverable skill, including config-disabled ones
