@@ -6,10 +6,7 @@ import { formatMoneyLocalized } from "../lib/money";
 import { appendRateBand, rateBandLabel } from "../lib/costRateBand";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
-import {
-  contextWindowStatus,
-  formatCacheHitRate,
-} from "./ContextPanel";
+import { contextWindowStatus, formatCacheHitRate } from "../lib/contextPanelUtils";
 
 interface ContextWindowRingProps {
   enabled?: boolean;
