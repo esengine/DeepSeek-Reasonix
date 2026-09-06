@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import {
   DecisionConfirmBar,
@@ -9,34 +10,61 @@ import {
   PromptShelf,
 } from "./PromptShelf";
 
+const askDrafts = new Map<string, AskDraft>();
+const askDraftKey = (scope: string, id: string) => `${scope}:${id}`;
+type AnswerMode = "option" | "custom";
+type AskDraft = {
+  sel: Record<string, string[]>;
+  custom: Record<string, string>;
+  answerMode: Record<string, AnswerMode>;
+  active: number;
+  selectedIndex: number;
+};
+
+function readAskDraft(scope: string, id: string): AskDraft | undefined {
+  const draft = askDrafts.get(askDraftKey(scope, id));
+  return draft ? { ...draft, sel: { ...draft.sel }, custom: { ...draft.custom }, answerMode: { ...draft.answerMode } } : undefined;
+}
+
+function clearAskDraft(scope: string, id: string): void {
+  askDrafts.delete(askDraftKey(scope, id));
+}
+
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
-// walks multi-question asks one at a time. Selecting (click / digit) never
-// advances; Enter / Confirm submits or moves to the next question.
+// walks multi-question asks one at a time. Single-select choices advance to
+// the next question immediately; multi-select and custom answers wait for an
+// explicit confirm, and the final question still requires submission.
 export function AskCard({
   ask,
   onAnswer,
-  onDismiss,
+  draftScope = "default",
   onStop,
 }: {
   ask: WireAsk;
   onAnswer: (id: string, answers: QuestionAnswer[]) => void | Promise<void>;
-  onDismiss: () => void | Promise<void>;
+  onDismiss?: () => void | Promise<void>;
+  draftScope?: string;
   onStop: () => void;
 }) {
   const t = useT();
   // Per-question state: selected option labels, and an optional typed answer.
-  const [sel, setSel] = useState<Record<string, string[]>>({});
-  const [custom, setCustom] = useState<Record<string, string>>({});
+  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(draftScope, ask.id)?.sel ?? {});
+  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(draftScope, ask.id)?.custom ?? {});
+  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(draftScope, ask.id)?.answerMode ?? {});
   const [customOpen, setCustomOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(() => readAskDraft(draftScope, ask.id)?.active ?? 0);
   // Extra decision row after option labels: custom answer. Skip is a
   // secondary footer action rather than an answer choice.
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(draftScope, ask.id)?.selectedIndex ?? 0);
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // A newly delivered Ask always starts expanded, matching harness. Collapse
+  // is presentation state and must not leak from an earlier request.
+  const [collapsed, setCollapsed] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
+  const initializedActiveRef = useRef(false);
   const instanceId = useId();
 
   const questions = ask.questions;
@@ -59,17 +87,30 @@ export function AskCard({
 
   useEffect(() => {
     shelfRef.current?.focus();
-    setSel({});
-    setCustom({});
+    initializedActiveRef.current = false;
+    const draft = readAskDraft(draftScope, ask.id);
+    setSel(draft?.sel ?? {});
+    setCustom(draft?.custom ?? {});
+    setAnswerMode(draft?.answerMode ?? {});
     setCustomOpen(false);
-    setActive(0);
-    setSelectedIndex(0);
+    setActive(draft?.active ?? 0);
+    setSelectedIndex(draft?.selectedIndex ?? 0);
     setSubmitting(false);
-  }, [ask.id]);
+    setCollapsed(false);
+  }, [ask.id, draftScope]);
+
+  useEffect(() => {
+    try {
+      askDrafts.set(askDraftKey(draftScope, ask.id), { sel: { ...sel }, custom: { ...custom }, answerMode: { ...answerMode }, active, selectedIndex });
+    } catch {
+      // Draft storage is best effort; the live pending ask remains authoritative.
+    }
+  }, [active, answerMode, ask.id, custom, draftScope, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
-    setSelectedIndex(0);
+    if (initializedActiveRef.current) setSelectedIndex(0);
+    initializedActiveRef.current = true;
   }, [active]);
 
   useEffect(() => {
@@ -86,17 +127,19 @@ export function AskCard({
   ): QuestionAnswer[] =>
     questions.map((question) => ({
       questionId: question.id,
-      selected: nextCustom[question.id]?.trim() ? [nextCustom[question.id].trim()] : (nextSel[question.id] ?? []),
+      selected: answerMode[question.id] === "custom" && nextCustom[question.id]?.trim()
+        ? [nextCustom[question.id].trim()]
+        : (nextSel[question.id] ?? []),
     }));
 
   const answerLabel = (question: WireAskQuestion) => {
-    const typed = custom[question.id]?.trim();
-    if (typed) return typed;
+    if (answerMode[question.id] === "custom") return custom[question.id]?.trim() ?? "";
     return (sel[question.id] ?? []).join(", ");
   };
 
-  const answered = (question: WireAskQuestion) =>
-    (sel[question.id]?.length ?? 0) > 0 || (custom[question.id]?.trim() ?? "") !== "";
+  const answered = (question: WireAskQuestion) => answerMode[question.id] === "custom"
+    ? (custom[question.id]?.trim() ?? "") !== ""
+    : (sel[question.id]?.length ?? 0) > 0;
 
   const currentAnswered = q ? answered(q) : false;
 
@@ -111,7 +154,9 @@ export function AskCard({
   const finishOrAdvance = (nextSel = sel, nextCustom = custom) => {
     if (submitting) return;
     if (isLast) {
-      submitAction(() => onAnswer(ask.id, answersFrom(nextSel, nextCustom)));
+      submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
+        clearAskDraft(draftScope, ask.id);
+      }));
       return;
     }
     setActive((i) => Math.min(i + 1, questions.length - 1));
@@ -119,18 +164,18 @@ export function AskCard({
 
   const toggleOption = (question: WireAskQuestion, label: string) => {
     if (submitting) return;
-    const nextCustom = { ...custom, [question.id]: "" };
     const cur = sel[question.id] ?? [];
     const nextSel = question.multi
       ? { ...sel, [question.id]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
       : { ...sel, [question.id]: [label] };
 
-    setCustom(nextCustom);
+    setAnswerMode((m) => ({ ...m, [question.id]: "option" }));
     setSel(nextSel);
     setCustomOpen(false);
   };
 
   const setTyped = (question: WireAskQuestion, text: string) => {
+    setAnswerMode((m) => ({ ...m, [question.id]: "custom" }));
     setCustom((c) => ({ ...c, [question.id]: text }));
     if (text.trim()) setSel((s) => ({ ...s, [question.id]: [] }));
   };
@@ -138,6 +183,27 @@ export function AskCard({
   const goBack = () => {
     if (submitting) return;
     setActive((i) => Math.max(0, i - 1));
+  };
+
+  const stopAsk = () => {
+    clearAskDraft(draftScope, ask.id);
+    onStop();
+  };
+
+  const skipCurrentQuestion = () => {
+    if (submitting || !q) return;
+    const nextSel = { ...sel, [q.id]: [] };
+    const nextCustom = { ...custom, [q.id]: "" };
+    setSel(nextSel);
+    setCustom(nextCustom);
+    setCustomOpen(false);
+    if (!isLast) {
+      setActive((i) => i + 1);
+      return;
+    }
+    submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
+      clearAskDraft(draftScope, ask.id);
+    }));
   };
 
   const selectRow = (index: number) => {
@@ -149,13 +215,16 @@ export function AskCard({
       if (q.multi) {
         toggleOption(q, option.label);
       } else {
-        // Single-select: click/digit only selects the row and marks the option.
-        setCustom((c) => ({ ...c, [q.id]: "" }));
+        // Single-select follows harness behavior: choose and advance, while
+        // keeping the answer in the draft so Back can revise it.
+        setAnswerMode((m) => ({ ...m, [q.id]: "option" }));
         setSel((s) => ({ ...s, [q.id]: [option.label] }));
         setCustomOpen(false);
+        if (active < questions.length - 1) setActive((i) => i + 1);
       }
     } else if (index === customRowIndex) {
       // Opening custom clears option picks for this question.
+      setAnswerMode((m) => ({ ...m, [q.id]: "custom" }));
       setCustomOpen(true);
       setSel((s) => ({ ...s, [q.id]: [] }));
     }
@@ -205,7 +274,7 @@ export function AskCard({
 
       if (event.key === "Escape") {
         event.preventDefault();
-        onStop();
+        stopAsk();
         return;
       }
       if (event.key === "ArrowUp") {
@@ -257,12 +326,14 @@ export function AskCard({
     <PromptShelf
       decision
       className="prompt-shelf--ask"
+      cardCollapsible
+      collapsed={collapsed}
+      onToggleCollapse={() => setCollapsed((value) => !value)}
       barRef={shelfRef}
       titleId="ask-shelf-title"
-      title={t("ask.title")}
+      title={q.header ?? t("ask.title")}
       badges={
         <span className="ask-shelf__header-meta">
-          {q.header && <span className="ask-shelf__header-text">{q.header}</span>}
           {hasMultipleQuestions && (
             <span className="ask-shelf__header-text ask-shelf__header-text--progress">
               {t("ask.questionProgress", { progress })}
@@ -272,9 +343,18 @@ export function AskCard({
       }
       meta={q.prompt}
       headerActions={
-        <PromptHeaderAction onClick={onStop} ariaLabel={t("decision.stopTask")} disabled={submitting}>
-          {t("decision.stopTask")}
-        </PromptHeaderAction>
+        <>
+          <PromptHeaderAction
+            onClick={() => setCollapsed((value) => !value)}
+            ariaLabel={collapsed ? t("common.expand") : t("common.collapse")}
+            disabled={submitting}
+          >
+            {collapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+          </PromptHeaderAction>
+          <PromptHeaderAction onClick={stopAsk} ariaLabel={t("decision.stopTask")} disabled={submitting}>
+            <X size={16} aria-hidden="true" />
+          </PromptHeaderAction>
+        </>
       }
       actions={
         <>
@@ -300,20 +380,35 @@ export function AskCard({
               />
             );
           })}
-          <PromptAction
-            actionId={`${instanceId}-row-${customRowIndex}`}
-            keyLabel=""
-            label={t("ask.customAnswer")}
-            onClick={() => selectRow(customRowIndex)}
-            selected={selectedIndex === customRowIndex || customOpen}
-            disabled={submitting}
-          />
+          <div
+            className={`ask-shelf__custom-row${custom[q.id]?.trim() ? " ask-shelf__custom-row--active" : ""}`}
+            role="group"
+            onClick={() => {
+              setSelectedIndex(customRowIndex);
+              setAnswerMode((m) => ({ ...m, [q.id]: "custom" }));
+              setCustomOpen(true);
+              customInputRef.current?.focus();
+            }}
+          >
+            <span className="ask-shelf__custom-indicator" aria-hidden="true">✎</span>
+            <input
+              ref={customInputRef}
+              className="ask-shelf__custom"
+              aria-label={t("ask.customAnswer")}
+              placeholder={t("ask.customPlaceholder")}
+              value={answerMode[q.id] === "custom" ? custom[q.id] ?? "" : ""}
+              disabled={submitting}
+              onChange={(e) => setTyped(q, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canConfirm()) {
+                  e.preventDefault();
+                  confirmSelected();
+                }
+                e.stopPropagation();
+              }}
+            />
+          </div>
         </>
-      }
-      quickActions={
-        active > 0 ? (
-          <PromptAction keyLabel="" label={t("ask.back")} onClick={goBack} quiet disabled={submitting} role="button" />
-        ) : undefined
       }
       crumbs={
         answeredSummary.length > 0 && (
@@ -338,39 +433,29 @@ export function AskCard({
               disabled={submitting}
             />
           )}
-          {customOpen && (
-            <div className="ask-shelf__custom-row">
-              <input
-                ref={customInputRef}
-                className="ask-shelf__custom"
-                placeholder={t("ask.customPlaceholder")}
-                value={custom[q.id] ?? ""}
-                disabled={submitting}
-                onChange={(e) => setTyped(q, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canConfirm()) {
-                    e.preventDefault();
-                    confirmSelected();
-                  }
-                  e.stopPropagation();
-                }}
-              />
-            </div>
-          )}
         </>
       }
       footer={
-        <DecisionConfirmBar
-          hint={t("decision.selectHint")}
-          confirmLabel={confirmLabel}
-          onConfirm={confirmSelected}
-          secondaryLabel={t("ask.justChat")}
-          onSecondary={() => {
-            submitAction(onDismiss);
-          }}
-          disabled={submitting}
-          confirmDisabled={!canConfirm()}
-        />
+        <div className="ask-shelf__footer-layout">
+          <div className="ask-shelf__pager" aria-label={t("ask.questionProgress", { progress })}>
+            <button type="button" className="ask-shelf__pager-button" aria-label={t("ask.back")} disabled={active === 0 || submitting} onClick={goBack}>
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <span>{progress}</span>
+            <button type="button" className="ask-shelf__pager-button" aria-label={t("ask.next")} disabled={isLast || submitting} onClick={() => setActive((i) => Math.min(i + 1, questions.length - 1))}>
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <DecisionConfirmBar
+            hint={t("decision.selectHint")}
+            confirmLabel={confirmLabel}
+            onConfirm={confirmSelected}
+            secondaryLabel={t("ask.skipQuestion")}
+            onSecondary={skipCurrentQuestion}
+            disabled={submitting}
+            confirmDisabled={!canConfirm()}
+          />
+        </div>
       }
     />
   );
