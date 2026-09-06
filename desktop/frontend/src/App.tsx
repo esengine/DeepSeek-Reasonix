@@ -67,6 +67,7 @@ import {
 import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { useWorktreeMergeCommands } from "./app-runtime/useWorktreeMergeCommands";
 import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle";
+import { useNativeSettingsEvent } from "./app-runtime/useNativeSettingsEvent";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -397,14 +398,7 @@ export default function App() {
     });
   }, [sidebarImConnections]);
 
-  // Open settings when the native menu item (CmdOrCtrl+,) is activated.
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.runtime) return;
-    return window.runtime.EventsOn("app:open-settings", () => {
-      closeTransientOverlays();
-      setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
-    });
-  }, [closeTransientOverlays]);
+  useNativeSettingsEvent({ closeTransientOverlays, setSettingsTarget });
 
   const [invocationMetadataByTab, setInvocationMetadataByTab] = useState<Record<string, InvocationMetadataMap>>({});
   const [footerHeight, setFooterHeight] = useState(0);
