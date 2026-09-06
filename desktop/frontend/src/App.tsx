@@ -23,7 +23,7 @@ import { useDesktopNavigation } from "./app-runtime/useDesktopNavigation";
 import { useRuntimeStatus } from "./app-runtime/useRuntimeStatus";
 import { useTerminalPanelCommands } from "./app-runtime/useTerminalPanelCommands";
 import { type HistoryLoadTrigger } from "./lib/useController";
-import { app, openExternal } from "./lib/bridge";
+import { openExternal } from "./lib/bridge";
 import { useDesktopPreferences } from "./app-runtime/useDesktopPreferences";
 import { Transcript } from "./components/Transcript";
 const RemoteSessionSurface = lazy(() => import("./components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
@@ -115,6 +115,7 @@ import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { useSessionSubmission } from "./lib/useSessionSubmission";
 import { usePendingPlanRevisions, reportPendingRevisionFailure } from "./lib/usePendingPlanRevisions";
 import { useTopicSummary } from "./app-runtime/useTopicSummary";
+import { desktopBridge } from "./app-runtime/desktopBridgeAdapter";
 import { createSubmissionPorts, projectSubmissionResources } from "./app-runtime/desktopSubmissionAdapter";
 import { useCommittedCommand } from "./lib/useCommittedCommand";
 import { createSessionSurfaceFence, sessionIdentityKey } from "./app-runtime/sessionTarget";
@@ -162,7 +163,7 @@ function setRemoteComposerProfileForSessionAction(
   approvalMode: ToolApprovalMode,
   goal: string,
 ) {
-  return app.SetRemoteTabComposerProfile(tabId, mode, approvalMode, goal);
+  return desktopBridge.setRemoteTabComposerProfile(tabId, mode, approvalMode, goal);
 }
 function lazyContinueDelivery(options: import("./lib/deliveryContinue").DeliveryContinueOptions) {
   return loadDeliveryContinue().then(({ continueDelivery }) => continueDelivery(options));
@@ -498,7 +499,7 @@ export default function App() {
     workspaceRoot: activeTab.workspaceRoot,
     topicId: activeTab.topicId,
   } : null, [activeTab?.scope, activeTab?.workspaceRoot, activeTab?.topicId]);
-  const getTopicSummary = useCommittedCommand((request: { scope: "global" | "project"; workspaceRoot: string; topicId: string }) => app.GetTopicSummary(request));
+  const getTopicSummary = useCommittedCommand((request: { scope: "global" | "project"; workspaceRoot: string; topicId: string }) => desktopBridge.getTopicSummary(request));
   const commitTopicTurns = useCommittedCommand((turns: number | undefined) => setActiveTopicTurns(turns));
   useTopicSummary({ target: topicSummaryTarget, revision: projectRevision, getSummary: getTopicSummary, onTurns: commitTopicTurns });
   const visibleUserTurns = visibleRuntimeState.items.reduce((count, item) => (item.kind === "user" ? count + 1 : count), 0);
@@ -815,7 +816,7 @@ export default function App() {
     const target = { tabId, sessionKey: tabId === activeTabId ? activeSessionIdentity : `tab:${tabId}` };
     const outcome = await sessionOperations(target, `runtime-cancel:${jobId}`, {}, (_input, authority) =>
       executeCancelRuntimeJob(target, jobId, {
-        cancelForTab: async (sourceTabId, sourceJobId) => app.CancelJobForTab(sourceTabId, sourceJobId),
+        cancelForTab: async (sourceTabId, sourceJobId) => desktopBridge.cancelJobForTab(sourceTabId, sourceJobId),
         refresh: refreshBackgroundRuntimes,
       }, authority),
     );
@@ -882,7 +883,7 @@ export default function App() {
     if (!remoteSurfaceActive && activeTabId && todoBatch) {
       const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
       void sessionOperations(target, "todo-dismiss", {}, (_input, authority) => executeTodoDismissal(
-        target, todoBatch, (tabId, batchKey) => app.DismissTodoBatchForTab(tabId, batchKey), authority,
+        target, todoBatch, (tabId, batchKey) => desktopBridge.dismissTodoBatchForTab(tabId, batchKey), authority,
       )).catch(() => undefined);
     }
   });
@@ -934,7 +935,7 @@ export default function App() {
     const outcome = await sessionOperations(target, "clear-context", { remote: remoteSurfaceActive }, (input, authority) =>
       executeClearSession(target, input, {
         clearSession,
-        clearRemoteSession: (tabId) => app.ClearRemoteTabSession(tabId),
+        clearRemoteSession: (tabId) => desktopBridge.clearRemoteTabSession(tabId),
         retryRemoteHydration: () => remoteSession.retryHydration(),
       }, authority),
     );
@@ -1101,7 +1102,7 @@ export default function App() {
     const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
     const outcome = await sessionOperations(target, `terminal-output:${sessionId}`, {}, (_input, authority) =>
       executeTerminalOutputInsertion(target, sessionId, {
-        read: (tabId, terminalSessionId) => app.TerminalOutputForTab(tabId, terminalSessionId),
+        read: (tabId, terminalSessionId) => desktopBridge.terminalOutputForTab(tabId, terminalSessionId),
         apply: addWorkspaceTextToComposer,
       }, formatTerminalOutputForComposer, authority),
     );
@@ -1226,12 +1227,12 @@ export default function App() {
   const handleAcceptDelivery = useCommittedCommand(() => {
     const sourceTabId = activeTabId;
     if (!sourceTabId) return;
-    void app.AcceptDeliveryToTab(sourceTabId).catch((error) => {
+    void desktopBridge.acceptDeliveryToTab(sourceTabId).catch((error) => {
       console.warn("Failed to accept delivery", error);
     });
   });
   const handleDisconnectRemote = useCommittedCommand((hostId: string) => {
-    void app.DisconnectRemoteHost(hostId).catch((error) => {
+    void desktopBridge.disconnectRemoteHost(hostId).catch((error) => {
       console.warn("Failed to disconnect remote host", error);
     });
   });
@@ -1257,8 +1258,8 @@ export default function App() {
     visible: { tabId: activeTabId ?? "", sessionKey: activeSessionIdentity }, singleSurface: singleSurfaceLayout,
     ports: { isNavigationIntentCurrent, activateTopic, openTopicSession, openGlobalTab, openProjectTab,
       ensureBlankSurface, ensureBlankTab, createIsolatedWorktree, openChannelSession, resumeSession,
-      registeredNavigationIntent, switchRemoteTab, openRemoteProject: app.OpenRemoteProjectTab,
-      listTabs: app.ListTabs, applyTabs: setTabMetas, seedTab: seedActiveTabMeta, listSessions, topicAccepted },
+      registeredNavigationIntent, switchRemoteTab, openRemoteProject: desktopBridge.openRemoteProjectTab,
+      listTabs: desktopBridge.listTabs, applyTabs: setTabMetas, seedTab: seedActiveTabMeta, listSessions, topicAccepted },
     setTabRevealSignal, setTranscriptRevealSignal, setProjectRevision, setHistory: setHistView, t, showToast,
     noteIntent: noteNavigationIntent, beginSurface: beginNavigationSurface, settleSurface: settleNavigationSurface,
     showChat: enterConversation,
@@ -1320,8 +1321,8 @@ export default function App() {
         taskID,
         intentSeq: navigationIntentSeq,
         isIntentCurrent: isNavigationIntentCurrent,
-        openTaskSessionForTab: (sourceTabID, sourceTaskID) => app.OpenTaskSessionForTab(sourceTabID, sourceTaskID),
-        listSessionsForTab: async (sourceTabID) => asArray(await app.ListSessionsForTab(sourceTabID)),
+        openTaskSessionForTab: (sourceTabID, sourceTaskID) => desktopBridge.openTaskSessionForTab(sourceTabID, sourceTaskID),
+        listSessionsForTab: async (sourceTabID) => asArray(await desktopBridge.listSessionsForTab(sourceTabID)),
         sessionIDFromPath: taskSessionIDFromPath,
       });
     } catch (error) {
@@ -1531,9 +1532,9 @@ export default function App() {
           : ensureBlankTab("project", sourceRoot, navigationIntentSeq),
         isNavigationCurrent: () => isNavigationIntentCurrent(navigationIntentSeq),
         seedSource: seedActiveTabMeta,
-        listTabs: () => app.ListTabs(),
-        closeWorktree: (request) => app.CloseMergedWorktreeTab(request),
-        finalize: (request) => app.FinalizeWorktreeMerge(request),
+        listTabs: desktopBridge.listTabs,
+        closeWorktree: (request) => desktopBridge.closeMergedWorktreeTab(request),
+        finalize: (request) => desktopBridge.finalizeWorktreeMerge(request),
         onNavigationPreserved: () => showToast(t("worktree.navigationChangedPreserved"), "error", { durationMs: 9000 }),
         onCloseBlocked: () => showToast(t("worktree.cleanupViewBlocked"), "error", { durationMs: 8000 }),
       });
