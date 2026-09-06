@@ -11,7 +11,9 @@ import { chooseAppLayout } from "./app-page-actions.mjs";
 import { attributeRetention, buildIdentity, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(frontendDir, ".pw-browsers");
+process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
+  ? path.join(frontendDir, ".pw-browsers")
+  : process.env.PLAYWRIGHT_BROWSERS_PATH;
 
 function integerEnv(name, fallback) {
   const value = Number(process.env[name]);
