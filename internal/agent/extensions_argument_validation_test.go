@@ -54,7 +54,7 @@ func TestInvalidReplacementArgumentsRemainCorrectable(t *testing.T) {
 	reg.Add(rec)
 	gate := &stubGate{}
 	a := New(nil, reg, NewSession(""), Options{Extensions: d, Gate: gate}, event.Discard)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"original"}`})
 		if out.blocked || !strings.Contains(out.output, `sole "arguments" wrapper`) {
 			t.Fatalf("replacement error: %+v", out)

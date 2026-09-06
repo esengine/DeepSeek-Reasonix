@@ -234,7 +234,7 @@ func TestArgumentRecoveryStillChecksPermissions(t *testing.T) {
 	reg.Add(b)
 	gate := &stubGate{deny: map[string]bool{"bash": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate}, event.Discard)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{}`})
 	}
 	if len(gate.checked) != 0 {
@@ -253,7 +253,7 @@ func TestArgumentRecoveryConcurrentFailures(t *testing.T) {
 	audit := &capability.Audit{}
 	a := New(nil, reg, NewSession(""), Options{CapabilityAudit: audit}, event.Discard)
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -277,7 +277,7 @@ func TestArgumentRecoveryCompileFailure(t *testing.T) {
 			reg.Add(target)
 			reg.Add(recoveryBash(t))
 			a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				calls := []provider.ToolCall{{ID: fmt.Sprint(i), Name: "broken", Arguments: `{}`}}
 				if mixed {
 					calls = append(calls, provider.ToolCall{ID: fmt.Sprint(i, "bad"), Name: "bash", Arguments: `{}`})
@@ -343,7 +343,7 @@ func TestArgumentRecoverySkillNesting(t *testing.T) {
 		return capability.Catalog{Entries: []capability.Entry{{ID: "skill:team-architect", Kind: capability.KindSkill, Name: "team-architect"}}}
 	}))
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "use_capability", Arguments: `{"action":"call","capability_id":"skill:team-architect","arguments":{}}`})
 		if out.blocked || !strings.Contains(out.output, `"arguments":{"arguments"`) || strings.Contains(out.output, `sole "arguments" wrapper`) {
 			t.Fatalf("skill correction: %+v", out)
@@ -390,7 +390,7 @@ func TestArgumentStormMixedPermissionFailure(t *testing.T) {
 	reg.Add(recoveryBash(t))
 	reg.Add(&recoveryArgumentTool{name: "denied", schema: json.RawMessage(`{"type":"object"}`)})
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{deny: map[string]bool{"denied": true}}}, event.Discard)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "bash", Arguments: `{}`}, {Name: "denied", Arguments: `{}`}})
 		if batch.outcomes[0].blocked || !batch.outcomes[1].blocked {
 			t.Fatalf("per-call classification lost: %+v", batch.outcomes)
@@ -430,7 +430,7 @@ func TestArgumentRecoveryPreservesProviderPrefix(t *testing.T) {
 	reg.Add(b)
 	var turns []testutil.Turn
 	raw := `{"arguments":{"command":"pwd"}}`
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{ID: fmt.Sprint(i), Name: "bash", Arguments: raw}}})
 	}
 	turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "fixed", Name: "bash", Arguments: `{"command":"pwd"}`}}}, testutil.Turn{Text: "done"})
