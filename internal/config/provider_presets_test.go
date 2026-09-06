@@ -482,6 +482,39 @@ func TestTokenRhythmPresetMatchesPublicAPIIntegration(t *testing.T) {
 	}
 }
 
+func TestOrcaRouterPresetMatchesPublicAPIIntegration(t *testing.T) {
+	preset, ok := CuratedProviderPreset("orcarouter")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("OrcaRouter preset = %+v, want one entry", preset)
+	}
+	if preset.Label != "OrcaRouter" || preset.KeyEnv != "ORCAROUTER_API_KEY" {
+		t.Fatalf("OrcaRouter identity = label %q key %q", preset.Label, preset.KeyEnv)
+	}
+	entry := preset.Entries[0]
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.orcarouter.ai/v1" {
+		t.Fatalf("OrcaRouter endpoint mismatch: %+v", entry)
+	}
+	if entry.DefaultModel() != "deepseek/deepseek-v4-flash" || !entry.HasModel("anthropic/claude-sonnet-5") || !entry.HasModel("orcarouter/auto") || entry.HasModel("nonsense/not-a-model") {
+		t.Fatalf("OrcaRouter chat catalog mismatch: models=%v default=%q", entry.Models, entry.DefaultModel())
+	}
+
+	var cfg Config
+	if err := cfg.UpsertProvider(entry); err != nil {
+		t.Fatalf("upsert OrcaRouter preset: %v", err)
+	}
+	deepseek, ok := cfg.ResolveModel("orcarouter/deepseek/deepseek-v4-flash")
+	if !ok || ReasoningProtocolForEntry(deepseek) != ReasoningProtocolDeepSeek {
+		t.Fatalf("OrcaRouter DeepSeek protocol mismatch: %+v", deepseek)
+	}
+	flashCap := EffortCapabilityForEntry(deepseek)
+	if !flashCap.Supported || flashCap.Default != "high" || !stringSlicesEqual(flashCap.Levels, []string{"auto", "disabled", "low", "high", "max"}) {
+		t.Fatalf("OrcaRouter DeepSeek effort mismatch: %+v", flashCap)
+	}
+	if _, ok := cfg.ResolveModel("orcarouter/anthropic/claude-sonnet-5"); !ok {
+		t.Fatalf("OrcaRouter Sonnet should resolve through the gateway")
+	}
+}
+
 func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 	tests := []struct {
 		id      string
