@@ -680,13 +680,13 @@ console.log("\nask card layout");
   dom.window.close();
 }
 
-// Skip uses the same retry contract as an answered Ask.
+// Skip advances the current question and submits an empty answer on the last.
 {
   const dom = installDom();
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
-  let dismissAttempts = 0;
+  const submitted: QuestionAnswer[][] = [];
   const ask: WireAsk = {
     id: "ask-skip-retry",
     questions: [{ id: "q1", prompt: "Skip this?", options: [{ label: "Continue" }] }],
@@ -697,11 +697,8 @@ console.log("\nask card layout");
       React.createElement(LocaleProvider, null,
         React.createElement(AskCard, {
           ask,
-          onAnswer: () => undefined,
-          onDismiss: async () => {
-            dismissAttempts += 1;
-            if (dismissAttempts === 1) throw new Error("skip failed");
-          },
+          onAnswer: (_id: string, answers: QuestionAnswer[]) => { submitted.push(answers); },
+          onDismiss: () => undefined,
           onStop: () => undefined,
         }),
       ),
@@ -713,15 +710,8 @@ console.log("\nask card layout");
     document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.click();
     await flushTimers();
   });
-  eq(dismissAttempts, 1, "failed skip is attempted exactly once");
-  eq(Boolean(document.querySelector(".prompt-shelf--ask")), true, "failed skip keeps the Ask visible");
-  eq(document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.disabled, false, "failed skip re-enables the action");
-
-  await act(async () => {
-    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.click();
-    await flushTimers();
-  });
-  eq(dismissAttempts, 2, "skip can be retried once after failure");
+  eq(submitted.length, 1, "skipping the final question submits once");
+  eq(submitted[0]?.[0]?.selected?.length, 0, "skipping submits an empty answer");
 
   await act(async () => { root.unmount(); });
   dom.window.close();

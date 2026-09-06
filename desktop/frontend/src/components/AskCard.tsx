@@ -38,7 +38,6 @@ function readAskDraft(id: string): AskDraft | undefined {
 export function AskCard({
   ask,
   onAnswer,
-  onDismiss,
   onStop,
 }: {
   ask: WireAsk;
@@ -174,6 +173,22 @@ export function AskCard({
   const goBack = () => {
     if (submitting) return;
     setActive((i) => Math.max(0, i - 1));
+  };
+
+  const skipCurrentQuestion = () => {
+    if (submitting || !q) return;
+    const nextSel = { ...sel, [q.id]: [] };
+    const nextCustom = { ...custom, [q.id]: "" };
+    setSel(nextSel);
+    setCustom(nextCustom);
+    setCustomOpen(false);
+    if (!isLast) {
+      setActive((i) => i + 1);
+      return;
+    }
+    submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
+      sessionStorage.removeItem(askDraftKey(ask.id));
+    }));
   };
 
   const selectRow = (index: number) => {
@@ -419,12 +434,8 @@ export function AskCard({
             hint={t("decision.selectHint")}
             confirmLabel={confirmLabel}
             onConfirm={confirmSelected}
-            secondaryLabel={t("ask.justChat")}
-            onSecondary={() => {
-              submitAction(() => Promise.resolve(onDismiss()).then(() => {
-                sessionStorage.removeItem(askDraftKey(ask.id));
-              }));
-            }}
+            secondaryLabel={t("ask.skipQuestion")}
+            onSecondary={skipCurrentQuestion}
             disabled={submitting}
             confirmDisabled={!canConfirm()}
           />
