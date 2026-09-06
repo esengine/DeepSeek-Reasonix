@@ -1224,6 +1224,20 @@ export default function App() {
     const sourceTabId = activeTabId;
     return sourceTabId ? cancelForTab(sourceTabId, queuedItemIDs) : cancel(queuedItemIDs);
   });
+  // Capture the committed source tab at the event boundary. Presentation must
+  // never read activeTabIdRef while an async delivery operation is in flight.
+  const handleAcceptDelivery = useCommittedCommand(() => {
+    const sourceTabId = activeTabId;
+    if (!sourceTabId) return;
+    void app.AcceptDeliveryToTab(sourceTabId).catch((error) => {
+      console.warn("Failed to accept delivery", error);
+    });
+  });
+  const handleDisconnectRemote = useCommittedCommand((hostId: string) => {
+    void app.DisconnectRemoteHost(hostId).catch((error) => {
+      console.warn("Failed to disconnect remote host", error);
+    });
+  });
   const cancelWorkspaceConflict = useCommittedCommand(() => {
     void handleCancelActive();
     setWorkspaceConflict(null);
@@ -1937,7 +1951,7 @@ export default function App() {
                       footerHeight={footerHeight}
                       onPrompt={handleTranscriptPrompt}
                       onDeliveryContinue={() => void handleDeliveryContinue()}
-                      onAcceptDelivery={() => void app.AcceptDeliveryToTab(activeTabIdRef.current ?? "")}
+                      onAcceptDelivery={handleAcceptDelivery}
                       onOpenChanges={() => openRightDockMode("changed")}
                       onOpenVerification={openTurnVerification}
                       onEditPrompt={handleEditPrompt}
@@ -2106,7 +2120,7 @@ export default function App() {
             onCancelRuntimeJob: cancelRuntimeJob, onRevealRuntime: revealBackgroundRuntime,
             sessionTurns, labelStyle: statusBarStyle, items: statusBarItems, extensionStatuses: extensionStatusList,
             onConnectRemote: connectAndOpenRemoteWorkspace,
-            onDisconnectRemote: (hostId) => void app.DisconnectRemoteHost(hostId).catch(() => {}),
+            onDisconnectRemote: handleDisconnectRemote,
             onManageRemote: () => setSettingsTarget("remote"), onOpenRemote: requestRemoteExplorer,
             onOpenRemoteWorkspace: openRemoteWorkspaceFromStatus, remoteHosts, remoteStatuses,
           }}
