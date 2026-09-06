@@ -114,6 +114,7 @@ import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { useSessionSubmission } from "./lib/useSessionSubmission";
 import { usePendingPlanRevisions, reportPendingRevisionFailure } from "./lib/usePendingPlanRevisions";
+import { useTopicSummary } from "./app-runtime/useTopicSummary";
 import { createSubmissionPorts, projectSubmissionResources } from "./app-runtime/desktopSubmissionAdapter";
 import { useCommittedCommand } from "./lib/useCommittedCommand";
 import { createSessionSurfaceFence, sessionIdentityKey } from "./app-runtime/sessionTarget";
@@ -492,29 +493,14 @@ export default function App() {
     // 560 ceiling, so the user's remembered width is preserved when reopened.
     setRightDockTreeWidth(rightDockTreeWidthClamp(treeWidth, workspacePanelAvailableWidth));
   });
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeTab?.topicId) {
-      setActiveTopicTurns(undefined);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void app.GetTopicSummary({
-      scope: activeTab.scope === "global" ? "global" : "project",
-      workspaceRoot: activeTab.scope === "global" ? "" : activeTab.workspaceRoot,
-      topicId: activeTab.topicId,
-    })
-      .then((topic) => {
-        if (!cancelled) setActiveTopicTurns(topic.turns);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveTopicTurns(undefined);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab?.scope, activeTab?.topicId, activeTab?.workspaceRoot, projectRevision]);
+  const topicSummaryTarget = useMemo(() => activeTab ? {
+    scope: activeTab.scope,
+    workspaceRoot: activeTab.workspaceRoot,
+    topicId: activeTab.topicId,
+  } : null, [activeTab?.scope, activeTab?.workspaceRoot, activeTab?.topicId]);
+  const getTopicSummary = useCommittedCommand((request: { scope: "global" | "project"; workspaceRoot: string; topicId: string }) => app.GetTopicSummary(request));
+  const commitTopicTurns = useCommittedCommand((turns: number | undefined) => setActiveTopicTurns(turns));
+  useTopicSummary({ target: topicSummaryTarget, revision: projectRevision, getSummary: getTopicSummary, onTurns: commitTopicTurns });
   const visibleUserTurns = visibleRuntimeState.items.reduce((count, item) => (item.kind === "user" ? count + 1 : count), 0);
   const currentTabTurns = Math.max(visibleRuntimeState.checkpoints.length, visibleUserTurns);
   const sessionTurns = currentTabTurns > 0 ? currentTabTurns : remoteSurfaceActive ? 0 : activeTopicTurns ?? 0;
