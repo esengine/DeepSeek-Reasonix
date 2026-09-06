@@ -9184,8 +9184,11 @@ body > .mermaid-diagram--fullscreen {
   transition: opacity 0.12s ease;
 }
 .prompt-shelf--todo .prompt-shelf__card--collapsed {
+  height: 42px;
+  min-height: 42px;
   padding: 4px 10px;
   border-radius: 14px;
+  box-sizing: border-box;
 }
 .prompt-shelf--todo .prompt-shelf__card--collapsed .prompt-shelf__header {
   gap: 10px;
