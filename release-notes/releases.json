@@ -7,60 +7,50 @@
       "channel": "stable",
       "targetingVersion": 1,
       "title": {
-        "en": "Desktop stability and interaction fixes",
-        "zh": "桌面端稳定性与交互修复"
+        "en": "Desktop stability and recovery fixes",
+        "zh": "桌面稳定性与恢复修复"
       },
       "summary": {
-        "en": "This release fixes stale prompt submissions, session state races, DeepSeek weekend pricing, and Ask card draft loss. It also unifies Ask and decision popups with a shared Harness-style UI and improves session recovery contracts.",
-        "zh": "此版本修复了过期提示提交、会话状态竞态、DeepSeek 周末计费以及 Ask 卡片草稿丢失问题，并统一了 Ask 与决策弹窗的 Harness 风格界面，改进了会话恢复契约。"
+        "en": "This release restores prompt answers and recovery flows, fences stale desktop session state, unifies Ask and decision popups, and fixes DeepSeek weekend pricing.",
+        "zh": "此版本恢复了提问提交与恢复流程，隔离了过期的桌面会话状态，统一了 Ask 与决策弹窗，并修复了 DeepSeek 周末计费。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli"
       ],
       "guides": [
         {
           "title": {
-            "en": "Desktop Prompt Identity",
-            "zh": "桌面端提示身份"
+            "en": "Desktop prompt identity",
+            "zh": "桌面提示身份"
           },
           "body": {
-            "en": "Protocol documentation for controller-owned prompt identity and fencing.",
-            "zh": "控制器拥有的提示身份与防护的协议文档。"
+            "en": "How desktop prompt cards are identified and fenced across turns, runtimes, and reconnects.",
+            "zh": "桌面提示卡片如何跨轮次、运行时和重连进行标识与隔离。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/239f25c7570181a29710a9a640a7c2f209b13790/docs/DESKTOP_PROMPT_IDENTITY.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a4ae5ff6b98a37aaf9c212454cd0cc3ed5008559/docs/DESKTOP_PROMPT_IDENTITY.md"
         },
         {
           "title": {
-            "en": "Desktop Prompt Identity (Chinese)",
-            "zh": "桌面端提示身份（中文）"
-          },
-          "body": {
-            "en": "Chinese protocol documentation for controller-owned prompt identity and fencing.",
-            "zh": "控制器拥有的提示身份与防护的中文协议文档。"
-          },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/239f25c7570181a29710a9a640a7c2f209b13790/docs/DESKTOP_PROMPT_IDENTITY.zh-CN.md"
-        },
-        {
-          "title": {
-            "en": "Session Recovery and Parallelism",
+            "en": "Session recovery and parallelism",
             "zh": "会话恢复与并行"
           },
           "body": {
-            "en": "Documentation for unified session recovery and parallel-work lifecycle contracts.",
-            "zh": "统一会话恢复与并行工作生命周期契约的文档。"
+            "en": "Unified session recovery and parallel-work lifecycle contracts for the Go rewrite.",
+            "zh": "Go 重写中统一的会话恢复与并行工作生命周期契约。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/239f25c7570181a29710a9a640a7c2f209b13790/docs/SESSION_RECOVERY_AND_PARALLELISM.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a4ae5ff6b98a37aaf9c212454cd0cc3ed5008559/docs/SESSION_RECOVERY_AND_PARALLELISM.md"
         },
         {
           "title": {
-            "en": "Session Recovery and Parallelism (Chinese)",
-            "zh": "会话恢复与并行（中文）"
+            "en": "Tool contract",
+            "zh": "工具契约"
           },
           "body": {
-            "en": "Chinese documentation for unified session recovery and parallel-work lifecycle contracts.",
-            "zh": "统一会话恢复与并行工作生命周期契约的中文文档。"
+            "en": "Bilingual guidance for tool argument validation, capability recovery, soft convergence, compatibility, and cache impact.",
+            "zh": "关于工具参数验证、能力恢复、软收敛、兼容性和缓存影响的双语指南。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/239f25c7570181a29710a9a640a7c2f209b13790/docs/SESSION_RECOVERY_AND_PARALLELISM.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a4ae5ff6b98a37aaf9c212454cd0cc3ed5008559/docs/TOOL_CONTRACT.md"
         }
       ],
       "highlights": [
@@ -70,12 +60,29 @@
             "desktop"
           ],
           "title": {
-            "en": "Stale prompt submissions are now fenced",
-            "zh": "过期提示提交现已受到防护"
+            "en": "Restored prompt answers and recovery",
+            "zh": "恢复提问提交与状态恢复"
           },
           "body": {
-            "en": "Delayed Ask or decision-card responses can no longer outlive the turn or controller that created them. Prompt identity is now controller-owned and bound to promptId, turnId, runtimeEpoch, and kind, preventing stale submissions and duplicate replays.",
-            "zh": "延迟的 Ask 或决策卡片响应不再能超过创建它们的轮次或控制器。提示身份现在由控制器拥有，并绑定到 promptId、turnId、runtimeEpoch 和 kind，防止过期提交和重复重放。"
+            "en": "Exact Ask answers no longer fail as not pending, and unwritable event ledgers no longer deadlock cancellation or prompt resolution. Keyboard-entered custom answers are preserved, Ask drafts are isolated by tab/runtime/turn/prompt identity, and background recovery errors are contained.",
+            "zh": "精确的 Ask 回答不再因未挂起而失败，不可写的事件账本不再导致取消或提示解析死锁。键盘输入的自定义答案得以保留，Ask 草稿按标签页/运行时/轮次/提示身份隔离，后台恢复错误得到遏制。"
+          },
+          "refs": [
+            9862
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Fenced stale prompt cards",
+            "zh": "隔离过期提示卡片"
+          },
+          "body": {
+            "en": "Delayed Ask or decision-card responses can no longer outlive the turn or controller that created them. Each prompt is bound to a promptId, turnId, runtimeEpoch, and kind, and stale responses expire only the matching identity.",
+            "zh": "延迟的 Ask 或决策卡片响应不再能超过创建它们的轮次或控制器。每个提示都绑定到 promptId、turnId、runtimeEpoch 和 kind，过期响应仅使匹配的身份失效。"
           },
           "refs": [
             9852
@@ -87,32 +94,15 @@
             "desktop"
           ],
           "title": {
-            "en": "Session state races resolved",
-            "zh": "会话状态竞态已解决"
+            "en": "Fixed stale desktop session state",
+            "zh": "修复桌面会话状态竞态"
           },
           "body": {
-            "en": "Late events from a previous session binding can no longer contaminate the current tab. Runtime epoch and turn event sequence are now carried through status actions, and session generation is bound to the event sink.",
-            "zh": "来自先前会话绑定的延迟事件不再污染当前标签页。运行时纪元与轮次事件序列现在贯穿状态操作，会话代次绑定到事件接收器。"
+            "en": "Sessions no longer appear empty or unable to execute while their transcript or runtime is still present. Late events from a previous session binding are rejected using runtimeEpoch and sessionGeneration fences.",
+            "zh": "会话不再在转录或运行时仍存在时显示为空或无法执行。来自先前会话绑定的延迟事件通过 runtimeEpoch 和 sessionGeneration 隔离被拒绝。"
           },
           "refs": [
             9842
-          ]
-        },
-        {
-          "kind": "fixed",
-          "targets": [
-            "desktop"
-          ],
-          "title": {
-            "en": "DeepSeek weekend pricing corrected",
-            "zh": "DeepSeek 周末计费已修正"
-          },
-          "body": {
-            "en": "Peak pricing is no longer applied on Saturdays and Sundays. Weekends are now classified as off-peak before evaluating weekday peak windows.",
-            "zh": "周六和周日不再应用峰值计费。周末现在在评估工作日峰值窗口之前被归类为非高峰。"
-          },
-          "refs": [
-            9846
           ]
         },
         {
@@ -122,11 +112,11 @@
           ],
           "title": {
             "en": "Unified Ask and decision popups",
-            "zh": "统一的 Ask 与决策弹窗"
+            "zh": "统一 Ask 与决策弹窗"
           },
           "body": {
-            "en": "Ask and decision popups now share a Harness-style surface with compact header controls, per-question pager, inline custom answers, and draft restoration.",
-            "zh": "Ask 与决策弹窗现在共享 Harness 风格界面，具有紧凑的标题控件、逐题分页器、内联自定义答案和草稿恢复功能。"
+            "en": "The desktop Ask surface now matches DeepSeek Harness with compact header controls, per-question pager, inline custom answers, draft restoration, and a shared visual shell for approvals, MCP interactions, runtime decisions, and extension forms.",
+            "zh": "桌面 Ask 界面现在与 DeepSeek Harness 一致，具有紧凑的标题控件、逐题分页器、内联自定义答案、草稿恢复，以及用于审批、MCP 交互、运行时决策和扩展表单的共享视觉外壳。"
           },
           "refs": [
             9844
@@ -138,12 +128,12 @@
             "desktop"
           ],
           "title": {
-            "en": "Ask custom drafts preserved",
-            "zh": "Ask 自定义草稿得以保留"
+            "en": "Fixed Ask custom draft loss",
+            "zh": "修复 Ask 自定义回答草稿丢失"
           },
           "body": {
-            "en": "Selecting a suggested option no longer clears your custom answer. Drafts are preserved per question and restored when reopening custom input.",
-            "zh": "选择建议选项不再清除您的自定义答案。草稿按问题保留，并在重新打开自定义输入时恢复。"
+            "en": "Selecting a suggested option no longer clears a custom answer draft. The draft is preserved per question and restored when reopening custom input.",
+            "zh": "选择建议选项不再清除自定义答案草稿。草稿按问题保留，并在重新打开自定义输入时恢复。"
           },
           "refs": [
             9840
@@ -155,15 +145,68 @@
             "desktop"
           ],
           "title": {
-            "en": "Topic bar duplicate controls fixed",
-            "zh": "主题栏重复控件已修复"
+            "en": "Fixed topicbar opener key collision",
+            "zh": "修复主题栏打开器 key 冲突"
           },
           "body": {
-            "en": "Switching projects no longer leaves duplicate external-opener controls in the topic bar. Component keys are now namespaced independently.",
-            "zh": "切换项目不再在主题栏中留下重复的外部打开器控件。组件键现在独立命名空间。"
+            "en": "Switching projects no longer leaves duplicate external-opener controls in the topic bar. Component keys are namespaced independently to prevent stale instances.",
+            "zh": "切换项目不再在主题栏中留下重复的外部打开器控件。组件键独立命名空间化，以防止陈旧实例。"
           },
           "refs": [
             9836
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Fixed DeepSeek weekend peak pricing",
+            "zh": "修复 DeepSeek 周末峰值计费"
+          },
+          "body": {
+            "en": "DeepSeek peak pricing is no longer applied on Saturdays and Sundays. The pricing schedule now correctly applies only Monday through Friday.",
+            "zh": "DeepSeek 峰值计费不再在周六和周日应用。计费表现在正确地仅适用于周一至周五。"
+          },
+          "refs": [
+            9846
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Recoverable tool argument failures",
+            "zh": "可恢复的工具参数错误"
+          },
+          "body": {
+            "en": "Malformed tool arguments are now reported as actionable unexecuted errors instead of escalating into a blocked permission-style state. A redundant top-level arguments wrapper is detected conservatively, and repairable use_capability envelope errors are diagnosed without masking authorization failures.",
+            "zh": "格式错误的工具参数现在报告为可操作的未执行错误，而不是升级为阻塞的权限样式状态。保守地检测冗余的顶层 arguments 包装器，并在不掩盖授权失败的情况下诊断可修复的 use_capability 信封错误。"
+          },
+          "refs": [
+            9863
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Unified mixed parallel recovery contracts",
+            "zh": "统一并行与会话恢复契约"
+          },
+          "body": {
+            "en": "Recovery copies now have explicit version identity and state. Recovery failures are persisted as pending with localized retry guidance, and worktree lifecycle payloads identify source revision and owning task/conversation.",
+            "zh": "恢复副本现在具有明确的版本身份和状态。恢复失败以挂起状态持久化，并提供本地化的重试指导，工作树生命周期负载标识源修订和所属任务/会话。"
+          },
+          "refs": [
+            9848
           ]
         }
       ],
@@ -175,12 +218,45 @@
               "desktop"
             ],
             "title": {
-              "en": "Session recovery contracts unified",
-              "zh": "会话恢复契约已统一"
+              "en": "Unified Ask and decision popups",
+              "zh": "统一 Ask 与决策弹窗"
             },
             "body": {
-              "en": "Recovery copies now have explicit version identity and state. The desktop client can query and select session versions, retry pending recovery after lease handoff failure, and trigger idempotent recovery-lineage reconciliation.",
-              "zh": "恢复副本现在具有明确的版本身份和状态。桌面客户端可以查询和选择会话版本，在租约交接失败后重试待处理的恢复，并触发幂等的恢复谱系协调。"
+              "en": "The desktop Ask surface now matches DeepSeek Harness with compact header controls, per-question pager, inline custom answers, draft restoration, and a shared visual shell for approvals, MCP interactions, runtime decisions, and extension forms.",
+              "zh": "桌面 Ask 界面现在与 DeepSeek Harness 一致，具有紧凑的标题控件、逐题分页器、内联自定义答案、草稿恢复，以及用于审批、MCP 交互、运行时决策和扩展表单的共享视觉外壳。"
+            },
+            "refs": [
+              9844
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Recoverable tool argument failures",
+              "zh": "可恢复的工具参数错误"
+            },
+            "body": {
+              "en": "Malformed tool arguments are now reported as actionable unexecuted errors instead of escalating into a blocked permission-style state. A redundant top-level arguments wrapper is detected conservatively, and repairable use_capability envelope errors are diagnosed without masking authorization failures.",
+              "zh": "格式错误的工具参数现在报告为可操作的未执行错误，而不是升级为阻塞的权限样式状态。保守地检测冗余的顶层 arguments 包装器，并在不掩盖授权失败的情况下诊断可修复的 use_capability 信封错误。"
+            },
+            "refs": [
+              9863
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Unified mixed parallel recovery contracts",
+              "zh": "统一并行与会话恢复契约"
+            },
+            "body": {
+              "en": "Recovery copies now have explicit version identity and state. Recovery failures are persisted as pending with localized retry guidance, and worktree lifecycle payloads identify source revision and owning task/conversation.",
+              "zh": "恢复副本现在具有明确的版本身份和状态。恢复失败以挂起状态持久化，并提供本地化的重试指导，工作树生命周期负载标识源修订和所属任务/会话。"
             },
             "refs": [
               9848
@@ -193,12 +269,28 @@
               "desktop"
             ],
             "title": {
-              "en": "Stale prompt submissions fenced",
-              "zh": "过期提示提交已防护"
+              "en": "Restored prompt answers and recovery",
+              "zh": "恢复提问提交与状态恢复"
             },
             "body": {
-              "en": "Prompt identity is now controller-owned and bound to promptId, turnId, runtimeEpoch, and kind. Stale responses expire only the matching prompt identity and preserve sibling cards.",
-              "zh": "提示身份现在由控制器拥有，并绑定到 promptId、turnId、runtimeEpoch 和 kind。过期响应仅使匹配的提示身份失效，并保留同级卡片。"
+              "en": "Exact Ask answers no longer fail as not pending, and unwritable event ledgers no longer deadlock cancellation or prompt resolution. Keyboard-entered custom answers are preserved, Ask drafts are isolated by tab/runtime/turn/prompt identity, and background recovery errors are contained.",
+              "zh": "精确的 Ask 回答不再因未挂起而失败，不可写的事件账本不再导致取消或提示解析死锁。键盘输入的自定义答案得以保留，Ask 草稿按标签页/运行时/轮次/提示身份隔离，后台恢复错误得到遏制。"
+            },
+            "refs": [
+              9862
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Fenced stale prompt cards",
+              "zh": "隔离过期提示卡片"
+            },
+            "body": {
+              "en": "Delayed Ask or decision-card responses can no longer outlive the turn or controller that created them. Each prompt is bound to a promptId, turnId, runtimeEpoch, and kind, and stale responses expire only the matching identity.",
+              "zh": "延迟的 Ask 或决策卡片响应不再能超过创建它们的轮次或控制器。每个提示都绑定到 promptId、turnId、runtimeEpoch 和 kind，过期响应仅使匹配的身份失效。"
             },
             "refs": [
               9852
@@ -209,12 +301,12 @@
               "desktop"
             ],
             "title": {
-              "en": "Session state races resolved",
-              "zh": "会话状态竞态已解决"
+              "en": "Fixed stale desktop session state",
+              "zh": "修复桌面会话状态竞态"
             },
             "body": {
-              "en": "Runtime epoch and turn event sequence are carried through status actions, and session generation is bound to the event sink. Delayed events from previous bindings are rejected.",
-              "zh": "运行时纪元与轮次事件序列贯穿状态操作，会话代次绑定到事件接收器。来自先前绑定的延迟事件被拒绝。"
+              "en": "Sessions no longer appear empty or unable to execute while their transcript or runtime is still present. Late events from a previous session binding are rejected using runtimeEpoch and sessionGeneration fences.",
+              "zh": "会话不再在转录或运行时仍存在时显示为空或无法执行。来自先前会话绑定的延迟事件通过 runtimeEpoch 和 sessionGeneration 隔离被拒绝。"
             },
             "refs": [
               9842
@@ -225,28 +317,12 @@
               "desktop"
             ],
             "title": {
-              "en": "DeepSeek weekend pricing corrected",
-              "zh": "DeepSeek 周末计费已修正"
+              "en": "Fixed Ask custom draft loss",
+              "zh": "修复 Ask 自定义回答草稿丢失"
             },
             "body": {
-              "en": "Saturdays and Sundays are now classified as off-peak before evaluating weekday peak windows.",
-              "zh": "周六和周日现在在评估工作日峰值窗口之前被归类为非高峰。"
-            },
-            "refs": [
-              9846
-            ]
-          },
-          {
-            "targets": [
-              "desktop"
-            ],
-            "title": {
-              "en": "Ask custom drafts preserved",
-              "zh": "Ask 自定义草稿得以保留"
-            },
-            "body": {
-              "en": "Custom drafts are preserved per question while switching options, and restored when reopening custom input.",
-              "zh": "切换选项时按问题保留自定义草稿，并在重新打开自定义输入时恢复。"
+              "en": "Selecting a suggested option no longer clears a custom answer draft. The draft is preserved per question and restored when reopening custom input.",
+              "zh": "选择建议选项不再清除自定义答案草稿。草稿按问题保留，并在重新打开自定义输入时恢复。"
             },
             "refs": [
               9840
@@ -257,15 +333,32 @@
               "desktop"
             ],
             "title": {
-              "en": "Topic bar duplicate controls fixed",
-              "zh": "主题栏重复控件已修复"
+              "en": "Fixed topicbar opener key collision",
+              "zh": "修复主题栏打开器 key 冲突"
             },
             "body": {
-              "en": "Component keys are namespaced independently to prevent stale instances when switching projects.",
-              "zh": "组件键独立命名空间，防止切换项目时出现陈旧实例。"
+              "en": "Switching projects no longer leaves duplicate external-opener controls in the topic bar. Component keys are namespaced independently to prevent stale instances.",
+              "zh": "切换项目不再在主题栏中留下重复的外部打开器控件。组件键独立命名空间化，以防止陈旧实例。"
             },
             "refs": [
               9836
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Fixed DeepSeek weekend peak pricing",
+              "zh": "修复 DeepSeek 周末峰值计费"
+            },
+            "body": {
+              "en": "DeepSeek peak pricing is no longer applied on Saturdays and Sundays. The pricing schedule now correctly applies only Monday through Friday.",
+              "zh": "DeepSeek 峰值计费不再在周六和周日应用。计费表现在正确地仅适用于周一至周五。"
+            },
+            "refs": [
+              9846
             ]
           }
         ]
