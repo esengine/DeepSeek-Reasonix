@@ -10140,6 +10140,21 @@ body > .mermaid-diagram--fullscreen {
 .prompt-shelf--ask .prompt-action--active,
 .prompt-shelf--ask .prompt-action--selected { background: color-mix(in srgb, var(--accent) 15%, var(--bg-soft)); }
 .prompt-shelf--ask .prompt-action__key { min-width: 28px; height: 28px; border-radius: 8px; font-size: 14px; }
+.prompt-shelf--ask .ask-shelf__custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  margin-top: 2px;
+  padding: 9px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+.prompt-shelf--ask .ask-shelf__custom-row:focus-within,
+.prompt-shelf--ask .ask-shelf__custom-row--active { border-color: var(--accent); }
+.ask-shelf__custom-indicator { color: var(--fg-dim); font-size: 18px; }
+.prompt-shelf--ask .ask-shelf__custom { border: 0; padding: 0; background: transparent; font-size: 14px; }
 .ask-shelf__footer-layout { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .ask-shelf__pager { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 15px; white-space: nowrap; }
 .ask-shelf__pager-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--fg-dim); cursor: pointer; }

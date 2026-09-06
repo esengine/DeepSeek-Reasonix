@@ -170,7 +170,7 @@ console.log("\nask card layout");
 
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   // options + custom; skip is a secondary footer action
-  eq(optionButtons.length, 3, "ask renders options plus custom without a skip row");
+  eq(optionButtons.length, 2, "ask renders only selectable options; custom answer is an always-visible input row");
   ok(
     optionButtons[0]?.textContent?.includes("Reuse the archive flow") === true,
     "option descriptions render inline on each decision row",

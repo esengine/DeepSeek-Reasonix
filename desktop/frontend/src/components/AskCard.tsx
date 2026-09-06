@@ -365,14 +365,29 @@ export function AskCard({
               />
             );
           })}
-          <PromptAction
-            actionId={`${instanceId}-row-${customRowIndex}`}
-            keyLabel=""
-            label={t("ask.customAnswer")}
-            onClick={() => selectRow(customRowIndex)}
-            selected={selectedIndex === customRowIndex || customOpen}
-            disabled={submitting}
-          />
+          <div
+            className={`ask-shelf__custom-row${custom[q.id]?.trim() ? " ask-shelf__custom-row--active" : ""}`}
+            role="group"
+            onClick={() => { setSelectedIndex(customRowIndex); setCustomOpen(true); customInputRef.current?.focus(); }}
+          >
+            <span className="ask-shelf__custom-indicator" aria-hidden="true">✎</span>
+            <input
+              ref={customInputRef}
+              className="ask-shelf__custom"
+              aria-label={t("ask.customAnswer")}
+              placeholder={t("ask.customPlaceholder")}
+              value={custom[q.id] ?? ""}
+              disabled={submitting}
+              onChange={(e) => setTyped(q, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canConfirm()) {
+                  e.preventDefault();
+                  confirmSelected();
+                }
+                e.stopPropagation();
+              }}
+            />
+          </div>
         </>
       }
       crumbs={
@@ -397,25 +412,6 @@ export function AskCard({
               onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
               disabled={submitting}
             />
-          )}
-          {customOpen && (
-            <div className="ask-shelf__custom-row">
-              <input
-                ref={customInputRef}
-                className="ask-shelf__custom"
-                placeholder={t("ask.customPlaceholder")}
-                value={custom[q.id] ?? ""}
-                disabled={submitting}
-                onChange={(e) => setTyped(q, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canConfirm()) {
-                    e.preventDefault();
-                    confirmSelected();
-                  }
-                  e.stopPropagation();
-                }}
-              />
-            </div>
           )}
         </>
       }
