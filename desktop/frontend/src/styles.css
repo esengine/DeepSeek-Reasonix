@@ -9132,6 +9132,52 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* Shared harness-style decision surface. Ask adds its own fields and pager;
+   every other PromptShelf keeps its domain controls inside this same visual
+   frame so approvals, forms, and MCP interactions read as one product. */
+.prompt-shelf--harness .prompt-shelf__card {
+  border-radius: 20px;
+  padding: 8px 12px 10px;
+  background: var(--bg-elev);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-soft));
+}
+.prompt-shelf--harness .prompt-shelf__header {
+  align-items: center;
+  gap: 16px;
+  padding: 10px 4px 12px;
+}
+.prompt-shelf--harness .prompt-shelf__heading {
+  font-size: 16px;
+  font-weight: 650;
+}
+.prompt-shelf--harness .prompt-shelf__meta {
+  font-size: 14px;
+}
+.prompt-shelf--harness .prompt-shelf__header-actions {
+  gap: 8px;
+}
+.prompt-shelf--harness .prompt-shelf__header-button {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 10px;
+}
+.prompt-shelf--harness.prompt-shelf--decision .prompt-shelf__actions {
+  gap: 6px;
+}
+.prompt-shelf--harness.prompt-shelf--decision .prompt-action {
+  min-height: 38px;
+  height: 38px;
+  border-radius: 10px;
+  padding: 5px 10px;
+}
+.prompt-shelf--harness .prompt-shelf__footer {
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.prompt-shelf--harness .decision-confirm-bar {
+  gap: 10px;
+}
+
 /* Todo shelf: header actions (collapse/close) appear on card hover/focus. */
 .prompt-shelf--todo .prompt-shelf__header-actions {
   opacity: 0;

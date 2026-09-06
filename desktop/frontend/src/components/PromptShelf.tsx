@@ -60,6 +60,7 @@ export function PromptShelf({
     <div
       className={[
         "prompt-shelf",
+        "prompt-shelf--harness",
         decision ? "prompt-shelf--decision" : "",
         className ?? "",
       ]
