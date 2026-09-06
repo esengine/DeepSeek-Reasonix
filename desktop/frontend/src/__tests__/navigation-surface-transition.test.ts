@@ -109,7 +109,7 @@ releaseReassert();
 ok(await staleAcceptedPromise === false, "a stale backend-activating result is rejected after reassertion");
 ok(reasserted === "tab.reveal-background:tab-stale", "stale reassertion receives the mutating target identity");
 
-const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../AppRuntime.tsx", import.meta.url), "utf8");
 const surfaceHookSource = readFileSync(new URL("../lib/useNavigationSurface.ts", import.meta.url), "utf8");
 const tabBarSource = readFileSync(new URL("../app-runtime/useTabBarCommands.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
