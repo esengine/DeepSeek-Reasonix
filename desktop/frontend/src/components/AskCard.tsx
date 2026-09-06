@@ -10,7 +10,8 @@ import {
   PromptShelf,
 } from "./PromptShelf";
 
-const askDraftKey = (id: string) => `reasonix.ask-draft:${id}`;
+const askDrafts = new Map<string, AskDraft>();
+const askDraftKey = (scope: string, id: string) => `${scope}:${id}`;
 type AnswerMode = "option" | "custom";
 type AskDraft = {
   sel: Record<string, string[]>;
@@ -20,16 +21,13 @@ type AskDraft = {
   selectedIndex: number;
 };
 
-function readAskDraft(id: string): AskDraft | undefined {
-  try {
-    const raw = sessionStorage.getItem(askDraftKey(id));
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw) as Partial<AskDraft>;
-    if (!parsed.sel || !parsed.custom || !parsed.answerMode || typeof parsed.active !== "number" || typeof parsed.selectedIndex !== "number") return undefined;
-    return { sel: parsed.sel, custom: parsed.custom, answerMode: parsed.answerMode, active: parsed.active, selectedIndex: parsed.selectedIndex };
-  } catch {
-    return undefined;
-  }
+function readAskDraft(scope: string, id: string): AskDraft | undefined {
+  const draft = askDrafts.get(askDraftKey(scope, id));
+  return draft ? { ...draft, sel: { ...draft.sel }, custom: { ...draft.custom }, answerMode: { ...draft.answerMode } } : undefined;
+}
+
+function clearAskDraft(scope: string, id: string): void {
+  askDrafts.delete(askDraftKey(scope, id));
 }
 
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
@@ -39,23 +37,25 @@ function readAskDraft(id: string): AskDraft | undefined {
 export function AskCard({
   ask,
   onAnswer,
+  draftScope = "default",
   onStop,
 }: {
   ask: WireAsk;
   onAnswer: (id: string, answers: QuestionAnswer[]) => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
+  draftScope?: string;
   onStop: () => void;
 }) {
   const t = useT();
   // Per-question state: selected option labels, and an optional typed answer.
-  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(ask.id)?.sel ?? {});
-  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(ask.id)?.custom ?? {});
-  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(ask.id)?.answerMode ?? {});
+  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(draftScope, ask.id)?.sel ?? {});
+  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(draftScope, ask.id)?.custom ?? {});
+  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(draftScope, ask.id)?.answerMode ?? {});
   const [customOpen, setCustomOpen] = useState(false);
-  const [active, setActive] = useState(() => readAskDraft(ask.id)?.active ?? 0);
+  const [active, setActive] = useState(() => readAskDraft(draftScope, ask.id)?.active ?? 0);
   // Extra decision row after option labels: custom answer. Skip is a
   // secondary footer action rather than an answer choice.
-  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(ask.id)?.selectedIndex ?? 0);
+  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(draftScope, ask.id)?.selectedIndex ?? 0);
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -64,6 +64,7 @@ export function AskCard({
   const [collapsed, setCollapsed] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
+  const initializedActiveRef = useRef(false);
   const instanceId = useId();
 
   const questions = ask.questions;
@@ -86,7 +87,8 @@ export function AskCard({
 
   useEffect(() => {
     shelfRef.current?.focus();
-    const draft = readAskDraft(ask.id);
+    initializedActiveRef.current = false;
+    const draft = readAskDraft(draftScope, ask.id);
     setSel(draft?.sel ?? {});
     setCustom(draft?.custom ?? {});
     setAnswerMode(draft?.answerMode ?? {});
@@ -95,19 +97,20 @@ export function AskCard({
     setSelectedIndex(draft?.selectedIndex ?? 0);
     setSubmitting(false);
     setCollapsed(false);
-  }, [ask.id]);
+  }, [ask.id, draftScope]);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, answerMode, active, selectedIndex } satisfies AskDraft));
+      askDrafts.set(askDraftKey(draftScope, ask.id), { sel: { ...sel }, custom: { ...custom }, answerMode: { ...answerMode }, active, selectedIndex });
     } catch {
-      // Session storage is best effort; the live pending ask remains authoritative.
+      // Draft storage is best effort; the live pending ask remains authoritative.
     }
-  }, [active, answerMode, ask.id, custom, selectedIndex, sel]);
+  }, [active, answerMode, ask.id, custom, draftScope, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
-    setSelectedIndex(0);
+    if (initializedActiveRef.current) setSelectedIndex(0);
+    initializedActiveRef.current = true;
   }, [active]);
 
   useEffect(() => {
@@ -152,7 +155,7 @@ export function AskCard({
     if (submitting) return;
     if (isLast) {
       submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
-        sessionStorage.removeItem(askDraftKey(ask.id));
+        clearAskDraft(draftScope, ask.id);
       }));
       return;
     }
@@ -182,6 +185,11 @@ export function AskCard({
     setActive((i) => Math.max(0, i - 1));
   };
 
+  const stopAsk = () => {
+    clearAskDraft(draftScope, ask.id);
+    onStop();
+  };
+
   const skipCurrentQuestion = () => {
     if (submitting || !q) return;
     const nextSel = { ...sel, [q.id]: [] };
@@ -194,7 +202,7 @@ export function AskCard({
       return;
     }
     submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
-      sessionStorage.removeItem(askDraftKey(ask.id));
+      clearAskDraft(draftScope, ask.id);
     }));
   };
 
@@ -266,7 +274,7 @@ export function AskCard({
 
       if (event.key === "Escape") {
         event.preventDefault();
-        onStop();
+        stopAsk();
         return;
       }
       if (event.key === "ArrowUp") {
@@ -343,7 +351,7 @@ export function AskCard({
           >
             {collapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
           </PromptHeaderAction>
-          <PromptHeaderAction onClick={onStop} ariaLabel={t("decision.stopTask")} disabled={submitting}>
+          <PromptHeaderAction onClick={stopAsk} ariaLabel={t("decision.stopTask")} disabled={submitting}>
             <X size={16} aria-hidden="true" />
           </PromptHeaderAction>
         </>

@@ -751,10 +751,10 @@ console.log("\nask card layout");
     id: "ask-session-draft",
     questions: [{ id: "q1", prompt: "Choose one", options: [{ label: "Keep" }, { label: "Change" }] }],
   };
-  const render = async () => {
+  const render = async (draftScope = "tab-a") => {
     await act(async () => {
       root.render(React.createElement(LocaleProvider, null,
-        React.createElement(AskCard, { ask, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+        React.createElement(AskCard, { ask, draftScope, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
       ));
       await flushTimers();
     });
@@ -768,16 +768,25 @@ console.log("\nask card layout");
     await flushTimers();
   });
   await act(async () => { root.unmount(); });
+  const otherRoot = createRoot(rootEl);
+  await act(async () => {
+    otherRoot.render(React.createElement(LocaleProvider, null,
+      React.createElement(AskCard, { ask, draftScope: "tab-b", onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+    ));
+    await flushTimers();
+  });
+  ok(![...document.querySelectorAll<HTMLElement>(".prompt-action")].some((button) => button.getAttribute("aria-selected") === "true" && button.textContent?.includes("Change")), "Ask drafts do not cross tab scopes");
+  await act(async () => { otherRoot.unmount(); });
   const remountRoot = createRoot(rootEl);
   await act(async () => {
     remountRoot.render(React.createElement(LocaleProvider, null,
-      React.createElement(AskCard, { ask, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+      React.createElement(AskCard, { ask, draftScope: "tab-a", onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
     ));
     await flushTimers();
   });
   ok(!document.querySelector(".prompt-shelf__card--collapsed"), "a remounted Ask starts expanded like harness");
-  const restoredDraft = sessionStorage.getItem("reasonix.ask-draft:ask-session-draft") ?? "";
-  ok(restoredDraft.includes("Change"), "Ask answer draft restores from the tab session");
+  ok([...document.querySelectorAll<HTMLElement>(".prompt-action")]
+    .some((button) => button.getAttribute("aria-selected") === "true" && button.textContent?.includes("Change")), "Ask answer draft restores within the tab scope");
   await act(async () => { remountRoot.unmount(); });
   dom.window.close();
 }
