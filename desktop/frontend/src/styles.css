@@ -10153,11 +10153,12 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 12px;
   background: var(--bg-soft);
   overflow: hidden;
+  box-sizing: border-box;
 }
 .prompt-shelf--ask .ask-shelf__custom-row:focus-within,
 .prompt-shelf--ask .ask-shelf__custom-row--active { border-color: var(--accent); }
-.ask-shelf__custom-indicator { color: var(--fg-dim); font-size: 18px; }
-.prompt-shelf--ask .ask-shelf__custom { border: 0; padding: 0; background: transparent; font-size: 14px; }
+.ask-shelf__custom-indicator { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; color: var(--fg-dim); font-size: 16px; line-height: 1; }
+.prompt-shelf--ask .ask-shelf__custom { height: 24px; min-height: 24px; border: 0; padding: 0; background: transparent; font-size: 14px; line-height: 24px; }
 .ask-shelf__footer-layout { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .ask-shelf__pager { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 15px; white-space: nowrap; }
 .ask-shelf__pager-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--fg-dim); cursor: pointer; }
