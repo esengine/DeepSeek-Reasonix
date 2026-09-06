@@ -2,7 +2,6 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
 import { chooseAppLayout } from "./app-page-actions.mjs";
 
@@ -10,6 +9,9 @@ const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
   ? path.join(frontendDir, ".pw-browsers")
   : process.env.PLAYWRIGHT_BROWSERS_PATH;
+// Playwright reads PLAYWRIGHT_BROWSERS_PATH at module evaluation; import it
+// only after the path normalization above.
+const { chromium } = await import("playwright");
 const port = Number(process.env.REASONIX_APP_BROWSER_PORT ?? 4657);
 const preview = await startPreviewServer(frontendDir, port);
 const browser = await chromium.launch({ headless: true });

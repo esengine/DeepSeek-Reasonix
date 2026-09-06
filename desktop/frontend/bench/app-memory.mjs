@@ -5,7 +5,6 @@ import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:
 import { once } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
 import { chooseAppLayout } from "./app-page-actions.mjs";
 import { attributeRetention, buildIdentity, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap } from "./app-memory-evidence.mjs";
@@ -14,6 +13,9 @@ const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
   ? path.join(frontendDir, ".pw-browsers")
   : process.env.PLAYWRIGHT_BROWSERS_PATH;
+// Playwright reads PLAYWRIGHT_BROWSERS_PATH at module evaluation; import it
+// only after the path normalization above.
+const { chromium } = await import("playwright");
 
 function integerEnv(name, fallback) {
   const value = Number(process.env[name]);
