@@ -38,6 +38,24 @@ func TestResolveDeepSeekScheduledRateBoundaries(t *testing.T) {
 	}
 }
 
+func TestDeepSeekRateBandWeekendIsAlwaysOffPeak(t *testing.T) {
+	tests := []struct {
+		name string
+		at   time.Time
+	}{
+		// Saturday and Sunday peak-window clock times must remain off-peak.
+		{"saturday_morning_window", time.Date(2026, 8, 22, 1, 30, 0, 0, time.UTC)},
+		{"sunday_afternoon_window", time.Date(2026, 8, 23, 7, 0, 0, 0, time.UTC)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DeepSeekRateBand(tc.at); got != RateBandOffPeak {
+				t.Fatalf("DeepSeekRateBand(%s) = %q, want %q", tc.at, got, RateBandOffPeak)
+			}
+		})
+	}
+}
+
 func TestBuildQuoteScheduledRateUsesMatchingPeerBand(t *testing.T) {
 	at := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
 	q := BuildQuote(QuoteInput{
