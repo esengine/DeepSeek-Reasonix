@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
-const app = read("../App.tsx");
+const app = read("../AppRuntime.tsx");
 const isolation = read("../lib/useManagementWorkspace.ts");
 const shell = read("../components/ManagementPageShell.tsx");
 const css = read("../components/ManagementPageShell.css");
