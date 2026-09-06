@@ -65,6 +65,17 @@ export async function executeTerminalOutputInsertion(
   return true;
 }
 
+export async function executeTodoDismissal(
+  target: SessionResource,
+  batchKey: string,
+  port: (tabId: string, batchKey: string) => Promise<void>,
+  authority: SessionOperationAuthority,
+): Promise<void> {
+  authority.checkpoint();
+  await port(target.tabId, batchKey);
+  authority.checkpoint();
+}
+
 export type SessionActionPorts = {
   approveForTab: (tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => void;
   resolvePlanForTab: (tabId: string, id: string, action: PlanDecisionAction) => void;

@@ -81,7 +81,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { useComposerModeActions } from "./lib/useComposerModeActions";
 import { useSessionOperations } from "./app-runtime/useSessionOperations";
-import { executeCancelRuntimeJob, executeClearSession, executeTerminalOutputInsertion } from "./app-runtime/sessionActionOwner";
+import { executeCancelRuntimeJob, executeClearSession, executeTerminalOutputInsertion, executeTodoDismissal } from "./app-runtime/sessionActionOwner";
 import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
@@ -879,7 +879,12 @@ export default function App() {
       saveDismissedTodoKeys(next);
       return next;
     });
-    if (!remoteSurfaceActive && activeTabId && todoBatch) void app.DismissTodoBatchForTab(activeTabId, todoBatch).catch(() => undefined);
+    if (!remoteSurfaceActive && activeTabId && todoBatch) {
+      const target = { tabId: activeTabId, sessionKey: activeSessionIdentity };
+      void sessionOperations(target, "todo-dismiss", {}, (_input, authority) => executeTodoDismissal(
+        target, todoBatch, (tabId, batchKey) => app.DismissTodoBatchForTab(tabId, batchKey), authority,
+      )).catch(() => undefined);
+    }
   });
   const handleTodoContinue = useCommittedCommand(() => {
     const targetTabId = todoContinueTarget(activeTabId, activeTabId, {
