@@ -145,6 +145,17 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		}
 		start := time.Now()
 		startedAt[i] = start.UnixMilli()
+		// Durable execution barrier: once this event is persisted, cancellation
+		// must classify the call as unknown rather than not-started.
+		if err := event.EmitChecked(a.svc.sink, event.Event{Kind: event.ToolStarted, Tool: event.Tool{
+			ID: calls[i].ID, Name: calls[i].Name, Args: calls[i].Arguments,
+			ResolvedName: calls[i].ResolvedName, CapabilityID: calls[i].CapabilityID,
+			RunState: string(provider.ToolRunRunning),
+		}}); err != nil {
+			outcomes[i] = toolOutcome{output: "error: tool start was not durable", errMsg: err.Error()}
+			results[i] = outcomes[i].output
+			return
+		}
 		outcomes[i] = a.executeOne(ctx, turn, calls[i])
 		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {

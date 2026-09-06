@@ -75,6 +75,9 @@ const (
 	// ToolResult for long tools like bash so a frontend can show live progress.
 	// Appended last to keep the Kind values before it wire-stable.
 	ToolProgress
+	// ToolStarted is the durable execution barrier after dispatch and before
+	// invoking a tool. It is distinct from ToolDispatch for UI compatibility.
+	ToolStarted
 	// MCPSurfaceReady fires once per server when its background-loaded surface
 	// (prompts or resources) finishes after startup. Lets UIs refresh /mcp
 	// status without polling. Text carries "<server>: <surface> ready (<count>

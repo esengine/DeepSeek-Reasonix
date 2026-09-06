@@ -165,7 +165,7 @@ func ToWire(e event.Event) Event {
 	switch e.Kind {
 	case event.Notice:
 		w.applyNotice(e)
-	case event.ToolDispatch, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
+	case event.ToolDispatch, event.ToolStarted, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
 		wt := &Tool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			ResolvedName: e.Tool.ResolvedName, CapabilityID: e.Tool.CapabilityID,
@@ -669,6 +669,7 @@ var kindNames = map[event.Kind]string{
 	event.CompactionStarted:       "compaction_started",
 	event.CompactionDone:          "compaction_done",
 	event.ToolProgress:            "tool_progress",
+	event.ToolStarted:             "tool_started",
 	event.MCPSurfaceReady:         "mcp_surface_ready",
 	event.Retrying:                "retrying",
 	event.Steer:                   "steer",
