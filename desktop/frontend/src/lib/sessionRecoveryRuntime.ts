@@ -1,4 +1,4 @@
-import { app, onSessionRecovered } from "./bridge";
+import { app, onSessionActiveVersionChanged, onSessionRecovered } from "./bridge";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { onProjectTreeChangedV2 } from "./sessionCatalogBridge";
 import type { ProjectTopicKey } from "./sessionCatalogTypes";
@@ -60,6 +60,9 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
     });
     options.onRecovered();
   });
+  const unsubscribeActiveVersion = onSessionActiveVersionChanged(() => {
+    if (!stopped) options.onRecovered();
+  });
   const unsubscribeCatalog = onProjectTreeChangedV2((event) => {
     for (const pending of tracker.entries()) {
       if (pendingRecoveryMatchesRoots(pending, event.roots)) void settle(pending);
@@ -69,6 +72,7 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
   return () => {
     stopped = true;
     unsubscribeRecovery();
+    unsubscribeActiveVersion();
     unsubscribeCatalog();
   };
 }
