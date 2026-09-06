@@ -13,23 +13,24 @@ export function useTabProjectionLifecycle(input: {
   setOrder: Dispatch<SetStateAction<string[]>>;
   setProfiles: Dispatch<SetStateAction<Record<string, ComposerProfile>>>;
 }) {
+  const { tabs, activeTabId, meta, yoloRestoreRef, planIntentsRef, setOrder, setProfiles } = input;
   useEffect(() => {
-    const ids = input.tabs.map((tab) => tab.id);
-    input.setOrder((current) => {
+    const ids = tabs.map((tab) => tab.id);
+    setOrder((current) => {
       const next = current.filter((id) => ids.includes(id));
       for (const id of ids) if (!next.includes(id)) next.push(id);
       return next.join("\u0000") === current.join("\u0000") ? current : next;
     });
     const present = new Set(ids);
-    for (const id of Object.keys(input.yoloRestoreRef.current)) {
-      if (!present.has(id)) delete input.yoloRestoreRef.current[id];
+    for (const id of Object.keys(yoloRestoreRef.current)) {
+      if (!present.has(id)) delete yoloRestoreRef.current[id];
     }
-    input.planIntentsRef.current = pruneUserPlanModeIntents(input.planIntentsRef.current, present);
-    input.setProfiles((current) => hydrateComposerProfilesFromTabs(current, [...input.tabs]));
-  }, [input.setOrder, input.setProfiles, input.tabs]);
+    planIntentsRef.current = pruneUserPlanModeIntents(planIntentsRef.current, present);
+    setProfiles((current) => hydrateComposerProfilesFromTabs(current, [...tabs]));
+  }, [planIntentsRef, setOrder, setProfiles, tabs, yoloRestoreRef]);
 
   useEffect(() => {
-    if (!input.activeTabId || !input.meta) return;
-    input.setProfiles((current) => hydrateComposerProfileFromMeta(current, input.activeTabId!, input.meta!));
-  }, [input.activeTabId, input.meta, input.setProfiles]);
+    if (!activeTabId || !meta) return;
+    setProfiles((current) => hydrateComposerProfileFromMeta(current, activeTabId, meta));
+  }, [activeTabId, meta, setProfiles]);
 }

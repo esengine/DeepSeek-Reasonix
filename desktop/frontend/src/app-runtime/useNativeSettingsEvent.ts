@@ -5,11 +5,12 @@ export function useNativeSettingsEvent(input: {
   closeTransientOverlays: () => void;
   setSettingsTarget: (target: ReturnType<typeof useAppNavigationStore.getState>["lastSettingsTarget"]) => void;
 }) {
+  const { closeTransientOverlays, setSettingsTarget } = input;
   useEffect(() => {
     if (typeof window === "undefined" || !window.runtime) return;
     return window.runtime.EventsOn("app:open-settings", () => {
-      input.closeTransientOverlays();
-      input.setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
+      closeTransientOverlays();
+      setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
     });
-  }, [input.closeTransientOverlays, input.setSettingsTarget]);
+  }, [closeTransientOverlays, setSettingsTarget]);
 }
