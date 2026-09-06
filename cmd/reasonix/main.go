@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/cli"
 	"reasonix/internal/config"
 	"reasonix/internal/crashreport"
+	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 
 	// Blank imports wire compile-time built-ins into their registries.
@@ -38,6 +39,9 @@ var runCLI = func(args []string, buildVersion string) int {
 
 func main() {
 	plugin.SetMCPClientVersion(version)
+	// Wire identity: LLM outbound requests carry Reasonix/<version> unless an
+	// explicit User-Agent (user config headers / provider presets) is set.
+	netclient.UserAgent = "Reasonix/" + version
 	os.Exit(runWithCrashCapture(os.Args[1:], version))
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"reasonix/internal/netclient"
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
 	_ "reasonix/internal/provider/anthropic"
@@ -106,6 +107,9 @@ func preparePrimaryDesktopRuntime(app *App) {
 
 func main() {
 	prepareLinuxRendererCompatibilityEnvironment()
+	// Wire identity: LLM outbound requests carry Reasonix/<version> unless an
+	// explicit User-Agent (user config headers / provider presets) is set.
+	netclient.UserAgent = "Reasonix/" + version
 	// Detached macOS self-update child: wait for the old PID, hold the shared
 	// repair mutation lock, then swap the .app bundle. Must run before Wails.
 	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {
