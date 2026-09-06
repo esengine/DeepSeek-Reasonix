@@ -9,6 +9,27 @@ import {
   PromptShelf,
 } from "./PromptShelf";
 
+const askDraftKey = (id: string) => `reasonix.ask-draft:${id}`;
+type AskDraft = {
+  sel: Record<string, string[]>;
+  custom: Record<string, string>;
+  active: number;
+  selectedIndex: number;
+  collapsed: boolean;
+};
+
+function readAskDraft(id: string): AskDraft | undefined {
+  try {
+    const raw = sessionStorage.getItem(askDraftKey(id));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<AskDraft>;
+    if (!parsed.sel || !parsed.custom || typeof parsed.active !== "number" || typeof parsed.selectedIndex !== "number") return undefined;
+    return { sel: parsed.sel, custom: parsed.custom, active: parsed.active, selectedIndex: parsed.selectedIndex, collapsed: parsed.collapsed === true };
+  } catch {
+    return undefined;
+  }
+}
+
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
 // walks multi-question asks one at a time. Selecting (click / digit) never
 // advances; Enter / Confirm submits or moves to the next question.
@@ -25,17 +46,17 @@ export function AskCard({
 }) {
   const t = useT();
   // Per-question state: selected option labels, and an optional typed answer.
-  const [sel, setSel] = useState<Record<string, string[]>>({});
-  const [custom, setCustom] = useState<Record<string, string>>({});
+  const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(ask.id)?.sel ?? {});
+  const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(ask.id)?.custom ?? {});
   const [customOpen, setCustomOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(() => readAskDraft(ask.id)?.active ?? 0);
   // Extra decision row after option labels: custom answer. Skip is a
   // secondary footer action rather than an answer choice.
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(() => readAskDraft(ask.id)?.selectedIndex ?? 0);
   const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
   const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => readAskDraft(ask.id)?.collapsed ?? false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
   const instanceId = useId();
@@ -60,13 +81,23 @@ export function AskCard({
 
   useEffect(() => {
     shelfRef.current?.focus();
-    setSel({});
-    setCustom({});
+    const draft = readAskDraft(ask.id);
+    setSel(draft?.sel ?? {});
+    setCustom(draft?.custom ?? {});
     setCustomOpen(false);
-    setActive(0);
-    setSelectedIndex(0);
+    setActive(draft?.active ?? 0);
+    setSelectedIndex(draft?.selectedIndex ?? 0);
     setSubmitting(false);
+    setCollapsed(draft?.collapsed ?? false);
   }, [ask.id]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, active, selectedIndex, collapsed } satisfies AskDraft));
+    } catch {
+      // Session storage is best effort; the live pending ask remains authoritative.
+    }
+  }, [active, ask.id, collapsed, custom, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
@@ -112,7 +143,9 @@ export function AskCard({
   const finishOrAdvance = (nextSel = sel, nextCustom = custom) => {
     if (submitting) return;
     if (isLast) {
-      submitAction(() => onAnswer(ask.id, answersFrom(nextSel, nextCustom)));
+      submitAction(() => Promise.resolve(onAnswer(ask.id, answersFrom(nextSel, nextCustom))).then(() => {
+        sessionStorage.removeItem(askDraftKey(ask.id));
+      }));
       return;
     }
     setActive((i) => Math.min(i + 1, questions.length - 1));
@@ -379,7 +412,9 @@ export function AskCard({
           onConfirm={confirmSelected}
           secondaryLabel={t("ask.justChat")}
           onSecondary={() => {
-            submitAction(onDismiss);
+            submitAction(() => Promise.resolve(onDismiss()).then(() => {
+              sessionStorage.removeItem(askDraftKey(ask.id));
+            }));
           }}
           disabled={submitting}
           confirmDisabled={!canConfirm()}

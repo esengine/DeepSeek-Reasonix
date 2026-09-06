@@ -52,6 +52,7 @@ function installDom() {
   globalThis.KeyboardEvent = dom.window.KeyboardEvent;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.localStorage = dom.window.localStorage;
+  globalThis.sessionStorage = dom.window.sessionStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", {
@@ -746,6 +747,47 @@ console.log("\nask card layout");
   await act(async () => { option.click(); await flushTimers(); });
   ok(!card.classList.contains("prompt-shelf__card--collapsed"), "clicking an option does not collapse the Ask");
   await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+// Session-scoped drafts restore when the Ask surface remounts in the same tab.
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const ask: WireAsk = {
+    id: "ask-session-draft",
+    questions: [{ id: "q1", prompt: "Choose one", options: [{ label: "Keep" }, { label: "Change" }] }],
+  };
+  const render = async () => {
+    await act(async () => {
+      root.render(React.createElement(LocaleProvider, null,
+        React.createElement(AskCard, { ask, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+      ));
+      await flushTimers();
+    });
+  };
+  await render();
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
+      .find((button) => button.textContent?.includes("Change"))?.click();
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-shelf__header-button")]
+      .find((button) => button.getAttribute("aria-label") === "Collapse" || button.getAttribute("aria-label") === "收起")?.click();
+    await flushTimers();
+  });
+  await act(async () => { root.unmount(); });
+  const remountRoot = createRoot(rootEl);
+  await act(async () => {
+    remountRoot.render(React.createElement(LocaleProvider, null,
+      React.createElement(AskCard, { ask, onAnswer: () => undefined, onDismiss: () => undefined, onStop: () => undefined }),
+    ));
+    await flushTimers();
+  });
+  ok(Boolean(document.querySelector(".prompt-shelf__card--collapsed")), "Ask collapse state restores from the tab session");
+  const restoredDraft = sessionStorage.getItem("reasonix.ask-draft:ask-session-draft") ?? "";
+  ok(restoredDraft.includes("Change"), "Ask answer draft restores from the tab session");
+  await act(async () => { remountRoot.unmount(); });
   dom.window.close();
 }
 
