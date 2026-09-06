@@ -8,7 +8,21 @@ import (
 	"time"
 )
 
-func (c *mcpOAuthClient) refresh(ctx context.Context) error {
+// latestSupersedes reports that the credential now on disk may be used instead
+// of asking the endpoint for another. It has to be usable — a fresher identity
+// that already expired is no answer — and, when a server refused the one we
+// sent, it has to not be that same one. A server's refusal outranks this
+// machine's opinion of how fresh its token is.
+func latestSupersedes(latest mcpOAuthState, rejected *string, now time.Time) bool {
+	if !oauthAccessTokenUsable(latest, now) {
+		return false
+	}
+	return rejected == nil || latest.AccessToken != *rejected
+}
+
+// refresh replaces the stored credential. rejected names the one a server just
+// turned down, or is nil for the ordinary expiry-driven refresh.
+func (c *mcpOAuthClient) refresh(ctx context.Context, rejected *string) error {
 	releaseGate, err := acquireMCPOAuthRefreshGate(ctx, c.stateDir)
 	if err != nil {
 		return fmt.Errorf("serialize MCP OAuth token refresh: %w", err)
@@ -30,7 +44,7 @@ func (c *mcpOAuthClient) refresh(ctx context.Context) error {
 		return fmt.Errorf("MCP OAuth token refresh: stored token belongs to a different MCP resource")
 	}
 	c.state = latest
-	if oauthAccessTokenUsable(latest, time.Now()) {
+	if latestSupersedes(latest, rejected, time.Now()) {
 		release()
 		return nil
 	}

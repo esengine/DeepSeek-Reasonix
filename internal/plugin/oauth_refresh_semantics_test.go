@@ -51,14 +51,25 @@ func (f *refreshFixture) client() *mcpOAuthClient {
 	return &mcpOAuthClient{stateDir: f.dir, state: f.state, client: http.DefaultClient}
 }
 
-func (f *refreshFixture) ask(t *testing.T, c *mcpOAuthClient, force bool) string {
+func (f *refreshFixture) ask(t *testing.T, c *mcpOAuthClient) string {
 	t.Helper()
-	header, used, err := c.authorizationHeader(context.Background(), force)
+	header, used, err := c.authorizationHeader(context.Background())
+	return checked(t, header, used, err)
+}
+
+func (f *refreshFixture) askAfterReject(t *testing.T, c *mcpOAuthClient, rejected string) string {
+	t.Helper()
+	header, used, err := c.authorizationHeaderAfterReject(context.Background(), rejected)
+	return checked(t, header, used, err)
+}
+
+func checked(t *testing.T, header string, used bool, err error) string {
+	t.Helper()
 	if err != nil {
-		t.Fatalf("authorizationHeader(force=%v): %v", force, err)
+		t.Fatalf("authorization: %v", err)
 	}
 	if !used {
-		t.Fatalf("authorizationHeader(force=%v) sent no OAuth header", force)
+		t.Fatal("no OAuth header was produced")
 	}
 	return header
 }
@@ -67,7 +78,7 @@ func (f *refreshFixture) ask(t *testing.T, c *mcpOAuthClient, force bool) string
 // refused and the clock still likes is sent as it is.
 func TestAnUnrefusedTokenIsNotRefreshed(t *testing.T) {
 	f := newRefreshFixture(t, "current", time.Now().Add(time.Hour))
-	if got := f.ask(t, f.client(), false); got != "Bearer current" {
+	if got := f.ask(t, f.client()); got != "Bearer current" {
 		t.Errorf("header = %q, want the stored token", got)
 	}
 	if n := f.calls.Load(); n != 0 {
@@ -89,7 +100,7 @@ func TestATokenSomeoneElseAlreadyReplacedIsUsedRatherThanRefreshedAgain(t *testi
 		t.Fatal(err)
 	}
 
-	if got := f.ask(t, c, true); got != "Bearer replaced-by-another-actor" {
+	if got := f.askAfterReject(t, c, "refused"); got != "Bearer replaced-by-another-actor" {
 		t.Errorf("header = %q, want the token the other actor stored", got)
 	}
 	if n := f.calls.Load(); n != 0 {
@@ -97,48 +108,62 @@ func TestATokenSomeoneElseAlreadyReplacedIsUsedRatherThanRefreshedAgain(t *testi
 	}
 }
 
-// Arm A — the one that is wrong today. The server refused the canonical token
-// and nobody has replaced it, so how fresh the local clock finds it decides
-// nothing. It is asserted here as it behaves, not as it should: when this
-// fails, the recovery was fixed, and this becomes
-// TestARefusedTokenThatIsStillCanonicalIsRefreshed.
-func TestKnownGapARefusedTokenIsHandedBackUnchanged(t *testing.T) {
+// Arm A — a server's refusal outranks this machine's opinion. The refused token
+// is still the canonical one and the clock likes it for another hour, and none
+// of that survives the endpoint having said no.
+func TestARefusedTokenThatIsStillCanonicalIsRefreshed(t *testing.T) {
 	f := newRefreshFixture(t, "refused", time.Now().Add(time.Hour))
-	got := f.ask(t, f.client(), true)
-	if got != "Bearer refused" || f.calls.Load() != 0 {
-		t.Fatalf("header %q after %d token calls — the refusal now reaches the endpoint, so replace this with the contract",
-			got, f.calls.Load())
+	if got := f.askAfterReject(t, f.client(), "refused"); got != "Bearer granted" {
+		t.Errorf("header = %q, want the refreshed token", got)
+	}
+	if n := f.calls.Load(); n != 1 {
+		t.Errorf("token endpoint calls = %d, want exactly 1", n)
 	}
 }
 
-// And the reason a one-line fix will not do it: nothing tells the refresh which
-// credential was refused, so the two arms above arrive identical. Arm B must
-// keep its answer and arm A must change, and today they are one call with one
-// argument. The signature is where that gets settled.
-func TestTheRefreshIsNotToldWhichCredentialWasRefused(t *testing.T) {
-	same := newRefreshFixture(t, "refused", time.Now().Add(time.Hour))
-	other := newRefreshFixture(t, "refused", time.Now().Add(time.Hour))
-	replaced := other.state
-	replaced.AccessToken = "replaced-by-another-actor"
-	if err := saveMCPOAuthState(other.dir, replaced); err != nil {
+// Arm B2 — the identity test must not swallow the freshness one. A credential
+// that is merely different from the refused one is not thereby a credential
+// worth sending.
+func TestAReplacementThatIsItselfExpiredIsNotUsed(t *testing.T) {
+	f := newRefreshFixture(t, "refused", time.Now().Add(time.Hour))
+	c := f.client()
+
+	stale := f.state
+	stale.AccessToken = "replaced-but-already-expired"
+	stale.Expiry = time.Now().Add(-time.Minute)
+	if err := saveMCPOAuthState(f.dir, stale); err != nil {
 		t.Fatal(err)
 	}
 
-	// Two different situations, one indistinguishable request.
-	same.ask(t, same.client(), true)
-	other.ask(t, other.client(), true)
-	if same.calls.Load() != other.calls.Load() {
-		t.Fatalf("the two arms already differ (%d vs %d): the identity reached the refresh, so this note is done",
-			same.calls.Load(), other.calls.Load())
+	if got := f.askAfterReject(t, c, "refused"); got != "Bearer granted" {
+		t.Errorf("header = %q, want a refreshed token rather than an expired replacement", got)
+	}
+	if n := f.calls.Load(); n != 1 {
+		t.Errorf("token endpoint calls = %d, want exactly 1", n)
 	}
 }
 
-// The refused token has to come from the production chain, not from a flag a
-// test set: a real endpoint answers 401 to the stored token and 200 to the
-// refreshed one. When this fails the recovery landed, and it becomes the
-// negative control the classification needs — a 401 the transport recovered
-// from is never a failure.
-func TestKnownGapA401IsRetriedWithTheTokenTheServerJustRefused(t *testing.T) {
+// The rejection has to name what actually went out. Asking about a credential
+// nobody sent is the shape a caller falls into by re-reading the store after
+// the refusal, and it answers the wrong question.
+func TestTheRejectionNamesTheCredentialThatWasSent(t *testing.T) {
+	f := newRefreshFixture(t, "current", time.Now().Add(time.Hour))
+	// Someone else's rejected token: what we hold was never refused, so it
+	// stands, and the endpoint hears nothing.
+	if got := f.askAfterReject(t, f.client(), "a-token-this-client-never-sent"); got != "Bearer current" {
+		t.Errorf("header = %q, want the credential this client holds", got)
+	}
+	if n := f.calls.Load(); n != 0 {
+		t.Errorf("token endpoint calls = %d, want 0", n)
+	}
+}
+
+// Arm D — the whole thing through the transport that does it for real. A server
+// refuses the stored credential, the refresh answers with another, and the
+// retry carries the new one. Two requests, two different credentials, and no
+// failure for anyone downstream to classify: a 401 the transport recovered
+// from never becomes one.
+func TestA401TheTransportRecoveredFromIsNotAFailure(t *testing.T) {
 	var sent []string
 	refreshes := &atomic.Int64{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,12 +202,37 @@ func TestKnownGapA401IsRetriedWithTheTokenTheServerJustRefused(t *testing.T) {
 	}
 	defer transport.close()
 
-	_, callErr := transport.call(context.Background(), "ping", nil)
-	if callErr == nil || refreshes.Load() != 0 {
-		t.Fatalf("the 401 reached the token endpoint (%d refreshes, err=%v): write the contract instead of this",
-			refreshes.Load(), callErr)
+	if _, err := transport.call(context.Background(), "ping", nil); err != nil {
+		t.Fatalf("a 401 the refresh should have fixed still surfaced: %v", err)
 	}
-	if len(sent) != 2 || sent[0] != "Bearer refused" || sent[1] != "Bearer refused" {
-		t.Fatalf("credentials sent = %v; the retry no longer reuses the refused token", sent)
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("refreshes = %d, want exactly 1", n)
+	}
+	if len(sent) != 2 || sent[0] != "Bearer refused" || sent[1] != "Bearer granted" {
+		t.Errorf("credentials sent = %v, want the refused one then the granted one", sent)
+	}
+}
+
+// The ordinary request must not have become more expensive. This is a fix to
+// the rejection path, and a proactive ask still touches no endpoint and leaves
+// the store as it found it.
+func TestAnOrdinaryRequestStillCostsNoTokenTraffic(t *testing.T) {
+	f := newRefreshFixture(t, "current", time.Now().Add(time.Hour))
+	before, err := loadMCPOAuthState(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ask(t, f.client()); got != "Bearer current" {
+		t.Errorf("header = %q", got)
+	}
+	after, err := loadMCPOAuthState(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.calls.Load() != 0 {
+		t.Errorf("token endpoint calls = %d, want 0", f.calls.Load())
+	}
+	if after.AccessToken != before.AccessToken || !after.Expiry.Equal(before.Expiry) {
+		t.Errorf("the store moved: %+v -> %+v", before, after)
 	}
 }

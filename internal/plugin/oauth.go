@@ -281,13 +281,30 @@ func newMCPOAuthClient(stateDir string, httpClient *http.Client) (*mcpOAuthClien
 	return &mcpOAuthClient{stateDir: stateDir, state: state, client: newOAuthHTTPClient(httpClient)}, nil
 }
 
-func (c *mcpOAuthClient) authorizationHeader(ctx context.Context, forceRefresh bool) (string, bool, error) {
+// authorizationHeader is the ordinary ask: refresh only when this client's own
+// clock says the token is about to expire.
+func (c *mcpOAuthClient) authorizationHeader(ctx context.Context) (string, bool, error) {
+	return c.authorization(ctx, nil)
+}
+
+// authorizationHeaderAfterReject asks again after a server refused what was
+// sent. rejected is the credential that actually went out, not what the store
+// holds now — another actor may already have replaced it, and telling those two
+// apart is the whole judgement.
+func (c *mcpOAuthClient) authorizationHeaderAfterReject(ctx context.Context, rejected string) (string, bool, error) {
+	return c.authorization(ctx, &rejected)
+}
+
+// bearerToken reads the credential out of a header this package produced.
+func bearerToken(header string) string { return strings.TrimPrefix(header, "Bearer ") }
+
+func (c *mcpOAuthClient) authorization(ctx context.Context, rejected *string) (string, bool, error) {
 	if c == nil {
 		return "", false, nil
 	}
-	needsRefresh := forceRefresh || (strings.TrimSpace(c.state.RefreshToken) != "" && !c.state.Expiry.IsZero() && time.Now().Add(30*time.Second).After(c.state.Expiry))
-	if needsRefresh {
-		if err := c.refresh(ctx); err != nil {
+	stale := strings.TrimSpace(c.state.RefreshToken) != "" && !c.state.Expiry.IsZero() && time.Now().Add(30*time.Second).After(c.state.Expiry)
+	if rejected != nil || stale {
+		if err := c.refresh(ctx, rejected); err != nil {
 			return "", false, err
 		}
 	}

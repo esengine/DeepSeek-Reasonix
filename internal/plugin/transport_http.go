@@ -197,15 +197,20 @@ func (t *httpTransport) doOAuth(ctx context.Context, body []byte, refreshed bool
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
+	// What actually goes out, kept so a refusal can name it. Re-reading the
+	// store after the 401 would answer with whatever is there by then, and that
+	// is exactly the credential another actor may have replaced it with.
+	sent := ""
 	usedOAuth := false
 	if req.Header.Get("Authorization") == "" && t.oauth != nil {
-		header, used, err := t.oauth.authorizationHeader(ctx, false)
+		header, used, err := t.oauth.authorizationHeader(ctx)
 		if err != nil {
 			return nil, err
 		}
 		if header != "" {
 			req.Header.Set("Authorization", header)
 			usedOAuth = used
+			sent = bearerToken(header)
 		}
 	}
 	if sid := t.sessionID(); sid != "" {
@@ -216,7 +221,7 @@ func (t *httpTransport) doOAuth(ctx context.Context, body []byte, refreshed bool
 		return resp, err
 	}
 	_ = resp.Body.Close()
-	if _, _, err := t.oauth.authorizationHeader(ctx, true); err != nil {
+	if _, _, err := t.oauth.authorizationHeaderAfterReject(ctx, sent); err != nil {
 		return nil, err
 	}
 	return t.doOAuth(ctx, body, true)
