@@ -195,7 +195,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 2,276 lines (25 -> 22 effects). Six domain owners, remaining
+- App is still 2,237 lines (25 -> 22 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
@@ -230,7 +230,10 @@ source-only tests must be audited as their owning features migrate.
   shortcuts and the palette item builder over the session/extension/remote
   stores), and the composer command router in
   `app-runtime/useComposerRouter.ts` (shell/model/memory/clear/new routes,
-  decision-mock seeds, goal-draft submits, theme commands and remote steer).
+  decision-mock seeds, goal-draft submits, theme commands and remote steer),
+  and the trash/history commands in `app-runtime/useHistoryCommands.ts`
+  (open/close/refresh plus running-gated delete and rename with local view
+  filtering after backend success).
   The footer
   ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App

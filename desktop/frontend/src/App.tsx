@@ -18,10 +18,10 @@ import { publishNavigationIntent } from "./lib/useNavigationIntentFence";
 import { useProjectTopicCommands } from "./app-runtime/useProjectTopicCommands";
 import { desktopProjectAdapter } from "./app-runtime/desktopProjectAdapter";
 import { projectConversation, projectConversationLayout, projectNavigationSurfaceTarget } from "./app-runtime/conversationProjection";
+import type { HistoryViewState } from "./app-runtime/historyViewProjection";
 import { useWorkspacePanelCommands } from "./app-runtime/useWorkspacePanelCommands";
 import { useDesktopNavigation } from "./app-runtime/useDesktopNavigation";
 import { useRuntimeStatus } from "./app-runtime/useRuntimeStatus";
-import { sessionsForScope, type HistoryViewState } from "./app-runtime/historyViewProjection";
 import { useTerminalPanelCommands } from "./app-runtime/useTerminalPanelCommands";
 import { type HistoryLoadTrigger } from "./lib/useController";
 import { app, openExternal } from "./lib/bridge";
@@ -139,6 +139,7 @@ import { useTabBarCommands } from "./app-runtime/useTabBarCommands";
 import { useRuntimeEventHandlers } from "./app-runtime/useRuntimeEventHandlers";
 import { usePaletteCommands } from "./app-runtime/usePaletteCommands";
 import { useComposerRouter } from "./app-runtime/useComposerRouter";
+import { useHistoryCommands } from "./app-runtime/useHistoryCommands";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -1286,25 +1287,15 @@ export default function App() {
     setWorkspaceConflict(null);
   });
 
-  const openTrash = useCommittedCommand(async () => {
-    closeTransientOverlays();
-    setHistView(null);
-    openPage({ kind: "trash" });
-  });
-  const closeHistory = useCommittedCommand(() => {
-    closeTransientOverlays();
-    setHistView(null);
-  });
-  const refreshHistoryView = useCommittedCommand(async () => {
-    const sessions = await listSessions().catch(() => null);
-    if (!sessions) return;
-    setHistView((cur) =>
-      cur === null || cur.kind !== "history"
-        ? cur
-        : cur.source === "scope"
-          ? { ...cur, sessions: sessionsForScope(sessions, cur.filter) }
-          : { ...cur, sessions },
-    );
+  const { openTrash, closeHistory, refreshHistoryView, onDeleteSession, onRenameHistorySession } = useHistoryCommands({
+    running: state.running,
+    setHistView,
+    ports: {
+      listSessions,
+      deleteSession,
+      renameSession,
+      openPage: (page) => openPage(page),
+    },
   });
 
   const { openAutomationTopic, topicAccepted } = useAutomationNavigation({ noteIntent: noteNavigationIntent,
@@ -1445,35 +1436,6 @@ export default function App() {
   }, [sidebarCollapsed, managementActive, desktopPlatform, handleNavigateTopic]);
 
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
-  const onDeleteSession = useCommittedCommand(async (path: string) => {
-      if (state.running) return;
-      try {
-        await deleteSession(path);
-      } catch {
-        await refreshHistoryView();
-        return;
-      }
-      // Local state removal: filter the deleted session out of the current
-      // history view instead of re-fetching the full list from the backend.
-      setHistView((cur) =>
-        cur === null || cur.kind !== "history"
-          ? cur
-          : { ...cur, sessions: cur.sessions.filter((s) => s.path !== path) },
-      );
-    });
-  const onRenameHistorySession = useCommittedCommand(async (session: SessionMeta, title: string) => {
-      if (state.running) return;
-      if (session.topicId) await app.RenameTopic(session.topicId, title);
-      else await renameSession(session.path, title);
-      const sessions = await listSessions();
-      setHistView((cur) =>
-        cur === null
-          ? null
-          : cur.kind === "history"
-            ? { ...cur, sessions: cur.source === "scope" ? sessionsForScope(sessions, cur.filter) : sessions }
-            : cur,
-      );
-    });
   // Workspace: open the folder chooser and switch projects. The hook resets the
   // transcript and refreshes meta on a pick. A cancel is a no-op.
   const refreshTabsAfterMutation = useCommittedCommand((latest: () => boolean) => (
