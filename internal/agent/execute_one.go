@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -214,6 +215,10 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 	if resolver, ok := t.(tool.CallResolver); ok {
 		rc, rerr := resolver.ResolveCall(ctx, json.RawMessage(call.Arguments))
 		if rerr != nil {
+			var inputErr *capabilityInputError
+			if errors.As(rerr, &inputErr) {
+				return a.diagnoseCapabilityInputFailure(plan, rerr), true
+			}
 			return toolOutcome{
 				output: fmt.Sprintf("error: %v", rerr),
 				errMsg: firstLine(rerr.Error()),

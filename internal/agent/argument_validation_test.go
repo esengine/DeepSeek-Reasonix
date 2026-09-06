@@ -3,11 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -103,77 +101,6 @@ func TestUnavailableMCPCallPreservesResolutionReason(t *testing.T) {
 	}
 	if strings.Contains(out.output, "argument validation failed") {
 		t.Fatalf("unavailable resolution was validated as a concrete tool: %q", out.output)
-	}
-}
-
-func TestSchemaErrorThirdCallIsBlocked(t *testing.T) {
-	store := skillStoreWithArchitect(t)
-	reg := tool.NewRegistry()
-	reg.Add(skill.NewRunSkillTool(store, func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		t.Fatal("must not start")
-		return "", nil
-	}))
-	proxy := NewUseCapabilityTool(context.Background(), nil, nil, reg, nil, nil, func() capability.Catalog {
-		return capability.Catalog{Entries: []capability.Entry{{ID: "skill:team-architect", Kind: capability.KindSkill, Name: "team-architect"}}}
-	})
-	reg.Add(proxy)
-	a := New(nil, reg, NewSession("sys"), Options{}, event.Discard)
-	call := provider.ToolCall{Name: "use_capability", Arguments: `{"action":"call","capability_id":"skill:team-architect","arguments":{}}`}
-	var last toolOutcome
-	for i := 1; i <= 3; i++ {
-		call.ID = "c" + string(rune('0'+i))
-		last = a.executeOne(context.Background(), &a.turn, call)
-	}
-	if !last.blocked || !strings.Contains(last.output, "3 times") {
-		t.Fatalf("third call = %+v", last)
-	}
-}
-
-func TestSuccessfulInspectUnlocksSchemaLoopGuard(t *testing.T) {
-	store := skillStoreWithArchitect(t)
-	reg := tool.NewRegistry()
-	reg.Add(skill.NewRunSkillTool(store, func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		t.Fatal("must not start")
-		return "", nil
-	}))
-	proxy := NewUseCapabilityTool(context.Background(), nil, nil, reg, nil, nil, func() capability.Catalog {
-		return capability.Catalog{Entries: []capability.Entry{{ID: "skill:team-architect", Kind: capability.KindSkill, Name: "team-architect"}}}
-	})
-	reg.Add(proxy)
-	a := New(nil, reg, NewSession("sys"), Options{}, event.Discard)
-	bad := provider.ToolCall{Name: "use_capability", Arguments: `{"action":"call","capability_id":"skill:team-architect","arguments":{}}`}
-	for i := range 3 {
-		bad.ID = fmt.Sprintf("bad-%d", i)
-		_ = a.executeOne(context.Background(), &a.turn, bad)
-	}
-	inspected := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
-		ID: "inspect", Name: "use_capability", Arguments: `{"action":"inspect","capability_id":"skill:team-architect"}`,
-	})
-	if inspected.errMsg != "" || !strings.Contains(inspected.output, "input_schema") {
-		t.Fatalf("inspect = %+v", inspected)
-	}
-	bad.ID = "after-inspect"
-	after := a.executeOne(context.Background(), &a.turn, bad)
-	if after.blocked || strings.Contains(after.output, "3 times") {
-		t.Fatalf("inspect did not unlock schema guard: %+v", after)
-	}
-}
-
-func TestSchemaErrorIncrementIsAtomic(t *testing.T) {
-	var state turnLoopState
-	const workers = 64
-	var done sync.WaitGroup
-	done.Add(workers)
-	for range workers {
-		go func() {
-			defer done.Done()
-			state.incrementSchemaError("sig", "skill:x")
-		}()
-	}
-	done.Wait()
-	record := state.incrementSchemaError("sig", "skill:x")
-	if record.count != workers+1 {
-		t.Fatalf("count = %d, want %d", record.count, workers+1)
 	}
 }
 

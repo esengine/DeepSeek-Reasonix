@@ -161,3 +161,54 @@ registry for dispatch. The model lists, inspects, calls, or declines them via
 `use_capability` without changing the provider tool list. Task risk changes host
 planning, verification, and review policy, not which tools appear on the
 provider-visible surface. The retired `connect_tool_source` path is no longer registered.
+
+## Invalid arguments and recovery
+
+The host validates concrete tool arguments before extension interception,
+permission prompts, hooks, write leases, subagent execution, or tool dispatch.
+An extension replacement is resolved and validated again. Invalid arguments are
+an unexecuted tool error, not a permission refusal: correcting the input can
+succeed on any subsequent call without an inspect action or a new user turn.
+Normal permission and execution checks still apply to a corrected call.
+
+Errors retain the target name, schema fingerprint, violation paths, and
+`argument_validation:<tool>:<fingerprint>:<category>` diagnostic signature.
+Feedback identifies whether parameters belong at the direct tool's input root
+or inside a capability call's `arguments`. A conservative, value-free hint may
+identify a single redundant `arguments` wrapper when the inner object satisfies
+the concrete contract, including conditional validation. This is advice only:
+the host never unwraps, coerces, fills, or executes the supplied parameters as
+part of diagnosis. Legitimate `arguments` fields and nested skill contracts are
+preserved. Empty/null validation compatibility remains unchanged.
+
+Input errors returned before capability resolution also receive contract
+feedback when the outer schema establishes the error. Successful resolution is
+not subjected to a new envelope gate; unavailable targets and authorization
+errors keep their own reasons. A malformed host schema is a configuration
+problem, not something the model can fix by rewriting arguments. Existing
+third-party MCP schema-compilation fallback remains unchanged.
+
+`inspect` remains a contract discovery operation, not an unlock requirement.
+There is no schema-specific error counter or third-failure tool lock. The shared
+storm breaker gives a soft convergence hint after three consecutive equivalent
+failed batches; multiple calls in one batch do not add multiple rounds, and a
+successful result resets the existing failure streak. Parameter-only failures
+receive correction advice rather than instructions about bypassing permissions.
+If correction remains unsuccessful, the model may report tool argument
+generation failure and unfinished work. This does not mark the work completed.
+Real permission, Plan-mode, hook, and write-loop restrictions remain enforced.
+
+Convergence is advisory. With `MaxSteps=0` and no explicit budget, there is no
+fixed-round hard stop; configured step/spend limits and cancellation still work.
+No extra repair-model request, provider-specific switch, or tool-schema change
+is introduced. Feedback is bounded to 4 KiB and appended to the failed tool
+result without rewriting prior messages or the stable provider prefix. Additional
+feedback consumes context tokens; historical error messages are left intact.
+
+Argument validation/failure/skip/remote-dispatch counters retain their meaning;
+internal wrapper checks do not count as additional calls. The legacy
+`capability_loop_guard.RepeatFailures` and `BlockedCalls` fields remain in metrics
+for compatibility but are no longer incremented by new runs. They are not
+repurposed as storm-intervention counters; existing `loop_guard` notices describe
+those interventions. No session/config migration is required. Downgrading restores
+the older error-recovery behavior without changing the stored conversation.

@@ -54,7 +54,8 @@ type ArgumentAudit struct {
 	Validations, Fail, Skip, RemoteDispatch int
 }
 
-// LoopGuardAudit records deterministic stop/retry actions.
+// LoopGuardAudit retains the metrics wire layout. RepeatFailures and
+// BlockedCalls are retired schema-guard counters; new runs leave them zero.
 type LoopGuardAudit struct {
 	RepeatFailures, RepeatClarifications, SoftBudgetNudges int
 	BlockedCalls                                           int
@@ -168,14 +169,10 @@ func (a *Audit) RecordLoopGuard(kind string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	switch kind {
-	case "repeat_failure":
-		a.LoopGuard.RepeatFailures++
 	case "repeat_clarification":
 		a.LoopGuard.RepeatClarifications++
 	case "soft_budget":
 		a.LoopGuard.SoftBudgetNudges++
-	case "blocked":
-		a.LoopGuard.BlockedCalls++
 	}
 }
 
