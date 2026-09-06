@@ -37,15 +37,16 @@ func KillTree(cmd *exec.Cmd) {
 // StartTracked starts cmd inside a new Job Object whose KILL_ON_JOB_CLOSE flag
 // fells the whole tree — including a launcher's detached grandchild (cmd.exe →
 // node.exe, as the CodeGraph daemon re-parents itself off the launcher) — when
-// the handle closes via KillTracked or an abrupt reasonix exit. The child is
+// the handle closes via TrackedJob.Kill or an abrupt reasonix exit. The child is
 // created suspended and assigned to the job before it runs, so a fast shim can
 // no longer exec its grandchild and exit before assignment, orphaning a node
 // the job never captured (#3747). It is always resumed before returning, even
 // when job assignment fails, so a child is never left wedged suspended. Returns
-// the job handle, 0 if it could not be created — then KillTracked relies on
+// the job handle, 0 if it could not be created — then killTracked relies on
 // KillTree alone.
-func StartTracked(cmd *exec.Cmd) (uintptr, error) {
-	return startTracked(cmd, false)
+func StartTracked(cmd *exec.Cmd) (*TrackedJob, error) {
+	job, err := startTracked(cmd, false)
+	return &TrackedJob{h: job}, err
 }
 
 func startTracked(cmd *exec.Cmd, requireJob bool) (uintptr, error) {
@@ -169,24 +170,24 @@ func resumeProcess(pid uint32) error {
 	return nil
 }
 
-// KillTracked terminates cmd's whole process tree. When job (from StartTracked)
+// killTracked terminates cmd's whole process tree. When job (from StartTracked)
 // is non-zero, terminating it kills even detached descendants; the KillTree pass
 // then catches anything spawned in the gap before the job was assigned.
-func KillTracked(cmd *exec.Cmd, job uintptr) {
+func killTracked(cmd *exec.Cmd, job uintptr) {
 	if job == 0 {
 		KillTree(cmd)
 		return
 	}
-	FinishTracked(job)
+	finishTracked(job)
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 }
 
-// FinishTracked releases a completed command's Job Object. Closing a job with
+// finishTracked releases a completed command's Job Object. Closing a job with
 // KILL_ON_JOB_CLOSE also terminates descendants without a PID-reuse-prone
 // taskkill fallback after cmd.Wait.
-func FinishTracked(job uintptr) {
+func finishTracked(job uintptr) {
 	if job == 0 {
 		return
 	}

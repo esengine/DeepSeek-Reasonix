@@ -41,17 +41,17 @@ func TestKillTreeTerminatesChild(t *testing.T) {
 	}
 }
 
-func TestKillTrackedTerminatesChild(t *testing.T) {
+func TestTrackedJobKillTerminatesChild(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	job, err := StartTracked(cmd)
 	if err != nil {
 		t.Fatalf("StartTracked: %v", err)
 	}
-	if job != 0 {
-		t.Fatalf("StartTracked job = %d off Windows; want 0", job)
+	if job.Tracked() {
+		t.Fatal("StartTracked reported an OS handle off Windows, where the process group does the work")
 	}
 
-	KillTracked(cmd, job)
+	job.Kill(cmd)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -87,7 +87,7 @@ func TestKillTrackedReapsProcessGroupGrandchild(t *testing.T) {
 		t.Fatalf("grandchild %d not alive before kill", gcPid)
 	}
 
-	KillTracked(cmd, 0)
+	killTracked(cmd, 0)
 	_ = cmd.Wait()
 
 	deadline := time.Now().Add(5 * time.Second)

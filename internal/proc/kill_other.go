@@ -34,17 +34,17 @@ func SetProcessGroupKill(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setsid = true
 }
 
-// StartTracked starts cmd in its own session/process group so KillTracked /
+// StartTracked starts cmd in its own session/process group so TrackedJob.Kill /
 // KillTree can reap its whole tree. Off Windows the process group is the
-// equivalent of the Windows Job Object; it returns a 0 handle, and KillTracked
+// equivalent of the Windows Job Object; it owns no handle, and TrackedJob.Kill
 // falls back to KillTree.
-func StartTracked(cmd *exec.Cmd) (uintptr, error) {
+func StartTracked(cmd *exec.Cmd) (*TrackedJob, error) {
 	SetProcessGroupKill(cmd)
-	return 0, cmd.Start()
+	return &TrackedJob{}, cmd.Start()
 }
 
-// KillTracked terminates cmd's process tree; the handle is unused off Windows.
-func KillTracked(cmd *exec.Cmd, _ uintptr) { KillTree(cmd) }
+// killTracked terminates cmd's process tree; the handle is unused off Windows.
+func killTracked(cmd *exec.Cmd, _ uintptr) { KillTree(cmd) }
 
-// FinishTracked is a no-op off Windows, where StartTracked owns no OS handle.
-func FinishTracked(uintptr) {}
+// finishTracked is a no-op off Windows, where StartTracked owns no OS handle.
+func finishTracked(uintptr) {}

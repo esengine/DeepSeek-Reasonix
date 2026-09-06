@@ -52,13 +52,13 @@ func TestKillTrackedReapsTrackedTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTracked: %v", err)
 	}
-	if job == 0 {
-		t.Fatal("StartTracked returned 0 — job object not created")
+	if !job.Tracked() {
+		t.Fatal("StartTracked reported no handle — job object not created")
 	}
 	go func() { _, _ = io.Copy(io.Discard, stdout) }()
 	time.Sleep(500 * time.Millisecond) // let cmd.exe exec the ping grandchild into the job
 
-	KillTracked(cmd, job)
+	job.Kill(cmd)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

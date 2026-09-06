@@ -131,14 +131,13 @@ func (b *tailBuffer) String() string {
 type process struct {
 	pluginID string
 	cmd      *exec.Cmd
-	job      uintptr
+	job      *proc.TrackedJob
 	stdin    io.WriteCloser
 	stdout   io.ReadCloser
 	stderr   *tailBuffer
 
 	waitOnce sync.Once
 	waitDone chan struct{}
-	jobOnce  sync.Once
 }
 
 // resolveRuntimeCommand expands ${REASONIX_PLUGIN_ROOT} and enforces the exec
@@ -238,9 +237,10 @@ func (p *process) wait() {
 }
 
 // finishJob releases the Windows Job Object once the process is known to be
-// gone (a no-op off Windows and after KillTracked already released it).
+// gone. The handle owns its own one-shot, so this and kill may both run, in
+// either order, from any number of goroutines.
 func (p *process) finishJob() {
-	p.jobOnce.Do(func() { proc.FinishTracked(p.job) })
+	p.job.Finish()
 }
 
 // kill terminates the whole process tree.
@@ -248,8 +248,7 @@ func (p *process) kill() {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
-	proc.KillTracked(p.cmd, p.job)
-	p.finishJob()
+	p.job.Kill(p.cmd)
 }
 
 // close stops the sidecar with the bounded sequence: close stdin, grant a

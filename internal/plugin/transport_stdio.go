@@ -38,7 +38,7 @@ type stdioTransport struct {
 	name   string
 	roots  []mcpRoot
 	cmd    *exec.Cmd
-	job    uintptr // Windows Job Object handle (0 elsewhere); reaps detached grandchildren on close
+	job    *proc.TrackedJob // reaps detached grandchildren on close; releases itself exactly once
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	stderr *tailBuffer
@@ -770,14 +770,14 @@ func (t *stdioTransport) close() {
 	if t.cmd == nil || t.cmd.Process == nil {
 		return
 	}
-	// Give protocol-aware servers a short chance to observe stdin EOF and clean
-	// up resources they launched outside the process group (Chrome isolated
-	// profiles are the important case). Hard-kill after the bounded grace period
-	// so an unresponsive MCP still cannot stall teardown.
+	// A short chance to observe stdin EOF and clean up what it launched outside
+	// the process group (Chrome isolated profiles are the case), then a hard
+	// kill, so an unresponsive MCP cannot stall teardown.
 	if waitFinishedWithinBudget(t.wait, gracefulCloseWaitBudget) {
+		t.job.Finish()
 		return
 	}
-	proc.KillTracked(t.cmd, t.job)
+	t.job.Kill(t.cmd)
 	waitWithBudget(t.wait, closeWaitBudget)
 }
 

@@ -47,7 +47,7 @@ type TrackedCommand struct {
 	cmd *exec.Cmd
 
 	mu     sync.Mutex
-	job    uintptr
+	job    *TrackedJob
 	tree   *TreeTracker
 	killed bool
 	diag   RunDiagnostics
@@ -180,13 +180,13 @@ func (p *TrackedCommand) Kill() {
 	p.killed = true
 	p.diag.KillCalls++
 	job := p.job
-	p.job = 0
+	p.job = nil
 	tree := p.tree
 	p.mu.Unlock()
 	if !firstKill {
-		job = 0
+		job = nil
 	}
-	KillTracked(p.cmd, job)
+	job.Kill(p.cmd)
 	if tree != nil {
 		treeKills := tree.Kill()
 		tree.Stop()
@@ -220,7 +220,7 @@ func (p *TrackedCommand) Diagnostics() RunDiagnostics {
 	return p.diag
 }
 
-func (p *TrackedCommand) setStarted(job uintptr) {
+func (p *TrackedCommand) setStarted(job *TrackedJob) {
 	if p == nil {
 		return
 	}
@@ -235,10 +235,10 @@ func (p *TrackedCommand) setStarted(job uintptr) {
 	}
 	p.diag.RootPID = rootPID
 	p.diag.Tracked = true
-	p.diag.JobObjectCreated = job != 0
+	p.diag.JobObjectCreated = job.Tracked()
 	p.mu.Unlock()
-	if killed && job != 0 {
-		KillTracked(p.cmd, job)
+	if killed && job.Tracked() {
+		job.Kill(p.cmd)
 	}
 }
 
