@@ -19,12 +19,17 @@ import (
 // and up to two cache-aligned summary checkpoints restore headroom.
 const (
 	defaultCompactRatio    = 0.80 // sole automatic maintenance trigger (new configs)
-	recentTailBudgetRatio  = 0.16 // recent verbatim tail as a fraction of the window
-	summaryOutputMaxTokens = 8192 // max digest output; further clipped by remaining candidate space
-	minRecentKeep          = 2    // never keep fewer recent messages than this
-	minCompactMessages     = 2    // skip compaction below this many compactable messages
-	fallbackTokPerChar     = 0.25 // ~4 chars/token, used before any usage is available to calibrate
-	protocolReserveTokens  = 256  // provider framing and control fields not represented by message estimates
+	// recentTailBudgetFactor is the fraction of the compact threshold retained
+	// verbatim as the recent tail. The tail budget is therefore
+	// window × compactRatio × factor, so lowering the compact ratio shrinks the
+	// retained prefix instead of leaving it at a fixed share of the window.
+	recentTailBudgetFactor  = 0.20 // recent verbatim tail as a fraction of the compact threshold
+	summaryOutputMaxTokens  = 8192 // max digest output; further clipped by remaining candidate space
+	minRecentKeep           = 2    // never keep fewer recent messages than this
+	minRecentKeepTurns      = 2    // never fold a whole recent user+assistant turn
+	minCompactMessages      = 2    // skip compaction below this many compactable messages
+	fallbackTokPerChar      = 0.25 // ~4 chars/token, used before any usage is available to calibrate
+	protocolReserveTokens   = 256  // provider framing and control fields not represented by message estimates
 )
 
 var (
@@ -114,13 +119,62 @@ func (a *Agent) hardInputCeiling() int {
 }
 
 // recentTailBudget is the content-construction budget for the recent verbatim
-// tail. Harness-style compaction always retains 16% of the model window.
+// tail. Harness-style compaction retains a share of the compact threshold
+// (window × compact_ratio × recentTailBudgetFactor), so a lower threshold also
+// shrinks the retained verbatim tail; at the default 0.80 this equals the
+// historic 16% of the window.
 func (a *Agent) recentTailBudget() int {
 	window := a.effectiveContextWindow()
 	if a == nil || window <= 0 {
 		return 1
 	}
-	return max(1, int(float64(window)*recentTailBudgetRatio))
+	ratio := a.compactRatio
+	if ratio <= 0 {
+		ratio = defaultCompactRatio
+	}
+	// Retain a share of the compact threshold, not of the window. Keeping this
+	// proportional to compact_ratio means lowering the threshold also lowers the
+	// retained verbatim tail (window × ratio × 0.20), so a 1M window at 0.80
+	// retains ~160k (140k+ preserved) while at 0.30 it retains ~60k.
+	return max(1, int(float64(window)*ratio*recentTailBudgetFactor))
+}
+
+// minRecentTailBudget returns the smallest verbatim-tail token budget that
+// still keeps the most recent user/assistant exchanges fully intact. The
+// budget covers the newest minRecentKeep messages and the newest
+// minRecentKeepTurns user messages (each with its assistant reply), so
+// lowering the compact threshold can never fold away the latest dialogue.
+func (a *Agent) minRecentTailBudget(msgs []provider.Message) int {
+	n := len(msgs)
+	if n == 0 {
+		return 1
+	}
+	tokPerChar := a.tokPerChar()
+	// Floor by the newest minRecentKeep messages.
+	budget := 0
+	for i := n - 1; i >= 0 && (n-1-i) < minRecentKeep; i-- {
+		budget += int(float64(msgChars(msgs[i])) * tokPerChar)
+	}
+	// Floor by the newest minRecentKeepTurns user messages (a user turn and its
+	// assistant reply), which preserves the most recent exchanges wholesale.
+	users := 0
+	turnBudget := 0
+	for i := n - 1; i >= 0; i-- {
+		turnBudget += int(float64(msgChars(msgs[i])) * tokPerChar)
+		if msgs[i].Role == provider.RoleUser {
+			users++
+			if users >= minRecentKeepTurns {
+				break
+			}
+		}
+	}
+	if turnBudget > budget {
+		budget = turnBudget
+	}
+	if budget <= 0 {
+		return 1
+	}
+	return budget
 }
 
 // foldEconomics estimates whether compacting the given region saves enough
@@ -270,6 +324,12 @@ func (a *Agent) planCompaction(msgs []provider.Message, min int, force bool) (he
 	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
 		budget := a.recentTailBudget()
+		// Never let a low compact threshold fold away the most recent turns:
+		// ratchet the verbatim tail up to a full recent user+assistant round
+		// so the latest exchange is always preserved verbatim.
+		if minBudget := a.minRecentTailBudget(msgs); minBudget > budget {
+			budget = minBudget
+		}
 		if force {
 			if half := estimateMessagesTokens(modelInputMessages(msgs)) / 2; half > 0 && half < budget {
 				budget = half

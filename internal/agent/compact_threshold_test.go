@@ -1,6 +1,11 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"reasonix/internal/provider"
+)
 
 // An output budget larger than the window it shares must never change the
 // sole compact_ratio trigger. Output is clipped only at send time.
@@ -26,27 +31,56 @@ func TestCompactTriggerIndependentOfOutputBudget(t *testing.T) {
 	}
 }
 
-func TestRecentTailBudgetIsFixedSixteenPercent(t *testing.T) {
+func TestRecentTailBudgetTracksCompactRatio(t *testing.T) {
 	cases := []struct {
-		window int
-		want   int
+		name        string
+		window      int
+		compactRatio float64
+		want        int
 	}{
-		{10_000, 1_600},
-		{128_000, 20_480},
-		{400_000, 64_000},
-		{1_000_000, 160_000},
+		// default 0.80 keeps the historic 16% of the window.
+		{"default-80pct-10k", 10_000, defaultCompactRatio, 1_600},
+		{"default-80pct-128k", 128_000, defaultCompactRatio, 20_480},
+		{"default-80pct-400k", 400_000, defaultCompactRatio, 64_000},
+		{"default-80pct-1m", 1_000_000, defaultCompactRatio, 160_000},
+		// Lowering the threshold shrinks the retained tail proportionally.
+		{"30pct-1m", 1_000_000, 0.30, 60_000},
+		{"85pct-1m", 1_000_000, 0.85, 170_000},
+		{"30pct-128k", 128_000, 0.30, 7_680},
 	}
 	for _, tc := range cases {
-		a := &Agent{agentConfig: agentConfig{contextWindow: tc.window, compactRatio: defaultCompactRatio}}
-		if got := a.recentTailBudget(); got != tc.want {
-			t.Fatalf("window %d: recentTailBudget = %d, want %d", tc.window, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Agent{agentConfig: agentConfig{contextWindow: tc.window, compactRatio: tc.compactRatio}}
+			if got := a.recentTailBudget(); got != tc.want {
+				t.Fatalf("window %d ratio %.2f: recentTailBudget = %d, want %d", tc.window, tc.compactRatio, got, tc.want)
+			}
+		})
 	}
 }
 
 func TestDefaultCompactRatioIsEightyPercent(t *testing.T) {
 	if defaultCompactRatio != 0.80 {
 		t.Fatalf("defaultCompactRatio = %v, want 0.80", defaultCompactRatio)
+	}
+}
+
+func TestMinRecentTailBudgetPreservesRecentTurns(t *testing.T) {
+	// A very large recent user+assistant round must be fully covered by the
+	// verbatim-tail floor so a low compact threshold never folds it away.
+	big := strings.Repeat("x", 100_000)
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: big},
+		{Role: provider.RoleAssistant, Content: "reply"},
+	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.30}}
+	got := a.minRecentTailBudget(msgs)
+	if got <= 0 {
+		t.Fatalf("minRecentTailBudget = %d, want > 0", got)
+	}
+	// The floor must not be smaller than the token estimate of the newest turn.
+	need := int(float64(msgChars(msgs[0])) * a.tokPerChar())
+	if got < need {
+		t.Fatalf("minRecentTailBudget = %d, want >= %d covering the recent turn", got, need)
 	}
 }
 
@@ -68,13 +102,6 @@ func TestExplicitLegacyCompactRatioStillApplies(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.85}}
 	if got := a.compactTrigger(); got != 850_000 {
 		t.Fatalf("compactTrigger = %d, want 850000", got)
-	}
-}
-
-func TestLowCompactRatioTriggerAtThirtyPercent(t *testing.T) {
-	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.30}}
-	if got := a.compactTrigger(); got != 300_000 {
-		t.Fatalf("compactTrigger = %d, want 300000", got)
 	}
 }
 
