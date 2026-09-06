@@ -2207,6 +2207,17 @@ func TestSnapshotConflictLogAttrsCarryRevisionLedger(t *testing.T) {
 	}
 }
 
+func TestSnapshotConflictRevisionsExtractTypedConflict(t *testing.T) {
+	conflict := &agent.SessionSnapshotConflictError{BaseRevision: 4, DiskRevision: 8}
+	base, disk := snapshotConflictRevisions(fmt.Errorf("wrapped: %w", conflict))
+	if base != 4 || disk != 8 {
+		t.Fatalf("revisions = %d/%d, want 4/8", base, disk)
+	}
+	if base, disk := snapshotConflictRevisions(errors.New("other")); base != 0 || disk != 0 {
+		t.Fatalf("non-conflict revisions = %d/%d, want 0/0", base, disk)
+	}
+}
+
 type noticeSink struct {
 	mu     sync.Mutex
 	events []event.Event

@@ -7,6 +7,7 @@ import type { ContextBudgetInfo, ContextMaintenanceInfo, WireContextMaintenance 
 import type { WireApproval } from "./approvalTypes";
 import type { RemoteProjectNodeFields, RemoteSessionMetaFields, RemoteTabMetaFields } from "./remoteTypes";
 import type { PinnedFileInfo } from "./pinnedContextBridge";
+import type { RecoveryLineageView } from "./sessionRecoveryTypes";
 export * from "./remoteTypes";
 export type { ContextBudgetInfo, ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectGroupsSnapshot, ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeOrganizationBindings, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionGroup, SessionReference } from "./sessionCatalogTypes";
@@ -537,6 +538,9 @@ export interface TabMeta extends RemoteTabMetaFields {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
+  versionKind?: "normal" | "recovery" | "subagent" | string;
+  versionState?: "active" | "pending" | "resolved" | "trashed" | string;
+  parentVersionId?: string;
   startupErr?: string;
   active: boolean;
   cwd: string;
@@ -571,6 +575,7 @@ export interface ProjectNode extends RemoteProjectNodeFields {
   label: string;
   root?: string;
   topicId?: string;
+  recoveryPath?: string;
   sessionPath?: string;
   preview?: string;
   projectColor?: string;
@@ -641,9 +646,12 @@ export interface DeliveryWorktreeOpenResult {
   workspaceRoot: string;
   worktreeRoot: string;
   sourceRoot: string;
-  branch: string;
-  sourceDirty: boolean;
-  tab: TabMeta;
+	branch: string;
+	sourceDirty: boolean;
+	sourceRevision?: string;
+	taskId?: string;
+	conversationId?: string;
+	tab: TabMeta;
 }
 
 export * from "./worktreeMergeTypes";
@@ -657,6 +665,9 @@ export interface TopicMeta {
 }
 
 export interface SessionRecoveryEvent {
+	conversationId?: string;
+	activeVersionId?: string;
+	recoveryVersionId?: string;
   originalPath?: string;
   recoveryPath: string;
   scope?: string;
@@ -666,11 +677,31 @@ export interface SessionRecoveryEvent {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
-  existing?: boolean;
+	existing?: boolean;
+	baseRevision?: number;
+	diskRevision?: number;
+	canContinue?: boolean;
+	requiresChoice?: boolean;
+}
+
+export interface SessionVersionStateView {
+  conversationId?: string;
+  activeVersionId?: string;
+  activePath?: string;
+  recoveryVersionId?: string;
+  canContinue: boolean;
+  requiresChoice: boolean;
+  lineage: RecoveryLineageView;
 }
 
 export interface SessionRecoveryFailedEvent {
   reason?: "lease_held" | "lease_unavailable" | string;
+  conversationId?: string;
+  topicId?: string;
+  canContinue?: boolean;
+  recoveryPending?: boolean;
+  recoveryPath?: string;
+  workspaceRoot?: string;
 }
 
 export interface ContextPanelInfo {

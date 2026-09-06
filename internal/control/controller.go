@@ -421,8 +421,18 @@ type SessionRecoveryInfo struct {
 	RecoveryPath string
 	Existing     bool
 	Reason       string
+	BaseRevision int64
+	DiskRevision int64
 	Meta         agent.BranchMeta
 	commit       *sessionRecoveryCommit
+}
+
+func snapshotConflictRevisions(err error) (base, disk int64) {
+	var conflict *agent.SessionSnapshotConflictError
+	if errors.As(err, &conflict) && conflict != nil {
+		return conflict.BaseRevision, conflict.DiskRevision
+	}
+	return 0, 0
 }
 
 // OnCommit defers publication work until the controller has installed the
@@ -4031,10 +4041,13 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 	if c.sessionRecoveryMeta != nil {
 		meta = c.sessionRecoveryMeta(req)
 	}
+	baseRevision, diskRevision := snapshotConflictRevisions(saveErr)
 	info, err := c.executor.Session().SaveRecoveryBranch(agent.RecoveryBranchOptions{
 		OriginalPath: path,
 		Reason:       reason,
 		BranchMeta:   meta,
+		BaseRevision: baseRevision,
+		DiskRevision: diskRevision,
 	})
 	if err != nil {
 		if errors.Is(err, agent.ErrSessionRecoveryNotNeeded) {
@@ -4101,6 +4114,8 @@ func (c *Controller) commitRecoveredSession(originalPath, reason string, info ag
 		RecoveryPath: info.Path,
 		Existing:     info.Existing,
 		Reason:       reason,
+		BaseRevision: info.Meta.BaseRevision,
+		DiskRevision: info.Meta.DiskRevision,
 		Meta:         info.Meta,
 		commit:       commit,
 	}

@@ -27,12 +27,15 @@ var (
 // IsolatedWorktreeOpenResult is returned after an isolated Git workspace has
 // been created and opened as a normal Reasonix project.
 type IsolatedWorktreeOpenResult struct {
-	WorkspaceRoot string  `json:"workspaceRoot"`
-	WorktreeRoot  string  `json:"worktreeRoot"`
-	SourceRoot    string  `json:"sourceRoot"`
-	Branch        string  `json:"branch"`
-	SourceDirty   bool    `json:"sourceDirty"`
-	Tab           TabMeta `json:"tab"`
+	WorkspaceRoot  string  `json:"workspaceRoot"`
+	WorktreeRoot   string  `json:"worktreeRoot"`
+	SourceRoot     string  `json:"sourceRoot"`
+	Branch         string  `json:"branch"`
+	SourceDirty    bool    `json:"sourceDirty"`
+	SourceRevision string  `json:"sourceRevision,omitempty"`
+	TaskID         string  `json:"taskId,omitempty"`
+	ConversationID string  `json:"conversationId,omitempty"`
+	Tab            TabMeta `json:"tab"`
 }
 
 // DeliveryWorktreeOpenResult is the deprecated alias of
@@ -74,12 +77,15 @@ func (a *App) CreateIsolatedWorktree(workspaceRoot string) (IsolatedWorktreeOpen
 		return IsolatedWorktreeOpenResult{}, fmt.Errorf("isolated worktree was created at %s but Reasonix could not open it: %w", created.WorktreeRoot, err)
 	}
 	return IsolatedWorktreeOpenResult{
-		WorkspaceRoot: created.WorkspaceRoot,
-		WorktreeRoot:  created.WorktreeRoot,
-		SourceRoot:    created.SourceRoot,
-		Branch:        created.Branch,
-		SourceDirty:   created.SourceDirty,
-		Tab:           tab,
+		WorkspaceRoot:  created.WorkspaceRoot,
+		WorktreeRoot:   created.WorktreeRoot,
+		SourceRoot:     created.SourceRoot,
+		Branch:         created.Branch,
+		SourceDirty:    created.SourceDirty,
+		SourceRevision: created.Head,
+		TaskID:         tab.ID,
+		ConversationID: tab.TopicID,
+		Tab:            tab,
 	}, nil
 }
 
@@ -148,6 +154,19 @@ func (a *App) InspectWorktreeMerge(tabID string) (worktree.MergeInspection, erro
 		inspection.Blockers = append(inspection.Blockers, blockers...)
 	}
 	return inspection, nil
+}
+
+// GetWorktreeStatus is the stable status-query name for new clients. It keeps
+// the existing inspection implementation as the single owner of merge guards.
+func (a *App) GetWorktreeStatus(tabID string) (worktree.MergeInspection, error) {
+	return a.InspectWorktreeMerge(tabID)
+}
+
+// PrepareWorktreeMerge performs the same fresh inspection used immediately
+// before a merge request. The request is intentionally small so clients cannot
+// smuggle stale paths or identities across the Wails boundary.
+func (a *App) PrepareWorktreeMerge(tabID string) (worktree.MergeInspection, error) {
+	return a.InspectWorktreeMerge(tabID)
 }
 
 // MergeWorktreeBack merges only after active-work and dual-workspace lease

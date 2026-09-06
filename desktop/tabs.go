@@ -2429,11 +2429,16 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 	if a.botBridge != nil {
 		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
 	}
-	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok && meta.Recovered {
-		m.Recovered = true
-		m.RecoveryReason = meta.RecoveryReason
-		m.RecoveryDigest = meta.RecoveryDigest
-		m.RecoveryParentID = string(meta.ParentID)
+	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok {
+		m.VersionKind = string(meta.EffectiveVersionKind())
+		m.VersionState = string(meta.EffectiveVersionState())
+		m.ParentVersionID = meta.ParentVersionID
+		if meta.Recovered {
+			m.Recovered = true
+			m.RecoveryReason = meta.RecoveryReason
+			m.RecoveryDigest = meta.RecoveryDigest
+			m.RecoveryParentID = string(meta.ParentID)
+		}
 	}
 	return m
 }
@@ -6094,20 +6099,33 @@ func (a *App) forkTopicTitle(title string) string {
 }
 
 type sessionRecoveryEvent struct {
-	OriginalPath     string `json:"originalPath,omitempty"`
-	RecoveryPath     string `json:"recoveryPath"`
-	Scope            string `json:"scope,omitempty"`
-	WorkspaceRoot    string `json:"workspaceRoot,omitempty"`
-	TopicID          string `json:"topicId,omitempty"`
-	TopicTitle       string `json:"topicTitle,omitempty"`
-	RecoveryReason   string `json:"recoveryReason,omitempty"`
-	RecoveryDigest   string `json:"recoveryDigest,omitempty"`
-	RecoveryParentID string `json:"recoveryParentId,omitempty"`
-	Existing         bool   `json:"existing,omitempty"`
+	ConversationID    string `json:"conversationId,omitempty"`
+	ActiveVersionID   string `json:"activeVersionId,omitempty"`
+	RecoveryVersionID string `json:"recoveryVersionId,omitempty"`
+	OriginalPath      string `json:"originalPath,omitempty"`
+	RecoveryPath      string `json:"recoveryPath"`
+	Scope             string `json:"scope,omitempty"`
+	WorkspaceRoot     string `json:"workspaceRoot,omitempty"`
+	TopicID           string `json:"topicId,omitempty"`
+	TopicTitle        string `json:"topicTitle,omitempty"`
+	RecoveryReason    string `json:"recoveryReason,omitempty"`
+	RecoveryDigest    string `json:"recoveryDigest,omitempty"`
+	RecoveryParentID  string `json:"recoveryParentId,omitempty"`
+	Existing          bool   `json:"existing,omitempty"`
+	BaseRevision      int64  `json:"baseRevision,omitempty"`
+	DiskRevision      int64  `json:"diskRevision,omitempty"`
+	CanContinue       bool   `json:"canContinue"`
+	RequiresChoice    bool   `json:"requiresChoice"`
 }
 
 type sessionRecoveryFailedEvent struct {
-	Reason string `json:"reason,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	ConversationID  string `json:"conversationId,omitempty"`
+	TopicID         string `json:"topicId,omitempty"`
+	RecoveryPath    string `json:"recoveryPath,omitempty"`
+	WorkspaceRoot   string `json:"workspaceRoot,omitempty"`
+	CanContinue     bool   `json:"canContinue"`
+	RecoveryPending bool   `json:"recoveryPending"`
 }
 
 func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionRecoveryRequest) agent.BranchMeta {

@@ -50,6 +50,9 @@ type TabMeta struct {
 	RecoveryReason    string             `json:"recoveryReason,omitempty"`
 	RecoveryDigest    string             `json:"recoveryDigest,omitempty"`
 	RecoveryParentID  string             `json:"recoveryParentId,omitempty"`
+	VersionKind       string             `json:"versionKind,omitempty"`
+	VersionState      string             `json:"versionState,omitempty"`
+	ParentVersionID   string             `json:"parentVersionId,omitempty"`
 	StartupErr        string             `json:"startupErr,omitempty"`
 	Active            bool               `json:"active"`
 	Cwd               string             `json:"cwd"`

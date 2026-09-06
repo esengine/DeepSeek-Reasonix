@@ -48,8 +48,16 @@ type BranchMeta struct {
 	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
 	Goal             string `json:"goal,omitempty"`
 	Recovered        bool   `json:"recovered,omitempty"`
-	RecoveryReason   string `json:"recovery_reason,omitempty"`
-	RecoveryDigest   string `json:"recovery_digest,omitempty"`
+	// VersionKind separates ordinary transcripts, recovery copies, and
+	// session-backed subagents. Older sidecars infer recovery from Recovered.
+	VersionKind          SessionVersionKind  `json:"version_kind,omitempty"`
+	VersionState         SessionVersionState `json:"version_state,omitempty"`
+	ParentConversationID string              `json:"parent_conversation_id,omitempty"`
+	ParentVersionID      string              `json:"parent_version_id,omitempty"`
+	BaseRevision         int64               `json:"base_revision,omitempty"`
+	DiskRevision         int64               `json:"disk_revision,omitempty"`
+	RecoveryReason       string              `json:"recovery_reason,omitempty"`
+	RecoveryDigest       string              `json:"recovery_digest,omitempty"`
 	// RecoveryDepth is 1 for new stable recovery branches. Older nested
 	// files may still carry a larger historical value.
 	RecoveryDepth int `json:"recovery_depth,omitempty"`
@@ -75,6 +83,43 @@ type BranchMeta struct {
 	InFlightTurn         *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
 	// Closed completed todo shelves; desktop remounts hide the same fingerprint.
 	DismissedTodoBatches []string `json:"dismissed_todo_batches,omitempty"`
+}
+
+// SessionVersionKind is the durable identity class of a physical transcript.
+// It is intentionally separate from Recovered for compatibility with older
+// sidecars and from subagent metadata, which carries richer child lifecycle.
+type SessionVersionKind string
+
+const (
+	VersionNormal   SessionVersionKind = "normal"
+	VersionRecovery SessionVersionKind = "recovery"
+	VersionSubagent SessionVersionKind = "subagent"
+)
+
+type SessionVersionState string
+
+const (
+	VersionActive   SessionVersionState = "active"
+	VersionPending  SessionVersionState = "pending"
+	VersionResolved SessionVersionState = "resolved"
+	VersionTrashed  SessionVersionState = "trashed"
+)
+
+func (m BranchMeta) EffectiveVersionKind() SessionVersionKind {
+	if m.VersionKind != "" {
+		return m.VersionKind
+	}
+	if m.Recovered {
+		return VersionRecovery
+	}
+	return VersionNormal
+}
+
+func (m BranchMeta) EffectiveVersionState() SessionVersionState {
+	if m.VersionState != "" {
+		return m.VersionState
+	}
+	return VersionActive
 }
 
 const (

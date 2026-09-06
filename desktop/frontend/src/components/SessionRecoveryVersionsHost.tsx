@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { app } from "../lib/bridge";
+import { app, onSessionRecoveryFailed } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { ProjectTopicKey } from "../lib/sessionCatalogTypes";
 import { bindSessionVersionInspector } from "../lib/sessionRecoveryVersionHostBridge";
@@ -58,6 +58,16 @@ export function SessionRecoveryVersionsHost({ sessions, onResumeSession, onRecov
       stop?.();
     };
   }, []);
+
+  useEffect(() => onSessionRecoveryFailed((event) => {
+    showToast(event.recoveryPending ? t("recovery.failedPending") : t("recovery.failed"), "error", event.recoveryPending && event.recoveryPath && event.topicId ? {
+      actionLabel: t("recovery.retry"),
+      onAction: () => { void app.RetrySessionRecovery({
+        scope: event.workspaceRoot ? "project" : "global", workspaceRoot: event.workspaceRoot,
+        topicId: event.topicId!, path: event.recoveryPath!,
+      }).catch((error) => showToast(error instanceof Error ? error.message : String(error), "error")); },
+    } : undefined);
+  }), [showToast, t]);
 
   const inspectVersions = useCallback((session: SessionMeta, view: RecoveryLineageView) => {
     if (!session.topicId) return;

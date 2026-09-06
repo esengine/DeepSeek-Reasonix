@@ -365,6 +365,10 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
   GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<RecoveryLineageView>;
+  GetSessionVersionState(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string; recordClassification?: boolean }): Promise<import("./types").SessionVersionStateView>;
+  SetActiveSessionVersion(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  RetrySessionRecovery(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  ReconcileRecoveryVersions(key: { scope: string; workspaceRoot?: string; topicId: string; path?: string }): Promise<void>;
   ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
   CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;
@@ -651,6 +655,8 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   IsolatedWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateIsolatedWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
   InspectWorktreeMerge(tabID: string): Promise<WorktreeMergeInspection>;
+  GetWorktreeStatus(tabID: string): Promise<WorktreeMergeInspection>;
+  PrepareWorktreeMerge(tabID: string): Promise<WorktreeMergeInspection>;
   MergeWorktreeBack(request: WorktreeMergeRequest): Promise<WorktreeMergeResult>;
   RegisterNavigationIntent(token: string): Promise<void>;
   CloseMergedWorktreeTab(request: CloseMergedWorktreeTabRequest): Promise<CloseMergedWorktreeTabResult>;
@@ -1043,6 +1049,11 @@ export function onSessionRecovered(cb: (payload: SessionRecoveryEvent) => void):
   return () => {};
 }
 
+export function onSessionActiveVersionChanged(cb: (payload: SessionRecoveryEvent) => void): () => void {
+  if (typeof window === "undefined" || !window.runtime?.EventsOn) return () => {};
+  return window.runtime.EventsOn("session:active-version-changed", (payload?: unknown) => cb((payload ?? {}) as SessionRecoveryEvent));
+}
+
 export function onSessionRecoveryFailed(cb: (payload: SessionRecoveryFailedEvent) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("session:recovery-failed", (payload?: unknown) => cb((payload ?? {}) as SessionRecoveryFailedEvent));
@@ -1105,7 +1116,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(AddSkillPath|RemoveSkillPath|SetSkillPathEnabled|RefreshSkills|SetSkillEnabled|SetSkillImplicitInvocation|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|RegisterNavigationIntent|CloseMergedWorktreeTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|StartTopicActivation|EnsureBlankSurface|SetActiveTab|CloseTab|RegisterNavigationIntent|CloseMergedWorktreeTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|IsolatedWorktreeAvailability|CreateIsolatedWorktree|InspectWorktreeMerge|GetWorktreeStatus|PrepareWorktreeMerge|ReconcileRecoveryVersions|MergeWorktreeBack|FinalizeWorktreeMerge|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -3429,6 +3440,13 @@ function makeMockApp(): AppBindings {
         members: [],
       };
     },
+    async GetSessionVersionState(key) {
+      const lineage = await this.GetRecoveryLineage(key);
+      return { conversationId: key.topicId, canContinue: true, requiresChoice: lineage.state === "diverged" && lineage.unresolved > 0, lineage };
+    },
+    async SetActiveSessionVersion() {},
+    async RetrySessionRecovery() {},
+    async ReconcileRecoveryVersions() {},
     async ChooseRecoveryBranch() {},
     async CleanRecoveryLineage(request) {
       const topic = findMockTopic(request.topicId);

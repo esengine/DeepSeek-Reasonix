@@ -194,6 +194,22 @@ func TestBranchMetaRoundTripAndList(t *testing.T) {
 	}
 }
 
+func TestBranchMetaEffectiveVersionKindKeepsLegacyRecoveryReadable(t *testing.T) {
+	if got := (BranchMeta{Recovered: true}).EffectiveVersionKind(); got != VersionRecovery {
+		t.Fatalf("legacy recovered kind = %q, want %q", got, VersionRecovery)
+	}
+	if got := (BranchMeta{}).EffectiveVersionKind(); got != VersionNormal {
+		t.Fatalf("legacy normal kind = %q, want %q", got, VersionNormal)
+	}
+	if got := (BranchMeta{}).EffectiveVersionState(); got != VersionActive {
+		t.Fatalf("legacy version state = %q, want %q", got, VersionActive)
+	}
+	meta := BranchMeta{VersionKind: VersionSubagent, VersionState: VersionPending}
+	if meta.EffectiveVersionKind() != VersionSubagent || meta.EffectiveVersionState() != VersionPending {
+		t.Fatalf("explicit version identity was not preserved: %+v", meta)
+	}
+}
+
 func TestListBranchesSkipsCleanupPending(t *testing.T) {
 	dir := t.TempDir()
 	visiblePath := filepath.Join(dir, "visible.jsonl")

@@ -1,4 +1,4 @@
-import { app, onSessionRecovered } from "./bridge";
+import { app, onSessionActiveVersionChanged, onSessionRecovered } from "./bridge";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import { onProjectTreeChangedV2 } from "./sessionCatalogBridge";
 import type { ProjectTopicKey } from "./sessionCatalogTypes";
@@ -21,6 +21,7 @@ type SessionRecoveryRuntimeOptions = {
 export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptions): () => void {
   const tracker = new SessionRecoveryDivergenceTracker();
   const inFlight = new Set<string>();
+  const reconciling = new Set<string>();
   let stopped = false;
 
   const settle = async (pending: PendingSessionRecovery) => {
@@ -59,6 +60,20 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
       total: registration.occurrence,
     });
     options.onRecovered();
+    const topicId = event.topicId;
+    const reconcileKey = topicId ? [event.scope, event.workspaceRoot, topicId].join("\u0000") : "";
+    if (topicId && !reconciling.has(reconcileKey) && typeof app.ReconcileRecoveryVersions === "function") {
+      reconciling.add(reconcileKey);
+      void app.ReconcileRecoveryVersions({
+        scope: event.scope || (event.workspaceRoot ? "project" : "global"),
+        workspaceRoot: event.workspaceRoot,
+        topicId,
+        path: event.recoveryPath,
+      }).finally(() => reconciling.delete(reconcileKey));
+    }
+  });
+  const unsubscribeActiveVersion = onSessionActiveVersionChanged(() => {
+    if (!stopped) options.onRecovered();
   });
   const unsubscribeCatalog = onProjectTreeChangedV2((event) => {
     for (const pending of tracker.entries()) {
@@ -69,6 +84,7 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
   return () => {
     stopped = true;
     unsubscribeRecovery();
+    unsubscribeActiveVersion();
     unsubscribeCatalog();
   };
 }
