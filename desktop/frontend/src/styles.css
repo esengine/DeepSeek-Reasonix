@@ -39981,4 +39981,197 @@ body > .mermaid-diagram--fullscreen {
 
 .tool__mcp-app-open:hover {
   filter: brightness(0.95);
+
+/* Project grouping (#9222): workbench grouped containers + move/new-group panels. */
+.sidebar--workbench .project-tree__group {
+  display: flex;
+  flex-direction: column;
+}
+.sidebar--workbench .project-tree__group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 560;
+  cursor: pointer;
+  user-select: none;
+}
+.sidebar--workbench .project-tree__group-title:hover {
+  background: var(--sidebar-hover);
+}
+.project-tree__group-title--section {
+  color: var(--fg-faint);
+  font-weight: 520;
+  cursor: default;
+}
+.project-tree__group-caret {
+  width: 12px;
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 10px;
+  text-align: center;
+}
+.project-tree__group-icon {
+  flex: none;
+  color: var(--fg-faint);
+}
+.project-tree__group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-tree__group-count {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.project-tree__group-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.project-tree__group-title:hover .project-tree__group-actions {
+  opacity: 1;
+}
+.project-tree__group-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.project-tree__group-act:hover {
+  background: var(--bg-hover, var(--sidebar-hover));
+  color: var(--fg);
+}
+.project-tree__group-act--danger:hover {
+  color: var(--danger, #e5534b);
+}
+
+/* Move-to-group / new-group overlays (independent panels, no context submenu). */
+.move-group-panel {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-menu);
+  width: min(320px, calc(100% - 48px));
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  color: var(--fg);
+}
+.move-group__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.move-group__header svg {
+  color: var(--fg-faint);
+  flex: none;
+}
+.move-group__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.move-group__project {
+  color: var(--fg-faint);
+  font-style: normal;
+}
+.move-group__list {
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.move-group__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.move-group__row:hover {
+  background: var(--sidebar-hover);
+}
+.move-group__row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-group__swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--fg-faint);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+.move-group__swatch--empty {
+  background: transparent;
+}
+.move-group__new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.move-group__new:hover {
+  background: var(--sidebar-hover);
+}
+.move-group__create {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+}
+.move-group__input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
 }

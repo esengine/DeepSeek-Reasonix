@@ -1230,6 +1230,15 @@ export const zhTW: Record<DictKey, string> = {
   "projectTree.sortByUpdatedAt": "更新時間",
   "projectTree.createBlankProject": "新建空白專案",
   "projectTree.useExistingFolder": "使用現有資料夾",
+  "projectGroup.moveInto": "移動到分組",
+  "projectGroup.movePanelLabel": "移動到分組",
+  "projectGroup.ungrouped": "未分組",
+  "projectGroup.createNew": "新增分組",
+  "projectGroup.createPlaceholder": "分組名稱",
+  "projectGroup.createConfirm": "建立",
+  "projectGroup.rename": "重新命名",
+  "projectGroup.renamePrompt": "重新命名分組《{title}》：",
+  "projectGroup.delete": "刪除分組",
 
   // 記憶抽屜
   "memory.title": "記憶",
