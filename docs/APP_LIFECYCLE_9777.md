@@ -195,7 +195,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 2,852 lines (25 -> 23 effects). Six domain owners, remaining
+- App is still 2,645 lines (25 -> 23 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
@@ -216,7 +216,12 @@ source-only tests must be audited as their owning features migrate.
   (export commands, export popover outside-click close, theme scene), and the
   undo/rewind core in `app-runtime/useSessionUndo.ts` (per-tab rewind state
   trio, handleMessageAction/handleEditPrompt/handleSessionRevertCommitted;
-  the undo banner reads the hook's returned state). The footer
+  the undo banner reads the hook's returned state), the extension form
+  surface in `app-runtime/useExtensionSurface.ts` (busy/submit/cancel plus
+  the notification toast drain), and the tab-bar commands in
+  `app-runtime/useTabBarCommands.ts` (single-flight switch queue, gated
+  single/bulk close, background-runtime reveals and delivery-worktree
+  continuation). The footer
   ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App
   lifecycle and browser replays all pass.

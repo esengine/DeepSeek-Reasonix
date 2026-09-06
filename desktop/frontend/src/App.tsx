@@ -133,10 +133,6 @@ import {
 import { useOverlayStore } from "./store/overlays";
 import { recordFrontendDiagnostic } from "./lib/frontendDiagnosticBridge";
 import { paletteSessionDisplayTitle, paletteSessionHint, paletteSessionKeywords, sessionActivityTime } from "./lib/session";
-import { enqueueNavigationRequest, type PendingNavigationRequest } from "./lib/openTopicCoalescing";
-import {
-  guardBackendNavigationResult,
-} from "./lib/navigationSurfaceTransition";
 import { useNavigationSurface } from "./lib/useNavigationSurface";
 import {
   applyTheme,
@@ -180,6 +176,7 @@ import { useSessionBannerCommands } from "./app-runtime/useSessionBannerCommands
 import { useSessionExportCommands } from "./app-runtime/useSessionExportCommands";
 import { useSessionUndo } from "./app-runtime/useSessionUndo";
 import { useExtensionSurface } from "./app-runtime/useExtensionSurface";
+import { useTabBarCommands } from "./app-runtime/useTabBarCommands";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -417,7 +414,6 @@ export default function App() {
   const setSidebarSearchFocusSignal = useOverlayStore((s) => s.setSidebarSearchFocusSignal);
   const sidebarTogglePressed = useLayoutStore((state) => state.sidebarTogglePressed);
   const [clearContextPending, setClearContextPending] = useState(false);
-  const [pendingClose, setPendingClose] = useState<{ tabId: string; work: ActiveWorkView; stopping: boolean } | null>(null);
   const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
   const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
@@ -620,6 +616,40 @@ export default function App() {
       contentRevision: state.historyLayoutRevision,
     });
   }, [controllerReady, runtimeTransitioning, state.hydrating, state.historyLayoutRevision, state.running]);
+  const {
+    pendingClose, setPendingClose,
+    revealBackgroundRuntime, handleTabChange, handleTabClose,
+    resolvePendingClose, revealWorkspaceWriter, continueInDeliveryWorktree,
+    handleTabsClose, handleTabsReorder,
+  } = useTabBarCommands({
+    activeTabId,
+    tabMetas,
+    deliveryWorktreeRoot: state.meta?.workspaceRoot || state.meta?.workspacePath || state.meta?.cwd,
+    t,
+    showToast,
+    setTabMetas,
+    setTabOrderIds,
+    setComposerProfilesByTab,
+    setTabRevealSignal,
+    clearWorkspaceConflict: () => setWorkspaceConflict(null),
+    ports: {
+      closeTab,
+      reorderTabs,
+      switchTab,
+      switchRemoteTab,
+      refreshTabMetas: (apply, options) => refreshTabMetas(apply, options),
+      refreshBackgroundRuntimes,
+      cancelActive: () => void handleCancelActive(),
+      noteNavigationIntent,
+      beginNavigationSurface,
+      settleNavigationSurface,
+      isNavigationIntentCurrent,
+      reassertVisibleTabAfterStaleNavigation,
+      enterChatView: enterConversation,
+      createIsolatedWorktree,
+    },
+  });
+
   // Single footer decision surface. Composer stays mounted underneath and is
   // only visually/a11y-hidden so per-session draft caches survive.
   const decisionSurface = useMemo((): DecisionSurfaceKind | null => {
@@ -1427,213 +1457,6 @@ export default function App() {
   // openTopic/blank/resume navigation uses, so rapidly clicking between two
   // running sessions can't run two switchTab() calls concurrently. Concurrent
   // switches race on the backend SetActiveTab/confirmBackendActiveTab ordering,
-  // which lands events + hydration on the wrong session (#5352). switchTab's own
-  // loadSessionDataForTab is already seq-guarded; this serializes the backend
-  // activation around it.
-  const tabSwitchSeqRef = useRef(0);
-  const tabSwitchRunningRef = useRef(false);
-  const tabSwitchPendingRef = useRef<PendingNavigationRequest<{ tabId: string; optimisticTab?: TabMeta; navigationIntentSeq: number }> | null>(null);
-  const enterChatViewForTabNavigation = useCommittedCommand(() => {
-    enterConversation();
-  });
-  const enqueueTabSwitch = useCommittedCommand((tabId: string, optimisticTab?: TabMeta): Promise<void> => {
-      enterChatViewForTabNavigation();
-      // Claim the shared navigation epoch at click time, before this request
-      // can wait behind an older tab switch. That immediately invalidates any
-      // in-flight blank/topic completion from a previous user intent.
-      const navigationIntentSeq = noteNavigationIntent();
-      beginNavigationSurface(navigationIntentSeq);
-      return enqueueNavigationRequest(
-        { seqRef: tabSwitchSeqRef, runningRef: tabSwitchRunningRef, pendingRef: tabSwitchPendingRef },
-        { tabId, optimisticTab, navigationIntentSeq },
-        async (request) => {
-          try {
-            if (!isNavigationIntentCurrent(request.navigationIntentSeq)) return;
-            if (request.optimisticTab?.remote) await switchRemoteTab(request.optimisticTab, request.navigationIntentSeq);
-            else await switchTab(request.tabId, request.optimisticTab, request.navigationIntentSeq);
-            if (!isNavigationIntentCurrent(request.navigationIntentSeq)) return;
-            await refreshTabMetas(
-              () => isNavigationIntentCurrent(request.navigationIntentSeq),
-              { afterMutation: true },
-            );
-          } finally {
-            settleNavigationSurface(request.navigationIntentSeq);
-          }
-        },
-      );
-    });
-
-  const revealBackgroundRuntime = useCommittedCommand(async (tabId: string): Promise<void> => {
-    enterChatViewForTabNavigation();
-    const navigationIntentSeq = noteNavigationIntent();
-    beginNavigationSurface(navigationIntentSeq);
-    try {
-      const meta = await app.RevealBackgroundRuntime(tabId);
-      if (!await guardBackendNavigationResult({
-        intent: navigationIntentSeq,
-        targetTabId: meta.id,
-        kind: "tab.reveal-background",
-        isIntentCurrent: isNavigationIntentCurrent,
-        reassert: reassertVisibleTabAfterStaleNavigation,
-      })) return;
-      await switchTab(meta.id, meta, navigationIntentSeq);
-      if (!isNavigationIntentCurrent(navigationIntentSeq)) return;
-      await refreshTabMetas(
-        () => isNavigationIntentCurrent(navigationIntentSeq),
-        { afterMutation: true },
-      );
-    } catch (err) {
-      if (isNavigationIntentCurrent(navigationIntentSeq)) showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      settleNavigationSurface(navigationIntentSeq);
-    }
-  });
-
-  const handleTabChange = useCommittedCommand((id: string) => {
-    closeTransientOverlays();
-    const selected = tabMetas.find((tab) => tab.id === id);
-    setTabMetas((current) => current.map((tab) => ({ ...tab, active: tab.id === id })));
-    void enqueueTabSwitch(id, selected);
-    setTabRevealSignal((signal) => signal + 1);
-  });
-
-  const finishTabClose = useCommittedCommand(async (
-    id: string,
-    policy: "keep_running" | "stop_and_close",
-  ): Promise<boolean> => {
-    closeTransientOverlays();
-    const closed = await closeTab(id, policy);
-    if (!closed) {
-      showToast(t("runtime.closeFailed"), "error");
-      return false;
-    }
-    setComposerProfilesByTab((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setTabMetas((current) => {
-      if (current.length <= 1) return current;
-      const closingIndex = current.findIndex((tab) => tab.id === id);
-      if (closingIndex < 0) return current;
-      const closingTab = current[closingIndex];
-      const remaining = current.filter((tab) => tab.id !== id);
-      if (!closingTab.active && closingTab.id !== activeTabId) return remaining;
-      const nextIndex = Math.min(closingIndex, remaining.length - 1);
-      const nextActiveId = remaining[nextIndex]?.id;
-      return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
-    });
-    await refreshTabMetas(undefined, { afterMutation: true });
-    await refreshBackgroundRuntimes();
-    setTabRevealSignal((signal) => signal + 1);
-    return true;
-  });
-
-  const handleTabClose = useCommittedCommand(async (id: string) => {
-    try {
-      const work = await app.ActiveWorkForTab(id);
-      if (work.running || work.pendingPrompt || work.jobs.length > 0) {
-        setPendingClose({ tabId: id, work, stopping: false });
-        return;
-      }
-    } catch {
-      // CloseTabWithPolicy re-checks the controller state atomically.
-    }
-    await finishTabClose(id, "stop_and_close");
-  });
-
-  const resolvePendingClose = useCommittedCommand(async (policy: "keep_running" | "stop_and_close") => {
-    const request = pendingClose;
-    if (!request || request.stopping) return;
-    if (policy === "stop_and_close") setPendingClose({ ...request, stopping: true });
-    const closed = await finishTabClose(request.tabId, policy);
-    if (closed) setPendingClose(null);
-    else setPendingClose((current) => current?.tabId === request.tabId ? { ...current, stopping: false } : current);
-  });
-
-  const revealWorkspaceWriter = useCommittedCommand(async () => {
-    if (!activeTabId) return;
-    enterChatViewForTabNavigation();
-    const navigationIntentSeq = noteNavigationIntent();
-    beginNavigationSurface(navigationIntentSeq);
-    try {
-      const meta = await app.RevealWorkspaceWriterForTab(activeTabId);
-      if (!await guardBackendNavigationResult({
-        intent: navigationIntentSeq,
-        targetTabId: meta.id,
-        kind: "tab.reveal-workspace-writer",
-        isIntentCurrent: isNavigationIntentCurrent,
-        reassert: reassertVisibleTabAfterStaleNavigation,
-      })) return;
-      setWorkspaceConflict(null);
-      await switchTab(meta.id, meta, navigationIntentSeq);
-      if (!isNavigationIntentCurrent(navigationIntentSeq)) return;
-      await refreshTabMetas(
-        () => isNavigationIntentCurrent(navigationIntentSeq),
-        { afterMutation: true },
-      );
-    } catch (err) {
-      if (isNavigationIntentCurrent(navigationIntentSeq)) showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      settleNavigationSurface(navigationIntentSeq);
-    }
-  });
-
-  const continueInDeliveryWorktree = useCommittedCommand(async () => {
-    const root = state.meta?.workspaceRoot || state.meta?.workspacePath || state.meta?.cwd;
-    if (!root) return;
-    void handleCancelActive();
-    setWorkspaceConflict(null);
-    const navigationIntentSeq = noteNavigationIntent();
-    beginNavigationSurface(navigationIntentSeq);
-    try {
-      await createIsolatedWorktree(root, navigationIntentSeq);
-      await refreshTabMetas(undefined, { afterMutation: true });
-    } catch (err) {
-      if (isNavigationIntentCurrent(navigationIntentSeq)) showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      settleNavigationSurface(navigationIntentSeq);
-    }
-  });
-
-  const handleTabsClose = useCommittedCommand(async (ids: string[], nextActiveTabId?: string) => {
-    closeTransientOverlays();
-    const currentIds = tabMetas.map((tab) => tab.id);
-    const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
-    if (targets.length === 0) return;
-    for (const id of targets) {
-      let work: ActiveWorkView | null = null;
-      try {
-        work = await app.ActiveWorkForTab(id);
-      } catch { /* the close path remains authoritative */ }
-      if (work && (work.running || work.pendingPrompt || work.jobs.length > 0)) {
-        setPendingClose({ tabId: id, work, stopping: false });
-        return;
-      }
-      await finishTabClose(id, "stop_and_close");
-    }
-    if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
-      const selected = tabMetas.find((tab) => tab.id === nextActiveTabId);
-      setTabMetas((current) => current.map((tab) => ({ ...tab, active: tab.id === nextActiveTabId })));
-      void enqueueTabSwitch(nextActiveTabId, selected);
-    }
-    await refreshTabMetas(undefined, { afterMutation: true });
-    setTabRevealSignal((signal) => signal + 1);
-  });
-
-  const handleTabsReorder = useCommittedCommand(async (ids: string[]) => {
-    setTabOrderIds(ids);
-    setTabMetas((current) => {
-      const byId = new Map(current.map((tab) => [tab.id, tab]));
-      const ordered = ids.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-      return ordered.length === current.length ? ordered : current;
-    });
-    await reorderTabs(ids);
-    await refreshTabMetas(undefined, { afterMutation: true });
-    setTabRevealSignal((signal) => signal + 1);
-  });
-
   const transcriptHydrating = state.hydrating && !state.hydrateHistoryLoaded;
   // Creation hero only after history hydration settles on a truly empty session.
   // Avoid flash while switching tabs: items may be empty while placeholders show.
