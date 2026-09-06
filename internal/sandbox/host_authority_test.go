@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,25 @@ func TestAuthorityEndpointsFollowTheClientsResolution(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "missing.sock"))
 	if got := existingSockets(authorityEndpoints(SSHAgent)); len(got) != 0 {
 		t.Errorf("a missing endpoint was kept (%v); masking it would fail the sandbox closed", got)
+	}
+}
+
+// TestAuthorityEndpointsCoverEveryGovernedClient pins the two answers the
+// resolution has beyond the defaults: podman's per-user socket, which lives
+// wherever XDG_RUNTIME_DIR points, and an authority this table does not govern,
+// which resolves to nothing rather than to a guess.
+func TestAuthorityEndpointsCoverEveryGovernedClient(t *testing.T) {
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/4242")
+	got := authorityEndpoints(Podman)
+	want := filepath.Join("/run/user/4242", "podman", "podman.sock")
+	if !slices.Contains(got, want) {
+		t.Fatalf("podman endpoints = %v, want the per-user socket %s", got, want)
+	}
+
+	// An authority nothing governs has no endpoints. Returning a default here
+	// would mask a path on the strength of a name this table never resolved.
+	if got := authorityEndpoints(HostAuthority("nothing-governs-this")); got != nil {
+		t.Fatalf("ungoverned authority resolved to %v, want nothing", got)
 	}
 }

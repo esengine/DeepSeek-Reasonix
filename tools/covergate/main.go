@@ -38,7 +38,7 @@ func main() {
 	if len(globs) == 0 {
 		fail(fmt.Errorf("no `sensitive:` paths declared in the project's host checks"))
 	}
-	measured, err := measure(*root, globs)
+	measured, gaps, err := measure(*root, globs)
 	if err != nil {
 		fail(err)
 	}
@@ -70,11 +70,24 @@ func main() {
 	if len(below) > 0 {
 		for _, b := range below {
 			fmt.Fprintln(os.Stderr, "covergate: "+b)
+			for _, g := range topGaps(gaps[strings.SplitN(b, ":", 2)[0]], 8) {
+				fmt.Fprintf(os.Stderr, "    %3d statements uncovered at %s\n", g.stmts, g.where)
+			}
 		}
 		fmt.Fprintln(os.Stderr, "\nThese paths decide what the agent may execute and reach. Restore the\ncoverage, or run `go run ./tools/covergate -update -allow-drop` and\njustify the diff in the pull request.")
 		os.Exit(1)
 	}
 	fmt.Printf("covergate: clean (%d sensitive paths at or above their floor)\n", len(measured))
+}
+
+// topGaps is what to write a test for, largest first. A shortfall on a platform
+// the reader is not on cannot be measured by hand there, and a percentage alone
+// says only that something moved.
+func topGaps(list []gap, n int) []gap {
+	if len(list) > n {
+		return list[:n]
+	}
+	return list
 }
 
 func fail(err error) {
@@ -118,7 +131,7 @@ func packagesFor(globs []string) []string {
 	return pkgs
 }
 
-func measure(root string, globs []string) (map[string]float64, error) {
+func measure(root string, globs []string) (map[string]float64, map[string][]gap, error) {
 	profile := filepath.Join(os.TempDir(), "covergate.out")
 	defer os.Remove(profile)
 	args := append([]string{"test", "-count=1", "-coverprofile=" + profile}, packagesFor(globs)...)
@@ -126,23 +139,32 @@ func measure(root string, globs []string) (map[string]float64, error) {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "LANG=en_US.UTF-8")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("go test: %w\n%s", err, out)
+		return nil, nil, fmt.Errorf("go test: %w\n%s", err, out)
 	}
 	return fromProfile(profile, globs)
 }
 
 // fromProfile aggregates statements per declared path. Per file, not per
 // package: a project may call one file sensitive inside a package that is not.
-func fromProfile(profile string, globs []string) (map[string]float64, error) {
+// gap is one block of statements nothing executed. A floor that has slipped is
+// a fact about which lines; reporting only the percentage leaves whoever has to
+// restore it measuring the package by hand on a platform they may not have.
+type gap struct {
+	where string
+	stmts int
+}
+
+func fromProfile(profile string, globs []string) (map[string]float64, map[string][]gap, error) {
 	f, err := os.Open(profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	total := map[string][2]int{}
+	gaps := map[string][]gap{}
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		file, stmts, covered, ok := parseProfileLine(scanner.Text())
+		file, at, stmts, covered, ok := parseProfileLine(scanner.Text())
 		if !ok {
 			continue
 		}
@@ -154,12 +176,22 @@ func fromProfile(profile string, globs []string) (map[string]float64, error) {
 			t[0] += stmts
 			if covered > 0 {
 				t[1] += stmts
+			} else if stmts > 0 {
+				gaps[glob] = append(gaps[glob], gap{where: file + ":" + at, stmts: stmts})
 			}
 			total[glob] = t
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	for glob := range gaps {
+		sort.Slice(gaps[glob], func(i, j int) bool {
+			if gaps[glob][i].stmts != gaps[glob][j].stmts {
+				return gaps[glob][i].stmts > gaps[glob][j].stmts
+			}
+			return gaps[glob][i].where < gaps[glob][j].where
+		})
 	}
 	out := map[string]float64{}
 	for _, glob := range globs {
@@ -171,26 +203,26 @@ func fromProfile(profile string, globs []string) (map[string]float64, error) {
 		// floor held to more precision than it is written with fails on itself.
 		out[glob] = round1(float64(t[1]) / float64(t[0]) * 100)
 	}
-	return out, nil
+	return out, gaps, nil
 }
 
-func parseProfileLine(line string) (file string, stmts, covered int, ok bool) {
+func parseProfileLine(line string) (file, at string, stmts, covered int, ok bool) {
 	// reasonix/internal/pkg/file.go:12.34,15.6 3 1
 	colon := strings.LastIndex(line, ":")
 	if colon < 0 {
-		return "", 0, 0, false
+		return "", "", 0, 0, false
 	}
 	fields := strings.Fields(line[colon+1:])
 	if len(fields) != 3 {
-		return "", 0, 0, false
+		return "", "", 0, 0, false
 	}
 	stmts, err1 := strconv.Atoi(fields[1])
 	covered, err2 := strconv.Atoi(fields[2])
 	if err1 != nil || err2 != nil {
-		return "", 0, 0, false
+		return "", "", 0, 0, false
 	}
 	file = strings.TrimPrefix(line[:colon], "reasonix/")
-	return file, stmts, covered, true
+	return file, fields[0], stmts, covered, true
 }
 
 // matchesGlob handles the two shapes the host checks use: a `dir/**` subtree

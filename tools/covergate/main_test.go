@@ -59,7 +59,7 @@ func TestFromProfileAggregatesPerDeclaredPath(t *testing.T) {
 	if err := os.WriteFile(profile, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := fromProfile(profile, []string{"internal/control/approval.go", "internal/permission/**"})
+	got, _, err := fromProfile(profile, []string{"internal/control/approval.go", "internal/permission/**"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestMeasuredValuesAreRoundedOnce(t *testing.T) {
 	if err := os.WriteFile(profile, []byte("mode: set\nreasonix/internal/x/a.go:1.1,2.2 3 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := fromProfile(profile, []string{"internal/x/**"})
+	got, _, err := fromProfile(profile, []string{"internal/x/**"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,5 +126,34 @@ func TestSensitiveGlobsComeFromTheProjectHostChecks(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("declared sensitive paths not read: %v", globs)
+	}
+}
+
+// A floor that has slipped names the lines, largest first. A percentage alone
+// leaves the reader measuring a package by hand on a platform they may not be
+// on, which is how a shortfall on one GOOS goes unfixed.
+func TestUncoveredBlocksAreReportedLargestFirst(t *testing.T) {
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "c.out")
+	body := "mode: set\n" +
+		"reasonix/internal/x/a.go:1.1,2.2 3 1\n" +
+		"reasonix/internal/x/a.go:4.1,5.2 2 0\n" +
+		"reasonix/internal/x/b.go:7.1,9.2 5 0\n"
+	if err := os.WriteFile(profile, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, gaps, err := fromProfile(profile, []string{"internal/x/**"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := gaps["internal/x/**"]
+	if len(got) != 2 {
+		t.Fatalf("gaps = %+v, want the two blocks nothing executed", got)
+	}
+	if got[0].stmts != 5 || got[0].where != "internal/x/b.go:7.1,9.2" {
+		t.Fatalf("first gap = %+v, want the largest one", got[0])
+	}
+	if n := len(topGaps(got, 1)); n != 1 {
+		t.Fatalf("topGaps kept %d, want the cap honoured", n)
 	}
 }

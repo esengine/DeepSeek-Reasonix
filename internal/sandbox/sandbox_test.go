@@ -358,3 +358,13 @@ func TestInstalledButUnusableBwrapIsUnavailable(t *testing.T) {
 		t.Fatalf("Command with unusable bwrap = %v, wrapped=%v; want unwrapped shell for caller fail-closed", argv, wrapped)
 	}
 }
+
+// TestEscapeApproverFromRefusesANilContext covers the side that fails closed.
+// A nil context carries no approver, and answering "found one" there would let
+// a caller that never set one act as though somebody had approved.
+func TestEscapeApproverFromRefusesANilContext(t *testing.T) {
+	//nolint:staticcheck // the nil context is the case under test.
+	if approver, ok := EscapeApproverFrom(nil); ok || approver != nil {
+		t.Fatalf("EscapeApproverFrom(nil) = %v, %v; want no approver", approver, ok)
+	}
+}
