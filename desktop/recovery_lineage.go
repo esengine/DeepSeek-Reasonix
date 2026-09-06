@@ -102,6 +102,8 @@ func (a *App) ReconcileRecoveryVersions(key ProjectTopicKey) error {
 // SetActiveSessionVersion selects and opens a recovery version on the existing
 // topic tab. It rejects subagent transcripts and preserves the logical topic.
 func (a *App) SetActiveSessionVersion(req RecoveryPreferenceRequest) error {
+	a.sessionVersionActivationMu.Lock()
+	defer a.sessionVersionActivationMu.Unlock()
 	meta, ok, err := agent.LoadBranchMeta(req.Path)
 	if err != nil || !ok {
 		return errors.New("session version is unavailable")
