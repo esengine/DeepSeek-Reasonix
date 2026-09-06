@@ -81,6 +81,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { useComposerModeActions } from "./lib/useComposerModeActions";
 import { useSessionOperations } from "./app-runtime/useSessionOperations";
+import { executeClearSession } from "./app-runtime/sessionActionOwner";
 import { useComposerGoalCommands } from "./app-runtime/useComposerGoalCommands";
 import { useRemoteComposerProfileSync, useRemoteComposerRuntimeActions, useRemoteComposerSend } from "./lib/useRemoteComposerIntegration";
 import { RemoteNavigationContext, type RemoteNavigationCommand } from "./lib/remoteNavigationCommands";
@@ -932,18 +933,21 @@ export default function App() {
   });
 
   const confirmClearContext = useCommittedCommand(async () => {
+    const target = activeTabId ? { tabId: activeTabId, sessionKey: activeSessionIdentity } : null;
+    if (!target) return;
     setClearContextPending(false);
-    try {
-      if (remoteSurfaceActive && activeTabId) {
-        await app.ClearRemoteTabSession(activeTabId);
-        await remoteSession.retryHydration();
-      } else {
-        await clearSession();
-      }
+    const outcome = await sessionOperations(target, "clear-context", { remote: remoteSurfaceActive }, (input, authority) =>
+      executeClearSession(target, input, {
+        clearSession,
+        clearRemoteSession: (tabId) => app.ClearRemoteTabSession(tabId),
+        retryRemoteHydration: () => remoteSession.retryHydration(),
+      }, authority),
+    );
+    if (outcome.status === "completed") {
       setDockRefreshKey((v) => v + 1);
       notice(t("clearContext.done"));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } else if (outcome.status === "failed") {
+      const msg = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
       notice(msg || t("clearContext.failed"), "warn");
     }
   });

@@ -1,5 +1,5 @@
 import type { CollaborationMode, QuestionAnswer, ToolApprovalMode } from "../lib/types";
-import type { SessionOperationAuthority } from "./useSessionOperations";
+import type { SessionOperationAuthority, SessionResource } from "./useSessionOperations";
 
 export type SessionPromptTarget = Readonly<{
   tabId: string;
@@ -10,6 +10,31 @@ export type SessionPromptTarget = Readonly<{
 export type PlanDecisionAction = "start_execution" | "revise_plan" | "exit_plan";
 export type RecoveryAction = "continue" | "continue_task" | "revise" | "stop";
 export type MCPInteractionAction = "accept" | "decline" | "cancel";
+
+export type ClearSessionPorts = {
+  clearSession: () => Promise<void>;
+  clearRemoteSession: (tabId: string) => Promise<void>;
+  retryRemoteHydration: () => Promise<void>;
+};
+
+/** Clears a captured session. Resource completion may finish after navigation,
+ * but UI follow-up is only allowed while the captured session owns the surface. */
+export async function executeClearSession(
+  target: SessionResource,
+  input: { remote: boolean },
+  ports: ClearSessionPorts,
+  authority: SessionOperationAuthority,
+): Promise<void> {
+  authority.checkpoint();
+  if (input.remote) {
+    await ports.clearRemoteSession(target.tabId);
+    authority.checkpoint();
+    await ports.retryRemoteHydration();
+  } else {
+    await ports.clearSession();
+  }
+  authority.checkpoint();
+}
 
 export type SessionActionPorts = {
   approveForTab: (tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => void;
