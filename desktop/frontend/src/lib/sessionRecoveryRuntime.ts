@@ -21,6 +21,7 @@ type SessionRecoveryRuntimeOptions = {
 export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptions): () => void {
   const tracker = new SessionRecoveryDivergenceTracker();
   const inFlight = new Set<string>();
+  const reconciling = new Set<string>();
   let stopped = false;
 
   const settle = async (pending: PendingSessionRecovery) => {
@@ -59,13 +60,16 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
       total: registration.occurrence,
     });
     options.onRecovered();
-    if (event.topicId && typeof app.ReconcileRecoveryVersions === "function") {
+    const topicId = event.topicId;
+    const reconcileKey = topicId ? [event.scope, event.workspaceRoot, topicId].join("\u0000") : "";
+    if (topicId && !reconciling.has(reconcileKey) && typeof app.ReconcileRecoveryVersions === "function") {
+      reconciling.add(reconcileKey);
       void app.ReconcileRecoveryVersions({
         scope: event.scope || (event.workspaceRoot ? "project" : "global"),
         workspaceRoot: event.workspaceRoot,
-        topicId: event.topicId,
+        topicId,
         path: event.recoveryPath,
-      });
+      }).finally(() => reconciling.delete(reconcileKey));
     }
   });
   const unsubscribeActiveVersion = onSessionActiveVersionChanged(() => {

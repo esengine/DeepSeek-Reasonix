@@ -37,7 +37,7 @@ ok(!appSource.includes("banner--recovery"), "App does not render a recovery bann
 ok(!appSource.includes('t("recovery.noticeSavedCopy")'), "App does not toast when a physical recovery copy is merely created");
 ok(recoveryHostSource.includes("recovery.divergedToast"), "App has a dedicated confirmed-divergence toast");
 ok(recoveryRuntimeSource.includes("onProjectTreeChangedV2"), "divergence is rechecked after catalog revisions");
-ok(!appSource.includes("onSessionRecoveryFailed"), "App does not show recovery failure toasts");
+ok(recoveryHostSource.includes("onSessionRecoveryFailed"), "recovery failures are surfaced by the recovery host");
 ok(!appSource.includes("AcknowledgeTabRecovery"), "App does not expose recovery acknowledgement controls");
 ok(!appSource.includes("OpenTabRecoveryParent"), "App does not expose recovery compare controls");
 ok(!appSource.includes("recovery.openOriginalFailed"), "App does not carry recovery compare failure text");
