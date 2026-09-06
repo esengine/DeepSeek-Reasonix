@@ -223,6 +223,36 @@ func TestMimoEffortSupportsNone(t *testing.T) {
 	}
 }
 
+// TestMimoEffortAutoDetected verifies that MiMo entries on any *.xiaomimimo.com
+// endpoint resolve effort capability through auto-detection even when the
+// provider entry does not explicitly set reasoning_protocol.
+func TestMimoEffortAutoDetected(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		baseURL string
+	}{
+		{"public API", "https://api.xiaomimimo.com/v1"},
+		{"enterprise", "https://token-plan-cn.xiaomimimo.com/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &ProviderEntry{
+				Kind:    "openai",
+				BaseURL: tc.baseURL,
+				Model:   "mimo-v2.5-pro",
+			}
+			cap := EffortCapabilityForEntry(e)
+			if !cap.Supported {
+				t.Fatalf("MiMo %s effort must be supported; got %+v", tc.name, cap)
+			}
+			for _, level := range []string{"auto", "none", "low", "medium", "high"} {
+				if !containsString(cap.Levels, level) {
+					t.Errorf("MiMo capability missing %q: %v", level, cap.Levels)
+				}
+			}
+		})
+	}
+}
+
 func TestEffortCapabilityZhipu(t *testing.T) {
 	e := &ProviderEntry{Kind: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-4.5-air"}
 	cap := EffortCapabilityForEntry(e)

@@ -93,6 +93,13 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		return effortCapabilityFromModel(cap)
 	}
+	// MiMo endpoints: auto-detect effort support even when reasoning_protocol
+	// is not explicitly set. All *.xiaomimimo.com hosts (public API and
+	// enterprise) are eligible — the vendor's Responses API exposes a binary
+	// thinking knob regardless of endpoint.
+	if isMimoEntry(e) {
+		return mimoEffortCapability()
+	}
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:
 		return deepSeekEffortCapability()
@@ -245,6 +252,19 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return "max", nil
 		default:
 			return "", fmt.Errorf("usage: /effort auto|none|low|medium|high|max")
+		}
+	case isMimoEntry(e):
+		// MiMo's Responses API documents a binary thinking knob: "none"
+		// disables reasoning; every other legal value enables it.
+		switch level {
+		case "none", "disabled", "off":
+			return "none", nil
+		case "low", "medium", "high":
+			return level, nil
+		case "xhigh", "max":
+			return "high", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|none|low|medium|high")
 		}
 	case e != nil && e.Kind == "anthropic":
 		switch level {

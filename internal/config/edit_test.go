@@ -2922,26 +2922,26 @@ func TestUpsertProviderNormalizesCustomEffortFields(t *testing.T) {
 }
 
 func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
-	// mimo-pro without SupportedEfforts: no built-in heuristic, /effort must reject.
+	// mimo-pro on xiaomimimo: auto-detected via isMimoEntry — effort supported.
 	e := &ProviderEntry{
 		Name:    "mimo-pro",
 		Kind:    "openai",
 		BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
 		Model:   "mimo-v2.5-pro",
 	}
-	if cap := EffortCapabilityForEntry(e); cap.Supported {
-		t.Fatalf("mimo-pro without SupportedEfforts should not be configurable, got %+v", cap)
+	if cap := EffortCapabilityForEntry(e); !cap.Supported {
+		t.Fatalf("mimo-pro auto-detected effort must be supported, got %+v", cap)
 	}
-	if _, err := NormalizeEffort(e, "high"); err == nil {
-		t.Fatal("NormalizeEffort should reject level for unsupported provider")
+	if _, err := NormalizeEffort(e, "high"); err != nil {
+		t.Fatalf("NormalizeEffort should accept level for auto-detected mimo-pro, got %v", err)
 	}
 	// `supported_efforts = []` (empty slice) is treated like nil — the v2 design
 	// has no way to opt out of the built-in heuristic; users either configure
 	// levels or leave the field unset.
 	e2 := *e
 	e2.SupportedEfforts = []string{}
-	if cap := EffortCapabilityForEntry(&e2); cap.Supported {
-		t.Fatalf("empty supported_efforts should also fall through to the heuristic, got %+v", cap)
+	if cap := EffortCapabilityForEntry(&e2); !cap.Supported {
+		t.Fatalf("mimo-pro with empty supported_efforts should still be auto-detected, got %+v", cap)
 	}
 }
 
