@@ -26,6 +26,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const remoteSource = readFileSync(resolve(here, "../components/ProjectTreeRemoteGroups.tsx"), "utf8");
 const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
+const paletteSource = readFileSync(resolve(here, "../app-runtime/usePaletteCommands.tsx"), "utf8");
+const exportSource = readFileSync(resolve(here, "../app-runtime/useSessionExportCommands.ts"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/remoteProjectBridge.ts"), "utf8");
 const remoteOpenSource = readFileSync(resolve(here, "../../../remote_projects.go"), "utf8");
 const remotePendingSelectionSource = readFileSync(resolve(here, "../../../remote_tab_pending_selection.go"), "utf8");
@@ -99,7 +101,7 @@ ok(
   "an explicit session refresh preserves the last successful rows and cache when Serve fails",
 );
 ok(
-  /item\.id !== "cmd-terminal" && item\.id !== "cmd-reload-runtime"/.test(appSource),
+  /item\.id !== "cmd-terminal" && item\.id !== "cmd-reload-runtime"/.test(paletteSource),
   "remote command palettes hide local-only terminal and runtime reload actions",
 );
 ok(
@@ -114,7 +116,7 @@ ok(
 );
 ok(
   /remoteSurfaceActive \? remoteSession\.transcript\.items : state\.items/.test(appSource) &&
-    /sessionItemsToMarkdown\(sessionTitle, exportItems, exportLive\)/.test(appSource),
+    /sessionItemsToMarkdown\(sessionTitle, Array\.from\(items\), live\)/.test(exportSource),
   "remote exports use the visible remote transcript",
 );
 ok(
