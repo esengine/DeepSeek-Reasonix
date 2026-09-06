@@ -316,7 +316,7 @@ export function AskCard({
       onToggleCollapse={() => setCollapsed((value) => !value)}
       barRef={shelfRef}
       titleId="ask-shelf-title"
-      title={t("ask.title")}
+      title={q.header ?? t("ask.title")}
       badges={
         <span className="ask-shelf__header-meta">
           {q.header && <span className="ask-shelf__header-text">{q.header}</span>}
