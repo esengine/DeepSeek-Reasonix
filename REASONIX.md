@@ -53,6 +53,17 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   sentinel the wrapping preserves; `error-text` fails a new match against an
   error message, following it one hop into a local because storing the text
   first is what the direct form turns into.
+- **Whoever first knows why an operation failed owns its class.** A transport
+  status is not a domain identity, and a display string is not a classification;
+  past that boundary a layer may project the class, never re-derive it. Both
+  directions were live: `catalog.go` answered 400 for a name nobody declared and
+  for a disk that would not write, so a failed store told the user their request
+  was wrong; `ServerRow` decided a connection was an authorisation problem by
+  matching `/401|403|unauthorized/` against prose an external MCP server wrote,
+  which the host had sanitised and truncated on the way through. Domain,
+  internal and dependency are three answers with three different things to do
+  next, and a caller that cannot tell them apart reports the last two as the
+  first.
 - Failure attribution is host-owned state. When the host can determine why an
   operation failed or stopped — truncation, timeout, unavailable context,
   dependency skipping, policy refusal, output spill, argument parsing — that

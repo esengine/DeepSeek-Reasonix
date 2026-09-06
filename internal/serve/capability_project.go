@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -86,7 +85,7 @@ func (s *Server) switchForProject(root, kind, name string, scope config.Activati
 	}
 	entry, found := projectServerEntry(root, name)
 	if !found {
-		return fmt.Errorf("no configured MCP server named %q", name)
+		return &config.ServerNotFoundError{Name: name}
 	}
 	if clear {
 		return store.ClearServer(entry, root, scope)

@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -103,6 +104,31 @@ func asUnparsedFile(path string, err error, recovered string) error {
 		out.Repair = lineAt(repaired, out.Line)
 	}
 	return out
+}
+
+// asUnparsedJSON names a JSON store the parser rejected. Same identity as the
+// TOML one and for the same reason: "your file is broken" and "the disk would
+// not answer" are different things to do next.
+func asUnparsedJSON(path string, data []byte, err error) error {
+	var syntax *json.SyntaxError
+	if err == nil || !errors.As(err, &syntax) {
+		return err
+	}
+	out := &UnparsedFile{Path: path, Line: lineOfOffset(data, syntax.Offset), Recovered: RecoveredDefaults, err: err}
+	out.Excerpt = lineAt(string(data), out.Line)
+	return out
+}
+
+// lineOfOffset turns a byte offset into the 1-based line holding it, which is
+// what a reader opens the file to.
+func lineOfOffset(data []byte, offset int64) int {
+	if offset < 0 {
+		return 0
+	}
+	if offset > int64(len(data)) {
+		offset = int64(len(data))
+	}
+	return 1 + strings.Count(string(data[:offset]), "\n")
 }
 
 func lineAt(text string, line int) string {

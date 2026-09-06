@@ -230,6 +230,16 @@ func (c *Controller) MCPServerEnabled(name string) (bool, error) {
 	return config.DefaultActivationStore().IsEnabled(entry, c.workspaceRoot)
 }
 
+// The two things that can go wrong once the switch is persisted, kept apart
+// because they leave the user in different places: the server would not start
+// and the durable state was put back, or it would not start and the state could
+// not be put back either — which is persisted state disagreeing with the
+// runtime, and the only one of the two worth interrupting anybody about.
+var (
+	ErrMCPUnavailable  = errors.New("the server would not start")
+	ErrSwitchNotUndone = errors.New("the durable switch could not be put back")
+)
+
 // SetMCPServerEnabled persists the switch at scope and moves this session's
 // tool registry with it. Enabling restores the cached tool surface without
 // starting a process, so it stays cheap for a lazy server. A registry failure
@@ -253,10 +263,15 @@ func (c *Controller) SetMCPServerEnabled(name string, scope config.ActivationSco
 		return nil
 	}
 	if _, err := c.RegisterMCPServerOnDemand(entry); err != nil {
+		unavailable := fmt.Errorf("%w: %w", ErrMCPUnavailable, err)
+		undo := store.ClearServer(entry, c.workspaceRoot, scope)
 		if hadPrev {
-			return errors.Join(err, store.SetOverride(prev))
+			undo = store.SetOverride(prev)
 		}
-		return errors.Join(err, store.ClearServer(entry, c.workspaceRoot, scope))
+		if undo != nil {
+			return errors.Join(unavailable, fmt.Errorf("%w: %w", ErrSwitchNotUndone, undo))
+		}
+		return unavailable
 	}
 	return nil
 }
@@ -279,8 +294,10 @@ func (c *Controller) ClearMCPServerOverride(name string, scope config.Activation
 		c.DisconnectMCPServer(entry.Name)
 		return nil
 	}
-	_, err = c.RegisterMCPServerOnDemand(entry)
-	return err
+	if _, err := c.RegisterMCPServerOnDemand(entry); err != nil {
+		return fmt.Errorf("%w: %w", ErrMCPUnavailable, err)
+	}
+	return nil
 }
 
 // mcpIdentitySpec builds the part of a server's spec that decides which server

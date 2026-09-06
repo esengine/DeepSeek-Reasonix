@@ -2566,7 +2566,7 @@ func (c *Controller) canonicalSkillName(name string) (string, error) {
 			return sk.Name, nil
 		}
 	}
-	return "", fmt.Errorf("unknown skill: %s", name)
+	return "", &skill.NotFoundError{Name: name}
 }
 
 // HookRunner returns the session's hook runner (nil-safe; may hold zero hooks),

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,13 +119,15 @@ func (s *ActivationStore) loadLocked() (ActivationFile, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return ActivationFile{}, err
+			return ActivationFile{}, fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
 		}
 		return s.loadLegacyLocked()
 	}
 	var file ActivationFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return ActivationFile{}, err
+		// A file the user can open and fix, which is not the same answer as a
+		// disk that would not read it.
+		return ActivationFile{}, asUnparsedJSON(s.path, data, err)
 	}
 	file.Version = activationVersion
 	file.Overrides = compactOverrides(file.Overrides)
@@ -362,14 +365,17 @@ func projectKeys(root string) []string {
 
 func (s *ActivationStore) saveLocked(file ActivationFile) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
 	}
 	data = append(data, '\n')
-	return fileutil.AtomicWriteFile(s.path, data, 0o600)
+	if err := fileutil.AtomicWriteFile(s.path, data, 0o600); err != nil {
+		return fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
+	}
+	return nil
 }
 
 // lockUpdates serializes the full read-modify-write transaction across both
@@ -379,13 +385,13 @@ func (s *ActivationStore) saveLocked(file ActivationFile) error {
 func (s *ActivationStore) lockUpdates() (func(), error) {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	unlock, err := filelock.Acquire(ctx, filepath.Join(dir, activationLockFile))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrActivationUnavailable, err)
 	}
 	return unlock, nil
 }

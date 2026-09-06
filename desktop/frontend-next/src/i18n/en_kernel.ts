@@ -5,6 +5,11 @@
 export const EN_KERNEL: Record<string, string> = {
   "这个决定已经不是当前状态了——计划在你回答前已经变了": "That decision is no longer current - the plan changed before you answered",
   "这条已经送给模型了，收不回来了": "That line already reached the model - it cannot be taken back",
+  // 能力开关：名字、这台机器的存档、以及服务器自己
+  "这个服务器没能起来，开关已经退回原样": "That server would not start; the switch has been put back",
+  "这个服务器没能起来，而且开关也没能退回去——重启后它会是刚才设的那个状态":
+    "That server would not start, and the switch could not be put back - after a restart it will hold what you just set",
+  "开关没能存下来：存放它的文件读不到或写不进去": "The switch was not stored: its file could not be read or written",
   // 待送达：条目、队列、这份存档各自会拒
   "这一条已经不在待送达里了": "That entry is no longer in the pending queue",
   "这一条现在的状态不允许这个操作": "That entry's current state does not allow this",

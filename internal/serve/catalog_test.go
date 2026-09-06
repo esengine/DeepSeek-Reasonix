@@ -216,7 +216,9 @@ func TestMcpAdminRejectsUnknownServer(t *testing.T) {
 		path, body string
 		want       int
 	}{
-		{"/mcp/enabled", `{"name":"nope","enabled":true}`, http.StatusBadRequest},
+		// A name nothing is configured under is the thing being missing, not the
+		// request being malformed — the second row is the malformed one.
+		{"/mcp/enabled", `{"name":"nope","enabled":true}`, http.StatusNotFound},
 		{"/mcp/enabled", `{"enabled":true}`, http.StatusBadRequest},
 		{"/mcp/reconnect", `{"name":"nope"}`, http.StatusBadGateway},
 	} {

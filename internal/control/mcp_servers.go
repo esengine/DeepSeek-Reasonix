@@ -214,7 +214,7 @@ func (c *Controller) configuredMCPServer(name string) (config.PluginEntry, error
 			return p, nil
 		}
 	}
-	return config.PluginEntry{}, fmt.Errorf("no configured MCP server named %q", name)
+	return config.PluginEntry{}, &config.ServerNotFoundError{Name: name}
 }
 
 // RemoveMCPServer removes writable config before disconnecting the live server.

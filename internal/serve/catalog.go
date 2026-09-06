@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -131,10 +132,39 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// writeCatalogError projects a capability-switch failure onto the class its
+// producer gave it. Every one of these went out as 400, so a name nobody
+// declared and a disk that would not write said the same thing: your request
+// was bad. The dependency arm answers 409 — the request was fine and the world
+// does not satisfy it — pending the MCP failure taxonomy.
+func writeCatalogError(w http.ResponseWriter, err error) {
+	var unknownSkill *skill.NotFoundError
+	var unknownServer *config.ServerNotFoundError
+	switch {
+	case errors.As(err, &unknownSkill):
+		notFound(w, "skill", unknownSkill.Name)
+	case errors.As(err, &unknownServer):
+		notFound(w, "MCP server", unknownServer.Name)
+	// Checked before the failure it accompanies: the switch is persisted and the
+	// runtime disagrees, which is the one outcome here worth interrupting over.
+	case errors.Is(err, control.ErrSwitchNotUndone):
+		refuse(w, http.StatusConflict, "mcp.switch_not_undone", err.Error(), nil)
+	case errors.Is(err, control.ErrMCPUnavailable):
+		refuse(w, http.StatusConflict, "mcp.unavailable", err.Error(), nil)
+	case errors.Is(err, config.ErrActivationUnavailable):
+		refuse(w, http.StatusInternalServerError, "activation.unavailable", err.Error(), nil)
+	default:
+		// Not a condition this package can name. Internal is the safe direction:
+		// a failure nobody classified is not evidence the request was wrong.
+		// writeErr still renders a malformed store as the file it is.
+		writeErr(w, http.StatusInternalServerError, err)
+	}
+}
+
 // skillEnabled persists one skill's switch at the requested scope, or clears it
-// so the skill inherits again. The runtime keeps serving the old prompt index
-// until the session is rebuilt, so the response says so rather than letting the
-// frontend imply the change already reached the model.
+// so the skill inherits again. Live in the session that flips it: the next
+// eligible turn owes the model a catalogue without the skill, and a slash
+// invocation stops resolving at once.
 func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name    string `json:"name"`
@@ -155,7 +185,7 @@ func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	if other {
 		if err := s.switchForProject(root, string(config.CapabilitySkill), name, scope, body.Enabled, body.Clear); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
+			writeCatalogError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"enabled": body.Enabled, "scope": string(scope), "root": root})
@@ -163,7 +193,7 @@ func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Clear {
 		if err := s.ctl().ClearSkillOverride(name, scope); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
+			writeCatalogError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{
@@ -172,7 +202,7 @@ func (s *Server) skillEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.ctl().SetSkillEnabled(name, scope, body.Enabled); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeCatalogError(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{
@@ -402,7 +432,7 @@ func (s *Server) mcpEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	if other {
 		if err := s.switchForProject(root, string(config.CapabilityMCP), name, scope, body.Enabled, body.Clear); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
+			writeCatalogError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"name": name, "enabled": body.Enabled, "scope": string(scope), "root": root})
@@ -410,19 +440,19 @@ func (s *Server) mcpEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Clear {
 		if err := s.ctl().ClearMCPServerOverride(name, scope); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
+			writeCatalogError(w, err)
 			return
 		}
 		enabled, err := s.ctl().MCPServerEnabled(name)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err)
+			writeCatalogError(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"name": name, "enabled": enabled, "cleared": true})
 		return
 	}
 	if err := s.ctl().SetMCPServerEnabled(name, scope, body.Enabled); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+		writeCatalogError(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"name": name, "enabled": body.Enabled, "scope": string(scope)})
