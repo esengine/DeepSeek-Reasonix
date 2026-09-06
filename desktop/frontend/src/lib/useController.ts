@@ -3523,8 +3523,8 @@ export function useController() {
       const currentMeta = statesRef.current.get(targetTabId)?.meta;
       if (
         e.sessionGeneration !== undefined &&
-        currentMeta?.sessionGeneration !== undefined &&
-        e.sessionGeneration !== currentMeta.sessionGeneration
+        (!currentMeta || currentMeta.sessionGeneration === undefined ||
+          e.sessionGeneration !== currentMeta.sessionGeneration)
       ) return;
       if (!turnEventProjector.acceptLive(targetTabId, e, acceptedEpoch)) return;
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
