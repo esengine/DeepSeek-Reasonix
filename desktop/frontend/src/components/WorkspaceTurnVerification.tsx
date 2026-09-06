@@ -28,6 +28,7 @@ export const WorkspaceTurnVerification = forwardRef<HTMLElement, {
           <span>{completionVerdictLabel(summary.verdict, t)}</span>
         </div>
         <div className="workspace-completion-summary__metrics">
+          <span>{t("completion.filesChanged", { count: summary.changed_files || summary.mutations })}</span>
           <span>{t("completion.mutations", { count: summary.mutations })}</span>
           <span>{t("completion.checksPassed", { count: summary.checks_passed })}</span>
           <span className={summary.checks_failed > 0 ? "workspace-completion-summary__metric--attention" : undefined}>

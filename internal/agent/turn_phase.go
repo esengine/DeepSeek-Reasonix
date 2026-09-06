@@ -50,10 +50,16 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 		return
 	}
 	mutations := 0
+	changedPaths := map[string]struct{}{}
 	if a.task.ledger != nil {
 		for _, r := range a.task.ledger.Receipts() {
 			if evidence.IsDeliveryMutation(r, a.writeWorkspaceRoot, nil) {
 				mutations++
+				for _, path := range r.Paths {
+					if path != "" {
+						changedPaths[path] = struct{}{}
+					}
+				}
 			}
 		}
 	}
@@ -128,6 +134,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completio
 			Preset:             string(agentpreset.Standard),
 			Verdict:            summaryVerdict,
 			Mutations:          mutations,
+			ChangedFiles:       len(changedPaths),
 			ChecksPassed:       passed,
 			ChecksFailed:       failed,
 			ChecksSuppressed:   suppressed,

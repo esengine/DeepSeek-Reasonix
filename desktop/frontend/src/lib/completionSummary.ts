@@ -10,6 +10,7 @@ export function normalizeCompletionSummary(summary: WireCompletionSummary): Wire
     preset: String(summary.preset ?? "").trim().toLowerCase(),
     verdict: String(summary.verdict ?? "").trim().toLowerCase(),
     mutations: count(summary.mutations),
+    changed_files: count(summary.changed_files ?? 0),
     checks_passed: count(summary.checks_passed),
     checks_failed: count(summary.checks_failed),
     checks_suppressed: count(summary.checks_suppressed),
@@ -59,9 +60,16 @@ export function completionSummaryNotice(summary: WireCompletionSummary, t: Trans
 }
 
 export function completionSummaryChangeNotice(summary: WireCompletionSummary, t: Translator): { title: string; body: string } {
+  const checks = summary.checks_failed > 0
+    ? t("notice.completionChangesChecksFailed", { count: String(summary.checks_failed) })
+    : summary.checks_suppressed > 0
+    ? t("notice.completionChangesChecksLimited", { count: String(summary.checks_suppressed) })
+    : t("notice.completionChangesChecksPassed", { count: String(summary.checks_passed) });
   return {
     title: t("notice.completionChangesTitle"),
-    body: t("notice.completionChangesBody", { count: String(summary.mutations) }),
+    body: summary.checks_passed + summary.checks_failed + summary.checks_suppressed > 0
+      ? `${t("notice.completionChangesBody", { count: String(summary.mutations) })} · ${checks}`
+      : t("notice.completionChangesBody", { count: String(summary.mutations) }),
   };
 }
 
