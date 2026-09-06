@@ -31,8 +31,9 @@ function readAskDraft(id: string): AskDraft | undefined {
 }
 
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
-// walks multi-question asks one at a time. Selecting (click / digit) never
-// advances; Enter / Confirm submits or moves to the next question.
+// walks multi-question asks one at a time. Single-select choices advance to
+// the next question immediately; multi-select and custom answers wait for an
+// explicit confirm, and the final question still requires submission.
 export function AskCard({
   ask,
   onAnswer,
@@ -183,10 +184,12 @@ export function AskCard({
       if (q.multi) {
         toggleOption(q, option.label);
       } else {
-        // Single-select: click/digit only selects the row and marks the option.
+        // Single-select follows harness behavior: choose and advance, while
+        // keeping the answer in the draft so Back can revise it.
         setCustom((c) => ({ ...c, [q.id]: "" }));
         setSel((s) => ({ ...s, [q.id]: [option.label] }));
         setCustomOpen(false);
+        if (active < questions.length - 1) setActive((i) => i + 1);
       }
     } else if (index === customRowIndex) {
       // Opening custom clears option picks for this question.

@@ -272,7 +272,7 @@ console.log("\nask card layout");
     await flushTimers(200);
   });
   eq(document.querySelector(".prompt-action__description-toggle"), null, "short selected descriptions do not show a redundant disclosure");
-  eq(answers.length, 0, "single-select click only selects and does not auto-advance/submit");
+  eq(answers.length, 0, "single-select click advances without submitting the final answer");
 
   await act(async () => {
     (document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement).click();
@@ -634,10 +634,23 @@ console.log("\nask card layout");
   await act(async () => {
     [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
       .find((button) => button.textContent?.includes("First A"))?.click();
-    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
     await flushTimers();
   });
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "multi-question Ask advances to question 2");
+
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
+      .find((button) => button.textContent?.includes("Back") || button.textContent?.includes("返回"))?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("1/2"), true, "Back returns to the previous question");
+
+  await act(async () => {
+    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
+      .find((button) => button.textContent?.includes("First B"))?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "previous question accepts a replacement choice");
 
   await act(async () => {
     [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
@@ -648,7 +661,7 @@ console.log("\nask card layout");
 
   eq(attempts, 1, "failed final submit is attempted exactly once");
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "failed final submit stays on question 2");
-  eq(document.querySelector(".ask-shelf__crumbs")?.textContent?.includes("First A"), true, "failed final submit preserves the first answer");
+  eq(document.querySelector(".ask-shelf__crumbs")?.textContent?.includes("First B"), true, "failed final submit preserves the revised first answer");
   eq(
     [...document.querySelectorAll<HTMLElement>(".prompt-action")]
       .some((button) => button.getAttribute("aria-selected") === "true" && button.textContent?.includes("Second B")),
@@ -662,7 +675,7 @@ console.log("\nask card layout");
     await flushTimers();
   });
   eq(attempts, 2, "retry submits once after the failure");
-  eq(submitted[1]?.map((answer) => answer.selected?.[0]).join("|"), "First A|Second B", "retry submits the preserved answer batch");
+  eq(submitted[1]?.map((answer) => answer.selected?.[0]).join("|"), "First B|Second B", "retry submits the preserved answer batch");
 
   await act(async () => { root.unmount(); });
   dom.window.close();
