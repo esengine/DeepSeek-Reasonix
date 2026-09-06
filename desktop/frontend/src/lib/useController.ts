@@ -4620,6 +4620,13 @@ export function useController() {
   }, [dispatchTo, loadSessionDataForTab]);
 
   // Tab management: switch preserves per-tab state; open creates it.
+  // Whether a target tab already holds a locally-rendered transcript. When a
+  // tab has items in memory, switching back to it is instant and does not need
+  // the navigation surface mask, so the caller can skip the mask entirely and
+  // render the cached content immediately while backend activation completes.
+  const hasLocalTranscriptForTab = useCallback((tabId: string): boolean => {
+    return Boolean(statesRef.current.get(tabId)?.items?.length);
+  }, []);
   const switchTab = useCallback(async (tabId: string, optimisticTab?: TabMeta, navigationIntentSeq?: number): Promise<TabMeta[] | undefined> => {
     const navigationSeq = navigationIntentSeq ?? beginActiveNavigation();
     await requireRegisteredNavigationIntent(navigationSeq);
@@ -5048,6 +5055,7 @@ export function useController() {
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, cancelJob,
     fetchMemory, remember, forget, saveDoc,
     switchTab, switchRemoteTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createIsolatedWorktree, commitSingleSurfaceNavigation, closeTab, reorderTabs,
+    hasLocalTranscriptForTab,
     // Invalidate in-flight navigation completions (activateTopic's stale
     // guard) from outside the hook. The App-level navigation queue must call
     // this at ENQUEUE time: a queued click does not run — and so does not
