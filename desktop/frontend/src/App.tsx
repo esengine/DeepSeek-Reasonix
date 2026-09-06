@@ -70,6 +70,7 @@ import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle
 import { useNativeSettingsEvent } from "./app-runtime/useNativeSettingsEvent";
 import { useTabProjectionLifecycle } from "./app-runtime/useTabProjectionLifecycle";
 import { useAppDiagnostics, useSidebarConnectionValidity } from "./app-runtime/useAppEffectHosts";
+import { useActiveTabUiReset, useDecisionSurfaceFocus, useTopicTimeFilter } from "./app-runtime/useLocalUiLifecycles";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -293,17 +294,7 @@ export default function App() {
   const setShortcutsOpen = useOverlayStore((s) => s.setShortcutsOpen);
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
-  type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
-  const [topicTimeFilter, setTopicTimeFilter] = useState<TimeFilter>(() => {
-    try {
-      const saved = localStorage.getItem("projectTree:timeFilter");
-      if (saved === "all" || saved === "10" || saved === "20" || saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") return saved;
-    } catch { /* localStorage unavailable */ }
-    return "all";
-  });
-  useEffect(() => {
-    try { localStorage.setItem("projectTree:timeFilter", topicTimeFilter); } catch { /* ignore */ }
-  }, [topicTimeFilter]);
+  const [topicTimeFilter, setTopicTimeFilter] = useTopicTimeFilter();
   const sidebarResizing = useLayoutStore((state) => state.sidebarResizing);
   const [tasksOpen, setTasksOpen] = useState<false | "session" | "all">(false);
   const takeoverDialogTab = useOverlayStore((s) => s.takeoverDialogTab);
@@ -353,8 +344,6 @@ export default function App() {
   const sidebarTogglePressed = useLayoutStore((state) => state.sidebarTogglePressed);
   const [clearContextPending, setClearContextPending] = useState(false);
   const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
-  const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
-  const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   useManagementWorkspace(layoutRef, managementActive);
@@ -571,28 +560,7 @@ export default function App() {
   }, [clearContextPending, pendingClose, state.approval, state.ask, state.extensionForm, state.mcpInteraction, workspaceConflict]);
   const visibleDecisionSurface = decisionSurface;
   const composerSurfaceHidden = runtimeTransitioning || Boolean(decisionSurface);
-  decisionSurfaceRef.current = decisionSurface;
-  useEffect(() => {
-    // Close composer menus/popovers when a decision takes over the footer.
-    if (decisionSurface) {
-      closeTransientOverlays();
-      prevDecisionSurfaceRef.current = decisionSurface;
-      return;
-    }
-    // Restore composer focus on the next frame only if the tab did not switch
-    // and no new decision arrived (remote resolution / rapid consecutive prompts).
-    const hadDecision = prevDecisionSurfaceRef.current != null;
-    prevDecisionSurfaceRef.current = null;
-    if (!hadDecision) return;
-    const tabAtRelease = activeTabId;
-    const frame = requestAnimationFrame(() => {
-      if (decisionSurfaceRef.current != null) return;
-      if (activeTabIdRef.current !== tabAtRelease) return;
-      const input = document.getElementById("composer-input") as HTMLTextAreaElement | null;
-      input?.focus({ preventScroll: true });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [activeTabId, closeTransientOverlays, decisionSurface]);
+  useDecisionSurfaceFocus({ surface: decisionSurface, activeTabId, closeOverlays: closeTransientOverlays, activeTabRef: activeTabIdRef });
 
   // Extension form surface (stage 8b2): submit delivers the structured values
   // to the owning sidecar; cancel reports values{"cancelled": true} over the
@@ -878,10 +846,7 @@ export default function App() {
     showToast,
   });
 
-  useEffect(() => {
-    setClearContextPending(false);
-    setWorkspaceInsertTarget("composer");
-  }, [activeTabId]);
+  useActiveTabUiReset({ activeTabId, setClearPending: setClearContextPending, setInsertTarget: setWorkspaceInsertTarget, activeTabRef: activeTabIdRef });
 
   const cancelClearContext = useCommittedCommand(() => {
     setClearContextPending(false);
@@ -907,9 +872,6 @@ export default function App() {
     }
   });
 
-  useEffect(() => {
-    activeTabIdRef.current = activeTabId;
-  }, [activeTabId]);
   const { handleSend, handleSteer } = useComposerRouter({
     activeTabId,
     activeTabIdRef,
