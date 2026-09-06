@@ -452,8 +452,8 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 	}{
 		{
 			name: "approval",
-			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm"}},
-			want: []string{`"kind":"approval_request"`, `"approval":{"id":"a1","tool":"bash","subject":"rm"}`},
+			in:   event.Event{Kind: event.ApprovalRequest, TurnID: "turn-a", ItemID: "a1", Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm", TurnID: "turn-a"}},
+			want: []string{`"kind":"approval_request"`, `"promptId":"a1"`, `"promptKind":"approval"`, `"turnId":"turn-a"`, `"approval":{"id":"a1"`, `"tool":"bash"`, `"subject":"rm"`},
 		},
 		{
 			name: "fresh approval",
@@ -489,14 +489,15 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 		},
 		{
 			name: "ask",
-			in: event.Event{Kind: event.AskRequest, Ask: event.Ask{
-				ID: "ask-1",
+			in: event.Event{Kind: event.AskRequest, TurnID: "turn-q", ItemID: "ask-1", Ask: event.Ask{
+				ID:     "ask-1",
+				TurnID: "turn-q",
 				Questions: []event.AskQuestion{{
 					ID: "q1", Header: "Pick", Prompt: "Choose", Multi: true,
 					Options: []event.AskOption{{Label: "A", Description: "Alpha"}, {Label: "B"}},
 				}},
 			}},
-			want: []string{`"kind":"ask_request"`, `"ask":{"id":"ask-1"`, `"header":"Pick"`, `"description":"Alpha"`, `"multi":true`},
+			want: []string{`"kind":"ask_request"`, `"promptId":"ask-1"`, `"promptKind":"ask"`, `"turnId":"turn-q"`, `"ask":{"id":"ask-1"`, `"header":"Pick"`, `"description":"Alpha"`, `"multi":true`},
 		},
 		{
 			name: "compaction",
@@ -529,5 +530,12 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPromptWireMarksLegacyIdentity(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.AskRequest, ItemID: "legacy-ask", Ask: event.Ask{ID: "legacy-ask"}})
+	if !w.PromptLegacy || w.PromptID != "legacy-ask" || w.PromptKind != "ask" {
+		t.Fatalf("legacy prompt wire identity = %+v", w)
 	}
 }

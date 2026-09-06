@@ -102,6 +102,7 @@ let tabsAvailable = false;
 let submitCalls = 0;
 let rejectSubmit = false;
 let rejectAnswer = false;
+let rejectAnswerMessage = "prompt write failed";
 let rejectListTabs = false;
 let listTabsCalls = 0;
 const exactAnswerCalls: Array<{ tabId: string; turnId: string; promptId: string; answers: unknown[] }> = [];
@@ -144,7 +145,11 @@ window.go = {
       AnswerQuestionForTab: async (_tabId: string, promptId: string) => { legacyAnswerCalls.push(promptId); },
       AnswerPromptForTab: async (tabId: string, turnId: string, promptId: string, answers: unknown[]) => {
         exactAnswerCalls.push({ tabId, turnId, promptId, answers });
-        if (rejectAnswer) throw new Error("prompt write failed");
+        if (rejectAnswer) throw new Error(rejectAnswerMessage);
+      },
+      ResolvePromptForTab: async (tabId: string, promptId: string, turnId: string, _runtimeEpoch: string, _kind: string, answer: unknown) => {
+        exactAnswerCalls.push({ tabId, turnId, promptId, answers: answer });
+        if (rejectAnswer) throw new Error(rejectAnswerMessage);
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -268,6 +273,46 @@ await act(async () => {
 eq(listTabsCalls - beforeFailedReconcileCalls, 4, "rejected submit retries failed ListTabs reads at every bounded delay");
 eq(controller?.state.running, true, "exhausted status reads leave the composer conservatively blocked");
 rejectListTabs = false;
+
+backendTab = tabMeta({ running: true, pendingPrompt: true, turnId: "turn-authoritative" });
+await act(async () => {
+  for (const handler of eventHandlers) handler({
+    kind: "ask_request",
+    tabId: "tab-send",
+    turnId: "turn-authoritative",
+    ask: { id: "ask-stale", questions: [{ id: "q3", prompt: "Stale?", options: [{ label: "yes" }] }] },
+  } as WireEvent);
+  await flushPromises();
+});
+rejectAnswer = true;
+rejectAnswerMessage = 'turn "turn-old" is not the active turn for tab "tab-send"';
+await act(async () => {
+  try { await controller?.answerQuestion("ask-stale", [{ questionId: "q3", selected: ["yes"] }]); } catch {}
+  await flushPromises();
+});
+eq(controller?.state.ask, undefined, "stale Ask submission expires the old card");
+rejectAnswer = false;
+rejectAnswerMessage = "prompt write failed";
+
+// Pre-admission rejection does not append a backend event. A fresh idle read
+// with the same sequence must still undo each optimistic submission.
+rejectSubmit = true;
+backendTab = tabMeta({ running: false, pendingPrompt: false, turnEventSeq: 700 });
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-send" } as WireEvent);
+  await controller?.send("seed idle status after rejected submit");
+  await flushPromises();
+  await flushPromises();
+});
+eq(controller?.state.runtimeStatusSeq, 700, "baseline stores the backend sequence");
+eq(controller?.state.running, false, "first rejection settles to authoritative idle");
+await act(async () => {
+  await controller?.send("second pre-admission rejection");
+  await flushPromises();
+  await flushPromises();
+});
+eq(controller?.state.running, false, "same-sequence idle settles a new failed submit");
+eq(controller?.state.cancellable, false, "same-sequence idle removes the stale Stop action");
 
 await act(async () => {
   root.unmount();

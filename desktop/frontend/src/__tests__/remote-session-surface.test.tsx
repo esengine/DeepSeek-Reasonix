@@ -403,14 +403,14 @@ await act(async () => {
   await flush();
 });
 await act(async () => {
-  [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Other answer")?.click();
+  document.querySelector<HTMLElement>(".ask-shelf__custom-row")?.click();
   await flush();
 });
 await act(async () => {
   const input = document.querySelector<HTMLInputElement>(".ask-shelf__custom");
   if (input) {
-    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set?.call(input, "canary");
-    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps")); const props = propsKey ? (input as unknown as Record<string, { onChange?: (event: { target: { value: string } }) => void }>)[propsKey] : undefined;
+    props?.onChange?.({ target: { value: "canary" } });
   }
   await flush();
 });

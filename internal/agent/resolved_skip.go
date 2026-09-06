@@ -12,9 +12,6 @@ import (
 // proxy policy resolution small enough to audit as one deterministic gate.
 func (a *Agent) resolvedSkipOutcome(plan *toolCallPlan, resolved tool.ResolvedCall) toolOutcome {
 	call := plan.call
-	if resolved.ProxyAction == "inspect" {
-		a.clearSchemaErrorsAfterInspect(resolved.CapabilityID)
-	}
 	// A connected mcp-server call completes during resolution by listing its
 	// live tools, so account for that successful call here too.
 	if resolved.ProxyAction == "call" && !resolved.Unavailable {

@@ -31,11 +31,10 @@ console.log("\nAsk prompt active-turn submission");
   const exactCalls: string[] = [];
   await answerPromptForActiveTurn(binding({
     ListTabs: async () => { listCalls += 1; return [tab]; },
-    AnswerQuestionForTab: async () => { throw new Error("legacy must not run"); },
-    AnswerPromptForTab: async (tabId, turnId, promptId) => { exactCalls.push(`${tabId}:${turnId}:${promptId}`); },
+    ResolvePromptForTab: async (tabId, promptId, turnId) => { exactCalls.push(`${tabId}:${turnId}:${promptId}`); },
   }), "tab-ask", "ask-1", answers, "turn-known");
-  eq(listCalls, 0, "known turn id avoids an unnecessary ListTabs lookup");
-  eq(exactCalls.join("|"), "tab-ask:turn-known:ask-1", "known turn id uses the exact prompt endpoint");
+  eq(listCalls, 1, "Ask refreshes the authoritative turn before submission");
+  eq(exactCalls.join("|"), "tab-ask:turn-authoritative:ask-1", "authoritative turn fences the exact answer");
 }
 
 {
@@ -43,74 +42,63 @@ console.log("\nAsk prompt active-turn submission");
   const exactCalls: string[] = [];
   await answerPromptForActiveTurn(binding({
     ListTabs: async () => { listCalls += 1; return [tab]; },
-    AnswerQuestionForTab: async () => { throw new Error("legacy must not run"); },
-    AnswerPromptForTab: async (tabId, turnId, promptId) => { exactCalls.push(`${tabId}:${turnId}:${promptId}`); },
+    ResolvePromptForTab: async (tabId, promptId, turnId) => { exactCalls.push(`${tabId}:${turnId}:${promptId}`); },
   }), "tab-ask", "ask-2", answers);
   eq(listCalls, 1, "missing local turn id is resolved from ListTabs once");
   eq(exactCalls.join("|"), "tab-ask:turn-authoritative:ask-2", "resolved turn id fences the exact answer");
 }
 
 {
-  let legacyCalls = 0;
   let exactCalls = 0;
   let rejected = "";
   try {
     await answerPromptForActiveTurn(binding({
       ListTabs: async () => [],
-      AnswerQuestionForTab: async () => { legacyCalls += 1; },
-      AnswerPromptForTab: async () => { exactCalls += 1; },
+      ResolvePromptForTab: async () => { exactCalls += 1; },
     }), "tab-ask", "ask-3", answers);
   } catch (error) {
     rejected = error instanceof Error ? error.message : String(error);
   }
-  eq(rejected.includes("active turn id is unavailable"), true, "missing authoritative turn id rejects visibly");
+  eq(rejected.includes("active turn identity is unavailable"), true, "missing authoritative turn id rejects visibly");
   eq(exactCalls, 0, "missing turn id never calls the exact endpoint with an empty fence");
-  eq(legacyCalls, 0, "missing turn id never falls back to the unfenced endpoint");
 }
 
 {
-  let legacyCalls = 0;
   let exactCalls = 0;
   let rejected = "";
   try {
     await answerPromptForActiveTurn(binding({
       ListTabs: async () => { throw new Error("ListTabs failed"); },
-      AnswerQuestionForTab: async () => { legacyCalls += 1; },
-      AnswerPromptForTab: async () => { exactCalls += 1; },
+      ResolvePromptForTab: async () => { exactCalls += 1; },
     }), "tab-ask", "ask-rpc", answers);
   } catch (error) {
     rejected = error instanceof Error ? error.message : String(error);
   }
   eq(rejected, "ListTabs failed", "authoritative turn lookup failure propagates");
   eq(exactCalls, 0, "failed turn lookup never calls the exact endpoint");
-  eq(legacyCalls, 0, "failed turn lookup never falls back to the unfenced endpoint");
 }
 
 {
-  let legacyCalls = 0;
   let rejected = "";
   try {
     await answerPromptForActiveTurn(binding({
       ListTabs: async () => [tab],
-      AnswerQuestionForTab: async () => { legacyCalls += 1; },
-      AnswerPromptForTab: async () => { throw new Error("stale turn"); },
+      ResolvePromptForTab: async () => { throw new Error("stale turn"); },
     }), "tab-ask", "ask-4", answers);
   } catch (error) {
     rejected = error instanceof Error ? error.message : String(error);
   }
   eq(rejected, "stale turn", "exact endpoint rejection propagates to the decision surface");
-  eq(legacyCalls, 0, "exact endpoint rejection never retries through the unfenced endpoint");
 }
 
 {
-  let listCalls = 0;
-  const legacyCalls: string[] = [];
-  await answerPromptForActiveTurn(binding({
-    ListTabs: async () => { listCalls += 1; return [tab]; },
-    AnswerQuestionForTab: async (tabId, promptId) => { legacyCalls.push(`${tabId}:${promptId}`); },
-  }), "tab-ask", "ask-legacy", answers);
-  eq(listCalls, 0, "legacy bridge compatibility does not require turn metadata");
-  eq(legacyCalls.join("|"), "tab-ask:ask-legacy", "legacy endpoint remains available only when the exact method is absent");
+  let rejected = "";
+  try {
+    await answerPromptForActiveTurn(binding({ ListTabs: async () => [tab] }), "tab-ask", "ask-legacy", answers);
+  } catch (error) {
+    rejected = error instanceof Error ? error.message : String(error);
+  }
+  eq(rejected.includes("active turn identity is unavailable"), true, "missing exact prompt API fails closed");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

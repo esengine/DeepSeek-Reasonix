@@ -248,6 +248,20 @@ export interface WireAskOption {
   description?: string;
 }
 
+export type PromptKind = "ask" | "approval" | "plan" | "recovery" | "mcp";
+export interface PromptIdentity {
+  promptId: string;
+  turnId?: string;
+  runtimeEpoch?: string;
+  kind: PromptKind;
+}
+export type PromptLifecycle = "pending" | "submitting" | "resolved" | "expired";
+export interface DecisionCardState {
+  identity: PromptIdentity;
+  lifecycle: PromptLifecycle;
+  failureNoticeShown?: boolean;
+}
+
 export interface WireAskQuestion {
   id: string;
   header?: string;
@@ -259,6 +273,8 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+  turnId?: string;
+  runtimeEpoch?: string;
 }
 
 export type { MCPAppInstanceView, MCPAppPresentation } from "./mcpAppProtocol";
@@ -273,6 +289,8 @@ export interface WireMCPInteraction {
   requestedSchema?: unknown;
   url?: string;
   elicitationId?: string;
+  turnId?: string;
+  runtimeEpoch?: string;
 }
 
 // Extension UI surfaces (stage 8a) — structured-only documents published by
@@ -364,6 +382,9 @@ export interface MemoryCitation {
 
 export interface WireEvent extends RecoveryEventFields {
   kind: EventKind;
+  promptId?: string;
+  promptKind?: "ask" | "approval" | "plan" | "recovery" | "mcp" | string;
+  promptLegacy?: boolean;
   turnId?: string;
   seq?: number;
   status?: TurnStatus;

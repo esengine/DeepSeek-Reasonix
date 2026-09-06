@@ -201,7 +201,19 @@ console.log("\nbundle budgets");
 // boundaries are sourcemap-identical to the pre-split graph. HEAD measured
 // 427.3-428.2 KiB (already 0.5-1.4 over the old gate from toolchain drift);
 // the split measures 440.3 KiB; retain only the next one-decimal ceiling.
-const initialJSBudgetKiB = 440.4;
+// main-v2 then added the subagent outcome envelope, partial-state card, and
+// history hydration (+0.5 KiB), the model-capability resolver with read-only
+// provider badges (+0.2 KiB), the integrated management shell with image
+// capability controls and the upstream updater refresh (465.4 KiB measured),
+// durable protocol recovery controls and search-source status (466.6 KiB),
+// rich-link menus (466.905 KiB), the AskCard session-draft wiring and the
+// session-runtime ordering fence (467.0 KiB), and the exact prompt protocol
+// (468.2 KiB measured on the pre-kernel graph). The merged graph combines the
+// kernel-reduced stack, the layering split, and that main-v2 feature chain;
+// it measures 441.0 KiB here — main-v2's features add only 0.7 KiB on the
+// reduced startup graph. Retain only the next one-decimal ceiling for
+// platform zlib rounding.
+const initialJSBudgetKiB = 441.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -375,6 +387,14 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // single App body previously minified away; the split graph measures 2378.6
 // KiB raw (2341.0 before the split). Retain only the next one-decimal
 // ceiling; gzip and largest-chunk budgets carry their own narrow ratchets.
-const rawInitialBudgetKiB = 2_378.7;
+// main-v2's chain then adds the outcome card and history hydration (2474.0
+// KiB measured in CI), the model-capability helper and localized status copy
+// (+0.9 KiB), the upstream updater ceiling, recovery controls (2484.509 KiB),
+// rich-link menus (2485.715 KiB), and the shared harness decision surface
+// with exact prompt identity and stale-card recovery (2496.4 KiB measured on
+// the pre-kernel graph). The merged graph combines the kernel-reduced stack,
+// the layering split, and that main-v2 feature chain; it measures 2380.9 KiB
+// raw here — retain only the next one-decimal ceiling.
+const rawInitialBudgetKiB = 2_381.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -11,8 +11,6 @@ import (
 // share one lock instead of unsynchronized maps on turnRuntime.
 type turnLoopState struct {
 	mu                      sync.Mutex
-	schemaErrors            map[string]schemaErrorRecord
-	schemaCapabilities      map[string]map[string]struct{}
 	dispatchClasses         map[string]tool.CallClass
 	resultFingerprints      map[string]string
 	acceptedDecisions       map[string]acceptedDecision
@@ -32,60 +30,6 @@ func (s *turnLoopState) dispatchClass(id string) (tool.CallClass, bool) {
 	defer s.mu.Unlock()
 	class, ok := s.dispatchClasses[id]
 	return class, ok
-}
-
-func (s *turnLoopState) incrementSchemaError(sig, capabilityID string) schemaErrorRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.schemaErrors == nil {
-		s.schemaErrors = map[string]schemaErrorRecord{}
-	}
-	record := s.schemaErrors[sig]
-	record.count++
-	s.schemaErrors[sig] = record
-	if capabilityID != "" {
-		if s.schemaCapabilities == nil {
-			s.schemaCapabilities = map[string]map[string]struct{}{}
-		}
-		if s.schemaCapabilities[capabilityID] == nil {
-			s.schemaCapabilities[capabilityID] = map[string]struct{}{}
-		}
-		s.schemaCapabilities[capabilityID][sig] = struct{}{}
-	}
-	return record
-}
-
-func (s *turnLoopState) markSchemaInspectAttached(sig string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record := s.schemaErrors[sig]
-	record.inspectAttached = true
-	s.schemaErrors[sig] = record
-}
-
-func (s *turnLoopState) clearSchemaErrors(match func(string) bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for sig := range s.schemaErrors {
-		if match(sig) {
-			delete(s.schemaErrors, sig)
-			for id, signatures := range s.schemaCapabilities {
-				delete(signatures, sig)
-				if len(signatures) == 0 {
-					delete(s.schemaCapabilities, id)
-				}
-			}
-		}
-	}
-}
-
-func (s *turnLoopState) clearSchemaErrorsForCapability(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for sig := range s.schemaCapabilities[id] {
-		delete(s.schemaErrors, sig)
-	}
-	delete(s.schemaCapabilities, id)
 }
 
 func (s *turnLoopState) rememberFingerprint(fp, callID string) (prev string, seen bool) {

@@ -71,8 +71,11 @@ export async function findTabAfterSubmitFailure(
 ) {
   for (const delay of delays) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-    const snapshotAt = clock();
     try {
+      // Fence at read start, so a delayed response cannot override a turn or
+      // prompt observed while it was in flight. Preserve a sub-tick advance
+      // for synchronous bridges called in the initiating event's clock tick.
+      const snapshotAt = clock() + 0.001;
       const tab = asArray(await binding.ListTabs()).find((candidate) => candidate.id === tabId);
       return [tab, snapshotAt] as const;
     } catch {

@@ -44,6 +44,7 @@ func (c *Controller) approveChecked(id string, allow, session, persist bool) err
 	if !ok || pending.reply == nil {
 		return nil
 	}
+	c.promptOwner.Remove(id)
 	outcome := "deny"
 	if pending.tool == planApprovalTool {
 		outcome = string(PlanDecisionRevisePlan)

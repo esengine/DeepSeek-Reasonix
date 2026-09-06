@@ -1,6 +1,7 @@
 // useController is the frontend's state machine over the agent event stream. It keeps
 // per-tab output, tool state, and approvals while the user switches tabs; components
 // render the active tab's state.
+import { runtimeStatusSnapshotIsStale } from "./runtimeStatusFreshness";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
 import { createControllerModelCommands } from "./controllerModelCommands";
@@ -13,7 +14,7 @@ import { settleForkConversationForTab } from "./forkWorktree";
 import type { MessageActionScope, MessageActionState } from "./messageActions";
 import { mergeRateBand, type AggregatedRateBand } from "./costRateBand";
 import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
-import { answerPromptForActiveTurn, normalizeTurnSubmit, resolveActiveTurnId } from "./inboxSubmit";
+import { answerPromptForActiveTurn, normalizeTurnSubmit, resolveActiveTurnId, resolvePromptForTab } from "./inboxSubmit";
 import { findTabAfterSubmitFailure, reduceManagementConfirmation, reduceSubmitFailure } from "./turnSubmissionFailure";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
@@ -89,6 +90,7 @@ import type {
   WireUsage,
   WireShellExecution,
 } from "./types";
+
 export { foregroundRunningFromRuntimeMeta } from "./runtimeMeta";
 export {
   deliveryReadinessDetail,
@@ -358,6 +360,17 @@ export function acceptsExtensionGeneration(stored: number | undefined, incoming:
 // prefixes persisted steers the same way). The prefix is the only durable
 // marker, so display code identifies steers by it.
 export const STEER_NOTICE_PREFIX = "↪ ";
+
+function isStalePromptError(error: unknown): boolean {
+  return /active turn|runtime changed|stale/i.test(errorMessage(error));
+}
+
+function handlePromptFailure(dispatchTo: (tabId: string, action: Action) => void, tabId: string, id: string, epoch: number, error: unknown, kind?: "approval" | "ask" | "mcp") {
+  if (isStalePromptError(error) && kind) dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind });
+  else if (kind) dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
+  replayPendingPromptsForActiveTab(tabId);
+}
+
 export function isSteerNoticeText(text: string): boolean {
   return text.startsWith(STEER_NOTICE_PREFIX);
 }
@@ -417,7 +430,7 @@ export interface State {
   turnDoneAt: number;
   turnLifecycleObservedAt?: number;
   /** Last runtime snapshot sequence accepted for this tab/epoch. */
-  runtimeStatusEpoch?: string; runtimeStatusSeq?: number;
+  runtimeStatusEpoch?: string; runtimeStatusSeq?: number; runtimeStatusSnapshotAt?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -818,6 +831,7 @@ type Action =
   | { type: "local_notice"; level: "info" | "warn"; text: string; preserveRuntime?: boolean }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
+  | { type: "expire_prompt"; id: string; epoch: number; kind: "approval" | "ask" | "mcp" }
   | { type: "clearExtensionForm" }
   | { type: "extension_notifications_drained" }
   | { type: "approval_drained"; ids: string[]; epoch: number }
@@ -1844,7 +1858,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       return beginPromptWait({
         ...s,
         activeTurnId: e.turnId ?? s.activeTurnId,
-        approval: e.approval,
+        approval: e.approval ? { ...e.approval, turnId: e.turnId ?? e.approval.turnId, runtimeEpoch: e.runtimeEpoch ?? e.approval.runtimeEpoch } : e.approval,
         // A replay of the SAME prompt (post-answer delayed delivery, or the
         // #6429 re-arm after activation) keeps the original arrival time; only
         // a genuinely new prompt id re-anchors it (#6432 reverse race).
@@ -1862,7 +1876,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       return beginPromptWait({
         ...s,
         activeTurnId: e.turnId ?? s.activeTurnId,
-        ask: e.ask,
+        ask: e.ask ? { ...e.ask, turnId: e.turnId ?? e.ask.turnId, runtimeEpoch: e.runtimeEpoch ?? e.ask.runtimeEpoch } : e.ask,
         promptArrivedAt: e.ask?.id === s.promptArrivedId ? s.promptArrivedAt : promptEventClock(),
         promptArrivedId: e.ask?.id,
         pendingPrompt: true,
@@ -1877,7 +1891,7 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       return beginPromptWait({
         ...s,
         activeTurnId: e.turnId ?? s.activeTurnId,
-        mcpInteraction: e.mcpInteraction,
+        mcpInteraction: e.mcpInteraction ? { ...e.mcpInteraction, turnId: e.turnId ?? e.mcpInteraction.turnId, runtimeEpoch: e.runtimeEpoch ?? e.mcpInteraction.runtimeEpoch } : e.mcpInteraction,
         promptArrivedAt: e.mcpInteraction?.id === s.promptArrivedId ? s.promptArrivedAt : promptEventClock(),
         promptArrivedId: e.mcpInteraction?.id,
         pendingPrompt: true,
@@ -2036,7 +2050,7 @@ export function reducer(s: State, a: Action): State {
         promptArrivedId: undefined,
         pendingUser: a.text,
         pendingSubmissionId: a.submissionId,
-        activeTurnId: undefined,
+        activeTurnId: s.turnActive ? s.activeTurnId : undefined,
         currentAssistant: undefined,
         assistantSegmentOrdinal: 0,
         live: undefined,
@@ -2093,11 +2107,10 @@ export function reducer(s: State, a: Action): State {
     case "backend_status": {
       const incomingEpoch = a.runtimeEpoch?.trim();
       const storedEpoch = s.runtimeStatusEpoch?.trim();
-      if (!(incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) && a.turnEventSeq !== undefined && s.runtimeStatusSeq !== undefined && a.turnEventSeq <= s.runtimeStatusSeq) {
-        return s;
-      }
+      if (runtimeStatusSnapshotIsStale(s, a)) return s;
       // Reject snapshots that began before newer prompt or turn lifecycle evidence.
       if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt) || snapshotPredatesTurnLifecycle(s.turnLifecycleObservedAt, a.snapshotAt)) return s;
+      const runtimeStatus = { runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq, runtimeStatusSnapshotAt: a.snapshotAt };
       const pendingPrompt = Boolean(a.pendingPrompt);
       const backgroundJobs = Math.max(0, a.backgroundJobs ?? s.backgroundJobs ?? 0);
       const cancelRequested = Boolean(a.cancelRequested);
@@ -2120,11 +2133,11 @@ export function reducer(s: State, a: Action): State {
         activeTurnId === s.activeTurnId &&
         !clearsRetry
       ) return incomingEpoch || a.turnEventSeq !== undefined
-        ? { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq } : s;
+        ? { ...s, ...runtimeStatus } : s;
       if (foregroundRunning) {
         return {
           ...s,
-          runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+          ...runtimeStatus,
           running: true,
           turnActive: true,
           pendingPrompt,
@@ -2144,7 +2157,7 @@ export function reducer(s: State, a: Action): State {
       }));
       return endPromptWait({
         ...telemetry,
-        runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+        ...runtimeStatus,
         items: finalized,
         running: false,
         turnActive: false,
@@ -2343,6 +2356,19 @@ export function reducer(s: State, a: Action): State {
         resolvedPromptId: s.ask?.id ?? s.mcpInteraction?.id ?? s.resolvedPromptId,
       };
       return endPromptWaitIfIdle(next);
+    }
+    case "expire_prompt": {
+      if (s.promptEpoch !== a.epoch) return s;
+      if (a.kind === "approval") {
+        if (s.approval?.id !== a.id) return s;
+        return endPromptWaitIfIdle({ ...s, approval: undefined, pendingPrompt: Boolean(s.ask || s.mcpInteraction), resolvedPromptId: a.id });
+      }
+      if (a.kind === "ask") {
+        if (s.ask?.id !== a.id) return s;
+        return endPromptWaitIfIdle({ ...s, ask: undefined, pendingPrompt: Boolean(s.approval || s.mcpInteraction), resolvedPromptId: a.id });
+      }
+      if (s.mcpInteraction?.id !== a.id) return s;
+      return endPromptWaitIfIdle({ ...s, mcpInteraction: undefined, pendingPrompt: Boolean(s.approval || s.ask), resolvedPromptId: a.id });
     }
     case "clearExtensionForm": return s.extensionForm ? { ...s, extensionForm: undefined } : s;
     case "extension_notifications_drained": return s.extensionNotifications.length > 0 ? { ...s, extensionNotifications: [] } : s;
@@ -3181,9 +3207,9 @@ export function useController() {
     return tabs.find((tab) => tab.active) ?? tabs[0];
   }, []);
 
-  // snapshotAt is the promptEventClock() reading taken immediately before
-  // initiating the backend call that produced `tab`. The reducer uses it to
-  // ignore snapshots that predate a live approval/ask event (#6429).
+  // snapshotAt is the promptEventClock() reading taken after the backend call
+  // produced `tab`. The reducer uses it to ignore snapshots that predate a
+  // live approval/ask event (#6429).
   const dispatchRuntimeStatusForTab = useCallback((tabId: string, tab: RuntimeMetaSnapshot, snapshotAt?: number) => {
     const foregroundRunning = foregroundRunningFromRuntimeMeta(tab);
     const runtimeEpoch = tab.runtime?.epoch;
@@ -3204,7 +3230,7 @@ export function useController() {
       turnId: tab.turnId,
       turnStatus: tab.turnStatus,
       runtimeEpoch,
-      turnEventSeq: latestEventSeq,
+      turnEventSeq: tab.turnEventSeq,
       snapshotAt,
     });
     // backend_status reconciliation can clear a live prompt from frontend state.
@@ -3933,19 +3959,14 @@ export function useController() {
   ), []);
   const approveForTab = useCallback((tabId: string, id: string, allow: boolean, session: boolean, persist: boolean) => {
     if (!tabId) return;
+    const promptState = statesRef.current.get(tabId);
     // Pin the failure callback to the prompt-id epoch the RPC was issued in:
     // if a controller rebuild lands while the call is in flight, a late
     // failure must not undo bookkeeping the NEW controller wrote for the same
     // numeric id (#6432 round 4).
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    app.ApproveTab(tabId, id, allow, session, persist).catch(() => {
-      // The backend never actually resolved this prompt — undo the optimistic
-      // tombstone and ask it to replay, so the approval card can come back
-      // instead of being silently lost forever (#6432 round 3).
-      dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
-      replayPendingPromptsForActiveTab(tabId);
-    });
+    resolvePromptForTab(app, tabId, id, "approval", { allow, session, persist }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [dispatchTo]);
 
   const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
@@ -3954,15 +3975,10 @@ export function useController() {
 
   const resolvePlanDecisionForTab = useCallback((tabId: string, id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
     if (!tabId) return;
+    const promptState = statesRef.current.get(tabId);
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    const request = typeof app.ResolvePlanDecisionTab === "function"
-      ? app.ResolvePlanDecisionTab(tabId, id, action)
-      : app.ApproveTab(tabId, id, action === "start_execution", false, false);
-    request.catch(() => {
-      dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
-      replayPendingPromptsForActiveTab(tabId);
-    });
+    resolvePromptForTab(app, tabId, id, "plan", { action }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [dispatchTo]);
 
   const resolvePlanDecision = useCallback((id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
@@ -3971,12 +3987,10 @@ export function useController() {
 
   const resolveRecoveryForTab = useCallback((tabId: string, id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
     if (!tabId) return;
+    const promptState = statesRef.current.get(tabId);
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    app.ResolveRecoveryTab(tabId, id, action, feedback).catch(() => {
-      dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
-      replayPendingPromptsForActiveTab(tabId);
-    });
+    resolvePromptForTab(app, tabId, id, "recovery", { action, feedback }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [dispatchTo]);
 
   const resolveRecovery = useCallback((id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
@@ -3987,10 +4001,11 @@ export function useController() {
     if (!tabId) return Promise.reject(new Error("source tab is unavailable"));
     const state = statesRef.current.get(tabId);
     const epoch = state?.promptEpoch ?? 0;
-    return answerPromptForActiveTurn(app, tabId, id, answers, state?.activeTurnId).then(
+    return answerPromptForActiveTurn(app, tabId, id, answers, state?.ask?.turnId ?? state?.activeTurnId, state?.ask?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).then(
       () => dispatchTo(tabId, { type: "ask_submit_succeeded", id, epoch }),
       (error) => {
-        dispatchTo(tabId, { type: "local_notice", level: "warn", text: t("notice.askSubmitFailed", { error: errorMessage(error) }), preserveRuntime: true });
+        if (isStalePromptError(error)) dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind: "ask" });
+        else dispatchTo(tabId, { type: "local_notice", level: "warn", text: t("notice.askSubmitFailed", { error: errorMessage(error) }), preserveRuntime: true });
         void reconcileRuntimeAfterRejectedMutation(tabId);
         throw error;
       },
@@ -4005,10 +4020,10 @@ export function useController() {
   const answerMCPInteractionForTab = useCallback(
     (tabId: string, id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => {
       if (!tabId) return;
-      dispatchTo(tabId, { type: "clearAsk" });
-      app.AnswerMCPInteractionForTab(tabId, id, action, content ?? null).catch(() => {
-        replayPendingPromptsForActiveTab(tabId);
-      });
+      const promptState = statesRef.current.get(tabId);
+      const epoch = promptState?.promptEpoch ?? 0;
+      dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind: "mcp" });
+      resolvePromptForTab(app, tabId, id, "mcp", { action, content: content ?? null }, promptState?.mcpInteraction?.turnId ?? promptState?.activeTurnId, promptState?.mcpInteraction?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "mcp"));
     },
     [dispatchTo],
   );

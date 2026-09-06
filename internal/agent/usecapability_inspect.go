@@ -34,7 +34,7 @@ func (t *UseCapabilityTool) resolveDiscovery(ctx context.Context, p useCapabilit
 	case "search":
 		query := strings.TrimSpace(p.Query)
 		if query == "" {
-			return tool.ResolvedCall{}, fmt.Errorf("query is required for action=search")
+			return tool.ResolvedCall{}, capabilityInputErrorf("query is required for action=search")
 		}
 		out, resultCount, err := t.searchCapabilities(query, p.Limit)
 		if err != nil {
@@ -49,7 +49,7 @@ func (t *UseCapabilityTool) resolveDiscovery(ctx context.Context, p useCapabilit
 		return base, nil
 	default:
 		if id == "" {
-			return tool.ResolvedCall{}, fmt.Errorf("capability_id is required for action=inspect")
+			return tool.ResolvedCall{}, capabilityInputErrorf("capability_id is required for action=inspect")
 		}
 		if id == sessionToolResultCapabilityID {
 			out, err := t.inspectSessionToolResult()

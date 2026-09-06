@@ -95,10 +95,15 @@ var errNoSessionPath = errors.New("session has content but no session path; conv
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
 type Controller struct {
-	runner       agent.Runner
-	executor     *agent.Agent
-	guardianSess *guardian.Session // nil when guardian is disabled
-	guardianPath string            // persisted guardian session file ("" when disabled)
+	// promptResolveMu serializes exact prompt decisions on one controller. It
+	// prevents two UI submissions from racing through separate prompt managers.
+	promptResolveMu    sync.Mutex
+	promptRuntimeEpoch string
+	promptOwner        PendingPromptOwner
+	runner             agent.Runner
+	executor           *agent.Agent
+	guardianSess       *guardian.Session // nil when guardian is disabled
+	guardianPath       string            // persisted guardian session file ("" when disabled)
 	// recoveryGate is the shared Auto Guard state for this controller.
 	// nil when the feature is not wired for this controller.
 	recoveryGate *recovery.Gate
@@ -2125,6 +2130,12 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 // Cancel aborts the in-flight turn. A goroutine blocked awaiting approval
 // unblocks via the cancelled context.
 func (c *Controller) Cancel() {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	c.cancelLocked()
+}
+
+func (c *Controller) cancelLocked() {
 	c.mu.Lock()
 	cancel := c.cancel
 	if cancel != nil {
@@ -2133,6 +2144,7 @@ func (c *Controller) Cancel() {
 	c.mu.Unlock()
 	if cancel != nil {
 		c.emitTurnStatus(event.TurnCancelling)
+		c.promptOwner.CancelAll()
 		c.approval.clearAll()
 		cancel()
 		return
@@ -2533,17 +2545,23 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	// Registering after the lock left a queued question invisible everywhere:
 	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
 	id, reply := c.approval.registerAsk(questions)
+	c.registerOwnedPrompt(id, PromptAsk)
 
 	if !c.lockPromptFor(ctx, "question") {
-		c.approval.cancelAsk(id)
+		c.cancelOwnedPrompt(id)
 		return nil, ctx.Err()
 	}
 	defer c.approval.promptMu.Unlock()
 
 	c.approval.promptEmitMu.Lock()
-	if err := event.EmitChecked(c.sink, event.Event{Kind: event.AskRequest, ItemID: id, Ask: event.Ask{ID: id, Questions: questions}}); err != nil {
+	turnID, _, _, _ := c.turnEventRuntimeStatus()
+	_, runtimeEpoch := c.promptIdentitySnapshot()
+	if identity := c.bindOwnedPromptRouting(id, turnID, runtimeEpoch); identity.TurnID != "" {
+		turnID = identity.TurnID
+	}
+	if err := event.EmitChecked(c.sink, event.Event{Kind: event.AskRequest, TurnID: turnID, ItemID: id, Ask: event.Ask{ID: id, Questions: questions, TurnID: turnID}}); err != nil {
 		c.approval.promptEmitMu.Unlock()
-		c.approval.cancelAsk(id)
+		c.cancelOwnedPrompt(id)
 		return nil, fmt.Errorf("persist ask request: %w", err)
 	}
 	c.approval.markAskEmitted(id)
@@ -2556,7 +2574,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	case ans := <-reply:
 		return ans, nil
 	case <-waitCtx.Done():
-		c.approval.cancelAsk(id)
+		c.cancelOwnedPrompt(id)
 		return nil, waitCtx.Err()
 	}
 }
@@ -2570,6 +2588,12 @@ func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 // AnswerQuestionChecked persists the prompt transition before releasing the
 // agent loop. A failed ledger write leaves the prompt pending and retryable.
 func (c *Controller) AnswerQuestionChecked(id string, answers []event.AskAnswer) error {
+	c.promptResolveMu.Lock()
+	defer c.promptResolveMu.Unlock()
+	return c.answerQuestionCheckedLocked(id, answers)
+}
+
+func (c *Controller) answerQuestionCheckedLocked(id string, answers []event.AskAnswer) error {
 	pending, ok, err := c.approval.resolveAskAfter(id, func(p pendingAsk) error {
 		return c.emitTurnEventChecked(event.Event{Kind: event.PromptAnswered, ItemID: id, Status: event.TurnInProgress})
 	})
@@ -2577,6 +2601,7 @@ func (c *Controller) AnswerQuestionChecked(id string, answers []event.AskAnswer)
 		return err
 	}
 	if ok {
+		c.promptOwner.Remove(id)
 		// An answer batch with no selections is the explicit "skip and continue
 		// chat" path. End the current turn instead of feeding a prose dismissal
 		// back to the model and trusting it not to ask again (#6869).
@@ -2585,7 +2610,7 @@ func (c *Controller) AnswerQuestionChecked(id string, answers []event.AskAnswer)
 			activeTurn := c.cancel != nil
 			c.mu.Unlock()
 			if activeTurn {
-				c.Cancel()
+				c.cancelLocked()
 				return nil
 			}
 		}
@@ -2694,13 +2719,22 @@ func (c *Controller) emitPendingPrompts(sink event.Sink, approvals []event.Appro
 		return
 	}
 	for _, a := range approvals {
+		if identity, ok := c.promptOwner.Identity(a.ID); ok {
+			a.TurnID = identity.TurnID
+		}
 		sink.Emit(c.approvalRequestEvent(a))
 	}
 	for _, a := range asks {
-		sink.Emit(event.Event{Kind: event.AskRequest, ItemID: a.ID, Ask: a})
+		if identity, ok := c.promptOwner.Identity(a.ID); ok {
+			a.TurnID = identity.TurnID
+		}
+		sink.Emit(event.Event{Kind: event.AskRequest, TurnID: a.TurnID, ItemID: a.ID, Ask: a})
 	}
 	for _, i := range interactions {
-		sink.Emit(event.Event{Kind: event.MCPInteractionRequest, ItemID: i.ID, MCPInteraction: i})
+		if identity, ok := c.promptOwner.Identity(i.ID); ok {
+			i.TurnID = identity.TurnID
+		}
+		sink.Emit(event.Event{Kind: event.MCPInteractionRequest, TurnID: i.TurnID, ItemID: i.ID, MCPInteraction: i})
 	}
 }
 
@@ -5524,8 +5558,13 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		if cancel != nil {
 			// clearAll deliberately does not signal waiters. Pair it with the
 			// foreground cancellation so approval/ask waits always unblock.
+			c.promptResolveMu.Lock()
+			c.promptOwner.CancelAll()
 			c.approval.clearAll()
+			c.promptResolveMu.Unlock()
 			cancel()
+		} else {
+			c.promptOwner.Clear()
 		}
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
@@ -6239,19 +6278,25 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 	c.approval.promptEmitMu.Lock()
 	var id string
 	var reply chan approvalReply
+	kind := ""
 	if opts.fresh || opts.requireHuman || tool == planApprovalTool {
-		kind := ""
 		if tool == planApprovalTool {
 			kind = "plan"
 		}
 		id, reply = c.approval.registerDecisionKindWithInput(tool, subject, reason, args, opts.fresh, opts.requireHuman, kind, nil)
+		ownerKind := PromptApproval
+		if kind == "plan" {
+			ownerKind = PromptPlan
+		}
+		c.registerOwnedPrompt(id, ownerKind)
 	} else {
 		id, reply = c.approval.registerWithInput(tool, subject, reason, args)
+		c.registerOwnedPrompt(id, PromptApproval)
 	}
 
-	if err := event.EmitChecked(c.sink, c.approvalRequestEvent(event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason, RawInput: append(json.RawMessage(nil), args...), Fresh: opts.fresh})); err != nil {
+	if err := event.EmitChecked(c.sink, c.approvalRequestEvent(event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason, RawInput: append(json.RawMessage(nil), args...), Fresh: opts.fresh, Kind: kind})); err != nil {
 		c.approval.promptEmitMu.Unlock()
-		c.approval.cancel(id)
+		c.cancelOwnedPrompt(id)
 		return approvalReply{}, fmt.Errorf("persist approval request: %w", err)
 	}
 	c.approval.promptEmitMu.Unlock()
@@ -6266,13 +6311,20 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 	case r := <-reply:
 		return r, nil
 	case <-waitCtx.Done():
-		c.approval.cancel(id)
+		c.cancelOwnedPrompt(id)
 		return approvalReply{}, waitCtx.Err()
 	}
 }
 
 func (c *Controller) approvalRequestEvent(approval event.Approval) event.Event {
-	return event.Event{Kind: event.ApprovalRequest, ItemID: approval.ID, Approval: approval}
+	if approval.TurnID == "" {
+		approval.TurnID, _, _, _ = c.turnEventRuntimeStatus()
+	}
+	_, runtimeEpoch := c.promptIdentitySnapshot()
+	if identity := c.bindOwnedPromptRouting(approval.ID, approval.TurnID, runtimeEpoch); identity.TurnID != "" {
+		approval.TurnID = identity.TurnID
+	}
+	return event.Event{Kind: event.ApprovalRequest, TurnID: approval.TurnID, ItemID: approval.ID, Approval: approval}
 }
 
 func (c *Controller) emitRememberResult(r RememberResult) {

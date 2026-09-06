@@ -283,10 +283,13 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   TurnEventsForTab?(tabID: string, afterSeq: number): Promise<TurnEventReplayView>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ApproveTabForTurn?(tabID: string, turnID: string, runtimeEpoch: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ResolvePlanDecision(id: string, action: "start_execution" | "revise_plan" | "exit_plan"): Promise<void>;
   ResolvePlanDecisionTab(tabID: string, id: string, action: "start_execution" | "revise_plan" | "exit_plan"): Promise<void>;
+  ResolvePlanDecisionTabForTurn?(tabID: string, turnID: string, runtimeEpoch: string, id: string, action: "start_execution" | "revise_plan" | "exit_plan"): Promise<void>;
   ResolveRecovery(id: string, action: string, feedback: string): Promise<void>;
   ResolveRecoveryTab(tabID: string, id: string, action: string, feedback: string): Promise<void>;
+  ResolveRecoveryTabForTurn?(tabID: string, turnID: string, runtimeEpoch: string, id: string, action: string, feedback: string): Promise<void>;
   SetRecoveryCheckpointEnabled(enabled: boolean): Promise<void>;
   SetRecoveryCheckpointEnabledTab(tabID: string, enabled: boolean): Promise<void>;
   RecoveryCheckpointEnabled(): Promise<boolean>;
@@ -299,7 +302,14 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
     action: "accept" | "decline" | "cancel",
     content: Record<string, unknown> | null,
   ): Promise<void>;
+  AnswerMCPInteractionForTurn?(tabID: string, turnID: string, runtimeEpoch: string, id: string, action: "accept" | "decline" | "cancel", content: Record<string, unknown> | null): Promise<void>;
   AnswerPromptForTab?(tabID: string, turnID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
+  ResolvePromptForTab?(tabID: string, promptID: string, turnID: string, runtimeEpoch: string, kind: string, answer: {
+    questions?: QuestionAnswer[]; allow?: boolean; session?: boolean; persist?: boolean;
+    action?: string; feedback?: string; content?: Record<string, unknown> | null;
+  }): Promise<void>;
+  PendingPromptIdentitiesForTab?(tabID: string): Promise<Array<{ promptId: string; turnId: string; runtimeEpoch?: string; kind: string }>>;
+  ReplayPendingPromptIdentitiesForTab?(tabID: string): Promise<Array<{ promptId: string; turnId: string; runtimeEpoch?: string; kind: string }>>;
   ReplayPendingPrompts(): Promise<void>;
   ReplayPendingPromptsForTab(tabID: string): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
@@ -3165,6 +3175,16 @@ function makeMockApp(): AppBindings {
         ...makeMockMCPAppBindings(), ...makeMockPinnedContextBindings(),
         async AnswerQuestionForTab(_tabID, id, answers) {
           await withMockTabScope(_tabID, () => this.AnswerQuestion(id, answers));
+        },
+        async ResolvePromptForTab(tabID, promptID, _turnID, _runtimeEpoch, kind, answer) {
+          await withMockTabScope(tabID, async () => {
+            if (kind === "ask") return this.AnswerQuestion(promptID, answer.questions ?? []);
+            if (kind === "approval") return this.Approve(promptID, Boolean(answer.allow), Boolean(answer.session), Boolean(answer.persist));
+            if (kind === "plan") return this.ResolvePlanDecisionTab(tabID, promptID, (answer.action ?? "exit_plan") as "start_execution" | "revise_plan" | "exit_plan");
+            if (kind === "recovery") return this.ResolveRecoveryTab(tabID, promptID, answer.action ?? "revise", answer.feedback ?? "");
+            if (kind === "mcp") return this.AnswerMCPInteractionForTab(tabID, promptID, (answer.action ?? "cancel") as "accept" | "decline" | "cancel", answer.content ?? null);
+            throw new Error(`unsupported prompt kind: ${kind}`);
+          });
         },
         async ReplayPendingPrompts() {},
         async ReplayPendingPromptsForTab(_tabID) {},

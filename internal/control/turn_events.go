@@ -394,6 +394,10 @@ func (c *Controller) failTurnEventLedger(err error) {
 	}
 	c.mu.Unlock()
 	if cancel != nil {
+		// Cancel and prompt resolvers may hold promptResolveMu while this
+		// synchronous failure callback runs. Use the owners' internal locks to
+		// invalidate pending resolutions without reentering the submission lock.
+		c.promptOwner.CancelAll()
 		c.approval.clearAll()
 		cancel()
 	}
@@ -413,12 +417,25 @@ func (c *Controller) emitTurnEventChecked(e event.Event) error {
 	if c == nil {
 		return nil
 	}
+	if e.ItemID != "" && e.TurnID == "" {
+		if identity, ok := c.promptOwner.Identity(e.ItemID); ok {
+			e.TurnID = identity.TurnID
+			e.PromptKind = string(identity.Kind)
+		}
+	} else if e.ItemID != "" && e.PromptKind == "" {
+		if identity, ok := c.promptOwner.Identity(e.ItemID); ok {
+			e.PromptKind = string(identity.Kind)
+		}
+	}
 	return event.EmitChecked(c.sink, e)
 }
 
 // SetTurnEventRoutingMetadata attaches desktop routing identity to lifecycle
 // envelopes only. It never changes provider-visible prompts or tool schemas.
 func (c *Controller) SetTurnEventRoutingMetadata(runtimeEpoch, submissionID string) {
+	c.promptResolveMu.Lock()
+	c.promptRuntimeEpoch = runtimeEpoch
+	c.promptResolveMu.Unlock()
 	if ledger := c.turnEventLedger(); ledger != nil {
 		ledger.RequireProjectionAck(true)
 		ledger.SetRoutingMetadata(runtimeEpoch, submissionID)
