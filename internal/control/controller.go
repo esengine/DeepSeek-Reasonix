@@ -4341,7 +4341,7 @@ func (c *Controller) recoverInterruptedTurn(path string) {
 	changed := found && len(msgs) > start
 	if changed {
 		if marker.PreserveUser {
-			c.stripCancelledVisibleTurnMessagesAfterWithFallbackAt(start, provider.Message{}, marker.StartedAt)
+			c.stripCancelledVisibleTurnMessagesAfterWithFallbackAt(start, provider.Message{}, marker.StartedAt, c.ledgerTailEvidence())
 		} else {
 			c.stripTurnMessagesAfter(start)
 		}
@@ -4436,10 +4436,10 @@ func (c *Controller) stripInterruptedSyntheticTurnMessagesAfter(idx int) {
 // orchestrator owns that input, so it supplies the exact message rather than
 // letting cancellation infer the current turn from older transcript history.
 func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallback(idx int, fallback provider.Message) {
-	c.stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx, fallback, c.inFlightTurnStartedAt())
+	c.stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx, fallback, c.inFlightTurnStartedAt(), nil)
 }
 
-func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx int, fallback provider.Message, startedAt time.Time) {
+func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx int, fallback provider.Message, startedAt time.Time, evidence *interruptedTailEvidence) {
 	if c.executor == nil {
 		return
 	}
@@ -4512,7 +4512,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 			continue
 		}
 		if m.Role == provider.RoleAssistant {
-			recordInterruptedAssistantRecovery(recovery, msgs, i)
+			recordInterruptedAssistantRecovery(recovery, msgs, i, evidence)
 		}
 		if end, ok := completeToolTurnEnd(msgs, i); ok && c.executor.CanReplayAssistantMessage(m) {
 			next = append(next, msgs[i:end]...)
@@ -4532,6 +4532,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 		})
 		localIndexes = append(localIndexes, len(next)-1)
 	}
+	applyInterruptedTailEvidence(recovery, evidence)
 	c.stampInterruptedTurnID(recovery)
 	next[localIndexes[len(localIndexes)-1]].InterruptedTurn = recovery
 	c.replaceSessionAfterCancel(next)

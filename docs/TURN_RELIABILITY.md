@@ -68,6 +68,27 @@ results are refused before they reach the wire. Normalization already
 repairs truncated arguments and dangling calls; the gate turns a normalizer
 regression into a local error instead of a provider 400.
 
+## Restart recovery
+
+Reopening a ledger whose last turn never reached a terminal event answers each
+unanswered call from the durable record: a call with a persisted `tool_started`
+barrier becomes `unknown`, one that only reached dispatch becomes `cancelled`.
+The synthesized results carry no arguments or output, are tagged with a reopen
+source so a second reopen reads the same evidence, and land the turn as
+`recovery_required` when any call may have run — otherwise `interrupted`.
+
+The controller reads that evidence when it strips the dead turn's tail, so the
+handoff distinguishes "may already have committed" from "safe to plan again",
+names the cause `runtime_restart`, and marks a turn that died before producing
+anything as a silent interruption.
+
+## Checkpoint identity
+
+The first side-effecting call of a turn stamps its open checkpoint with the
+turn ID, call ID, an argument digest, and the transcript digest, right after
+its start barrier is durable. Later writers keep the first stamp, so a restore
+names the attempt it protects rather than only the user turn.
+
 ## Status
 
 Landed (Phase 1, state correctness):
@@ -79,10 +100,16 @@ Landed (Phase 1, state correctness):
 - `recovery_required` terminal escalation
 - transcript gate before every provider request
 
+Landed (Phase 2, persistence and recovery):
+
+- reopen classifies orphaned calls by the persisted start barrier and escalates
+  the terminal status when an effect is unproven
+- the restart handoff inherits that evidence, its cause, and silent-interruption
+  facts
+- checkpoints carry the recovery identity of the first side-effecting call
+
 Next:
 
-- Phase 2: ledger schema v3 with tool call records, checkpoint before the
-  first side-effecting call, restart recovery of pending and unknown calls
 - Phase 3: Desktop recovery card with inspect, mark-completed, and re-run
   (new attempt ID, original call ID never reused); silent-interruption notice;
   no automatic session fork for ordinary tool interruptions

@@ -55,6 +55,17 @@ branch.
   `failed`，恢复块不再把它当作 unknown；存在未证明副作用或静默中断的取消以
   `recovery_required` 结束回合；每次 provider 请求前都经过转录门（#9825、#9566）。
 
+- **Restart after a crash:** reopening a session ledger now answers each
+  unanswered tool call from its persisted start barrier — started calls read as
+  `unknown`, never-started ones as `cancelled` — escalates the recovered turn to
+  `recovery_required` when an effect is unproven, and hands that evidence to the
+  next turn instead of treating every interrupted call alike. Checkpoints record
+  the interrupted attempt's identity (#9825).
+- **崩溃后重启：** 重开会话账本时，按持久化的起始屏障答复每个未答复的工具调用
+  ——已启动读作 `unknown`，从未启动读作 `cancelled`——效果未证明时把恢复出的回合
+  升级为 `recovery_required`，并把该证据交给下一回合，而不是把所有被中断的调用
+  一视同仁。checkpoint 记录被中断尝试的身份（#9825）。
+
 - **Relay image input:** ID-only or invalid model metadata now stays unknown.
   Both Desktop model editors expose per-model Auto / On / Off overrides, with
   official protocol limits retained. A separate V2 discovery cache rejects stale

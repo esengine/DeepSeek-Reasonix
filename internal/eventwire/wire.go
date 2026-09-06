@@ -213,6 +213,7 @@ func ToWire(e event.Event) Event {
 		w.CheckpointTurn = e.CheckpointTurn
 		w.Receipt = completionReceiptWire(e.Receipt)
 		w.ProtocolRecovery = e.ProtocolRecovery
+		w.Recovery = e.Recovery
 		w.Diagnostic = e.Diagnostic
 		if e.Readiness != nil {
 			w.Readiness = &FinalReadiness{Attempts: e.Readiness.Attempts, Missing: append([]string(nil), e.Readiness.Missing...)}

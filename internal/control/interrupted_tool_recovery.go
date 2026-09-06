@@ -6,7 +6,48 @@ import (
 	"reasonix/internal/provider"
 )
 
-func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msgs []provider.Message, i int) {
+// interruptedTailEvidence is what the lifecycle ledger proved about a turn the
+// runtime never finished: which unanswered calls crossed the start barrier.
+type interruptedTailEvidence struct {
+	turnID string
+	states map[string]provider.ToolRunState
+}
+
+func (c *Controller) ledgerTailEvidence() *interruptedTailEvidence {
+	orphan := c.turnEventLedger().OrphanRecovery()
+	if orphan == nil {
+		return nil
+	}
+	ev := &interruptedTailEvidence{turnID: orphan.TurnID, states: make(map[string]provider.ToolRunState, len(orphan.Tools))}
+	for _, tool := range orphan.Tools {
+		state := provider.ToolRunCancelled
+		if tool.Started {
+			state = provider.ToolRunUnknown
+		}
+		ev.states[tool.ID] = state
+	}
+	return ev
+}
+
+// applyInterruptedTailEvidence names the restart and marks a turn that died
+// before producing anything as silent, so the next turn is told exactly that.
+func applyInterruptedTailEvidence(r *provider.InterruptedTurnRecovery, ev *interruptedTailEvidence) {
+	if ev == nil {
+		return
+	}
+	if r.Cause == "" {
+		r.Cause = "runtime_restart"
+	}
+	if r.TurnID == "" {
+		r.TurnID = ev.turnID
+	}
+	produced := len(r.ToolCalls) > 0 || len(r.CompletedTools) > 0 || r.DroppedPartialText || r.DroppedPartialReasoning
+	r.SilentInterruption = r.SilentInterruption || !produced
+}
+
+// A call without a stored result is unknown unless the ledger proves it never
+// crossed the start barrier; a session that outran the ledger stays unknown.
+func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msgs []provider.Message, i int, ev *interruptedTailEvidence) {
 	results := make(map[string]provider.Message)
 	for j := i + 1; j < len(msgs) && msgs[j].Role == provider.RoleTool && !msgs[j].LocalOnly; j++ {
 		result := msgs[j]
@@ -16,6 +57,10 @@ func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msg
 		state := provider.ToolRunUnknown
 		if result, ok := results[call.ID+"\x00"+call.Name]; ok {
 			state = provider.ToolResultRunState(result)
+		} else if ev != nil {
+			if proven, ok := ev.states[call.ID]; ok {
+				state = proven
+			}
 		}
 		provider.RecordToolRecovery(r, interruptedToolSummary(call), state)
 		record := provider.ToolCallRecord{

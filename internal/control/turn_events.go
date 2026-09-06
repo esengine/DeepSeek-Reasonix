@@ -203,6 +203,9 @@ func (s *turnEventSink) persistAndPublish(e event.Event) error {
 	if !ok {
 		return nil
 	}
+	if e.Kind == event.ToolStarted && !e.Tool.ReadOnly {
+		s.c.stampCheckpointIdentity(e, stamped.TurnID)
+	}
 	s.publishInner(stamped)
 	if e.Kind == event.TurnDone && !ledger.ProjectionAckRequired() {
 		if err := ledger.AcknowledgeProjection(stamped.TurnID); err != nil {
