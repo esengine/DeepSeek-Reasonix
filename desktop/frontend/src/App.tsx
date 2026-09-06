@@ -4,21 +4,8 @@ import { useAppNavigationStore } from "./store/appNavigation";
 import { useAutomationNavigation } from "./app-runtime/useAutomationNavigation";
 import { ShellExpandProvider } from "./lib/shellExpand";
 import {
-  Activity,
-  AlarmClock,
   Search,
-  Server,
-  SquarePen,
   PanelRight,
-  Settings as SettingsIcon,
-  RotateCw,
-  Trash2,
-  BarChart3,
-  Brain,
-  Cpu,
-  Palette,
-  Puzzle,
-  TerminalSquare,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { useGoalActionHandler } from "./lib/goalAction";
@@ -49,7 +36,6 @@ import { DecisionFooterRegion, type DecisionFooterSurface } from "./app-shell/De
 type DecisionSurfaceKind = MockDecisionSurfaceKind | "extension_form";
 import { RemoteConnectionTimeoutError, useRemoteStore, waitForRemoteConnection } from "./store/remote";
 import { RemoteWorkspaceLaunchGate, resolveRemoteWorkspace } from "./lib/remoteWorkspace";
-import type { PaletteItem } from "./components/CommandPalette";
 import { UpdaterProvider } from "./lib/useUpdater";
 import { Tooltip } from "./components/Tooltip";
 import { useOnboardingCommands } from "./app-runtime/useOnboardingCommands";
@@ -114,7 +100,6 @@ import {
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
 import { recordFrontendDiagnostic } from "./lib/frontendDiagnosticBridge";
-import { paletteSessionDisplayTitle, paletteSessionHint, paletteSessionKeywords, sessionActivityTime } from "./lib/session";
 import { useNavigationSurface } from "./lib/useNavigationSurface";
 import {
   applyTheme,
@@ -132,7 +117,7 @@ import { NoticePreviewPanel, noticePreviewMockEnabled } from "./app-shell/Notice
 import { ShellHotkeys, TextSizeHotkeys } from "./app-shell/HotkeyRegistrations";
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
-import { formatShortcutCombo, resolvedShortcutCombo, useGlobalShortcut } from "./lib/keyboardShortcuts";
+import { formatShortcutCombo, resolvedShortcutCombo } from "./lib/keyboardShortcuts";
 import { useWarmTerminalPanel } from "./lib/useWarmTerminalPanel";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
@@ -160,6 +145,7 @@ import { useSessionUndo } from "./app-runtime/useSessionUndo";
 import { useExtensionSurface } from "./app-runtime/useExtensionSurface";
 import { useTabBarCommands } from "./app-runtime/useTabBarCommands";
 import { useRuntimeEventHandlers } from "./app-runtime/useRuntimeEventHandlers";
+import { usePaletteCommands } from "./app-runtime/usePaletteCommands";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -304,8 +290,6 @@ export default function App() {
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const paletteOpen = useOverlayStore((s) => s.paletteOpen);
   const setPaletteOpen = useOverlayStore((s) => s.setPaletteOpen);
-  const paletteExtensionActions = useOverlayStore((s) => s.paletteExtensionActions);
-  const setPaletteExtensionActions = useOverlayStore((s) => s.setPaletteExtensionActions);
   const remoteHosts = useRemoteStore((s) => s.hosts);
   const remoteStatuses = useRemoteStore((s) => s.statuses);
   const { runGoalAction, handleGoalActionError } = useGoalActionHandler();
@@ -314,8 +298,6 @@ export default function App() {
 
   const shortcutsOpen = useOverlayStore((s) => s.shortcutsOpen);
   const setShortcutsOpen = useOverlayStore((s) => s.setShortcutsOpen);
-  const paletteSessions = useOverlayStore((s) => s.paletteSessions);
-  const setPaletteSessions = useOverlayStore((s) => s.setPaletteSessions);
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
   type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
@@ -1533,29 +1515,28 @@ export default function App() {
   // Command palette: ⌘K / Ctrl+K opens a fuzzy navigator over commands and
   // recent sessions. Sessions are snapshotted on open so the list is stable
   // while the palette is up; extension actions follow the same snapshot rule.
-  const openPalette = useCommittedCommand(async () => {
-    closeTransientOverlays();
-    setPaletteOpen(true);
-    setPaletteSessions(await listSessions().catch(() => []));
-    setPaletteExtensionActions(await app.ExtensionActions(activeTabIdRef.current ?? "").catch(() => []));
+  const { openPalette, paletteItems } = usePaletteCommands({
+    managementActive,
+    activeTabId,
+    activeTabIdRef,
+    remoteSurfaceActive,
+    t,
+    notice,
+    showToast,
+    ports: {
+      handleNewTab: () => void handleNewTab(),
+      listSessions,
+      openTrash: () => void openTrash(),
+      onResumeSession: (session) => onResumeSession(session),
+      openRemoteWorkspaceFromStatus: (host) => openRemoteWorkspaceFromStatus(host),
+      connectAndOpenRemoteWorkspace: (host) => connectAndOpenRemoteWorkspace(host),
+      toggleTerminalPanel,
+      setTasksOpen: (open) => setTasksOpen(open),
+      handleTabClose: (id) => void handleTabClose(id),
+      toggleSidebar,
+      returnToWorkspace,
+    },
   });
-  useGlobalShortcut("commandPalette.open", () => {
-    setPaletteOpen((current) => {
-      if (!current) void openPalette();
-      return !current; // ← fix: toggle the state so the palette actually opens/closes
-    });
-  }, [openPalette]);
-  useGlobalShortcut("app.newSession", () => void handleNewTab(), [handleNewTab]);
-  useGlobalShortcut("settings.open", () => {
-    closeTransientOverlays();
-    setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget);
-  }, [closeTransientOverlays]);
-  useGlobalShortcut("tab.close", () => {
-    if (managementActive) returnToWorkspace();
-    else if (activeTabId) void handleTabClose(activeTabId);
-  }, [activeTabId, handleTabClose, managementActive, returnToWorkspace], managementActive || Boolean(activeTabId));
-  useGlobalShortcut("shortcuts.show", () => setShortcutsOpen(true));
-  useGlobalShortcut("sidebar.toggle", toggleSidebar, [toggleSidebar], !managementActive);
 
   // --- Topic shortcut navigation (Cmd/Ctrl+1-9) ---
   const visibleTopicsRef = useRef<TopicShortcutEntry[]>([]);
@@ -1583,120 +1564,6 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKeydown);
   }, [sidebarCollapsed, managementActive, desktopPlatform, handleNavigateTopic]);
 
-  const paletteItems = useMemo<PaletteItem[]>(() => {
-    const cmds: PaletteItem[] = [
-      { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
-      { id: "cmd-automation", group: t("palette.group.commands"), title: t("sidebar.automation"), icon: <AlarmClock size={15} />, compact: true, keywords: ["automation", "自动化"], run: () => openPage({ kind: "automation" }) },
-      { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
-      { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget(useAppNavigationStore.getState().lastSettingsTarget) },
-      { id: "cmd-appearance", group: t("palette.group.commands"), title: t("palette.cmd.appearance"), icon: <Palette size={15} />, compact: true, keywords: ["theme", "appearance", "外观", "主题"], run: () => setSettingsTarget("appearance") },
-      {
-        id: "cmd-theme-reset",
-        group: t("palette.group.commands"),
-        title: t("settings.themeLibrary.reset"),
-        icon: <Palette size={15} />,
-        compact: true,
-        keywords: ["theme", "reset", "default", "恢复默认", "主题"],
-        run: () => {
-          void app.ResetThemePack()
-            .then(() => {
-              clearThemePack();
-              notice(t("settings.themeReset"));
-            })
-            .catch((err) => showToast(err instanceof Error ? err.message : String(err), "error"));
-        },
-      },
-      { id: "cmd-memory", group: t("palette.group.commands"), title: t("palette.cmd.memory"), icon: <Brain size={15} />, compact: true, keywords: ["memory", "记忆"], run: () => setSettingsTarget("memory") },
-      { id: "cmd-models", group: t("palette.group.commands"), title: t("palette.cmd.models"), icon: <Cpu size={15} />, compact: true, keywords: ["model", "模型"], run: () => setSettingsTarget("models") },
-      {
-        id: "cmd-usage-stats",
-        group: t("palette.group.commands"),
-        title: t("palette.cmd.usageStats"),
-        icon: <BarChart3 size={15} />,
-        compact: true,
-        keywords: ["usage", "stats", "statistics", "用量", "统计"],
-        run: () => {
-          setSettingsFocus((current) => ({
-            target: "model-stats",
-            requestId: (current?.requestId ?? 0) + 1,
-          }));
-          setSettingsTarget("models");
-        },
-      },
-      { id: "cmd-task-center", group: t("palette.group.commands"), title: t("palette.cmd.taskCenter"), icon: <Activity size={15} />, compact: true, keywords: ["task", "tasks", "center", "任务", "任务中心"], run: () => setTasksOpen("all") },
-      { id: "cmd-terminal", group: t("palette.group.commands"), title: t("rightDock.terminal"), icon: <TerminalSquare size={15} />, compact: true, keywords: ["terminal", "shell", "终端"], run: () => toggleTerminalPanel() },
-      {
-        id: "cmd-reload-runtime",
-        group: t("palette.group.commands"),
-        title: t("palette.cmd.reloadRuntime"),
-        icon: <RotateCw size={15} />,
-        compact: true,
-        keywords: ["reload", "runtime", "重载", "运行时"],
-        run: () => {
-          const tabID = activeTab?.id;
-          if (!tabID) return;
-          // Success/queued feedback arrives as a tab notice; only hard failures need a toast.
-          void app.ReloadRuntime(tabID).catch((err) => showToast(err instanceof Error ? err.message : String(err), "error"));
-        },
-      },
-    ];
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const dayLabel = (ms: number) => {
-      const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(ms))) / 86_400_000);
-      if (days <= 0) return t("history.today");
-      if (days === 1) return t("history.yesterday");
-      return new Date(ms).toLocaleDateString();
-    };
-    const sessionItems: PaletteItem[] = paletteSessions.slice(0, 12).map((s) => ({
-      id: `sess-${s.path}`,
-      group: t("palette.group.sessions"),
-      title: paletteSessionDisplayTitle(s, t("history.emptySession")),
-      hint: paletteSessionHint(s),
-      keywords: paletteSessionKeywords(s),
-      meta: dayLabel(sessionActivityTime(s)),
-      badge: t(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns }),
-      run: () => void onResumeSession(s),
-    }));
-    const remoteItems: PaletteItem[] = remoteHosts.map((host) => {
-      const status = remoteStatuses[host.id];
-      const connected = status?.state === "connected" || status?.state === "degraded";
-      const target = `${host.user ? `${host.user}@` : ""}${host.host}${host.port && host.port !== 22 ? `:${host.port}` : ""}`;
-      return {
-        id: `remote-${host.id}`,
-        group: t("palette.group.remote"),
-        title: connected
-          ? t("palette.remote.open", { host: host.label })
-          : t("palette.remote.connect", { host: host.label }),
-        hint: host.defaultWorkspace || target,
-        icon: <Server size={15} />,
-        keywords: ["ssh", "remote", "远程", "连接", host.label, host.host],
-        run: () => {
-          if (connected) openRemoteWorkspaceFromStatus(host);
-          else connectAndOpenRemoteWorkspace(host);
-        },
-      };
-    });
-    const extensionItems: PaletteItem[] = paletteExtensionActions.map((action) => ({
-      id: `ext-${action.slash}`,
-      group: t("palette.group.extensions"),
-      title: action.description || action.slash,
-      hint: action.slash,
-      icon: <Puzzle size={15} />,
-      keywords: ["extension", "扩展", action.plugin, action.action, action.slash],
-      run: () => {
-        const tabID = activeTab?.id;
-        if (!tabID) return;
-        // The extension's result message is user-facing feedback; only hard
-        // failures need an error toast.
-        void app.InvokeExtensionAction(tabID, action.slash, {})
-          .then((message) => {
-            if (message) showToast(message, "info");
-          })
-          .catch((err) => showToast(err instanceof Error ? err.message : String(err), "error"));
-      },
-    }));
-    return [...(remoteSurfaceActive ? cmds.filter((item) => item.id !== "cmd-terminal" && item.id !== "cmd-reload-runtime") : cmds), ...extensionItems, ...remoteItems, ...sessionItems];
-  }, [t, paletteSessions, paletteExtensionActions, remoteHosts, remoteStatuses, activeTab?.id, handleNewTab, openTrash, onResumeSession, openRemoteWorkspaceFromStatus, connectAndOpenRemoteWorkspace, openRightDockMode, remoteSurfaceActive, showToast]);
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCommittedCommand(async (path: string) => {
       if (state.running) return;
