@@ -1741,7 +1741,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			persistMetricsEvent(app, m, tabID, e)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt))
+	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt, app.sessionGenerationForTab(tabID)))
 	if m := s.takeoverMirror.Load(); m != nil {
 		m.forwardEvent(e)
 	}
@@ -2326,12 +2326,25 @@ func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab
 	}
 }
 
+func (a *App) sessionGenerationForTab(tabID string) uint64 {
+	if a == nil || tabID == "" {
+		return 0
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if tab := a.tabByEventSinkIDLocked(tabID); tab != nil {
+		return tab.SessionGeneration
+	}
+	return 0
+}
+
 // wireEventTab extends the shared event wire with tab routing info. The frontend reducer
 // uses tabId to dispatch to the correct per-tab state.
 type wireEventTab struct {
 	eventwire.Event
 	TabID         string `json:"tabId"`
 	RuntimeEpoch  string `json:"runtimeEpoch,omitempty"`
+	SessionGeneration uint64 `json:"sessionGeneration,omitempty"`
 	TurnStartedAt int64  `json:"turnStartedAt,omitempty"`
 	// Session-cumulative tokens per tab.
 	SessionHitTokens  int `json:"sessionHitTokens,omitempty"`

@@ -403,6 +403,7 @@ export interface WireEvent extends RecoveryEventFields {
   completion?: WireCompletionSummary;
   tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
+  sessionGeneration?: number;
   /** Unix milliseconds recorded by the desktop host when this turn began. */
   turnStartedAt?: number;
   sessionHitTokens?: number;

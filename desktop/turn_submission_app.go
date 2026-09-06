@@ -80,8 +80,11 @@ type correlatedWireEventTab struct {
 	SubmissionID string `json:"submissionId,omitempty"`
 }
 
-func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string, turnStartedAt int64) any {
+func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string, turnStartedAt int64, sessionGeneration ...uint64) any {
 	wire := toWireTab(e, tabID, runtimeEpoch)
+	if len(sessionGeneration) > 0 {
+		wire.SessionGeneration = sessionGeneration[0]
+	}
 	if e.Kind == event.TurnStarted {
 		wire.TurnStartedAt = turnStartedAt
 	}

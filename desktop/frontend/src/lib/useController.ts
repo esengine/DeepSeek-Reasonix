@@ -3520,6 +3520,12 @@ export function useController() {
         if (!acceptsRuntimeEventEpoch(acceptedEpoch, e.runtimeEpoch)) return;
         if (!acceptedEpoch) runtimeEpochByTabRef.current.set(targetTabId, e.runtimeEpoch);
       }
+      const currentMeta = statesRef.current.get(targetTabId)?.meta;
+      if (
+        e.sessionGeneration !== undefined &&
+        currentMeta?.sessionGeneration !== undefined &&
+        e.sessionGeneration !== currentMeta.sessionGeneration
+      ) return;
       if (!turnEventProjector.acceptLive(targetTabId, e, acceptedEpoch)) return;
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
