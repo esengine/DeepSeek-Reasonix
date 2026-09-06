@@ -319,7 +319,6 @@ export function AskCard({
       title={q.header ?? t("ask.title")}
       badges={
         <span className="ask-shelf__header-meta">
-          {q.header && <span className="ask-shelf__header-text">{q.header}</span>}
           {hasMultipleQuestions && (
             <span className="ask-shelf__header-text ask-shelf__header-text--progress">
               {t("ask.questionProgress", { progress })}
