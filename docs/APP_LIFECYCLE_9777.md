@@ -195,8 +195,11 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 2,180 lines (25 -> 22 effects). Six domain owners, remaining
-  effects, the pure shell and removal of its size exception are not complete.
+- `App.tsx` is now a 10-line bridge-free composition entry. The runtime
+  controller currently lives in `AppRuntime.tsx`; region/controller extraction
+  and the ≤800-line per-module ceiling still remain before the full ≤200-line
+  composition target is complete. App-specific entry/layer checks are now part
+  of the frontend build.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
   `app-shell/NoticePreviewPanel.tsx`, `app-shell/HotkeyRegistrations.tsx`);
@@ -259,7 +262,9 @@ source-only tests must be audited as their owning features migrate.
   PASS. Complete prewarming, control builds and retaining-path classification
   for the final structure remain required.
 - Formal 128/512-round, three-process App memory runs, native App soak, final
-  Go/race/lint/CodeQL evidence, CI path filters and final-head checks are pending.
+  Go/race/lint/CodeQL evidence and final-head checks are pending. CI now invokes
+  App lifecycle/browser/memory and the complete frontend suite; memory remains
+  fail-closed until retention paths are attributed.
 
 ## Layering migration runbook (pending slices, in order)
 

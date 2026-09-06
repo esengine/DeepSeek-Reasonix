@@ -395,6 +395,10 @@ jobs:
           pnpm --dir frontend test:motion-browser
           pnpm --dir frontend test:composer
           pnpm --dir frontend test:todo-visibility
+          pnpm --dir frontend test:app-lifecycle
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:app-browser
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:app-memory
+          pnpm --dir frontend test:all
           pnpm --dir frontend test:transcript
           xvfb-run -a env REASONIX_TRANSCRIPT_NATIVE_THUMB=1 pnpm --dir frontend test:transcript-browser
           PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend test:transcript-reader-browser
