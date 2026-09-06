@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { dispatchPartialRewindNotice, partialRewindNotice, rewindFailureDetail, rewindOutcome } from "../lib/rewindCommit";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const undoSource = readFileSync(resolve(testDir, "../app-runtime/useSessionUndo.ts"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
 
