@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Queue as QueueSnapshot, QueueItem } from "../port/port";
 import { t } from "../i18n";
+import { reason } from "../i18n/kernel";
 import { Overflow } from "./Overflow";
 
 interface Props {
@@ -72,6 +73,9 @@ const fill = (n: number, max: number) => (max > 0 ? `${Math.min(100, Math.round(
 export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefresh, onPause }: Props) {
   const [editing, setEditing] = useState("");
   const [draft, setDraft] = useState("");
+  // Which row could not be read back, and why. Not a draft: the editor stays
+  // shut, because the row's own text is the only thing that may fill it.
+  const [unread, setUnread] = useState<{ id: string; why: string } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
 
   // The body arrives after the click, so focus waits for the field to exist.
@@ -83,7 +87,17 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
     async (id: string) => {
       // Opening on the preview would put a cut-off line in the box and save it
       // back as the whole instruction.
-      const body = await onRead(id).catch(() => "");
+      setUnread(null);
+      let body: string;
+      try {
+        body = await onRead(id);
+      } catch (e) {
+        // A read that failed is not an empty instruction. Filling the box with
+        // "" would have the user retype a line they never saw, and the save
+        // replaces the whole entry with it.
+        setUnread({ id, why: reason(e) });
+        return;
+      }
       setDraft(body);
       setEditing(id);
     },
@@ -167,6 +181,11 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
               )}
               {!!it.refs?.length && <span className="rf">{t("冻结 {n} 文件", { n: it.refs.length })}</span>}
               {it.blockReason && <span className="qwhy">{it.blockReason}</span>}
+              {unread?.id === it.id && (
+                <span className="qwhy" data-err="" role="alert">
+                  {t("读不回这一条的正文，没有打开编辑：{why}", { why: unread.why })}
+                </span>
+              )}
               {live && (
                 <span className="qacts">
                   <button onClick={() => onMove(it.id, i - 1)} disabled={i === 0} title={t("上移")}>

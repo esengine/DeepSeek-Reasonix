@@ -250,6 +250,8 @@ export const EN: Record<string, string> = {
   "受阻": "blocked",
   "状态不明": "uncertain",
   "冻结 {n} 文件": "{n} frozen",
+  "读不回这一条的正文，没有打开编辑：{why}":
+    "Could not read this entry back, so it was not opened for editing: {why}",
   "上移": "Move up",
   "下移": "Move down",
   "改": "Edit",

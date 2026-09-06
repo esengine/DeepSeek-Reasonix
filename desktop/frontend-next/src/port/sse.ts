@@ -621,7 +621,13 @@ export class SsePort extends SseTheme implements AgentPort {
   }
   async readQueued(itemId: string) {
     const r = await this.get<{ envelope?: { displayText?: string } }>("/inbox/items/" + encodeURIComponent(itemId));
-    return r.envelope?.displayText ?? "";
+    // Every stored entry has a body — the kernel refuses an empty one at
+    // enqueue — so an absent field is an answer we do not understand, not an
+    // empty instruction. Returning "" for it hands the editor a blank page.
+    if (typeof r.envelope?.displayText !== "string") {
+      throw new Error(`inbox item ${itemId}: answer carried no body`);
+    }
+    return r.envelope.displayText;
   }
   editQueued(itemId: string, text: string) {
     return this.patch("/inbox/items/" + encodeURIComponent(itemId), { input: text });

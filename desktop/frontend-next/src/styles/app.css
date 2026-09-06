@@ -655,6 +655,7 @@
   .pv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
   .rf { flex: none; color: var(--faint) }
   .qwhy { flex: none; color: var(--warn-ink) }
+  .qwhy[data-err] { color: var(--err-ink) }
   .qedit {
     flex: 1; min-width: 0; padding: 2px 5px; border: 1px solid var(--focus); border-radius: var(--r-xs);
     background: var(--surface); color: var(--text); font: inherit; resize: none;

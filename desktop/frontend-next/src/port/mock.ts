@@ -632,9 +632,13 @@ export class MockPort extends MockTheme implements AgentPort {
   }
 
   // The fixture keeps the whole line, so what comes back is what went in —
-  // which is the point being modelled: a preview is not the text.
+  // which is the point being modelled: a preview is not the text. An entry the
+  // fixture no longer holds refuses the way the kernel does, so the failure a
+  // reader can actually hit is reachable here too.
   async readQueued(itemId: string) {
-    return this.queueBodies.get(itemId) ?? "";
+    const body = this.queueBodies.get(itemId);
+    if (body === undefined) throw new HttpError(404, "no such entry", { code: "inbox.not_found" });
+    return body;
   }
 
   async editQueued(itemId: string, text: string) {
