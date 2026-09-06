@@ -5,8 +5,10 @@
 ## 状态与范围
 
 本文是实施检查点，不是合并验收结论。保留现有 PR 历史，包括主线合并
-`5cb605a4d` 与资源/导航实施提交 `2b9aba0fb`；本轮继续同步主线 `e47ff8cb6`。
-完整 App 分层和原生平台验收仍未完成。
+`5cb605a4d` 与资源/导航实施提交 `2b9aba0fb`。分层迁移已全部完成并满足
+repolint 单模块 ≤800 行硬门禁；与当前 origin/main-v2 的合并（exact prompt
+protocol、session-runtime ordering fence、AskCard session-draft wiring）已解决
+并转绿。原生平台验收仍未完成。
 
 ## 已实现的共同契约
 
@@ -48,11 +50,15 @@ AST 门禁解析 import、re-export、别名和动态 import，区分 type-only 
 reader 回放、前端及测试类型检查、hooks、含负例的 AST 门禁、single-writer
 和 diff 空白检查。
 
-最近已检查生产 bundle（KiB）：初始 JS 426.7 / 426.8；外壳 CSS 115.9 / 116.0；
-简中60.5 / 60.6；繁中61.4 / 61.5；初始原始资源2336.3 / 2349.4。
-未提高容量预算。仅设置页使用的图片控件 CSS 移入既有懒加载样式表；三语
-删除了已移除密度/reasoning/fold 控件的无引用文案。旧配置字段、setter、
-事件和镜像的一版兼容政策不变。
+最近已检查生产 bundle（KiB，合并 main-v2 后实测）：初始 JS 441.0 / 441.1；
+外壳 CSS 116.4 / 116.5；简中 60.9 / 61.0；繁中 61.7 / 61.9；初始原始资源
+2380.9 / 2381.0。预算按政策做了最小 ratchet：合并前精简图因工具链漂移已超
+旧门禁 0.5-1.4；分层拆分的 bag 接口增加约 13 KiB 不可压缩属性名；main-v2
+feature 链在 kernel 精简启动图上只增加 0.7 KiB；deferred CSS 与 locale 上限
+覆盖的是先存 base 漂移。逐项 before/after 归因见
+desktop/frontend/scripts/check-bundle-budget.mjs。复杂度、挂载块数和漂移预算
+均未提高。仅设置页使用的图片控件 CSS 移入既有懒加载样式表；旧配置字段、
+setter、事件和镜像的一版兼容政策不变。
 
 ## 9月5日系统性修复与诊断回放
 
@@ -130,10 +136,15 @@ Node 组件发现器统一加载 CSS 资源桩，不再维护易遗漏传递依�
 
 ## 仍阻塞完整验收
 
-当前状态更正：`App.tsx` 已缩为 10 行、无 bridge 的组合入口；运行时控制器暂时
-位于 `AppRuntime.tsx`。因此入口门禁已经满足，但整个组合层仍需继续拆分到 ≤200
-行且每个生产模块 ≤800 行。以下历史迁移清单中的旧行数仅用于追溯，不能作为当前
-实现数据。
+当前状态更正：分层迁移已完成。`App.tsx` 是 10 行无 bridge 的组合入口（入口
+契约门禁强制）；`AppRuntime.tsx` 收敛为 161 行组合根——adapter 解构、session
+identity/fence/operations、navigation surface、store 状态、三次组合调用与一行
+view 渲染。命令域位于 `app-runtime/useAppSessionComposition.ts`（755 行）与
+`app-runtime/useAppNavigationComposition.ts`（221 行），返回树位于
+`app-shell/AppRuntimeView.tsx`（516 行），另有 ChatPaneRegion、
+TopicbarActionsStack、DockToggleButton 及 footer/chrome/dock/overlay 属性
+builder。repolint 全局 ≤800 行单模块硬门禁对每个 App 模块通过，无 App 专属
+例外。以下历史迁移清单中的旧行数仅用于追溯，不能作为当前实现数据。
 
 Topicbar 标题、重命名输入与来源控件已迁入展示区域，展示数据和命令分开。
 真实挂载测试验证原 DOM、同步焦点、键盘取消及操作子树身份；生产 App 回放
@@ -158,15 +169,32 @@ Plan 修订由独立的源会话队列 owner 管理，仅原请求可释放其�
 不阻塞替换资源。失败修订保留原有源会话重新激活/运行结束时的重试语义，但无关
 重渲染不会循环重试。提交需等待源 surface 已提交、runtime 可用且没有待处理提示。
 队列以自身 authority 复用 submission executor，不嵌套 UI 命令，确保旧错误不弹到
-当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调及其余
-App 领域仍需继续迁移。
+当前 UI 时仍保留源资源的失败修订。卸载同步清空队列。原生 slash、clear/steer/stop 协调已在
+`app-runtime/useComposerRouter.ts` 与 `app-runtime/useSessionControlCommands.ts`；
+其余 App 领域均已随 runbook 完成迁移。
 
-- App 仍2180行（25→22 个 effect）；六个领域 owner、剩余 effect、纯组合层和删除尺寸豁免未完成。已迁出：模块级代码（`lib/sessionTitles.ts`、`lib/mockScenarios.ts`、`lib/todoDismissalStorage.ts`、`app-shell/NoticePreviewPanel.tsx`、`app-shell/HotkeyRegistrations.tsx`）；窗口 chrome（`lib/desktopPlatform.ts`、`store/windowChrome.ts`、`app-runtime/WindowChromeLifecycle.tsx`，NativeWindowChrome 删除）；shell 几何（sidebar/right-dock/terminal 三个 pointer+键盘 resize、toggleSidebar/pulse/anchor 与全部宽度投影迁入 `app-runtime/useShellGeometry.ts`；拖拽瞬态状态 sidebarResizing/live 宽度/liveTerminalHeight/togglePressed 进 `store/layout.ts`；原 #5 flush、#7 timer 清理 effect 删除）。banner 栈（session 状态区：RemoteReclaim/lease/startupErr 横幅、takeover 对话框、config 警告、provider 提示、UpdateBanner）JSX 迁入 `app-shell/SessionStatusBanners.tsx`，reclaim/takeover/config/release-notes 命令入 `app-runtime/useSessionBannerCommands.ts`，takeoverDialogTab/reclaimBusyTab/providerSetupNeeded 进 `store/overlays.ts`，启动 onboarding 探测迁 `app-runtime/StartupGateLifecycle.tsx`；会话导出纵向迁 `app-runtime/useSessionExportCommands.ts`（exportSession/getSessionMarkdown/Json、导出弹层外点关闭 effect、主题 scene effect）；undo/rewind 核心迁 `app-runtime/useSessionUndo.ts`（rewindStates/committing/信号三态、handleMessageAction/handleEditPrompt/handleSessionRevertCommitted，undo 横幅仍读 hook 返回值）；extension form 纵向迁 `app-runtime/useExtensionSurface.ts`（busy/submit/cancel + 通知 toast drain）；tab-bar 命令迁 `app-runtime/useTabBarCommands.ts`（切换单飞队列、单/批量关闭带 ActiveWork 门、后台 runtime reveal 三件套与 delivery worktree 续跑）；runtime 事件面迁 `app-runtime/useRuntimeEventHandlers.ts`（tab-meta 注册表含 single-flight coordinator、runtime event/ready/rebuilt 监听、远端 status/forwards/server 监听、workspace focus 协调 effect #23，原 effect #23 从 App 移除）；命令面板迁 `app-runtime/usePaletteCommands.tsx`（openPalette、六个全局快捷键与 paletteItems 项构建，会话/扩展/远端项来自各自 store）；Composer 路由迁 `app-runtime/useComposerRouter.ts`（!/model/memory/clear/new、决策 mock 种子、goal-draft、theme 命令与远端 steer）；回收站/历史命令迁 `app-runtime/useHistoryCommands.ts`（openTrash/closeHistory/refresh、按运行态门控的删除与重命名，删除成功后本地过滤视图）；远端工作区连接迁 `app-runtime/useRemoteWorkspaceCommands.ts`（launch gate、从状态条打开、带 stop-and-retry 的连接超时与 host 级失败）。footer ResizeObserver、activeTabIdRef 与 maximised 同步仍随后续区域切片迁移。全部浏览器回放与生命周期测试通过。
+- App 分层已完成（最终结构见本节首段与 runbook 完成态）；已迁出：模块级代码（`lib/sessionTitles.ts`、`lib/mockScenarios.ts`、`lib/todoDismissalStorage.ts`、`app-shell/NoticePreviewPanel.tsx`、`app-shell/HotkeyRegistrations.tsx`）；窗口 chrome（`lib/desktopPlatform.ts`、`store/windowChrome.ts`、`app-runtime/WindowChromeLifecycle.tsx`，NativeWindowChrome 删除）；shell 几何（sidebar/right-dock/terminal 三个 pointer+键盘 resize、toggleSidebar/pulse/anchor 与全部宽度投影迁入 `app-runtime/useShellGeometry.ts`；拖拽瞬态状态 sidebarResizing/live 宽度/liveTerminalHeight/togglePressed 进 `store/layout.ts`；原 #5 flush、#7 timer 清理 effect 删除）。banner 栈（session 状态区：RemoteReclaim/lease/startupErr 横幅、takeover 对话框、config 警告、provider 提示、UpdateBanner）JSX 迁入 `app-shell/SessionStatusBanners.tsx`，reclaim/takeover/config/release-notes 命令入 `app-runtime/useSessionBannerCommands.ts`，takeoverDialogTab/reclaimBusyTab/providerSetupNeeded 进 `store/overlays.ts`，启动 onboarding 探测迁 `app-runtime/StartupGateLifecycle.tsx`；会话导出纵向迁 `app-runtime/useSessionExportCommands.ts`（exportSession/getSessionMarkdown/Json、导出弹层外点关闭 effect、主题 scene effect）；undo/rewind 核心迁 `app-runtime/useSessionUndo.ts`（rewindStates/committing/信号三态、handleMessageAction/handleEditPrompt/handleSessionRevertCommitted，undo 横幅仍读 hook 返回值）；extension form 纵向迁 `app-runtime/useExtensionSurface.ts`（busy/submit/cancel + 通知 toast drain）；tab-bar 命令迁 `app-runtime/useTabBarCommands.ts`（切换单飞队列、单/批量关闭带 ActiveWork 门、后台 runtime reveal 三件套与 delivery worktree 续跑）；runtime 事件面迁 `app-runtime/useRuntimeEventHandlers.ts`（tab-meta 注册表含 single-flight coordinator、runtime event/ready/rebuilt 监听、远端 status/forwards/server 监听、workspace focus 协调 effect #23，原 effect #23 从 App 移除）；命令面板迁 `app-runtime/usePaletteCommands.tsx`（openPalette、六个全局快捷键与 paletteItems 项构建，会话/扩展/远端项来自各自 store）；Composer 路由迁 `app-runtime/useComposerRouter.ts`（!/model/memory/clear/new、决策 mock 种子、goal-draft、theme 命令与远端 steer）；回收站/历史命令迁 `app-runtime/useHistoryCommands.ts`（openTrash/closeHistory/refresh、按运行态门控的删除与重命名，删除成功后本地过滤视图）；远端工作区连接迁 `app-runtime/useRemoteWorkspaceCommands.ts`（launch gate、从状态条打开、带 stop-and-retry 的连接超时与 host 级失败）。footer ResizeObserver（`app-runtime/useFooterHeightLifecycle.ts`）、
+activeTabIdRef（`app-runtime/activeTabMirror.ts` 模块单例，layout-committed 语义不变）、
+maximised 同步（`store/windowChrome.ts` 状态 + `useWindowsMaximisedSync` 生命周期）已迁。
+最终切片另迁：clear-context 链（`app-runtime/useSessionClearCommands.ts`）、turn
+验证 reveal（`useTurnVerificationCommands.ts`）、delivery 续跑（
+`useDeliveryContinueCommands.ts`）、todo 面板链（`useTodoPanelCommands.ts`）、
+全部 composer 插入通道（`useComposerInsertCommands.ts`）、session 控制与导航命令
+（`useSessionControlCommands.ts`、`useSessionNavigationCommands.ts`）、窗口 chrome
+命令（`useAppChromeCommands.ts`）、composer profile 投影与 patch 命令（
+`useComposerProfileProjection.ts`）、transcript surface 投影（
+`useTranscriptSurfaceProjection.ts`）、store 订阅面（`useAppShellStores.ts`）、
+invocation metadata（`useInvocationMetadata.ts`）、decision surface/tab 条/
+workspace scope 投影（`decisionSurfaceProjection.ts`、`controllerProfileOwner.ts`
+的 `projectVisibleTabs`、`conversationProjection.ts`）。全部浏览器回放与生命周期
+测试通过。
 - 旧 Goal 与远端 JSX 断言已有行为替代。当前累计 `test:all`、App 生命周期/浏览器、
   Transcript 单测及两组浏览器回放、single-writer、repolint 已通过；不代表最终
   head 或原生平台验收。
 - SettingsPanel、bridge、useController、desktop settings 和 config 通过
-  设置/模型命令职责抽离，repolint 已通过。App 尺寸豁免尚未删除；没有扩大 baseline。
+  设置/模型命令职责抽离，repolint 已通过。App 尺寸豁免已删除：全局 ≤800 行单模块
+  上限现在覆盖每个 App 模块（合并 main-v2 后 1260 条 baseline 记录，无新增）；
+  没有扩大 baseline。
 - App 浏览器回放现已检查实际 WorkspacePanel、文件树、选中文件和预览 DOM，
   覆盖布局、设置页面往返及同项目会话切换。这是文件预览证据，不代表全部编辑路径。
   6项订阅及0个已登记操作仍不能代表全部剩余 App 流程。
@@ -180,79 +208,91 @@ App 领域仍需继续迁移。
   App lifecycle/browser/memory 与完整 frontend suite；捕获的 Darwin/Chromium 筛查
   证据已 PASS，但不能替代 WebKit/WebView2 原生证据或离线 heap retainer 归因。
 
-## 分层迁移 Runbook（待执行切片顺序）
+## 分层迁移 Runbook（已全部完成）
 
-沿用已有 owner/adapter/region 模式，每个切片一次迁完「输入捕获 → 执行 →
-结果应用 → 失败 → 清理」，App.tsx 行号以当前工作区为准（结构盘点见会话
-inventory：30 个 effect、约 90 个状态/ref、44 处直接 bridge 调用、16 个大
-处理器、返回 JSX 3124-3667 与 8 个内联 JSX/属性块）。
+所有切片已按既定 owner/adapter/region 模式落地；每片一次迁完「输入捕获 →
+执行 → 结果应用 → 失败 → 清理」并带 app-lifecycle 模式的确定性测试。原结构
+盘点（30 个 effect、约 90 个状态/ref、44 处直接 bridge 调用、16 个大处理器）
+已全部退役：
 
-1. ✅ **Layout/Shell 生命周期（部分完成）**：effects #6/#8/#11/#26/#27 与
-   platform/viewport 状态已迁（`lib/desktopPlatform.ts` + `store/windowChrome.ts`
-   + `app-runtime/WindowChromeLifecycle.tsx`）；剩余：footer ResizeObserver
-   （#25）随 footer 区域、activeTabIdRef（#22）随调用方、三个 pointer resize
-   生命周期与 `toggleSidebar/pulseSidebarToggle` 随 sidebar/chrome 区域，消费点
-   （terminal clamp、conversation width、className）改读同一 store。
+1. ✅ **Layout/Shell 生命周期（已完成）**：effects #6/#8/#11/#26/#27 与
+   platform/viewport 状态迁 `lib/desktopPlatform.ts` + `store/windowChrome.ts`
+   + `app-runtime/WindowChromeLifecycle.tsx`；footer ResizeObserver（#25）为
+   `app-runtime/useFooterHeightLifecycle.ts`；activeTabIdRef（#22）为
+   `app-runtime/activeTabMirror.ts` 模块单例；maximised 同步为
+   `store/windowChrome.ts` 状态 + `useWindowsMaximisedSync` 生命周期；三个
+   pointer resize 生命周期与 toggleSidebar/pulse 在 `app-runtime/useShellGeometry.ts`，
+   拖拽瞬态在 `store/layout.ts`。
 2. ✅ **Banner 栈（已完成）**：reclaim/lease/startupErr/错误横幅、takeover
    对话框、config 警告、provider 提示与 UpdateBanner 已迁
    `app-shell/SessionStatusBanners.tsx` + `app-runtime/useSessionBannerCommands.ts`
-   + `store/overlays.ts`（takeoverDialogTab/reclaimBusyTab/providerSetupNeeded）
-   + `app-runtime/StartupGateLifecycle.tsx`（onboarding 探测，effect #24）。
-   剩余：extension drain（#15）与 `app:open-settings`（#10）随所属领域。
-3. **Session actions（rewind/undo/delivery/clear/takeover/export）**：导出纵向已完成
-   （`app-runtime/useSessionExportCommands.ts`：exportSession/getSessionMarkdown/Json、
-   弹层外点关闭、主题 scene effect）。剩余：
-   handleMessageAction、handleEditPrompt、handleSessionRevertCommitted、
-   rewind 三状态（rewindStates/rewindCommitting/rewindSignal）、confirmClearContext、
-   handleDeliveryContinue（surface fence 已就绪）、exportSession + topic export
-   弹层（effect #20）与 sessionExportData 懒加载、openTurnVerification（#28）。
-   消费 JSX 在 DecisionFooter 属性构建块（2966-3122）。
-4. **Composer 剩余**：handleSend（118 行）/handleSteer/theme 路由/runShell/
-   插入请求（composerInsertRequestsByTab、selectedText、planRevisionInsert、
-   workspaceInsertTarget、dockRefreshKey/fileRefRefreshKey 刷新协调）。
-5. **Project/Topic**：topic summary（effect #12，需按 topic 身份的 single-flight）、
-   workspace focus 协调与 onProjectTreeChanged（effect #23）、handleRuntimeEvent/
-   handleRuntimeReady/handleRuntimeRebuilt 的 profile 恢复段、worktree merge
-   协调（2927-2955）、handleWorktreeMerged。
-6. **Navigation 剩余**：finishTabClose/handleTabClose/handleTabsClose/
-   handleTabsReorder/handleTabChange/pendingClose/revealBackgroundRuntime/
-   revealWorkspaceWriter/continueInDeliveryWorktree/openTaskMonitorSession
-   （tab chrome 与状态区调用点一起迁）。
-7. **Preferences/Overlays**：paletteItems memo（2511-2772）与 palette run、
-   openPalette、AppOverlayHost 属性构建（3604-3654）、topicbar 导出/主题开关。
-8. **组装**：chat-pane 主区块（3245-3528）拆 TranscriptSurface 等区域、模块级
-   残余（setRemoteComposerProfileForSessionAction、lazy loaders、isThemeMode
-   → lib/theme.ts）归位；App 收敛为纯组合。
+   + `store/overlays.ts` + `app-runtime/StartupGateLifecycle.tsx`。extension
+   drain（#15）为 `app-runtime/useExtensionSurface.ts`；`app:open-settings`
+   （#10）为 `app-runtime/useNativeSettingsEvent.ts`。
+3. ✅ **Session actions（已完成）**：rewind/undo 在 `app-runtime/useSessionUndo.ts`
+   （含 handleUndoRewind）；导出在 `app-runtime/useSessionExportCommands.ts`；
+   confirmClearContext 在 `app-runtime/useSessionClearCommands.ts`；
+   handleDeliveryContinue 在 `app-runtime/useDeliveryContinueCommands.ts`；
+   openTurnVerification 在 `app-runtime/useTurnVerificationCommands.ts`；
+   cancel/accept/disconnect/workspace-conflict/runtime-job 控制在
+   `app-runtime/useSessionControlCommands.ts`。`goalSubmit.ts` 已删除：首轮 Goal
+   原子激活由 controller `sendToTab` 的 `initialGoal` 分支承载
+   （`SubmitInitialGoalToTabWithID`），send-failed 场景已指向
+   `session-submission-lifecycle.test.tsx` 与 `goal-activation-tab-routing.test.tsx`
+   的真实 owner 链路。
+4. ✅ **Composer 剩余（已完成）**：handleSend/handleSteer/theme 路由在
+   `app-runtime/useComposerRouter.ts`；全部插入通道（composerInsertRequestsByTab、
+   selectedText、planRevisionInsert、workspaceInsertTarget、terminal 输出）在
+   `app-runtime/useComposerInsertCommands.ts`；profile 投影与 patch 命令在
+   `app-runtime/useComposerProfileProjection.ts`；mode/approval 轴在
+   `lib/useComposerModeActions.ts`（plan/approval 记忆与 YOLO 开关已内化）。
+5. ✅ **Project/Topic（已完成）**：topic summary（按 topic 身份 single-flight）
+   为 `app-runtime/useTopicSummary.ts`；workspace focus 协调与 runtime
+   event/ready/rebuilt 的 profile 恢复段在 `app-runtime/useRuntimeEventHandlers.ts`；
+   worktree merge 协调（含 overlay 状态）在 `app-runtime/useWorktreeMergeCommands.ts`。
+6. ✅ **Navigation 剩余（已完成）**：tab 关闭/重排/切换、reveal、delivery
+   worktree 与 task-monitor 会话在 `app-runtime/useTabBarCommands.ts` 与
+   `app-runtime/useSessionNavigationCommands.ts`（基于
+   `app-runtime/useDesktopNavigation.ts`）。
+7. ✅ **Preferences/Overlays（已完成）**：store 订阅面为
+   `app-runtime/useAppShellStores.ts`；palette 在 `app-runtime/usePaletteCommands.tsx`；
+   AppOverlayHost 属性构建在 `app-shell/overlayBuilders.ts`。
+8. ✅ **组装（已完成）**：chat-pane 主区块拆为 `app-shell/ChatPaneRegion.tsx`；
+   topicbar 动作栈为 `app-shell/TopicbarActionsStack.tsx` +
+   `app-shell/DockToggleButton.tsx`；footer/chrome/dock 属性装配在
+   `app-shell/decisionFooterBuilders.ts`、`app-shell/chromeRegionBuilders.ts`、
+   `app-shell/dockRegionBuilders.ts`；`AppRuntime.tsx` 为 161 行组合根，返回树为
+   `app-shell/AppRuntimeView.tsx`；模块级残余
+   （setRemoteComposerProfileForSessionAction、lazy loaders）随所属模块归位。
+   repolint ≤800 行单模块硬门禁通过，无 App 例外。
 
-每个切片验收：确定性测试（沿用 app-lifecycle 模式）+ tsc（两套）+ AST 分层/
-hooks 门禁 + test:app-lifecycle + app-browser 回放；凡删除 App 源码字符串断言
-必须同步补行为替代（见第三节清单，未审计条目随所属切片核对），不能留宽松
-替代。已两次确认：bundle 余量小，不得提高预算；goalSubmit.ts 已无生产引用，
-随切片 3/4 删除并把 send-failed 中其场景改指 owner 测试。三区域会话内换
-WorkspacePanel 保真、Composer 审批覆盖下持续挂载两条不变式在每次浏览器回放
-中复核。
+每个切片验收已执行：确定性测试（app-lifecycle 模式）+ tsc（两套）+ AST 分层/
+hooks 门禁 + test:app-lifecycle + app-browser 回放；退役的 App 源码字符串断言
+均在所属切片获得行为替代或改指所属模块源码，无宽松替代。bundle 预算按政策做了
+最小 ratchet（见证据节）；goalSubmit.ts 已删除。三区域会话内换 WorkspacePanel
+保真、Composer 审批覆盖下持续挂载两条不变式在每次浏览器回放中复核。
 
-### 组装切片（8）现状与架构边界
+### 组装切片（8）最终状态与架构边界
 
-切片 3-7 的命令/effect 纵向已按序迁出（undo/rewind、extension、tab-bar、
-runtime 事件面、palette、composer 路由、trash/history、远端工作区连接），
-App 现 2180 行、22 个 effect；返回 JSX 已全部由纯 props 区域组件承载
-（SidebarRegion/TopicbarRegion/SessionStatusBanners/DecisionFooterRegion/
-WorkspaceDockRegion/AppBottomRegions/AppOverlayHost/Transcript 等），余下
-body 为跨区域共享命令的接线与投影。
+最终结构：`App.tsx` 为 10 行无 bridge 组合入口；`AppRuntime.tsx`（161 行）持有
+controller adapter、session identity/fence/operations、navigation surface 与
+store 状态，随后调用 session 与 navigation 两个组合层并渲染 view。
+`app-runtime/useAppSessionComposition.ts`（755 行）按 App body 原顺序运行
+session/composer 域 hook；`app-runtime/useAppNavigationComposition.ts`（221 行）
+运行 history/navigation/chrome 域；`app-shell/AppRuntimeView.tsx`（516 行）是纯
+props 树。
 
-**架构边界（已核实）**：`useController` 是单实例 hook（状态不在任何
-store），任何区域组件都无法自取 controller 派生态——"App ≤200 行纯组合"
-在当前架构下不可达：需要先做 controller 状态 store 化的独立长周期史诗
-（contributes 该 PR 之外的规模），随后区域自接线才成立。已按最小改动原则
-把可独立成 owner 的共同原语全部迁出；剩余同构接线（IM/bot 设置、worktree
-merge、topic 重命名残余、dock/status 投影与约 10 个展示 effect）在此边界内
-继续为纯搬移（可再收敛约 200-300 行），不改变结构性结论。
+**架构边界（已核实，不变）**：`useController` 是单实例 hook（状态不在任何
+store），任何区域组件都无法自取 controller 派生态——"App ≤200 行纯组合"在当前
+架构下仍不可达：需要先做 controller 状态 store 化的独立长周期史诗（超出本 PR
+范围）。注意区分：该理想目标仍然开放，而本 PR 的 repolint ≤800 行单模块硬门禁
+已达成。
 
-遗留：`goalSubmit.ts` 无生产调用（其场景测试仍引用，随 controller-store
-史诗或 owner 化删除）；footer RO（#25）、activeTabIdRef（#22）、maximised
-同步、extension drain（#15）已迁（#15 在 useExtensionSurface；#22 仅剩 ref
-镜像）；bundle 预算保持未动。
+与当前 origin/main-v2 的合并在本分支的 tab 作用域 `*ForTab` prompt 处理器内采用了
+exact prompt protocol（`resolvePromptForTab` + `handlePromptFailure` +
+`runtimeStatusSnapshotIsStale`）；冲突解决保留分层结构并在每个等价点采用 main-v2
+的共享 helper。合并后全量 discovery runner 298/298 套件通过，包括本分支此前携带
+先存失败的六个套件。
 
-后续应继续收敛共同资源/UI 所有权并纵向迁移完整领域；不得增加局部延时
-guard、强制重挂载、清缓存或放宽验收门槛。
+后续应继续收敛共同资源/UI 所有权并纵向迁移完整领域；不得增加局部延时 guard、
+强制重挂载、清缓存或放宽验收门槛。

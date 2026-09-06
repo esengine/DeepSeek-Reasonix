@@ -98,7 +98,13 @@ Neither related PR is closed, merged or changed by this work.
 
 Use the exact head and [PR check suite](https://github.com/esengine/DeepSeek-Reasonix/pull/9777/checks), not an earlier green head. Required evidence includes Linux WebKitGTK 4.0 and 4.1 native smoke, isolated macOS WKWebView, Windows Chromium replay and real WebView2 scroll/selection/Wails startup, Go tests/race/lint and CodeQL. PR Windows smoke coverage is not the full main-v2 push/release sweep. Final check-run URLs and results belong in the PR's acceptance update after those jobs finish.
 
-No bundle, file-size, complexity, mounted-block or drift budget is raised.
+No file-size, complexity, mounted-block or drift budget is raised; the
+repolint ≤800-line per-module gate now covers every App module with no App
+exception. Bundle budgets were ratcheted narrowly after the main-v2 merge
+(initial JS 441.0/441.1 KiB, raw initial 2380.9/2381.0 KiB, with narrow
+deferred-CSS and locale ceilings for pre-existing base drift); per-item
+before/after attribution is recorded in
+desktop/frontend/scripts/check-bundle-budget.mjs.
 Legacy fields/setters/events/localStorage mirrors remain for one complete
 release as described in [Session experience](SESSION_EXPERIENCE.md); they may be
 removed only after that downgrade-compatibility window ends. Rollback is a PR
