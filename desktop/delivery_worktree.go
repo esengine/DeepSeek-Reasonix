@@ -156,6 +156,19 @@ func (a *App) InspectWorktreeMerge(tabID string) (worktree.MergeInspection, erro
 	return inspection, nil
 }
 
+// GetWorktreeStatus is the stable status-query name for new clients. It keeps
+// the existing inspection implementation as the single owner of merge guards.
+func (a *App) GetWorktreeStatus(tabID string) (worktree.MergeInspection, error) {
+	return a.InspectWorktreeMerge(tabID)
+}
+
+// PrepareWorktreeMerge performs the same fresh inspection used immediately
+// before a merge request. The request is intentionally small so clients cannot
+// smuggle stale paths or identities across the Wails boundary.
+func (a *App) PrepareWorktreeMerge(tabID string) (worktree.MergeInspection, error) {
+	return a.InspectWorktreeMerge(tabID)
+}
+
 // MergeWorktreeBack merges only after active-work and dual-workspace lease
 // gates. It intentionally leaves navigation, tab closure, and cleanup to the
 // second phase.

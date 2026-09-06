@@ -40,6 +40,12 @@ export function makeMockWorktreeMergeBindings(
         cleanupBlockers: [{ code: "not_merged", message: "Worktree is not merged yet", paths: [] }],
       };
     },
+    async GetWorktreeStatus(tabID: string) {
+      return this.InspectWorktreeMerge(tabID);
+    },
+    async PrepareWorktreeMerge(tabID: string) {
+      return this.InspectWorktreeMerge(tabID);
+    },
     async MergeWorktreeBack(request: WorktreeMergeRequest) {
       const tabs = readTabs();
       const tab = tabs.find((candidate) => candidate.id === request.tabId) ?? tabs.find((candidate) => candidate.active);
