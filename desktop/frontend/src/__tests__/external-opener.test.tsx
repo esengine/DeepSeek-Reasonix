@@ -100,6 +100,8 @@ ok(
   "preserves the slimmer Creation application artwork size",
 );
 
+ok(appSource.includes("key={`external-opener:${activeTab.id}`}"), "external opener has a distinct React key namespace");
+ok(appSource.includes("key={`session-actions:${activeTab?.id || \"none\"}`}"), "session actions have a distinct React key namespace");
 ok(shouldMountExternalOpener({ id: "tab-project", scope: "project" }, false), "mounts for a Project tab");
 ok(shouldMountExternalOpener({ id: "tab-global", scope: "global" }, false), "mounts for a Global tab without guessing from scope");
 ok(!shouldMountExternalOpener({ id: "tab-global", scope: "global" }, true), "stays hidden while an IM detail surface owns the header");

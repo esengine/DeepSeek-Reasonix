@@ -11,9 +11,11 @@ import {
 } from "./PromptShelf";
 
 const askDraftKey = (id: string) => `reasonix.ask-draft:${id}`;
+type AnswerMode = "option" | "custom";
 type AskDraft = {
   sel: Record<string, string[]>;
   custom: Record<string, string>;
+  answerMode: Record<string, AnswerMode>;
   active: number;
   selectedIndex: number;
 };
@@ -23,8 +25,8 @@ function readAskDraft(id: string): AskDraft | undefined {
     const raw = sessionStorage.getItem(askDraftKey(id));
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as Partial<AskDraft>;
-    if (!parsed.sel || !parsed.custom || typeof parsed.active !== "number" || typeof parsed.selectedIndex !== "number") return undefined;
-    return { sel: parsed.sel, custom: parsed.custom, active: parsed.active, selectedIndex: parsed.selectedIndex };
+    if (!parsed.sel || !parsed.custom || !parsed.answerMode || typeof parsed.active !== "number" || typeof parsed.selectedIndex !== "number") return undefined;
+    return { sel: parsed.sel, custom: parsed.custom, answerMode: parsed.answerMode, active: parsed.active, selectedIndex: parsed.selectedIndex };
   } catch {
     return undefined;
   }
@@ -41,13 +43,14 @@ export function AskCard({
 }: {
   ask: WireAsk;
   onAnswer: (id: string, answers: QuestionAnswer[]) => void | Promise<void>;
-  onDismiss: () => void | Promise<void>;
+  onDismiss?: () => void | Promise<void>;
   onStop: () => void;
 }) {
   const t = useT();
   // Per-question state: selected option labels, and an optional typed answer.
   const [sel, setSel] = useState<Record<string, string[]>>(() => readAskDraft(ask.id)?.sel ?? {});
   const [custom, setCustom] = useState<Record<string, string>>(() => readAskDraft(ask.id)?.custom ?? {});
+  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>(() => readAskDraft(ask.id)?.answerMode ?? {});
   const [customOpen, setCustomOpen] = useState(false);
   const [active, setActive] = useState(() => readAskDraft(ask.id)?.active ?? 0);
   // Extra decision row after option labels: custom answer. Skip is a
@@ -86,6 +89,7 @@ export function AskCard({
     const draft = readAskDraft(ask.id);
     setSel(draft?.sel ?? {});
     setCustom(draft?.custom ?? {});
+    setAnswerMode(draft?.answerMode ?? {});
     setCustomOpen(false);
     setActive(draft?.active ?? 0);
     setSelectedIndex(draft?.selectedIndex ?? 0);
@@ -95,11 +99,11 @@ export function AskCard({
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, active, selectedIndex } satisfies AskDraft));
+      sessionStorage.setItem(askDraftKey(ask.id), JSON.stringify({ sel, custom, answerMode, active, selectedIndex } satisfies AskDraft));
     } catch {
       // Session storage is best effort; the live pending ask remains authoritative.
     }
-  }, [active, ask.id, custom, selectedIndex, sel]);
+  }, [active, answerMode, ask.id, custom, selectedIndex, sel]);
 
   useEffect(() => {
     setCustomOpen(false);
@@ -120,17 +124,19 @@ export function AskCard({
   ): QuestionAnswer[] =>
     questions.map((question) => ({
       questionId: question.id,
-      selected: nextCustom[question.id]?.trim() ? [nextCustom[question.id].trim()] : (nextSel[question.id] ?? []),
+      selected: answerMode[question.id] === "custom" && nextCustom[question.id]?.trim()
+        ? [nextCustom[question.id].trim()]
+        : (nextSel[question.id] ?? []),
     }));
 
   const answerLabel = (question: WireAskQuestion) => {
-    const typed = custom[question.id]?.trim();
-    if (typed) return typed;
+    if (answerMode[question.id] === "custom") return custom[question.id]?.trim() ?? "";
     return (sel[question.id] ?? []).join(", ");
   };
 
-  const answered = (question: WireAskQuestion) =>
-    (sel[question.id]?.length ?? 0) > 0 || (custom[question.id]?.trim() ?? "") !== "";
+  const answered = (question: WireAskQuestion) => answerMode[question.id] === "custom"
+    ? (custom[question.id]?.trim() ?? "") !== ""
+    : (sel[question.id]?.length ?? 0) > 0;
 
   const currentAnswered = q ? answered(q) : false;
 
@@ -155,18 +161,18 @@ export function AskCard({
 
   const toggleOption = (question: WireAskQuestion, label: string) => {
     if (submitting) return;
-    const nextCustom = { ...custom, [question.id]: "" };
     const cur = sel[question.id] ?? [];
     const nextSel = question.multi
       ? { ...sel, [question.id]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
       : { ...sel, [question.id]: [label] };
 
-    setCustom(nextCustom);
+    setAnswerMode((m) => ({ ...m, [question.id]: "option" }));
     setSel(nextSel);
     setCustomOpen(false);
   };
 
   const setTyped = (question: WireAskQuestion, text: string) => {
+    setAnswerMode((m) => ({ ...m, [question.id]: "custom" }));
     setCustom((c) => ({ ...c, [question.id]: text }));
     if (text.trim()) setSel((s) => ({ ...s, [question.id]: [] }));
   };
@@ -203,13 +209,14 @@ export function AskCard({
       } else {
         // Single-select follows harness behavior: choose and advance, while
         // keeping the answer in the draft so Back can revise it.
-        setCustom((c) => ({ ...c, [q.id]: "" }));
+        setAnswerMode((m) => ({ ...m, [q.id]: "option" }));
         setSel((s) => ({ ...s, [q.id]: [option.label] }));
         setCustomOpen(false);
         if (active < questions.length - 1) setActive((i) => i + 1);
       }
     } else if (index === customRowIndex) {
       // Opening custom clears option picks for this question.
+      setAnswerMode((m) => ({ ...m, [q.id]: "custom" }));
       setCustomOpen(true);
       setSel((s) => ({ ...s, [q.id]: [] }));
     }
@@ -368,7 +375,12 @@ export function AskCard({
           <div
             className={`ask-shelf__custom-row${custom[q.id]?.trim() ? " ask-shelf__custom-row--active" : ""}`}
             role="group"
-            onClick={() => { setSelectedIndex(customRowIndex); setCustomOpen(true); customInputRef.current?.focus(); }}
+            onClick={() => {
+              setSelectedIndex(customRowIndex);
+              setAnswerMode((m) => ({ ...m, [q.id]: "custom" }));
+              setCustomOpen(true);
+              customInputRef.current?.focus();
+            }}
           >
             <span className="ask-shelf__custom-indicator" aria-hidden="true">✎</span>
             <input
@@ -376,7 +388,7 @@ export function AskCard({
               className="ask-shelf__custom"
               aria-label={t("ask.customAnswer")}
               placeholder={t("ask.customPlaceholder")}
-              value={custom[q.id] ?? ""}
+              value={answerMode[q.id] === "custom" ? custom[q.id] ?? "" : ""}
               disabled={submitting}
               onChange={(e) => setTyped(q, e.target.value)}
               onKeyDown={(e) => {

@@ -533,6 +533,71 @@ console.log("\nask card layout");
   dom.window.close();
 }
 
+// Custom answer drafts survive switching to another option and back.
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const answers: QuestionAnswer[][] = [];
+  const ask: WireAsk = {
+    id: "ask-custom-draft",
+    questions: [{
+      id: "choice",
+      prompt: "Pick or describe",
+      options: [{ label: "Suggested", description: "Use the suggestion" }],
+    }],
+  };
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null,
+      React.createElement(AskCard, {
+        ask,
+        onAnswer: (_id: string, next: QuestionAnswer[]) => { answers.push(next); },
+        onDismiss: () => undefined,
+        onStop: () => undefined,
+      }),
+    ));
+    await flushTimers();
+  });
+
+  const actions = [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")];
+  await act(async () => {
+    actions[1]?.click();
+    await flushTimers();
+  });
+  const input = document.querySelector<HTMLInputElement>(".ask-shelf__custom");
+  if (!input) throw new Error("custom input did not open");
+  await act(async () => {
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps"));
+    const props = propsKey ? (input as unknown as Record<string, { onChange?: (event: { target: { value: string } }) => void }>)[propsKey] : undefined;
+    props?.onChange?.({ target: { value: "Keep this draft" } });
+    await flushTimers();
+  });
+  eq(input.value, "Keep this draft", "custom input accepts a draft");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".prompt-action")?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector<HTMLInputElement>(".ask-shelf__custom")?.value, "", "selecting an option clears the visible custom draft without removing the input row");
+
+  await act(async () => {
+    document.querySelector<HTMLElement>(".ask-shelf__custom-row")?.click();
+    await flushTimers();
+  });
+  eq(document.querySelector<HTMLInputElement>(".ask-shelf__custom")?.value, "Keep this draft", "reopening custom restores the draft");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
+    await flushTimers();
+  });
+  eq(answers[0]?.[0]?.selected?.[0], "Keep this draft", "custom mode submits the restored draft");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
 // Multi-select: keyboard cursor must not look like a checked answer.
 {
   const dom = installDom();
