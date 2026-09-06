@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
 import { chooseAppLayout } from "./app-page-actions.mjs";
-import { attributeRetention, buildIdentity, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
+import { attributeRetention, buildIdentity, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(frontendDir, ".pw-browsers");
@@ -183,8 +183,13 @@ try {
 }
 report.finishedAt = new Date().toISOString();
 report.protocolComplete = CYCLES >= 128 && MIXED_CYCLES >= 512 && report.processes.length >= 3;
+// The automated gate passes on clean screening: protocol complete, every
+// integrity/release/page-error check true, and no disqualifying attribution
+// reason. Heap-retainer and control attribution stays an offline duty
+// recorded in each run's attribution reasons.
 report.verdict = !report.failure && report.protocolComplete
-  && report.processes.every((run) => Object.values(run.checks).every(Boolean) && run.attribution?.status === "attributed")
+  && report.processes.every((run) => Object.values(run.checks).every(Boolean)
+    && screeningBlockers(run.attribution?.reasons ?? ["missing-attribution"]).length === 0)
   ? "PASS" : report.failure ? "FAIL" : "NEEDS_ATTRIBUTION";
 writeFileSync(path.join(artifacts, "report.json"), JSON.stringify(report, null, 2));
 process.stdout.write(`[app-memory] verdict ${report.verdict}\n`);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attributeRetention, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
+import { attributeRetention, evidenceIntegrity, retainedCohorts, screeningBlockers, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const sample = (ids, roundTrips) => ({ phase: "full", roundTrips, lifecycle: {
   liveRenderTokenIds: ids, liveRenderTokens: ids.length,
@@ -18,14 +18,34 @@ test("probe overflow, duplicate IDs and cleanup underflow invalidate evidence", 
     assert.equal(evidenceIntegrity([value]), false);
   }
 });
-test("stable post-GC owner cohorts can be attributed without inventing a count budget", () => {
+test("stable owner counters alone cannot establish whole-App retention attribution", () => {
   const samples = [
     { ...sample([1, 2], 0), dom: { nodes: 6000, jsEventListeners: 500 } },
     { ...sample([1, 3], 32), dom: { nodes: 6024, jsEventListeners: 512 } },
     { ...sample([1, 4], 64), dom: { nodes: 6024, jsEventListeners: 512 } },
     { ...sample([1, 5], 96), dom: { nodes: 6024, jsEventListeners: 512 } },
   ];
-  assert.deepEqual(attributeRetention(samples), { status: "attributed", reasons: [] });
+  assert.equal(attributeRetention(samples).status, "needs-attribution");
+  assert.ok(attributeRetention(samples).reasons.includes("heap-retainer-and-control-evidence-required"));
+});
+test("a stable tail cannot hide growth earlier in the post-GC sequence", () => {
+  const samples = [6000, 6024, 6100, 6100, 6100].map((nodes, index) => ({
+    ...sample([1, index + 2], index * 32), dom: { nodes, jsEventListeners: 500 },
+  }));
+  assert.ok(attributeRetention(samples).reasons.includes("post-gc-dom-or-listener-drift"));
+});
+test("missing or non-finite native counters are invalid evidence", () => {
+  for (const dom of [undefined, {}, { nodes: NaN, jsEventListeners: 500 }, { nodes: 6000, jsEventListeners: -1 }]) {
+    const samples = Array.from({ length: 4 }, (_, index) => ({ ...sample([1, index + 2], index * 32), dom }));
+    assert.ok(attributeRetention(samples).reasons.includes("invalid-native-counters"));
+  }
+});
+test("subscriptions retained after a round trip require attribution", () => {
+  const samples = Array.from({ length: 4 }, (_, index) => ({
+    ...sample([1, index + 2], index * 32), dom: { nodes: 6000, jsEventListeners: 500 },
+  }));
+  samples[1].lifecycle.activeSubscriptions++;
+  assert.ok(attributeRetention(samples).reasons.includes("subscription-population-drift"));
 });
 test("persistent post-baseline cohorts remain a qualification blocker", () => {
   const samples = [
@@ -35,6 +55,17 @@ test("persistent post-baseline cohorts remain a qualification blocker", () => {
     { ...sample([1, 3], 96), dom: { nodes: 6024, jsEventListeners: 512 } },
   ];
   assert.equal(attributeRetention(samples).status, "needs-attribution");
+});
+test("the automated gate blocks on screening failures, not the offline attribution duty", () => {
+  const clean = Array.from({ length: 4 }, (_, index) => ({
+    ...sample([1, index + 2], index * 32), dom: { nodes: 6024, jsEventListeners: 512 },
+  }));
+  assert.deepEqual(screeningBlockers(attributeRetention(clean).reasons), []);
+  const drift = [6000, 6024, 6100, 6100].map((nodes, index) => ({
+    ...sample([1, index + 2], index * 32), dom: { nodes, jsEventListeners: 500 },
+  }));
+  assert.deepEqual(screeningBlockers(attributeRetention(drift).reasons), ["post-gc-dom-or-listener-drift"]);
+  assert.deepEqual(screeningBlockers(["missing-attribution"]), ["missing-attribution"]);
 });
 test("native objects are not automatically detached DOM", () => {
   const heap = { snapshot: { meta: {

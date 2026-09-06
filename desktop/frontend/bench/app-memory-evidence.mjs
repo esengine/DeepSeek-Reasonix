@@ -52,29 +52,40 @@ export function evidenceIntegrity(samples) {
   ));
 }
 
-/**
- * Attribute a completed soak only when the instrumented owner cohort shows no
- * persistent post-baseline survivors, all operations are released, and the
- * browser's post-GC DOM/listener counters are stable. A baseline cohort may
- * legitimately survive (the mounted application itself); only newly retained
- * identities are treated as a leak signal.
- */
+// Counter stability is a screening result, not heap-retainer attribution.
+// Weak refs observe only instrumented tokens. They cannot explain survivors
+// outside that cohort, compiled-code growth, or the mainline control delta,
+// so heap-retainer and control evidence stays an offline attribution duty
+// that the automated gate can never discharge by itself.
+export const OFFLINE_ATTRIBUTION_REASON = "heap-retainer-and-control-evidence-required";
+
+// Reasons the automated gate must block on. The offline-attribution follow-up
+// is recorded on every report but is not a screening failure.
+export function screeningBlockers(reasons) {
+  return reasons.filter((reason) => reason !== OFFLINE_ATTRIBUTION_REASON);
+}
+
+// Keep every checkpoint, including the warmed baseline: an early step or a
+// transient population needs an explanation even if the final tail is flat.
 export function attributeRetention(samples, cohorts = retainedCohorts(samples)) {
   if (!evidenceIntegrity(samples) || samples.length < 2) return { status: "needs-attribution", reasons: ["invalid-evidence"] };
   const retained = cohorts.some((cohort) => cohort.retainedPostBaseline.length > 0);
-  const final = samples.at(-1);
-  const postBaseline = samples.filter((sample) => sample.roundTrips > 0);
-  // A one-sample browser/native blip is not a leak. Require the final three
-  // post-GC checkpoints to agree; persistent drift remains a blocker.
-  const tail = postBaseline.slice(-3);
-  const stableDom = tail.length === 3 && tail.every((sample) => sample.dom?.nodes === final.dom?.nodes
-    && sample.dom?.jsEventListeners === final.dom?.jsEventListeners);
+  const baseline = samples[0];
+  const nativeCountersValid = samples.every(({ dom }) =>
+    [dom?.nodes, dom?.jsEventListeners].every(value => Number.isSafeInteger(value) && value >= 0));
+  const stableDom = nativeCountersValid && samples.every((sample) => sample.dom.nodes === baseline.dom.nodes
+    && sample.dom.jsEventListeners === baseline.dom.jsEventListeners);
+  const stableSubscriptions = samples.every(sample =>
+    sample.lifecycle.activeSubscriptions === baseline.lifecycle.activeSubscriptions);
   const released = samples.every((sample) => sample.lifecycle.activeOperations === 0);
   const reasons = [];
   if (retained) reasons.push("persistent-render-cohort");
+  if (!nativeCountersValid) reasons.push("invalid-native-counters");
   if (!stableDom) reasons.push("post-gc-dom-or-listener-drift");
+  if (!stableSubscriptions) reasons.push("subscription-population-drift");
   if (!released) reasons.push("active-operations");
-  return { status: reasons.length ? "needs-attribution" : "attributed", reasons };
+  reasons.push(OFFLINE_ATTRIBUTION_REASON);
+  return { status: "needs-attribution", reasons };
 }
 
 // CDP's DOM counter includes attached and detached nodes. Only the heap's
