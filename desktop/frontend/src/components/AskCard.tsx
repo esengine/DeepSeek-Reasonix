@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import {
   DecisionConfirmBar,
@@ -318,10 +319,10 @@ export function AskCard({
             ariaLabel={collapsed ? t("common.expand") : t("common.collapse")}
             disabled={submitting}
           >
-            {collapsed ? t("common.expand") : t("common.collapse")}
+            {collapsed ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
           </PromptHeaderAction>
           <PromptHeaderAction onClick={onStop} ariaLabel={t("decision.stopTask")} disabled={submitting}>
-            {t("decision.stopTask")}
+            <X size={16} aria-hidden="true" />
           </PromptHeaderAction>
         </>
       }
@@ -358,11 +359,6 @@ export function AskCard({
             disabled={submitting}
           />
         </>
-      }
-      quickActions={
-        active > 0 ? (
-          <PromptAction keyLabel="" label={t("ask.back")} onClick={goBack} quiet disabled={submitting} role="button" />
-        ) : undefined
       }
       crumbs={
         answeredSummary.length > 0 && (
@@ -409,19 +405,30 @@ export function AskCard({
         </>
       }
       footer={
-        <DecisionConfirmBar
-          hint={t("decision.selectHint")}
-          confirmLabel={confirmLabel}
-          onConfirm={confirmSelected}
-          secondaryLabel={t("ask.justChat")}
-          onSecondary={() => {
-            submitAction(() => Promise.resolve(onDismiss()).then(() => {
-              sessionStorage.removeItem(askDraftKey(ask.id));
-            }));
-          }}
-          disabled={submitting}
-          confirmDisabled={!canConfirm()}
-        />
+        <div className="ask-shelf__footer-layout">
+          <div className="ask-shelf__pager" aria-label={t("ask.questionProgress", { progress })}>
+            <button type="button" className="ask-shelf__pager-button" aria-label={t("ask.back")} disabled={active === 0 || submitting} onClick={goBack}>
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <span>{progress}</span>
+            <button type="button" className="ask-shelf__pager-button" aria-label={t("ask.next")} disabled={isLast || submitting} onClick={() => setActive((i) => Math.min(i + 1, questions.length - 1))}>
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <DecisionConfirmBar
+            hint={t("decision.selectHint")}
+            confirmLabel={confirmLabel}
+            onConfirm={confirmSelected}
+            secondaryLabel={t("ask.justChat")}
+            onSecondary={() => {
+              submitAction(() => Promise.resolve(onDismiss()).then(() => {
+                sessionStorage.removeItem(askDraftKey(ask.id));
+              }));
+            }}
+            disabled={submitting}
+            confirmDisabled={!canConfirm()}
+          />
+        </div>
       }
     />
   );

@@ -639,8 +639,7 @@ console.log("\nask card layout");
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "multi-question Ask advances to question 2");
 
   await act(async () => {
-    [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
-      .find((button) => button.textContent?.includes("Back") || button.textContent?.includes("返回"))?.click();
+    document.querySelector<HTMLButtonElement>(".ask-shelf__pager-button")?.click();
     await flushTimers();
   });
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("1/2"), true, "Back returns to the previous question");

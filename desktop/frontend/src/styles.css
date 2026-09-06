@@ -10116,6 +10116,39 @@ body > .mermaid-diagram--fullscreen {
   padding: 4px 12px;
   border-radius: 999px;
 }
+.prompt-shelf--ask .prompt-shelf__card {
+  border-radius: 20px;
+  padding: 0 12px 10px;
+  background: var(--bg-elev);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-soft));
+}
+.prompt-shelf--ask .prompt-shelf__content { gap: 0; padding: 0 2px; }
+.prompt-shelf--ask .prompt-shelf__header { align-items: center; padding: 18px 4px 14px; gap: 16px; }
+.prompt-shelf--ask .prompt-shelf__heading { font-size: 16px; font-weight: 650; }
+.prompt-shelf--ask .prompt-shelf__header-actions { gap: 8px; }
+.prompt-shelf--ask .prompt-shelf__header-button {
+  width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; background: var(--bg-soft);
+}
+.prompt-shelf--ask .prompt-shelf__meta { font-size: 15px; }
+.prompt-shelf--ask .prompt-shelf__actions { gap: 6px; padding: 0 0 8px; }
+.prompt-shelf--ask .prompt-action { min-height: 46px; border-radius: 12px; padding: 9px 14px; background: var(--bg-soft); }
+.prompt-shelf--ask .prompt-action:hover,
+.prompt-shelf--ask .prompt-action--active,
+.prompt-shelf--ask .prompt-action--selected { background: color-mix(in srgb, var(--accent) 15%, var(--bg-soft)); }
+.prompt-shelf--ask .prompt-action__key { min-width: 28px; height: 28px; border-radius: 8px; font-size: 14px; }
+.ask-shelf__footer-layout { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ask-shelf__pager { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 15px; white-space: nowrap; }
+.ask-shelf__pager-button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 999px; background: transparent; color: var(--fg-dim); cursor: pointer; }
+.ask-shelf__pager-button:hover:not(:disabled) { background: var(--bg-soft); color: var(--fg); }
+.ask-shelf__pager-button:disabled { color: var(--fg-faint); cursor: default; }
+.prompt-shelf--ask .prompt-shelf__footer { padding: 12px 0 0; margin-top: 0; }
+.prompt-shelf--ask .decision-confirm-bar { justify-content: flex-end; gap: 10px; }
+.prompt-shelf--ask .decision-confirm-bar__hint { display: none; }
+@media (max-width: 680px) {
+  .ask-shelf__footer-layout { align-items: stretch; flex-direction: column; }
+  .ask-shelf__pager { justify-content: center; }
+  .prompt-shelf--ask .decision-confirm-bar { justify-content: space-between; }
+}
 .prompt-shelf__footnote {
   min-width: 0;
 }
