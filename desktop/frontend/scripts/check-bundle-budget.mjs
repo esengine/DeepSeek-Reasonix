@@ -381,7 +381,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
 // With the current-base rich-link menus: 2485.715 KiB raw. The session-runtime
 // ordering fence adds a measured 0.7 KiB raw; retain the smallest bounded
-// cross-platform ceiling for the resulting 2486.4 KiB payload.
-const rawInitialBudgetKiB = 2_486.5;
+// cross-platform ceiling for the resulting 2486.4 KiB payload. Linux/macOS
+// toolchain output rounds slightly above the binary threshold.
+const rawInitialBudgetKiB = 2_486.7;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
