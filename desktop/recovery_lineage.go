@@ -137,6 +137,30 @@ func (a *App) SetActiveSessionVersion(req RecoveryPreferenceRequest) error {
 	return nil
 }
 
+// RetrySessionRecovery re-arms a pending recovery version after its lease
+// owner has gone away, then routes through the same validated activation path.
+func (a *App) RetrySessionRecovery(req RecoveryPreferenceRequest) error {
+	meta, ok, err := agent.LoadBranchMeta(req.Path)
+	if err != nil || !ok || meta.EffectiveVersionKind() != agent.VersionRecovery {
+		return errors.New("session recovery version is unavailable")
+	}
+	if err := agent.UpdateBranchMeta(req.Path, false, func(next *agent.BranchMeta) error {
+		next.VersionKind = agent.VersionRecovery
+		next.VersionState = agent.VersionActive
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := a.SetActiveSessionVersion(req); err != nil {
+		_ = agent.UpdateBranchMeta(req.Path, false, func(next *agent.BranchMeta) error {
+			next.VersionState = agent.VersionPending
+			return nil
+		})
+		return err
+	}
+	return nil
+}
+
 type RecoveryCleanupRequest struct {
 	Scope         string `json:"scope"`
 	WorkspaceRoot string `json:"workspaceRoot,omitempty"`

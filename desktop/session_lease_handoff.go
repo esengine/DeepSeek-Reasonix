@@ -73,9 +73,16 @@ func (a *App) handoffTabRecoveryLease(tab *WorkspaceTab, recoveryPath string) er
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			reason = "lease_held"
 		}
+		_ = agent.UpdateBranchMeta(recoveryPath, false, func(meta *agent.BranchMeta) error {
+			meta.VersionKind = agent.VersionRecovery
+			meta.VersionState = agent.VersionPending
+			return nil
+		})
 		a.emitRuntimeEvent("session:recovery-failed", sessionRecoveryFailedEvent{
 			Reason: reason, ConversationID: tab.TopicID, TopicID: tab.TopicID,
-			CanContinue: false, RecoveryPending: true,
+			RecoveryPath:  recoveryPath,
+			WorkspaceRoot: tab.WorkspaceRoot,
+			CanContinue:   false, RecoveryPending: true,
 		})
 		return fmt.Errorf("acquire recovery session lease: %w", userFacingSessionLeaseError("", err))
 	}
