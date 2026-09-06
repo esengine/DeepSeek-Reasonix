@@ -1351,7 +1351,7 @@ export const en = {
   "recovery.lineageEmpty": "No additional session versions.",
   "recovery.divergedToast": "Another unmerged session version was detected. All content has been preserved.",
   "recovery.failed": "Session recovery failed. Retry or reopen the session.",
-  "recovery.failedPending": "Session recovery is pending. The current content did not overwrite the disk record; retry or export it before continuing.",
+  "recovery.failedPending": "Session recovery is pending. The current content did not overwrite the disk record; retry or export first.",
   "recovery.retry": "Retry recovery",
   "recovery.defaultVersion": "Default version",
   "recovery.alternateVersion": "Another version",

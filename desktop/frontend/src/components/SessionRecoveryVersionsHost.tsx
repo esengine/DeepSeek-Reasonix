@@ -65,7 +65,7 @@ export function SessionRecoveryVersionsHost({ sessions, onResumeSession, onRecov
       onAction: () => { void app.RetrySessionRecovery({
         scope: event.workspaceRoot ? "project" : "global", workspaceRoot: event.workspaceRoot,
         topicId: event.topicId!, path: event.recoveryPath!,
-      }); },
+      }).catch((error) => showToast(error instanceof Error ? error.message : String(error), "error")); },
     } : undefined);
   }), [showToast, t]);
 

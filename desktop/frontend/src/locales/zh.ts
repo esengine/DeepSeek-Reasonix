@@ -1352,7 +1352,7 @@ export const zh: Record<DictKey, string> = {
   "recovery.lineageEmpty": "没有其他会话版本。",
   "recovery.divergedToast": "检测到另一个未合并的会话版本，所有内容均已保留。",
   "recovery.failed": "会话恢复失败，请重试或重新打开会话。",
-  "recovery.failedPending": "会话恢复暂未完成，当前内容未覆盖磁盘记录；请重试或导出后再继续。",
+  "recovery.failedPending": "会话恢复未完成，当前内容未覆盖磁盘；请重试或先导出。",
   "recovery.retry": "重试恢复",
   "recovery.defaultVersion": "默认版本",
   "recovery.alternateVersion": "另一个版本",

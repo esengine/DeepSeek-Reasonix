@@ -109,6 +109,28 @@ func (a *App) SetActiveSessionVersion(req RecoveryPreferenceRequest) error {
 	if meta.EffectiveVersionKind() == agent.VersionSubagent {
 		return errors.New("subagent transcripts cannot become the active conversation version")
 	}
+	catalog := a.sessionCatalog.Load()
+	if catalog == nil {
+		return errors.New("session catalog is unavailable")
+	}
+	topic, ok, err := catalog.GetTopic(a.bootContext(), sessioncatalog.TopicKey{Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, TopicID: req.TopicID})
+	if err != nil || !ok {
+		return errors.New("recovery lineage is unavailable")
+	}
+	groupID, _, ok := recoveryLineageSelection(topic, req.Path)
+	if !ok || groupID == "" {
+		return errors.New("selected version is outside the recovery lineage")
+	}
+	memberFound := false
+	for _, member := range topic.Sessions {
+		if recoveryRecordBelongsToGroup(member, groupID) && sameRecoveryLineagePath(member.Path, req.Path) && member.RecoveryRole != sessioncatalog.RecoveryRoleCoveredCopy {
+			memberFound = true
+			break
+		}
+	}
+	if !memberFound {
+		return errors.New("selected version is outside the recovery lineage")
+	}
 	a.mu.RLock()
 	var tabID string
 	for _, tab := range a.runtimeTabsLocked() {

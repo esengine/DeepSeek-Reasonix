@@ -280,8 +280,10 @@ for (const path of localeChunks) {
   // Protocol recovery and source-availability copy measure 60.927 KiB zh
   // and 61.789 KiB zh-TW (base: 60.8 / 61.6 rounded).
   // Rich-link action copy on the current base brings these to
-  // 61.027/61.881 KiB; retain bounded cross-platform headroom.
-  const budget = name.startsWith("zh-TW-") ? 62.0 * 1024 : 61.1 * 1024;
+  // 61.027/61.881 KiB; retain bounded cross-platform headroom. The recovery
+  // retry state adds a small zh-only tail that rounds to 61.1 KiB on some
+  // Node/zlib versions, so keep the next one-decimal ceiling for stability.
+  const budget = name.startsWith("zh-TW-") ? 62.0 * 1024 : 61.2 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
@@ -382,7 +384,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
 // With the current-base rich-link menus: 2485.715 KiB raw.
 // The shared harness decision surface adds a bounded startup stylesheet
-// payload; retain the measured 2492.1 KiB path with narrow headroom.
-const rawInitialBudgetKiB = 2_492.5;
+// payload; recovery version/retry controls add about 1 KiB to the current
+// measured path. Retain the next one-decimal ceiling with narrow headroom.
+const rawInitialBudgetKiB = 2_493.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
