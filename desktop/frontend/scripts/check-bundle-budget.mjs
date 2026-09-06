@@ -222,10 +222,11 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-// The one-row model configuration list, responsive stacking, and Automation's
-// shared title-safe shell measure 116.423 KiB gzip while reusing existing
-// layout primitives. Retain only the next one-decimal ceiling.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.5 * 1024);
+// The one-row model configuration list, responsive stacking, Automation's
+// shared title-safe shell, and the shared harness decision surface measure
+// 116.9 KiB gzip while reusing existing layout primitives. Retain a bounded
+// 0.1 KiB headroom ratchet.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 117.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -380,8 +381,8 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Recovery controls add 3.6 KiB raw over the measured 2480.9 KiB base;
 // current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
 // With the current-base rich-link menus: 2485.715 KiB raw.
-// The session-scoped Ask draft adds a small startup payload; keep the raw gate
-// explicit and bounded alongside the gzip ratchet above.
-const rawInitialBudgetKiB = 2_487.5;
+// The shared harness decision surface adds a bounded startup stylesheet
+// payload; retain the measured 2492.1 KiB path with narrow headroom.
+const rawInitialBudgetKiB = 2_492.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
