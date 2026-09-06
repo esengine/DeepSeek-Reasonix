@@ -170,6 +170,7 @@ func ToWire(e event.Event) Event {
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			ResolvedName: e.Tool.ResolvedName, CapabilityID: e.Tool.CapabilityID,
 			Output: e.Tool.Output, Err: e.Tool.Err,
+			RunState: e.Tool.RunState,
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
 			StartedAt: e.Tool.StartedAt, EndedAt: e.Tool.EndedAt,
@@ -438,6 +439,7 @@ type Tool struct {
 	CapabilityID      string          `json:"capabilityId,omitempty"`
 	Output            string          `json:"output,omitempty" externalizable:"true"`
 	Err               string          `json:"err,omitempty" externalizable:"true"`
+	RunState          string          `json:"runState,omitempty"`
 	ReadOnly          bool            `json:"readOnly"`
 	Truncated         bool            `json:"truncated,omitempty"`
 	DurationMs        int64           `json:"durationMs,omitempty"`

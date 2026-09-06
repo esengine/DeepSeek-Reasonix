@@ -24,6 +24,7 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 		Output:       o.output,
 		Err:          o.errMsg,
 		ReadOnly:     readOnly,
+		RunState:     toolOutcomeRunState(o),
 		Truncated:    o.truncated,
 		DurationMs:   duration,
 		Execution:    toEventShellExecution(o.execution, duration),
@@ -58,6 +59,22 @@ func (a *Agent) emitBatchToolResult(c provider.ToolCall, o toolOutcome, duration
 	}
 	a.recordToolExecutionAudit(readOnly, parallel, started, duration, batchStart, o)
 	return nil
+}
+
+func toolOutcomeRunState(o toolOutcome) string {
+	if o.cancelledBeforeExecution {
+		return string(provider.ToolRunCancelled)
+	}
+	if !o.executed {
+		return string(provider.ToolRunNotStarted)
+	}
+	if provider.ToolResultRunState(provider.Message{Content: o.output + "\n" + o.errMsg}) == provider.ToolRunUnknown {
+		return string(provider.ToolRunUnknown)
+	}
+	if o.errMsg != "" {
+		return string(provider.ToolRunFailed)
+	}
+	return string(provider.ToolRunCompleted)
 }
 
 func isSubagentToolName(name string) bool {

@@ -235,9 +235,12 @@ type Tool struct {
 	CapabilityID string
 	Output       string // ToolResult: the result text fed to the model
 	Err          string // ToolResult: non-empty when the call failed or was blocked
-	ReadOnly     bool
-	Truncated    bool  // ToolResult: Output was head+tailed before display/model
-	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	// RunState is host-local execution evidence (pending/running/completed/
+	// failed/cancelled/unknown). It is never sent to the provider.
+	RunState   string
+	ReadOnly   bool
+	Truncated  bool  // ToolResult: Output was head+tailed before display/model
+	DurationMs int64 // ToolResult: wall-clock execution time in milliseconds
 	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
 	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
 	StartedAt int64

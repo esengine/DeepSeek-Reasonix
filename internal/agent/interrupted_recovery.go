@@ -46,6 +46,12 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 	return nil
 }
 
+// PendingInterruptedRecovery exposes a sanitized local snapshot for host UIs.
+// It never returns provider transcript bytes or mutates the session.
+func (a *Agent) PendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
+	return a.pendingInterruptedRecovery()
+}
+
 // interruptedRecoveryBlock is appended only at the mutable user-message tail.
 // It contains no raw tool arguments, results, assistant text, or reasoning.
 func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {

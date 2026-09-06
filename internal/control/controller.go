@@ -1104,6 +1104,16 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	}
 	done = c.applyTurnDoneProtocol(done, cancelRequested)
 	done.Diagnostic = provider.DiagnoseFailure(err)
+	if pending := c.executor.PendingInterruptedRecovery(); pending != nil && pending.Pending {
+		done.Recovery = &event.RecoveryStatus{
+			Phase:        "turn_recovery_required",
+			Reason:       pending.Cause,
+			TurnID:       pending.TurnID,
+			AttemptID:    pending.AttemptID,
+			RequiresUser: pending.RequiresUserDecision || len(pending.UnknownTools) > 0,
+			Silent:       pending.SilentInterruption,
+		}
+	}
 	if !cancelRequested {
 		done.ProtocolRecovery = c.executor.PendingProtocolRecovery()
 	}
