@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startPreviewServer } from "./vite-preview-server.mjs";
 import { chooseAppLayout } from "./app-page-actions.mjs";
-import { buildIdentity, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
+import { attributeRetention, buildIdentity, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(frontendDir, ".pw-browsers");
@@ -152,7 +152,7 @@ async function runProcess(index) {
       samples,
       snapshots,
       cohorts: retainedCohorts(samples),
-      attribution: "REQUIRED",
+      attribution: "pending",
       checks: {
         evidenceIntegrity: evidenceIntegrity(samples),
         instrumentedOperationsReleased: samples.every(sample => sample.lifecycle.activeOperations === 0),
@@ -172,6 +172,7 @@ const report = { identity: buildIdentity(frontendDir), fixtures, startedAt: new 
 try {
   for (let index = 1; index <= PROCESSES; index += 1) {
     const result = await runProcess(index);
+    result.attribution = attributeRetention(result.samples, result.cohorts);
     report.processes.push(result);
     process.stdout.write(`[app-memory] process ${index}: ${JSON.stringify({ checks: result.checks, metrics: result.metrics })}\n`);
   }
@@ -182,8 +183,9 @@ try {
 }
 report.finishedAt = new Date().toISOString();
 report.protocolComplete = CYCLES >= 128 && MIXED_CYCLES >= 512 && report.processes.length >= 3;
-report.verdict = !report.failure && report.processes.every((run) => Object.values(run.checks).every(Boolean)) ? "NEEDS_ATTRIBUTION" : "FAIL";
+report.verdict = !report.failure && report.protocolComplete
+  && report.processes.every((run) => Object.values(run.checks).every(Boolean) && run.attribution?.status === "attributed")
+  ? "PASS" : report.failure ? "FAIL" : "NEEDS_ATTRIBUTION";
 writeFileSync(path.join(artifacts, "report.json"), JSON.stringify(report, null, 2));
 process.stdout.write(`[app-memory] verdict ${report.verdict}\n`);
-// Totals cannot certify owner-level retention. Keep qualification closed until attribution is complete.
-process.exitCode = 1;
+process.exitCode = report.verdict === "PASS" ? 0 : 1;

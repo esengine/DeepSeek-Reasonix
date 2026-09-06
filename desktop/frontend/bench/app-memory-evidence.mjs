@@ -52,6 +52,28 @@ export function evidenceIntegrity(samples) {
   ));
 }
 
+/**
+ * Attribute a completed soak only when the instrumented owner cohort shows no
+ * persistent post-baseline survivors, all operations are released, and the
+ * browser's post-GC DOM/listener counters are stable. A baseline cohort may
+ * legitimately survive (the mounted application itself); only newly retained
+ * identities are treated as a leak signal.
+ */
+export function attributeRetention(samples, cohorts = retainedCohorts(samples)) {
+  if (!evidenceIntegrity(samples) || samples.length < 2) return { status: "needs-attribution", reasons: ["invalid-evidence"] };
+  const retained = cohorts.some((cohort) => cohort.retainedPostBaseline.length > 0);
+  const final = samples.at(-1);
+  const postBaseline = samples.filter((sample) => sample.roundTrips > 0);
+  const stableDom = postBaseline.every((sample) => sample.dom?.nodes === final.dom?.nodes
+    && sample.dom?.jsEventListeners === final.dom?.jsEventListeners);
+  const released = samples.every((sample) => sample.lifecycle.activeOperations === 0);
+  const reasons = [];
+  if (retained) reasons.push("persistent-render-cohort");
+  if (!stableDom) reasons.push("post-gc-dom-or-listener-drift");
+  if (!released) reasons.push("active-operations");
+  return { status: reasons.length ? "needs-attribution" : "attributed", reasons };
+}
+
 // CDP's DOM counter includes attached and detached nodes. Only the heap's
 // detachedness field can label an object as detached; unknown stays unknown.
 export function summarizeHeap(snapshot) {

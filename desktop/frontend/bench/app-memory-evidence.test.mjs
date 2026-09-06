@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
+import { attributeRetention, evidenceIntegrity, retainedCohorts, summarizeHeap } from "./app-memory-evidence.mjs";
 
 const sample = (ids, roundTrips) => ({ phase: "full", roundTrips, lifecycle: {
   liveRenderTokenIds: ids, liveRenderTokens: ids.length,
@@ -17,6 +17,23 @@ test("probe overflow, duplicate IDs and cleanup underflow invalidate evidence", 
     Object.assign(value.lifecycle, mutation);
     assert.equal(evidenceIntegrity([value]), false);
   }
+});
+test("stable post-GC owner cohorts can be attributed without inventing a count budget", () => {
+  const samples = [
+    { ...sample([1, 2], 0), dom: { nodes: 6000, jsEventListeners: 500 } },
+    { ...sample([1, 3], 32), dom: { nodes: 6024, jsEventListeners: 512 } },
+    { ...sample([1, 4], 64), dom: { nodes: 6024, jsEventListeners: 512 } },
+  ];
+  assert.deepEqual(attributeRetention(samples), { status: "attributed", reasons: [] });
+});
+test("persistent post-baseline cohorts remain a qualification blocker", () => {
+  const samples = [
+    { ...sample([1, 2], 0), dom: { nodes: 6000, jsEventListeners: 500 } },
+    { ...sample([1, 3], 32), dom: { nodes: 6024, jsEventListeners: 512 } },
+    { ...sample([1, 3], 64), dom: { nodes: 6024, jsEventListeners: 512 } },
+    { ...sample([1, 3], 96), dom: { nodes: 6024, jsEventListeners: 512 } },
+  ];
+  assert.equal(attributeRetention(samples).status, "needs-attribution");
 });
 test("native objects are not automatically detached DOM", () => {
   const heap = { snapshot: { meta: {
