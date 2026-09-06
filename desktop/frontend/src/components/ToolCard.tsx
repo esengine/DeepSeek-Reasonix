@@ -564,6 +564,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           </div>
         )}
 
+        {isShellCard && subject && (
+          <div className="tool__command">
+            <div className="tool__command-label">{t("tool.command")}</div>
+            <CodeViewer value={subject} language="bash" maxHeight={180} />
+          </div>
+        )}
+
         {shellPreview && (
           <>
             <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
