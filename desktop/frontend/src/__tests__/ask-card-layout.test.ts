@@ -1,5 +1,4 @@
 // Run: tsx src/__tests__/ask-card-layout.test.ts
-
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,13 +9,10 @@ import { createRoot } from "react-dom/client";
 import { AskCard } from "../components/AskCard";
 import { LocaleProvider } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk } from "../lib/types";
-
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
-
 let passed = 0;
 let failed = 0;
-
 function ok(value: boolean, label: string) {
   if (value) {
     process.stdout.write(`  PASS  ${label}\n`);
@@ -26,16 +22,13 @@ function ok(value: boolean, label: string) {
     failed += 1;
   }
 }
-
 function eq(actual: unknown, expected: unknown, label: string) {
   if (actual === expected) ok(true, label);
   else ok(false, `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
-
 function flushTimers(delay = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
-
 function installDom() {
   const dom = new JSDOM("<!doctype html><html><head></head><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
@@ -99,15 +92,12 @@ function installDom() {
       this.setAttribute("data-scrolled-into-view", "true");
     },
   });
-
   const style = document.createElement("style");
   style.textContent = styles;
   document.head.appendChild(style);
   return dom;
 }
-
 console.log("\nask card layout");
-
 {
   const dom = installDom();
   const rootEl = document.getElementById("root");
@@ -131,7 +121,6 @@ console.log("\nask card layout");
       },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -145,15 +134,12 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   const card = document.querySelector(".prompt-shelf__card") as HTMLElement | null;
   const content = document.querySelector(".prompt-shelf__content") as HTMLElement | null;
   const meta = document.querySelector(".prompt-shelf__meta") as HTMLElement | null;
   const footer = document.querySelector(".prompt-shelf__footer") as HTMLElement | null;
   if (!card || !content || !meta || !footer) throw new Error("ask prompt shelf did not render");
-
   eq(meta.textContent, ask.questions[0].prompt, "ask question text remains complete in the prompt shelf");
-
   const computed = window.getComputedStyle(meta);
   eq(computed.whiteSpace, "normal", "ask question can wrap instead of staying on one line");
   eq(computed.overflow, "visible", "ask question is not clipped by the prompt shelf");
@@ -167,7 +153,6 @@ console.log("\nask card layout");
   eq(content.contains(footer), false, "Ask confirmation footer stays outside the scrolling content");
   const secondary = footer.querySelector(".decision-confirm-bar__secondary") as HTMLButtonElement | null;
   ok(Boolean(secondary?.textContent?.trim()), "Ask skip is a quiet footer action");
-
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   // options + custom; skip is a secondary footer action
   eq(optionButtons.length, 2, "ask renders only selectable options; custom answer is an always-visible input row");
@@ -179,19 +164,16 @@ console.log("\nask card layout");
   const firstOption = optionButtons[0];
   const firstDescription = firstOption?.querySelector(".prompt-action__desc") as HTMLElement | null;
   if (!actions || !firstOption || !firstDescription) throw new Error("ask option layout did not render");
-
   const actionsStyle = window.getComputedStyle(actions);
   eq(actionsStyle.gridAutoRows, "max-content", "decision row wrappers accommodate optional external details");
   eq(actionsStyle.alignContent, "start", "decision rows stay content-sized at the top of the scroll region");
   eq(actionsStyle.maxHeight, "none", "Ask options do not create a nested scroll region");
   eq(actionsStyle.overflow, "visible", "Ask option overflow belongs to the shared content scroller");
-
   const optionStyle = window.getComputedStyle(firstOption);
   eq(optionStyle.height, "38px", "desktop decision rows keep a stable compact height");
   eq(optionStyle.minHeight, "38px", "short decision rows retain a compact click target");
   eq(optionStyle.alignItems, "center", "single-line decision copy stays vertically centered with the option key");
   eq(window.getComputedStyle(firstOption.querySelector(".prompt-action__key") as HTMLElement).marginTop, "0px", "decision keys do not carry a top offset");
-
   ok(
     /\.prompt-shelf--decision \.prompt-shelf__actions \.prompt-action__copy \{[^}]*grid-template-columns:\s*fit-content\(44%\) minmax\(0, 1fr\)/s.test(styles),
     "decision option labels size to content while staying capped at 44% of the row",
@@ -200,7 +182,6 @@ console.log("\nask card layout");
     !/\.prompt-shelf--decision \.prompt-shelf__actions \.prompt-action__label \{[^}]*max-width:\s*[\d.]/s.test(styles),
     "decision option labels never resolve their width cap against their own content-sized track",
   );
-
   const descriptionStyle = window.getComputedStyle(firstDescription);
   eq(descriptionStyle.whiteSpace, "nowrap", "long option descriptions stay on one stable summary line");
   eq(descriptionStyle.display, "block", "Ask summaries use ordinary single-line flow");
@@ -213,7 +194,6 @@ console.log("\nask card layout");
     ask.questions[0].options[0].description,
     "normal short labels preserve the existing description tooltip",
   );
-
   const descriptionToggle = document.querySelector(".prompt-action__description-toggle") as HTMLButtonElement | null;
   if (!descriptionToggle) throw new Error("long Ask description disclosure did not render");
   eq(descriptionToggle.textContent?.trim(), "View full description", "truncated descriptions expose an explicit full-text action");
@@ -222,7 +202,6 @@ console.log("\nask card layout");
   if (!descriptionDetail) throw new Error("long Ask detail region did not render");
   eq(descriptionToggle.getAttribute("aria-controls"), descriptionDetail.id, "disclosure identifies the separate detail region");
   eq(descriptionDetail.hidden, true, "full detail region starts hidden");
-
   let disclosureEnterDefaultPrevented = true;
   await act(async () => {
     const event = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
@@ -233,7 +212,6 @@ console.log("\nask card layout");
   eq(answers.length, 0, "Enter on Ask disclosure never confirms the selected answer");
   eq(disclosureEnterDefaultPrevented, true, "Ask disclosure owns keyboard activation before global shortcuts");
   eq(descriptionToggle.getAttribute("aria-expanded"), "true", "Enter expands the Ask description");
-
   await act(async () => {
     descriptionToggle.dispatchEvent(new window.KeyboardEvent("keydown", {
       key: "Enter",
@@ -243,7 +221,6 @@ console.log("\nask card layout");
     await flushTimers();
   });
   eq(descriptionToggle.getAttribute("aria-expanded"), "false", "Enter collapses the Ask description again");
-
   await act(async () => {
     descriptionToggle.click();
     await flushTimers();
@@ -259,34 +236,29 @@ console.log("\nask card layout");
     true,
     "separate detail region reveals the complete text",
   );
-
   await act(async () => {
     descriptionToggle.click();
     await flushTimers();
   });
   eq(descriptionDetail.hidden, true, "separate detail region can be collapsed again");
   eq(descriptionToggle.getAttribute("aria-expanded"), "false", "collapsed state is announced");
-
   await act(async () => {
     optionButtons[1].click();
     await flushTimers(200);
   });
   eq(document.querySelector(".prompt-action__description-toggle"), null, "short selected descriptions do not show a redundant disclosure");
   eq(answers.length, 0, "single-select click advances without submitting the final answer");
-
   await act(async () => {
     (document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement).click();
     await flushTimers();
   });
   eq(answers.length, 1, "confirm submits the selected single-select answer");
   eq(answers[0]?.[0]?.selected?.[0], "Minimal repair", "submitted answer matches the selected option");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // Legacy or malformed Ask payloads may omit description and put the entire
 // decision in label. Give those rows the full copy column, then disclose the
 // original label only when it still overflows. The answer value stays exact.
@@ -308,7 +280,6 @@ console.log("\nask card layout");
       ],
     }],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -322,18 +293,15 @@ console.log("\nask card layout");
     );
     await flushTimers(200);
   });
-
   const firstOption = document.querySelector(".prompt-shelf__actions .prompt-action") as HTMLButtonElement | null;
   const label = firstOption?.querySelector(".prompt-action__label") as HTMLElement | null;
   const copy = firstOption?.querySelector(".prompt-action__copy") as HTMLElement | null;
   const toggle = document.querySelector(".prompt-action__description-toggle") as HTMLButtonElement | null;
   if (!firstOption || !label || !copy || !toggle) throw new Error("long label fallback did not render");
-
   eq(window.getComputedStyle(copy).gridTemplateColumns, "minmax(0, 1fr)", "label-only decisions use the full copy width before truncating");
   eq(window.getComputedStyle(label).textOverflow, "ellipsis", "overflowing legacy labels keep the stable compact row");
   eq(firstOption.getAttribute("title"), longLabel, "overflowing labels retain their complete native tooltip");
   eq(toggle.getAttribute("aria-expanded"), "false", "overflowing label detail starts collapsed");
-
   await act(async () => {
     toggle.click();
     await flushTimers();
@@ -349,20 +317,17 @@ console.log("\nask card layout");
     "full label detail wraps instead of being ellipsized again",
   );
   eq(answers.length, 0, "opening a long label never submits the decision");
-
   await act(async () => {
     (document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement).click();
     await flushTimers();
   });
   eq(answers.length, 1, "long label decision still submits normally");
   eq(answers[0]?.[0]?.selected?.[0], longLabel, "display fallback does not alter the answer value");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // Multi-select requires at least one choice before confirm advances.
 {
   const dom = installDom();
@@ -384,7 +349,6 @@ console.log("\nask card layout");
       },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -398,10 +362,8 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   const confirm = document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement;
   eq(confirm.disabled, true, "multi-select confirm stays disabled until an option is chosen");
-
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   await act(async () => {
     optionButtons[0].click();
@@ -409,20 +371,17 @@ console.log("\nask card layout");
   });
   eq(confirm.disabled, false, "multi-select confirm enables after selecting one option");
   eq(answers.length, 0, "multi-select click does not submit");
-
   await act(async () => {
     confirm.click();
     await flushTimers();
   });
   eq(answers.length, 1, "multi-select confirm submits once");
   eq(JSON.stringify(answers[0]?.[0]?.selected), JSON.stringify(["A"]), "multi-select keeps chosen labels");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // Single-select: keyboard cursor is confirmable without a prior click.
 {
   const dom = installDom();
@@ -443,7 +402,6 @@ console.log("\nask card layout");
       },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -457,12 +415,10 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   const confirm = document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement;
   eq(optionButtons[0]?.getAttribute("aria-selected"), "true", "initial keyboard cursor marks the first option");
   eq(confirm.disabled, false, "initial option cursor enables confirm without a click");
-
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
     await flushTimers();
@@ -471,20 +427,17 @@ console.log("\nask card layout");
   eq(optionButtons[1]?.getAttribute("aria-selected"), "true", "ArrowDown selects the second option visually");
   eq(optionButtons[1]?.getAttribute("data-scrolled-into-view"), "true", "keyboard selection stays inside the visible option viewport");
   eq(confirm.disabled, false, "ArrowDown keeps confirm enabled for the highlighted option");
-
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     await flushTimers();
   });
   eq(answers.length, 1, "ArrowDown+Enter submits the highlighted single-select option");
   eq(answers[0]?.[0]?.selected?.[0], "Second", "submitted answer matches the keyboard cursor");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // Single-select: initial Enter confirms the default-highlighted first option.
 {
   const dom = installDom();
@@ -505,7 +458,6 @@ console.log("\nask card layout");
       },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -519,20 +471,17 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     await flushTimers();
   });
   eq(answers.length, 1, "initial Enter submits without a prior click");
   eq(answers[0]?.[0]?.selected?.[0], "Alpha", "initial Enter uses the first highlighted option");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // Custom answer drafts survive switching to another option and back.
 {
   const dom = installDom();
@@ -548,7 +497,6 @@ console.log("\nask card layout");
       options: [{ label: "Suggested", description: "Use the suggestion" }],
     }],
   };
-
   await act(async () => {
     root.render(React.createElement(LocaleProvider, null,
       React.createElement(AskCard, {
@@ -560,7 +508,6 @@ console.log("\nask card layout");
     ));
     await flushTimers();
   });
-
   const actions = [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")];
   await act(async () => {
     actions[1]?.click();
@@ -575,29 +522,24 @@ console.log("\nask card layout");
     await flushTimers();
   });
   eq(input.value, "Keep this draft", "custom input accepts a draft");
-
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".prompt-action")?.click();
     await flushTimers();
   });
   eq(document.querySelector<HTMLInputElement>(".ask-shelf__custom")?.value, "", "selecting an option clears the visible custom draft without removing the input row");
-
   await act(async () => {
     document.querySelector<HTMLElement>(".ask-shelf__custom-row")?.click();
     await flushTimers();
   });
   eq(document.querySelector<HTMLInputElement>(".ask-shelf__custom")?.value, "Keep this draft", "reopening custom restores the draft");
-
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
     await flushTimers();
   });
   eq(answers[0]?.[0]?.selected?.[0], "Keep this draft", "custom mode submits the restored draft");
-
   await act(async () => { root.unmount(); });
   dom.window.close();
 }
-
 // Multi-select: keyboard cursor must not look like a checked answer.
 {
   const dom = installDom();
@@ -618,7 +560,6 @@ console.log("\nask card layout");
       },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -632,13 +573,11 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   const confirm = document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement;
   eq(optionButtons[0]?.getAttribute("aria-selected"), "false", "multi-select cursor alone is not aria-selected");
   eq(optionButtons[0]?.getAttribute("data-active"), "true", "multi-select marks the keyboard cursor with data-active");
   eq(confirm.disabled, true, "multi-select confirm stays disabled until an option is checked");
-
   await act(async () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
     await flushTimers();
@@ -647,20 +586,17 @@ console.log("\nask card layout");
   eq(optionButtons[1]?.getAttribute("data-active"), "true", "ArrowDown moves the multi-select cursor");
   eq(optionButtons[1]?.getAttribute("aria-selected"), "false", "ArrowDown does not check the multi-select option");
   eq(confirm.disabled, true, "ArrowDown alone does not enable multi-select confirm");
-
   await act(async () => {
     optionButtons[1].click();
     await flushTimers();
   });
   eq(optionButtons[1]?.getAttribute("aria-selected"), "true", "click checks the multi-select option");
   eq(confirm.disabled, false, "multi-select confirm enables after a real check");
-
   await act(async () => {
     root.unmount();
   });
   dom.window.close();
 }
-
 // A failed asynchronous submit must preserve multi-question progress and
 // selections instead of remounting the card at question 1.
 {
@@ -677,7 +613,6 @@ console.log("\nask card layout");
       { id: "q2", prompt: "Second choice?", options: [{ label: "Second A" }, { label: "Second B" }] },
     ],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -695,34 +630,29 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   await act(async () => {
     [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
       .find((button) => button.textContent?.includes("First A"))?.click();
     await flushTimers();
   });
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "multi-question Ask advances to question 2");
-
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".ask-shelf__pager-button")?.click();
     await flushTimers();
   });
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("1/2"), true, "Back returns to the previous question");
-
   await act(async () => {
     [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
       .find((button) => button.textContent?.includes("First B"))?.click();
     await flushTimers();
   });
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "previous question accepts a replacement choice");
-
   await act(async () => {
     [...document.querySelectorAll<HTMLButtonElement>(".prompt-action")]
       .find((button) => button.textContent?.includes("Second B"))?.click();
     document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
     await flushTimers();
   });
-
   eq(attempts, 1, "failed final submit is attempted exactly once");
   eq(document.querySelector(".ask-shelf__header-text--progress")?.textContent?.includes("2/2"), true, "failed final submit stays on question 2");
   eq(document.querySelector(".ask-shelf__crumbs")?.textContent?.includes("First B"), true, "failed final submit preserves the revised first answer");
@@ -733,18 +663,15 @@ console.log("\nask card layout");
     "failed final submit preserves the second answer",
   );
   eq(document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.disabled, false, "failed final submit re-enables retry");
-
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".decision-confirm-bar__confirm")?.click();
     await flushTimers();
   });
   eq(attempts, 2, "retry submits once after the failure");
   eq(submitted[1]?.map((answer) => answer.selected?.[0]).join("|"), "First B|Second B", "retry submits the preserved answer batch");
-
   await act(async () => { root.unmount(); });
   dom.window.close();
 }
-
 // Skip advances the current question and submits an empty answer on the last.
 {
   const dom = installDom();
@@ -756,7 +683,6 @@ console.log("\nask card layout");
     id: "ask-skip-retry",
     questions: [{ id: "q1", prompt: "Skip this?", options: [{ label: "Continue" }] }],
   };
-
   await act(async () => {
     root.render(
       React.createElement(LocaleProvider, null,
@@ -770,18 +696,15 @@ console.log("\nask card layout");
     );
     await flushTimers();
   });
-
   await act(async () => {
     document.querySelector<HTMLButtonElement>(".decision-confirm-bar__secondary")?.click();
     await flushTimers();
   });
   eq(submitted.length, 1, "skipping the final question submits once");
   eq(submitted[0]?.[0]?.selected?.length, 0, "skipping submits an empty answer");
-
   await act(async () => { root.unmount(); });
   dom.window.close();
 }
-
 // Collapsing an Ask keeps the pending card header visible, while interactive
 // controls continue to work without toggling the card accidentally.
 {
@@ -818,7 +741,6 @@ console.log("\nask card layout");
   await act(async () => { root.unmount(); });
   dom.window.close();
 }
-
 // Session-scoped drafts restore when the Ask surface remounts in the same tab.
 {
   const dom = installDom();
@@ -859,6 +781,5 @@ console.log("\nask card layout");
   await act(async () => { remountRoot.unmount(); });
   dom.window.close();
 }
-
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
