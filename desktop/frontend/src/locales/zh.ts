@@ -2678,7 +2678,7 @@ export const zh: Record<DictKey, string> = {
   "shortcuts.action.textSizeReset": "重置字号",
   "shortcuts.action.yoloToggle": "切换 YOLO 审批",
   "shortcuts.action.showShortcuts": "显示快捷键",
-  "shortcuts.desc.newSession": "为当前工作区范围创建新会话。",
+  "shortcuts.desc.newSession": "创建新的非项目会话。",
   "shortcuts.desc.commandPalette": "搜索命令和最近会话。",
   "shortcuts.desc.settings": "打开桌面设置中心。",
   "shortcuts.desc.closeTab": "关闭当前标签页。",

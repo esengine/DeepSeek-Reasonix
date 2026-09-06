@@ -2469,10 +2469,11 @@ export default function App() {
   }, [refreshTabMetas, setControllerCollaborationMode]);
 
   const blankSessionTarget = useCallback(() => {
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
-    const scope = activeWorkspaceRoot ? "project" : "global";
-    return { scope, workspaceRoot: activeWorkspaceRoot };
-  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+    // Top-level "New Session" always creates a global (non-project) session.
+    // It must never inherit the project of the currently active tab; project
+    // sessions are only created through explicit project-tree actions.
+    return { scope: "global", workspaceRoot: "" };
+  }, []);
 
   useEffect(() => {
     let live = true;

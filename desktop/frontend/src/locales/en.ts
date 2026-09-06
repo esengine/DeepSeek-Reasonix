@@ -2675,7 +2675,7 @@ export const en = {
   "shortcuts.action.textSizeReset": "Reset text size",
   "shortcuts.action.yoloToggle": "Toggle YOLO approvals",
   "shortcuts.action.showShortcuts": "Show shortcuts",
-  "shortcuts.desc.newSession": "Create a new session for the current workspace scope.",
+  "shortcuts.desc.newSession": "Create a new non-project session.",
   "shortcuts.desc.commandPalette": "Search commands and recent sessions.",
   "shortcuts.desc.settings": "Open the desktop settings center.",
   "shortcuts.desc.closeTab": "Close the active tab.",
