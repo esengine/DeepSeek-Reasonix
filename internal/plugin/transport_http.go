@@ -124,7 +124,7 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 				body:   msg,
 			})
 		}
-		return nil, fmt.Errorf("plugin %q: %s: http %d: %s", t.name, method, resp.StatusCode, msg)
+		return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, &httpStatusError{Status: resp.StatusCode, Detail: msg})
 	}
 
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
@@ -146,7 +146,7 @@ func (t *httpTransport) notify(ctx context.Context, method string, params any) e
 	t.captureSession(resp)
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPBody))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("plugin %q: %s: http %d", t.name, method, resp.StatusCode)
+		return fmt.Errorf("plugin %q: %s: %w", t.name, method, &httpStatusError{Status: resp.StatusCode})
 	}
 	return nil
 }
@@ -228,6 +228,23 @@ func (t *httpTransport) captureSession(resp *http.Response) {
 		t.session = sid
 		t.mu.Unlock()
 	}
+}
+
+// httpStatusError is a non-2xx answer with the status kept as a number. The
+// host knows which status it got, and formatting it into the sentence was where
+// that stopped being true: everything downstream — a failure record, a settings
+// row — was left reading the digits back out of prose an external server had a
+// hand in writing.
+type httpStatusError struct {
+	Status int
+	Detail string
+}
+
+func (e *httpStatusError) Error() string {
+	if e.Detail == "" {
+		return fmt.Sprintf("http %d", e.Status)
+	}
+	return fmt.Sprintf("http %d: %s", e.Status, e.Detail)
 }
 
 type httpSessionExpiredError struct {
@@ -340,7 +357,7 @@ func (t *httpTransport) replyServerRequest(ctx context.Context, message inboundM
 	t.captureSession(resp)
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPBody))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("plugin %q: reply to %s: http %d", t.name, message.Method, resp.StatusCode)
+		return fmt.Errorf("plugin %q: reply to %s: %w", t.name, message.Method, &httpStatusError{Status: resp.StatusCode})
 	}
 	return nil
 }

@@ -114,7 +114,7 @@ func (t *sseTransport) readLoop() {
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		t.fail(fmt.Errorf("GET %s: http %d: %s", t.getURL, resp.StatusCode, strings.TrimSpace(string(body))))
+		t.fail(fmt.Errorf("GET %s: %w", t.getURL, &httpStatusError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(body))}))
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
@@ -356,7 +356,7 @@ func (t *sseTransport) post(ctx context.Context, body []byte) error {
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return &httpStatusError{Status: resp.StatusCode, Detail: strings.TrimSpace(string(responseBody))}
 	}
 	return nil
 }
