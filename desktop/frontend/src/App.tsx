@@ -69,6 +69,7 @@ import { useWorktreeMergeCommands } from "./app-runtime/useWorktreeMergeCommands
 import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle";
 import { useNativeSettingsEvent } from "./app-runtime/useNativeSettingsEvent";
 import { useTabProjectionLifecycle } from "./app-runtime/useTabProjectionLifecycle";
+import { useAppDiagnostics, useSidebarConnectionValidity } from "./app-runtime/useAppEffectHosts";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
@@ -98,7 +99,6 @@ import {
   useLayoutStore,
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
-import { recordFrontendDiagnostic } from "./lib/frontendDiagnosticBridge";
 import { useNavigationSurface } from "./lib/useNavigationSurface";
 import {
 } from "./lib/theme";
@@ -315,12 +315,6 @@ export default function App() {
   const workspaceScopeActiveTabRef = useRef(activeTabId);
   const [workspaceControllerEpoch, setWorkspaceControllerEpoch] = useState(0);
   workspaceScopeActiveTabRef.current = activeTabId;
-  useEffect(() => {
-    recordFrontendDiagnostic("app", "app.surface", {
-      hasActiveTab: Boolean(activeTabId),
-      tabCount: tabMetas.length,
-    });
-  }, [activeTabId, tabMetas.length]);
 
   const workspacePanelResizing = useLayoutStore((state) => state.workspacePanelResizing);
   const liveTerminalHeight = useLayoutStore((state) => state.liveTerminalHeight);
@@ -392,12 +386,7 @@ export default function App() {
     setSettingsTarget("bots");
   });
 
-  useEffect(() => {
-    setSidebarImDetailConnectionId((current) => {
-      if (!current) return "";
-      return sidebarImConnections.some((connection) => connection.id === current) ? current : "";
-    });
-  }, [sidebarImConnections]);
+  useSidebarConnectionValidity({ connections: sidebarImConnections, setConnectionId: setSidebarImDetailConnectionId });
 
   useNativeSettingsEvent({ closeTransientOverlays, setSettingsTarget });
 
@@ -529,16 +518,9 @@ export default function App() {
     !state.meta.startupErr &&
     !state.backendActivationPending &&
     !runtimeTransitioning;
+  useAppDiagnostics({ activeTabId, tabCount: tabMetas.length, ready: controllerReady, running: state.running,
+    hydrating: state.hydrating, runtimeTransitioning, contentRevision: state.historyLayoutRevision });
 
-  useEffect(() => {
-    recordFrontendDiagnostic("app", "app.runtime-state", {
-      ready: controllerReady,
-      running: state.running,
-      hydrating: state.hydrating,
-      runtimeTransitioning,
-      contentRevision: state.historyLayoutRevision,
-    });
-  }, [controllerReady, runtimeTransitioning, state.hydrating, state.historyLayoutRevision, state.running]);
   const {
     pendingClose, setPendingClose,
     revealBackgroundRuntime, handleTabChange, handleTabClose,
