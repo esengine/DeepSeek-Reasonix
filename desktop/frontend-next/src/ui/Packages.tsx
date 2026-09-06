@@ -2,6 +2,7 @@ import { useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, PluginExport, PluginItem, PluginPackage } from "../port/port";
 import { Switch } from "./Switch";
+import { reason } from "../i18n/kernel";
 
 interface Props {
   port: AgentPort;
@@ -67,7 +68,7 @@ function Package({
     try {
       await fn();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      setFailed(reason(e));
     } finally {
       setBusy("");
       onDone();

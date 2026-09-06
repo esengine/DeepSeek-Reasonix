@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { AgentPort, McpEntry } from "../port/port";
 import { Exception } from "./CapabilityScope";
 import { Switch } from "./Switch";
+import { reason } from "../i18n/kernel";
 
 // One external service: whether it is answering, what it brought, and the two
 // acts that change that — switching it off and letting it try again.
@@ -40,7 +41,7 @@ export function ServerRow({
       const r = (await fn()) as { error?: string } | void;
       if (r && typeof r === "object" && r.error) setFailed(r.error);
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      setFailed(reason(e));
     } finally {
       setBusy("");
       onDone();

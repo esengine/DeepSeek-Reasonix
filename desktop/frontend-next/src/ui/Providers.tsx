@@ -4,6 +4,7 @@ import type { Protocol, ProviderCheck, ProviderEdit, ProviderEntry, ProviderProb
 import { AddProvider } from "./AddProvider";
 import { EditConn } from "./EditConn";
 import { KIND_LABEL, accountKey, accountLabel, disambiguate, hostOf } from "./vendors";
+import { reason } from "../i18n/kernel";
 
 // A connection is an account, not a config row. One endpoint answering two
 // protocols is two rows in the file and one service to the person paying for it,
@@ -91,7 +92,7 @@ export function Providers({ port, onChanged, onFailed, protocol, onProtocol, act
       reload();
       onChanged();
     } catch (e) {
-      onFailed(e instanceof Error ? e.message : String(e));
+      onFailed(reason(e));
     } finally {
       setBusy("");
     }
@@ -156,7 +157,7 @@ function Conn({
       await port.setProviderWebSearch(entry.name, on);
       onEdited();
     } catch (e) {
-      onFailed(e instanceof Error ? e.message : String(e));
+      onFailed(reason(e));
     } finally {
       setBusy("");
     }
@@ -169,7 +170,7 @@ function Conn({
       await port.setProviderThinking(entry.name, on);
       onEdited();
     } catch (e) {
-      onFailed(e instanceof Error ? e.message : String(e));
+      onFailed(reason(e));
     } finally {
       setBusy("");
     }
@@ -181,7 +182,7 @@ function Conn({
     try {
       setFound(await port.checkProvider(entry.name));
     } catch (e) {
-      setFound({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      setFound({ ok: false, error: reason(e) });
     } finally {
       setBusy("");
     }

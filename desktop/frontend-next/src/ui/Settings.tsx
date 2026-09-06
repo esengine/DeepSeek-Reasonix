@@ -35,6 +35,7 @@ import { DEFAULT_DAYS, Usage } from "./Usage";
 import { Storage } from "./Storage";
 import { Appearance, SCHEMES } from "./Appearance";
 import { ScopeBar } from "./CapabilityScope";
+import { reason } from "../i18n/kernel";
 
 const PRESETS: [Preset, string, string][] = [
   ["balanced", "均衡", "做到模型认为做完为止。日常用这档"],
@@ -212,7 +213,7 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
       await fn();
       onChanged();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      setFailed(reason(e));
     } finally {
       setBusy("");
     }

@@ -94,7 +94,7 @@ export function Memory({ port }: { port: AgentPort }) {
       await port.forgetMemory(name);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }

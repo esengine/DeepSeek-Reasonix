@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { ProviderEntry } from "../port/port";
 import { ModelChoice } from "./ModelChoice";
 import type { Port } from "./Providers";
+import { reason } from "../i18n/kernel";
 
 // The reasoning vocabularies the kernel knows, in config's own spelling. Auto
 // is the absence of a declaration, not a seventh shape.
@@ -72,7 +73,7 @@ function EditConn({
       if (found.length === 0) throw new Error("这个端点没报出任何聊天模型");
       setModels([...new Set([...found, ...picked])]);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(reason(e));
     } finally {
       setBusy("");
     }
@@ -96,7 +97,7 @@ function EditConn({
       });
       onDone();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(reason(e));
     } finally {
       setBusy("");
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { bytes } from "../i18n/format";
 import { t } from "../i18n";
 import type { UpdateProgress, VersionHub } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // The panel answers three questions in the order a user asks them: what am I
 // running, is something wrong with it, and how do I get off it. Every action
@@ -69,7 +70,7 @@ export function Versions({ port }: { port: Port }) {
       await port.pinVersion(v);
       reload();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      setFailed(reason(e));
     } finally {
       setBusy(false);
     }

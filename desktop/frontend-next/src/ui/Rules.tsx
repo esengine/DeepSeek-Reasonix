@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, PermissionLists, PermissionRules } from "../port/port";
 import { Switch } from "./Switch";
+import { reason } from "../i18n/kernel";
 
 type List = "deny" | "ask" | "allow";
 
@@ -171,7 +172,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
       setRules(await port.savePermissions(next));
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }

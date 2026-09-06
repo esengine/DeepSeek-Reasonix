@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, ShellOption, ShellSettings } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // The product name, not the executable: "powershell.exe" is what the file is
 // called, "Windows PowerShell" is what the user installed.
@@ -58,7 +59,7 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
       setCustom(next.path ?? "");
       onChanged?.();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
+      setFailed(reason(e));
     } finally {
       setBusy("");
     }

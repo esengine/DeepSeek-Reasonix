@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, HookCatalog, HookDryRun, HookEntry } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // Nobody arrives wanting a "PreToolUse hook with an anchored matcher". They
 // arrive wanting the agent to run their formatter. The recipe is the product;
@@ -80,7 +81,7 @@ export function Hooks({ port, onChanged }: Props) {
       reload();
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }
@@ -102,7 +103,7 @@ export function Hooks({ port, onChanged }: Props) {
       const res = await port.dryRunHook(h);
       setTried((t) => ({ ...t, [key]: res }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }

@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import type { AgentPort, SkillEntry } from "../port/port";
 import { Exception } from "./CapabilityScope";
 import { Switch } from "./Switch";
+import { reason } from "../i18n/kernel";
 
 // One skill, and the two things a reader wants from it: whether the model can
 // reach it at all, and which of the layers it was switched at.
@@ -32,7 +33,7 @@ export function SkillRow({
     try {
       await fn();
     } catch (e) {
-      onFailed(e instanceof Error ? e.message : String(e));
+      onFailed(reason(e));
     } finally {
       setBusy(false);
       onDone();

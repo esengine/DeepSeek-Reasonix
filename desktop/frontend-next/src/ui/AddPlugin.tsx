@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { useFileDrop } from "./filedrop";
 import type { AgentPort, PluginAction, PluginPackage, PluginPlan } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // Installing and importing are the same act from two doors, so there is one
 // box: a link, or a folder picked off this machine.
@@ -56,7 +57,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
       setPlan(p);
     } catch (e) {
       setPlan(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy(false);
     }
@@ -71,7 +72,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
       setDone(out);
       if (out.applied) onInstalled();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy(false);
     }

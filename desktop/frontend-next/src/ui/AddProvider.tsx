@@ -4,6 +4,7 @@ import type { Protocol, ProviderEntry, ProviderProbe } from "../port/port";
 import { ModelChoice } from "./ModelChoice";
 import { KIND_LABEL, hostOf, nameFrom, vendorLabel } from "./vendors";
 import type { Port } from "./Providers";
+import { reason } from "../i18n/kernel";
 
 // Adding a connection asks two questions — where, and with what key. Everything
 // else is knowable by asking the endpoint, so it is asked rather than typed.
@@ -53,7 +54,7 @@ export function AddProvider({
       setName(uniqueName(nameFrom(baseUrl), taken));
     } catch (e) {
       setProbe(null);
-      setErr(String(e instanceof Error ? e.message : e));
+      setErr(reason(e));
     } finally {
       setBusy(false);
     }
@@ -78,7 +79,7 @@ export function AddProvider({
       });
       onDone();
     } catch (e) {
-      setErr(String(e instanceof Error ? e.message : e));
+      setErr(reason(e));
     } finally {
       setBusy(false);
     }

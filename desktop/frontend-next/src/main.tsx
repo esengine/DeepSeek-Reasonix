@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { boot as bootLang } from "./i18n";
+import { reason } from "./i18n/kernel";
 import { track as trackWidth } from "./ui/viewport";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -121,7 +122,7 @@ pick().then(
     root.render(
       <div className="app" data-run="idle">
         <div className="errbar" role="alert">
-          <span>{e instanceof Error ? e.message : String(e)}</span>
+          <span>{reason(e)}</span>
         </div>
       </div>,
     );

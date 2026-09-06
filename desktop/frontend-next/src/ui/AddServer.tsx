@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, McpDraftServer, McpInstallResult, McpInstallScope, McpRisk } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // Nobody types a transport into a form: they arrive holding whatever the server's
 // docs printed. So the input is one box that takes all three shapes, and the
@@ -39,7 +40,7 @@ export function AddServer({ port, canProject, onClose, onInstalled }: Props) {
       setDraft(await port.parseMcp(text));
     } catch (e) {
       setDraft(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy(false);
     }
@@ -55,7 +56,7 @@ export function AddServer({ port, canProject, onClose, onInstalled }: Props) {
       setResults(out);
       if (out.some((r) => r.state !== "issue")) onInstalled();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy(false);
     }

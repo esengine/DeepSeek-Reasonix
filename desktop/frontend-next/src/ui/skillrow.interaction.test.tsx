@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "./testkit";
 import { SkillRow } from "./SkillRow";
+import { boot, STORAGE } from "../i18n";
 import { HttpError } from "../port/port";
 import type { AgentPort, ScopeLayer, SkillEntry } from "../port/port";
 
+// Pinned rather than defaulted: with nothing stored the window follows the
+// machine, and half of what this asserts is which language the reader is in.
+beforeEach(() => {
+  localStorage.setItem(STORAGE, "zh");
+  boot();
+});
 afterEach(cleanup);
 
 function deferred<T>() {
@@ -84,13 +91,42 @@ describe("switching one skill off", () => {
     call.fail(new HttpError(400, "unknown skill: explore"));
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
 
-    // Only that a reason reached the panel. How it is worded is a separate
-    // open item: this row hands on err.message rather than going through
-    // i18n/kernel's reason(), which some twenty catch sites also do.
-    const said = onFailed.mock.calls.at(-1)?.[0] as string;
-    expect(said).toBeTruthy();
+    expect(onFailed).toHaveBeenLastCalledWith("unknown skill: explore");
     // The row keeps the state the kernel last gave it; nothing was flipped on
     // the strength of a click that was turned down.
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    expect(sw().disabled).toBe(false);
+  });
+
+  // The refusal reaches the panel as this window's sentence, not as the English
+  // that rode along for the log — which is the whole point of the code.
+  it("hands on a coded refusal in the reader's language", async () => {
+    const call = deferred<void>();
+    const { sw, onDone, onFailed } = draw(skill(), () => call.promise);
+
+    await userEvent.click(sw());
+    call.fail(new HttpError(409, "a turn is running", { code: "busy.reload_extensions" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+
+    const said = onFailed.mock.calls.at(-1)?.[0] as string;
+    expect(said).toContain("任务正在运行");
+    expect(said).not.toContain("a turn is running");
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+  });
+
+  // A dead kernel or a proxy answers with neither a code nor a body. Printing
+  // message then puts an internal path and a status number on screen.
+  it("says the request never landed, without showing the route it took", async () => {
+    const call = deferred<void>();
+    const { sw, onDone, onFailed } = draw(skill(), () => call.promise);
+
+    await userEvent.click(sw());
+    call.fail(new HttpError(502, "/skills/enabled: 502", undefined, false));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+
+    const said = onFailed.mock.calls.at(-1)?.[0] as string;
+    expect(said).toBe("这次请求没能送到内核（HTTP 502）");
+    expect(said).not.toContain("/skills/enabled");
     expect(sw().getAttribute("aria-checked")).toBe("true");
     expect(sw().disabled).toBe(false);
   });

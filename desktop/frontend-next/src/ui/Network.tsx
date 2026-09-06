@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { AgentPort, NetworkProbe, NetworkSettings } from "../port/port";
+import { reason } from "../i18n/kernel";
 
 // Three modes, not six input boxes. Nobody's first question is whether they want
 // http_proxy or https_proxy — it is "use what the system uses" or "here is mine".
@@ -47,7 +48,7 @@ export function Network({ port }: { port: AgentPort }) {
       // claim a path that has not been tested since.
       setProbes(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }
@@ -59,7 +60,7 @@ export function Network({ port }: { port: AgentPort }) {
     try {
       setProbes(await port.diagnoseNetwork());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(reason(e));
     } finally {
       setBusy("");
     }
