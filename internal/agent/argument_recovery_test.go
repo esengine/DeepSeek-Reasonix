@@ -390,7 +390,7 @@ func TestArgumentStormMixedPermissionFailure(t *testing.T) {
 	reg.Add(recoveryBash(t))
 	reg.Add(&recoveryArgumentTool{name: "denied", schema: json.RawMessage(`{"type":"object"}`)})
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{deny: map[string]bool{"denied": true}}}, event.Discard)
-	for range 3 {
+	for i := range 3 {
 		batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "bash", Arguments: `{}`}, {Name: "denied", Arguments: `{}`}})
 		if batch.outcomes[0].blocked || !batch.outcomes[1].blocked {
 			t.Fatalf("per-call classification lost: %+v", batch.outcomes)
