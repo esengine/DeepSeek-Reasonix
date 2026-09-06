@@ -23,6 +23,7 @@ test("stable post-GC owner cohorts can be attributed without inventing a count b
     { ...sample([1, 2], 0), dom: { nodes: 6000, jsEventListeners: 500 } },
     { ...sample([1, 3], 32), dom: { nodes: 6024, jsEventListeners: 512 } },
     { ...sample([1, 4], 64), dom: { nodes: 6024, jsEventListeners: 512 } },
+    { ...sample([1, 5], 96), dom: { nodes: 6024, jsEventListeners: 512 } },
   ];
   assert.deepEqual(attributeRetention(samples), { status: "attributed", reasons: [] });
 });

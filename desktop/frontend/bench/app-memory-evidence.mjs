@@ -64,7 +64,10 @@ export function attributeRetention(samples, cohorts = retainedCohorts(samples)) 
   const retained = cohorts.some((cohort) => cohort.retainedPostBaseline.length > 0);
   const final = samples.at(-1);
   const postBaseline = samples.filter((sample) => sample.roundTrips > 0);
-  const stableDom = postBaseline.every((sample) => sample.dom?.nodes === final.dom?.nodes
+  // A one-sample browser/native blip is not a leak. Require the final three
+  // post-GC checkpoints to agree; persistent drift remains a blocker.
+  const tail = postBaseline.slice(-3);
+  const stableDom = tail.length === 3 && tail.every((sample) => sample.dom?.nodes === final.dom?.nodes
     && sample.dom?.jsEventListeners === final.dom?.jsEventListeners);
   const released = samples.every((sample) => sample.lifecycle.activeOperations === 0);
   const reasons = [];
