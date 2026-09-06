@@ -34,6 +34,10 @@ eq(formatSearchFootnotesMarkdown([{ title: "bad", url: "javascript:alert(1)" }])
 eq(parseSearchSources("新闻本文\nhttps://example.com/a\nNo URL").length, 2, "output parser keeps title-only hits");
 eq(parseSearchSources("新闻本文\nhttps://example.com/a")[0]?.title, "新闻本文", "output parser keeps the title");
 eq(parseSearchSources("新闻本文\r\nhttps://example.com/a\r\n")[0]?.url, "https://example.com/a", "output parser tolerates CRLF line endings");
+const independent = parseSearchSources(JSON.stringify({ summary: "A summary, not a source title", sources: [{ title: "Docs", url: "https://example.com/docs" }, { title: "Unsafe", url: "javascript:alert(1)" }, null] }));
+eq(independent.length, 1, "independent search parses only safe structured sources");
+eq(independent[0]?.title, "Docs", "search summary does not become a source title");
+eq(parseSearchSources('{"summary":"No matches","sources":[]}').length, 0, "empty native results stay empty");
 const degraded = parseSearchSources("- **新闻本文**\n  <https://example.com/a>");
 eq(degraded.length, 1, "degraded footnote-markdown dump still resolves to one source");
 eq(degraded[0]?.title, "新闻本文", "degraded dump strips the bullet and bold markers from the title");

@@ -54,7 +54,7 @@ func TestLiveDeepSeekResponsesMissingReasoningFallback(t *testing.T) {
 		wantRetries    int
 	}{
 		{model: "deepseek-v4-flash", stripResponses: 1},
-		{model: "deepseek-v4-pro", stripResponses: 2, wantRetries: 1},
+		{model: "deepseek-v4-pro", stripResponses: 1},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			proxy := &liveResponsesReasoningStripProxy{stripResponses: tc.stripResponses}
@@ -70,6 +70,9 @@ func TestLiveDeepSeekResponsesMissingReasoningFallback(t *testing.T) {
 			retries, recovered := runLiveAgentToolLoops(t, prov, 1)
 			if retries != tc.wantRetries {
 				t.Fatalf("reasoning retries = %d, want %d", retries, tc.wantRetries)
+			}
+			if proxy.requests.Load() != 2 {
+				t.Fatalf("upstream requests = %d, want 2", proxy.requests.Load())
 			}
 			if proxy.toolResponses.Load() < tc.stripResponses {
 				t.Fatalf("tool responses = %d, want at least %d", proxy.toolResponses.Load(), tc.stripResponses)

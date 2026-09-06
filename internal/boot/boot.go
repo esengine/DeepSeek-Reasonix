@@ -228,7 +228,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Import v1/v0.5 config before Load so this boot sees the new config + ~/.env.
 	// CLI Run also calls this before config-only commands; keep a shared fallback.
 	migrated, migErr := config.MigrateLegacyIfNeededForRoot(root)
-	deepSeekProtocolMigrated, deepSeekProtocolMigErr := config.MigrateLegacyDeepSeekProtocolUserConfig()
+	deepSeekProtocolMigrated, deepSeekProtocolMigErr := config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath())
 	stepLimitsMigrated, stepLimitMigErr := config.MigrateLegacyAgentStepLimitsForRoot(root)
 	redactToolOutputMigrated, redactToolOutputMigErr := config.MigrateLegacyRedactToolOutputForRoot(root)
 	memoryCompilerMigrated, memoryCompilerMigErr := config.MigrateLegacyMemoryCompilerForRoot(root)
@@ -459,8 +459,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		sink.Emit(event.Event{
 			Kind:   event.Notice,
 			Level:  event.LevelInfo,
-			Text:   "DeepSeek official access was upgraded to Anthropic Messages.",
-			Detail: "Your unmodified legacy OpenAI Chat Completions configuration now uses DeepSeek's recommended Anthropic endpoint with server-side web search. Existing model names and pricing were preserved. The first request starts a new provider cache prefix; later requests rebuild normal prefix-cache reuse.",
+			Text:   "User configuration was upgraded.",
+			Detail: "Legacy built-in DeepSeek defaults now use Chat Completions with independent web search. Explicit custom routes remain unchanged. Protocol changes start a new provider cache prefix; later requests rebuild normal prefix-cache reuse.",
 		})
 	} else if deepSeekProtocolMigErr != nil {
 		sink.Emit(event.Event{
@@ -718,6 +718,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Register the full built-in inventory for use_capability dispatch. The
 	// provider-visible surface is narrowed later via SetProviderVisibleTools.
 	addBuiltins(reg, enabledBuiltins, writeRoots, writeRootSet, bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, forbidReadRoots, readPathResolver, sessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner, sessionTemp, fileWriteReceipt)
+	addWebSearch(reg, cfg, entry, proxySpec, sink)
 	// Use the caller-supplied shared host when set, so controllers for the same
 	// workspace root reuse running MCP processes (e.g. one CodeGraph daemon
 	// instead of one per tab). Otherwise construct a private host per controller.
@@ -2495,6 +2496,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // NewProviderWithProxyAndModelInfo builds a provider while preserving the
 // adapter-resolved metadata for the exact model instance.
 func NewProviderWithProxyAndModelInfo(e *config.ProviderEntry, proxy netclient.ProxySpec, modelInfo *provider.ModelInfo) (provider.Provider, error) {
+	return newProviderWithSearchMode(e, proxy, modelInfo, true)
+}
+
+// clientSearch suppresses new native searches while retaining the adapter's
+// ability to read and replay existing native search history.
+func newProviderWithSearchMode(e *config.ProviderEntry, proxy netclient.ProxySpec, modelInfo *provider.ModelInfo, clientSearch bool) (provider.Provider, error) {
 	if modelInfo == nil {
 		resolved := config.NewModelCapabilityResolver().Resolve(e)
 		modelInfo = &resolved.ModelInfo
@@ -2525,6 +2532,8 @@ func NewProviderWithProxyAndModelInfo(e *config.ProviderEntry, proxy netclient.P
 			"vision":             config.EffectiveVision(e),
 			"vision_detail":      e.VisionDetail,
 			"web_search":         config.EffectiveWebSearch(e),
+			"client_web_search":  clientSearch,
+			"reject_redirects":   !clientSearch,
 			"mode":               e.ResponsesMode,
 			// Keep nil as nil so the responses provider can vendor-detect its
 			// default instead of accidentally treating every endpoint as stateful.

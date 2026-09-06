@@ -17,6 +17,7 @@ import (
 // the run-loop goroutine stay lock-free (serial with its own writes); cross-
 // goroutine access goes through Snapshot.
 type Session struct {
+	cacheSessionID string // ephemeral transport identity; never model-visible or persisted
 	mu             sync.RWMutex
 	Messages       []provider.Message
 	version        uint64
@@ -90,6 +91,7 @@ func NewSession(system string) *Session {
 func (s *Session) Add(m provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.expireProtocolRecoveryLocked([]provider.Message{m})
 	s.Messages = append(s.Messages, m)
 	s.version++
 }
@@ -102,6 +104,7 @@ func (s *Session) AddBatch(messages ...provider.Message) {
 		return
 	}
 	s.mu.Lock()
+	s.expireProtocolRecoveryLocked(messages)
 	s.Messages = append(s.Messages, messages...)
 	s.version++
 	s.mu.Unlock()

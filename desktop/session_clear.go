@@ -82,6 +82,9 @@ func (a *App) bumpAndSnapshotSessionClear(tab *WorkspaceTab) SessionClearResult 
 	a.mu.Lock()
 	tab.SessionGeneration++
 	gen := tab.SessionGeneration
+	if tab.sink != nil {
+		tab.sink.setSessionGeneration(gen)
+	}
 	path := tab.currentSessionPath()
 	if path == "" && tab.Ctrl != nil {
 		path = tab.Ctrl.SessionPath()

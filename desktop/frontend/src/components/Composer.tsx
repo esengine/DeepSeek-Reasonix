@@ -1,3 +1,4 @@
+import { recoveryStatusText } from "../lib/recoveryStatus";
 import { useAppNavigationStore } from "../store/appNavigation";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
@@ -681,11 +682,9 @@ export function Composer({
   // tree — only the composer re-renders, matching the controller's live-store
   // contract (pure stream deltas must not re-render the controller owner).
   liveStore?: ControllerLiveStore;
-  // Streaming tool-call argument chars (no usage event yet) — folded into the
-  // pill as an estimated-token tail so a long write_file body reads as
-  // progress, not a stall.
+  // Streaming argument characters provide estimated progress before usage arrives.
   turnArgChars?: number;
-  retry?: { attempt: number; max: number };
+  retry?: { attempt: number; max: number; recovery?: { phase?: string; next_attempt_at?: number; waiting?: boolean } };
   // True while a footer decision surface (approval / ask / clear context) owns
   // the UI. Pauses the model-work ticker without rendering a "waiting approval"
   // run strip (the decision card already conveys that state).
@@ -3802,7 +3801,7 @@ export function Composer({
     }
   })();
   const runStateText = retry
-    ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
+    ? recoveryStatusText(t, retry, now)
     : waitingPrompt === "approval"
       ? t("composer.runWaitingApproval", { tool: pendingApprovalLabel ?? "" })
       : waitingPrompt === "ask"

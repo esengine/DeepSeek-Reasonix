@@ -413,10 +413,9 @@ func TestRepeatGuardKeepsStaleFailureAfterSameFileMutation(t *testing.T) {
 
 	executeBatchOutputs(a, ctx, []provider.ToolCall{stale})
 	executeBatchOutputs(a, ctx, []provider.ToolCall{stale})
-	executeBatchOutputs(a, ctx, []provider.ToolCall{{
-		Name:      "edit_file",
-		Arguments: `{"path":"prompt.txt","old_string":"status=ready","new_string":"status=done"}`,
-	}})
+	successful := provider.ToolCall{ID: "same-file-edit", Name: "edit_file", Arguments: `{"path":"prompt.txt","old_string":"status=ready","new_string":"status=done"}`}
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{successful}})
+	executeBatchOutputs(a, ctx, []provider.ToolCall{successful})
 	last := executeBatchOutputs(a, ctx, []provider.ToolCall{stale})[0]
 
 	if !strings.Contains(last, "[loop guard]") {

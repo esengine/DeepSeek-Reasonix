@@ -142,6 +142,15 @@ func EnsureCostQuote(e Event, ctx *QuoteContext) *billing.CostQuote {
 		return nil
 	}
 	display, now := ctx.snapshot()
+	if e.Usage.Unknown {
+		known := *e.Usage
+		known.Unknown = false
+		e.Usage = &known
+		q := EnsureCostQuote(e, ctx)
+		q.CostComplete, q.DisplayComplete, q.Complete = false, false, false
+		q.Estimated, q.DisplayStatus, q.IncompleteReason = true, billing.DisplayStatusUnavailable, "usage_unknown"
+		return q
+	}
 	if e.Pricing == nil {
 		q := billing.CostQuote{
 			Estimated: true, CostComplete: false, DisplayComplete: false, Complete: false,

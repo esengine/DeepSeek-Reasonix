@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"strings"
 	"time"
 
 	"reasonix/internal/provider"
@@ -25,10 +24,8 @@ type unwrittenResolve struct {
 }
 
 // observeMissingToolCallReasoning classifies a thinking-mode tool-call turn and
-// claims the one silent retry its active incident allows. DeepSeek requires
-// provider-issued thinking content to be replayed, so a missing value is retried
-// once before tools execute; three consecutive healthy rounds then resolve the
-// incident and re-arm a future isolated regression (#6259, #7059).
+// claims one recovery for a strict replay contract. Compatible protocols bypass
+// this incident state; healthy strict rounds eventually re-arm recovery.
 func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) (missing, shouldRetry bool) {
 	return a.observeMissingAssistantReasoning(provider.Message{
 		Role: provider.RoleAssistant, ToolCalls: calls, ReasoningContent: reasoning,
@@ -39,25 +36,24 @@ func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reaso
 // provider-executed tool activity while preserving its persisted incident and
 // anti-flapping behavior.
 func (a *Agent) observeMissingAssistantReasoning(message provider.Message, complete bool) (missing, shouldRetry bool) {
-	if !provider.RequiresAssistantReasoningReplay(a.svc.prov, message) {
+	if provider.AllowsEmptyReasoningFallback(a.svc.prov) || !provider.RequiresAssistantReasoningReplay(a.svc.prov, message) {
 		return false, false
 	}
-	reasoning := message.ReasoningContent
-	if !complete {
-		reasoning = ""
-	}
-	// Persist the incident for strict and empty-fallback protocols alike. Strict
-	// providers used to bypass this state and pay for the same exact retry on
-	// every new Run; the shared incident now acts as the recovery circuit.
+	decision := provider.DecideReasoningReplay(a.svc.prov, message, complete)
+	replayable := decision == provider.ReplayDirect || decision == provider.ReplayCompatible
+	// Strict contracts retain their incident across manual continuation.
 	if !provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
-		if strings.TrimSpace(reasoning) == "" && !provider.AllowsEmptyReasoningFallback(a.svc.prov) {
+		if replayable {
+			a.recordHealthyAssistantReasoning(provider.MissingToolCallReasoningWarningFingerprint(a.svc.prov), time.Now())
+		}
+		if !replayable && !provider.AllowsEmptyReasoningFallback(a.svc.prov) {
 			return true, a.claimMissingReasoningIncident(time.Now())
 		}
 		return false, false
 	}
 	fingerprint := provider.MissingToolCallReasoningWarningFingerprint(a.svc.prov)
 	observedAt := time.Now()
-	if strings.TrimSpace(reasoning) != "" {
+	if replayable {
 		a.recordHealthyAssistantReasoning(fingerprint, observedAt)
 		return false, false
 	}
@@ -79,7 +75,7 @@ func (a *Agent) observeMissingAssistantReasoning(message provider.Message, compl
 		claimed := stateReady && s.claimAt(fingerprint, observedAt)
 		if !claimed || alreadyActive {
 			// This exact configuration already attempted recovery for the active
-			// incident, so keep the empty-key fallback without doubling requests.
+			// incident, so do not grant another regeneration.
 			a.sess.missingReasoning.active = true
 			a.sess.missingReasoning.stateRecorded = true
 			return true, false

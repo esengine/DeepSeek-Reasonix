@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"reasonix/internal/i18n"
+	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 )
 
@@ -35,6 +37,9 @@ func clipStatusValue(value string, limit int) string {
 func clipStatusError(err error, limit int) string {
 	if err == nil {
 		return ""
+	}
+	if provider.IsOpaqueBadRequest(err) {
+		return clipStatusCredentialText(i18n.M.ProviderErrReasonMissing, limit)
 	}
 	return clipStatusCredentialText(err.Error(), limit)
 }

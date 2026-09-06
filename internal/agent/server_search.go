@@ -2,6 +2,7 @@ package agent
 
 import (
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
@@ -26,6 +27,8 @@ func emitServerSearch(sink event.Sink, call *provider.ServerSearchCall, dispatch
 	if call == nil {
 		return
 	}
+	display := *call
+	display.SourcesStatus = provider.ServerSearchSourcesStatus(display)
 	args := provider.FormatServerSearchArgs(call.Query)
 	completed := len(call.Results) > 0 || len(call.Raw) > 0
 	if !dispatched[call.ID] || !completed {
@@ -37,7 +40,11 @@ func emitServerSearch(sink event.Sink, call *provider.ServerSearchCall, dispatch
 	if !completed {
 		return
 	}
+	if provider.ServerSearchSourcesStatus(*call) == provider.SourcesNotProvided && !dispatched[call.ID+"\x00sources"] {
+		dispatched[call.ID+"\x00sources"] = true
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: "search_sources_not_provided", Text: i18n.M.SearchSourcesNotProvided})
+	}
 	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-		ID: call.ID, Name: "web_search", Args: args, Output: provider.FormatServerSearchOutput(call.Results), ReadOnly: true, AttemptID: attemptID,
+		ID: call.ID, Name: "web_search", Args: args, Output: provider.ServerSearchDisplayOutput(display), ReadOnly: true, AttemptID: attemptID,
 	}})
 }

@@ -495,7 +495,7 @@ command = "legacy-bin"
 		t.Fatalf("read migrated config: %v", err)
 	}
 	text := string(got)
-	for _, want := range []string{`config_version = 7`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
+	for _, want := range []string{`config_version = 8`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("migrated TOML missing %q:\n%s", want, text)
 		}

@@ -43,25 +43,25 @@ func TestFinalizeReservationRejectsConcurrentFallbackPublication(t *testing.T) {
 	t.Cleanup(func() { finalizeWorktreeMerge = originalFinalize })
 	entered := make(chan struct{})
 	releaseFinalize := make(chan struct{})
-	finalizeWorktreeMerge = func(_ context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
+	finalizeWorktreeMerge = func(ctx context.Context, _ string, _ worktree.CleanupRequest) (worktree.CleanupResult, error) {
 		close(entered)
-		<-releaseFinalize
+		select {
+		case <-releaseFinalize:
+		case <-ctx.Done():
+			return worktree.CleanupResult{}, ctx.Err()
+		}
 		return worktree.CleanupResult{Completed: true, WorktreeRemoved: true, BranchDeleted: true, Blockers: []worktree.MergeBlocker{}}, nil
 	}
 
 	app := NewApp()
-	result := make(chan error, 1)
-	go func() {
-		_, err := app.FinalizeWorktreeMerge(worktree.CleanupRequest{SourceRoot: sourceRoot, WorktreeRoot: worktreeRoot})
-		result <- err
-	}()
-	<-entered
+	result := startFinalizeAdmissionTest(t, app, worktree.CleanupRequest{SourceRoot: sourceRoot, WorktreeRoot: worktreeRoot})
+	waitForFinalizeAdmissionGate(t, entered, result)
 	if err := app.openTransientBlankRuntime("project", worktreeRoot); err == nil || !strings.Contains(err.Error(), "cleanup is in progress") {
 		close(releaseFinalize)
 		t.Fatalf("concurrent fallback open = %v", err)
 	}
 	close(releaseFinalize)
-	if err := <-result; err != nil {
+	if err := waitForFinalizeAdmissionResult(t, result); err != nil {
 		t.Fatalf("finalize = %v", err)
 	}
 	app.mu.RLock()
@@ -91,24 +91,24 @@ func TestFinalizeReservationCoversRetainedProjectRegistryUpdate(t *testing.T) {
 	}
 	registryEntered := make(chan struct{})
 	releaseRegistry := make(chan struct{})
+	app := NewApp()
 	removeWorktreeProject = func(string) error {
 		close(registryEntered)
-		<-releaseRegistry
-		return nil
+		select {
+		case <-releaseRegistry:
+			return nil
+		case <-app.bootContext().Done():
+			return app.bootContext().Err()
+		}
 	}
-	app := NewApp()
-	result := make(chan error, 1)
-	go func() {
-		_, err := app.FinalizeWorktreeMerge(worktree.CleanupRequest{SourceRoot: sourceRoot, WorktreeRoot: worktreeRoot})
-		result <- err
-	}()
-	<-registryEntered
+	result := startFinalizeAdmissionTest(t, app, worktree.CleanupRequest{SourceRoot: sourceRoot, WorktreeRoot: worktreeRoot})
+	waitForFinalizeAdmissionGate(t, registryEntered, result)
 	if err := app.openTransientBlankRuntime("project", recoveryRoot); err == nil || !strings.Contains(err.Error(), "cleanup is in progress") {
 		close(releaseRegistry)
 		t.Fatalf("recovery runtime entered during registry update: %v", err)
 	}
 	close(releaseRegistry)
-	if err := <-result; err != nil {
+	if err := waitForFinalizeAdmissionResult(t, result); err != nil {
 		t.Fatalf("finalize = %v", err)
 	}
 }

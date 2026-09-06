@@ -19,7 +19,7 @@ func TestRecoveryLaneRewriteAdvancesItsOwnLedgerAndDerivedIndexes(t *testing.T) 
 
 	recovery := NewSession("sys")
 	recovery.Add(provider.Message{Role: provider.RoleUser, Content: "local question"})
-	first, err := recovery.SaveShutdownRecoveryBranch(RecoveryBranchOptions{OriginalPath: originalPath})
+	first, err := recovery.SaveShutdownRecoveryBranch(RecoveryBranchOptions{OriginalPath: originalPath, BaseRevision: 4, DiskRevision: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,9 @@ func TestRecoveryLaneRewriteAdvancesItsOwnLedgerAndDerivedIndexes(t *testing.T) 
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
 	}
-	if meta.Revision != 8 || meta.ContentDigest != digest || meta.RecoveryDigest != digest ||
+	if meta.EffectiveVersionKind() != VersionRecovery || meta.EffectiveVersionState() != VersionActive ||
+		meta.BaseRevision != 4 || meta.DiskRevision != 9 ||
+		meta.Revision != 8 || meta.ContentDigest != digest || meta.RecoveryDigest != digest ||
 		meta.ListingRevision != 8 || meta.ListingContentDigest != digest || meta.Turns != 2 {
 		t.Fatalf("rewritten recovery meta = %+v", meta)
 	}

@@ -29,10 +29,11 @@ type summaryChunksProvider struct {
 
 func (p *summaryChunksProvider) Name() string { return "summary-chunks" }
 func (p *summaryChunksProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
-	ch := make(chan provider.Chunk, len(p.chunks))
+	ch := make(chan provider.Chunk, len(p.chunks)+1)
 	for _, chunk := range p.chunks {
 		ch <- chunk
 	}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
 }
@@ -40,8 +41,9 @@ func (p *summaryChunksProvider) Stream(context.Context, provider.Request) (<-cha
 func (p *deadlineInspectProvider) Name() string { return "deadline-inspect" }
 func (p *deadlineInspectProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
 	_, p.hadDeadline = ctx.Deadline()
-	ch := make(chan provider.Chunk, 1)
+	ch := make(chan provider.Chunk, 2)
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: "digest"}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
 }

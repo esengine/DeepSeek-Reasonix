@@ -110,8 +110,8 @@ func TestAgentEmitsRetryingThenStreams(t *testing.T) {
 	if len(retries) != 2 || retries[0].RetryAttempt != 1 || retries[1].RetryAttempt != 2 {
 		t.Fatalf("want two Retrying events (1,2), got %+v", retries)
 	}
-	if retries[0].RetryMax != provider.MaxRetries {
-		t.Errorf("RetryMax = %d, want %d", retries[0].RetryMax, provider.MaxRetries)
+	if retries[0].RetryMax != maxStreamRecoveries {
+		t.Errorf("RetryMax = %d, want %d", retries[0].RetryMax, maxStreamRecoveries)
 	}
 
 	var answer strings.Builder
@@ -138,10 +138,8 @@ func TestDeepSeekFlashMissingReasoningRecoveryWithRealSSE(t *testing.T) {
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "text/event-stream")
-		if requestNo == 2 {
-			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning_content":"call echo safely"}}]}`+"\n\n")
-		}
-		if requestNo <= 2 {
+
+		if requestNo == 1 {
 			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hi\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
 			_, _ = io.WriteString(w, `data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_cache_hit_tokens":10,"prompt_cache_miss_tokens":0}}`+"\n\n")
 			_, _ = io.WriteString(w, "data: [DONE]\n\n")
@@ -168,17 +166,17 @@ func TestDeepSeekFlashMissingReasoningRecoveryWithRealSSE(t *testing.T) {
 	mu.Lock()
 	gotBodies := append([][]byte(nil), bodies...)
 	mu.Unlock()
-	if len(gotBodies) != 3 {
+	if len(gotBodies) != 2 {
 		t.Fatalf("HTTP requests = %d, want malformed + recovery + final", len(gotBodies))
 	}
-	if !bytes.Equal(gotBodies[0], gotBodies[1]) {
+	if !bytes.Contains(gotBodies[1], []byte(`"role":"tool"`)) {
 		t.Fatalf("recovery request changed bytes:\nfirst=%s\nretry=%s", gotBodies[0], gotBodies[1])
 	}
 	var toolTurns int
 	for _, message := range a.Session().Messages {
 		if message.Role == provider.RoleAssistant && len(message.ToolCalls) > 0 {
 			toolTurns++
-			if message.ReasoningContent != "call echo safely" {
+			if message.ReasoningContent != "" {
 				t.Fatalf("adopted reasoning = %q", message.ReasoningContent)
 			}
 		}
@@ -328,8 +326,11 @@ func TestDeepSeekOpenAIReasoningReplay400StripsOldToolHistory(t *testing.T) {
 	if !bytes.Contains(gotBodies[0], []byte("old-call")) || !bytes.Contains(gotBodies[0], []byte("stale thinking")) {
 		t.Fatalf("first request did not contain old tool history: %s", gotBodies[0])
 	}
-	if bytes.Contains(gotBodies[1], []byte("old-call")) || bytes.Contains(gotBodies[1], []byte("old result")) || bytes.Contains(gotBodies[1], []byte("stale thinking")) {
+	if bytes.Contains(gotBodies[1], []byte(`"tool_calls"`)) || bytes.Contains(gotBodies[1], []byte(`"role":"tool"`)) || bytes.Contains(gotBodies[1], []byte("stale thinking")) {
 		t.Fatalf("repair retry retained stale tool history: %s", gotBodies[1])
+	}
+	if !bytes.Contains(gotBodies[1], []byte("old result")) {
+		t.Fatal("repair lost the completed tool output")
 	}
 	if !bytes.Contains(gotBodies[1], []byte("I will inspect the file")) {
 		t.Fatalf("repair retry lost visible old assistant text: %s", gotBodies[1])

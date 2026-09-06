@@ -186,7 +186,7 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		`"completed" | "partial" | "blocked"`,
 		`"final_readiness" | "recovery_paused"`,
 		"checkpointTurn?: number;",
-		"retryAttempt?: number;",
+		"retryAttempt?: number;", "WireEvent extends RecoveryEventFields", "recovery?: RecoveryStatus;",
 		"retryMax?: number;",
 		"retryScope?:",
 		"streamAttempt?: WireStreamAttempt;",
@@ -366,7 +366,7 @@ func readDesktopTypes(t *testing.T) string {
 	}
 	dir := filepath.Join(filepath.Dir(file), "..", "..", "desktop", "frontend", "src", "lib")
 	var source strings.Builder
-	for _, name := range []string{"types.ts", "sessionContextTypes.ts"} {
+	for _, name := range []string{"types.ts", "sessionContextTypes.ts", "recoveryStatus.ts"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("read desktop type %s: %v", name, err)

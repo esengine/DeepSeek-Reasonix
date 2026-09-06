@@ -25,3 +25,13 @@ func TestLookupToolResultFindsServerSearch(t *testing.T) {
 		t.Fatal("unknown tool id should miss")
 	}
 }
+
+func TestLookupSearchResultPreservesRecordedMissingSources(t *testing.T) {
+	for _, status := range []string{"", provider.SourcesNotProvided} {
+		messages := []provider.Message{{Role: provider.RoleAssistant, ServerSearch: []provider.ServerSearchCall{{ID: "s", SourcesStatus: status}}}}
+		got := lookupToolResult(messages, "s")
+		if got == nil || strings.Contains(got.Output, "not_provided") != (status != "") {
+			t.Fatalf("status %q: %+v", status, got)
+		}
+	}
+}

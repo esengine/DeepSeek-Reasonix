@@ -10,7 +10,7 @@ func historyServerSearch(in []provider.ServerSearchCall) []provider.ServerSearch
 	}
 	out := make([]provider.ServerSearchCall, 0, len(in))
 	for _, search := range in {
-		copied := provider.ServerSearchCall{ID: search.ID, Query: search.Query}
+		copied := provider.ServerSearchCall{ID: search.ID, Query: search.Query, SourcesStatus: search.SourcesStatus}
 		if len(search.Results) > 0 {
 			copied.Results = append([]provider.ServerSearchHit(nil), search.Results...)
 		}

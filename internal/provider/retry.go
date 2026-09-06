@@ -101,6 +101,12 @@ func WithRequestAttemptCounter(ctx context.Context) context.Context {
 	return context.WithValue(ctx, requestAttemptCounterKey{}, &requestAttemptCounter{})
 }
 
+// WithIndependentRequestAttemptCounter gives an auxiliary call its own usage
+// count while preserving cancellation and other context values from its parent.
+func WithIndependentRequestAttemptCounter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requestAttemptCounterKey{}, &requestAttemptCounter{})
+}
+
 // RequestAttemptCount returns the number of HTTP requests started through
 // SendWithRetry for the counter attached to ctx.
 func RequestAttemptCount(ctx context.Context) int {
@@ -137,7 +143,7 @@ func UsageWithRequestAttemptCount(ctx context.Context, usage *Usage) *Usage {
 		if count <= 0 {
 			return nil
 		}
-		return &Usage{RequestCount: count}
+		return &Usage{RequestCount: count, Unknown: true}
 	}
 	result := *usage
 	if count > 0 {
@@ -160,6 +166,8 @@ func recordRequestAttempt(ctx context.Context) {
 // carries the code so the display layer can map it to an actionable, localized
 // message; Body is a trimmed snippet of the response.
 type APIError struct {
+	RetryAfter  time.Duration // uncapped server delay for managed recovery
+	ShouldRetry string        // explicit provider retry hint
 	Provider    string
 	Status      int
 	Body        string
@@ -282,7 +290,11 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 	var retryAfter time.Duration
 	authRetries := 0
 
-	for attempt := 0; attempt <= MaxRetries; attempt++ {
+	limit := MaxRetries
+	if ManagedRecovery(ctx) {
+		limit = 0
+	}
+	for attempt := 0; attempt <= limit; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt, retryAfter)
 			if notify != nil {
@@ -315,10 +327,13 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 
 		msg := readErrorBody(resp)
 		retryAfter = parseRetryAfter(resp)
+		if quota := QuotaErrorFromResponse(opts.Provider, resp.StatusCode, string(msg)); quota != nil {
+			return nil, quota
+		}
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent, Body: strings.TrimSpace(string(msg))}
-			if opts.RetryAuth && authRetries < maxAuthRetries {
+			if !ManagedRecovery(ctx) && opts.RetryAuth && authRetries < maxAuthRetries {
 				authRetries++
 				lastErr = authErr
 				continue
@@ -326,10 +341,12 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			return nil, authErr
 		}
 		apiErr := &APIError{
-			Provider: opts.Provider,
-			Status:   resp.StatusCode,
-			Body:     strings.TrimSpace(string(msg)),
-			TraceID:  responseTraceID(resp.Header),
+			RetryAfter:  retryAfter,
+			ShouldRetry: resp.Header.Get("x-should-retry"),
+			Provider:    opts.Provider,
+			Status:      resp.StatusCode,
+			Body:        strings.TrimSpace(string(msg)),
+			TraceID:     responseTraceID(resp.Header),
 		}
 		if !RetryableStatus(resp.StatusCode) {
 			if limitErr := ParseOutputLimitError(apiErr); limitErr != nil {

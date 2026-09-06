@@ -112,10 +112,13 @@ func catalogEntryEffective(e CatalogEntry, at time.Time) bool {
 	return e.EffectiveTo.IsZero() || at.Before(e.EffectiveTo)
 }
 
-// DeepSeekRateBand selects the documented Beijing peak windows by their stable
-// UTC equivalents.
+// DeepSeekRateBand selects the documented Beijing weekday peak windows by
+// their stable UTC equivalents.
 func DeepSeekRateBand(at time.Time) string {
 	at = at.UTC()
+	if at.Weekday() == time.Saturday || at.Weekday() == time.Sunday {
+		return RateBandOffPeak
+	}
 	minutes := at.Hour()*60 + at.Minute()
 	if (minutes >= 60 && minutes < 240) || (minutes >= 360 && minutes < 600) {
 		return RateBandPeak

@@ -5301,7 +5301,7 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 }
 
-func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
+func TestConnectKeyFreshInstallUsesDeepSeekChatAndIndependentSearchDefaults(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	oldFetch := connectKeyBalanceFetch
 	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
@@ -5332,9 +5332,9 @@ func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("default model %q did not resolve", cfg.DefaultModel)
 	}
-	if entry.Kind != "anthropic" || entry.BaseURL != "https://api.deepseek.com/anthropic" ||
-		entry.Thinking != "enabled" || !config.EffectiveWebSearch(entry) || config.EffectiveVision(entry) {
-		t.Fatalf("fresh-install DeepSeek entry = %+v; want Anthropic, thinking, web search, and text-only vision", entry)
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.deepseek.com" ||
+		entry.Thinking != "enabled" || !config.EffectiveIndependentWebSearch(entry) || config.EffectiveVision(entry) {
+		t.Fatalf("fresh-install DeepSeek entry = %+v; want Chat Completions, thinking, independent search, and text-only vision", entry)
 	}
 	if app.NeedsOnboarding() {
 		t.Fatal("fresh-install onboarding should close after the validated DeepSeek key is stored")

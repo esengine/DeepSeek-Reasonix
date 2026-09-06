@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 )
 
@@ -72,16 +73,23 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 			}
 		}
 		a.emitSessionRecoveredAndRefresh(sessionDirectoryForPath(info.RecoveryPath), sessionRecoveryEvent{
-			OriginalPath:     info.OriginalPath,
-			RecoveryPath:     info.RecoveryPath,
-			Scope:            scope,
-			WorkspaceRoot:    workspaceRoot,
-			TopicID:          meta.TopicID,
-			TopicTitle:       meta.TopicTitle,
-			RecoveryReason:   meta.RecoveryReason,
-			RecoveryDigest:   meta.RecoveryDigest,
-			RecoveryParentID: string(meta.ParentID),
-			Existing:         info.Existing,
+			ConversationID:    meta.TopicID,
+			ActiveVersionID:   agent.BranchID(info.RecoveryPath),
+			RecoveryVersionID: agent.BranchID(info.RecoveryPath),
+			OriginalPath:      info.OriginalPath,
+			RecoveryPath:      info.RecoveryPath,
+			Scope:             scope,
+			WorkspaceRoot:     workspaceRoot,
+			TopicID:           meta.TopicID,
+			TopicTitle:        meta.TopicTitle,
+			RecoveryReason:    meta.RecoveryReason,
+			RecoveryDigest:    meta.RecoveryDigest,
+			RecoveryParentID:  string(meta.ParentID),
+			Existing:          info.Existing,
+			BaseRevision:      info.BaseRevision,
+			DiskRevision:      info.DiskRevision,
+			CanContinue:       true,
+			RequiresChoice:    false,
 		})
 		a.invalidatePromptHistoryCache()
 		return nil

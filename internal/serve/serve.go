@@ -686,16 +686,21 @@ func (s *Server) logoWordmark(w http.ResponseWriter, _ *http.Request) {
 // on this turn (text.format on the wire).
 func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Input  string `json:"input"`
-		Format string `json:"format"`
-		Action string `json:"action"`
+		Input      string `json:"input"`
+		Format     string `json:"format"`
+		Action     string `json:"action"`
+		RecoveryID string `json:"recoveryId"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Input == "" && body.Action != control.ProtocolRecoveryAction) {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
 	body.Format = strings.TrimSpace(body.Format)
 	body.Action = strings.TrimSpace(body.Action)
+	if body.Action == control.ProtocolRecoveryAction && strings.TrimSpace(body.RecoveryID) == "" {
+		http.Error(w, "missing recoveryId", http.StatusBadRequest)
+		return
+	}
 	switch body.Format {
 	case "", "json_object":
 		// Supported: empty = default text output, json_object = structured.
@@ -708,6 +713,10 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trimmed := strings.TrimSpace(body.Input)
+	// Typed recovery guidance is never dispatched as a management command.
+	if body.Action != "" {
+		trimmed = ""
+	}
 	if strings.HasPrefix(trimmed, "!") {
 		http.Error(w, "shell commands are unavailable over HTTP", http.StatusForbidden)
 		return
@@ -762,7 +771,21 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session is busy; use POST /inbox/items for durable follow-up", http.StatusConflict)
 		return
 	}
-	submitWithAction(ctrl, body.Input, body.Format, body.Action)
+	if body.Action == control.ProtocolRecoveryAction {
+		pending, ok := ctrl.(interface {
+			PendingProtocolRecovery() *provider.ProtocolRecoveryAction
+		})
+		var action *provider.ProtocolRecoveryAction
+		if ok {
+			action = pending.PendingProtocolRecovery()
+		}
+		if action == nil || action.ID != body.RecoveryID {
+			s.bindMu.Unlock()
+			http.Error(w, "protocol recovery is unavailable or stale", http.StatusConflict)
+			return
+		}
+	}
+	submitWithAction(ctrl, body.Input, body.Format, body.Action, body.RecoveryID)
 	if isServeManagementCommand(trimmed) && !ctrl.Running() && !ctrl.RuntimeStatus().PendingPrompt {
 		// Management notices/status are successful non-turn operations.
 		s.bindMu.Unlock()
@@ -812,57 +835,6 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-type historyToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-type historyMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	Missing    []string          `json:"missing,omitempty"`
-	Reasoning  string            `json:"reasoning,omitempty"`
-	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	ToolName   string            `json:"toolName,omitempty"`
-}
-
-func historyMessages(msgs []provider.Message) []historyMessage {
-	out := make([]historyMessage, 0, len(msgs))
-	for _, m := range historyWithoutPinnedContextRevisions(msgs) {
-		if recovered, handled := finalReadinessHistoryMessage(m); handled {
-			out = append(out, recovered...)
-			continue
-		}
-		// Steer messages are surfaced as a notice, not a user message.
-		if m.Role == provider.RoleUser {
-			if text, handled := agent.ReplaySteerText(m.Content); handled {
-				if text != "" {
-					out = append(out, historyMessage{Role: "notice", Content: "↪ " + text})
-				}
-				continue
-			}
-		}
-		hm := historyMessage{Role: string(m.Role), Content: historyMessageContent(m)}
-		if m.Role == provider.RoleAssistant {
-			hm.Reasoning = m.ReasoningContent
-			if len(m.ToolCalls) > 0 {
-				hm.ToolCalls = make([]historyToolCall, len(m.ToolCalls))
-				for i, tc := range m.ToolCalls {
-					hm.ToolCalls[i] = historyToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
-				}
-			}
-		}
-		if m.Role == provider.RoleTool {
-			hm.ToolCallID = m.ToolCallID
-			hm.ToolName = m.Name
-		}
-		out = append(out, hm)
-	}
-	return out
 }
 
 // history returns the session's message log so a reconnecting client can

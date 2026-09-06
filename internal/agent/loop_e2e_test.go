@@ -623,7 +623,7 @@ func TestRunSilentlyRecoversMissingToolCallReasoning(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+	a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
 	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -679,7 +679,7 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 		},
 	)
 	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+	a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
 	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -692,7 +692,7 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 		if message.Role == provider.RoleAssistant && len(message.ToolCalls) > 0 {
 			toolTurns++
 		}
-		if message.Role == provider.RoleTool {
+		if message.Role == provider.RoleTool && !message.LocalOnly {
 			toolResults++
 		}
 	}
@@ -718,15 +718,11 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 	}
 }
 
-func TestMissingReasoningRecoveryFailureUsesOriginalProtocolResult(t *testing.T) {
+func TestCompatibleMissingReasoningKeepsOriginalWithoutRecovery(t *testing.T) {
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{
 			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}},
 			Usage:     &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, FinishReason: "tool_calls"},
-		},
-		testutil.Turn{
-			Usage:      &provider.Usage{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11},
-			ChunkError: errors.New("recovery stream failed"),
 		},
 		testutil.Turn{Text: "done"},
 	)
@@ -746,7 +742,7 @@ func TestMissingReasoningRecoveryFailureUsesOriginalProtocolResult(t *testing.T)
 		t.Fatalf("tool results = %d, want the original call executed once", toolResults)
 	}
 	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 23 {
+	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 12 {
 		t.Fatalf("failed recovery usage was not accounted for: %+v", usageEvents)
 	}
 	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningFallback) != 0 {
@@ -784,7 +780,7 @@ func TestMissingReasoningRecoveryCancellationAccountsBothAttempts(t *testing.T) 
 	}
 }
 
-func TestSetSessionRearmsInMemoryMissingReasoningRecovery(t *testing.T) {
+func TestCompatibleMissingReasoningDoesNotRearmOnSessionChange(t *testing.T) {
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1r", Name: "echo", Arguments: `{"text":"hi"}`}}},
@@ -803,15 +799,15 @@ func TestSetSessionRearmsInMemoryMissingReasoningRecovery(t *testing.T) {
 	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
-	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 2 {
-		t.Fatalf("recovery retries across two sessions = %d, want 2", got)
+	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
+		t.Fatalf("recovery retries across two sessions = %d, want 0", got)
 	}
 }
 
 // A shared state dir turns the old warning cooldown into a cross-process retry
 // circuit breaker. The first process retries once; a fresh process immediately
 // uses the empty-key fallback without doubling the request.
-func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
+func TestCompatibleMissingReasoningIgnoresLegacyIncidentState(t *testing.T) {
 	stateDir := t.TempDir()
 	mp := testutil.NewMock("deepseek-proxy",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
@@ -823,8 +819,8 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	if err := a1.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	if got := sink1.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 1 {
-		t.Fatalf("first process recovery retries = %d, want 1", got)
+	if got := sink1.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
+		t.Fatalf("first process recovery retries = %d, want 0", got)
 	}
 
 	mp2 := testutil.NewMock("deepseek-proxy",
@@ -839,8 +835,8 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
 		t.Fatalf("fresh process recovery retries = %d, want 0", got)
 	}
-	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetrySuppressed); got != 1 {
-		t.Fatalf("fresh process suppressed retries = %d, want 1", got)
+	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetrySuppressed); got != 0 {
+		t.Fatalf("fresh process suppressed retries = %d, want 0", got)
 	}
 }
 
@@ -854,7 +850,7 @@ func TestMissingReasoningRecoverySeparatesProviderConfigurations(t *testing.T) {
 		)
 		sink := &recordSink{}
 		a := New(configuredToolCallReasoningProvider{MockProvider: mp, identity: identity}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil && !isReplayFailureForTest(err) {
 			t.Fatalf("Run(%q): %v", identity, err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -878,8 +874,8 @@ func TestThreeHealthyToolCallReasoningTurnsRearmFutureRegression(t *testing.T) {
 	run := func(turns ...testutil.Turn) int {
 		mp := testutil.NewMock("deepseek-proxy", turns...)
 		sink := &recordSink{}
-		a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
+		a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil && !isReplayFailureForTest(err) {
 			t.Fatalf("Run: %v", err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -901,7 +897,7 @@ func TestThreeHealthyToolCallReasoningTurnsRearmFutureRegression(t *testing.T) {
 
 func TestHealthyToolCallReasoningStreakWorksWithinOneAgentAndResetsOnMissing(t *testing.T) {
 	stateDir := t.TempDir()
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 
@@ -927,7 +923,7 @@ func TestMissingReasoningRecoveryIOFailureStillSuppressesLocally(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte("occupied"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: statePath}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 
@@ -944,7 +940,7 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 		t.Skip("chmod permissions are not portable to Windows")
 	}
 	stateDir := t.TempDir()
-	prov := toolCallReasoningRequiredProvider{testutil.NewMock("deepseek-proxy")}
+	prov := strictToolCallReasoningProvider{testutil.NewMock("deepseek-proxy")}
 	a := New(prov, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, event.Discard)
 	calls := []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}
 

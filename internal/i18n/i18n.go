@@ -572,6 +572,10 @@ type Messages struct {
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrModelFormatMismatch string // provider rejected the model on the selected wire format
 	ProviderErrOpenCodeGoGrokRoute string // recovery hint for OpenCode Go Grok routing
+	ProviderErrQuotaExhaustedFmt   string // provider name, actual HTTP status
+	ProviderErrReasonMissing       string
+	SearchSourcesNotProvided       string
+	ProtocolRecoveryLabel          string
 	ProviderErrInsufficientBalance string // 402
 	ProviderErrUnprocessable       string // 422
 	ProviderErrInputSensitive      string // MiniMax 1026

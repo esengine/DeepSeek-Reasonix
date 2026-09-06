@@ -42,6 +42,9 @@ func appendServerSearchBlocks(blocks []contentBlock, searches []provider.ServerS
 }
 
 type streamContentBlock struct {
+	Thinking  string          `json:"thinking"`
+	Signature string          `json:"signature"`
+	Data      string          `json:"data"`
 	Type      string          `json:"type"`
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`

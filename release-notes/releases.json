@@ -2,6 +2,387 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.38.0",
+      "date": "2026-09-05",
+      "channel": "stable",
+      "targetingVersion": 1,
+      "title": {
+        "en": "Reasonix 1.38: Independent search, resilient recovery, and a unified desktop workspace",
+        "zh": "Reasonix 1.38：独立搜索、可靠恢复与统一桌面工作区"
+      },
+      "summary": {
+        "en": "This release separates web search from the main conversation, hardens protocol recovery, and unifies desktop management pages. It also improves link menus, update relaunch stability, model image capability handling, and session actions.",
+        "zh": "此版本将网络搜索与主对话分离，增强协议恢复可靠性，并统一桌面管理页面。同时改进了链接菜单、更新重启稳定性、模型图像能力处理以及会话操作。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Management Pages",
+            "zh": "管理页面"
+          },
+          "body": {
+            "en": "Learn how to use the unified management pages for settings, trash, and automation.",
+            "zh": "了解如何使用统一的设置、回收站和自动化管理页面。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/94ded620594fa0a6d25f65cd3de94fec1e56eca6/docs/MANAGEMENT_PAGES.md"
+        },
+        {
+          "title": {
+            "en": "Model Capabilities",
+            "zh": "模型能力"
+          },
+          "body": {
+            "en": "Understand how model capabilities are discovered and overridden.",
+            "zh": "了解模型能力的发现与覆盖方式。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/94ded620594fa0a6d25f65cd3de94fec1e56eca6/docs/MODEL_CAPABILITIES.md"
+        },
+        {
+          "title": {
+            "en": "Model Settings",
+            "zh": "模型设置"
+          },
+          "body": {
+            "en": "Configure provider and model settings with the new editor.",
+            "zh": "使用新编辑器配置提供程序和模型设置。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/94ded620594fa0a6d25f65cd3de94fec1e56eca6/docs/MODEL_SETTINGS.md"
+        },
+        {
+          "title": {
+            "en": "Web Search",
+            "zh": "网络搜索"
+          },
+          "body": {
+            "en": "Details on the independent web search feature.",
+            "zh": "独立网络搜索功能的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/94ded620594fa0a6d25f65cd3de94fec1e56eca6/docs/WEB_SEARCH.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Independent web search",
+            "zh": "独立网络搜索"
+          },
+          "body": {
+            "en": "Web search now runs separately from the main conversation, with its own recovery budget and clear reporting when structured sources are missing.",
+            "zh": "网络搜索现在独立于主对话运行，拥有自己的恢复预算，并在缺少结构化来源时提供清晰报告。"
+          },
+          "refs": [
+            9826
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Resilient protocol recovery",
+            "zh": "可靠的协议恢复"
+          },
+          "body": {
+            "en": "Eligible protocol failures now offer a one-time recovery from valid history through the Desktop button, CLI /recover-context, Serve, and ACP. Recovery survives restart and respects cancellation.",
+            "zh": "可恢复的协议错误现在支持通过桌面按钮、CLI /recover-context、Serve 和 ACP 从有效历史恢复一次，重启后保留恢复状态，并遵守取消操作。"
+          },
+          "refs": [
+            9826
+          ]
+        },
+        {
+          "kind": "new",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Unified management pages",
+            "zh": "统一管理页面"
+          },
+          "body": {
+            "en": "Settings, Trash, and Automation now use full-window management pages with shared navigation and focus isolation, while keeping the workspace mounted.",
+            "zh": "设置、回收站和自动化现在使用全窗口管理页面，具有共享导航和焦点隔离，同时保持工作区挂载。"
+          },
+          "refs": [
+            9821
+          ]
+        },
+        {
+          "kind": "improved",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Accessible rich link menus",
+            "zh": "无障碍富链接菜单"
+          },
+          "body": {
+            "en": "Web, GitHub, and mail links now have context menus with open/copy actions and compact GitHub references, with full keyboard support.",
+            "zh": "网络、GitHub 和邮件链接现在具有上下文菜单，提供打开/复制操作和紧凑的 GitHub 引用，并支持完整的键盘操作。"
+          },
+          "refs": [
+            9824
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Stable update relaunch",
+            "zh": "稳定的更新重启"
+          },
+          "body": {
+            "en": "Versioned updates now relaunch through the permanent launcher, and the update banner refreshes hourly and on focus without interrupting active operations.",
+            "zh": "版本化更新现在通过永久启动器重启，更新横幅每小时及获得焦点时刷新，不会中断正在进行的操作。"
+          },
+          "refs": [
+            9809
+          ]
+        },
+        {
+          "kind": "fixed",
+          "targets": [
+            "desktop"
+          ],
+          "title": {
+            "en": "Model image capability overrides",
+            "zh": "模型图像能力覆盖"
+          },
+          "body": {
+            "en": "Provider models with unknown image capability can now be manually enabled or disabled, with official protocol restrictions taking precedence.",
+            "zh": "图像能力未知的提供程序模型现在可以手动启用或禁用，官方协议限制优先。"
+          },
+          "refs": [
+            9812
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Rich link context menus",
+              "zh": "富链接上下文菜单"
+            },
+            "body": {
+              "en": "Added context menus for web, GitHub, and mail links with open, copy, and compact reference actions.",
+              "zh": "为网络、GitHub 和邮件链接添加了上下文菜单，包含打开、复制和紧凑引用操作。"
+            },
+            "refs": [
+              9824
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Unified management pages",
+              "zh": "统一管理页面"
+            },
+            "body": {
+              "en": "Settings, Trash, and Automation now use full-window management pages with shared navigation and focus isolation.",
+              "zh": "设置、回收站和自动化现在使用全窗口管理页面，具有共享导航和焦点隔离。"
+            },
+            "refs": [
+              9821
+            ]
+          },
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Independent web search",
+              "zh": "独立网络搜索"
+            },
+            "body": {
+              "en": "Web search is decoupled from the main conversation with its own recovery budget and reporting.",
+              "zh": "网络搜索与主对话解耦，拥有自己的恢复预算和报告。"
+            },
+            "refs": [
+              9826
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "targets": [
+              "desktop",
+              "cli"
+            ],
+            "title": {
+              "en": "Protocol recovery hardening",
+              "zh": "协议恢复加固"
+            },
+            "body": {
+              "en": "Eligible protocol failures now offer a one-time recovery from valid history through the Desktop button, CLI /recover-context, Serve, and ACP. Recovery survives restart and respects cancellation.",
+              "zh": "可恢复的协议错误现在支持通过桌面按钮、CLI /recover-context、Serve 和 ACP 从有效历史恢复一次，重启后保留恢复状态，并遵守取消操作。"
+            },
+            "refs": [
+              9826
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Model image capability overrides",
+              "zh": "模型图像能力覆盖"
+            },
+            "body": {
+              "en": "Added per-model Auto/On/Off image input control and improved capability discovery for relays.",
+              "zh": "添加了每个模型的自动/开/关图像输入控制，并改进了中转站的能力发现。"
+            },
+            "refs": [
+              9812
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Session actions restored",
+              "zh": "恢复会话操作"
+            },
+            "body": {
+              "en": "Copy, export, terminal, and summary actions are now directly available in the topic bar.",
+              "zh": "复制、导出、终端和摘要操作现在可直接在主题栏中使用。"
+            },
+            "refs": [
+              9810
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Update relaunch stability",
+              "zh": "更新重启稳定性"
+            },
+            "body": {
+              "en": "Relaunch now uses the permanent launcher, and tray identity and recovery are more reliable.",
+              "zh": "重启现在使用永久启动器，托盘身份和恢复更加可靠。"
+            },
+            "refs": [
+              9809
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "Automation control overlap",
+              "zh": "自动化控件重叠"
+            },
+            "body": {
+              "en": "Fixed overlapping controls when opening Automation tasks, including Windows caption buttons and macOS workspace toggle.",
+              "zh": "修复了打开自动化任务时控件重叠的问题，包括 Windows 标题按钮和 macOS 工作区切换。"
+            },
+            "refs": [
+              9811
+            ]
+          },
+          {
+            "targets": [
+              "desktop"
+            ],
+            "title": {
+              "en": "macOS dock alignment",
+              "zh": "macOS 工作区对齐"
+            },
+            "body": {
+              "en": "Workspace tabs now share the title row with the toggle, preventing overlap at minimum dock width.",
+              "zh": "工作区选项卡现在与切换按钮共享标题行，防止在最小停靠宽度下重叠。"
+            },
+            "refs": [
+              9810
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "DeepSeek conversation default",
+            "zh": "DeepSeek 主对话默认协议"
+          },
+          "body": {
+            "en": "Built-in DeepSeek conversations use Chat Completions again while web search runs independently through the official search endpoint. The one-time configuration upgrade preserves model, effort, search preferences and explicit custom routes.",
+            "zh": "内置 DeepSeek 主对话恢复使用 Chat Completions，网络搜索独立使用官方搜索端点。一次性配置升级保留模型、思考等级、搜索偏好和显式自定义路由。"
+          },
+          "refs": [
+            9826
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "targets": [
+            "desktop",
+            "cli"
+          ],
+          "title": {
+            "en": "Recovery and downgrade boundaries",
+            "zh": "恢复与降级边界"
+          },
+          "body": {
+            "en": "A model may request a completed read-only tool again after protocol repair. Verified file-write recovery prevents repeated satisfied writes, but this is not a guarantee for arbitrary shell or MCP effects. Older clients can read ordinary history but cannot enforce the new recovery accounting; do not use a downgrade to resume an unresolved protocol incident.",
+            "zh": "协议修复后，模型可能再次请求已经完成的只读工具。已验证的文件写入恢复可避免重复执行已满足的写入，但不能据此保证任意 shell 或 MCP 副作用不重复。旧客户端可读取普通历史，但无法执行新的恢复约束；请勿通过降级续跑尚未解决的协议故障。"
+          },
+          "refs": [
+            9826
+          ]
+        }
+      ],
+      "contributors": [
+        "SivanCola",
+        "wqshan-cn"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.38.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.37.0...desktop-v1.38.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.38.0",
+      "baseVersion": "1.38.0",
+      "status": "reviewed",
+      "previousRelease": "1.37.0",
+      "builds": {
+        "cli": "v1.38.0",
+        "desktop": "v1.38.0",
+        "npm": "1.38.0"
+      }
+    },
+    {
       "version": "1.37.0",
       "date": "2026-09-04",
       "channel": "stable",

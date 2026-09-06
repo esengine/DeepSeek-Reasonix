@@ -161,7 +161,9 @@ ok(
 );
 ok(providerSupportsServerWebSearch("responses", "https://api.deepseek.com"), "DeepSeek Responses exposes server-side web search");
 ok(providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com/anthropic"), "DeepSeek Anthropic exposes server-side web search");
-ok(!providerSupportsServerWebSearch("openai", "https://api.deepseek.com"), "DeepSeek Chat Completions does not expose server-side web search");
+ok(providerSupportsServerWebSearch("openai", "https://api.deepseek.com"), "DeepSeek Chat Completions exposes independent web search");
+ok(providerSupportsServerWebSearch("openai", "https://api.deepseek.com/v1"), "versioned official Chat Completions supports independent search");
+ok(!providerSupportsServerWebSearch("openai", "https://gateway.example/v1"), "custom Chat Completions is not assumed to support search");
 ok(!providerSupportsServerWebSearch("responses", "https://relay.deepseek.com"), "DeepSeek-like subdomains do not inherit official defaults");
 ok(!providerSupportsServerWebSearch("responses", "https://api.deepseek.com/anthropic"), "Responses rejects the Anthropic base path");
 ok(!providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com"), "Anthropic requires its documented base path");

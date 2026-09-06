@@ -145,6 +145,7 @@ export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfa
         <AskCard
           key={`${tab.id}:${ask.id}`}
           ask={ask}
+          draftScope={tab.id}
           onAnswer={(id, answers) => runAction(() => session.answer(id, answers.map((answer) => ({
             QuestionID: answer.questionId,
             Selected: answer.selected,

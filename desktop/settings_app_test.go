@@ -122,8 +122,8 @@ func TestProviderViewFromEntryOffersOnlySafeDeepSeekProtocolUpgrade(t *testing.T
 		Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com",
 		Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
 	}
-	if view := providerViewFromEntry(legacy, true, true); !view.RecommendedUpgradeAvailable {
-		t.Fatal("standard official OpenAI entry did not offer the recommended protocol upgrade")
+	if view := providerViewFromEntry(legacy, true, true); view.RecommendedUpgradeAvailable {
+		t.Fatal("standard official OpenAI entry still offers the retired protocol upgrade")
 	}
 
 	proxy := legacy
@@ -147,50 +147,6 @@ func TestProviderViewFromEntryIncludesThinking(t *testing.T) {
 	}, false, true)
 	if view.Thinking != "adaptive" {
 		t.Fatalf("ProviderView.Thinking = %q, want adaptive", view.Thinking)
-	}
-}
-
-func TestProviderViewFromEntryUsesEffectiveWebSearch(t *testing.T) {
-	view := providerViewFromEntry(config.ProviderEntry{
-		Name:    "deepseek-responses",
-		Kind:    "responses",
-		BaseURL: "https://api.deepseek.com",
-	}, false, true)
-	if !view.WebSearch {
-		t.Fatal("official DeepSeek Responses omission did not default web search on")
-	}
-
-	disabled := false
-	explicitOff := providerViewFromEntry(config.ProviderEntry{
-		Name:      "deepseek-responses",
-		Kind:      "responses",
-		BaseURL:   "https://api.deepseek.com",
-		WebSearch: &disabled,
-	}, false, true)
-	if explicitOff.WebSearch {
-		t.Fatal("explicit web_search=false was not preserved")
-	}
-
-	custom := providerViewFromEntry(config.ProviderEntry{
-		Name:    "custom-responses",
-		Kind:    "responses",
-		BaseURL: "https://gateway.example/v1",
-	}, false, true)
-	if custom.WebSearch {
-		t.Fatal("custom provider unexpectedly enabled web search")
-	}
-	if custom.ServerWebSearchCapability {
-		t.Fatal("unverified custom Responses provider unexpectedly exposed server web search in Settings")
-	}
-
-	openAI := providerViewFromEntry(config.ProviderEntry{
-		Name:      "custom-openai",
-		Kind:      "openai",
-		BaseURL:   "https://gateway.example/v1",
-		WebSearch: func() *bool { enabled := true; return &enabled }(),
-	}, false, true)
-	if openAI.ServerWebSearchCapability || openAI.WebSearch {
-		t.Fatal("OpenAI Chat Completions unexpectedly reported server web-search support")
 	}
 }
 
@@ -1593,7 +1549,9 @@ func TestUpgradeDeepSeekProviderAccessContinuesAfterWorkspaceBuildFailure(t *tes
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := `default_model = "deepseek-flash/deepseek-v4-flash"
+	// The explicit Settings action runs after the one-time startup migration.
+	raw := `config_version = 8
+default_model = "deepseek-flash/deepseek-v4-flash"
 
 [desktop]
 provider_access = ["deepseek"]
@@ -1875,8 +1833,8 @@ func TestOfficialDeepSeekTemplateUsesRegionalPricing(t *testing.T) {
 			t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
 		}
 		got := entries[0]
-		if got.Kind != "anthropic" || got.BaseURL != "https://api.deepseek.com/anthropic" || !config.EffectiveWebSearch(&got) || got.Thinking != "enabled" {
-			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Anthropic-compatible with web search", language, got.Kind, got.BaseURL, config.EffectiveWebSearch(&got), got.Thinking)
+		if got.Kind != "openai" || got.BaseURL != "https://api.deepseek.com" || !config.EffectiveIndependentWebSearch(&got) || got.Thinking != "enabled" {
+			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Chat Completions with independent web search", language, got.Kind, got.BaseURL, config.EffectiveIndependentWebSearch(&got), got.Thinking)
 		}
 		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 1.32 {
 			t.Fatalf("%s deepseek-v4-flash price = %+v, want frozen USD table", language, price)

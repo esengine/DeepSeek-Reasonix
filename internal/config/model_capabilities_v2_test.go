@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reasonix/internal/provider"
 	"reflect"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -80,8 +81,10 @@ func TestCapabilityV2IgnoresV1AndPersistsUnknown(t *testing.T) {
 		t.Fatal("v1 was modified")
 	}
 	info, err := os.Stat(r.path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("cache permissions: %v %v", info, err)
+	if err != nil {
+		t.Fatal(err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("cache permissions: %o, want 600", info.Mode().Perm())
 	}
 	for _, content := range []string{"broken", `{"version":999}`, `{"version":1}`} {
 		if err := os.WriteFile(r.path, []byte(content), 0600); err != nil {

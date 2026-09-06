@@ -2,7 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-export type ContextMenuPoint = { left: number; top: number };
+export type ContextMenuPoint = {
+  left: number;
+  top: number;
+  keyboardTarget?: HTMLElement;
+};
 
 export type ContextMenuItem =
   | {
@@ -38,7 +42,11 @@ export function contextMenuPointFromEvent(
     return { left: event.clientX, top: event.clientY };
   }
   const rect = event.currentTarget.getBoundingClientRect();
-  return { left: rect.left + 12, top: rect.bottom + 6 };
+  return {
+    left: rect.left + 12,
+    top: rect.bottom + 6,
+    ...("key" in event ? { keyboardTarget: event.currentTarget } : {}),
+  };
 }
 
 export function ContextMenu({
@@ -71,6 +79,46 @@ export function ContextMenu({
     setPosition(clampMenuPoint(point.left, point.top, rect.width, rect.height));
   }, [open, point, items]);
 
+  useLayoutEffect(() => {
+    const target = point?.keyboardTarget;
+    const menu = menuRef.current;
+    if (!open || !target || !menu) return;
+    menu.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus({ preventScroll: true });
+    return () => {
+      // Do not steal focus from an outside click or an action opening a dialog.
+      if (target.isConnected && (menu.contains(document.activeElement) || document.activeElement === document.body)) {
+        target.focus({ preventScroll: true });
+      }
+    };
+  }, [open, point]);
+
+  const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)'));
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    let next: number;
+    switch (event.key) {
+      case "ArrowDown": next = (index + 1) % buttons.length; break;
+      case "ArrowUp": next = index < 0 ? buttons.length - 1 : (index - 1 + buttons.length) % buttons.length; break;
+      case "Home": next = 0; break;
+      case "End": next = buttons.length - 1; break;
+      case "Tab":
+        // Let the browser continue from the invoking control in tab order.
+        point?.keyboardTarget?.focus({ preventScroll: true });
+        onClose();
+        event.stopPropagation();
+        return;
+      case "Escape":
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      default: return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    buttons[next]?.focus({ preventScroll: true });
+  };
+
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
@@ -92,7 +140,7 @@ export function ContextMenu({
     };
   }, [open, onClose]);
 
-  if (!open || !point || !position) return null;
+  if (!open || !point) return null;
 
   return createPortal(
     <div
@@ -100,7 +148,8 @@ export function ContextMenu({
       className={`context-menu${className ? ` ${className}` : ""}`}
       role="menu"
       aria-label={ariaLabel}
-      style={{ left: position.left, top: position.top, minWidth }}
+      style={{ left: (position ?? point).left, top: (position ?? point).top, minWidth }}
+      onKeyDown={onMenuKeyDown}
       onMouseDown={(event) => {
         event.preventDefault();
         event.stopPropagation();

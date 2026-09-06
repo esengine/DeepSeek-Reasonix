@@ -21,12 +21,30 @@ func (s *Session) prepareRecoveryBranchMetaLocked(path string, opts RecoveryBran
 	meta.Turns = turns
 	meta.SchemaVersion = BranchMetaCountsVersion
 	meta.Recovered = true
+	meta.VersionKind = VersionRecovery
+	meta.VersionState = VersionActive
+	meta.ParentConversationID = firstNonEmpty(meta.ParentConversationID, meta.TopicID)
+	meta.ParentVersionID = firstNonEmpty(meta.ParentVersionID, meta.ParentID)
+	meta.BaseRevision = opts.BaseRevision
+	meta.DiskRevision = opts.DiskRevision
 	meta.RecoveryReason = firstNonEmpty(strings.TrimSpace(opts.Reason), "session snapshot conflict")
 	meta.RecoveryDigest = digest
 	meta.RecoveryDepth = depth
 	meta.Revision = 1
 	ledgerCurrent := false
 	if ok {
+		if meta.BaseRevision == 0 {
+			meta.BaseRevision = existing.BaseRevision
+		}
+		if meta.DiskRevision == 0 {
+			meta.DiskRevision = existing.DiskRevision
+		}
+		if meta.ParentConversationID == "" {
+			meta.ParentConversationID = existing.ParentConversationID
+		}
+		if meta.ParentVersionID == "" {
+			meta.ParentVersionID = existing.ParentVersionID
+		}
 		ledgerCurrent = contentUnchanged && existing.Revision > 0 &&
 			strings.TrimSpace(existing.ContentDigest) == digest &&
 			strings.TrimSpace(existing.RecoveryDigest) == digest

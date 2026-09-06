@@ -92,7 +92,7 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
       if (isSteerNoticeText(item.text)) {
         current.outsideItems.push(item);
         currentHasConversation = true;
-      } else if (item.level === "warn" || item.variant === "delivery") {
+      } else if (item.level === "warn" || item.variant === "delivery" || Boolean(item.action) || item.code === "search_sources_not_provided") {
         current.outsideItems.push(item);
       } else {
         pushProcess(item);
@@ -515,13 +515,13 @@ function itemMeasurementVersion(item: Item): string {
       parts.push(String(item.text ?? ""));
       break;
     case "notice":
-      parts.push(String(item.text ?? ""), String(item.detail ?? ""), String(item.title ?? ""), String(item.level ?? ""), String(item.variant ?? ""), String(item.action ?? ""), JSON.stringify(item.completionSummary ?? {}));
+      parts.push(String(item.text ?? ""), String(item.detail ?? ""), String(item.title ?? ""), String(item.level ?? ""), String(item.variant ?? ""), String(item.action ?? ""), String(item.recoveryId ?? ""), JSON.stringify(item.completionSummary ?? {}));
       break;
     case "compaction":
       parts.push(item.pending ? "1" : "0", String(item.trigger ?? ""), String(item.messages ?? ""), String(item.summary ?? ""), String(item.archive ?? ""));
       break;
     case "tool":
-      parts.push(String(item.name ?? ""), String(item.args ?? ""), String(item.output ?? ""), String(item.error ?? ""), String(item.status ?? ""), String(item.subject ?? ""), String(item.summary ?? ""), item.truncated ? "1" : "0", item.dataArchived ? "1" : "0", JSON.stringify(item.fileDiff ?? {}), JSON.stringify(item.execution ?? {}), item.subagentProgress ? JSON.stringify(item.subagentProgress) : "");
+      parts.push(String(item.name ?? ""), String(item.args ?? ""), String(item.output ?? ""), String(item.error ?? ""), String(item.status ?? ""), String(item.subject ?? ""), String(item.summary ?? ""), String(item.searchSourcesStatus ?? ""), String(item.searchSummary ?? ""), item.truncated ? "1" : "0", item.dataArchived ? "1" : "0", JSON.stringify(item.fileDiff ?? {}), JSON.stringify(item.execution ?? {}), item.subagentProgress ? JSON.stringify(item.subagentProgress) : "");
       break;
     case "extension":
       parts.push(String(item.surfaceKey ?? ""), String(item.pluginId ?? ""), String(item.surfaceId ?? ""), String(item.generation ?? ""), JSON.stringify(item.card ?? null));

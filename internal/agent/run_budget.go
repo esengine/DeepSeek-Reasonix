@@ -73,7 +73,10 @@ func (b *runBudget) observeQuote(usage *provider.Usage, quote *billing.CostQuote
 	b.requests += usageRequestCount(usage)
 	b.promptTokens += usage.PromptTokens
 	b.outputTokens += usage.CompletionTokens
-	if quote == nil || !quote.CostComplete || quote.Original.Currency == "" {
+	if usage.Unknown {
+		b.unpricedTurns = true
+	}
+	if quote == nil || (!quote.CostComplete && quote.IncompleteReason != "usage_unknown") || quote.Original.Currency == "" {
 		b.unpricedTurns = true
 		return
 	}
@@ -110,7 +113,7 @@ func (b *runBudget) exceeded(limit TaskBudget) (axis, detail string) {
 			return "token", fmt.Sprintf("task used %d tokens, reaching the %d budget", used, limit.Tokens)
 		}
 	}
-	if limit.Cost > 0 && b.pricedRounds > 0 && !b.unpricedTurns && b.cost >= limit.Cost {
+	if limit.Cost > 0 && b.pricedRounds > 0 && b.cost >= limit.Cost {
 		return "cost", fmt.Sprintf("task spend %.4f reached the %.4f budget", b.cost, limit.Cost)
 	}
 	if limit.Wall > 0 {

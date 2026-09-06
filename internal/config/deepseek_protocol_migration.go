@@ -140,6 +140,32 @@ func editLegacyDeepSeekProtocolFile(path, target string, automatic bool) (bool, 
 }
 
 func rewriteLegacyDeepSeekProtocol(raw, target string, automatic bool) (string, bool, error) {
+	// Retained for compatibility callers; current startup no longer invokes
+	// the old automatic Messages migration, and v8 choices must stay untouched.
+	if automatic {
+		var header struct {
+			ConfigVersion int `toml:"config_version"`
+		}
+		if _, err := toml.Decode(raw, &header); err != nil {
+			return raw, false, err
+		}
+		if header.ConfigVersion >= deepSeekChatDefaultConfigVersion {
+			return raw, false, nil
+		}
+	}
+	return rewriteDeepSeekProtocol(raw, "anthropic", deepSeekAnthropicBaseURL, func(entry *ProviderEntry, fields map[string]any) bool {
+		if !CanUpgradeDeepSeekProviderProtocol(entry) {
+			return false
+		}
+		if automatic {
+			return isUnmodifiedLegacyDeepSeekProvider(*entry, fields)
+		}
+		return deepSeekUpgradeTargetMatches(target, entry.Name)
+	})
+}
+
+// Shared lexical rewrite preserves comments, unknown fields and inline tables.
+func rewriteDeepSeekProtocol(raw, kind, baseURL string, eligible func(*ProviderEntry, map[string]any) bool) (string, bool, error) {
 	var decoded struct {
 		Providers []ProviderEntry `toml:"providers"`
 	}
@@ -159,16 +185,10 @@ func rewriteLegacyDeepSeekProtocol(raw, target string, automatic bool) (string, 
 		changed := false
 		for i := range decoded.Providers {
 			entry := &decoded.Providers[i]
-			eligible := CanUpgradeDeepSeekProviderProtocol(entry)
-			if automatic {
-				eligible = eligible && isUnmodifiedLegacyDeepSeekProvider(*entry, generic.Providers[i])
-			} else {
-				eligible = eligible && deepSeekUpgradeTargetMatches(target, entry.Name)
-			}
-			if !eligible {
+			if !eligible(entry, generic.Providers[i]) {
 				continue
 			}
-			if err := rewriteDeepSeekProviderBlock(lines, blocks[i]); err != nil {
+			if err := rewriteDeepSeekProviderBlockAs(lines, blocks[i], kind, baseURL); err != nil {
 				return raw, false, err
 			}
 			changed = true
@@ -183,13 +203,7 @@ func rewriteLegacyDeepSeekProtocol(raw, target string, automatic bool) (string, 
 	replacements := make([]tomlReplacement, 0, len(decoded.Providers)*2)
 	for i := range decoded.Providers {
 		entry := &decoded.Providers[i]
-		eligible := CanUpgradeDeepSeekProviderProtocol(entry)
-		if automatic {
-			eligible = eligible && isUnmodifiedLegacyDeepSeekProvider(*entry, generic.Providers[i])
-		} else {
-			eligible = eligible && deepSeekUpgradeTargetMatches(target, entry.Name)
-		}
-		if !eligible {
+		if !eligible(entry, generic.Providers[i]) {
 			continue
 		}
 		block := inlineBlocks[i]
@@ -197,8 +211,8 @@ func rewriteLegacyDeepSeekProtocol(raw, target string, automatic bool) (string, 
 			return raw, false, fmt.Errorf("upgrade DeepSeek protocol: inline provider table is missing kind or base_url")
 		}
 		replacements = append(replacements,
-			tomlReplacement{start: block.kindStart, end: block.kindEnd, value: strconv.Quote("anthropic")},
-			tomlReplacement{start: block.baseURLStart, end: block.baseURLEnd, value: strconv.Quote(deepSeekAnthropicBaseURL)},
+			tomlReplacement{start: block.kindStart, end: block.kindEnd, value: strconv.Quote(kind)},
+			tomlReplacement{start: block.baseURLStart, end: block.baseURLEnd, value: strconv.Quote(baseURL)},
 		)
 	}
 	if len(replacements) == 0 {
@@ -684,7 +698,7 @@ func isProviderArrayTableHeader(line string) bool {
 	}
 }
 
-func rewriteDeepSeekProviderBlock(lines []string, block providerTOMLBlock) error {
+func rewriteDeepSeekProviderBlockAs(lines []string, block providerTOMLBlock, kind, baseURL string) error {
 	kindLine, baseURLLine := -1, -1
 	state := tomlOutside
 	for i := block.start + 1; i < block.end; i++ {
@@ -708,12 +722,16 @@ func rewriteDeepSeekProviderBlock(lines []string, block providerTOMLBlock) error
 	if kindLine < 0 || baseURLLine < 0 {
 		return fmt.Errorf("upgrade DeepSeek protocol: provider table is missing kind or base_url")
 	}
-	lines[kindLine] = replaceTOMLStringAssignment(lines[kindLine], "anthropic")
-	lines[baseURLLine] = replaceTOMLStringAssignment(lines[baseURLLine], deepSeekAnthropicBaseURL)
+	lines[kindLine] = replaceTOMLStringAssignment(lines[kindLine], kind)
+	lines[baseURLLine] = replaceTOMLStringAssignment(lines[baseURLLine], baseURL)
 	return nil
 }
 
 func replaceTOMLStringAssignment(line, value string) string {
+	return replaceTOMLScalarAssignment(line, strconv.Quote(value))
+}
+
+func replaceTOMLScalarAssignment(line, encoded string) string {
 	carriageReturn := strings.HasSuffix(line, "\r")
 	line = strings.TrimSuffix(line, "\r")
 	equals, err := findTOMLAssignmentEquals(line, 0, len(line))
@@ -734,7 +752,7 @@ func replaceTOMLStringAssignment(line, value string) string {
 		}
 		suffix = rhs[spaceStart:]
 	}
-	next := line[:equals+1] + leading + strconv.Quote(value) + suffix
+	next := line[:equals+1] + leading + encoded + suffix
 	if carriageReturn {
 		next += "\r"
 	}

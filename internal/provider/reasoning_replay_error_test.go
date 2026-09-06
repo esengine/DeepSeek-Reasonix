@@ -26,6 +26,18 @@ func TestParseReasoningReplayError(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "official responses reasoning_text 400",
+			status: 400,
+			body:   "The `reasoning_text` in the thinking mode must be passed back to the API.",
+			want:   true,
+		},
+		{
+			name:   "responses unrelated reasoning error",
+			status: 400,
+			body:   "reasoning_text is not supported",
+			want:   false,
+		},
+		{
 			name:   "case-insensitive",
 			status: 400,
 			body:   `The CONTENT[].THINKING in the thinking mode MUST BE PASSED BACK to the API`,

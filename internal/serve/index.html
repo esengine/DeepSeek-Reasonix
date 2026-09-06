@@ -626,8 +626,11 @@ const __T = {
     'ready': 'Ready',
     'thinking': 'Thinking...',
     'retrying_status': 'Retrying ({attempt}/{max})...',
+    'recovery_waiting': 'Waiting for provider; retry in {seconds}s. Stop to cancel.',
     'recovery_paused': 'Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.',
     'completion_uncertain': 'Completion could not be confirmed. The current result and completed work are kept. Send "continue" to resume, or restate what should change.',
+    'protocol_recovery': 'Recover from valid history',
+    'search_sources_missing': 'Search completed; the provider did not supply usable structured sources.',
     'final_readiness_title': 'Task completion checks are not complete',
     'final_readiness_body': 'The response was generated, but this task still requires verification or review.',
     'final_readiness_missing': 'Still needed: ',
@@ -778,8 +781,11 @@ const __T = {
     'ready': '就绪',
     'thinking': '思考中...',
     'retrying_status': '正在重试 ({attempt}/{max})...',
+    'recovery_waiting': '正在等待供应商恢复，{seconds} 秒后重试；可点击停止。',
     'recovery_paused': '已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。',
     'completion_uncertain': '完成状态未确认。当前结果和已完成工作均已保留。发送“继续”可接着完成，也可以补充说明需要调整的内容。',
+    'protocol_recovery': '从有效历史恢复',
+    'search_sources_missing': '搜索已完成，供应商未提供可用的结构化来源',
     'final_readiness_title': '任务收尾检查尚未完成',
     'final_readiness_body': '内容已经生成，但这项任务要求的验证或复审步骤尚未完成。',
     'final_readiness_missing': '仍需完成：',
@@ -1102,12 +1108,26 @@ function showFinalReadinessPause(readiness){
   };
   card.appendChild(button);log.appendChild(card);scrollDown(true);
 }
+function showProtocolRecovery(action){
+  if(!action?.id)return;
+  log.querySelectorAll('[data-protocol-recovery]').forEach(node=>node.remove());
+  const card=el('div','readiness-card');card.dataset.protocolRecovery=action.id;
+  const button=el('button','readiness-card__action',__('protocol_recovery'));
+  button.type='button';button.onclick=async()=>{
+    button.disabled=true;
+    const response=await post('/submit',{action:'protocol_recovery',recoveryId:action.id,input:''});
+    if(response.ok){card.remove();return;}
+    button.disabled=false;showNotice((await response.text()).trim(),'warn');
+  };
+  card.appendChild(button);log.appendChild(card);scrollDown(true);
+}
 function updateActionAvailability() {
   setActionDisabled('btn-compact', running || !hasVisibleHistory, running ? __('thinking') : __('no_conversation'));
   setActionDisabled('btn-rewind', running || checkpointCount === 0, running ? __('thinking') : __('no_checkpoints'));
 }
 
 function setRunning(on) {
+ if(on)log.querySelectorAll('[data-protocol-recovery] button').forEach(button=>button.disabled=true);
   running=on;
   retryStatus=null;
   btnSend.style.display=on?'none':'';
@@ -1122,14 +1142,18 @@ function setRunning(on) {
   },1000);} else {clearInterval(tickTimer);turnInfo.textContent='';}
 }
 
-function setRetrying(attempt,max) {
+let recoveryTimer=null;
+function setRetrying(attempt,max,recovery) {
+  clearInterval(recoveryTimer);
   retryStatus={attempt:attempt||0,max:max||0};
   statusDot.className='status__dot status__dot--busy';
   statusDotSidebar.className=statusDot.className;
   statusText.textContent=__('retrying_status').replace('{attempt}',retryStatus.attempt).replace('{max}',retryStatus.max);
+  if(recovery&&recovery.waiting){const render=()=>{statusText.textContent=__('recovery_waiting').replace('{seconds}',Math.max(0,Math.ceil((recovery.next_attempt_at-Date.now())/1000)));};render();recoveryTimer=setInterval(render,1000);}
 }
 
 function clearRetrying() {
+  clearInterval(recoveryTimer);
   if(!retryStatus)return;
   retryStatus=null;
   if(running)statusText.textContent=__('thinking');
@@ -1245,7 +1269,12 @@ function shellDisplayName(ex){
   if(ex.shell==='pwsh')return 'PowerShell 7+';
   return ex.shell;
 }
+function showSearchHistoryNotice(name,output){
+ if(name!=='web_search'||!output)return;
+ try{if(JSON.parse(output).sources_status==='not_provided')showNotice(__('search_sources_missing'));}catch{}
+}
 function renderToolResult(tool) {
+
   const card=toolCards[tool.id]; if(!card)return;
   const elapsed=Math.max(0,Date.now()-Number(card.dataset.startedAt||Date.now()));
   const ex=tool.execution||null;
@@ -1623,8 +1652,8 @@ es.onmessage=ev=>{setConnState('connected');
     case 'extension_status': if(e.extension)renderExtensionSurface(e.extension); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
-    case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
-    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.outcome==='final_readiness'){showFinalReadinessPause(e.readiness);}else if(e.outcome==='recovery_paused'){showNotice('⏸ '+__('recovery_paused'));}else if(e.outcome==='completion_uncertain'){showNotice('⏸ '+__('completion_uncertain'));}else if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
+    case 'retrying': setRetrying(e.retryAttempt,e.retryMax,e.recovery); break;
+    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.outcome==='final_readiness'){showFinalReadinessPause(e.readiness);}else if(e.outcome==='recovery_paused'){showNotice('⏸ '+__('recovery_paused'));}else if(e.outcome==='completion_uncertain'){showNotice('⏸ '+__('completion_uncertain'));}else if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} if(e.protocolRecovery&&e.status!=='interrupted')showProtocolRecovery(e.protocolRecovery); fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
   }
 };
 es.onerror=()=>{
@@ -1670,7 +1699,7 @@ function renderHistoryMessages(ms){
     if(m.role==='user')return !!m.content;
     if(m.role==='assistant')return !!(m.content||m.reasoning||(m.toolCalls&&m.toolCalls.length));
     if(m.role==='tool')return !!(m.content||m.toolCallId||m.toolName);
-    if(m.role==='final_readiness')return true;
+    if(m.role==='final_readiness'||m.role==='protocol_recovery')return true;
     return false;
   });
   hasVisibleHistory=visible;
@@ -1683,8 +1712,10 @@ function renderHistoryMessages(ms){
   ms.forEach(m=>{
     if(m.role==='system')return;
     if(m.role==='user'){if(m.content)addUserMsg(m.content);return;}
+    if(m.role==='protocol_recovery'){showProtocolRecovery(m.protocolRecovery);return;}
     if(m.role==='final_readiness'){showFinalReadinessPause({missing:m.missing||[]});return;}
     if(m.role==='assistant'){
+      (m.serverSearch||[]).forEach(search=>{if(search.sources_status==='not_provided')showNotice(__('search_sources_missing'));});
       if(m.reasoning)appendReasoning(m.reasoning);
       if(m.content)appendText(m.content);
       if(m.content||m.reasoning)finalizeMsg();
@@ -1693,7 +1724,7 @@ function renderHistoryMessages(ms){
         renderToolDispatch({id,name:tc.name,args:tc.arguments||'',readOnly:false});
         const result=resultById.get(tc.id);
         if(tc.id)consumed.add(tc.id);
-        if(result)renderToolResult({id,name:tc.name,output:result.content||''});
+        if(result){renderToolResult({id,name:tc.name,output:result.content||''});showSearchHistoryNotice(tc.name,result.content);}
       });
       return;
     }
@@ -1701,7 +1732,7 @@ function renderHistoryMessages(ms){
       if(m.toolCallId&&consumed.has(m.toolCallId))return;
       const id=m.toolCallId||'hist-tool-'+(seq++);
       renderToolDispatch({id,name:m.toolName||'tool',args:'',readOnly:false});
-      renderToolResult({id,name:m.toolName||'tool',output:m.content||''});
+      renderToolResult({id,name:m.toolName||'tool',output:m.content||''});showSearchHistoryNotice(m.toolName,m.content);
     }
   });
   currentMsg=null;currentText=null;currentReasoning=null; scrollDown(true); updateActionAvailability(); return true;

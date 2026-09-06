@@ -89,30 +89,31 @@ type machineEventUsage struct {
 // format is a rich UI transport and includes prompts, tool arguments, results,
 // and reasoning; this contract is for automation that must not receive them.
 type machineEventRecord struct {
-	SchemaVersion  int                `json:"schema_version"`
-	Sequence       uint64             `json:"sequence"`
-	Kind           string             `json:"kind"`
-	Code           string             `json:"code,omitempty"`
-	Level          string             `json:"level,omitempty"`
-	ToolID         string             `json:"tool_id,omitempty"`
-	ToolName       string             `json:"tool_name,omitempty"`
-	ToolReadOnly   bool               `json:"tool_read_only,omitempty"`
-	ToolError      bool               `json:"tool_error,omitempty"`
-	ToolTruncated  bool               `json:"tool_truncated,omitempty"`
-	ToolDurationMS int64              `json:"tool_duration_ms,omitempty"`
-	Usage          *machineEventUsage `json:"usage,omitempty"`
-	ApprovalID     string             `json:"approval_id,omitempty"`
-	ApprovalKind   string             `json:"approval_kind,omitempty"`
-	AskID          string             `json:"ask_id,omitempty"`
-	Outcome        string             `json:"outcome,omitempty"`
-	Cancelled      bool               `json:"cancelled,omitempty"`
-	Error          bool               `json:"error,omitempty"`
-	RetryAttempt   int                `json:"retry_attempt,omitempty"`
-	RetryMax       int                `json:"retry_max,omitempty"`
-	CompactionType string             `json:"compaction_type,omitempty"`
-	CompactionMsgs int                `json:"compaction_messages,omitempty"`
-	GuardianResult string             `json:"guardian_result,omitempty"`
-	GuardianRisk   string             `json:"guardian_risk,omitempty"`
+	SchemaVersion  int                   `json:"schema_version"`
+	Sequence       uint64                `json:"sequence"`
+	Kind           string                `json:"kind"`
+	Code           string                `json:"code,omitempty"`
+	Level          string                `json:"level,omitempty"`
+	ToolID         string                `json:"tool_id,omitempty"`
+	ToolName       string                `json:"tool_name,omitempty"`
+	ToolReadOnly   bool                  `json:"tool_read_only,omitempty"`
+	ToolError      bool                  `json:"tool_error,omitempty"`
+	ToolTruncated  bool                  `json:"tool_truncated,omitempty"`
+	ToolDurationMS int64                 `json:"tool_duration_ms,omitempty"`
+	Usage          *machineEventUsage    `json:"usage,omitempty"`
+	ApprovalID     string                `json:"approval_id,omitempty"`
+	ApprovalKind   string                `json:"approval_kind,omitempty"`
+	AskID          string                `json:"ask_id,omitempty"`
+	Outcome        string                `json:"outcome,omitempty"`
+	Cancelled      bool                  `json:"cancelled,omitempty"`
+	Error          bool                  `json:"error,omitempty"`
+	Recovery       *event.RecoveryStatus `json:"recovery,omitempty"`
+	RetryAttempt   int                   `json:"retry_attempt,omitempty"`
+	RetryMax       int                   `json:"retry_max,omitempty"`
+	CompactionType string                `json:"compaction_type,omitempty"`
+	CompactionMsgs int                   `json:"compaction_messages,omitempty"`
+	GuardianResult string                `json:"guardian_result,omitempty"`
+	GuardianRisk   string                `json:"guardian_risk,omitempty"`
 }
 
 type machineRunDone struct {
@@ -350,6 +351,7 @@ func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) ma
 		record.GuardianResult = e.Guardian.Outcome
 		record.GuardianRisk = e.Guardian.RiskLevel
 	case event.Retrying:
+		record.Recovery = e.Recovery
 		record.RetryAttempt = e.RetryAttempt
 		record.RetryMax = e.RetryMax
 	}

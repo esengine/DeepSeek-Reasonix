@@ -1,3 +1,5 @@
+import { providerSupportsServerWebSearch } from "../lib/providerSearch";
+export { providerSupportsServerWebSearch } from "../lib/providerSearch";
 import { ManagementPageShell } from "./ManagementPageShell";
 import { useProviderT as useT } from "../lib/providerSettingsLocale";
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
@@ -6234,32 +6236,6 @@ function providerBaseHost(baseUrl: string): string {
 }
 
 type ProviderVisionCapability = "configurable" | "unsupported";
-
-export function providerSupportsServerWebSearch(kind: string, baseUrl: string): boolean {
-  try {
-    const endpoint = new URL(baseUrl.trim());
-    if (
-      endpoint.protocol !== "https:" ||
-      endpoint.hostname.toLowerCase() !== "api.deepseek.com" ||
-      endpoint.port ||
-      endpoint.username ||
-      endpoint.password ||
-      endpoint.search ||
-      endpoint.hash
-    ) return false;
-    const path = endpoint.pathname.replace(/\/+$/, "");
-    switch (kind.trim().toLowerCase()) {
-      case "responses":
-        return path === "";
-      case "anthropic":
-        return path === "/anthropic";
-      default:
-        return false;
-    }
-  } catch {
-    return false;
-  }
-}
 
 export function providerSupportsServerWebSearchForView(
   provider: Pick<ProviderView, "kind" | "baseUrl" | "serverWebSearchCapability">,

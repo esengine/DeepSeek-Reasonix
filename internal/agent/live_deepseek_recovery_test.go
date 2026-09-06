@@ -42,38 +42,19 @@ func TestLiveDeepSeekFlashMissingReasoningRecovery(t *testing.T) {
 		{name: "persistent", stripResponses: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for attempt := 1; attempt <= 3; attempt++ {
-				result := runLiveDeepSeekRecoveryScenario(t, key, tc.stripResponses, attempt)
-				t.Logf("mode=%s attempt=%d upstream_requests=%d stripped_fields=%d retry_request_identical=%t executions=%d tool_turns=%d warnings=%d retry_attempts=%d recovered=%d replaced=%d fallbacks=%d",
-					tc.name, attempt, result.requests, result.strippedFields, result.identicalRetry,
-					result.executions, result.toolTurns, result.warnings, result.retryAttempts,
-					result.recovered, result.replaced, result.fallbacks)
-				if result.strippedFields == 0 || result.replaced != 0 {
-					continue // provider chose a different response shape; retry a bounded fresh scenario
-				}
-				if result.executions != 1 || result.toolTurns != 1 {
-					t.Fatalf("tool execution/session turns = %d/%d, want 1/1", result.executions, result.toolTurns)
-				}
-				if result.warnings != 0 {
-					t.Fatalf("user-visible protocol warnings = %d, want 0", result.warnings)
-				}
-				if result.retryAttempts == 0 {
-					if result.recovered != 0 || result.fallbacks != 0 {
-						t.Fatalf("no-retry compatible-empty outcomes recovered/fallbacks = %d/%d, want 0/0",
-							result.recovered, result.fallbacks)
-					}
-					continue // visible text made retry unsafe; seek the requested retry shape
-				}
-				if !result.identicalRetry {
-					t.Fatal("missing-reasoning recovery changed the provider request")
-				}
-				if result.retryAttempts != 1 || result.fallbacks != 0 {
-					t.Fatalf("recovery outcomes attempts/recovered/fallbacks = %d/%d/%d, want 1/<provider-dependent>/0",
-						result.retryAttempts, result.recovered, result.fallbacks)
-				}
-				return
+			result := runLiveDeepSeekRecoveryScenario(t, key, tc.stripResponses, 1)
+			t.Logf("mode=%s upstream_requests=%d stripped_fields=%d executions=%d tool_turns=%d warnings=%d retry_attempts=%d recovered=%d replaced=%d fallbacks=%d",
+				tc.name, result.requests, result.strippedFields, result.executions, result.toolTurns,
+				result.warnings, result.retryAttempts, result.recovered, result.replaced, result.fallbacks)
+			if result.strippedFields == 0 {
+				t.Fatal("official response contained no reasoning field to strip")
 			}
-			t.Fatal("official API did not produce the requested live recovery shape in three bounded attempts")
+			if result.executions != 1 || result.toolTurns != 1 || result.requests != 2 {
+				t.Fatalf("executions/tool turns/requests = %d/%d/%d, want 1/1/2", result.executions, result.toolTurns, result.requests)
+			}
+			if result.warnings != 0 || result.retryAttempts != 0 || result.recovered != 0 || result.replaced != 0 || result.fallbacks != 0 {
+				t.Fatal("compatible empty reasoning must not trigger a strict recovery incident")
+			}
 		})
 	}
 }
@@ -238,10 +219,12 @@ func (p *liveReasoningStripProxy) stripReasoning(body []byte) []byte {
 		for _, rawChoice := range choices {
 			choice, _ := rawChoice.(map[string]any)
 			delta, _ := choice["delta"].(map[string]any)
-			if _, ok := delta["reasoning_content"]; ok {
-				delete(delta, "reasoning_content")
-				p.strippedFields.Add(1)
-				changed = true
+			for _, field := range []string{"reasoning_content", "reasoning"} {
+				if _, ok := delta[field]; ok {
+					delete(delta, field)
+					p.strippedFields.Add(1)
+					changed = true
+				}
 			}
 		}
 		if changed {

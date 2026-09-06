@@ -69,8 +69,10 @@ type Message struct {
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContentis genuine model output.
 	// Anthropic requires the signed thinking block be replayed on the next turn when a toolcallfollowedthinking;
 	// providers without signed reasoning (e.g. the openai-compatible ones) leave it empty.
-	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
+	ReasoningSignature string          `json:"reasoning_signature,omitempty"`
+	ReasoningState     ReasoningState  `json:"reasoning_state,omitempty"`
+	ThinkingBlocks     []ThinkingBlock `json:"thinking_blocks,omitempty"`
+	ToolCalls          []ToolCall      `json:"tool_calls,omitempty"` // set by assistant
 	// ResponsesItems preserves provider-issued Responses API output items forstateless replay.
 	// omitemptykeepsoldsession files byte-compatible.
 	ResponsesItems  []json.RawMessage  `json:"responses_items,omitempty"`
@@ -94,10 +96,12 @@ type Message struct {
 	// FinalReadinessRecovery is durable host state on a LocalOnly sentinel.
 	// ModelMessages removes it before provider serialization.
 	FinalReadinessRecovery *FinalReadinessRecovery `json:"final_readiness_recovery,omitempty"`
+	ProtocolRecovery       json.RawMessage         `json:"protocol_recovery,omitempty"`
 	// ToolExecution is local shell UI metadata on tool-result messages. It ispersisted for
 	// Desktop/CLI/Servecards and stripped by
 	// ModelMessagesbeforeanyproviderrequestsotoolschemasandprompt-cacheprefixes stay stable.
 	ToolExecution *ToolExecution `json:"tool_execution,omitempty"`
+	ToolRunState  ToolRunState   `json:"tool_run_state,omitempty"`
 	// MCPApp is the local MCP Apps presentation for results from App-capableservers. Persisted for
 	// Desktopcardsand stripped by ModelMessages;
 	// provider serializers must never emit it on the wire.
@@ -146,28 +150,6 @@ type DecisionReceipt struct {
 	Outcome string `json:"outcome"`
 }
 
-// InterruptedTurnRecovery is the durable,
-// provider-excludedhandoffforaturnthatstoppedbeforeproducingacleanfinal answer.
-// Itcontainsonlyboundedstructural facts; raw partial reasoning remains on the LocalOnly
-// Messagefordisplayandisnevercopiedintotherecovery prompt.
-type InterruptedTurnRecovery struct {
-	Pending                 bool                     `json:"pending,omitempty"`
-	CompletedTools          []InterruptedToolSummary `json:"completed_tools,omitempty"`
-	InterruptedTools        []string                 `json:"interrupted_tools,omitempty"`
-	DroppedPartialText      bool                     `json:"dropped_partial_text,omitempty"`
-	DroppedPartialReasoning bool                     `json:"dropped_partial_reasoning,omitempty"`
-}
-
-// InterruptedToolSummary records a completed, fully paired tool call withoutduplicatingitsargumentsorresult.
-// The canonical assistant/tool messagesimmediately before the recovery record remain the source of truth.
-type InterruptedToolSummary struct {
-	ID      string   `json:"id,omitempty"`
-	Name    string   `json:"name"`
-	Files   []string `json:"files,omitempty"`
-	Added   int      `json:"added,omitempty"`
-	Removed int      `json:"removed,omitempty"`
-}
-
 // MemoryCitation is local display metadata for memories that influenced anassistant turn.
 // Providerimplementations must not forward it to model APIs.
 type MemoryCitation struct {
@@ -200,9 +182,10 @@ func ParseImageDataURL(dataURL string) (mediaType, base64Data string, ok bool) {
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
 type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	WriteIntents []json.RawMessage `json:"write_intents,omitempty"` // local versioned evidence, stripped from model input
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Arguments    string            `json:"arguments"`
 	// ThoughtSignature is an opaque Gemini-issued proof attached to a functioncall. OpenAI-compatible
 	// Geminiendpoints require it on message replay.
 	ThoughtSignature string `json:"thought_signature,omitempty"`
@@ -701,6 +684,7 @@ const (
 // Estimated marks counts reconstructed locally because the provider's terminalusage record did not arrive;
 // exact provider usage leaves it false.
 type Usage struct {
+	Unknown                bool `json:"unknown,omitempty"` // at least one request had no provider usage
 	PromptTokens           int
 	CompletionTokens       int
 	TotalTokens            int
@@ -841,9 +825,11 @@ func isThreeLetterCurrencyCode(value string) bool {
 
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
-	Type      ChunkType
-	Text      string // ChunkText, ChunkReasoning
-	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	ThinkingBlock  *ThinkingBlock
+	ReasoningState ReasoningState
+	Type           ChunkType
+	Text           string // ChunkText, ChunkReasoning
+	Signature      string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
 	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
 	// (empty Text): the provider-issued reasoning item id/status capturedfrom the SSE stream, so the
 	// Agentcanpersist them into the sessionand the next turn's input reasoning item round-trips them (review

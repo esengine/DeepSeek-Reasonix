@@ -28,9 +28,10 @@ const (
 )
 
 type topicStateManager struct {
-	mu     sync.Mutex
-	scopes map[string]*topicStateScope
-	now    func() time.Time
+	mu               sync.Mutex
+	scopes           map[string]*topicStateScope
+	now              func() time.Time
+	operationContext func() (context.Context, context.CancelFunc)
 }
 
 type topicStateScope struct {
@@ -56,7 +57,10 @@ var desktopTopicState = newTopicStateManager()
 var topicLegacyWriteHookForTest func(string) error
 
 func newTopicStateManager() *topicStateManager {
-	return &topicStateManager{scopes: map[string]*topicStateScope{}, now: time.Now}
+	return &topicStateManager{
+		scopes: map[string]*topicStateScope{}, now: time.Now,
+		operationContext: newTopicOperationContext,
+	}
 }
 
 func (m *topicStateManager) scope(workspaceRoot string) *topicStateScope {
@@ -124,8 +128,6 @@ func (m *topicStateManager) mutate(workspaceRoot string, mutation func(context.C
 		return err
 	}
 	defer release()
-	ctx, cancelOperation := context.WithTimeout(context.Background(), topicStateOperationTimeout)
-	defer cancelOperation()
 	if err := m.ensureOpenAndReconcileLocked(scope); err != nil {
 		if legacyFallback != nil && legacyTopicFilesExist(scope.root) && legacyFallbackAllowed(err) {
 			slog.Warn("desktop: topic state using legacy write fallback", "scope", topicScopeKind(scope.root), "error_type", topicStateErrorType(err))
@@ -133,6 +135,10 @@ func (m *topicStateManager) mutate(workspaceRoot string, mutation func(context.C
 		}
 		return err
 	}
+	// Opening/reconciling uses its own context. Start the mutation's budget only
+	// after that phase; cold SQLite startup must not hand it an expired context.
+	ctx, cancelOperation := m.operationContext()
+	defer cancelOperation()
 	if _, err := mutation(ctx, scope.store); err != nil {
 		return err
 	}

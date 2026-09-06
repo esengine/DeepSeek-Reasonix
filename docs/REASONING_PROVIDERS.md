@@ -61,10 +61,10 @@ persisted `supported_efforts` metadata is retained but does not override it.
 
 ## DeepSeek Anthropic-compatible endpoint
 
-The default official DeepSeek provider targets `https://api.deepseek.com/anthropic`.
-New official entries use this native Messages API path and enable provider-side
-`web_search`; existing explicit providers, including legacy
-`deepseek-anthropic` entries, keep their configured protocol. Reasonix emits
+The default official DeepSeek provider uses Chat Completions at
+`https://api.deepseek.com`, with the independent [`web_search` tool](WEB_SEARCH.md)
+using Messages for search. The optional `deepseek-anthropic` preset remains
+available. When selected for the main conversation, Reasonix emits
 `thinking.type=enabled|disabled` with `output_config.effort`, replays unsigned
 DeepSeek thinking blocks from every historical assistant turn that carries
 reasoning when the request declares tools (tool-call turn or not), omits unsupported
@@ -87,13 +87,13 @@ session history remains unchanged.
 
 ## Missing-reasoning recovery
 
-When a provider requires reasoning to be replayed for a tool turn but returns a
-completed tool call without reasoning, Reasonix performs one exact retry of the
-frozen request before executing the tool. It does not disable thinking for the
-session or run a long-lived provider fallback circuit. If the retry still
-cannot produce replayable reasoning, the provider-specific recovery policy
-returns a clear protocol error; the existing one-shot stale-history 400 repair
-remains available for failures caused by earlier persisted history.
+Adapters own replay requirements. Complete DeepSeek Chat responses can use empty
+`reasoning_content`; compatible Responses endpoints can omit absent reasoning
+items. These paths continue without an extra generation. Strict contracts allow
+one recovery for missing or unfinished required proof, preferring repairable
+history over exact regeneration. The two recoveries do not stack, and neither
+changes the selected model or protocol. Client-truncated proof is never replaced
+with an empty field.
 
 ## Everything else (standard `reasoning_effort`)
 
@@ -139,3 +139,104 @@ If a model keeps thinking when you asked it not to (or vice versa):
 Distinguishing "provider ignores the field" from a Reasonix bug starts here:
 the request shape Reasonix emits is fixed per the table, so a mismatch between
 the table and observed behaviour is the provider's, not Reasonix's.
+
+## Reasoning replay and interrupted execution
+
+Replay contracts belong to adapters: DeepSeek Chat retains its empty
+`reasoning_content` fallback; DeepSeek Responses can omit an absent reasoning
+item but retains items actually returned. Anthropic unsigned thinking and native
+Claude signed thinking have separate requirements. Missing content or proofs
+never produce fabricated blocks. Unknown gateways do not gain extra empty-value
+compatibility from a DeepSeek model name; explicit protocol configuration applies.
+
+Anthropic preserves initial thinking, signature fragments, signed empty text, and
+separate signed blocks. Responses preserves full reasoning items and uses the
+completed response's final snapshot for the same item ID. Missing, explicitly
+empty, client-truncated, and unfinished states are distinct. Required truncated or
+unfinished reasoning cannot use an empty fallback to release tool execution.
+
+Compatibility conversion runs before strict recovery. Native Claude's complete,
+unsigned thinking from a non-tool assistant turn can become ordinary assistant
+text in the outbound view. It is not applied to client/server tool turns, mixed
+signed/unsigned proofs, redacted data, or incomplete/truncated reasoning. Raw
+local thinking stays intact; no signature is invented.
+
+An unknown Anthropic gateway does not acquire Claude's signature requirement
+from its model name or adaptive-thinking setting. With thinking replay enabled,
+its actually received unsigned blocks are retained without adding a signature.
+An absent block is not synthesized. Explicit `reasoning_protocol = "deepseek"`
+continues to enforce the DeepSeek replay contract. A concrete replay rejection
+from the server uses the existing bounded history repair, retaining completed
+execution facts instead of repeating tools.
+
+Native signed and DeepSeek replay prefixes stay unchanged. Gateways whose enabled
+thinking was previously dropped now receive their actual blocks; this corrects
+lossy serialization but can change the old prefix once. No ordinary user setting
+or additional persisted format is introduced by these conversions.
+
+Strict replay repair and reasoning HTTP 400 repair share one recovery and consume the current model round retry budget. Only the outbound view changes; original records and completed-tool facts remain available. New calls still pass replay validation.
+
+Tool results are recorded in call order, crossing a durability barrier before the
+next writer starts. Read-only parallel groups checkpoint after the group returns.
+Persistence failure prevents later tools from starting. Recovery distinguishes
+completed, definitely not started, and outcome unknown. Unknown calls require
+checking filesystem or external side effects before retrying. Missing results do
+not prove non-execution, and unfinished siblings do not hide completed writes.
+
+The optional fields `reasoning_state`, `thinking_blocks`, `tool_run_state`, and
+recovery fields `not_started_tools` / `unknown_tools` preserve legacy reads.
+Older sessions infer state from existing fields; interrupted placeholders mean
+unknown outcome. Older clients can ignore new metadata for display, but cannot be
+guaranteed to resume sessions relying on multiple signed blocks or opaque Responses
+items; use the current version for those sessions. Healthy histories are not
+stripped each round. Fault repair can change the repaired prefix's cache hit;
+newly appended healthy tool rounds stay outside the old-prefix repair.
+
+
+## Automatic retries and waiting
+
+Model rounds allow three additional attempts with 2/4/8-second backoff. HTTP,
+stream, and protocol recovery no longer reset separate budgets. Server retry
+delays take precedence. Only the main conversation can keep waiting after
+transient connection, throttling, or service failures, normally every 60 seconds.
+Partial generations, protocol failures, credentials, and exhausted quota cannot
+enter unlimited generation. Search, summaries, compaction, and subagents use
+finite retries. Cancellation and existing task limits remain effective; restarting
+the app does not automatically resume network activity. Request counts and known
+usage accumulate; missing usage is marked unknown, not interpreted as free.
+
+## File write verification
+
+Built-in writes and edits persist versioned `write_intents` before modification,
+including before/after content digests, encoding, path, and execution route.
+Failed persistence prevents writing. Metadata never enters model requests or tool
+schemas. Recovery reads the original route and reports satisfied postconditions
+only when every target matches; it does not invent the original execution result.
+Conflicts, unknown versions, and unavailable or replaced transports stay unknown.
+There is no fallback to a similarly named local file. Identical unresolved writes
+are blocked; read-only inspection remains available. Shell/MCP effects are not
+automatically verified. Old sessions remain readable without evidence; older
+clients do not provide the new recovery guarantees.
+
+
+### Verified official recovery behavior
+
+The 2026-09-05 official Flash/Pro probes distinguished original provider call
+IDs from replacement IDs: omitting reasoning can succeed with the former and
+return a protocol-specific HTTP 400 with the latter. Responses names
+`reasoning_text`, Messages names `content[].thinking`, and Chat names
+`reasoning_content`; all use the existing bounded recovery path. Do not infer
+unconditional omission support from one successful request.
+
+EOF inside an unterminated JSON event now enters finite stream recovery;
+malformed complete events remain errors. History repair carries bounded,
+escaped, model-visible completed tool outputs with their originating user turns.
+It retains the original repair boundary so later turns cannot reintroduce the
+removed protocol history. Raw/local-only output remains excluded. Only fault
+recovery changes that prefix; healthy schema and history stay stable.
+
+File-write intent persistence runs on the actual prepared dispatch context,
+before the effect. Missing terminal usage remains unknown through estimation
+and aggregation. See [the validation report](RECOVERY_VALIDATION.md) for real
+endpoint results, observed model variability, and the distinction between API
+acceptance and fault-injected Agent tests.

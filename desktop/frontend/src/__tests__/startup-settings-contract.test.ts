@@ -190,9 +190,9 @@ ok(
 );
 ok(
   bridgeSource.includes('value === "deepseek-upgrade"') &&
-    bridgeSource.includes('recommendedUpgradeAvailable: deepSeekUpgradeMock') &&
+    bridgeSource.includes('recommendedUpgradeAvailable: false') &&
     bridgeSource.includes('headers: deepSeekUpgradeMock ? { "X-Route": "official-custom" } : undefined'),
-  "browser mock can preview the customized legacy DeepSeek upgrade flow",
+  "browser mock preserves custom DeepSeek headers without proposing the retired protocol upgrade",
 );
 ok(
   /async ConnectKey\(apiKey: string\)[\s\S]*?await this\.AddOfficialProviderAccess\("deepseek", apiKey\)/.test(bridgeSource),

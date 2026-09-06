@@ -60,9 +60,9 @@ reasoning_protocol = "kimi-k3"
 
 ## DeepSeek Anthropic-compatible 端点
 
-默认官方 DeepSeek provider 指向 `https://api.deepseek.com/anthropic`。
-新建的官方条目使用原生 Messages API 路径并开启 provider 侧 `web_search`；已有显式
-provider（包括旧的 `deepseek-anthropic` 条目）保留其原协议。Reasonix 会发送
+默认官方 DeepSeek provider 使用 `https://api.deepseek.com` 的 Chat Completions，
+并开启[独立 `web_search` 工具](WEB_SEARCH.zh-CN.md)。搜索单独使用 Messages。
+`deepseek-anthropic` 仍作为可选预设保留，主对话选择它时，Reasonix 会发送
 `thinking.type=enabled|disabled` 与 `output_config.effort`，在请求携带 tools 时回放历史
 assistant 轮次中未签名的 DeepSeek 思考块，省略不支持的图片，并依赖 DeepSeek 的自动前缀缓存，
 而不是被忽略的 `cache_control` 标记。
@@ -80,11 +80,11 @@ reasoning 回传 HTTP 400 失败，Reasonix 只重建旧历史的 provider-visib
 
 ## 缺失 reasoning 时的恢复
 
-如果 provider 要求工具轮次回放 reasoning，但模型返回了没有 reasoning 的完整工具
-调用，Reasonix 会在执行工具前，对同一份 frozen request 做一次精确重试。它不会在
-整个会话中关闭 thinking，也不会运行长期 provider fallback 熔断器。如果重试后仍然
-无法产生可回放的 reasoning，provider-specific 恢复策略会返回明确的协议错误；如果
-问题来自旧会话中已经持久化的历史，现有的一次性 reasoning 400 自愈仍然有效。
+适配器决定回放要求。完整 DeepSeek Chat 响应允许空 `reasoning_content`，
+Responses 允许缺省的 reasoning item；这些兼容路径直接继续，不为补齐 reasoning
+额外生成一次响应。必要证明未完成或丢失时，严格协议最多恢复一次，优先修复
+确有问题的历史，否则从原请求重新生成；不叠加两种恢复，也不切换模型或协议。
+客户端截断的真实 reasoning 不能被空值替代。
 
 ## 其他所有后端（标准 `reasoning_effort`）
 
@@ -125,3 +125,81 @@ thinking    = "disabled"   # enabled | disabled — 发送 thinking.type
 
 区分“provider 忽略字段”与 Reasonix 自身的 bug 从这里入手：Reasonix 发出的
 请求形态按表格固定，因此表格与实际行为不一致时，问题在提供商而不是 Reasonix。
+
+## Reasoning 回放与中断恢复
+
+回放契约按适配器区分：DeepSeek Chat 保留空 `reasoning_content` 回退；
+DeepSeek Responses 可以省略没有返回的 reasoning item，实际返回的 item 则会
+保存。Anthropic unsigned thinking 与原生 Claude signed thinking 分开处理，
+不能为缺失内容或签名制造占位块。未知中转不因模型名包含 DeepSeek 就获得
+额外的空值兼容能力，继续使用显式协议配置。
+
+Anthropic 保存首块 thinking、分片 signature、签名空文本块以及多个独立签名块。
+Responses 保存完整 reasoning item，并采用 completed 响应中同一 ID 的终态内容。
+缺失、显式空值、客户端截断和未完成状态分别记录；截断或未完成的必要 reasoning
+不能通过空值回退放行工具执行。
+
+先进行协议兼容转换，再判定是否需要严格恢复。原生 Claude 的完整、无签名、
+不涉及工具的 assistant thinking，可以在出站请求中转换为普通 assistant 文本。
+客户端或服务端工具轮、签名与无签名混合块、redacted 数据、未完成或截断的内容
+不采用这种转换。本地原始 thinking 保持不变，不伪造签名。
+
+未知 Anthropic 网关不会因为模型名称或 adaptive thinking 设置就被要求提供
+Claude 签名。启用 thinking 回放时，保留实际收到的 unsigned 块，不添加签名；
+整块缺失时不补造。显式 `reasoning_protocol = "deepseek"` 仍按 DeepSeek 契约
+检查回放。若服务端确实拒绝回放，则进入既有的有限历史修复，携带已完成工具事实，
+不重复执行工具。
+
+原生签名和 DeepSeek 的健康回放前缀保持原样。某些 enabled 网关以前会丢掉真实
+thinking，现在保留这些块会改变旧前缀一次；后续回放稳定。转换不新增普通用户
+配置，也不新增持久化格式。
+
+严格协议修复和 reasoning HTTP 400 修复共用一次预算，且消耗当前模型轮的统一重试次数。只修改供应商请求视图，保留本地原始记录和已完成工具事实；新的工具请求仍须通过回放检查。
+
+工具完成后按调用顺序记录结果，下一个写操作开始前经过持久化检查；只读并行组
+在组内全部返回后依次记录。持久化失败会阻止后续工具启动。恢复分别列出已完成、
+确定未执行、结果未知的调用。结果未知时先核对文件或外部系统的副作用，不能把
+“没有结果”当成“没有执行”，也不能因同批其他调用缺失而重复已完成的写入。
+
+新增 `reasoning_state`、`thinking_blocks`、`tool_run_state` 以及恢复记录中的
+`not_started_tools` / `unknown_tools` 均为可选字段。旧会话按现有字段推断状态，
+旧版中断占位结果按结果未知处理。旧客户端可以忽略新字段并读取记录，但不保证
+能续跑依赖多个签名块或不透明 Responses item 的新会话，这类会话应使用当前版本。
+正常历史不逐轮清理 reasoning；故障修复可能降低被修复前缀的缓存命中，后续新增
+的健康工具轮保留原样。
+
+
+## 自动重试与等待
+
+普通模型轮最多额外重试三次，退避为 2、4、8 秒；HTTP 连接、断流和协议修复不再分别重置预算。
+服务端等待提示优先。仅主会话在明确的临时连接、限流或服务故障下，可在快速重试耗尽后
+每约 60 秒继续等待；已经产生不完整内容、协议错误、凭据或额度问题不进入无限生成。
+搜索、摘要、压缩和子任务使用有限重试。停止、既有任务期限和预算仍然有效；重启不自动联网续跑。
+请求数和已知 usage 累计；缺失用量标为 unknown，不能解读为免费请求。
+
+## 文件写入核验
+
+内置写入和编辑在实际修改前持久化 `write_intents`，包括版本、原始及预期内容摘要、
+编码、路径和执行通道；持久化失败时不写入。元数据不进入模型请求或工具 schema。
+恢复通过原通道检查当前目标，满足全部预期条件时报告“修改目标已满足”，不虚构原执行结果。
+文件冲突、未知版本、原通道失联或替换时保留未知；不会改读本地同名路径。
+重复的未知写调用被阻止；只读核对仍然允许。Shell/MCP 不支持自动副作用核验。
+旧会话缺少核验证据时仍可读取；旧客户端不保证新版恢复能力。
+
+
+### 官方端点恢复实测
+
+2026-09-05 的 Flash／Pro 实测区分了原始调用 ID 与替换后的 ID：省略 reasoning
+在前者可能成功，在后者可能触发协议专属的 HTTP 400。Responses 错误字段为
+`reasoning_text`，Messages 为 `content[].thinking`，Chat 为 `reasoning_content`；
+均进入已有的有限恢复流程。不能从一次成功请求推断服务端无条件允许省略。
+
+未结束 JSON 事件中的 EOF 进入有限断流恢复；完整事件中的非法 JSON 仍报错。
+历史修复携带经过转义、有界、模型原本可见的已完成工具结果，并标明所属用户轮次；
+修复边界定位在原始历史上，防止后续轮次重新引入已移除的错误协议历史。
+RawContent 等本地内容不进入请求。只有故障恢复改变该前缀，健康工具 schema
+和历史保持稳定。
+
+文件写入的意图持久化绑定实际执行工具的上下文，在落盘前完成；缺少终态 usage
+时，估算和合并也保留未知标记。真实端点结果、模型行为波动及服务端契约与故障
+注入的区分，见[验证报告](RECOVERY_VALIDATION.md)。

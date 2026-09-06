@@ -67,7 +67,7 @@ func lookupToolResult(msgs []provider.Message, toolID string) *ToolResultData {
 			}
 			return &ToolResultData{
 				Args:   provider.FormatServerSearchArgs(search.Query),
-				Output: provider.FormatServerSearchOutput(search.Results),
+				Output: provider.ServerSearchDisplayOutput(search),
 			}
 		}
 	}

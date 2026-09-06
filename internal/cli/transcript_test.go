@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"reasonix/internal/i18n"
 	"strings"
 	"testing"
 
@@ -401,5 +403,25 @@ func TestCopyToClipboard(t *testing.T) {
 	got = copyToClipboard("remote")().(clipboardCopyMsg)
 	if !got.osc52 || got.text != "remote" {
 		t.Fatalf("SSH clipboard result = %+v, want OSC 52", got)
+	}
+}
+
+func TestReplaySearchMissingSourcesIsExplicitAndKeepsSummary(t *testing.T) {
+	render := func(s string, _ int) string { return s }
+	for _, msg := range []provider.Message{
+		{Role: provider.RoleAssistant, ServerSearch: []provider.ServerSearchCall{{ID: "s", SourcesStatus: provider.SourcesNotProvided}}},
+		{Role: provider.RoleTool, Name: "web_search", Content: `{"sources_status":"not_provided","summary":"retained search summary"}`},
+	} {
+		got := strings.Join(replaySectionsForWithAssistantRenderer([]provider.Message{msg}, 80, render), "")
+		if !strings.Contains(got, i18n.M.SearchSourcesNotProvided) {
+			t.Fatal("missing source notice")
+		}
+		if msg.Role == provider.RoleTool && !strings.Contains(got, "retained search summary") {
+			t.Fatal("summary lost")
+		}
+	}
+	old := provider.Message{Role: provider.RoleAssistant, ServerSearch: []provider.ServerSearchCall{{ID: "s", Raw: json.RawMessage(`[]`)}}}
+	if got := searchHistorySections(old, 80, render); len(got) != 0 {
+		t.Fatal("inferred unrecorded old status")
 	}
 }

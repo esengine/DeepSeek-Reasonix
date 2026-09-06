@@ -1,5 +1,7 @@
 package provider
 
+import "slices"
+
 // Two copies of a transcript are derived from the stored one: the bytes a
 // provider receives, and the projection compaction writes back. They differ in
 // exactly one field, and that difference is load-bearing.
@@ -19,7 +21,7 @@ func ProjectionMessages(msgs []Message) []Message { return projectMessages(msgs,
 func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || (m.ToolExecution != nil && !keepExecution) {
+		if slices.ContainsFunc(m.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) || len(m.ProtocolRecovery) > 0 || (!keepExecution && slices.ContainsFunc(m.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 })) || m.LocalOnly || (!keepOrigin && m.Origin != "") || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.VisionSummary != nil || m.MCPApp != nil || ((m.ToolExecution != nil || m.ToolRunState != "") && !keepExecution) {
 			needsCopy = true
 			break
 		}
@@ -37,6 +39,13 @@ func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 			candidate.ProviderContent = ""
 		}
 		candidate.RawContent = ""
+		candidate.ProtocolRecovery = nil
+		if !keepExecution && slices.ContainsFunc(candidate.ServerSearch, func(s ServerSearchCall) bool { return s.SourcesStatus != "" }) {
+			candidate.ServerSearch = append([]ServerSearchCall(nil), candidate.ServerSearch...)
+			for i := range candidate.ServerSearch {
+				candidate.ServerSearch[i].SourcesStatus = ""
+			}
+		}
 		if !keepOrigin {
 			candidate.Origin = ""
 		}
@@ -48,6 +57,13 @@ func projectMessages(msgs []Message, keepExecution, keepOrigin bool) []Message {
 		if !keepExecution {
 			// Local shell metadata must never enter provider request bytes.
 			candidate.ToolExecution = nil
+			candidate.ToolRunState = ""
+			if slices.ContainsFunc(candidate.ToolCalls, func(c ToolCall) bool { return len(c.WriteIntents) > 0 }) {
+				candidate.ToolCalls = append([]ToolCall(nil), candidate.ToolCalls...)
+				for i := range candidate.ToolCalls {
+					candidate.ToolCalls[i].WriteIntents = nil
+				}
+			}
 		}
 		out = append(out, candidate)
 	}

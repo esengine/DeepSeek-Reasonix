@@ -184,7 +184,7 @@ func (a *App) promoteLocalTakeoverSpectator(
 	tab.ActivityStatus = ""
 	tab.replaceTelemetry(candidate.telemetry, key)
 	if tab.sink != nil {
-		tab.sink.setBinding(tab.ID, a)
+		tab.sink.setBinding(tab.ID, a, tab.SessionGeneration)
 		tab.sink.setContext(a.ctx)
 	}
 	a.supersedeTabBuildLocked(tab)

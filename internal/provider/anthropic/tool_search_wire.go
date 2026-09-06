@@ -8,7 +8,7 @@ import (
 
 func encodeAnthTools(c *client, req provider.Request) []anthTool {
 	var tools []anthTool
-	if c.webSearch {
+	if c.search.NativeEnabled && !c.search.ClientEnabled {
 		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
 	}
 	for _, t := range req.Tools {

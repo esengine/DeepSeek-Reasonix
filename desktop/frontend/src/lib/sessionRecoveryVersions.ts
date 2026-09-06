@@ -37,7 +37,7 @@ export function normalizeRecoveryLineageView(value: unknown): RecoveryLineageVie
 
 export function userVisibleRecoveryVersions(view: Pick<RecoveryLineageView, "members">): RecoveryLineageMember[] {
   return asArray(view.members)
-    .filter((member) => member.role !== "covered_copy")
+    .filter((member) => member.role !== "covered_copy" && member.versionKind !== "subagent")
     .sort((left, right) => Number(right.canonical) - Number(left.canonical)
       || count(right.lastActivityAt || right.createdAt) - count(left.lastActivityAt || left.createdAt));
 }

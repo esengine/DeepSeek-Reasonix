@@ -190,7 +190,7 @@ func TestFactoryPropagatesWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newFromConfig: %v", err)
 	}
-	if !p.(*client).webSearch {
+	if !p.(*client).search.NativeEnabled {
 		t.Fatal("web_search was not propagated to the Responses client")
 	}
 }

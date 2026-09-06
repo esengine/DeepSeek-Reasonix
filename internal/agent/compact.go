@@ -428,7 +428,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.svc.prov.Stream(ctx, req)
+	ch, err := provider.StreamAuxiliary(provider.WithRecoverySleeper(ctx, recoverySleep), a.svc.prov, req)
 	if err != nil {
 		return "", usage, err
 	}

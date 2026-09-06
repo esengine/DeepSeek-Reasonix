@@ -89,7 +89,7 @@ func TestMissingReasoningRetryAggregateDoesNotTriggerEarlyCompaction(t *testing.
 		{Role: provider.RoleAssistant, Content: strings.Repeat("more old work ", 100)},
 	}}
 	sink := &recordSink{}
-	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), sess, Options{
+	a := New(strictToolCallReasoningProvider{mp}, echoRegistry(), sess, Options{
 		ContextWindow: 10_000,
 		ArchiveDir:    t.TempDir(),
 	}, sink)

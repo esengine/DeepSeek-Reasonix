@@ -177,17 +177,6 @@ const (
 	StreamAttemptCommit  StreamAttemptAction = "commit"
 )
 
-// RetryScope distinguishes connection+header retries, body-phase stream
-// retries, and host-classified protocol recovery. Older clients ignore an
-// unknown value and still render the generic retry state.
-type RetryScope string
-
-const (
-	RetryScopeHeaders  RetryScope = "headers"
-	RetryScopeStream   RetryScope = "stream"
-	RetryScopeProtocol RetryScope = "protocol"
-)
-
 // StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
 // Reason is a fixed enum (connection_reset | premature_eof | idle_timeout).
 type StreamAttemptInfo struct {
@@ -537,32 +526,37 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
-	Level           Level                    // Notice
-	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
-	Approval        Approval                 // ApprovalRequest
-	Ask             Ask                      // AskRequest
-	MCPInteraction  MCPInteraction           // MCPInteractionRequest
-	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
-	Err             error                    // TurnDone: non-nil on failure
-	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
-	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
-	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
-	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
-	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
-	Compaction      Compaction               // Compaction
-	Maintenance     *ContextMaintenance      // ContextMaintenanceEvent
-	Guardian        GuardianResult
-	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
-	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
-	RetryMax        int                       // Retrying: total attempts before giving up
-	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
-	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
-	ItemID          string                    // correlates durable inbox events
-	SessionPath     string                    // routes Serve frames
-	SessionReset    bool                      // SessionChanged came from /new or /clear, not resume/recovery
-	Workspace       *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
+	SessionHit         int                      // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss        int                      // Usage: cumulative cache-miss prompt tokens this session
+	Level              Level                    // Notice
+	Audience           NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
+	Approval           Approval                 // ApprovalRequest
+	Ask                Ask                      // AskRequest
+	MCPInteraction     MCPInteraction           // MCPInteractionRequest
+	Extension          *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
+	Err                error                    // TurnDone: non-nil on failure
+	Cancelled          bool                     // TurnDone: Cancel was requested while the turn was active
+	Outcome            string                   // TurnDone: optional machine-readable recoverable outcome
+	Readiness          *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	ProtocolRecovery   *provider.ProtocolRecoveryAction
+	Diagnostic         *provider.FailureDiagnostic
+	RecoveryCheckpoint bool                // local durable recovery checkpoint, not a notice
+	Receipt            *CompletionReceipt  // TurnDone: what the host verified, and what it could not
+	CheckpointTurn     *int                // TurnDone: authoritative checkpoint for this turn's visible user message
+	Compaction         Compaction          // Compaction
+	Maintenance        *ContextMaintenance // ContextMaintenanceEvent
+	Guardian           GuardianResult
+	DecisionReceipt    *provider.DecisionReceipt // Notice: durable user decision receipt
+	WriteIntent        bool                      // local write-ahead checkpoint, not a user notice
+	Recovery           *RecoveryStatus           // optional local recovery details
+	RetryAttempt       int                       // Retrying: 1-based attempt about to be made
+	RetryMax           int                       // Retrying: total attempts before giving up
+	RetryScope         RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	StreamAttempt      StreamAttemptInfo         // StreamAttempt lifecycle
+	ItemID             string                    // correlates durable inbox events
+	SessionPath        string                    // routes Serve frames
+	SessionReset       bool                      // SessionChanged came from /new or /clear, not resume/recovery
+	Workspace          *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
 	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
 	PhaseName TurnPhaseName
 	// Completion is set on CompletionSummary events.

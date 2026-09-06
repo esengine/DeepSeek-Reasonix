@@ -21,7 +21,6 @@
 package anthropic
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -127,6 +126,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		modelInfo.InputModalities = []provider.ModelModality{provider.ModalityText}
 	}
 	webSearch, _ := cfg.Extra["web_search"].(bool)
+	clientWebSearch, _ := cfg.Extra["client_web_search"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
@@ -147,7 +147,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
 	}
+	if reject, _ := cfg.Extra["reject_redirects"].(bool); reject {
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	return &client{
+		identityHeaders:  provider.NewClientIdentityHeaders(),
 		name:             name,
 		apiKey:           cfg.APIKey,
 		keyEnv:           keyEnv,
@@ -162,7 +166,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		vision:           vision,
 		modelInfo:        modelInfo,
 		mimo:             provider.IsMiMoEndpoint(root),
-		webSearch:        webSearch,
+		search:           provider.SearchPolicy{NativeEnabled: webSearch, ClientEnabled: clientWebSearch},
 		headers:          cleanCustomHeaders(headers),
 		authHeader:       authHeader,
 		defaultMaxTokens: maxOutputTokens,
@@ -182,6 +186,7 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
+	identityHeaders  http.Header
 	name             string
 	apiKey           string
 	keyEnv           string // api_key_env name, surfaced in auth errors
@@ -196,7 +201,7 @@ type client struct {
 	vision           bool   // model accepts image input — embed attached images as base64 image blocks
 	modelInfo        provider.ModelInfo
 	mimo             bool // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
-	webSearch        bool // enable server-side web_search tool (DeepSeek Anthropic API)
+	search           provider.SearchPolicy
 	headers          map[string]string
 	authHeader       bool // send Authorization: Bearer instead of Anthropic's x-api-key header
 	defaultMaxTokens int
@@ -239,8 +244,11 @@ func (c *client) RequiresToolCallReasoning() bool {
 }
 
 func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
-	if c == nil || !c.deepseek {
+	if c == nil {
 		return false
+	}
+	if !c.deepseek {
+		return c.requiresReceivedReasoning(m)
 	}
 	// A turn carrying provider-issued reasoning must replay it, tools or not:
 	// DeepSeek's thinking mode 400s when a stored thinking block is not passed
@@ -347,6 +355,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 			httpReq.Header.Set("anthropic-beta", "files-api-2025-04-14")
 		}
 		applyCustomHeaders(httpReq.Header, c.headers)
+		provider.ApplyOpenCodeGoHeaders(httpReq, c.baseURL, c.identityHeaders)
 		return httpReq, nil
 	}
 	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
@@ -419,9 +428,7 @@ func (c *client) buildRequest(ctx context.Context, req provider.Request) anthReq
 			// not — even if the current request no longer declares tools or has
 			// since disabled thinking. Anthropic proper requires a signature, so
 			// reasoning without one cannot be replayed on that endpoint.
-			if block, ok := c.replayReasoningBlock(m); ok {
-				blocks = append(blocks, block)
-			}
+			blocks = append(blocks, c.replayReasoningBlocks(m)...)
 			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
@@ -534,6 +541,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
 	searches := newSearchStream()
+	thinking := map[int]*provider.ThinkingBlock{}
 	argBuckets := map[int]int{} // last emitted 2KB progress bucket per block
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
@@ -554,8 +562,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		haveUsage = true
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := provider.NewStreamScanner(resp.Body, 1024*1024)
 
 	for scanner.Scan() {
 		select { // ping the idle watchdog; non-blocking so a full buffer is fine
@@ -575,10 +582,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		var ev streamEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamDecodeError(c.name, data, err)})
+			send(provider.Chunk{Type: provider.ChunkError, Err: scanner.DecodeError(c.name, data, err)})
 			return
 		}
 
+		if !updateThinkingStream(thinking, ev, send) {
+			return
+		}
 		switch ev.Type {
 		case "message_start":
 			if ev.Message != nil && ev.Message.Usage != nil {
@@ -598,18 +608,6 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			case "text_delta":
 				if ev.Delta.Text != "" {
 					if !send(provider.Chunk{Type: provider.ChunkText, Text: ev.Delta.Text}) {
-						return
-					}
-				}
-			case "thinking_delta":
-				if ev.Delta.Thinking != "" {
-					if !send(provider.Chunk{Type: provider.ChunkReasoning, Text: ev.Delta.Thinking}) {
-						return
-					}
-				}
-			case "signature_delta":
-				if ev.Delta.Signature != "" {
-					if !send(provider.Chunk{Type: provider.ChunkReasoning, Signature: ev.Delta.Signature}) {
 						return
 					}
 				}
@@ -678,6 +676,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	goto finalize
 
 finalize:
+	if len(thinking) > 0 {
+		send(provider.Chunk{Type: provider.ChunkReasoning, ReasoningState: provider.ReasoningIncomplete})
+	}
 	if haveUsage {
 		cacheWriteBilledTokens := 0.0
 		if cacheCreate > 0 && c.nativeAnthropic {
@@ -776,6 +777,7 @@ type anthMessage struct {
 // tool_use (echoing a prior assistant call), and tool_result. Unused fields are
 // omitted so each block serialises to its canonical shape.
 type contentBlock struct {
+	Data         string          `json:"data,omitempty"`
 	Type         string          `json:"type"`
 	Text         string          `json:"text,omitempty"`        // text
 	Thinking     string          `json:"thinking,omitempty"`    // thinking

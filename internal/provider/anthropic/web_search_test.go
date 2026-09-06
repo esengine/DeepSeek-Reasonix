@@ -15,7 +15,7 @@ import (
 // server-side web_search tool is enabled: it is prepended as a typed entry
 // without an input_schema, and named tools keep their schema untouched.
 func TestBuildRequestWebSearchServerTool(t *testing.T) {
-	c := &client{name: "deepseek", model: "deepseek-v4-flash", webSearch: true}
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", search: provider.SearchPolicy{NativeEnabled: true}}
 	r := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 		Tools:    []provider.ToolSchema{{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)}},
@@ -221,7 +221,7 @@ func TestStreamSurfacesWebSearchResultDelta(t *testing.T) {
 }
 
 func TestBuildRequestReplaysServerSearchBlocks(t *testing.T) {
-	c := &client{name: "deepseek", model: "deepseek-v4-flash", webSearch: true}
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", search: provider.SearchPolicy{NativeEnabled: true}}
 	raw := json.RawMessage(`[{"title":"Change Log","url":"https://api-docs.deepseek.com/updates/","encrypted_content":"xxx"}]`)
 	r := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{{
@@ -255,7 +255,7 @@ func TestBuildRequestReplaysServerSearchBlocks(t *testing.T) {
 }
 
 func TestBuildRequestDeepSeekReplaysThinkingBeforeServerSearch(t *testing.T) {
-	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", search: provider.SearchPolicy{NativeEnabled: true}}
 	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "search first",
 		ServerSearch: []provider.ServerSearchCall{{
@@ -275,7 +275,7 @@ func TestBuildRequestDeepSeekReplaysThinkingBeforeServerSearch(t *testing.T) {
 }
 
 func TestBuildRequestDeepSeekProjectsMissingThinkingServerSearchToPlainText(t *testing.T) {
-	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", search: provider.SearchPolicy{NativeEnabled: true}}
 	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleAssistant, Content: "answer",
 		ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "latest", Raw: json.RawMessage(`[]`)}},
@@ -287,7 +287,7 @@ func TestBuildRequestDeepSeekProjectsMissingThinkingServerSearchToPlainText(t *t
 }
 
 func TestBuildRequestDeepSeekOrdersThinkingSearchTextAndClientTool(t *testing.T) {
-	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", search: provider.SearchPolicy{NativeEnabled: true}}
 	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleAssistant, Content: "checking", ReasoningContent: "use both",
 		ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "latest", Raw: json.RawMessage(`[]`)}},

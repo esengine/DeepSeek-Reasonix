@@ -2,6 +2,7 @@ package agent
 
 import (
 	"reasonix/internal/completion"
+	"reasonix/internal/provider"
 	"reasonix/internal/runtimepolicy"
 )
 
@@ -10,6 +11,7 @@ import (
 // State an external caller arms before a Run lives in pendingTurn; state that
 // outlives the Run lives in taskRuntime or sessionRuntime.
 type turnRuntime struct {
+	writeRecovery  map[string]provider.ToolCall // unresolved prior effects; reverified before reuse
 	runMaxSteps    int
 	runMaxStepsKey string
 

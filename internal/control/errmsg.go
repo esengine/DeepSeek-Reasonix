@@ -39,8 +39,17 @@ func explainError(err error) error {
 		}
 		return errors.New(msg)
 	}
+	if quota := provider.AsQuotaError(err); quota != nil {
+		return fmt.Errorf(i18n.M.ProviderErrQuotaExhaustedFmt, quota.Provider, quota.Status)
+	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
+		if provider.IsOpaqueBadRequest(err) {
+			if trace := provider.DiagnoseFailure(err).TraceID; trace != "" {
+				return fmt.Errorf("%s\nTrace ID: %s", i18n.M.ProviderErrReasonMissing, trace)
+			}
+			return errors.New(i18n.M.ProviderErrReasonMissing)
+		}
 		if msg := providerContentSafetyMessage(apiErr); msg != "" {
 			if reason := apiErrorReason(apiErr); reason != "" {
 				return fmt.Errorf("%s\n%s", msg, reason)

@@ -40,7 +40,7 @@ func ParseReasoningReplayError(apiErr *APIError) *ReasoningReplayError {
 		return nil
 	}
 	body := strings.ToLower(apiErr.Body)
-	namesReasoning := strings.Contains(body, "content[].thinking") || strings.Contains(body, "reasoning_content")
+	namesReasoning := strings.Contains(body, "content[].thinking") || strings.Contains(body, "reasoning_content") || strings.Contains(body, "reasoning_text")
 	if !namesReasoning || !strings.Contains(body, "must be passed back") {
 		return nil
 	}

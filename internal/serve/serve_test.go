@@ -426,7 +426,7 @@ func TestServeIndexReportsSessionDeleteFailures(t *testing.T) {
 func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
-		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;",
+		"case 'retrying': setRetrying(e.retryAttempt,e.retryMax,e.recovery); break;",
 		"if(e.kind!=='retrying')clearRetrying();",
 		"'retrying_status': 'Retrying ({attempt}/{max})...'",
 		"'retrying_status': '正在重试 ({attempt}/{max})...'",

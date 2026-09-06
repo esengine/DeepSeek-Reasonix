@@ -76,7 +76,7 @@ func projectReasoningStrippedMessages(p Provider, msgs []Message, prefix int) ([
 		if m.Role != RoleAssistant {
 			continue
 		}
-		if m.ReasoningContent == "" && m.ReasoningSignature == "" && m.ReasoningID == "" && m.ReasoningStatus == "" {
+		if m.ReasoningContent == "" && m.ReasoningSignature == "" && m.ReasoningID == "" && m.ReasoningStatus == "" && len(m.ThinkingBlocks) == 0 && len(m.ResponsesItems) == 0 && m.ReasoningState == "" {
 			continue
 		}
 		if !stripped {
@@ -87,6 +87,9 @@ func projectReasoningStrippedMessages(p Provider, msgs []Message, prefix int) ([
 		work[i].ReasoningSignature = ""
 		work[i].ReasoningID = ""
 		work[i].ReasoningStatus = ""
+		work[i].ReasoningState = ReasoningIncomplete
+		work[i].ThinkingBlocks = nil
+		work[i].ResponsesItems = nil
 	}
 	projected, projectedChanged := projectReplaySafeMessages(p, work, prefix, false)
 	return projected, stripped || projectedChanged
@@ -107,17 +110,16 @@ func ProjectReplaySafeMessages(p Provider, msgs []Message) ([]Message, bool) {
 }
 
 func projectReplaySafeMessages(p Provider, msgs []Message, prefix int, honorEmptyFallback bool) ([]Message, bool) {
-	if honorEmptyFallback && AllowsEmptyReasoningFallback(p) {
-		return msgs, false
-	}
+	msgs, converted := projectCompatibleReplay(p, msgs, prefix)
+
 	isUnreplayable := func(m Message) bool {
 		return m.Role == RoleAssistant &&
 			RequiresAssistantReasoningReplay(p, m) &&
-			strings.TrimSpace(m.ReasoningContent) == ""
+			!HasReplayableReasoning(p, m) && (!honorEmptyFallback || !CanReplayAssistantMessage(p, m))
 	}
 
 	if !slices.ContainsFunc(msgs[:prefix], isUnreplayable) {
-		return msgs, false
+		return msgs, converted
 	}
 
 	out := make([]Message, 0, len(msgs))
@@ -135,6 +137,8 @@ func projectReplaySafeMessages(p Provider, msgs []Message, prefix int, honorEmpt
 			plain.ReasoningSignature = ""
 			plain.ReasoningID = ""
 			plain.ReasoningStatus = ""
+			plain.ReasoningState = ""
+			plain.ThinkingBlocks = nil
 			plain.ToolCalls = nil
 			plain.ResponsesItems = nil
 			plain.ServerSearch = nil

@@ -6,6 +6,7 @@ export type SearchSource = {
 export interface HistoryServerSearch {
   id: string;
   query?: string;
+  sources_status?: "available" | "not_provided";
   results?: { title?: string; url?: string }[];
 }
 
@@ -46,6 +47,19 @@ export function searchSourcesFromHistory(searches: { results?: { title?: string;
 }
 
 export function parseSearchSources(output: string): SearchSource[] {
+  if (output.trimStart().startsWith("{")) {
+    try {
+      const result: unknown = JSON.parse(output);
+      if (result && typeof result === "object" && "sources" in result && Array.isArray(result.sources)) {
+        return result.sources.flatMap((source: unknown): SearchSource[] => {
+          if (!source || typeof source !== "object" || !("url" in source) || typeof source.url !== "string" || !isSafeHttpUrl(source.url)) return [];
+          return [{ url: source.url, title: "title" in source && typeof source.title === "string" ? source.title : undefined }];
+        });
+      }
+    } catch {
+      // Old search output is plain text; preserve its existing parser.
+    }
+  }
   const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
   const out: SearchSource[] = [];
   for (const line of lines) {
@@ -74,4 +88,15 @@ export function formatSearchFootnotesMarkdown(sources: SearchSource[]): string {
     if (source.url && isSafeHttpUrl(source.url)) lines.push(`  <${source.url}>`);
   }
   return lines.length > 0 ? `\n${lines.join("\n")}\n` : "";
+}
+
+// Only explicit structured metadata carries availability; never infer it from prose.
+export function searchOutputMetadata(output?: string): { status?: "available" | "not_provided"; summary?: string } {
+  if (!output) return {};
+  try {
+    const value = JSON.parse(output);
+    if (!value || typeof value !== "object") return {};
+    return { status: value.sources_status === "available" || value.sources_status === "not_provided" ? value.sources_status : undefined,
+      summary: typeof value.summary === "string" ? value.summary : undefined };
+  } catch { return {}; }
 }

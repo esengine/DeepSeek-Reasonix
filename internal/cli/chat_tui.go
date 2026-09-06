@@ -96,12 +96,11 @@ type chatTUI struct {
 	runStart              time.Time
 	elapsed               int
 	elapsedTickGeneration uint64
-	// retryAttempt/retryMax drive the transient "retrying (n/m)" indicator while
-	// the provider re-attempts the connection; cleared by the next stream event.
+	// Recovery state is cleared by progress or completion.
 	retryAttempt int
 	retryMax     int
-	// turnPhase is the host turn phase from turn_phase events
-	// (working|checking|verifying|reviewing). Cleared on TurnDone.
+	recovery     *event.RecoveryStatus
+	// Host turn phase, cleared on TurnDone.
 	turnPhase string
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
@@ -3261,6 +3260,10 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 		return ""
 	}
 	if m.retryAttempt > 0 && !cancelRequested {
+		if line, ok := m.waitingRecoveryLine(); ok {
+			return line
+		}
+
 		return fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
 	}
 
@@ -4227,26 +4230,23 @@ func (m *chatTUI) unsendPending() {
 // of a flattened byte stream: the structure is now explicit.
 func (m *chatTUI) ingestEvent(e event.Event) {
 	if e.Kind == event.Retrying {
-		m.retryAttempt = e.RetryAttempt
-		m.retryMax = e.RetryMax
+		m.setRecoveryStatus(e)
 		return
 	}
 	if e.Kind == event.StreamAttempt {
-		// Body-phase replay: clear any in-progress tool presentation and surface
-		// a reconnect marker. Text already in terminal scrollback is left as-is.
+		// Clear speculative presentation when an attempt is discarded.
 		if e.StreamAttempt.Action == event.StreamAttemptDiscard {
 			m.toolPartial = ""
 			m.toolTail = nil
 			m.toolStreamIdx = -1
 			m.toolLineCount = 0
-			m.commitLine(dim("  ↻ stream interrupted — reconnecting…"))
+			m.recordRecoveryDiscard(e.StreamAttempt.Reason)
 		}
 		return
 	}
 	// Any other event means the connection got past the retry window (or the turn
 	// ended), so the transient "retrying" indicator clears.
-	m.retryAttempt = 0
-	m.retryMax = 0
+	m.clearRecoveryStatus()
 	if m.turnDiscarded {
 		// The turn was un-sent (Esc before any packet); swallow whatever was already
 		// buffered for it until it settles, so nothing lands in scrollback.
@@ -4563,6 +4563,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	cmd := canonicalBuiltinSlashCommand(typedCmd)
 
 	switch cmd {
+	case control.RecoverContextCommand:
+		id, guidance, _ := control.ParseProtocolRecoveryCommand(input)
+		return m.startControllerTurn(input, input, func() {
+			if runner, ok := m.ctrl.(interface{ SubmitProtocolRecovery(string, string) }); ok {
+				runner.SubmitProtocolRecovery(id, guidance)
+			}
+		})
 	case control.ContinueChecksCommand:
 		prompt, _ := control.ParseFinalReadinessRecoveryCommand(input)
 		return m.startControllerTurn(input, input, func() {
@@ -5267,6 +5274,9 @@ func replaySectionsForWithRenderers(
 	var out []string
 	for _, m := range cliHistoryWithoutPinnedContextRevisions(history) {
 		if m.LocalOnly {
+			if recovery, ok := provider.DecodeProtocolRecovery(m.ProtocolRecovery); ok && recovery.State == "pending" {
+				out = append(out, fmt.Sprintf("  · %s: /recover-context %s\n\n", i18n.M.ProtocolRecoveryLabel, recovery.ID))
+			}
 			if m.FinalReadinessRecovery != nil && m.FinalReadinessRecovery.Pending {
 				out = append(out, fmt.Sprintf("  · %s\n\n", i18n.M.FinalReadinessRecovery))
 				continue
@@ -5285,6 +5295,7 @@ func replaySectionsForWithRenderers(
 			}
 			continue
 		}
+		out = append(out, searchHistorySections(m, width, renderAssistant)...)
 		switch m.Role {
 		case provider.RoleUser:
 			// Steer messages are surfaced as a notice line, not a user bubble.

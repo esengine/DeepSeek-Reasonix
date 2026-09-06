@@ -791,6 +791,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.adoptDisplayState(source.displayBufferState())
 	if source.sink != nil {
 		source.sink.setBinding(target.ID, app)
+		source.sink.setSessionGeneration(target.SessionGeneration)
 		source.sink.setContext(wailsCtx)
 	}
 
@@ -1659,15 +1660,16 @@ func retryPendingDisplayWrites(state *tabDisplayState) {
 // live under mu like ctx does (a bare field write would data-race Emit). Read
 // them via binding(), write via setBinding().
 type tabEventSink struct {
-	tabID         string
-	app           *App
-	mu            sync.RWMutex
-	ctx           context.Context
-	runtimeEpoch  string
-	runtimeEvents asyncRuntimeEmitter
-	botSink       event.Sink // optional: when set, events are also forwarded here
-	botSinkGen    uint64
-	turn          turnSubmissionState // stays reserved through the end of TurnDone fan-out
+	tabID             string
+	app               *App
+	mu                sync.RWMutex
+	ctx               context.Context
+	runtimeEpoch      string
+	sessionGeneration uint64 // source session binding generation
+	runtimeEvents     asyncRuntimeEmitter
+	botSink           event.Sink // optional: when set, events are also forwarded here
+	botSinkGen        uint64
+	turn              turnSubmissionState // stays reserved through the end of TurnDone fan-out
 	// takeoverMirror, when set, forwards every event to the serve that used to
 	// own this session so the remote tab keeps rendering after a local
 	// takeover. Atomic so Emit reads it without the sink lock.
@@ -1741,7 +1743,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			persistMetricsEvent(app, m, tabID, e)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt))
+	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot(), turnStartedAt, s.sessionGenerationSnapshot()))
 	if m := s.takeoverMirror.Load(); m != nil {
 		m.forwardEvent(e)
 	}
@@ -2330,9 +2332,10 @@ func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab
 // uses tabId to dispatch to the correct per-tab state.
 type wireEventTab struct {
 	eventwire.Event
-	TabID         string `json:"tabId"`
-	RuntimeEpoch  string `json:"runtimeEpoch,omitempty"`
-	TurnStartedAt int64  `json:"turnStartedAt,omitempty"`
+	TabID             string `json:"tabId"`
+	RuntimeEpoch      string `json:"runtimeEpoch,omitempty"`
+	SessionGeneration uint64 `json:"sessionGeneration,omitempty"`
+	TurnStartedAt     int64  `json:"turnStartedAt,omitempty"`
 	// Session-cumulative tokens per tab.
 	SessionHitTokens  int `json:"sessionHitTokens,omitempty"`
 	SessionMissTokens int `json:"sessionMissTokens,omitempty"`
@@ -2426,11 +2429,16 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 	if a.botBridge != nil {
 		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
 	}
-	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok && meta.Recovered {
-		m.Recovered = true
-		m.RecoveryReason = meta.RecoveryReason
-		m.RecoveryDigest = meta.RecoveryDigest
-		m.RecoveryParentID = string(meta.ParentID)
+	if meta, ok, err := agent.LoadBranchMeta(tab.currentSessionPath()); err == nil && ok {
+		m.VersionKind = string(meta.EffectiveVersionKind())
+		m.VersionState = string(meta.EffectiveVersionState())
+		m.ParentVersionID = meta.ParentVersionID
+		if meta.Recovered {
+			m.Recovered = true
+			m.RecoveryReason = meta.RecoveryReason
+			m.RecoveryDigest = meta.RecoveryDigest
+			m.RecoveryParentID = string(meta.ParentID)
+		}
 	}
 	return m
 }
@@ -6091,20 +6099,33 @@ func (a *App) forkTopicTitle(title string) string {
 }
 
 type sessionRecoveryEvent struct {
-	OriginalPath     string `json:"originalPath,omitempty"`
-	RecoveryPath     string `json:"recoveryPath"`
-	Scope            string `json:"scope,omitempty"`
-	WorkspaceRoot    string `json:"workspaceRoot,omitempty"`
-	TopicID          string `json:"topicId,omitempty"`
-	TopicTitle       string `json:"topicTitle,omitempty"`
-	RecoveryReason   string `json:"recoveryReason,omitempty"`
-	RecoveryDigest   string `json:"recoveryDigest,omitempty"`
-	RecoveryParentID string `json:"recoveryParentId,omitempty"`
-	Existing         bool   `json:"existing,omitempty"`
+	ConversationID    string `json:"conversationId,omitempty"`
+	ActiveVersionID   string `json:"activeVersionId,omitempty"`
+	RecoveryVersionID string `json:"recoveryVersionId,omitempty"`
+	OriginalPath      string `json:"originalPath,omitempty"`
+	RecoveryPath      string `json:"recoveryPath"`
+	Scope             string `json:"scope,omitempty"`
+	WorkspaceRoot     string `json:"workspaceRoot,omitempty"`
+	TopicID           string `json:"topicId,omitempty"`
+	TopicTitle        string `json:"topicTitle,omitempty"`
+	RecoveryReason    string `json:"recoveryReason,omitempty"`
+	RecoveryDigest    string `json:"recoveryDigest,omitempty"`
+	RecoveryParentID  string `json:"recoveryParentId,omitempty"`
+	Existing          bool   `json:"existing,omitempty"`
+	BaseRevision      int64  `json:"baseRevision,omitempty"`
+	DiskRevision      int64  `json:"diskRevision,omitempty"`
+	CanContinue       bool   `json:"canContinue"`
+	RequiresChoice    bool   `json:"requiresChoice"`
 }
 
 type sessionRecoveryFailedEvent struct {
-	Reason string `json:"reason,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	ConversationID  string `json:"conversationId,omitempty"`
+	TopicID         string `json:"topicId,omitempty"`
+	RecoveryPath    string `json:"recoveryPath,omitempty"`
+	WorkspaceRoot   string `json:"workspaceRoot,omitempty"`
+	CanContinue     bool   `json:"canContinue"`
+	RecoveryPending bool   `json:"recoveryPending"`
 }
 
 func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionRecoveryRequest) agent.BranchMeta {

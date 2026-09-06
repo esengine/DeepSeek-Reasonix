@@ -1,6 +1,10 @@
 package responses
 
-import "strings"
+import (
+	"reasonix/internal/provider"
+	"slices"
+	"strings"
+)
 
 // RequiresToolCallReasoning tells the agent to preserve stateless vendors'
 // reasoning on assistant tool-call turns so the follow-up can replay it.
@@ -47,4 +51,12 @@ func (c *client) WarnOnMissingToolCallReasoning() bool {
 	// Flash-tier DeepSeek models do not emit tool-call reasoning (same carve
 	// as openai.go expectsDeepSeekToolCallReasoning).
 	return !strings.Contains(model, "flash")
+}
+
+func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	if slices.ContainsFunc(m.ResponsesItems, provider.IsReplayableResponsesReasoning) {
+		return true
+	}
+
+	return c.RequiresToolCallReasoning() && (len(m.ToolCalls) > 0 || m.ReasoningContent != "")
 }

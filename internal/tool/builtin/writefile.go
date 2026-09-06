@@ -84,8 +84,17 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// one step. Text-only, so it handles plain UTF-8 targets (and new files);
 	// non-UTF-8 files stay on the local encoding-preserving path below.
 	if w.overlay != nil && filepath.IsAbs(p.Path) && (rerr != nil || src.enc == fileenc.UTF8) {
+		if err := src.recordWrite(ctx, p.Path, p.Content, "overlay", w.overlay); err != nil {
+			return "", err
+		}
+		if err := src.assertUnchanged(ctx, w.overlay, p.Path); err != nil {
+			return "", err
+		}
 		if ok, werr := w.overlay.WriteTextFile(ctx, p.Path, p.Content); ok {
 			if werr != nil {
+				if tool.HasWriteIntentHook(ctx) {
+					return "", fmt.Errorf("write outcome unknown: %w", werr)
+				}
 				return "", fmt.Errorf("write %s: %w", p.Path, werr)
 			}
 			if w.receipt != nil {
@@ -93,6 +102,15 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 			}
 			return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
 		}
+		if tool.HasWriteIntentHook(ctx) {
+			return "", fmt.Errorf("write outcome unknown: original overlay did not confirm the write")
+		}
+	}
+	if err := src.recordWrite(ctx, p.Path, p.Content, "disk", w.overlay); err != nil {
+		return "", err
+	}
+	if err := src.assertUnchanged(ctx, w.overlay, p.Path); err != nil {
+		return "", err
 	}
 	if dir := filepath.Dir(p.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

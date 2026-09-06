@@ -2,10 +2,12 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	fileenc "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/tool"
 )
 
 // editSource is the file state a read-modify-write tool works against, plus the
@@ -50,16 +52,34 @@ func readEditSource(ctx context.Context, overlay FileOverlay, path string) (edit
 }
 
 // write persists content on the same route the source was read from. An overlay
-// that declines the write (ok=false) falls back to disk, which is safe because
-// the content already carries whatever the buffer held.
+// that declines a managed write leaves its outcome unknown. Standalone calls
+// without durable recovery retain the legacy disk fallback.
 func (s editSource) write(ctx context.Context, overlay FileOverlay, path, content string) error {
 	if err := s.assertUnchanged(ctx, overlay, path); err != nil {
 		return err
 	}
 	if s.overlay && overlay != nil {
-		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
+		if err := s.recordWrite(ctx, path, content, "overlay", overlay); err != nil {
 			return err
 		}
+		if err := s.assertUnchanged(ctx, overlay, path); err != nil {
+			return err
+		}
+		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
+			if err != nil && tool.HasWriteIntentHook(ctx) {
+				return fmt.Errorf("write outcome unknown: %w", err)
+			}
+			return err
+		}
+		if tool.HasWriteIntentHook(ctx) {
+			return fmt.Errorf("write outcome unknown: original overlay did not confirm the write")
+		}
+	}
+	if err := s.recordWrite(ctx, path, content, "disk", overlay); err != nil {
+		return err
+	}
+	if err := s.assertUnchanged(ctx, overlay, path); err != nil {
+		return err
 	}
 	return writeFileEncoded(path, content, s.enc)
 }

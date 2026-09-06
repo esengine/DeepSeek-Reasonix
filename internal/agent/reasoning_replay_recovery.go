@@ -9,21 +9,31 @@ import (
 // reasoningReplayRecoveryBudget bounds the thinking-400 catch-and-repair to one
 // retry per model round and records the repaired provider-message prefix.
 type reasoningReplayRecoveryBudget struct {
-	retries int
-	cutoff  int
-	anchor  string
+	persisted bool
+	retries   int
+	local     bool
+	cutoff    int
+	anchor    string
 }
 
 // recoverReasoningReplay400 applies the vendor-documented self-heal for a
 // provider that rejected replayed thinking history with HTTP 400: rebuild the
 // frozen request's messages through the strong projection and retry exactly
 // once. Everything except Messages stays byte-identical to the rejected
-// request; the repaired message count bounds future projection.
+// request; the original history boundary bounds future projection, including
+// a trailing tool pair that disappears from the repaired view.
 func (a *Agent) recoverReasoningReplay400(frozen samplingRequest, err error, budget *reasoningReplayRecoveryBudget) (samplingRequest, bool) {
-	if a == nil || budget == nil || budget.retries > 0 {
+	if a == nil || budget == nil || budget.retries > 0 || a.protocolRecoverySpent() {
 		return samplingRequest{}, false
 	}
 	if provider.AsReasoningReplayError(err) == nil {
+		return samplingRequest{}, false
+	}
+	return a.recoverReasoningReplayHistory(frozen, budget)
+}
+
+func (a *Agent) recoverReasoningReplayHistory(frozen samplingRequest, budget *reasoningReplayRecoveryBudget) (samplingRequest, bool) {
+	if a == nil || budget == nil || budget.retries > 0 || a.protocolRecoverySpent() {
 		return samplingRequest{}, false
 	}
 	repaired, changed := provider.ProjectReasoningStrippedMessages(a.svc.prov, frozen.req.Messages)
@@ -31,12 +41,12 @@ func (a *Agent) recoverReasoningReplay400(frozen samplingRequest, err error, bud
 		return samplingRequest{}, false
 	}
 	budget.retries++
-	budget.cutoff = len(repaired)
+	budget.cutoff = len(frozen.req.Messages)
 	if budget.cutoff > 0 {
-		budget.anchor = reasoningReplayMessageFingerprint(repaired[budget.cutoff-1])
+		budget.anchor = reasoningReplayMessageFingerprint(frozen.req.Messages[budget.cutoff-1])
 	}
 	next := frozen.req
-	next.Messages = repaired
+	next.Messages = a.replayRecoveryFacts(frozen.req.Messages, repaired)
 	return samplingRequest{req: next}, true
 }
 
@@ -60,13 +70,17 @@ func (a *Agent) tryRecoverReasoningReplay400(streamSink *deferredStreamSink, fro
 
 // activateReasoningReplayStrongProjection records the repaired history prefix.
 // Messages appended after it keep their normal reasoning/tool replay.
-func (a *Agent) activateReasoningReplayStrongProjection(cutoff int, anchor string) {
+func (a *Agent) activateReasoningReplayStrongProjection(budget reasoningReplayRecoveryBudget) {
 	if a == nil {
 		return
 	}
-	a.sess.reasoningReplayStrongProjection = cutoff
-	a.sess.reasoningReplayStrongProjectionAnchor = anchor
-	event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryReasoningReplay400Recovered})
+	a.sess.reasoningReplayStrongProjection = budget.cutoff
+	a.sess.reasoningReplayStrongProjectionAnchor = budget.anchor
+	kind := event.ProtocolRecoveryReasoningReplay400Recovered
+	if budget.local {
+		kind = event.ProtocolRecoveryHistoryRepaired
+	}
+	event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: kind})
 	a.emitReasoningReplayRepairNotice()
 }
 
@@ -79,6 +93,6 @@ func (a *Agent) emitReasoningReplayRepairNotice() {
 		Level:  event.LevelWarn,
 		Code:   event.NoticeCodeReasoningReplayRepair,
 		Text:   i18n.M.ReasoningReplayRepair,
-		Detail: "provider rejected replayed thinking blocks (HTTP 400); retried once with reasoning stripped from the projected history",
+		Detail: "reasoning replay recovery regenerated the response once from a repaired history with completed-tool facts preserved",
 	})
 }

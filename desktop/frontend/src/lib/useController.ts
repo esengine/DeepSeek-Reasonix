@@ -266,7 +266,7 @@ export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number; historyTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; wasStreamed?: true; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; code?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; code?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes" | "recover_context"; recoveryId?: string; completionSummary?: WireCompletionSummary; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
       kind: "compaction";
       id: string;
@@ -285,7 +285,7 @@ export type Item =
       resolvedName?: string;
       capabilityId?: string; subagentOutcome?: import("./subagentOutcome").SubagentOutcome;
       status: ToolStatus;
-      output?: string; searchSources?: SearchSource[]; // display-only provider search results; replay data stays in output/serverSearch
+      output?: string; searchSources?: SearchSource[]; searchSourcesStatus?: "available" | "not_provided"; searchSummary?: string; // display-only provider search results; replay data stays in output/serverSearch
       error?: string;
       truncated?: boolean;
       dataArchived?: boolean; // args/output trimmed for memory; full data available via backend
@@ -416,6 +416,8 @@ export interface State {
   turnStartAt: number;
   turnDoneAt: number;
   turnLifecycleObservedAt?: number;
+  /** Last runtime snapshot sequence accepted for this tab/epoch. */
+  runtimeStatusEpoch?: string; runtimeStatusSeq?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -479,7 +481,7 @@ export interface State {
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
-  retry?: { attempt: number; max: number; observedAt: number };
+  retry?: { attempt: number; max: number; observedAt: number; recovery?: WireEvent["recovery"] };
   seq: number;
   sessionGen: number;
   // Per-session counter bumped after hydration ancillary data (context, effort,
@@ -786,7 +788,7 @@ type Action =
   | { type: "turn_submit_rejected"; submissionId: string; error: string }
   | { type: "send_failed"; submissionId: string; error: string }
   | { type: "turn_interrupted" }
-  | { type: "backend_status"; running: boolean; turnStartedAt?: number; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; turnId?: string; turnStatus?: string; snapshotAt?: number }
+  | { type: "backend_status"; running: boolean; turnStartedAt?: number; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; turnId?: string; turnStatus?: string; snapshotAt?: number; runtimeEpoch?: string; turnEventSeq?: number }
   | { type: "cancel_requested" }
   | { type: "meta"; meta: Meta }
   | { type: "optimistic_meta"; meta: Meta }
@@ -837,6 +839,7 @@ function backendStatusFromRuntimeMeta(meta: RuntimeMetaSnapshot): Extract<Action
     cancellable: foregroundRunning,
     turnId: meta.turnId,
     turnStatus: meta.turnStatus,
+    runtimeEpoch: meta.runtime?.epoch, turnEventSeq: meta.turnEventSeq,
   };
 }
 
@@ -867,6 +870,10 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       continue;
     }
     if (m.role === "notice") {
+      if (m.code === "protocol_recovery" && m.pending && m.protocolRecovery?.id) {
+        items.push({kind:"notice",id:`${idPrefix}${seq++}`,level:"info",code:m.code,text:t("notice.protocolRecoveryBody"),action:"recover_context",recoveryId:m.protocolRecovery.id});
+        continue;
+      }
       if (m.code === "final_readiness" && m.pending) {
         items.push({
           kind: "notice",
@@ -1452,11 +1459,11 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
     return applyExtensionSurfaceEvent(s, e.extension);
   }
   if (e.kind === "retrying") {
-    // Retrying is synchronous proof that the foreground turn is active. Keep
-    // older idle ListTabs completions from hiding Stop/Escape during backoff.
+    // Recovery keeps Stop/Escape available despite stale idle snapshots.
     return {
       ...s,
       retry: {
+        recovery: e.recovery,
         attempt: e.retryAttempt ?? 0,
         max: e.retryMax ?? 0,
         observedAt: promptEventClock(),
@@ -1970,6 +1977,10 @@ function applyEvent(s: State, e: WireEvent, preserveToolPayloads = false): State
       } else if (e.err && !s.streamInterruptNoticeShown) {
         items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }];
       }
+      if (e.protocolRecovery?.id && e.status !== "interrupted" && !s.cancelRequested) {
+        items = items.map(item => item.kind==="notice" && item.action==="recover_context" ? {...item,action:undefined} : item);
+        items.push({kind:"notice",id:`e${s.seq}-protocol`,level:"info",code:"protocol_recovery",text:t("notice.protocolRecoveryBody"),action:"recover_context",recoveryId:e.protocolRecovery.id});
+      }
       // Plan approval can arrive before turn_done on some Wails event paths.
       // Keep that gate visible instead of clearing the only UI that can answer it.
       const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
@@ -2012,7 +2023,7 @@ export function reducer(s: State, a: Action): State {
       return {
         ...s,
         seq: seq + 1,
-        items: [...s.items, { kind: "user", id: userItemId, submissionId: a.submissionId, text: a.text, submitText: a.submitText, createdAt: Date.now() }],
+        items: [...s.items.map(item => item.kind==="notice" && item.action==="recover_context" ? {...item,action:undefined} : item), { kind: "user", id: userItemId, submissionId: a.submissionId, text: a.text, submitText: a.submitText, createdAt: Date.now() }],
         running: true,
         pendingPrompt: false,
         cancelRequested: false,
@@ -2080,6 +2091,11 @@ export function reducer(s: State, a: Action): State {
       return withRemoteTurnInterrupted(s);
     }
     case "backend_status": {
+      const incomingEpoch = a.runtimeEpoch?.trim();
+      const storedEpoch = s.runtimeStatusEpoch?.trim();
+      if (!(incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) && a.turnEventSeq !== undefined && s.runtimeStatusSeq !== undefined && a.turnEventSeq <= s.runtimeStatusSeq) {
+        return s;
+      }
       // Reject snapshots that began before newer prompt or turn lifecycle evidence.
       if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt) || snapshotPredatesTurnLifecycle(s.turnLifecycleObservedAt, a.snapshotAt)) return s;
       const pendingPrompt = Boolean(a.pendingPrompt);
@@ -2103,10 +2119,12 @@ export function reducer(s: State, a: Action): State {
         turnStartedAt === s.turnStartAt &&
         activeTurnId === s.activeTurnId &&
         !clearsRetry
-      ) return s;
+      ) return incomingEpoch || a.turnEventSeq !== undefined
+        ? { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq } : s;
       if (foregroundRunning) {
         return {
           ...s,
+          runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
           running: true,
           turnActive: true,
           pendingPrompt,
@@ -2126,6 +2144,7 @@ export function reducer(s: State, a: Action): State {
       }));
       return endPromptWait({
         ...telemetry,
+        runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
         items: finalized,
         running: false,
         turnActive: false,
@@ -3184,6 +3203,8 @@ export function useController() {
       cancellable: foregroundRunning,
       turnId: tab.turnId,
       turnStatus: tab.turnStatus,
+      runtimeEpoch,
+      turnEventSeq: latestEventSeq,
       snapshotAt,
     });
     // backend_status reconciliation can clear a live prompt from frontend state.
@@ -3485,6 +3506,8 @@ export function useController() {
         if (!acceptsRuntimeEventEpoch(acceptedEpoch, e.runtimeEpoch)) return;
         if (!acceptedEpoch) runtimeEpochByTabRef.current.set(targetTabId, e.runtimeEpoch);
       }
+      const currentMeta = statesRef.current.get(targetTabId)?.meta;
+      if (e.sessionGeneration !== undefined && (!currentMeta || currentMeta.sessionGeneration === undefined || e.sessionGeneration !== currentMeta.sessionGeneration)) return;
       if (!turnEventProjector.acceptLive(targetTabId, e, acceptedEpoch)) return;
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());

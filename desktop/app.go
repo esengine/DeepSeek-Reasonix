@@ -159,6 +159,10 @@ type App struct {
 	// tabSelectionMu serializes cross-registry activation. A remote selection
 	// must not overtake the local-session snapshot that makes switching safe.
 	tabSelectionMu sync.Mutex
+	// sessionVersionActivationMu serializes version selection's validation,
+	// preference update, and tab rebind so concurrent Wails calls cannot publish
+	// a different active version than the one persisted as preferred.
+	sessionVersionActivationMu sync.Mutex
 
 	// Ticketed topic activation bookkeeping (StartTopicActivation). Guarded by
 	// mu. activationGen bumps on every activation-or-supersede so a background
@@ -3998,7 +4002,7 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	tab.ActivityStatus = ""
 	tab.replaceTelemetry(candidate.telemetry, sessionRuntimeKey(sessionPath))
 	if tab.sink != nil {
-		tab.sink.setBinding(tab.ID, a)
+		tab.sink.setBinding(tab.ID, a, tab.SessionGeneration)
 		tab.sink.setContext(a.ctx)
 	}
 	// Wiring a mirror inspects App state under a read lock, so defer it until
@@ -5156,15 +5160,16 @@ type HistoryMessage struct {
 	ToolResultError    string                    `json:"toolResultError,omitempty"`
 	// Execution is local shell metadata restored onto ToolCards after history
 	// reload. Omitted when absent so older frontends ignore it safely.
-	Execution       *provider.ToolExecution     `json:"execution,omitempty"`
-	Pending         bool                        `json:"pending,omitempty"`
-	Trigger         string                      `json:"trigger,omitempty"`
-	Messages        int                         `json:"messages,omitempty"`
-	Summary         string                      `json:"summary,omitempty"`
-	Archive         string                      `json:"archive,omitempty"`
-	DecisionReceipt *provider.DecisionReceipt   `json:"decisionReceipt,omitempty"`
-	Readiness       *event.FinalReadiness       `json:"readiness,omitempty"`
-	ServerSearch    []provider.ServerSearchCall `json:"serverSearch,omitempty"`
+	Execution        *provider.ToolExecution          `json:"execution,omitempty"`
+	Pending          bool                             `json:"pending,omitempty"`
+	Trigger          string                           `json:"trigger,omitempty"`
+	Messages         int                              `json:"messages,omitempty"`
+	Summary          string                           `json:"summary,omitempty"`
+	Archive          string                           `json:"archive,omitempty"`
+	DecisionReceipt  *provider.DecisionReceipt        `json:"decisionReceipt,omitempty"`
+	Readiness        *event.FinalReadiness            `json:"readiness,omitempty"`
+	ProtocolRecovery *provider.ProtocolRecoveryAction `json:"protocolRecovery,omitempty"`
+	ServerSearch     []provider.ServerSearchCall      `json:"serverSearch,omitempty"`
 }
 
 type HistoryToolCall struct {

@@ -10,6 +10,7 @@ export function errorMessage(err: unknown): string {
 
 const noticeCodeKeys: Record<string, DictKey> = {
   final_readiness: "notice.finalReadiness",
+  search_sources_not_provided: "sources.notProvided",
   empty_final: "notice.emptyFinal",
   executor_handoff: "notice.executorHandoff",
   tool_budget: "notice.toolBudget",

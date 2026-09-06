@@ -11,6 +11,9 @@ import (
 // informational line. Pauses are not send failures: the composer is already
 // free and the user continues with an ordinary message.
 func (m *chatTUI) commitTurnPauseNotice(e event.Event) {
+	if e.ProtocolRecovery != nil {
+		m.commitLine(wrapForViewport("ⓘ "+i18n.M.ProtocolRecoveryLabel+": /recover-context "+e.ProtocolRecovery.ID, m.width, activeCLITheme.info))
+	}
 	var text string
 	switch e.Outcome {
 	case event.TurnOutcomeRecoveryPaused:
