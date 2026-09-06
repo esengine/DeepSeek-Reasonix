@@ -69,6 +69,13 @@ export function startSessionRecoveryRuntime(options: SessionRecoveryRuntimeOptio
         workspaceRoot: event.workspaceRoot,
         topicId,
         path: event.recoveryPath,
+      }).catch(() => {
+        // Background reconciliation can race catalog rebuilds. Keep the
+        // recovery pending for classification on a later catalog revision;
+        // raw backend errors can contain private session paths.
+        if (!stopped) recordFrontendDiagnostic("runtime", "session.recovery-reconcile", {
+          status: "error", reason: "reconcile_failed",
+        });
       }).finally(() => reconciling.delete(reconcileKey));
     }
   });

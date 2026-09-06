@@ -294,6 +294,26 @@ eq(controller?.state.ask, undefined, "stale Ask submission expires the old card"
 rejectAnswer = false;
 rejectAnswerMessage = "prompt write failed";
 
+// Pre-admission rejection does not append a backend event. A fresh idle read
+// with the same sequence must still undo each optimistic submission.
+rejectSubmit = true;
+backendTab = tabMeta({ running: false, pendingPrompt: false, turnEventSeq: 700 });
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-send" } as WireEvent);
+  await controller?.send("seed idle status after rejected submit");
+  await flushPromises();
+  await flushPromises();
+});
+eq(controller?.state.runtimeStatusSeq, 700, "baseline stores the backend sequence");
+eq(controller?.state.running, false, "first rejection settles to authoritative idle");
+await act(async () => {
+  await controller?.send("second pre-admission rejection");
+  await flushPromises();
+  await flushPromises();
+});
+eq(controller?.state.running, false, "same-sequence idle settles a new failed submit");
+eq(controller?.state.cancellable, false, "same-sequence idle removes the stale Stop action");
+
 await act(async () => {
   root.unmount();
 });

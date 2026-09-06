@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// capabilityInputError distinguishes repairable envelope errors from target
+// availability and authorization failures without changing their error text.
+type capabilityInputError struct{ error }
+
+func (e *capabilityInputError) Unwrap() error { return e.error }
+func capabilityInputErrorf(format string, args ...any) error {
+	return &capabilityInputError{fmt.Errorf(format, args...)}
+}
+
 type useCapabilityArgs struct {
 	Action       string          `json:"action"`
 	CapabilityID string          `json:"capability_id"`

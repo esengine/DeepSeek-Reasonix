@@ -1,6 +1,7 @@
 // useController is the frontend's state machine over the agent event stream. It keeps
 // per-tab output, tool state, and approvals while the user switches tabs; components
 // render the active tab's state.
+import { runtimeStatusSnapshotIsStale } from "./runtimeStatusFreshness";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
 import { compactArchivedToolItems } from "./archivedToolItems";
@@ -429,7 +430,7 @@ export interface State {
   turnDoneAt: number;
   turnLifecycleObservedAt?: number;
   /** Last runtime snapshot sequence accepted for this tab/epoch. */
-  runtimeStatusEpoch?: string; runtimeStatusSeq?: number;
+  runtimeStatusEpoch?: string; runtimeStatusSeq?: number; runtimeStatusSnapshotAt?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -2103,11 +2104,10 @@ export function reducer(s: State, a: Action): State {
     case "backend_status": {
       const incomingEpoch = a.runtimeEpoch?.trim();
       const storedEpoch = s.runtimeStatusEpoch?.trim();
-      if (!(incomingEpoch && storedEpoch && incomingEpoch !== storedEpoch) && a.turnEventSeq !== undefined && s.runtimeStatusSeq !== undefined && a.turnEventSeq <= s.runtimeStatusSeq) {
-        return s;
-      }
+      if (runtimeStatusSnapshotIsStale(s, a)) return s;
       // Reject snapshots that began before newer prompt or turn lifecycle evidence.
       if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt) || snapshotPredatesTurnLifecycle(s.turnLifecycleObservedAt, a.snapshotAt)) return s;
+      const runtimeStatus = { runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq, runtimeStatusSnapshotAt: a.snapshotAt };
       const pendingPrompt = Boolean(a.pendingPrompt);
       const backgroundJobs = Math.max(0, a.backgroundJobs ?? s.backgroundJobs ?? 0);
       const cancelRequested = Boolean(a.cancelRequested);
@@ -2130,11 +2130,11 @@ export function reducer(s: State, a: Action): State {
         activeTurnId === s.activeTurnId &&
         !clearsRetry
       ) return incomingEpoch || a.turnEventSeq !== undefined
-        ? { ...s, runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq } : s;
+        ? { ...s, ...runtimeStatus } : s;
       if (foregroundRunning) {
         return {
           ...s,
-          runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+          ...runtimeStatus,
           running: true,
           turnActive: true,
           pendingPrompt,
@@ -2154,7 +2154,7 @@ export function reducer(s: State, a: Action): State {
       }));
       return endPromptWait({
         ...telemetry,
-        runtimeStatusEpoch: incomingEpoch ?? storedEpoch, runtimeStatusSeq: a.turnEventSeq ?? s.runtimeStatusSeq,
+        ...runtimeStatus,
         items: finalized,
         running: false,
         turnActive: false,

@@ -54,9 +54,9 @@ const loopGuardBlockErrMsg = "blocked by loop guard"
 // blocked outcomes. Any success resets both. When a guard fires — or when a
 // call in the batch was already blocked by the per-call repeat-success guard —
 // the final-readiness loop-guard pass is armed so the model may report the
-// blocker (see loopGuardAllowsFinal). The hard maxSteps guard remains the
-// ultimate backstop; this just keeps the loop from burning that whole budget
-// bouncing off the same host refusals.
+// blocker (see loopGuardAllowsFinal). A positive maxSteps value remains a hard
+// backstop; with no explicit step or budget limit this guidance alone does not
+// guarantee a finite run.
 func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, receiptMark int) intervention {
 	allBlocked := len(outcomes) > 0
 	for _, outcome := range outcomes {
@@ -114,6 +114,19 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 		}
 		action := "failed"
 		advice := "Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer."
+		parameterErrors := true
+		hasSchemaError := false
+		for _, outcome := range outcomes {
+			validation := strings.HasPrefix(outcome.errMsg, "argument_validation:")
+			schema := validation && strings.HasSuffix(outcome.errMsg, ":schema")
+			parameterErrors = parameterErrors && validation && !schema
+			hasSchemaError = hasSchemaError || schema
+		}
+		if parameterErrors {
+			advice = "Stop repeating the same invalid input. Correct the parameters using the reported contract and retry; valid calls still undergo normal permission checks. If you cannot construct a valid call, report that tool argument generation failed and state what remains unfinished."
+		} else if hasSchemaError {
+			advice = "A host tool schema is invalid. Rewriting arguments cannot repair that configuration error; report it and the unfinished work. Handle any other failures according to their individual diagnostics."
+		}
 		if anyBlocked {
 			action = "been blocked or failed"
 			advice = blockedAdvice
