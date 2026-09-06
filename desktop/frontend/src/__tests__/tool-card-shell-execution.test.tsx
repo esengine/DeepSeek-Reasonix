@@ -398,5 +398,44 @@ console.log("\ntool card shell execution");
   await ui.cleanup();
 }
 
+// ── Command section: expanded shell card shows the full command (#9858) ──
+{
+  const longCommand =
+    "git status && git diff --stat && docker system df -v && kubectl get pods -A -o wide | grep -v kube-system | head -80 && echo LONG_COMMAND_TAIL_MARKER_DONE";
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_dispatch",
+      tool: { id: "cmd-vis", name: "bash", args: JSON.stringify({ command: longCommand }), readOnly: false },
+    },
+  });
+  s = reducer(s, {
+    type: "event",
+    e: {
+      kind: "tool_result",
+      tool: { id: "cmd-vis", name: "bash", readOnly: false, output: "done", durationMs: 5 },
+    },
+  });
+  const item = s.items.find((it): it is ToolItem => it.kind === "tool" && it.id === "cmd-vis");
+  ok(!!item, "command section: tool item created");
+  // The reducer archives tool payloads for memory efficiency; un-archiving
+  // here keeps this test focused on the command-section render (lazy full-data
+  // loading needs a live bridge and is exercised in the desktop app).
+  if (item) (item as any).dataArchived = false;
+  const ui = await renderCard(item!);
+  await ui.expand();
+  const section = document.querySelector(".tool__command");
+  ok(!!section, "command section: .tool__command rendered after expand");
+  const text = section?.textContent ?? "";
+  ok(text.includes("LONG_COMMAND_TAIL_MARKER_DONE"), "command section: full command tail visible (not truncated)");
+  const label = document.querySelector(".tool__command-label")?.textContent ?? "";
+  ok(label.length > 0, "command section: label rendered");
+  // Collapsed header keeps its glanceable subject row (CSS ellipsis is visual
+  // and not assertable in jsdom); the command section lives in the body.
+  ok(!!document.querySelector(".tool__subject"), "command section: header subject row retained");
+  await ui.cleanup();
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

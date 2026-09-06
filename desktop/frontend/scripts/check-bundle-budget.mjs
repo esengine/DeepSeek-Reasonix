@@ -389,6 +389,7 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // The shared harness decision surface adds a bounded startup stylesheet
 // payload. The session-runtime fence and current-base merge measure 2493.1 KiB
 // locally; retain the smallest bounded cross-platform ceiling.
-const rawInitialBudgetKiB = 2_494.3;
+// The shell card command section (#9858) measures 2494.5 KiB raw on this base.
+const rawInitialBudgetKiB = 2_494.6;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

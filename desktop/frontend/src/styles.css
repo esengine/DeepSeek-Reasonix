@@ -5054,6 +5054,17 @@ button.reasoning-summary:focus-visible {
   color: var(--accent);
   background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
+.tool__command {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool__command-label {
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+}
+
 .tool__search-summary {
   display: flex;
   flex-direction: column;

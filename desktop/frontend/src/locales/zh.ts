@@ -3320,6 +3320,7 @@ export const zh: Record<DictKey, string> = {
   "tool.error": "错误",
   "tool.receivingArgs": "接收参数中 ↓ {chars}…",
   "tool.errorReceiptMismatch": "证据命令没有匹配的成功执行记录",
+  "tool.command": "命令",
   "tool.truncated": "输出已截断",
   "tool.showAllLines": "显示全部 {n} 行",
   "tool.showErrorDetails": "显示错误详情",
