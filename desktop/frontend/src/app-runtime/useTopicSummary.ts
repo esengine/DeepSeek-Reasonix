@@ -14,23 +14,24 @@ export function useTopicSummary(input: {
   getSummary: (request: { scope: "global" | "project"; workspaceRoot: string; topicId: string }) => Promise<TopicSummary>;
   onTurns: (turns: number | undefined) => void;
 }) {
+  const { getSummary, onTurns, revision, target } = input;
   useEffect(() => {
-    const target = input.target;
-    const topicId = target?.topicId?.trim();
+    const currentTarget = target;
+    const topicId = currentTarget?.topicId?.trim();
     if (!topicId) {
-      input.onTurns(undefined);
+      onTurns(undefined);
       return;
     }
     let current = true;
-    void input.getSummary({
-      scope: target?.scope === "global" ? "global" : "project",
-      workspaceRoot: target?.scope === "global" ? "" : target?.workspaceRoot ?? "",
+    void getSummary({
+      scope: currentTarget?.scope === "global" ? "global" : "project",
+      workspaceRoot: currentTarget?.scope === "global" ? "" : currentTarget?.workspaceRoot ?? "",
       topicId,
     }).then((summary) => {
-      if (current) input.onTurns(summary.turns);
+      if (current) onTurns(summary.turns);
     }).catch(() => {
-      if (current) input.onTurns(undefined);
+      if (current) onTurns(undefined);
     });
     return () => { current = false; };
-  }, [input.getSummary, input.onTurns, input.revision, input.target]);
+  }, [getSummary, onTurns, revision, target]);
 }
