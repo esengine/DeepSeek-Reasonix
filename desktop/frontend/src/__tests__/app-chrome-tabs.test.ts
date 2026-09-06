@@ -12,6 +12,7 @@ const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.t
 const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
+const topicShortcutOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useTopicNavigationShortcuts.ts"), "utf8");
 const runtimeHandlersSource = readFileSync(resolve(testDir, "../app-runtime/useRuntimeEventHandlers.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
@@ -395,8 +396,8 @@ ok(
 );
 
 ok(
-  /topicShortcutIndexFromEvent\(event, desktopPlatform\)/.test(appSource) &&
-    /useTopicShortcuts\(!sidebarCollapsed && !managementActive, desktopPlatform\)/.test(appSource),
+  /topicShortcutIndexFromEvent\(event, input\.platform\)/.test(topicShortcutOwnerSource) &&
+    /useTopicShortcuts\(input\.enabled, input\.platform\)/.test(topicShortcutOwnerSource),
   "topic shortcuts use the resolved desktop platform",
 );
 
