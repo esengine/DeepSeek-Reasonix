@@ -68,13 +68,14 @@ import { showWorktreeCleanupNotice } from "./lib/worktreeCleanupNotice";
 import { useWorktreeMergeCommands } from "./app-runtime/useWorktreeMergeCommands";
 import { useFooterHeightLifecycle } from "./app-runtime/useFooterHeightLifecycle";
 import { useNativeSettingsEvent } from "./app-runtime/useNativeSettingsEvent";
+import { useTabProjectionLifecycle } from "./app-runtime/useTabProjectionLifecycle";
 import { requestSessionVersions } from "./lib/sessionRecoveryVersionHostBridge";
 import type { WorkspaceVerificationRevealRequest } from "./components/WorkspacePanel";
 import type { DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
 import type { InvocationMetadataMap } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import { resolveTaskMonitorSession } from "./lib/taskMonitorNavigation";
-import { composerProfileFromMeta, composerProfileFromTab, composerProfileMode, defaultComposerProfile, displayedComposerProfileCollaborationMode, hydrateComposerProfileFromMeta, hydrateComposerProfilesFromTabs, patchComposerProfile, pruneUserPlanModeIntents, updateUserPlanModeIntent, type ComposerProfile, type ComposerProfileField, type UserPlanModeIntents } from "./lib/composerProfile";
+import { composerProfileFromMeta, composerProfileFromTab, composerProfileMode, defaultComposerProfile, displayedComposerProfileCollaborationMode, patchComposerProfile, updateUserPlanModeIntent, type ComposerProfile, type ComposerProfileField, type UserPlanModeIntents } from "./lib/composerProfile";
 import {
   toggleYoloToolApprovalMode,
   restorableToolApprovalMode,
@@ -654,31 +655,11 @@ export default function App() {
     });
   }, [composerProfilesByTab, state.running, tabMetas, tabOrderIds, visibleTabId]);
 
-  useEffect(() => {
-    const ids = tabMetas.map((tab) => tab.id);
-    setTabOrderIds((current) => {
-      const next = current.filter((id) => ids.includes(id));
-      for (const id of ids) {
-        if (!next.includes(id)) next.push(id);
-      }
-      return next.join("\u0000") === current.join("\u0000") ? current : next;
-    });
-  }, [tabMetas]);
-
-  useEffect(() => {
-    const ids = new Set(tabMetas.map((tab) => tab.id));
-    for (const id of Object.keys(yoloRestoreToolApprovalModesRef.current)) {
-      if (!ids.has(id)) delete yoloRestoreToolApprovalModesRef.current[id];
-    }
-    userPlanModeByTabRef.current = pruneUserPlanModeIntents(userPlanModeByTabRef.current, ids);
-    setComposerProfilesByTab((current) => hydrateComposerProfilesFromTabs(current, tabMetas));
-  }, [tabMetas]);
-
-
-  useEffect(() => {
-    if (!activeTabId || !state.meta) return;
-    setComposerProfilesByTab((current) => hydrateComposerProfileFromMeta(current, activeTabId, state.meta!));
-  }, [activeTabId, state.meta]);
+  useTabProjectionLifecycle({
+    tabs: tabMetas, activeTabId, activeMeta: activeTab, meta: state.meta,
+    yoloRestoreRef: yoloRestoreToolApprovalModesRef, planIntentsRef: userPlanModeByTabRef,
+    setOrder: setTabOrderIds, setProfiles: setComposerProfilesByTab,
+  });
 
 
   const applyQualityFloor = useCommittedCommand((floor: QualityFloor) => {
