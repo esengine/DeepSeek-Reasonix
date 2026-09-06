@@ -364,9 +364,9 @@ function isStalePromptError(error: unknown): boolean {
   return /active turn|runtime changed|stale/i.test(errorMessage(error));
 }
 
-function handlePromptFailure(dispatchTo: (tabId: string, action: Action) => void, tabId: string, id: string, epoch: number, error: unknown, clear?: "clearApproval" | "clearAsk") {
-  if (isStalePromptError(error) && clear) dispatchTo(tabId, { type: clear });
-  else if (clear === "clearApproval") dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
+function handlePromptFailure(dispatchTo: (tabId: string, action: Action) => void, tabId: string, id: string, epoch: number, error: unknown, kind?: "approval" | "ask" | "mcp") {
+  if (isStalePromptError(error) && kind) dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind });
+  else if (kind) dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
   replayPendingPromptsForActiveTab(tabId);
 }
 
@@ -830,6 +830,7 @@ type Action =
   | { type: "local_notice"; level: "info" | "warn"; text: string; preserveRuntime?: boolean }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
+  | { type: "expire_prompt"; id: string; epoch: number; kind: "approval" | "ask" | "mcp" }
   | { type: "clearExtensionForm" }
   | { type: "extension_notifications_drained" }
   | { type: "approval_drained"; ids: string[]; epoch: number }
@@ -2352,6 +2353,19 @@ export function reducer(s: State, a: Action): State {
         resolvedPromptId: s.ask?.id ?? s.mcpInteraction?.id ?? s.resolvedPromptId,
       };
       return endPromptWaitIfIdle(next);
+    }
+    case "expire_prompt": {
+      if (s.promptEpoch !== a.epoch) return s;
+      if (a.kind === "approval") {
+        if (s.approval?.id !== a.id) return s;
+        return endPromptWaitIfIdle({ ...s, approval: undefined, pendingPrompt: Boolean(s.ask || s.mcpInteraction), resolvedPromptId: a.id });
+      }
+      if (a.kind === "ask") {
+        if (s.ask?.id !== a.id) return s;
+        return endPromptWaitIfIdle({ ...s, ask: undefined, pendingPrompt: Boolean(s.approval || s.mcpInteraction), resolvedPromptId: a.id });
+      }
+      if (s.mcpInteraction?.id !== a.id) return s;
+      return endPromptWaitIfIdle({ ...s, mcpInteraction: undefined, pendingPrompt: Boolean(s.approval || s.ask), resolvedPromptId: a.id });
     }
     case "clearExtensionForm": return s.extensionForm ? { ...s, extensionForm: undefined } : s;
     case "extension_notifications_drained": return s.extensionNotifications.length > 0 ? { ...s, extensionNotifications: [] } : s;
@@ -3942,7 +3956,7 @@ export function useController() {
     // numeric id (#6432 round 4).
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    resolvePromptForTab(app, tabId, id, "approval", { allow, session, persist }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "clearApproval"));
+    resolvePromptForTab(app, tabId, id, "approval", { allow, session, persist }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [activeTabId, dispatchTo]);
 
   const resolvePlanDecision = useCallback((id: string, action: "start_execution" | "revise_plan" | "exit_plan") => {
@@ -3951,7 +3965,7 @@ export function useController() {
     const promptState = statesRef.current.get(tabId);
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    resolvePromptForTab(app, tabId, id, "plan", { action }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "clearApproval"));
+    resolvePromptForTab(app, tabId, id, "plan", { action }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [activeTabId, dispatchTo]);
 
   const resolveRecovery = useCallback((id: string, action: "continue" | "continue_task" | "revise" | "stop", feedback = "") => {
@@ -3960,7 +3974,7 @@ export function useController() {
     const promptState = statesRef.current.get(tabId);
     const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
     dispatchTo(tabId, { type: "clearApproval" });
-    resolvePromptForTab(app, tabId, id, "recovery", { action, feedback }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "clearApproval"));
+    resolvePromptForTab(app, tabId, id, "recovery", { action, feedback }, promptState?.approval?.turnId ?? promptState?.activeTurnId, promptState?.approval?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "approval"));
   }, [activeTabId, dispatchTo]);
 
   const answerQuestion = useCallback((id: string, answers: QuestionAnswer[]): Promise<void> => {
@@ -3971,7 +3985,7 @@ export function useController() {
     return answerPromptForActiveTurn(app, tabId, id, answers, state?.ask?.turnId ?? state?.activeTurnId, state?.ask?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).then(
       () => dispatchTo(tabId, { type: "ask_submit_succeeded", id, epoch }),
       (error) => {
-        if (isStalePromptError(error)) dispatchTo(tabId, { type: "clearAsk" });
+        if (isStalePromptError(error)) dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind: "ask" });
         else dispatchTo(tabId, { type: "local_notice", level: "warn", text: t("notice.askSubmitFailed", { error: errorMessage(error) }), preserveRuntime: true });
         void reconcileRuntimeAfterRejectedMutation(tabId);
         throw error;
@@ -3984,8 +3998,9 @@ export function useController() {
       if (!activeTabId) return;
       const tabId = activeTabId;
       const promptState = statesRef.current.get(tabId);
-      dispatchTo(tabId, { type: "clearAsk" });
-      resolvePromptForTab(app, tabId, id, "mcp", { action, content: content ?? null }, promptState?.mcpInteraction?.turnId ?? promptState?.activeTurnId, promptState?.mcpInteraction?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, promptState?.promptEpoch ?? 0, error));
+      const epoch = promptState?.promptEpoch ?? 0;
+      dispatchTo(tabId, { type: "expire_prompt", id, epoch, kind: "mcp" });
+      resolvePromptForTab(app, tabId, id, "mcp", { action, content: content ?? null }, promptState?.mcpInteraction?.turnId ?? promptState?.activeTurnId, promptState?.mcpInteraction?.runtimeEpoch ?? runtimeEpochByTabRef.current.get(tabId)).catch((error) => handlePromptFailure(dispatchTo, tabId, id, epoch, error, "mcp"));
     },
     [activeTabId, dispatchTo],
   );
