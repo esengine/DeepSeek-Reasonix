@@ -96,13 +96,13 @@ export function AskCard({
     }));
 
   const answerLabel = (question: WireAskQuestion) => {
-    const typed = custom[question.id]?.trim();
-    if (typed) return typed;
+    if (answerMode[question.id] === "custom") return custom[question.id]?.trim() ?? "";
     return (sel[question.id] ?? []).join(", ");
   };
 
-  const answered = (question: WireAskQuestion) =>
-    (sel[question.id]?.length ?? 0) > 0 || (custom[question.id]?.trim() ?? "") !== "";
+  const answered = (question: WireAskQuestion) => answerMode[question.id] === "custom"
+    ? (custom[question.id]?.trim() ?? "") !== ""
+    : (sel[question.id]?.length ?? 0) > 0;
 
   const currentAnswered = q ? answered(q) : false;
 
