@@ -34,6 +34,85 @@ type RecoveryLineageView struct {
 	Members         []RecoveryLineageMember `json:"members"`
 }
 
+type SessionVersionStateView struct {
+	ConversationID    string              `json:"conversationId,omitempty"`
+	ActiveVersionID   string              `json:"activeVersionId,omitempty"`
+	ActivePath        string              `json:"activePath,omitempty"`
+	RecoveryVersionID string              `json:"recoveryVersionId,omitempty"`
+	CanContinue       bool                `json:"canContinue"`
+	RequiresChoice    bool                `json:"requiresChoice"`
+	Lineage           RecoveryLineageView `json:"lineage"`
+}
+
+// GetSessionVersionState exposes the logical conversation and its physical
+// recovery versions without making the physical paths ordinary sessions.
+func (a *App) GetSessionVersionState(key ProjectTopicKey) SessionVersionStateView {
+	view := a.GetRecoveryLineage(key)
+	if view.Members == nil {
+		view.Members = []RecoveryLineageMember{}
+	}
+	out := SessionVersionStateView{Lineage: view, CanContinue: true}
+	out.ConversationID = key.TopicID
+	for _, member := range view.Members {
+		if member.Canonical {
+			out.ActivePath = member.Path
+			out.ActiveVersionID = agent.BranchID(member.Path)
+			break
+		}
+	}
+	if key.Path != "" {
+		out.ActivePath = key.Path
+		out.ActiveVersionID = agent.BranchID(key.Path)
+	}
+	out.RequiresChoice = view.State == "diverged" && view.Unresolved > 0
+	if out.ActivePath != "" {
+		for _, member := range view.Members {
+			if sameRecoveryLineagePath(member.Path, out.ActivePath) && member.Role == sessioncatalog.RecoveryRoleDiverged {
+				out.RecoveryVersionID = agent.BranchID(member.Path)
+			}
+		}
+	}
+	return out
+}
+
+// SetActiveSessionVersion selects and opens a recovery version on the existing
+// topic tab. It rejects subagent transcripts and preserves the logical topic.
+func (a *App) SetActiveSessionVersion(req RecoveryPreferenceRequest) error {
+	meta, ok, err := agent.LoadBranchMeta(req.Path)
+	if err != nil || !ok {
+		return errors.New("session version is unavailable")
+	}
+	if meta.EffectiveVersionKind() == agent.VersionSubagent {
+		return errors.New("subagent transcripts cannot become the active conversation version")
+	}
+	a.mu.RLock()
+	var tabID string
+	for _, tab := range a.runtimeTabsLocked() {
+		if tab == nil || tab.TopicID != req.TopicID || tab.Scope != req.Scope ||
+			(req.Scope == "project" && tab.WorkspaceRoot != req.WorkspaceRoot) {
+			continue
+		}
+		tabID = tab.ID
+		break
+	}
+	a.mu.RUnlock()
+	if tabID != "" {
+		if _, err := a.ResumeSessionForTab(tabID, req.Path); err != nil {
+			return err
+		}
+	}
+	if err := a.ChooseRecoveryBranch(req); err != nil {
+		return err
+	}
+	a.emitRuntimeEvent("session:active-version-changed", sessionRecoveryEvent{
+		ConversationID: req.TopicID, ActiveVersionID: agent.BranchID(req.Path),
+		RecoveryVersionID: agent.BranchID(req.Path), Scope: req.Scope,
+		WorkspaceRoot: req.WorkspaceRoot, TopicID: req.TopicID,
+		CanContinue: true, RequiresChoice: false,
+	})
+	return nil
+}
+
 type RecoveryCleanupRequest struct {
 	Scope         string `json:"scope"`
 	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
