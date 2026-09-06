@@ -24,10 +24,9 @@ import { useToast } from "./lib/toast";
 import { useGoalActionHandler } from "./lib/goalAction";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
-import { activeLeaseBlockedTab, createBoundedRefreshCoordinator, sameTabMetaLists, seedActiveTabMetaList, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT } from "./lib/tabMetaRefresh";
+import { activeLeaseBlockedTab } from "./lib/tabMetaRefresh";
 import { useT, useI18n } from "./lib/i18n";
 import { useActiveRemoteSession } from "./lib/useRemoteSession";
-import { useRemoteTabOpened } from "./lib/useRemoteTabOpened";
 import { publishNavigationIntent } from "./lib/useNavigationIntentFence";
 import { useProjectTopicCommands } from "./app-runtime/useProjectTopicCommands";
 import { desktopProjectAdapter } from "./app-runtime/desktopProjectAdapter";
@@ -38,9 +37,8 @@ import { useRuntimeStatus } from "./app-runtime/useRuntimeStatus";
 import { sessionsForScope, type HistoryViewState } from "./app-runtime/historyViewProjection";
 import { useTerminalPanelCommands } from "./app-runtime/useTerminalPanelCommands";
 import { type HistoryLoadTrigger } from "./lib/useController";
-import { app, onProjectTreeChanged, openExternal } from "./lib/bridge";
+import { app, openExternal } from "./lib/bridge";
 import { useDesktopPreferences } from "./app-runtime/useDesktopPreferences";
-import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { decisionSurfaceMockFromInput, type DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
 const RemoteSessionSurface = lazy(() => import("./components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
@@ -93,23 +91,7 @@ import type { WorkspaceVerificationRevealRequest } from "./components/WorkspaceP
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import { resolveTaskMonitorSession } from "./lib/taskMonitorNavigation";
-import {
-  composerProfileFromMeta,
-  composerProfileFromTab,
-  composerProfileMode,
-  defaultComposerProfile,
-  displayedComposerProfileCollaborationMode,
-  hydrateComposerProfileFromMeta,
-  hydrateComposerProfilesFromTabs,
-  patchComposerProfile,
-  pruneUserPlanModeIntents,
-  resolvePlanRestoreTabId,
-  shouldRestoreUserPlanModeForProfile,
-  updateUserPlanModeIntent,
-  type ComposerProfile,
-  type ComposerProfileField,
-  type UserPlanModeIntents,
-} from "./lib/composerProfile";
+import { composerProfileFromMeta, composerProfileFromTab, composerProfileMode, defaultComposerProfile, displayedComposerProfileCollaborationMode, hydrateComposerProfileFromMeta, hydrateComposerProfilesFromTabs, patchComposerProfile, pruneUserPlanModeIntents, updateUserPlanModeIntent, type ComposerProfile, type ComposerProfileField, type UserPlanModeIntents } from "./lib/composerProfile";
 import {
   toggleYoloToolApprovalMode,
   restorableToolApprovalMode,
@@ -177,6 +159,7 @@ import { useSessionExportCommands } from "./app-runtime/useSessionExportCommands
 import { useSessionUndo } from "./app-runtime/useSessionUndo";
 import { useExtensionSurface } from "./app-runtime/useExtensionSurface";
 import { useTabBarCommands } from "./app-runtime/useTabBarCommands";
+import { useRuntimeEventHandlers } from "./app-runtime/useRuntimeEventHandlers";
 import { SessionStatusBanners } from "./app-shell/SessionStatusBanners";
 import { useShellGeometry } from "./app-runtime/useShellGeometry";
 import { nativeWindowCommands, useWindowsMaximised } from "./app-runtime/useNativeWindowController";
@@ -185,15 +168,7 @@ import {
   taskSessionIDFromPath,
   type SidebarImConnection,
 } from "./app-runtime/sidebarImProjection";
-import {
-  AppRuntimeEffects,
-  type RemoteForwardsListener,
-  type RemoteServerListener,
-  type RemoteStatusListener,
-  type RuntimeEventListener,
-  type RuntimeReadyListener,
-  type RuntimeRebuiltListener,
-} from "./app-runtime/AppRuntimeEffects";
+import { AppRuntimeEffects } from "./app-runtime/AppRuntimeEffects";
 import { useSessionPromptCommands } from "./app-runtime/useSessionPromptCommands";
 // Hold reasoning UI until the authoritative desktop startup settings arrive;
 // this prevents a hidden preference from flashing content during first paint.
@@ -334,13 +309,8 @@ export default function App() {
   const remoteHosts = useRemoteStore((s) => s.hosts);
   const remoteStatuses = useRemoteStore((s) => s.statuses);
   const { runGoalAction, handleGoalActionError } = useGoalActionHandler();
-  const setRemoteHosts = useRemoteStore((s) => s.setHosts);
-  const hydrateRemoteStatuses = useRemoteStore((s) => s.hydrateStatuses);
   const requestRemoteExplorer = useRemoteStore((s) => s.openExplorer);
-  const applyRemoteStatus = useRemoteStore((s) => s.applyStatus);
   const requestRemoteStatusPopover = useRemoteStore((s) => s.requestStatusPopover);
-  const setRemoteForwards = useRemoteStore((s) => s.setForwards);
-  const setRemoteServer = useRemoteStore((s) => s.setServer);
 
   const shortcutsOpen = useOverlayStore((s) => s.shortcutsOpen);
   const setShortcutsOpen = useOverlayStore((s) => s.setShortcutsOpen);
@@ -367,7 +337,6 @@ export default function App() {
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
   const rightDockPreviewWidth = useLayoutStore((s) => s.rightDockPreviewWidth);
-  const attentionChimeEvents = useRef(new Set<string>());
   const workspaceScopeActiveTabRef = useRef(activeTabId);
   const [workspaceControllerEpoch, setWorkspaceControllerEpoch] = useState(0);
   workspaceScopeActiveTabRef.current = activeTabId;
@@ -1152,116 +1121,31 @@ export default function App() {
     setLocalEffort: setEffortForTab, showError: (message) => showToast(message, "error"),
   });
 
-  const tabMetaRefreshCoordinatorRef = useRef<ReturnType<typeof createBoundedRefreshCoordinator<TabMeta[]>> | null>(null);
-  if (!tabMetaRefreshCoordinatorRef.current) {
-    tabMetaRefreshCoordinatorRef.current = createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT);
-  }
-  const refreshTabMetas = useCommittedCommand(async (
-    apply?: () => boolean,
-    options?: { afterMutation?: boolean },
-  ): Promise<TabMeta[]> => {
-    const result = await tabMetaRefreshCoordinatorRef.current!.run(
-      async () => asArray(await app.ListTabs().catch(() => [] as TabMeta[])),
-      options?.afterMutation ? { invalidate: true } : undefined,
-    );
-    const tabs = result.value;
-    if (result.latest && (!apply || apply())) {
-      setTabMetas((current) => sameTabMetaLists(current, tabs) ? current : tabs);
-    }
-    return tabs;
-  });
-  const seedActiveTabMeta = useCommittedCommand((tab: TabMeta): void => {
-    setTabMetas((current) => seedActiveTabMetaList(current, tab));
-    setTabOrderIds((current) => current.includes(tab.id) ? current : [...current, tab.id]);
-  });
-  const updateRemoteTabMeta = useCommittedCommand((tab: TabMeta): void => {
-    setTabMetas((current) => current.map((existing) => existing.id === tab.id
-      ? { ...existing, ...tab, active: existing.active }
-      : existing));
-  });
-
-  const registerRemoteTabMeta = useCommittedCommand((tab: TabMeta) => {
-    setTabMetas(current => current.some(existing => existing.id === tab.id) ? current : [...current, { ...tab, active: false }]);
-  });
-  useRemoteTabOpened(registerRemoteTabMeta, updateRemoteTabMeta);
-
-  const handleRuntimeEvent = useCommittedCommand<RuntimeEventListener>((event) => {
-    recordFrontendDiagnostic("runtime", "runtime.event", { action: event.kind, status: event.err ? "error" : "ok" });
-    if (event.kind === "turn_done") {
-      setDockRefreshKey((value) => value + 1);
-      setProjectRevision((value) => value + 1);
-      if (!event.err) playSuccessChime();
-    }
-    if (shouldPlayAttentionChimeForEvent(event, attentionChimeEvents.current)) playAttentionChime();
-    if (shouldRefreshTabMetaForEvent(event.kind)) void refreshTabMetas(undefined, { afterMutation: true });
-    if (event.kind !== "turn_done") return;
-    const turnTabId = resolvePlanRestoreTabId(event.tabId, activeTabIdRef.current);
-    void refreshTabMetas(undefined, { afterMutation: true }).then((tabs) => {
-      if (!turnTabId) return;
-      const tab = tabs.find((item) => item.id === turnTabId);
-      const baseProfile = tab ? composerProfileFromTab(tab) : defaultComposerProfile;
-      if (!shouldRestoreUserPlanModeForProfile(userPlanModeByTabRef.current, turnTabId, baseProfile)) {
-        if (baseProfile.goal.trim()) {
-          userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, turnTabId, false);
-        }
-        return;
-      }
-      setComposerProfilesByTab((current) => patchComposerProfile(
-        current, turnTabId, current[turnTabId] ?? baseProfile,
-        { collaborationMode: "plan", goalDraftMode: false, goal: "" },
-        ["collaborationMode", "goal"],
-      ));
-      if (activeTabIdRef.current === turnTabId) void setControllerCollaborationMode("plan");
-    });
-  });
-
-  const handleRuntimeReady = useCommittedCommand<RuntimeReadyListener>((readyTabId) => {
-    recordFrontendDiagnostic("runtime", "runtime.ready", { ready: true, hasActiveTab: Boolean(readyTabId) });
-    clearAttentionChimeKeys(attentionChimeEvents.current, readyTabId);
-    void refreshTabMetas();
-    if (!readyTabId || readyTabId === workspaceScopeActiveTabRef.current) {
-      setWorkspaceControllerEpoch((value) => value + 1);
-    }
-  });
-
-  const handleRuntimeRebuilt = useCommittedCommand<RuntimeRebuiltListener>((rebuiltTabId) => {
-    recordFrontendDiagnostic("runtime", "runtime.rebuilt", { ready: true, hasActiveTab: Boolean(rebuiltTabId) });
-    clearAttentionChimeKeys(attentionChimeEvents.current, rebuiltTabId);
-    if (!rebuiltTabId || rebuiltTabId === workspaceScopeActiveTabRef.current) {
-      setWorkspaceControllerEpoch((value) => value + 1);
-    }
-  });
-
   const blankSessionTarget = useCommittedCommand(() => {
     const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
     const scope = activeWorkspaceRoot ? "project" : "global";
     return { scope, workspaceRoot: activeWorkspaceRoot };
   });
 
-  useEffect(() => {
-    let live = true;
-    const ready = import("./lib/workspaceRefreshStore")
-      .then(({ default: startWorkspaceFocusReconciliation }) => live ? startWorkspaceFocusReconciliation(activeTabId, workspaceScopeKey, refreshTabMetas) : undefined)
-      .catch(() => undefined);
-    const stopProjectTree = onProjectTreeChanged(() => {
-      setProjectRevision((value) => value + 1);
-      void refreshTabMetas(undefined, { afterMutation: true });
-    });
-    return () => {
-      live = false;
-      stopProjectTree();
-      void ready.then((stop) => stop?.());
-    };
-  }, [activeTabId, refreshTabMetas, workspaceScopeKey]);
-
-  const handleRemoteStatus = useCommittedCommand<RemoteStatusListener>((status) => {
-    applyRemoteStatus(status);
-    if (status.state === "stopped" && status.error) requestRemoteStatusPopover(status.hostId);
+  const {
+    refreshTabMetas, seedActiveTabMeta,
+    handleRuntimeEvent, handleRuntimeReady, handleRuntimeRebuilt,
+    handleRemoteStatus, handleRemoteForwards, handleRemoteServer,
+    handleInitialRemoteHosts, handleInitialRemoteStatuses,
+  } = useRuntimeEventHandlers({
+    activeTabId,
+    workspaceScopeKey,
+    activeTabIdRef,
+    workspaceScopeActiveTabRef,
+    userPlanModeByTabRef,
+    setTabMetas,
+    setTabOrderIds,
+    setComposerProfilesByTab,
+    setDockRefreshKey,
+    setProjectRevision,
+    setWorkspaceControllerEpoch,
+    setControllerCollaborationMode,
   });
-  const handleRemoteForwards = useCommittedCommand<RemoteForwardsListener>((event) => setRemoteForwards(event.hostId, event.forwards));
-  const handleRemoteServer = useCommittedCommand<RemoteServerListener>((server) => setRemoteServer(server));
-  const handleInitialRemoteHosts = useCommittedCommand((hosts: Awaited<ReturnType<typeof app.RemoteHosts>>) => setRemoteHosts(hosts));
-  const handleInitialRemoteStatuses = useCommittedCommand((statuses: Awaited<ReturnType<typeof app.RemoteConnectionStatuses>>) => hydrateRemoteStatuses(statuses));
 
   const refreshProviderSetupState = useCommittedCommand(() => probeProviderSetupState());
 

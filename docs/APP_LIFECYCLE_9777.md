@@ -195,7 +195,7 @@ source-only tests must be audited as their owning features migrate.
 
 ## Remaining blocking evidence
 
-- App is still 2,645 lines (25 -> 23 effects). Six domain owners, remaining
+- App is still 2,529 lines (25 -> 22 effects). Six domain owners, remaining
   effects, the pure shell and removal of its size exception are not complete.
   Already moved out: module-level code (`lib/sessionTitles.ts`,
   `lib/mockScenarios.ts`, `lib/todoDismissalStorage.ts`,
@@ -221,7 +221,11 @@ source-only tests must be audited as their owning features migrate.
   the notification toast drain), and the tab-bar commands in
   `app-runtime/useTabBarCommands.ts` (single-flight switch queue, gated
   single/bulk close, background-runtime reveals and delivery-worktree
-  continuation). The footer
+  continuation), and the runtime event surface in
+  `app-runtime/useRuntimeEventHandlers.ts` (tab-meta registry with the
+  single-flight coordinator, runtime event/ready/rebuilt listeners, remote
+  status/forwards/server listeners, workspace focus reconciliation effect
+  #23, now gone from App). The footer
   ResizeObserver, activeTabIdRef and the maximised sync remain for the
   chrome/footer region slices. Typechecks, layer/hooks gates and the App
   lifecycle and browser replays all pass.

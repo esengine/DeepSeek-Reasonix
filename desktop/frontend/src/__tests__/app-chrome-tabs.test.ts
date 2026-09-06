@@ -12,6 +12,7 @@ const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.t
 const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
+const runtimeHandlersSource = readFileSync(resolve(testDir, "../app-runtime/useRuntimeEventHandlers.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8"), forkWorktreeSource = readFileSync(resolve(testDir, "../lib/forkWorktree.ts"), "utf8");
@@ -226,9 +227,9 @@ ok(!shouldRefreshTabMetaForEvent("text_delta"), "stream deltas do not trigger ta
 }
 
 ok(
-  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") && appSource.includes('import("./lib/workspaceRefreshStore")') &&
+  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") && runtimeHandlersSource.includes('import("../lib/workspaceRefreshStore")') &&
     workspaceFocusSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
-    appSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
+    runtimeHandlersSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
     /void refreshTabMetas\(\);\s+schedule\(\);/.test(workspaceFocusSource),
   "tab metadata refresh is event-driven with a visibility-aware fallback",
 );
