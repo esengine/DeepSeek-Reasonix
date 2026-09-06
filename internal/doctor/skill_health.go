@@ -78,7 +78,7 @@ func CollectSkillHealthWarnings(opts SkillHealthOptions) []string {
 			if at == "" {
 				continue
 			}
-			if !toolNames[at] && !isBuiltinOrMetaTool(at) {
+			if !toolNames[at] && !isRegisteredBuiltin(at) && !isBuiltinOrMetaTool(at) {
 				// Soft: only warn when the name looks concrete and missing.
 				out = append(out, fmt.Sprintf("skill %q allowed-tools references %q which is not in the current registry", name, at))
 			}
@@ -124,11 +124,25 @@ func normalizedTriggers(in []string) []string {
 	return out
 }
 
+// isRegisteredBuiltin asks the built-in registry, which is the only list that
+// cannot drift from the tools that actually ship. isBuiltinOrMetaTool below
+// stays as the fallback: it covers subagent and alias names that are dispatched
+// by the host rather than registered as tools, and it keeps this check working
+// in builds where the builtin package is not linked in.
+func isRegisteredBuiltin(name string) bool {
+	_, ok := tool.LookupBuiltin(name)
+	return ok
+}
+
 func isBuiltinOrMetaTool(name string) bool {
 	switch name {
 	case "bash", "read_file", "write_file", "edit_file", "grep", "glob", "ls",
 		"todo_write", "complete_step", "ask", "task", "read_only_task",
 		"parallel_tasks", "fleet",
+		// Host-wired at boot rather than registered as a compile-time built-in,
+		// so isRegisteredBuiltin cannot see it. The built-in skills name it in
+		// allowed-tools, so leaving it out warned on every session.
+		"use_capability",
 		"run_skill", "read_skill", "read_only_skill", "explore", "research",
 		"review", "security_review", "web_fetch", "multi_edit", "move_file",
 		"code_index", "wait", "bash_output", "kill_shell":
