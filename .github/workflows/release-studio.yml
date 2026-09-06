@@ -630,7 +630,7 @@ jobs:
           fi
           {
             printf '%s\n\n' '---'
-            printf '**macOS** 已用 Developer ID 签名并公证，打开时不需要清除隔离属性。%s**Linux** 从 `.deb` 安装。\n\n' "$windows"
+            printf "**macOS** 已用 Developer ID 签名并公证，打开时不需要清除隔离属性。%s**Linux** 从 \`.deb\` 安装。\n\n" "$windows"
             printf '%s\n' '三个平台都能自更新：Linux 走自己的包，Windows 运行下一个安装器，macOS 替换自身 bundle。'
           } >> "$notes"
           if gh release view "$TAG" >/dev/null 2>&1; then
