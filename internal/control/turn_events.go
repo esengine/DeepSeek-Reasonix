@@ -394,10 +394,11 @@ func (c *Controller) failTurnEventLedger(err error) {
 	}
 	c.mu.Unlock()
 	if cancel != nil {
-		c.promptResolveMu.Lock()
+		// Cancel and prompt resolvers may hold promptResolveMu while this
+		// synchronous failure callback runs. Use the owners' internal locks to
+		// invalidate pending resolutions without reentering the submission lock.
 		c.promptOwner.CancelAll()
 		c.approval.clearAll()
-		c.promptResolveMu.Unlock()
 		cancel()
 	}
 }

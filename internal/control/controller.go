@@ -2545,9 +2545,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	// Registering after the lock left a queued question invisible everywhere:
 	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
 	id, reply := c.approval.registerAsk(questions)
-	turnID, _, _, _ := c.turnEventRuntimeStatus()
-	_, runtimeEpoch := c.promptIdentitySnapshot()
-	_ = c.promptOwner.Register(PromptIdentity{PromptID: id, TurnID: turnID, RuntimeEpoch: runtimeEpoch, Kind: PromptAsk})
+	c.registerOwnedPrompt(id, PromptAsk)
 
 	if !c.lockPromptFor(ctx, "question") {
 		c.cancelOwnedPrompt(id)
@@ -2556,8 +2554,8 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	defer c.approval.promptMu.Unlock()
 
 	c.approval.promptEmitMu.Lock()
-	turnID, _, _, _ = c.turnEventRuntimeStatus()
-	_, runtimeEpoch = c.promptIdentitySnapshot()
+	turnID, _, _, _ := c.turnEventRuntimeStatus()
+	_, runtimeEpoch := c.promptIdentitySnapshot()
 	if identity := c.bindOwnedPromptRouting(id, turnID, runtimeEpoch); identity.TurnID != "" {
 		turnID = identity.TurnID
 	}
