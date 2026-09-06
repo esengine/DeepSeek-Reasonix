@@ -29,12 +29,14 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 		m := v
 		if m.LocalOnly && m.InterruptedTurn != nil && m.InterruptedTurn.Pending {
 			copy := *m.InterruptedTurn
+			copy.ToolCalls = append([]provider.ToolCallRecord(nil), copy.ToolCalls...)
 			copy.WriteChecks = append([]provider.WriteRecoveryCheck(nil), copy.WriteChecks...)
 			copy.SatisfiedWrites = append([]provider.InterruptedToolSummary(nil), copy.SatisfiedWrites...)
 			copy.CompletedTools = append([]provider.InterruptedToolSummary(nil), copy.CompletedTools...)
 			copy.InterruptedTools = append([]string(nil), copy.InterruptedTools...)
 			copy.NotStartedTools = append([]provider.InterruptedToolSummary(nil), copy.NotStartedTools...)
 			copy.UnknownTools = append([]provider.InterruptedToolSummary(nil), copy.UnknownTools...)
+			copy.CancelledTools = append([]provider.InterruptedToolSummary(nil), copy.CancelledTools...)
 			return &copy
 		}
 		if IsUserAuthoredTurnMessage(m) {
@@ -53,6 +55,12 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<%s>\n", interruptedRecoveryTag)
 	b.WriteString("The previous turn was interrupted. Treat these as host-verified recovery facts, not as a new task.\n")
+	if r.Cause != "" {
+		fmt.Fprintf(&b, "cause: %s\n", html.EscapeString(clipRecoveryValue(r.Cause)))
+	}
+	if r.SilentInterruption {
+		b.WriteString("silent_interruption: true\n")
+	}
 	if len(r.CompletedTools) == 0 {
 		b.WriteString("completed_tools: none\n")
 	} else {
@@ -98,6 +106,7 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 	}
 	writeRecoveryChecks(&b, r.WriteChecks)
 	writeRecoveryCalls(&b, "write_postconditions_satisfied_do_not_repeat", r.SatisfiedWrites)
+	writeRecoveryCalls(&b, "cancelled_tools", r.CancelledTools)
 	writeRecoveryCalls(&b, "not_started_tools", r.NotStartedTools)
 	writeRecoveryCalls(&b, "outcome_unknown_tools", r.UnknownTools)
 	if r.DroppedPartialText || r.DroppedPartialReasoning {
@@ -110,7 +119,7 @@ func interruptedRecoveryBlock(r *provider.InterruptedTurnRecovery) string {
 			b.WriteString(" (assistant text)\n")
 		}
 	}
-	b.WriteString("Before continuing, inspect the current workspace and prior completed tool results. Do not blindly repeat completed writes. For outcome-unknown calls (including legacy interrupted calls without execution evidence), first inspect side effects and external state; never assume they did not run. Only retry after verifying it is safe. Calls marked not_started may be planned again with complete arguments.\n")
+	b.WriteString("Before continuing, inspect the current workspace and prior completed tool results. Do not blindly repeat completed writes. For outcome-unknown calls (including legacy interrupted calls without execution evidence), first inspect side effects and external state; never assume they did not run. Only retry after verifying it is safe. Calls marked cancelled or not_started may be planned again with complete arguments.\n")
 	fmt.Fprintf(&b, "</%s>", interruptedRecoveryTag)
 	return b.String()
 }

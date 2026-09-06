@@ -4483,10 +4483,17 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 			recovery.DroppedPartialText = recovery.DroppedPartialText || strings.TrimSpace(m.Content) != ""
 			recovery.DroppedPartialReasoning = recovery.DroppedPartialReasoning || strings.TrimSpace(m.ReasoningContent) != ""
 			if previousRecovery != nil {
+				recovery.TurnID = previousRecovery.TurnID
+				recovery.AttemptID = previousRecovery.AttemptID
+				recovery.Cause = previousRecovery.Cause
+				recovery.RequiresUserDecision = recovery.RequiresUserDecision || previousRecovery.RequiresUserDecision
+				recovery.SilentInterruption = recovery.SilentInterruption || previousRecovery.SilentInterruption
 				recovery.CompletedTools = append(recovery.CompletedTools, previousRecovery.CompletedTools...)
 				recovery.InterruptedTools = append(recovery.InterruptedTools, previousRecovery.InterruptedTools...)
 				recovery.NotStartedTools = append(recovery.NotStartedTools, previousRecovery.NotStartedTools...)
 				recovery.UnknownTools = append(recovery.UnknownTools, previousRecovery.UnknownTools...)
+				recovery.CancelledTools = append(recovery.CancelledTools, previousRecovery.CancelledTools...)
+				recovery.ToolCalls = append(recovery.ToolCalls, previousRecovery.ToolCalls...)
 			} else {
 				for _, call := range m.ToolCalls {
 					provider.RecordToolRecovery(recovery, interruptedToolSummary(call), provider.ToolRunUnknown)

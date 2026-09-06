@@ -2018,7 +2018,7 @@ func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provide
 			continue
 		}
 		seen[key] = struct{}{}
-		displayCalls = append(displayCalls, provider.ToolCall{ID: call.ID, Name: name})
+		displayCalls = append(displayCalls, provider.ToolCall{ID: call.ID, Name: name, Arguments: call.Arguments})
 		if name != "" {
 			interrupted = append(interrupted, name)
 			notStarted = append(notStarted, provider.InterruptedToolSummary{ID: call.ID, Name: name})
@@ -2034,9 +2034,19 @@ func (a *Agent) recordInterruptedDisplay(text, reasoning string, calls []provide
 		WorkDurationMs:   workDurationMs,
 		LocalOnly:        true,
 		InterruptedTurn: &provider.InterruptedTurnRecovery{
-			Pending:                 pending,
-			InterruptedTools:        interrupted,
-			NotStartedTools:         notStarted,
+			Pending:            pending,
+			Cause:              "host_interruption",
+			SilentInterruption: pending && strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "" && len(calls) == 0,
+			DisplayOnlyPartial: strings.TrimSpace(text) != "" || strings.TrimSpace(reasoning) != "",
+			InterruptedTools:   interrupted,
+			NotStartedTools:    notStarted,
+			ToolCalls: func() []provider.ToolCallRecord {
+				records := make([]provider.ToolCallRecord, 0, len(calls))
+				for _, call := range calls {
+					records = append(records, provider.ToolCallRecord{ID: call.ID, Name: call.Name, Arguments: []byte(call.Arguments), State: provider.ToolRunNotStarted})
+				}
+				return records
+			}(),
 			DroppedPartialText:      strings.TrimSpace(text) != "",
 			DroppedPartialReasoning: strings.TrimSpace(reasoning) != "",
 		},

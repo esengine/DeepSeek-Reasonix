@@ -14,5 +14,12 @@ func recordInterruptedAssistantRecovery(r *provider.InterruptedTurnRecovery, msg
 			state = provider.ToolResultRunState(result)
 		}
 		provider.RecordToolRecovery(r, interruptedToolSummary(call), state)
+		record := provider.ToolCallRecord{
+			ID: call.ID, Name: call.Name, Arguments: append([]byte(nil), call.Arguments...), State: state,
+		}
+		if state == provider.ToolRunUnknown {
+			r.RequiresUserDecision = true
+		}
+		r.ToolCalls = append(r.ToolCalls, record)
 	}
 }

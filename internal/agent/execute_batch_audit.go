@@ -87,7 +87,9 @@ func (a *Agent) recordToolExecutionAudit(readOnly, parallel bool, startedAt, dur
 
 func (a *Agent) storeBatchToolResult(call provider.ToolCall, o toolOutcome) {
 	state := provider.ToolRunCompleted
-	if !o.executed {
+	if o.cancelledBeforeExecution {
+		state = provider.ToolRunCancelled
+	} else if !o.executed {
 		state = provider.ToolRunNotStarted
 	} else if provider.ToolResultRunState(provider.Message{Content: o.output + "\n" + o.errMsg}) == provider.ToolRunUnknown {
 		state = provider.ToolRunUnknown

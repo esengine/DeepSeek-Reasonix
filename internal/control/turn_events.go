@@ -286,6 +286,10 @@ func (s *turnEventDurableSink) RecordSubagentLifecycle(a event.SubagentLifecycle
 }
 
 func terminalTurnStatus(e event.Event) event.TurnStatus {
+	var uncertain *agent.CompletionUncertainError
+	if errors.As(e.Err, &uncertain) {
+		return event.TurnRecoveryRequired
+	}
 	if e.Cancelled || errors.Is(e.Err, context.Canceled) {
 		return event.TurnInterrupted
 	}

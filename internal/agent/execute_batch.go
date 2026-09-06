@@ -51,6 +51,7 @@ type toolOutcome struct {
 	rawOutput                  string // full original when different from output
 	images                     []string
 	blocked                    bool
+	cancelledBeforeExecution   bool
 	errMsg                     string
 	truncated                  bool
 	truncMsg                   string
@@ -185,7 +186,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		output := "cancelled: context cancelled before execution"
 		for j := start; j < len(calls); j++ {
 			results[j] = output
-			outcomes[j] = toolOutcome{output: output, errMsg: errMsg}
+			outcomes[j] = toolOutcome{output: output, errMsg: errMsg, cancelledBeforeExecution: true}
 		}
 		cancelled = true
 	}
