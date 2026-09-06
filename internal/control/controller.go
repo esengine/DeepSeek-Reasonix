@@ -2557,6 +2557,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 
 	c.approval.promptEmitMu.Lock()
 	turnID, _, _, _ = c.turnEventRuntimeStatus()
+	_, runtimeEpoch = c.promptIdentitySnapshot()
 	if identity := c.bindOwnedPromptRouting(id, turnID, runtimeEpoch); identity.TurnID != "" {
 		turnID = identity.TurnID
 	}
