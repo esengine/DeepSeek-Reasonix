@@ -1271,6 +1271,7 @@ export const en = {
   "ask.customPlaceholder": "Type your own answer…",
   "ask.justChat": "Skip and keep chatting",
   "ask.justChatDesc": "Submit empty answers and continue the conversation.",
+  "ask.skipQuestion": "Skip this question",
 
   // clear context confirmation
   "clearContext.title": "Clear current context",

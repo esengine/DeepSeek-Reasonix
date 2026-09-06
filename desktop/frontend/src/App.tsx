@@ -4996,6 +4996,7 @@ export default function App() {
               <AskCard
                 key={`${activeTabId ?? ""}:${state.ask.id}`}
                 ask={state.ask}
+                draftScope={activeTabId ?? "local"}
                 onAnswer={answerQuestion}
                 onDismiss={() => answerQuestion(state.ask!.id, [])}
                 onStop={() => {

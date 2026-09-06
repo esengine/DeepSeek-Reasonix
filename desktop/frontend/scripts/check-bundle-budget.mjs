@@ -200,7 +200,10 @@ console.log("\nbundle budgets");
 // over the same-environment main-v2 build (465.4 -> 466.6 KiB gzip).
 // Keep one decimal of cross-platform headroom for this measured shell change.
 // Integrating main-v2 rich-link menus measures 466.905 KiB combined.
-const initialJSBudgetKiB = 467.0;
+// The AskCard session-draft wiring adds a bounded 30-byte gzip drift on the
+// initial route; retain the explicit budget rather than failing on a rounded
+// 467.0 KiB display value.
+const initialJSBudgetKiB = 467.5;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -219,10 +222,11 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-// The one-row model configuration list, responsive stacking, and Automation's
-// shared title-safe shell measure 116.423 KiB gzip while reusing existing
-// layout primitives. Retain only the next one-decimal ceiling.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.5 * 1024);
+// The one-row model configuration list, responsive stacking, Automation's
+// shared title-safe shell, and the shared harness decision surface measure
+// 116.9 KiB gzip while reusing existing layout primitives. Retain a bounded
+// 0.1 KiB headroom ratchet.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 117.0 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -376,8 +380,9 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // Retain the upstream updater ceiling and independent chunk gates.
 // Recovery controls add 3.6 KiB raw over the measured 2480.9 KiB base;
 // current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
-// With the current-base rich-link menus: 2485.715 KiB raw. Linux, macOS, and
-// Windows toolchain output can round slightly above the binary threshold.
-const rawInitialBudgetKiB = 2_486.7;
+// With the current-base rich-link menus: 2485.715 KiB raw.
+// The shared harness decision surface adds a bounded startup stylesheet
+// payload; retain the measured 2492.1 KiB path with narrow headroom.
+const rawInitialBudgetKiB = 2_492.5;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
