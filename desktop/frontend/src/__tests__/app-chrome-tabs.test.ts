@@ -414,10 +414,10 @@ ok(
 // session-submission-lifecycle.test.tsx verifies source-only undo invalidation
 // before send, and zero invalidation for stale/read-only/disposed submissions.
 
-ok(
-  /if \(scope === "code"\) \{[\s\S]*?rewindForTabDetailed\(sourceTabId, turn, scope\)[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
-  "code-only rewind retains the committed transaction id for real undo",
-);
+// session-undo-lifecycle.test.tsx drives the production useSessionUndo owner:
+// code-only rewind retains the committed transaction id, full rewinds fill the
+// composer only after success, failures leave the banner untouched, and the
+// edit prompt honors the undo banner gate.
 
 
 
