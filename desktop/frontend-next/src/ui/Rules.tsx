@@ -223,7 +223,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
               <span className="lb">{t(r.title)}</span>
               <span className="ds">{t(r.desc)}</span>
             </div>
-            <Switch on={has(r)} busy={busy === r.id} label={t(r.title)} onClick={() => toggleRecipe(r)} />
+            <Switch data-action="permissions.recipe" data-target={r.id} on={has(r)} busy={busy === r.id} label={t(r.title)} onClick={() => toggleRecipe(r)} />
           </div>
         ))}
       </div>
@@ -232,7 +232,8 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
         <span className="k">{t("剩下的写操作")}</span>
         <div className="seg fit" data-text role="radiogroup" aria-label={t("剩下的写操作")}>
           {MODES.map(([id, label]) => (
-            <button key={id} role="radio" aria-checked={rules.mode === id} disabled={!!busy}
+            <button key={id} role="radio" data-action="permissions.mode" data-value={id}
+              aria-checked={rules.mode === id} disabled={!!busy}
               onClick={() => void apply("mode", { ...lists, mode: id })}>
               {t(label)}
             </button>
@@ -290,7 +291,8 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
                         <option key={id} value={id}>{t(label)}</option>
                       ))}
                     </select>
-                    <button className="act ghost" disabled={!!busy} aria-label={t("删掉 {rule}", { rule: row.rule })}
+                    <button className="act ghost" data-action="permissions.remove-rule" data-target={row.rule}
+                      disabled={!!busy} aria-label={t("删掉 {rule}", { rule: row.rule })}
                       onClick={() => drop(row.rule)}>
                       {t("删掉")}
                     </button>
@@ -337,7 +339,7 @@ function AddRule({ busy, onAdd }: { busy: boolean; onAdd: (rule: string, level: 
             <option key={id} value={id}>{t(label)}</option>
           ))}
         </select>
-        <button className="act" data-primary disabled={busy || !rule} onClick={() => onAdd(rule, level)}>
+        <button className="act" data-primary data-action="permissions.add-rule" disabled={busy || !rule} onClick={() => onAdd(rule, level)}>
           {t("加上")}
         </button>
       </div>

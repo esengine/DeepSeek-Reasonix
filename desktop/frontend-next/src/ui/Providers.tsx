@@ -212,7 +212,7 @@ function Conn({
           {t(checking ? "测试中…" : "测一下")}
         </button>
         {!entry.inUse && (
-          <button className="sa lnk" onClick={() => onRemove(entry.name)} disabled={busy !== ""}>
+          <button className="sa lnk" data-action="provider.remove" data-target={entry.name} onClick={() => onRemove(entry.name)} disabled={busy !== ""}>
             {t("删除")}
           </button>
         )}
@@ -222,7 +222,7 @@ function Conn({
           <span className="lb">{t("接入方式")}</span>
           <div className="seg" role="group" aria-label={t("{name} 的接入方式", { name: a.label })}>
             {a.kinds.map((k) => (
-              <button key={k} aria-pressed={k === kind} disabled={busy !== ""} onClick={() => onProtocol(k)}>
+              <button key={k} data-action="provider.protocol" data-target={entry.name} data-value={k} aria-pressed={k === kind} disabled={busy !== ""} onClick={() => onProtocol(k)}>
                 {t(KIND_LABEL[k] ?? k)}
                 {/* A door that carries a capability the other lacks has to say
                     so on itself: switching is otherwise a silent downgrade. */}
@@ -240,7 +240,8 @@ function Conn({
           <span className="lb">{t("联网搜索")}</span>
           <div className="seg" role="group" aria-label={t("{name} 的联网搜索", { name: a.label })}>
             {[true, false].map((on) => (
-              <button key={String(on)} aria-pressed={entry.webSearch === on} disabled={busy !== ""}
+              <button key={String(on)} data-action="provider.web-search" data-target={entry.name} data-value={String(on)}
+                aria-pressed={entry.webSearch === on} disabled={busy !== ""}
                 onClick={() => setSearch(on)}>
                 {t(on ? "开" : "关")}
               </button>
@@ -254,7 +255,8 @@ function Conn({
           <span className="lb">{t("思考参数")}</span>
           <div className="seg" role="group" aria-label={t("{name} 的思考参数", { name: a.label })}>
             {[true, false].map((on) => (
-              <button key={String(on)} aria-pressed={(entry.sendsThinking ?? true) === on} disabled={busy !== ""}
+              <button key={String(on)} data-action="provider.thinking" data-target={entry.name} data-value={String(on)}
+                aria-pressed={(entry.sendsThinking ?? true) === on} disabled={busy !== ""}
                 onClick={() => setThinking(on)}>
                 {t(on ? "自动" : "不发送")}
               </button>

@@ -78,7 +78,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
               onKeyDown={(e) => e.key === "Enter" && void save("root", { ...box, workspaceRoot: root })}
             />
           </label>
-          <button className="act" disabled={!!busy} onClick={() => void pick()}>
+          <button className="act" data-action="sandbox.add-write-root" data-value="browse" disabled={!!busy} onClick={() => void pick()}>
             {t("选文件夹")}
           </button>
         </div>
@@ -90,6 +90,8 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
               <code>{p}</code>
               <button
                 className="act ghost"
+                data-action="sandbox.remove-write-root"
+                data-target={p}
                 disabled={!!busy}
                 aria-label={t("不再允许写 {path}", { path: p })}
                 onClick={() => void save("extra", { ...box, allowWrite: box.allowWrite.filter((x) => x !== p) })}
@@ -114,6 +116,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
             />
             <button
               className="act"
+              data-action="sandbox.add-write-root"
               disabled={!!busy || !draft.trim()}
               onClick={() => {
                 void save("extra", { ...box, allowWrite: [...box.allowWrite, draft.trim()] });
@@ -195,6 +198,8 @@ export function CommandMode({
             <button
               key={id}
               role="radio"
+              data-action="sandbox.mode"
+              data-value={id}
               aria-checked={mode === id}
               disabled={!!busy || locked}
               data-locked={locked ? "" : undefined}
@@ -221,7 +226,7 @@ export function CommandMode({
             <span className="lb">{t("沙箱里允许联网")}</span>
             <span className="ds">{t("关闭后安装依赖、拉取仓库等操作都会失败，这正是该选项的用途")}</span>
           </span>
-          <Switch on={box.network} busy={busy === "net"} label={t("沙箱里允许联网")} onClick={onNetwork} />
+          <Switch data-action="sandbox.network" on={box.network} busy={busy === "net"} label={t("沙箱里允许联网")} onClick={onNetwork} />
         </div>
       )}
     </div>

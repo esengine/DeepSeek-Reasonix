@@ -104,6 +104,20 @@ export const ACTIONS: UIAction[] = [
   { id: "storage.move", kind: "kernel-mutation", target: "none", proof: "interaction" },
   { id: "network.diagnose", kind: "repeatable", target: "none", proof: "interaction" },
 
+  // ── Permissions, the sandbox, and the endpoints a session can reach.
+  { id: "permissions.recipe", kind: "kernel-mutation", target: "entity", proof: "authority-effect" },
+  { id: "permissions.mode", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "permissions.add-rule", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "permissions.remove-rule", kind: "destructive", target: "entity", proof: "authority-effect" },
+  { id: "sandbox.mode", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "sandbox.network", kind: "kernel-mutation", target: "none", proof: "authority-effect" },
+  { id: "sandbox.add-write-root", kind: "kernel-mutation", target: "optional", proof: "authority-effect" },
+  { id: "sandbox.remove-write-root", kind: "destructive", target: "entity", proof: "authority-effect" },
+  { id: "provider.remove", kind: "destructive", target: "entity", proof: "interaction" },
+  { id: "provider.protocol", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "provider.web-search", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+  { id: "provider.thinking", kind: "kernel-mutation", target: "entity", proof: "interaction" },
+
   // ── The two side panels. Reached from the keyboard here, and from each
   //    gutter's own grip, which this pass has not annotated yet.
   { id: "rail.toggle", kind: "view", target: "none", proof: "interaction" },
