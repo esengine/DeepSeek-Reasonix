@@ -2109,11 +2109,11 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 func rememberPermissionConfigPath(workspaceRoot string) string {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
-		return filepath.Join(workspaceRoot, "reasonix.toml")
+		return config.ProjectConfigPath(workspaceRoot)
 	}
 	path := config.SourcePath()
 	if path == "" {
-		path = "reasonix.toml" // match Config.Save() fallback
+		path = config.ProjectConfigPath(".") // match Config.Save() fallback
 	}
 	return path
 }
@@ -2518,6 +2518,8 @@ func newProviderWithSearchMode(e *config.ProviderEntry, proxy netclient.ProxySpe
 		Extra: map[string]any{
 			"api_key_env":        e.APIKeyEnv,
 			"api_key_source":     e.APIKeySourceLabel(),
+			"user_id":            e.CacheContextValue(),
+			"session_id":         e.SessionContextValue(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
 			"supported_efforts":  e.SupportedEfforts,

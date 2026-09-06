@@ -639,6 +639,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
+  SetCacheContext(value: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
@@ -1116,7 +1117,7 @@ function bridgeBreadcrumb(method: string): string {
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetDefaultModel|SetPlannerModel|SetVisionModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage|SetCacheContext)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|SetProviderWebSearch|SaveProviderModelCatalogs|AddOfficialProviderAccess|UpgradeDeepSeekProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|RemoveProviderAccesses|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|TestProviderModel|FetchProviderModelCatalog|FetchAllProviderModelCatalogs|FetchProviderModels|FetchAllProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
@@ -1909,6 +1910,8 @@ function makeMockApp(): AppBindings {
     metrics: true,
     configPath: "~/.reasonix/config.toml",
     shadowedByPath: "~/projects/reasonix/reasonix.toml",
+    cacheContext: "mock-project",
+    cacheContextProject: true,
     providerKinds: ["openai", "anthropic", "responses"],
     autoApproveTools: false,
     bypass: false,
@@ -5119,6 +5122,9 @@ function makeMockApp(): AppBindings {
     async SetReasoningLanguage(lang: string) {
       const normalized = lang === "zh" || lang === "en" ? lang : "auto";
       settings.agent = { ...settings.agent, reasoningLanguage: normalized };
+    },
+    async SetCacheContext(_value: string) {
+      // mock bridge: cache context writes to the project config; no-op here.
     },
     // ── Heartbeat mock ──
     async HeartbeatListTasks() { return mockHeartbeatTasks; },
