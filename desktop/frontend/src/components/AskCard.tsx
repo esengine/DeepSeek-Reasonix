@@ -9,6 +9,8 @@ import {
   PromptShelf,
 } from "./PromptShelf";
 
+type AnswerMode = "option" | "custom";
+
 // AskCard renders the `ask` tool as a decision shelf near the composer. It
 // walks multi-question asks one at a time. Selecting (click / digit) never
 // advances; Enter / Confirm submits or moves to the next question.
@@ -27,6 +29,7 @@ export function AskCard({
   // Per-question state: selected option labels, and an optional typed answer.
   const [sel, setSel] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
+  const [answerMode, setAnswerMode] = useState<Record<string, AnswerMode>>({});
   const [customOpen, setCustomOpen] = useState(false);
   const [active, setActive] = useState(0);
   // Extra decision row after option labels: custom answer. Skip is a
@@ -61,6 +64,7 @@ export function AskCard({
     shelfRef.current?.focus();
     setSel({});
     setCustom({});
+    setAnswerMode({});
     setCustomOpen(false);
     setActive(0);
     setSelectedIndex(0);
@@ -86,7 +90,9 @@ export function AskCard({
   ): QuestionAnswer[] =>
     questions.map((question) => ({
       questionId: question.id,
-      selected: nextCustom[question.id]?.trim() ? [nextCustom[question.id].trim()] : (nextSel[question.id] ?? []),
+      selected: answerMode[question.id] === "custom" && nextCustom[question.id]?.trim()
+        ? [nextCustom[question.id].trim()]
+        : (nextSel[question.id] ?? []),
     }));
 
   const answerLabel = (question: WireAskQuestion) => {
@@ -119,18 +125,18 @@ export function AskCard({
 
   const toggleOption = (question: WireAskQuestion, label: string) => {
     if (submitting) return;
-    const nextCustom = { ...custom, [question.id]: "" };
     const cur = sel[question.id] ?? [];
     const nextSel = question.multi
       ? { ...sel, [question.id]: cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label] }
       : { ...sel, [question.id]: [label] };
 
-    setCustom(nextCustom);
+    setAnswerMode((m) => ({ ...m, [question.id]: "option" }));
     setSel(nextSel);
     setCustomOpen(false);
   };
 
   const setTyped = (question: WireAskQuestion, text: string) => {
+    setAnswerMode((m) => ({ ...m, [question.id]: "custom" }));
     setCustom((c) => ({ ...c, [question.id]: text }));
     if (text.trim()) setSel((s) => ({ ...s, [question.id]: [] }));
   };
@@ -150,12 +156,13 @@ export function AskCard({
         toggleOption(q, option.label);
       } else {
         // Single-select: click/digit only selects the row and marks the option.
-        setCustom((c) => ({ ...c, [q.id]: "" }));
+        setAnswerMode((m) => ({ ...m, [q.id]: "option" }));
         setSel((s) => ({ ...s, [q.id]: [option.label] }));
         setCustomOpen(false);
       }
     } else if (index === customRowIndex) {
       // Opening custom clears option picks for this question.
+      setAnswerMode((m) => ({ ...m, [q.id]: "custom" }));
       setCustomOpen(true);
       setSel((s) => ({ ...s, [q.id]: [] }));
     }
