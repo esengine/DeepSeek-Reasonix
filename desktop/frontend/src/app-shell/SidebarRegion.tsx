@@ -7,7 +7,7 @@ import logoWordmark from "../assets/logo-wordmark.svg";
 
 const ProjectTree = lazy(() => import("../components/ProjectTree").then((module) => ({ default: module.ProjectTree })));
 
-type SidebarRegionProps = {
+export type SidebarRegionProps = {
   className: string;
   workbench: boolean;
   creation: boolean;

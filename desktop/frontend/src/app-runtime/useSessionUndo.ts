@@ -181,6 +181,23 @@ export function useSessionUndo(input: SessionUndoInput) {
     });
   });
 
+  const handleUndoRewind = useCommittedCommand(() => {
+    const tabId = activeTabId;
+    const state = rewindState;
+    if (!tabId || !state) return;
+    const tx = state.transactionId;
+    const undoTabId = state.undoTabId || tabId;
+    const undo = tx && state.undoAvailable ? ports.undoRewindForTab(undoTabId, tx) : Promise.resolve(true);
+    void undo.then((ok) => {
+      if (!ok) return;
+      setRewindStateForTab(tabId, null);
+      ports.composeInsert(tabId, "");
+      bumpRewindSignal();
+      ports.refreshDock();
+      ports.refreshProject();
+    });
+  });
+
   const handleEditPrompt = useCommittedCommand(async (turn: number, displayText: string, submitText?: string): Promise<boolean> => {
     const sourceTabId = activeTabId;
     if (!sourceTabId || input.activeTabReadOnly || !input.controllerReady || input.hydratePlaceholderActive
@@ -222,6 +239,7 @@ export function useSessionUndo(input: SessionUndoInput) {
     bumpRewindSignal,
     handleSessionRevertCommitted,
     handleMessageAction,
+    handleUndoRewind,
     handleEditPrompt,
   };
 }

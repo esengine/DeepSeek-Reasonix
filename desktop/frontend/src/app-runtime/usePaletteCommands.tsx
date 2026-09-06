@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo } from "react";
 import { AlarmClock, Activity, BarChart3, Brain, Cpu, Palette, Puzzle, RotateCw, Server, Settings as SettingsIcon, SquarePen, TerminalSquare, Trash2 } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
@@ -8,6 +8,7 @@ import { paletteSessionDisplayTitle, paletteSessionHint, paletteSessionKeywords,
 import { useOverlayStore } from "../store/overlays";
 import { useAppNavigationStore } from "../store/appNavigation";
 import { useRemoteStore } from "../store/remote";
+import { activeTabMirror } from "./activeTabMirror";
 import type { RemoteHostView, SessionMeta } from "../lib/types";
 import type { Translator } from "../lib/i18n";
 import type { PaletteItem } from "../components/CommandPalette";
@@ -15,7 +16,6 @@ import type { PaletteItem } from "../components/CommandPalette";
 export type PaletteCommandsInput = {
   managementActive: boolean;
   activeTabId: string | undefined;
-  activeTabIdRef: RefObject<string | undefined>;
   remoteSurfaceActive: boolean;
   t: Translator;
   notice(message: string, kind?: "info" | "warn" | "error"): void;
@@ -42,7 +42,7 @@ export type PaletteCommandsInput = {
  * extension, remote-host and navigation targets come from their stores.
  */
 export function usePaletteCommands(input: PaletteCommandsInput) {
-  const { managementActive, activeTabId, activeTabIdRef, remoteSurfaceActive, t, notice, showToast, ports } = input;
+  const { managementActive, activeTabId, remoteSurfaceActive, t, notice, showToast, ports } = input;
   const setPaletteOpen = useOverlayStore((state) => state.setPaletteOpen);
   const paletteSessions = useOverlayStore((state) => state.paletteSessions);
   const setPaletteSessions = useOverlayStore((state) => state.setPaletteSessions);
@@ -61,7 +61,7 @@ export function usePaletteCommands(input: PaletteCommandsInput) {
     closeTransientOverlays();
     setPaletteOpen(true);
     setPaletteSessions(await ports.listSessions().catch(() => []));
-    setPaletteExtensionActions(await app.ExtensionActions(activeTabIdRef.current ?? "").catch(() => []));
+    setPaletteExtensionActions(await app.ExtensionActions(activeTabMirror().current ?? "").catch(() => []));
   });
 
   useGlobalShortcut("commandPalette.open", () => {

@@ -1,4 +1,4 @@
-import { composerProfileFromTab, controllerComposerProfileCollaborationMode, type ComposerProfile } from "../lib/composerProfile";
+import { composerProfileFromTab, composerProfileMode, controllerComposerProfileCollaborationMode, displayedComposerProfileCollaborationMode, type ComposerProfile } from "../lib/composerProfile";
 import type { CollaborationMode, TabMeta, ToolApprovalMode } from "../lib/types";
 import { sessionIdentityKey } from "./sessionTarget";
 import type { SessionOperationAuthority, SessionResource } from "./useSessionOperations";
@@ -60,4 +60,29 @@ export async function executeControllerModel(input: ControllerProfileInput & {
   }
   authority.checkpoint();
   return authority.ownsUI();
+}
+
+/** Visible tab strip projection: committed order plus profile display fields. */
+export function projectVisibleTabs(input: {
+  tabs: readonly TabMeta[];
+  orderIds: readonly string[];
+  profiles: Readonly<Record<string, ComposerProfile>>;
+  visibleTabId: string | undefined;
+  running: boolean;
+}) {
+  const byId = new Map(input.tabs.map((tab) => [tab.id, tab]));
+  const ordered = input.orderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
+  const missing = input.tabs.filter((tab) => !input.orderIds.includes(tab.id));
+  return [...ordered, ...missing].map((tab) => {
+    const profile = input.profiles[tab.id] ?? composerProfileFromTab(tab);
+    return {
+      ...tab,
+      running: tab.id === input.visibleTabId ? tab.running || input.running : tab.running,
+      mode: composerProfileMode(profile),
+      collaborationMode: displayedComposerProfileCollaborationMode(profile),
+      toolApprovalMode: profile.toolApprovalMode,
+      goal: profile.goal,
+      active: tab.id === input.visibleTabId,
+    };
+  });
 }

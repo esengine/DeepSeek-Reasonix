@@ -13,7 +13,11 @@ const effects: string[] = [];
 let release!: () => void;
 let gate = new Promise<void>(resolve => { release = resolve; });
 const resetGate = () => { effects.length = 0; gate = new Promise<void>(resolve => { release = resolve; }); };
-const ports: ComposerModePorts = {
+const planIntentsRef = { current: {} };
+const yoloRestoreRef = { current: {} };
+// The hook owns rememberPlan/rememberApproval through these refs; the owner
+// still accepts them as ports, exercised directly below.
+const ports: Omit<ComposerModePorts, "rememberPlan" | "rememberApproval"> = {
   setMode: async id => { effects.push(`mode:${id}`); },
   setCollaboration: async id => { effects.push(`collaboration:${id}`); },
   setApproval: async id => { effects.push(`approval:${id}`); },
@@ -21,8 +25,6 @@ const ports: ComposerModePorts = {
   setRemote: async id => { effects.push(`remote:${id}`); await gate; return ["approval-A"]; },
   drainRemote: id => { effects.push(`drain:${id}`); },
   patch: id => { effects.push(`patch:${id}`); },
-  rememberPlan: id => { effects.push(`plan:${id}`); },
-  rememberApproval: id => { effects.push(`remember:${id}`); },
 };
 let commands!: ReturnType<typeof useComposerModeActions>;
 let operations!: ReturnType<typeof useSessionOperations>;
@@ -31,6 +33,7 @@ function Probe({ id, remote = false, generation = "" }: { id: string; remote?: b
   commands = useComposerModeActions({
     remote, collaborationMode: "goal", toolApprovalMode: "ask", goal: "task",
     target: { tabId: id, sessionKey: id + generation }, operations, ports,
+    planIntentsRef, yoloRestoreRef,
     showError: message => effects.push(`error:${message}`),
   });
   return null;
@@ -45,7 +48,8 @@ try {
   await paint("B");
   release();
   await act(async () => { await pending; });
-  assert.deepEqual(effects, ["clear:A", "collaboration:A", "plan:A", "patch:A"], "every continuation mutates the captured source, never B");
+  assert.deepEqual(effects, ["clear:A", "collaboration:A", "patch:A"], "every continuation mutates the captured source, never B");
+  assert.equal(planIntentsRef.current["A"], undefined, "normal mode records no plan intent for the source tab");
   resetGate();
   await paint("A", true);
   const remote = commands.applyCollaborationMode("normal");
@@ -53,7 +57,7 @@ try {
   await paint("A", true);
   release();
   await act(async () => { await remote; });
-  assert.deepEqual(effects, ["remote:A", "plan:A", "patch:A"], "A→B→A preserves source data but never revives approval-drain UI ownership");
+  assert.deepEqual(effects, ["remote:A", "patch:A"], "A→B→A preserves source data but never revives approval-drain UI ownership");
 
   resetGate();
   await paint("A");
@@ -73,7 +77,7 @@ try {
   await paint("A");
   release();
   await act(async () => { await rerendered; });
-  assert.deepEqual(effects, ["clear:A", "stop:A", "collaboration:A", "plan:A", "patch:A"], "ordinary commit does not cancel an in-flight source request");
+  assert.deepEqual(effects, ["clear:A", "stop:A", "collaboration:A", "patch:A"], "ordinary commit does not cancel an in-flight source request");
 
   resetGate();
   const stale = commands.applyCollaborationMode("normal");
@@ -85,7 +89,7 @@ try {
   assert.deepEqual(effects, ["clear:A", "clear:A"], "superseded continuation has zero side effects");
   release();
   await act(async () => { await latest; });
-  assert.deepEqual(effects, ["clear:A", "clear:A", "collaboration:A", "plan:A", "patch:A"], "old finally cannot release the new request");
+  assert.deepEqual(effects, ["clear:A", "clear:A", "collaboration:A", "patch:A"], "old finally cannot release the new request");
 
   resetGate();
   const disposed = commands.applyCollaborationMode("normal");
@@ -97,6 +101,8 @@ try {
   assert.deepEqual(effects, ["clear:A"], "unmount synchronously revokes commands and pending continuations");
   const writes: unknown[][] = [];
   const remotePorts: ComposerModePorts = { ...ports,
+    rememberPlan: id => { effects.push(`plan:${id}`); },
+    rememberApproval: id => { effects.push(`remember:${id}`); },
     setRemote: async (...args) => { writes.push(args); return []; },
     clearGoal: async () => { throw new Error("atomic remote transition cannot use local goal clearing"); },
     setCollaboration: async () => { throw new Error("atomic remote transition cannot use local mode changes"); },

@@ -103,3 +103,36 @@ export function projectConversationLayout(input: {
     terminalOpen: input.chatVisible && input.terminalOpen && input.localToolsEnabled,
   };
 }
+
+/** Workspace controller scope key: any identity input change re-scopes the composer. */
+export function projectWorkspaceScopeKey(input: {
+  activeTabId: string | undefined;
+  tabSessionPath: string | undefined;
+  metaSessionPath: string | undefined;
+  cwd: string | undefined;
+  sessionGen: number;
+  workspaceControllerEpoch: number;
+}): string {
+  return [
+    input.activeTabId ?? "",
+    input.tabSessionPath ?? "",
+    input.metaSessionPath ?? "",
+    input.cwd ?? "",
+    input.sessionGen,
+    input.workspaceControllerEpoch,
+  ].join("\u0000");
+}
+
+// Workspace navigation belongs to the project, not to a single conversation.
+// A session switch inside the same project must therefore retain the dock,
+// tree and selection state.
+export function projectWorkspaceTreeMemoryKey(input: {
+  scope: string | undefined;
+  workspaceRoot: string | undefined;
+  cwd: string | undefined;
+}): string {
+  return [
+    input.scope ?? "",
+    input.workspaceRoot ?? input.cwd ?? "",
+  ].join("\u0000");
+}

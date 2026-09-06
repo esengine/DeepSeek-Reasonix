@@ -15,8 +15,11 @@ let commands!: ReturnType<typeof useWorkspacePanelCommands>;
 let closes = 0; let widthClears = 0;
 const closeOverlays = () => { closes++; };
 const clearLiveWidth = () => { widthClears++; };
+let restoredWidth = 0;
+const setTreeWidth = (width: number) => { restoredWidth = width; };
 function Probe({ workspace, creation, visible }: { workspace: string; creation: boolean; visible: boolean }) {
-  commands = useWorkspacePanelCommands({ workspaceRoot: workspace, creation, visible, closeOverlays, clearLiveWidth });
+  commands = useWorkspacePanelCommands({ workspaceRoot: workspace, creation, visible, closeOverlays, clearLiveWidth,
+    availableWidth: 800, clampTreeWidth: (width) => width, setTreeWidth });
   return null;
 }
 const paint = (workspace: string, creation = false, visible = false) => act(async () => root.render(<Probe workspace={workspace} creation={creation} visible={visible} />));
@@ -54,6 +57,8 @@ try {
   assert.equal(useRemoteStore.getState().explorerHostId, "online");
   assert.equal(useRemoteStore.getState().explorerOpen, false, "request is consumed by the same dock owner");
   assert.equal(useLayoutStore.getState().rightDockMode, "remote");
+  await act(async () => { commands.restoreWorkspaceDockWidths(640, 0); });
+  assert.equal(restoredWidth, 640, "dock width restore clamps through the owner and writes the layout store port");
   await act(async () => useRemoteStore.getState().setHosts([]));
   assert.equal(useLayoutStore.getState().rightDockMode, "files");
   await act(async () => root.unmount());

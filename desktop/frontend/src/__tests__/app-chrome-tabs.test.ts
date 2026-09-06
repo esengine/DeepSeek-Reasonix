@@ -14,6 +14,12 @@ const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTr
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const topicShortcutOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useTopicNavigationShortcuts.ts"), "utf8");
 const runtimeHandlersSource = readFileSync(resolve(testDir, "../app-runtime/useRuntimeEventHandlers.ts"), "utf8");
+const sessionNavigationSource = readFileSync(resolve(testDir, "../app-runtime/useSessionNavigationCommands.ts"), "utf8");
+const chromeCommandsSource = readFileSync(resolve(testDir, "../app-runtime/useAppChromeCommands.ts"), "utf8");
+const dockToggleSource = readFileSync(resolve(testDir, "../app-shell/DockToggleButton.tsx"), "utf8");
+const chatPaneSource = readFileSync(resolve(testDir, "../app-shell/ChatPaneRegion.tsx"), "utf8");
+const transcriptSurfaceSource = readFileSync(resolve(testDir, "../app-runtime/useTranscriptSurfaceProjection.ts"), "utf8");
+const appViewSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8"), forkWorktreeSource = readFileSync(resolve(testDir, "../lib/forkWorktree.ts"), "utf8");
@@ -362,24 +368,24 @@ ok(
 );
 
 ok(
-  /workbenchChromeHidden\s*=\s*sidebarWorkbench/.test(appSource),
+  /workbenchChromeHidden\s*=\s*sidebarWorkbench/.test(appViewSource),
   "workbench chrome is hidden for every desktop platform",
 );
 
 ok(
-  /\{!appChromeHidden && \(/.test(appSource),
+  /\{!appChromeHidden && \(/.test(appViewSource),
   "workbench skips rendering the top AppChrome row",
 );
 
 ok(
-  /topicbar__chrome-btn/.test(appSource),
+  /topicbar__chrome-btn/.test(dockToggleSource),
   "workbench keeps chrome controls in the topic bar",
 );
 
 ok(
   /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
-    /revealActiveSignal=\{tabRevealSignal\}/.test(appSource) &&
-    /revealSignal=\{transcriptRevealSignal\}/.test(appSource),
+    /revealActiveSignal={local.tabRevealSignal}/.test(appViewSource) &&
+    /revealSignal=\{transcript\.revealSignal\}/.test(chatPaneSource),
   "transcript bottom reveal is decoupled from tab-strip reveal",
 );
 
@@ -453,9 +459,9 @@ ok(
   "rewind previews warn on incomplete coverage and only authorize file overwrite after a conflict confirmation",
 );
 
-ok(/const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
-    /hydrating=\{transcriptHydrating \|\| \(runtimeTransitioning && !navigationTargetDataReady\)\}/.test(appSource) &&
-    /surfaceCommitToken=\{surfaceCommitToken\}/.test(appSource) && /onSurfacePaintReady=\{handleSurfacePaintReady\}/.test(appSource),
+ok(/const transcriptHydrating = input\.hydrating && !input\.hydrateHistoryLoaded;/.test(transcriptSurfaceSource) &&
+    /hydrating=\{transcript\.transcriptHydrating \|\| \(transitioning && !transcript\.navigationDataReady\)\}/.test(chatPaneSource) &&
+    /surfaceCommitToken=\{transcript\.surfaceCommitToken\}/.test(chatPaneSource) && /onSurfacePaintReady=\{commands\.onSurfacePaintReady\}/.test(chatPaneSource),
   "Welcome stays suppressed through target data commit and navigation settles only after paint readiness",
 );
 
@@ -471,10 +477,10 @@ ok(
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
 
 ok(
-  /return enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(appSource) &&
-    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(appSource) &&
-    /return enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(appSource) &&
-    /return enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(appSource),
+  /return navigation\.enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(sessionNavigationSource) &&
+    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(sessionNavigationSource) &&
+    /return navigation\.enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(sessionNavigationSource) &&
+    /return navigation\.enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(sessionNavigationSource),
   "topic, blank, IM, and history navigation all use the shared coalescing path",
 );
 
@@ -710,11 +716,11 @@ ok(
 // click on a drag region never reaches the OS: both title-bar-hiding platforms
 // have to zoom from here or not at all.
 ok(
-  /chromeDoubleClickZooms\s*=\s*windowsFramelessChrome\s*\|\|\s*desktopPlatform === "darwin"/.test(appSource),
+  /chromeDoubleClickZooms\s*=\s*input\.windowsFrameless\s*\|\|\s*input\.platform === "darwin"/.test(chromeCommandsSource),
   "title-bar double click zooms on macOS as well as frameless Windows",
 );
 ok(
-  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(chromeCommandsSource),
   "title-bar double click still ignores interactive controls",
 );
 

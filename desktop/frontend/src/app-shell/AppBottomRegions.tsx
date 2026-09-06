@@ -4,7 +4,7 @@ import type { Translator } from "../lib/i18n";
 
 const TerminalPanel = lazy(() => import("../components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
-type AppBottomRegionsProps = {
+export type AppBottomRegionsProps = {
   terminal: {
     surfaceVisible?: boolean;
     open: boolean;

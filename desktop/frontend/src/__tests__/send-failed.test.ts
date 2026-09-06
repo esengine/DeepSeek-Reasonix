@@ -5,10 +5,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acceptsRuntimeEventEpoch, historyMessagesToItems, initialState, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
 import { continueDelivery } from "../lib/deliveryContinue";
-import {
-  activateGoalAndSubmit,
-  activateGoalAndSubmitOnTab,
-} from "../lib/goalSubmit";
 import type { WireEvent } from "../lib/types";
 import { submitPlanDecision, type SessionActionPorts } from "../app-runtime/sessionActionOwner";
 import { createSessionSurfaceFence } from "../app-runtime/sessionTarget";
@@ -28,90 +24,11 @@ function eq(a: unknown, b: unknown, label: string) {
 
 console.log("\nsend failure feedback");
 
-{
-  const calls: string[] = [];
-  await activateGoalAndSubmit({
-    displayText: "List the existing notes",
-    submitText: "/ui-ux-pro-max List the existing notes",
-    structured: {
-      display: "/ui-ux-pro-max List the existing notes",
-      input: "List the existing notes",
-      invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-    },
-    applyGoal: async (goal) => {
-      calls.push(`goal:${goal}`);
-    },
-    send: async (display, submit, structured) => {
-      calls.push(`send:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}`);
-    },
-  });
-  eq(calls.join("|"), "goal:List the existing notes|send:List the existing notes:/ui-ux-pro-max List the existing notes:ui-ux-pro-max", "initial Goal activates before structured Skill submission");
-}
-
-{
-  // Bridge failure must abort structured Skill submit: there is no `/goal` fallback.
-  const calls: string[] = [];
-  let threw = false;
-  try {
-    await activateGoalAndSubmit({
-      displayText: "Ship the feature",
-      submitText: "/ui-ux-pro-max Ship the feature",
-      structured: {
-        display: "/ui-ux-pro-max Ship the feature",
-        input: "Ship the feature",
-        invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-      },
-      applyGoal: async (goal) => {
-        calls.push(`goal:${goal}`);
-        throw new Error("SetGoalForTab: tab closed");
-      },
-      send: async (display, submit, structured) => {
-        calls.push(`send:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}`);
-      },
-    });
-  } catch (error) {
-    threw = error instanceof Error && error.message === "SetGoalForTab: tab closed";
-  }
-  eq(threw, true, "Goal activation bridge failure propagates");
-  eq(calls.join("|"), "goal:Ship the feature", "failed Goal activation does not submit the structured Skill");
-}
-
-{
-  // Tab-scoped helper captures source tab and workbench target once; callbacks
-  // receive both even if a surrounding "active tab" concept changes mid-flight.
-  const calls: string[] = [];
-  let releaseSubmit!: () => void;
-  const submitGate = new Promise<void>((resolve) => {
-    releaseSubmit = resolve;
-  });
-  let activeTab = "tab-a";
-  const pending = activateGoalAndSubmitOnTab({
-    tabId: "tab-a",
-    displayText: "Cross-tab safe goal",
-    submitText: "/ui-ux-pro-max Cross-tab safe goal",
-    structured: {
-      display: "/ui-ux-pro-max Cross-tab safe goal",
-      input: "Cross-tab safe goal",
-      invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-    },
-    sendToTab: async (tabId, goal, display, submit, structured) => {
-      await submitGate;
-      calls.push(
-        `send:${tabId}:${goal}:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}:active=${activeTab}`,
-      );
-    },
-  });
-  activeTab = "tab-b";
-  calls.push("switched-to-tab-b");
-  releaseSubmit();
-  await pending;
-  eq(
-    calls.join("|"),
-    "switched-to-tab-b|send:tab-a:Cross-tab safe goal:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:active=tab-b",
-    "activateGoalAndSubmitOnTab keeps Goal and Skill on the captured source tab",
-  );
-}
-
+// The initial Goal + structured Skill scenarios formerly exercised the
+// goalSubmit.ts shim. That wrapper is deleted; the same contracts are covered on
+// the real chain by session-submission-lifecycle.test.tsx (atomic payload and
+// activation ordering at the submission owner) and goal-activation-tab-routing
+// .test.tsx (source-tab capture and fail-closed propagation at the controller).
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "starting", epoch: "e1" } }), false, "starting runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "lease_blocked", epoch: "e1" } }), false, "lease-blocked runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "failed", epoch: "e1" } }), false, "failed runtime cannot submit");
@@ -354,6 +271,7 @@ eq(
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
+const sessionCompositionSource = readFileSync(resolve(here, "../app-runtime/useAppSessionComposition.ts"), "utf8");
 const typesSource = readFileSync(resolve(here, "../lib/types.ts"), "utf8");
 const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
@@ -411,7 +329,7 @@ eq(
   "execution-mode switch state is gone from the app shell",
 );
 eq(
-  appSource.includes("!state.backendActivationPending &&") && appSource.includes("!runtimeTransitioning"),
+  sessionCompositionSource.includes("!state.backendActivationPending &&") && sessionCompositionSource.includes("!runtimeTransitioning"),
   true,
   "composer submit stays behind the controller-ready gate",
 );

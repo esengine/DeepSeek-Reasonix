@@ -86,7 +86,7 @@ ok(errors.includes("background goal resync bridge failed"), "rejected background
 ok(unhandled.length === 0, "handled Goal action rejections do not emit unhandledrejection");
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
+const appSource = readFileSync(resolve(here, "../app-runtime/useAppSessionComposition.ts"), "utf8");
 ok(
   /runGoalAction\(\(\) => applyCollaborationMode\(collaborationMode === "plan" \? "normal" : "plan"\)\)/.test(appSource),
   "mode shortcut routes through the rejection handler",

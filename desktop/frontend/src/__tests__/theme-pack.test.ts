@@ -42,7 +42,7 @@ import {
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
-const appSource = readFileSync(resolve(testDir, "../AppRuntime.tsx"), "utf8");
+const appViewSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 const exportOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useSessionExportCommands.ts"), "utf8");
 const composerRouterSource = readFileSync(resolve(testDir, "../app-runtime/useComposerRouter.ts"), "utf8");
 const librarySource = readFileSync(resolve(testDir, "../components/ThemeLibrary.tsx"), "utf8");
@@ -529,7 +529,7 @@ ok(
 );
 ok(themeBgSlice.includes(".theme-bg__overlay"), "overlay wash element styled");
 ok(exportOwnerSource.includes("applyThemeScene"), "session export owner wires scene from session content");
-ok(appSource.includes("ThemeBackground"), "App mounts background layer");
+ok(appViewSource.includes("ThemeBackground"), "App mounts background layer");
 ok(composerRouterSource.includes("ResetThemePack") || composerRouterSource.includes("theme reset") || composerRouterSource.includes('arg === "reset"'), "reset entry exists");
 
 console.log("\nofficial themes (kind/grouping/i18n)");

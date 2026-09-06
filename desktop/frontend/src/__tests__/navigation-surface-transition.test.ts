@@ -110,20 +110,23 @@ ok(await staleAcceptedPromise === false, "a stale backend-activating result is r
 ok(reasserted === "tab.reveal-background:tab-stale", "stale reassertion receives the mutating target identity");
 
 const appSource = readFileSync(new URL("../AppRuntime.tsx", import.meta.url), "utf8");
+const chatPaneSource = readFileSync(new URL("../app-shell/ChatPaneRegion.tsx", import.meta.url), "utf8");
+const appViewSource = readFileSync(new URL("../app-shell/AppRuntimeView.tsx", import.meta.url), "utf8");
+const sessionCompositionSource = readFileSync(new URL("../app-runtime/useAppSessionComposition.ts", import.meta.url), "utf8");
 const surfaceHookSource = readFileSync(new URL("../lib/useNavigationSurface.ts", import.meta.url), "utf8");
 const tabBarSource = readFileSync(new URL("../app-runtime/useTabBarCommands.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 ok(surfaceHookSource.includes("flushSync(() => {"), "navigation masking commits synchronously before the Wails await");
 ok(surfaceHookSource.includes("setPreserved(rendered?.items.length ? rendered : null)"), "the last stable transcript is retained during navigation");
-ok(appSource.includes("items={visibleTranscriptItems}"), "the visible transcript is decoupled from the hydrating target");
-ok(appSource.includes("transcript-navigation-overlay"), "navigation renders a blocking transcript overlay");
+ok(sessionCompositionSource.includes("visibleTranscriptItems,") && appViewSource.includes("items: session.transcript.visibleTranscriptItems"), "the visible transcript is decoupled from the hydrating target");
+ok(chatPaneSource.includes("transcript-navigation-overlay"), "navigation renders a blocking transcript overlay");
 ok(/\.transcript-navigation-overlay\s*\{[\s\S]*?background:\s*var\(--chat-bg, var\(--bg\)\)/.test(stylesSource), "the navigation overlay is opaque while target rows settle");
-ok(appSource.includes("live={runtimeTransitioning ? undefined : state.live}"), "App removes source live output during navigation");
+ok(chatPaneSource.includes("live={transitioning ? undefined : state.live}"), "App removes source live output during navigation");
 ok(!appSource.includes("hidden={composerSurfaceHidden || undefined}"), "navigation no longer collapses the composer footprint");
 // Masked Composer/Todo/rewind layout is exercised through the mounted production
 // DecisionFooterRegion in decision-footer-lifecycle.test.tsx, not App source text.
 ok(/\.footer--navigation-hidden\s*\{[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;/.test(stylesSource), "masked target footer cannot paint or receive input");
-ok(appSource.includes('style={navigationSurface?.phase === "source-retained"') && appSource.includes("const visibleDecisionSurface = decisionSurface"), "target-masked paint uses the target footer geometry");
+ok(appViewSource.includes('style={core.surface.surface?.phase === "source-retained"') && sessionCompositionSource.includes("const visibleDecisionSurface = decisionSurface"), "target-masked paint uses the target footer geometry");
 ok((tabBarSource.match(/guardBackendNavigationResult\(\{/g) ?? []).length === 2, "both Reveal paths guard stale backend activation results");
 ok(surfaceHookSource.includes("navigation.paint-ready"), "surface settlement is diagnosed only from target paint readiness");
 

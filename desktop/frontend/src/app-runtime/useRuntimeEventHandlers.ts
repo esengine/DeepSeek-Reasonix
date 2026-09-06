@@ -1,6 +1,7 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { app, onProjectTreeChanged } from "../lib/bridge";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
+import { activeTabMirror } from "./activeTabMirror";
 import { asArray } from "../lib/array";
 import { createBoundedRefreshCoordinator, sameTabMetaLists, seedActiveTabMetaList, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT } from "../lib/tabMetaRefresh";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "../lib/sound";
@@ -21,7 +22,6 @@ import type {
 export type RuntimeEventHandlersInput = {
   activeTabId: string | undefined;
   workspaceScopeKey: string;
-  activeTabIdRef: RefObject<string | undefined>;
   workspaceScopeActiveTabRef: RefObject<string | undefined>;
   userPlanModeByTabRef: RefObject<UserPlanModeIntents>;
   setTabMetas: Dispatch<SetStateAction<TabMeta[]>>;
@@ -87,7 +87,7 @@ export function useRuntimeEventHandlers(input: RuntimeEventHandlersInput) {
     if (shouldPlayAttentionChimeForEvent(event, attentionChimeEvents.current)) playAttentionChime();
     if (shouldRefreshTabMetaForEvent(event.kind)) void refreshTabMetas(undefined, { afterMutation: true });
     if (event.kind !== "turn_done") return;
-    const turnTabId = resolvePlanRestoreTabId(event.tabId, input.activeTabIdRef.current);
+    const turnTabId = resolvePlanRestoreTabId(event.tabId, activeTabMirror().current);
     void refreshTabMetas(undefined, { afterMutation: true }).then((tabs) => {
       if (!turnTabId) return;
       const tab = tabs.find((item) => item.id === turnTabId);
@@ -103,7 +103,7 @@ export function useRuntimeEventHandlers(input: RuntimeEventHandlersInput) {
         { collaborationMode: "plan", goalDraftMode: false, goal: "" },
         ["collaborationMode", "goal"],
       ));
-      if (input.activeTabIdRef.current === turnTabId) void input.setControllerCollaborationMode("plan");
+      if (activeTabMirror().current === turnTabId) void input.setControllerCollaborationMode("plan");
     });
   });
 

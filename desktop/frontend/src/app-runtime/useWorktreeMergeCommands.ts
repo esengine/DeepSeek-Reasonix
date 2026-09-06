@@ -1,10 +1,16 @@
+import { useState } from "react";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { runWorktreeMergeLifecycle } from "../lib/worktreeMergeLifecycle";
 import type { WorktreeMergeResult } from "../lib/types";
 import type { Translator } from "../lib/i18n";
 
+/**
+ * Owns the worktree merge coordination: the worktreeMergeTabId overlay state
+ * with its open/close commands and the merged-receipt handler that runs the
+ * navigation-intent-gated close/finalize lifecycle. Callers only wire the
+ * returned state and commands into the topicbar and overlay regions.
+ */
 export function useWorktreeMergeCommands(input: {
-  worktreeTabId: string | null;
   singleSurfaceLayout: boolean;
   noteNavigationIntent: () => number;
   registeredNavigationIntent: (seq: number) => Promise<string | null>;
@@ -19,8 +25,13 @@ export function useWorktreeMergeCommands(input: {
   t: Translator;
   showCleanup: (cleanup: any, t: Translator) => void;
 }) {
+  const [worktreeMergeTabId, setWorktreeMergeTabId] = useState<string | null>(null);
+
+  const openWorktreeMerge = useCommittedCommand((tabId: string) => setWorktreeMergeTabId(tabId));
+  const closeWorktreeMerge = useCommittedCommand(() => setWorktreeMergeTabId(null));
+
   const handleWorktreeMerged = useCommittedCommand(async (result: WorktreeMergeResult) => {
-    const tabToClose = input.worktreeTabId;
+    const tabToClose = worktreeMergeTabId;
     if (!tabToClose || !result.sourceRoot || !result.worktreeRoot || !result.targetBranch || !result.mergedCommit || !result.worktreeBranch || !result.worktreeHead) {
       throw new Error(result.error || input.t("worktree.mergeReceiptInvalid"));
     }
@@ -48,5 +59,5 @@ export function useWorktreeMergeCommands(input: {
       input.showToast(`${input.t("worktree.mergeDoneCleanupFailed")} ${error instanceof Error ? error.message : String(error)}`, "error", { durationMs: 9000 });
     }
   });
-  return { handleWorktreeMerged };
+  return { worktreeMergeTabId, openWorktreeMerge, closeWorktreeMerge, handleWorktreeMerged };
 }

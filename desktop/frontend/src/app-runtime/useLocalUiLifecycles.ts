@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { activeTabMirror } from "./activeTabMirror";
 export type TopicTimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
 
 export function useTopicTimeFilter(): [TopicTimeFilter, Dispatch<SetStateAction<TopicTimeFilter>>] {
@@ -19,9 +20,8 @@ export function useDecisionSurfaceFocus(input: {
   surface: string | null;
   activeTabId?: string | null;
   closeOverlays: () => void;
-  activeTabRef: { current: string | null | undefined };
 }) {
-  const { surface, activeTabId, closeOverlays, activeTabRef } = input;
+  const { surface, activeTabId, closeOverlays } = input;
   const previous = useRef<string | null>(null);
   const surfaceRef = useRef<string | null>(surface);
   surfaceRef.current = surface;
@@ -36,25 +36,23 @@ export function useDecisionSurfaceFocus(input: {
     if (!hadSurface) return;
     const tabAtRelease = activeTabId;
     const frame = requestAnimationFrame(() => {
-      if (surfaceRef.current !== null || activeTabRef.current !== tabAtRelease) return;
+      if (surfaceRef.current !== null || activeTabMirror().current !== tabAtRelease) return;
       (document.getElementById("composer-input") as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeTabId, activeTabRef, closeOverlays, surface]);
+  }, [activeTabId, closeOverlays, surface]);
 }
 
 export function useActiveTabUiReset(input: {
   activeTabId?: string | null;
   setClearPending: (value: boolean) => void;
   setInsertTarget: (value: "composer") => void;
-  activeTabRef: { current: string | null | undefined };
 }) {
-  const { activeTabId, activeTabRef, setClearPending, setInsertTarget } = input;
+  const { activeTabId, setClearPending, setInsertTarget } = input;
   useEffect(() => {
-    activeTabRef.current = activeTabId;
     setClearPending(false);
     setInsertTarget("composer");
-  }, [activeTabId, activeTabRef, setClearPending, setInsertTarget]);
+  }, [activeTabId, setClearPending, setInsertTarget]);
 }
 
 export function useVerificationRevealReset(input: {

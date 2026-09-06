@@ -11,15 +11,15 @@ const ExtensionFormDialog = lazy(() => import("../components/ExtensionFormDialog
 const RuntimeDecisionCard = lazy(() => import("../components/RuntimeDecisionCard").then((module) => ({ default: module.RuntimeDecisionCard })));
 const ClearContextCard = lazy(() => import("../components/ClearContextCard").then((module) => ({ default: module.ClearContextCard })));
 
-type ComposerProps = ComponentProps<(typeof import("../components/Composer"))["Composer"]>;
-type TodoProps = ComponentProps<(typeof import("../components/TodoPanel"))["TodoPanel"]>;
-type UndoProps = ComponentProps<(typeof import("../components/UndoRewindBanner"))["UndoRewindBanner"]>;
-type ApprovalProps = ComponentProps<(typeof import("../components/ApprovalModal"))["ApprovalModal"]>;
-type AskProps = ComponentProps<(typeof import("../components/AskCard"))["AskCard"]>;
-type McpProps = ComponentProps<(typeof import("../components/MCPInteractionCard"))["MCPInteractionCard"]>;
-type ExtensionProps = ComponentProps<(typeof import("../components/ExtensionFormDialog"))["ExtensionFormDialog"]>;
-type RuntimeDecisionProps = ComponentProps<(typeof import("../components/RuntimeDecisionCard"))["RuntimeDecisionCard"]>;
-type ClearContextProps = ComponentProps<(typeof import("../components/ClearContextCard"))["ClearContextCard"]>;
+export type ComposerProps = ComponentProps<(typeof import("../components/Composer"))["Composer"]>;
+export type TodoProps = ComponentProps<(typeof import("../components/TodoPanel"))["TodoPanel"]>;
+export type UndoProps = ComponentProps<(typeof import("../components/UndoRewindBanner"))["UndoRewindBanner"]>;
+export type ApprovalProps = ComponentProps<(typeof import("../components/ApprovalModal"))["ApprovalModal"]>;
+export type AskProps = ComponentProps<(typeof import("../components/AskCard"))["AskCard"]>;
+export type McpProps = ComponentProps<(typeof import("../components/MCPInteractionCard"))["MCPInteractionCard"]>;
+export type ExtensionProps = ComponentProps<(typeof import("../components/ExtensionFormDialog"))["ExtensionFormDialog"]>;
+export type RuntimeDecisionProps = ComponentProps<(typeof import("../components/RuntimeDecisionCard"))["RuntimeDecisionCard"]>;
+export type ClearContextProps = ComponentProps<(typeof import("../components/ClearContextCard"))["ClearContextCard"]>;
 
 export type DecisionFooterSurface =
   | { kind: "approval"; identity: string; props: ApprovalProps }
@@ -38,7 +38,7 @@ export function DecisionFooterSlots({ todo, undo, decision }: { todo: ReactNode;
   </>;
 }
 
-type DecisionFooterRegionProps = {
+export type DecisionFooterRegionProps = {
   hidden: boolean;
   className: string;
   style?: CSSProperties;

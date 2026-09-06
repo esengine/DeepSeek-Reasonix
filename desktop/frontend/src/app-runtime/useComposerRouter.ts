@@ -1,9 +1,9 @@
-import type { RefObject } from "react";
 import { app } from "../lib/bridge";
 import { useCommittedCommand } from "../lib/useCommittedCommand";
 import { clearThemePack } from "../lib/themePack";
 import { applyTheme, getTheme, getThemeStyle, isThemeStyle } from "../lib/theme";
 import { decisionSurfaceMockFromInput } from "../lib/decisionSurfaceMock";
+import { activeTabMirror } from "./activeTabMirror";
 import type { SettingsTab } from "../lib/types";
 import type { StructuredInvocationSubmit } from "../lib/invocationDisplay";
 import type { Translator } from "../lib/i18n";
@@ -17,7 +17,6 @@ type MockWorkView = {
 
 export type ComposerRouterInput = {
   activeTabId: string | undefined;
-  activeTabIdRef: RefObject<string | undefined>;
   goalDraftActive: boolean;
   t: Translator;
   notice(message: string, kind?: "info" | "warn" | "error"): void;
@@ -48,7 +47,7 @@ function isThemeMode(value: string): value is "auto" | "light" | "dark" {
  * Only the routes that need a desktop-native UI action are reserved here.
  */
 export function useComposerRouter(input: ComposerRouterInput) {
-  const { activeTabId, activeTabIdRef, goalDraftActive, t, notice, showToast, ports } = input;
+  const { activeTabId, goalDraftActive, t, notice, showToast, ports } = input;
 
   const handleSend = useCommittedCommand(async (displayText: string, submitText = displayText, requestedTabId = activeTabId, structured?: StructuredInvocationSubmit) => {
     const sourceTabId = requestedTabId || activeTabId;
@@ -70,17 +69,17 @@ export function useComposerRouter(input: ComposerRouterInput) {
       return;
     }
     if (trimmed === "/memory") {
-      if (activeTabIdRef.current !== sourceTabId) return;
+      if (activeTabMirror().current !== sourceTabId) return;
       ports.setSettingsTarget("memory");
       return;
     }
     if (trimmed === "/clear") {
-      if (activeTabIdRef.current !== sourceTabId) return;
+      if (activeTabMirror().current !== sourceTabId) return;
       ports.setClearContextPending(true);
       return;
     }
     if (trimmed === "/new") {
-      if (activeTabIdRef.current !== sourceTabId) return;
+      if (activeTabMirror().current !== sourceTabId) return;
       await ports.newSession();
       return;
     }
@@ -88,7 +87,7 @@ export function useComposerRouter(input: ComposerRouterInput) {
       ? decisionSurfaceMockFromInput(trimmed)
       : null;
     if (decisionMock === "workspace_conflict" || decisionMock === "mode_jobs" || decisionMock === "close_active" || decisionMock === "clear_context") {
-      if (activeTabIdRef.current !== sourceTabId) return;
+      if (activeTabMirror().current !== sourceTabId) return;
       ports.clearWorkspaceConflict();
       ports.setPendingClose(null);
       ports.setClearContextPending(false);

@@ -13,7 +13,7 @@ const WorkspacePanel = lazy(async () => {
   return { default: module.WorkspacePanel };
 });
 
-type WorkspaceDockRegionProps = {
+export type WorkspaceDockRegionProps = {
   visible: boolean;
   overlay: boolean;
   mode: RightDockMode;

@@ -9,6 +9,9 @@ type Input = {
   visible: boolean;
   closeOverlays: () => void;
   clearLiveWidth: (width: null) => void;
+  availableWidth: number;
+  clampTreeWidth: (width: number, availableWidth: number) => number;
+  setTreeWidth: (width: number) => void;
 };
 
 /** One project-scoped preference owner, with no mirrored layout state. */
@@ -58,6 +61,12 @@ export function useWorkspacePanelCommands(input: Input) {
     const hostId = remote.hosts.some(host => host.id === remote.explorerHostId) ? remote.explorerHostId : fallback?.id;
     if (hostId) remote.openExplorer(hostId);
   });
+  const restoreWorkspaceDockWidths = useCommittedCommand((treeWidth: number, _previewWidth: number) => {
+    // Single-width dock: only the tree width is meaningful; clamp it to the
+    // dynamic available width (chat keeps its 400px floor), never a fixed
+    // 560 ceiling, so the user's remembered width is preserved when reopened.
+    input.setTreeWidth(input.clampTreeWidth(treeWidth, input.availableWidth));
+  });
   useLayoutEffect(() => {
     useLayoutStore.getState().setWorkspacePanelOpen(loadWorkspacePanelOpen(input.workspaceRoot));
   }, [input.workspaceRoot]);
@@ -72,5 +81,5 @@ export function useWorkspacePanelCommands(input: Input) {
   useEffect(() => {
     if (hostCount === 0 && mode === "remote") useLayoutStore.getState().setRightDockMode("files");
   }, [hostCount, mode]);
-  return { openRightDockMode, closeWorkspacePanel, toggleWorkspacePanel, toggleWorkspaceMaximized, handleWorkspacePreviewModeChange, openRemoteDock };
+  return { openRightDockMode, closeWorkspacePanel, toggleWorkspacePanel, toggleWorkspaceMaximized, handleWorkspacePreviewModeChange, openRemoteDock, restoreWorkspaceDockWidths };
 }
