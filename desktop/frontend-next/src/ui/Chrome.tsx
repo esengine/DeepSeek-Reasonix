@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { reason } from "../i18n/kernel";
 import type { AccountState, AgentPort, Preset, SessionStatus, WorkspaceInfo } from "../port/port";
 import { WindowControls, zoomOnTitleBar } from "./WindowControls";
 import { chord } from "./keys";
@@ -57,6 +58,21 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
   // Only for the "隔离" tag: the folder list and the switch itself moved to the
   // sidebar, where adding one and opening one are the same gesture.
   const [ws, setWs] = useState<WorkspaceInfo | null>(null);
+  // The preset the kernel has not answered for yet, and why it refused the last
+  // one. Without both, a call that never lands leaves the pair reading as the
+  // state it did not reach — the settings panel already works this way.
+  const [asking, setAsking] = useState("");
+  const [refused, setRefused] = useState("");
+  const pick = (id: Preset) => {
+    if (!port || asking) return;
+    setAsking(id);
+    setRefused("");
+    port
+      .setPreset(id)
+      .then(onChanged)
+      .catch((e: unknown) => setRefused(reason(e)))
+      .finally(() => setAsking(""));
+  };
   useEffect(() => {
     if (!port) {
       setWs(null);
@@ -94,12 +110,17 @@ export function Chrome({ port, status, title, steer, run, theme, onTheme, onSett
           <i />
           {t(RUN_LB[run] ?? "待命")}
         </span>
+        <span className="badge" data-err="" role="alert" hidden={!refused}>
+          {refused}
+        </span>
         <div className="themer" role="group" aria-label={t("执行设定")}>
           {PRESETS.map(([id, lb]) => (
             <button
               key={id}
               aria-pressed={status?.preset === id}
-              onClick={() => void port?.setPreset(id).then(onChanged)}
+              disabled={!port || !!asking}
+              data-asking={asking === id ? "" : undefined}
+              onClick={() => pick(id)}
             >
               {t(lb)}
             </button>
