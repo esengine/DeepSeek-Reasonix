@@ -8,12 +8,13 @@ import { dispatchPartialRewindNotice, partialRewindNotice, rewindFailureDetail, 
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const undoSource = readFileSync(resolve(testDir, "../app-runtime/useSessionUndo.ts"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
 
-assert.match(appSource, /const targetTabId = outcome\.tabId \|\| sourceTabId/);
-assert.match(appSource, /undoTabId: sourceTabId/);
-assert.match(appSource, /const outcome = await rewindForTabDetailed\(sourceTabId, turn, "conversation"\)/);
-assert.match(appSource, /sendToTab\(targetTabId, next, submit, original\)/);
+assert.match(undoSource, /const targetTabId = outcome\.tabId \|\| sourceTabId/);
+assert.match(undoSource, /undoTabId: sourceTabId/);
+assert.match(undoSource, /const outcome = await ports\.rewindForTabDetailed\(sourceTabId, turn, "conversation"\)/);
+assert.match(undoSource, /ports\.sendToTab\(targetTabId, next, submit, original\)/);
 assert.match(controllerSource, /settleRewindTarget\(result, tab => adoptReturnedTab\(tab, sourceTabId, forkNavigationSeq, "tab\.rewind"\)/);
 assert.match(controllerSource, /partialNotice = partialRewindNotice\(result\)/);
 assert.match(controllerSource, /dispatchPartialRewindNotice\(partialNotice, sourceTabId, outcome\.tabId,/);
