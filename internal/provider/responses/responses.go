@@ -494,12 +494,6 @@ func (c *client) conversationDigest(messages []provider.Message) string {
 	return hex.EncodeToString(sum[:])
 }
 
-type streamedCall struct {
-	id, name, arguments string
-	argChars            int
-	completed           bool
-}
-
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk, requestMessages []provider.Message) {
 	defer resp.Body.Close()
 	defer close(out)
@@ -633,7 +627,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 		case "response.function_call_arguments.delta":
 			call := callForItem(event.ItemID)
-			call.arguments += event.Delta
+			call.appendArguments(event.Delta)
 			call.argChars += len(event.Delta)
 			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name}, ArgChars: call.argChars}) {
 				return
@@ -641,11 +635,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		case "response.function_call_arguments.done":
 			call := callForItem(event.ItemID)
 			if event.Arguments != "" {
-				call.arguments = event.Arguments
+				call.setArguments(event.Arguments)
 			}
 			if !call.completed {
 				call.completed = true
-				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments}}) {
+				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.completeArguments()}}) {
 					return
 				}
 			}
@@ -677,11 +671,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						call.name = event.Item.Name
 					}
 					if event.Item.Arguments != "" {
-						call.arguments = event.Item.Arguments
+						call.setArguments(event.Item.Arguments)
 					}
 					if !call.completed {
 						call.completed = true
-						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments}}) {
+						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.completeArguments()}}) {
 							return
 						}
 					}
@@ -759,7 +753,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		for _, itemID := range callOrder {
 			call := calls[itemID]
 			if call.completed {
-				assistant.ToolCalls = append(assistant.ToolCalls, provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.arguments})
+				assistant.ToolCalls = append(assistant.ToolCalls, provider.ToolCall{ID: call.id, Name: call.name, Arguments: call.completeArguments()})
 			}
 		}
 		expected := append(append([]provider.Message(nil), requestMessages...), assistant)

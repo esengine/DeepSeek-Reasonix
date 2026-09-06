@@ -539,7 +539,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return sendChunk(ctx, out, chunk)
 	}
 
-	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
+	tools := map[int]*streamedToolCall{} // tool_use blocks, keyed by content index
 	searches := newSearchStream()
 	thinking := map[int]*provider.ThinkingBlock{}
 	argBuckets := map[int]int{} // last emitted 2KB progress bucket per block
@@ -613,12 +613,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			case "input_json_delta":
 				if tc := tools[ev.Index]; tc != nil {
-					tc.Arguments += ev.Delta.PartialJSON
+					tc.appendArguments(ev.Delta.PartialJSON)
 					// Progress ticks for large streaming argument payloads, one
 					// per 2KB bucket (see the openai provider for rationale).
-					if bucket := len(tc.Arguments) / 2048; bucket > argBuckets[ev.Index] {
+					if bucket := tc.argumentLen() / 2048; bucket > argBuckets[ev.Index] {
 						argBuckets[ev.Index] = bucket
-						if !send(provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}, ArgChars: len(tc.Arguments)}) {
+						if !send(provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}, ArgChars: tc.argumentLen()}) {
 							return
 						}
 					}
@@ -640,7 +640,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
-				if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}) {
+				if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc.complete()}) {
 					return
 				}
 				delete(tools, ev.Index)

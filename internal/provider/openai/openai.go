@@ -924,7 +924,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}()
 
-	acc := map[int]*provider.ToolCall{}
+	acc := map[int]*streamedToolCall{}
 	started := map[int]bool{}
 	argBucket := map[int]int{}
 	var order []int
@@ -1000,7 +1000,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		for _, tc := range delta.ToolCalls {
 			cur, ok := acc[tc.Index]
 			if !ok {
-				cur = &provider.ToolCall{}
+				cur = &streamedToolCall{}
 				acc[tc.Index] = cur
 				order = append(order, tc.Index)
 			}
@@ -1010,7 +1010,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if tc.Function.Name != "" {
 				cur.Name = tc.Function.Name
 			}
-			cur.Arguments += tc.Function.Arguments
+			cur.appendArguments(tc.Function.Arguments)
 			thoughtSignature := ""
 			if tc.ExtraContent != nil {
 				thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
@@ -1038,10 +1038,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			// write_file body can take a minute-plus): one chunk per 2KB bucket
 			// so the consumer can show liveness without per-delta spam.
 			if started[tc.Index] {
-				if bucket := len(cur.Arguments) / 2048; bucket > argBucket[tc.Index] {
+				if bucket := cur.argumentLen() / 2048; bucket > argBucket[tc.Index] {
 					argBucket[tc.Index] = bucket
 					emitted = true
-					if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}, ArgChars: len(cur.Arguments)}) {
+					if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}, ArgChars: cur.argumentLen()}) {
 						return emitted, ctx.Err()
 					}
 				}
@@ -1083,7 +1083,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 	sort.Ints(order)
 	for _, idx := range order {
-		tc := acc[idx]
+		tc := acc[idx].complete()
 		if tc.ID == "" {
 			// Some OpenAI-compatible gateways stream tool calls by index with no id.
 			// Synthesize a stable one so the result can be paired back to its call —
