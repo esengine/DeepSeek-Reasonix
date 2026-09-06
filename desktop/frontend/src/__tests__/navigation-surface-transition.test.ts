@@ -111,6 +111,7 @@ ok(reasserted === "tab.reveal-background:tab-stale", "stale reassertion receives
 
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 const surfaceHookSource = readFileSync(new URL("../lib/useNavigationSurface.ts", import.meta.url), "utf8");
+const tabBarSource = readFileSync(new URL("../app-runtime/useTabBarCommands.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 ok(surfaceHookSource.includes("flushSync(() => {"), "navigation masking commits synchronously before the Wails await");
 ok(surfaceHookSource.includes("setPreserved(rendered?.items.length ? rendered : null)"), "the last stable transcript is retained during navigation");
@@ -123,7 +124,7 @@ ok(!appSource.includes("hidden={composerSurfaceHidden || undefined}"), "navigati
 // DecisionFooterRegion in decision-footer-lifecycle.test.tsx, not App source text.
 ok(/\.footer--navigation-hidden\s*\{[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;/.test(stylesSource), "masked target footer cannot paint or receive input");
 ok(appSource.includes('style={navigationSurface?.phase === "source-retained"') && appSource.includes("const visibleDecisionSurface = decisionSurface"), "target-masked paint uses the target footer geometry");
-ok((appSource.match(/guardBackendNavigationResult\(\{/g) ?? []).length === 2, "both Reveal paths guard stale backend activation results");
+ok((tabBarSource.match(/guardBackendNavigationResult\(\{/g) ?? []).length === 2, "both Reveal paths guard stale backend activation results");
 ok(surfaceHookSource.includes("navigation.paint-ready"), "surface settlement is diagnosed only from target paint readiness");
 
 let currentWorkspaceIntent = 30;
