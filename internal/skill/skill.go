@@ -7,9 +7,9 @@
 // demand. Discovery scans several conventions (.reasonix / .agents / .agent /
 // .claude under the project root and the home dir — see config.ConventionDirs) so
 // skills authored for other agent tools migrate in unchanged. Directory skills
-// use <name>/SKILL.md; flat <name>.md files from Claude roots are loaded only
-// when they carry skill frontmatter. Discovery follows symlinks, so linked
-// skills are picked up like real ones.
+// use <name>/SKILL.md; flat <name>.md files from Claude and plugin-package
+// roots are loaded only when they carry skill frontmatter. Discovery follows
+// symlinks, so linked skills are picked up like real ones.
 package skill
 
 import (
@@ -488,7 +488,7 @@ func (s *Store) roots() []discoveryRoot {
 		key := config.CanonicalSkillPath(d.dir)
 		out = append(out, discoveryRoot{
 			Root:              Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)},
-			requireFlatMarker: d.requireFlatMarker,
+			requireFlatMarker: d.requireFlatMarker || len(s.pluginPaths[key]) > 0 || len(s.pluginAgentPaths[key]) > 0,
 			plugins:           append([]string(nil), s.pluginPaths[key]...),
 			forceSubagent:     len(s.pluginAgentPaths[key]) > 0,
 		})
