@@ -1,4 +1,5 @@
 import { onTerminalExit, onTerminalOutput, type TerminalExitEvent, type TerminalOutputEvent } from "./bridge";
+import { createSubscriptionScope } from "./subscriptionScope";
 
 const MAX_HISTORY_BYTES = 1024 * 1024;
 
@@ -9,8 +10,7 @@ const exitListeners = new Set<(event: TerminalExitEvent) => void>();
 const history = new Map<string, Uint8Array[]>();
 const historyBytes = new Map<string, number>();
 const nextSequence = new Map<string, number>();
-let started = false;
-let stopBridge: (() => void) | null = null;
+let bridge: { users: number; scope: ReturnType<typeof createSubscriptionScope> } | null = null;
 
 function decodeBase64(value: string): Uint8Array {
   if (typeof atob !== "function") return new Uint8Array();
@@ -42,18 +42,23 @@ function deliverExit(event: TerminalExitEvent): void {
 }
 
 export function startTerminalEventBridge(): () => void {
-  if (!started) {
-    started = true;
-    const stopOutput = onTerminalOutput(deliverOutput);
-    const stopExit = onTerminalExit(deliverExit);
-    stopBridge = () => {
-      stopOutput();
-      stopExit();
-      started = false;
-      stopBridge = null;
-    };
+  if (!bridge) {
+    const scope = createSubscriptionScope();
+    scope.listen(onTerminalOutput, deliverOutput);
+    scope.listen(onTerminalExit, deliverExit);
+    bridge = { users: 0, scope };
   }
-  return () => stopBridge?.();
+  const owned = bridge;
+  owned.users += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    owned.users -= 1;
+    if (owned.users !== 0) return;
+    owned.scope.dispose();
+    if (bridge === owned) bridge = null;
+  };
 }
 
 export function registerTerminalOutputSink(id: string, sink: SequencedTerminalSink): readonly [
@@ -85,7 +90,8 @@ export function __resetTerminalEventBus(): void {
   history.clear();
   historyBytes.clear();
   nextSequence.clear();
-  stopBridge?.();
+  bridge?.scope.dispose();
+  bridge = null;
 }
 
 export const terminalEventBufferLimit = MAX_HISTORY_BYTES;

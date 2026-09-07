@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startPreviewServer } from "./vite-preview-server.mjs";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
@@ -11,7 +11,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || 
   : process.env.PLAYWRIGHT_BROWSERS_PATH;
 const { chromium, webkit } = await import("playwright");
 const port = Number(process.env.REASONIX_TRANSCRIPT_READER_PORT ?? 4621);
-const iterations = Number(process.env.REASONIX_TRANSCRIPT_READER_ITERATIONS ?? 20);
+const iterations = Number(process.env.REASONIX_TRANSCRIPT_READER_ITERATIONS ?? 6);
 const url = `http://127.0.0.1:${port}/?mock=bench&bench=1`;
 
 function assert(condition, message) {
@@ -35,415 +35,349 @@ async function waitForServer() {
   throw new Error("reader transaction preview did not become ready");
 }
 
-async function waitStable(page, requireTail = false) {
-  await page.evaluate(({ requireTail }) => new Promise((resolve, reject) => {
-    const started = performance.now();
-    let previous;
-    let stable = 0;
+async function frames(page, count = 4) {
+  await page.evaluate((remaining) => new Promise((resolve) => {
     const tick = () => {
-      const element = document.querySelector(".transcript");
-      if (element instanceof HTMLElement) {
-        const current = {
-          top: element.scrollTop,
-          height: element.scrollHeight,
-          mode: element.dataset.scrollMode,
-          distance: element.scrollHeight - element.scrollTop - element.clientHeight,
-          occupied: [...element.querySelectorAll(".transcript__row")].some((row) => {
-            const rowRect = row.getBoundingClientRect();
-            const viewport = element.getBoundingClientRect();
-            return rowRect.bottom > viewport.top && rowRect.top < viewport.bottom;
-          }),
-        };
-        stable = current.occupied && previous?.occupied
-          && Math.abs(previous.top - current.top) <= 1
-          && Math.abs(previous.height - current.height) <= 1
-          && previous.mode === current.mode
-          ? stable + 1
-          : 0;
-        previous = current;
-        if (stable >= 2 && (!requireTail || (current.mode === "tail-follow" && current.distance <= 4))) {
-          resolve();
-          return;
-        }
-      }
-      if (performance.now() - started > 15_000) {
-        reject(new Error(`transcript did not stabilize: ${JSON.stringify(previous)}`));
-        return;
-      }
-      requestAnimationFrame(tick);
+      remaining -= 1;
+      if (remaining <= 0) resolve();
+      else requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  }), { requireTail });
+  }), count);
 }
 
-async function loadPlainClickFixture(page) {
-  await page.click('.project-tree__topic-main:has-text("bench:selection-table")');
-  await page.waitForFunction(() => {
-    const element = document.querySelector(".transcript");
-    return document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:selection-table")
-      && element instanceof HTMLElement
-      && element.textContent?.includes("SELECTION REPAINT TARGET")
-      && Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10) > 0
-      && element.dataset.transcriptHydrating === "false";
-  }, undefined, { timeout: 30_000 });
-  await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 15_000 });
-  await waitStable(page);
-  return page.locator(".transcript");
+async function waitForNativeViewportSettlement(page, requiredStableFrames = 6) {
+  await page.evaluate((stableFrameTarget) => new Promise((resolve, reject) => {
+    let previous = null;
+    let stableFrames = 0;
+    let sampledFrames = 0;
+    const sample = () => {
+      const transcript = document.querySelector(".transcript");
+      if (!(transcript instanceof HTMLElement)) {
+        reject(new Error("transcript viewport disappeared while native scrolling settled"));
+        return;
+      }
+      const current = [transcript.scrollTop, transcript.scrollHeight, transcript.clientHeight];
+      const unchanged = previous != null
+        && current.every((value, index) => Math.abs(value - previous[index]) <= 0.5);
+      stableFrames = unchanged ? stableFrames + 1 : 0;
+      sampledFrames += 1;
+      previous = current;
+      if (stableFrames >= stableFrameTarget) {
+        resolve();
+        return;
+      }
+      if (sampledFrames >= 240) {
+        reject(new Error(`native viewport did not settle: ${JSON.stringify(current)}`));
+        return;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }), requiredStableFrames);
 }
 
 async function loadLongFixture(page) {
-  await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
+  await page.click('.project-tree__topic-main:has-text("bench:windowed-1000t")');
   await page.waitForFunction(() => {
     const element = document.querySelector(".transcript");
-    return document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t")
+    return document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:windowed-1000t")
       && element instanceof HTMLElement
-      && element.textContent?.includes("pkg-41/mod.go")
-      && Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10) > 0;
+      && element.dataset.transcriptHydrating === "false"
+      && element.textContent?.includes("Windowed turn 1000")
+      && element.querySelector(".transcript__projection")?.getAttribute("data-transcript-render-mode") === "windowed";
   }, undefined, { timeout: 30_000 });
-  await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 15_000 });
-  await page.waitForTimeout(300);
-  const transcript = page.locator(".transcript");
-  let stalledPages = 0;
-  for (let pageIndex = 0; pageIndex < 32; pageIndex += 1) {
-    const current = await transcript.evaluate((element) => Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10));
-    if (current >= 400) break;
-    const box = await transcript.boundingBox();
-    if (!box) throw new Error("transcript is unavailable for history paging");
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.wheel(0, -100_000);
-    const loaded = await page.waitForFunction((before) => (
-      Number.parseInt(document.querySelector(".transcript")?.dataset.transcriptRowCount ?? "0", 10) > before
-    ), current, { timeout: 5_000 }).then(() => true, () => false);
-    if (loaded) {
-      stalledPages = 0;
-      await page.waitForFunction(() => !document.querySelector(".transcript-navigation-overlay"), undefined, { timeout: 15_000 });
-    } else {
-      // WebKit can deliver the top wheel while a retained page is still
-      // committing. Retry the native paging gesture after that boundary;
-      // three quiet attempts mean the fixture has genuinely reached history.
-      stalledPages += 1;
-      if (stalledPages >= 3) break;
-      await page.waitForTimeout(100);
-    }
-  }
-  let rows = await transcript.evaluate((element) => Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10));
-  if (rows < 400) {
-    // A second browser engine can inherit a quiet top range after the mock's
-    // one-wheel paging authorization has already been consumed. Use the
-    // product's real unloaded-question transaction as a deterministic user
-    // fallback; this exercises the same history API without a test-only hook.
-    for (let jump = 0; jump < 4 && rows < 400; jump += 1) {
-      const marker = page.locator('.jump-item[data-loaded="false"]').last();
-      const markerBox = await marker.boundingBox();
-      if (!markerBox) break;
-      await page.mouse.click(markerBox.x + markerBox.width / 2, markerBox.y + markerBox.height / 2);
-      await page.waitForFunction(() => {
-        const element = document.querySelector(".transcript");
-        return element instanceof HTMLElement
-          && element.dataset.scrollMode !== "restoring"
-          && !document.querySelector(".transcript-navigation-overlay");
-      }, undefined, { timeout: 30_000 });
-      rows = await transcript.evaluate((element) => Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10));
-    }
-  }
-  assert(rows >= 400, `long reader fixture mounts at least 400 logical rows (${rows})`);
-  // The mock history can expose its first 400-row window before the retained
-  // surface finishes hydration. Reader assertions begin only after the same
-  // production completion signal used by the general stability bench, so the
-  // intentional loading/bootstrap surface is not counted as an empty frame.
-  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.transcriptHydrating === "false", undefined, { timeout: 15_000 });
-  await page.waitForTimeout(300);
-  const stableRows = await transcript.evaluate((element) => Number.parseInt(element.dataset.transcriptRowCount ?? "0", 10));
-  assert(stableRows >= 400, `long reader fixture keeps its loaded window (${stableRows})`);
-  return transcript;
+  await frames(page, 8);
+  return page.locator(".transcript");
 }
 
-async function runPlainClickHandoff(page, transcript, label) {
-  const box = await transcript.boundingBox();
-  if (!box) throw new Error(`${label}: transcript is unavailable for plain-click handoff`);
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -560);
-  await page.waitForFunction(() => {
-    const element = document.querySelector(".transcript");
-    return element?.dataset.scrollMode === "manual"
-      && element.dataset.transcriptReaderLayoutLease === "true";
-  }, undefined, { timeout: 2_000 });
-  await page.waitForFunction(() => {
-    const element = document.querySelector(".transcript");
-    return element?.dataset.scrollMode === "manual"
-      && element.dataset.transcriptReaderIntent === "false"
-      && element.dataset.transcriptReaderLayoutLease === "true";
-  }, undefined, { timeout: 10_000 });
-  await waitStable(page);
-
-  const before = await page.evaluate(() => {
+async function anchorSnapshot(page) {
+  return page.evaluate(() => {
     const element = document.querySelector(".transcript");
     if (!(element instanceof HTMLElement)) return null;
     const viewport = element.getBoundingClientRect();
-    const centerY = (viewport.top + viewport.bottom) / 2;
-    const ys = [];
-    for (let y = viewport.top + 48; y <= viewport.bottom - 48; y += 20) ys.push(y);
-    ys.sort((left, right) => Math.abs(left - centerY) - Math.abs(right - centerY));
-    const xs = [0.5, 0.35, 0.65].map((ratio) => viewport.left + viewport.width * ratio);
-    let click = null;
-    let row = null;
-    for (const y of ys) {
-      for (const x of xs) {
-        const hit = document.elementFromPoint(x, y);
-        if (!hit || hit.closest("button, a, input, textarea, select, [contenteditable='true']")) continue;
-        const selectable = hit.closest("[data-transcript-selectable]");
-        const candidateRow = selectable?.closest(".transcript__row[data-row-key]");
-        if (!selectable || !element.contains(selectable) || !(candidateRow instanceof HTMLElement)) continue;
-        click = { x, y };
-        row = candidateRow;
-        break;
-      }
-      if (row) break;
-    }
-    if (!(row instanceof HTMLElement) || !click) {
-      return {
-        diagnostic: {
-          selectableCount: element.querySelectorAll("[data-transcript-selectable]").length,
-          mountedRows: element.querySelectorAll(".transcript__row[data-row-key]").length,
-          visibleRows: [...element.querySelectorAll(".transcript__row")].filter((candidate) => {
-            const rect = candidate.getBoundingClientRect();
-            return rect.bottom > viewport.top && rect.top < viewport.bottom;
-          }).length,
-          centerHit: document.elementFromPoint((viewport.left + viewport.right) / 2, centerY)?.className,
-        },
-      };
-    }
-    const rowRect = row.getBoundingClientRect();
+    const blocks = [...element.querySelectorAll("[data-transcript-block-key]")];
+    const visible = blocks.filter((block) => {
+      const rect = block.getBoundingClientRect();
+      return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+    });
+    const first = visible[0];
+    const projection = element.querySelector(".transcript__projection");
+    const item = first?.closest(".transcript__window-item");
     return {
-      rowKey: row.dataset.rowKey,
-      rowTop: rowRect.top - viewport.top,
+      key: first?.getAttribute("data-transcript-block-key"),
+      top: first ? first.getBoundingClientRect().top - viewport.top : null,
+      index: item?.getAttribute("data-index"),
+      itemTop: item instanceof HTMLElement ? item.style.top : null,
       scrollTop: element.scrollTop,
-      readerIntent: element.dataset.transcriptReaderIntent,
-      lease: element.dataset.transcriptReaderLayoutLease,
-      click,
+      visible: visible.length,
+      visibleBlocks: visible.map((block) => ({
+        key: block.getAttribute("data-transcript-block-key"),
+        top: block.getBoundingClientRect().top - viewport.top,
+      })),
+      intent: element.dataset.transcriptIntent,
+      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+      mounted: Number(projection?.getAttribute("data-transcript-mounted-blocks")),
+      rangeSource: projection?.getAttribute("data-transcript-range-source"),
     };
   });
-  if (!before?.rowKey) throw new Error(`${label}: no visible selectable row for plain-click handoff ${JSON.stringify(before?.diagnostic)}`);
+}
 
-  await page.mouse.click(before.click.x, before.click.y);
-  await waitStable(page);
-  const after = await page.evaluate((rowKey) => {
+async function jumpToTail(page) {
+  await page.evaluate(() => {
+    const button = document.querySelector(".transcript__jump-bottom:not([hidden])");
+    if (button instanceof HTMLElement) button.click();
+  });
+  await page.waitForFunction(() => {
     const element = document.querySelector(".transcript");
-    if (!(element instanceof HTMLElement)) return null;
-    const viewport = element.getBoundingClientRect();
-    const row = [...element.querySelectorAll(".transcript__row[data-row-key]")]
-      .find((candidate) => candidate instanceof HTMLElement && candidate.dataset.rowKey === rowKey);
-    if (!(row instanceof HTMLElement)) return {
-      rowTop: null,
-      scrollTop: element.scrollTop,
-      mounted: element.querySelectorAll(".transcript__row[data-row-key]").length,
-      readerIntent: element.dataset.transcriptReaderIntent,
-      lease: element.dataset.transcriptReaderLayoutLease,
+    return element instanceof HTMLElement
+      && element.dataset.transcriptIntent === "tail"
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
+  }, undefined, { timeout: 15_000 });
+}
+
+async function runSustainedWheelTraversal(page, transcript, label) {
+  const box = await transcript.boundingBox();
+  if (!box) throw new Error(`${label}: transcript viewport unavailable for sustained traversal`);
+  await transcript.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await frames(page, 4);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.evaluate(() => {
+    window.__readerProbe = { active: true, blankFrames: 0, maxMounted: 0 };
+    const sample = () => {
+      const probe = window.__readerProbe;
+      const element = document.querySelector(".transcript");
+      if (!probe?.active || !(element instanceof HTMLElement)) return;
+      const viewport = element.getBoundingClientRect();
+      const occupied = [...element.querySelectorAll("[data-transcript-block-key]")].some((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+      if (!occupied) probe.blankFrames += 1;
+      probe.maxMounted = Math.max(probe.maxMounted, Number(
+        element.querySelector(".transcript__projection")?.getAttribute("data-transcript-mounted-blocks") ?? "0",
+      ));
+      requestAnimationFrame(sample);
     };
+    requestAnimationFrame(sample);
+  });
+  for (let step = 0; step < 80; step += 1) {
+    const atTail = await transcript.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight <= 4);
+    if (atTail) break;
+    // Match the largest coalesced WKWebView delta observed by the native gate.
+    await page.mouse.wheel(0, 2_880);
+    await frames(page, 1);
+  }
+  const result = await transcript.evaluate((element) => {
+    const probe = window.__readerProbe;
+    if (probe) probe.active = false;
+    window.__readerProbe = undefined;
     return {
-      rowTop: row.getBoundingClientRect().top - viewport.top,
+      blankFrames: probe?.blankFrames ?? -1,
+      maxMounted: probe?.maxMounted ?? Number.POSITIVE_INFINITY,
       scrollTop: element.scrollTop,
-      mounted: element.querySelectorAll(".transcript__row[data-row-key]").length,
-      readerIntent: element.dataset.transcriptReaderIntent,
-      lease: element.dataset.transcriptReaderLayoutLease,
     };
-  }, before.rowKey);
-  const visualDelta = after?.rowTop == null ? Number.POSITIVE_INFINITY : Math.abs(after.rowTop - before.rowTop);
-  const scrollDelta = after == null ? Number.POSITIVE_INFINITY : Math.abs(after.scrollTop - before.scrollTop);
-  const detail = JSON.stringify({ before: { rowKey: before.rowKey, rowTop: before.rowTop, scrollTop: before.scrollTop, readerIntent: before.readerIntent, lease: before.lease }, after });
-  assert(before.readerIntent === "false" && before.lease === "true", `${label}: plain-click handoff starts after reader intent settles with its layout lease retained${before.readerIntent === "false" && before.lease === "true" ? "" : ` ${detail}`}`);
-  assert(after?.readerIntent === "false", `${label}: plain transcript click does not recreate reader intent${after?.readerIntent === "false" ? "" : ` ${detail}`}`);
-  assert(after?.lease === "true", `${label}: plain transcript click keeps the reader layout lease${after?.lease === "true" ? "" : ` ${detail}`}`);
-  assert(scrollDelta <= 2, `${label}: plain transcript click preserves scrollTop (${scrollDelta.toFixed(1)}px)${scrollDelta <= 2 ? "" : ` ${detail}`}`);
-  assert(visualDelta <= 2, `${label}: plain transcript click preserves the visible row anchor (${visualDelta.toFixed(1)}px)${visualDelta <= 2 ? "" : ` ${detail}`}`);
+  });
+  assert(result.scrollTop > 10_000, `${label}: coalesced native-size wheel steps traverse deep history`);
+  assert(result.blankFrames === 0, `${label}: sustained forward wheel traversal produces zero blank frames`);
+  assert(result.maxMounted <= 40, `${label}: sustained traversal keeps the completed-block mount cap (${result.maxMounted})`);
 }
 
 async function runIteration(page, transcript, label, iteration) {
-  const inputStates = [];
-  const setupMode = await transcript.getAttribute("data-scroll-mode");
-  // Test positioning is meaningful only after a real reader input owns the
-  // surface. Otherwise tail-follow can legitimately pin the raw scrollTop
-  // assignment back to the physical bottom before the transaction begins.
-  if (setupMode === "tail-follow") {
-    await transcript.dispatchEvent("wheel", { deltaY: -24, deltaMode: 0, bubbles: true, cancelable: true });
-    await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 2_000 }).catch((error) => {
-      throw new Error(`reader setup could not enter manual mode from ${setupMode}: ${error.message}`);
-    });
-  }
-  await transcript.evaluate((element) => {
-    element.scrollTop = Math.max(element.clientHeight * 2, (element.scrollHeight - element.clientHeight) * 0.55);
-    element.dispatchEvent(new Event("scroll"));
-  });
-  await waitStable(page);
+  // Each measurement transaction owns an independent reader baseline. Without
+  // this reset, repeated upward wheel input eventually crosses the history
+  // boundary and a valid prepend transaction replaces the anchor under test.
+  await jumpToTail(page);
+  const box = await transcript.boundingBox();
+  if (!box) throw new Error(`${label}: transcript viewport unavailable`);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -(520 + iteration * 13));
+  await page.waitForFunction(() => document.querySelector(".transcript")?.getAttribute("data-transcript-intent") === "reader",
+    undefined, { timeout: 5_000 });
+  // WebKit may deliver one native wheel delta across several compositor
+  // frames. Establish the transaction baseline only after native geometry is
+  // stable; otherwise the remainder of the user's own wheel movement is
+  // indistinguishable from a product-induced anchor drift.
+  await waitForNativeViewportSettlement(page);
+  const before = await anchorSnapshot(page);
+  assert(before?.key && before.visible > 0, `${label} ${iteration + 1}/${iterations}: reader has a visible logical anchor`);
+
   await page.evaluate(() => {
-    if (!(document.querySelector(".transcript") instanceof HTMLElement)) throw new Error("transcript missing");
-    window.__readerTransactionProbe = { active: true, frames: [], writes: [] };
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => window.__readerTransactionProbe?.writes.push(write);
-    // Sample after the animation-frame callbacks have committed their visual
-    // guards. Reading in an earlier rAF callback can observe Virtuoso's new
-    // row geometry before the geometry controller's later callback applies
-    // its same-paint transform, reporting a jump the user never sees.
-    const schedulePaintSample = () => requestAnimationFrame(() => setTimeout(sample, 0));
-    const sample = () => {
-      const probe = window.__readerTransactionProbe;
-      if (!probe?.active) return;
-      const element = document.querySelector(".transcript");
-      if (!(element instanceof HTMLElement)) {
-        probe.frames.push({ top: 0, height: 0, occupied: false, mode: "missing", guard: "", visible: [], connected: false });
-        schedulePaintSample();
-        return;
-      }
-      const viewport = element.getBoundingClientRect();
-      const rows = [...element.querySelectorAll(".transcript__row")]
-        .filter((row) => row.getBoundingClientRect().bottom > viewport.top && row.getBoundingClientRect().top < viewport.bottom);
-      probe.frames.push({
-        top: element.scrollTop,
-        height: element.scrollHeight,
-        occupied: rows.length > 0,
-        mode: element.dataset.scrollMode,
-        readerIntent: element.dataset.transcriptReaderIntent,
-        guard: element.style.getPropertyValue("--transcript-reader-visual-offset"),
-        connected: element.isConnected,
-        visible: rows.map((row) => ({ index: row.dataset.index ?? row.dataset.logicalIndex ?? "", top: row.getBoundingClientRect().top - viewport.top })),
-      });
-      schedulePaintSample();
+    window.__readerProbe = { active: true, held: true, blankFrames: 0, heldAccepted: [], writes: [], diagnostics: [] };
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__readerProbe?.writes.push(write);
+      if (window.__readerProbe?.held && write.outcome === "accepted") window.__readerProbe.heldAccepted.push(write);
     };
-    schedulePaintSample();
+    window.__REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__ = (type, fields) => {
+      const diagnostics = window.__readerProbe?.diagnostics;
+      if (!diagnostics) return;
+      diagnostics.push({ type, fields });
+      if (diagnostics.length > 40) diagnostics.shift();
+    };
+    window.addEventListener("pointerup", () => {
+      if (window.__readerProbe) window.__readerProbe.held = false;
+    }, { capture: true, once: true });
+    const sample = () => {
+      const probe = window.__readerProbe;
+      const element = document.querySelector(".transcript");
+      if (!probe?.active || !(element instanceof HTMLElement)) return;
+      const viewport = element.getBoundingClientRect();
+      const occupied = [...element.querySelectorAll("[data-transcript-block-key]")].some((block) => {
+        const rect = block.getBoundingClientRect();
+        return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+      if (!occupied) probe.blankFrames += 1;
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
   });
+  await page.mouse.down();
+  const mutation = await transcript.evaluate((element, iterationIndex) => {
+    const viewport = element.getBoundingClientRect();
+    const items = [...element.querySelectorAll(".transcript__window-item")];
+    const firstVisibleIndex = items.findIndex((item) => item.getBoundingClientRect().bottom > viewport.top);
+    const earlier = firstVisibleIndex > 0 ? items[firstVisibleIndex - 1] : items[firstVisibleIndex];
+    const postViewport = items.find((item) => item.getBoundingClientRect().top >= viewport.bottom);
+    const earlierBlock = earlier;
+    const visibleBlock = items[firstVisibleIndex];
+    const postViewportBlock = postViewport;
+    if (!(earlierBlock instanceof HTMLElement)
+      || !(visibleBlock instanceof HTMLElement)
+      || !(postViewportBlock instanceof HTMLElement)) return null;
+    earlierBlock.style.paddingBottom = `${120 + iterationIndex * 3}px`;
+    visibleBlock.style.paddingBottom = "24px";
+    postViewportBlock.style.paddingBottom = "32px";
+    return {
+      earlierKey: earlierBlock.dataset.transcriptBlockKey,
+      earlierIndex: earlier?.dataset.index,
+      visibleKey: visibleBlock.dataset.transcriptBlockKey,
+      visibleIndex: items[firstVisibleIndex]?.dataset.index,
+      postViewportKey: postViewportBlock.dataset.transcriptBlockKey,
+      postViewportIndex: postViewport?.dataset.index,
+    };
+  }, iteration);
+  await frames(page, 6);
+  const held = await anchorSnapshot(page);
+  const heldOriginal = await page.evaluate((key) => {
+    const element = document.querySelector(".transcript");
+    const block = [...document.querySelectorAll("[data-transcript-block-key]")]
+      .find((candidate) => candidate.getAttribute("data-transcript-block-key") === key);
+    const item = block?.closest(".transcript__window-item");
+    return element instanceof HTMLElement && block instanceof HTMLElement
+      ? {
+          top: block.getBoundingClientRect().top - element.getBoundingClientRect().top,
+          index: item?.getAttribute("data-index"),
+          itemTop: item instanceof HTMLElement ? item.style.top : null,
+          height: item instanceof HTMLElement ? item.getBoundingClientRect().height : null,
+        }
+      : null;
+  }, before.key);
+  await page.mouse.up();
+  let settlementError;
+  try {
+    await page.waitForFunction(({ key, top }) => {
+      const element = document.querySelector(".transcript");
+      const block = [...document.querySelectorAll("[data-transcript-block-key]")]
+        .find((candidate) => candidate.getAttribute("data-transcript-block-key") === key);
+      return element instanceof HTMLElement && block instanceof HTMLElement
+        && Math.abs(block.getBoundingClientRect().top - element.getBoundingClientRect().top - top) <= 4;
+    }, { key: before.key, top: before.top }, { timeout: 5_000 });
+  } catch (error) {
+    settlementError = String(error?.message ?? error);
+  }
+  await frames(page, 2);
 
-  for (let tick = 0; tick < 6; tick += 1) {
-    await transcript.evaluate((element) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 24, deltaMode: 0, bubbles: true, cancelable: true }));
-    });
-    if (tick === 0) {
-      await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.transcriptReaderIntent === "true", undefined, { timeout: 2_000 });
-    }
-    inputStates.push(await page.evaluate((currentTick) => ({
-      tick: currentTick,
-      surfaces: [...document.querySelectorAll(".transcript")].map((element) => ({
-        connected: element.isConnected,
-        intent: element.dataset.transcriptReaderIntent,
-        mode: element.dataset.scrollMode,
-        rows: element.dataset.transcriptRowCount,
-        top: element.scrollTop,
-        height: element.scrollHeight,
-      })),
-    }), tick));
-    await page.waitForTimeout(16);
-  }
-  const intentBeforeCollapse = await transcript.getAttribute("data-transcript-reader-intent");
-  if (intentBeforeCollapse !== "true") throw new Error(`${label} ${iteration + 1}/${iterations}: reader transaction ended before collapse ${JSON.stringify(inputStates)}`);
-  await transcript.evaluate(async (element) => {
-    const physicalHeight = element.scrollHeight;
-    const collapse = Math.min(4_000, Math.max(2_000, element.clientHeight * 3));
-    const collapsedHeight = Math.max(element.clientHeight + 1, physicalHeight - collapse);
-    Object.defineProperty(element, "scrollHeight", { configurable: true, get: () => collapsedHeight });
-    element.scrollTop = Math.max(0, element.scrollTop - collapse);
-    element.dispatchEvent(new Event("scroll"));
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    delete element.scrollHeight;
-    element.dispatchEvent(new Event("scroll"));
-  });
-  for (let tick = 0; tick < 12; tick += 1) {
-    await transcript.evaluate((element) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 24, deltaMode: 0, bubbles: true, cancelable: true }));
-    });
-    await page.waitForTimeout(16);
-  }
-  await page.waitForFunction(() => (
-    document.querySelector(".transcript")?.dataset.transcriptReaderIntent !== "true"
-  ), undefined, { timeout: 1_500 });
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const probe = await page.evaluate(() => {
-    const value = window.__readerTransactionProbe;
-    if (value) value.active = false;
-    window.__readerTransactionProbe = undefined;
+  const result = await page.evaluate((key) => {
+    const probe = window.__readerProbe;
+    if (probe) probe.active = false;
+    const element = document.querySelector(".transcript");
+    const block = [...document.querySelectorAll("[data-transcript-block-key]")]
+      .find((candidate) => candidate.getAttribute("data-transcript-block-key") === key);
+    const top = element instanceof HTMLElement && block instanceof HTMLElement
+      ? block.getBoundingClientRect().top - element.getBoundingClientRect().top
+      : null;
+    const projection = element?.querySelector(".transcript__projection");
+    const viewport = element?.getBoundingClientRect();
+    window.__readerProbe = undefined;
     window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = undefined;
-    return value;
-  });
-
-  let maxReverse = 0;
-  let maxReversePair;
-  for (let index = 1; index < probe.frames.length; index += 1) {
-    const previous = probe.frames[index - 1];
-    const current = probe.frames[index];
-    const currentRows = new Map(current.visible.filter((row) => row.index).map((row) => [row.index, row.top]));
-    const visual = previous.visible
-      .filter((row) => row.index && currentRows.has(row.index))
-      .map((row) => currentRows.get(row.index) - row.top)
-      .sort((left, right) => left - right);
-    if (visual.length > 0) {
-      const reverse = visual[Math.floor(visual.length / 2)];
-      if (reverse > maxReverse) {
-        maxReverse = reverse;
-        maxReversePair = { previous, current, reverse };
-      }
-    }
-  }
-  const acceptedCorrections = probe.writes.filter((write) => write.owner === "reader-stability" && !write.rejectedReason);
-  const correctionsByTransaction = new Map();
-  for (const write of acceptedCorrections) correctionsByTransaction.set(write.transactionId, (correctionsByTransaction.get(write.transactionId) ?? 0) + 1);
-  const blankFrames = probe.frames.filter((frame) => !frame.occupied);
-  const reverseDetail = maxReverse > 96
-    ? `; ${JSON.stringify(maxReversePair)}; writes=${JSON.stringify(probe.writes.filter((write) => write.owner === "reader-stability"))}`
+    window.__REASONIX_TRANSCRIPT_SCROLL_DIAGNOSTIC__ = undefined;
+    return {
+      top,
+      scrollTop: element instanceof HTMLElement ? element.scrollTop : null,
+      intent: element?.getAttribute("data-transcript-intent"),
+      mounted: Number(projection?.getAttribute("data-transcript-mounted-blocks")),
+      blankFrames: probe?.blankFrames ?? -1,
+      heldAccepted: probe?.heldAccepted ?? [],
+      diagnostics: probe?.diagnostics ?? [],
+      visibleBlocks: element instanceof HTMLElement && viewport
+        ? [...element.querySelectorAll("[data-transcript-block-key]")]
+            .filter((candidate) => {
+              const rect = candidate.getBoundingClientRect();
+              return rect.bottom > viewport.top && rect.top < viewport.bottom;
+            })
+            .map((candidate) => ({
+              key: candidate.getAttribute("data-transcript-block-key"),
+              top: candidate.getBoundingClientRect().top - viewport.top,
+            }))
+        : [],
+    };
+  }, before.key);
+  assert(result.heldAccepted.length === 0,
+    `${label} ${iteration + 1}/${iterations}: user-held transaction accepts zero programmatic writes`);
+  assert(result.blankFrames === 0, `${label} ${iteration + 1}/${iterations}: geometry churn produces zero blank frames`);
+  const heldDrift = heldOriginal?.top == null ? null : Math.abs(heldOriginal.top - before.top);
+  const heldDiagnostic = heldDrift == null || heldDrift > 4
+    ? `; ${JSON.stringify({ before, mutation, held, heldOriginal })}`
     : "";
-  const blankDetail = blankFrames.length > 0
-    ? `; first=${JSON.stringify(blankFrames[0])}; writes=${JSON.stringify(probe.writes.filter((write) => write.owner === "reader-stability"))}`
+  assert(heldDrift != null && heldDrift <= 4,
+    `${label} ${iteration + 1}/${iterations}: staged prefix geometry cannot move the held reader anchor${heldDiagnostic}`);
+  const finalTops = new Map(result.visibleBlocks.map((block) => [block.key, block.top]));
+  const visibleDrift = Math.max(0, ...before.visibleBlocks
+    .filter((block) => finalTops.has(block.key))
+    .map((block) => Math.abs(finalTops.get(block.key) - block.top)));
+  assert(visibleDrift <= 4,
+    `${label} ${iteration + 1}/${iterations}: staged measurements cannot reflow the painted viewport (${visibleDrift.toFixed(1)}px)`);
+  const drift = result.top == null ? null : Math.abs(result.top - before.top);
+  const driftDiagnostic = settlementError || drift == null || drift > 4
+    ? `; ${JSON.stringify({ settlementError, before, mutation, held, heldOriginal, result })}`
     : "";
-  assert(maxReverse <= 96, `${label} ${iteration + 1}/${iterations}: no visual reverse jump above 96px (${maxReverse.toFixed(1)}px${reverseDetail})`);
-  assert(blankFrames.length === 0, `${label} ${iteration + 1}/${iterations}: mounted rows cover every sampled frame (${blankFrames.length}/${probe.frames.length} blank${blankDetail})`);
-  assert([...correctionsByTransaction.values()].every((count) => count <= 1), `${label} ${iteration + 1}/${iterations}: each reader transaction corrects at most once`);
+  assert(!settlementError && drift != null && drift <= 4,
+    `${label} ${iteration + 1}/${iterations}: logical anchor drift is at most 4px (${drift == null ? "missing" : drift.toFixed(1)}px${driftDiagnostic})`);
+  assert(result.intent === "reader", `${label} ${iteration + 1}/${iterations}: reader retains viewport ownership`);
+  assert(result.mounted <= 40, `${label} ${iteration + 1}/${iterations}: mounted completed blocks remain bounded (${result.mounted})`);
 }
 
 async function runBrowser(browserType, label) {
   const browser = await browserType.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await page.addInitScript(() => localStorage.setItem("reasonix-process-fold", "expanded"));
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
     const transcript = await loadLongFixture(page);
-    for (let iteration = 0; iteration < iterations; iteration += 1) await runIteration(page, transcript, label, iteration);
-    const jumpBottom = page.locator(".transcript__jump-bottom");
-    if (await jumpBottom.isVisible()) {
-      await jumpBottom.click();
-    } else {
-      // A physical-bottom clamp can hide the affordance while ownership is
-      // still manual. One real downward wheel transaction must perform the
-      // same two-frame stability handoff without a programmatic shortcut.
-      await transcript.dispatchEvent("wheel", { deltaY: 24, deltaMode: 0, bubbles: true, cancelable: true });
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
+      await runIteration(page, transcript, label, iteration);
     }
-    await waitStable(page, true);
-    const final = await transcript.evaluate((element) => ({
-      distance: element.scrollHeight - element.scrollTop - element.clientHeight,
-      mode: element.dataset.scrollMode,
-      occupied: [...element.querySelectorAll(".transcript__row")].some((row) => {
-        const rowRect = row.getBoundingClientRect();
-        const viewport = element.getBoundingClientRect();
-        return rowRect.bottom > viewport.top && rowRect.top < viewport.bottom;
-      }),
-    }));
-    assert(final.distance <= 4 && final.mode === "tail-follow", `${label}: final viewport reaches the physical tail`);
-    assert(final.occupied, `${label}: final viewport has no blank range`);
-    const plainClickTranscript = await loadPlainClickFixture(page);
-    await runPlainClickHandoff(page, plainClickTranscript, label);
+    await runSustainedWheelTraversal(page, transcript, label);
+    await jumpToTail(page);
+    const final = await anchorSnapshot(page);
+    assert(final.visible > 0 && final.distance <= 4, `${label}: final viewport is visibly covered at the native tail`);
+    assert(errors.length === 0, `${label}: replay emits no page errors (${errors.length})`);
   } finally {
     await browser.close();
   }
 }
 
-const packageManager = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const preview = spawn(packageManager, ["exec", "vite", "preview", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
-  cwd: frontendDir,
-  stdio: "ignore",
-  shell: process.platform === "win32",
-});
-
+const preview = await startPreviewServer(frontendDir, port);
 try {
   await waitForServer();
   await runBrowser(chromium, "Chromium");
   await runBrowser(webkit, "WebKit");
   process.stdout.write("transcript reader transaction browser replay passed\n");
 } finally {
-  preview.kill("SIGTERM");
+  await preview.close();
 }

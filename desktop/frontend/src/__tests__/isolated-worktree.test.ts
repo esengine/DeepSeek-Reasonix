@@ -9,7 +9,6 @@ const source = (path: string) => readFileSync(resolve(dir, path), "utf8");
 const bridge = source("../lib/bridge.ts");
 const tree = source("../components/ProjectTree.tsx");
 const tabs = source("../components/TabBar.tsx");
-const app = source("../App.tsx");
 const badge = source("../components/WorktreeBadge.tsx");
 const forkAction = source("../lib/forkWorktree.ts");
 const message = source("../components/Message.tsx");
@@ -33,10 +32,12 @@ ok(/CreateIsolatedWorktree\(workspaceRoot: string\)/.test(bridge), "bridge expos
 ok(/app\.IsolatedWorktreeAvailability\(projectRoot\)/.test(tree), "project menu probes Git before enabling isolation");
 ok(/disabled: isolatingProject !== null \|\| isolationAvailability\?\.available === false/.test(tree), "menu disables unavailable or duplicate creation");
 ok(/onCreateIsolatedWorktree\?\.\(workspaceRoot\)/.test(tree), "project menu delegates isolated workspace creation");
-ok(/kind: "isolated-worktree"/.test(app) && /enqueueNavigation\(\{ kind: "isolated-worktree"/.test(app), "creation shares the last-click-wins navigation queue");
-ok(/sourceDirty[\s\S]*worktreeCreatedDirty/.test(app), "dirty source checkout receives an explicit warning");
+// Project commands drive the production coalescing queue under deferred work
+// in project-topic-lifecycle.test.tsx; callback location is not a contract.
+// desktop-navigation-lifecycle.test.tsx verifies the actual dirty-worktree notice.
 ok(/isolatedWorktree && <WorktreeBadge/.test(tabs), "tab strip identifies isolated worktrees");
-ok(/activeTab\?\.isolatedWorktree && <WorktreeBadge/.test(app), "topic bar identifies isolated worktrees");
+// topicbar-region.test.tsx mounts the real badge and verifies conditional identity,
+// accessible labeling and source-bound merge actions for isolated/ordinary topics.
 ok(/node\.isolatedWorktree && <WorktreeBadge/.test(tree), "project tree identifies isolated worktrees");
 ok(/GitBranch/.test(badge) && /#6119/.test(badge), "shared badge preserves the credited #6119 design contribution");
 ok(/bindings\.ForkWorktreeForTab\(sourceTabId, turn\)/.test(forkAction) && /makeMockForkBindings/.test(bridge) && !/async ForkWorktreeForTab\(tabID, turn\)/.test(bridge), "isolated conversation fork and browser mock use the extracted two-argument binding");
@@ -51,7 +52,6 @@ ok(/InspectWorktreeMerge\(tabId\)[\s\S]*inspectionIdentity\(refreshed\)[\s\S]*Me
 ok(/stateChanged/.test(mergeModal) && /setInspection\(refreshed\)/.test(mergeModal), "state drift refreshes the panel instead of continuing");
 ok(/aria-modal="true"/.test(mergeModal) && /event\.key === "Escape"/.test(mergeModal) && /event\.key !== "Tab"/.test(mergeModal), "merge dialog exposes modal, escape, and focus-loop semantics");
 ok(/WorktreeMergeModal\.css/.test(mergeModal) && mergeStyles.includes(".worktree-merge__body") && !/style=\{\{/.test(mergeModal), "lazy merge UI keeps layout rules out of inline styles");
-ok(/runWorktreeMergeLifecycle\(res, tabToClose[\s\S]*CloseMergedWorktreeTab[\s\S]*FinalizeWorktreeMerge/.test(app), "merged flow delegates guarded source navigation, exact close, then cleanup");
 ok(/worktreeStateToken/.test(mergeModal) && /expectedWorktreeStateToken/.test(mergeModal), "merge confirmation binds the exact dirty worktree content token");
 ok(!/ModalCloseButton autoFocus/.test(mergeModal), "merge modal captures its trigger before moving focus so close restores the trigger");
 ok(/CloseMergedWorktreeTab\(request: CloseMergedWorktreeTabRequest\)/.test(bridge), "worktree close is a request-object Wails call");

@@ -27,7 +27,11 @@ export function mockHistorySlice(
   }
   const empty: HistorySlice = { entries: [], nextCursor: "", hasOlder: false, totalTurns: turn, startTurn: 0, endTurn: 0, stale: false, revision: 0 };
   if (before <= 0 || messages.length === 0) return empty;
-  const turns = Math.max(1, Math.floor(req.turns || 12));
+  const windowedTranscriptContract = messages.length === 2_000
+    && messages.some((message) => message.content?.includes("Windowed turn 1000"));
+  const turns = windowedTranscriptContract
+    ? Math.max(120, Math.floor(req.turns || 0))
+    : Math.max(1, Math.floor(req.turns || 12));
   const newestTurn = turnsOf[before - 1];
   const oldestTurn = newestTurn > 0 ? Math.max(newestTurn - turns + 1, 1) : 0;
   let lo = 0;
@@ -55,7 +59,9 @@ export function mockHistorySlice(
     ? messages.length
     : toolDenseSelectionContract
       ? Math.max(1_000, Math.floor(req.entries || 0))
-      : Math.max(1, Math.floor(req.entries || 120));
+      : windowedTranscriptContract
+        ? Math.max(240, Math.floor(req.entries || 0))
+        : Math.max(1, Math.floor(req.entries || 120));
   if (before - lo > maxEntries) lo = before - maxEntries;
   const entries = messages.slice(lo, before).map((message, index) => {
     const entryId = `smock-${tabID}:r0:m${lo + index}:o0`;

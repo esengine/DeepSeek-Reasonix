@@ -3441,15 +3441,12 @@ a[href] {
   }
 }
 .transcript {
-  /* Virtuoso sizes rows from the scroller clientWidth (padding included) but
-     lays them out in the content box. Horizontal padding here therefore makes
-     right-aligned bubbles extend under the workspace dock. Keep only vertical
-     inset on the scroller; rows own --transcript-inline-pad. */
+  /* Keep horizontal inset on blocks so the native scroller's geometry is
+     independent of readable content width. */
   --transcript-inline-pad: 32px;
   position: relative;
-  /* Virtuoso owns the logical anchor. Browser scroll anchoring reacts to
-     asynchronous Markdown boxes before Virtuoso receives their size and can
-     move the scroller in the opposite direction during an upward gesture. */
+  /* TranscriptKernel owns logical anchors and applies at most one structural
+     correction per geometry revision. */
   overflow-anchor: none;
   height: 100%;
   overflow-y: auto;
@@ -3508,29 +3505,6 @@ a[href] {
 @media (prefers-reduced-motion: reduce) {
   .transcript-navigation-overlay__spinner { animation: none; }
 }
-/* The active turn streams as the virtual list's in-flow Footer: inside the
-   scroller, right after the last history row, but outside Virtuoso's
-   measured size tree — unbounded growth never reaches the list's anchors or
-   recovery machinery (#8657/#8688). */
-.transcript__live-region {
-  position: relative;
-  width: 100%;
-}
-.transcript__live-region--overlay {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: var(--z-local-raised);
-  pointer-events: none;
-}
-.transcript__live-content {
-  position: relative;
-  width: 100%;
-}
-.transcript[data-transcript-reader-visual-guard="true"] [data-testid="virtuoso-item-list"] {
-  transform: translateY(var(--transcript-reader-visual-offset, 0));
-  will-change: transform;
-}
 .transcript__live-status {
   display: flex;
   align-items: center;
@@ -3550,42 +3524,28 @@ a[href] {
   margin-right: auto;
 }
 
-/* ── Virtual transcript rows ─────────────────────────────────────── */
-/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
-/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
-   flow; flow-root contains child margins so ResizeObserver sees the complete
-   dynamic height instead of a collapsed margin outside the measured item. */
-.transcript__virtual-sizer {
+/* ── Transcript projection and window adapter ───────────────────── */
+.transcript__projection,
+.transcript__block,
+.transcript__resident-tail {
   position: relative;
+}
+.transcript > .transcript__projection {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+.transcript__block {
+  display: flow-root;
+}
+.transcript__window-item {
+  box-sizing: border-box;
   width: 100%;
-}
-.transcript > .transcript__virtual-sizer {
-  max-width: none;
-  margin-left: 0;
-  margin-right: 0;
-}
-.transcript > [data-viewport-type="element"] {
-  max-width: none;
-  margin-left: 0;
-  margin-right: 0;
-  /* Virtuoso's inline style pins only top (position:absolute; top:0;
-     width:100%). With the scroller's horizontal padding, width:100%
-     resolves against the padding box and starts at padding-left, so the
-     right edge overflows past the content box and gets clipped by
-     overflow-x:hidden. Pin left/right to the content box edges instead
-     (following --transcript-pad-x) so rows keep the scroller's padding
-     on both sides and never overflow. */
-  left: var(--transcript-pad-x, 32px);
-  right: var(--transcript-pad-x, 32px);
-  /* Virtuoso sets width:100% inline; without !important the inline width
-     wins over left/right and right-edge clipping returns. */
-  width: auto !important;
 }
 .transcript__row {
   position: relative;
   display: flow-root;
   box-sizing: border-box;
-  width: 100%;
   padding-left: var(--transcript-inline-pad, 32px);
   padding-right: var(--transcript-inline-pad, 32px);
 }
@@ -3641,7 +3601,7 @@ a[href] {
 .history-preview__body .transcript__row > * {
   max-width: none;
 }
-/* Keep the lazy Markdown source readable while Virtuoso waits for the real
+/* Keep the lazy Markdown source readable while the parser resolves the real
    parser result. The row itself remains free to measure once the marker is
    removed; no manual-scroll path writes a forced row height. */
 .transcript__row .msg--assistant .msg__body > .md[data-transcript-geometry-pending] {
@@ -3649,8 +3609,7 @@ a[href] {
   height: max(0px, calc(var(--transcript-row-estimate) - 32px));
   overflow: hidden;
 }
-/* Offscreen rows are unmounted by the virtualizer, so content-visibility
-/* Offscreen rows are unmounted by the virtualizer, so content-visibility
+/* Offscreen blocks are unmounted by the window adapter, so content-visibility
    culling is redundant inside rows — and skipping it keeps offsetHeight
    measurements exact instead of contain-intrinsic-size placeholders. */
 .transcript__row .msg,
@@ -3663,7 +3622,7 @@ a[href] {
   content-visibility: visible;
   contain-intrinsic-size: none;
 }
-.transcript__jump-bottom {
+.transcript__jump-bottom:not([hidden]) {
   --wails-draggable: no-drag;
   position: absolute;
   left: 50%;
@@ -4298,13 +4257,9 @@ a[href] {
   content-visibility: auto;
   contain-intrinsic-size: 1px 60px;
 }
-/* Virtuoso already owns transcript virtualization. A second content-visibility
-/* Virtuoso already owns transcript virtualization. A second content-visibility
- * viewport inside each mounted row gives the browser a 60px intrinsic box and
- * then expands it when the row crosses the viewport, which makes Virtuoso's
- * upward compensation write a large reverse frame during manual reading. Keep
- * content-visibility for non-transcript message lists, but let the transcript
- * size tree see the real row geometry from its first mount. */
+/* The transcript window adapter already bounds mounted blocks. A second
+ * content-visibility viewport would replace real measurements with an
+ * intrinsic placeholder, so keep it only for non-transcript message lists. */
 .transcript__row .msg {
   content-visibility: visible;
   contain-intrinsic-size: auto;
@@ -6511,9 +6466,8 @@ body > .mermaid-diagram--fullscreen {
   white-space: nowrap;
   min-width: 0;
 }
-/* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
-/* Sub-agent progress chip: phase + running elapsed + recent activity. The dot
- * carries the phase color; the chip never grows the head beyond one line. */
+/* The compact phase chip is structural header chrome. Expanded sub-agent
+ * details load with their own presentation component. */
 .tool__subagent-chip {
   display: inline-flex;
   align-items: center;
@@ -6547,9 +6501,7 @@ body > .mermaid-diagram--fullscreen {
   animation: subagent-pulse 1.4s ease-in-out infinite;
 }
 .tool__subagent-chip--reasoning .tool__subagent-dot,
-.tool__subagent-chip--responding .tool__subagent-dot {
-  background: var(--accent);
-}
+.tool__subagent-chip--responding .tool__subagent-dot,
 .tool__subagent-chip--tool .tool__subagent-dot,
 .tool__subagent-chip--retrying .tool__subagent-dot {
   background: var(--accent);
@@ -6564,75 +6516,9 @@ body > .mermaid-diagram--fullscreen {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-
-/* Expanded sub-agent preview: reasoning / response preview / notices live in
-/* Expanded sub-agent preview: reasoning / response preview / notices live in
- * their own block and never mix with ordinary tool output. Long text wraps;
- * it must not widen the chat column. */
-.tool__subagent-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  min-width: 0;
+@media (prefers-reduced-motion: reduce) {
+  .tool__subagent-chip--running .tool__subagent-dot { animation: none; }
 }
-.tool__subagent-preview-label {
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  font-weight: 600;
-  color: var(--fg-dim);
-  margin-bottom: 2px;
-}
-.tool__subagent-preview-label--toggle {
-  padding: 0;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-.tool__subagent-preview-label--toggle:hover {
-  color: var(--fg);
-}
-/* The collapsed reasoning preview matches the plain-text preview blocks. */
-.tool__subagent-preview .reasoning-summary {
-  margin: 0;
-  border-left: none;
-  padding-left: 0;
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  line-height: 1.5;
-}
-.tool__subagent-preview-text {
-  margin: 0;
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  max-height: 260px;
-  overflow-y: auto;
-  color: inherit;
-}
-.tool__subagent-outcome {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
-  font-family: var(--font-code-family);
-  font-size: var(--font-caption);
-}
-.tool__subagent-outcome-status { color: var(--fg-dim); }
-.tool__subagent-outcome code { overflow-wrap: anywhere; }
 .tool__nested-count {
   display: inline-flex;
   align-items: center;
@@ -18240,82 +18126,6 @@ body > .mermaid-diagram--fullscreen {
   font-family: var(--font-sans);
   font-size: var(--text-2xs);
 }
-.provider-image-input {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-  font-family: var(--font-sans);
-}
-.provider-image-input__head {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.provider-image-input__label {
-  min-width: 60px;
-  color: var(--fg-dim);
-  font-size: var(--font-control-small);
-  font-weight: 650;
-  white-space: nowrap;
-}
-.provider-image-input__meta {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
-.provider-image-input__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  color: var(--fg-faint);
-  font-size: var(--text-2xs);
-  line-height: 1.35;
-}
-.provider-image-input__status-dot {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.provider-image-input__status--supported {
-  color: var(--ok);
-}
-.provider-image-input__status--unsupported,
-.provider-image-input__status--restricted {
-  color: var(--fg-dim);
-}
-.provider-image-input__modes {
-  flex: 0 0 auto;
-}
-.provider-image-input__mode {
-  position: relative;
-  display: flex;
-  min-width: 54px;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.provider-image-input__mode:focus-within {
-  outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
-  outline-offset: 1px;
-}
-.provider-image-input__mode--disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-.provider-image-input__detail {
-  flex: 1 1 180px;
-  color: var(--fg-faint);
-  font-size: var(--text-2xs);
-  line-height: 1.45;
-}
 .provider-model-draft__capabilities span {
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -18791,6 +18601,9 @@ body > .mermaid-diagram--fullscreen {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.set-key .btn {
+  flex: 0 0 auto;
 }
 .set-rules {
   margin-bottom: 10px;

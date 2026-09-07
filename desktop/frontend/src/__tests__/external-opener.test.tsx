@@ -70,6 +70,9 @@ console.log("\nexternal opener");
 
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+// The App layering split (#9777) renders these actions inside the topicbar
+// actions region; the key namespace contract lives there.
+const topicbarActionsSource = readFileSync(new URL("../app-shell/TopicbarActionsRegion.tsx", import.meta.url), "utf8");
 const sharedControlRule = stylesSource.match(/(?:^|\n)\.external-opener\s*\{([^}]*)\}/)?.[1] ?? "";
 const sharedSegmentRule = stylesSource.match(
   /\.external-opener__primary,\s*\.external-opener__menu-trigger\s*\{([^}]*)\}/,
@@ -101,8 +104,8 @@ ok(
   "preserves the slimmer Creation application artwork size",
 );
 
-ok(appSource.includes("key={`external-opener:${activeTab.id}`}"), "external opener has a distinct React key namespace");
-ok(appSource.includes("key={`session-actions:${activeTab?.id || \"none\"}`}"), "session actions have a distinct React key namespace");
+ok(topicbarActionsSource.includes('key="external-opener"') && topicbarActionsSource.includes("key={external.tabId}"), "external opener has a distinct React key namespace");
+ok(topicbarActionsSource.includes('key="session-actions"') && topicbarActionsSource.includes("key={sessionIdentity}"), "session actions have a distinct React key namespace");
 ok(shouldMountExternalOpener({ id: "tab-project", scope: "project" }, false), "mounts for a Project tab");
 ok(shouldMountExternalOpener({ id: "tab-global", scope: "global" }, false), "mounts for a Global tab without guessing from scope");
 ok(!shouldMountExternalOpener({ id: "tab-global", scope: "global" }, true), "stays hidden while an IM detail surface owns the header");

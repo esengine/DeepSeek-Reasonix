@@ -7,6 +7,12 @@ import (
 
 // DesktopReasoningDisplayMode normalizes the desktop-only presentation mode.
 func (c *Config) DesktopReasoningDisplayMode() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceDeep)) {
+		return "expanded"
+	}
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceStandard)) {
+		return "auto"
+	}
 	raw := strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode))
 	switch raw {
 	case "hidden", "summary", "auto", "expanded":
@@ -19,6 +25,12 @@ func (c *Config) DesktopReasoningDisplayMode() string {
 
 // DesktopReasoningDisplayModeExplicit reports whether a valid new enum was stored.
 func (c *Config) DesktopReasoningDisplayModeExplicit() bool {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceDeep)) {
+		return true
+	}
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.SessionExperience), string(SessionExperienceStandard)) {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode)) {
 	case "hidden", "summary", "auto", "expanded":
 		return true
@@ -54,5 +66,11 @@ func renderDesktopReasoningDisplayMode(b *strings.Builder, c *Config) {
 	fmt.Fprintf(b, "expand_thinking = %v   # desktop: legacy reasoning display alias; use reasoning_display_mode\n", c.Desktop.ExpandThinking)
 	if c.DesktopReasoningDisplayModeExplicit() {
 		fmt.Fprintf(b, "reasoning_display_mode = %q   # desktop: hidden|summary|auto|expanded reasoning presentation\n", c.DesktopReasoningDisplayMode())
+	}
+}
+
+func renderDesktopSessionExperience(b *strings.Builder, c *Config) {
+	if strings.TrimSpace(c.Desktop.SessionExperience) != "" {
+		fmt.Fprintf(b, "session_experience = %q   # desktop: standard|deep transcript experience\n", c.DesktopSessionExperience())
 	}
 }

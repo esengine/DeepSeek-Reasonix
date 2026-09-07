@@ -52,6 +52,17 @@ const flush = () => act(async () => {
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
 
+// Lazy module resolution is I/O, not a twenty-millisecond rendering contract.
+// Drain React/event-loop work until the observable worker handshake completes;
+// the deadline is only a failure bound, never the success condition.
+async function until(condition: () => boolean) {
+  const deadline = Date.now() + 5_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Markdown worker handshake did not settle");
+    await act(async () => { await new Promise<void>((resolve) => setImmediate(resolve)); });
+  }
+}
+
 const server = await createServer({
   appType: "custom",
   logLevel: "silent",
@@ -116,7 +127,7 @@ console.log("\nmarkdown streaming → worker final parse");
   await act(async () => {
     root.render(<Markdown text={finalText} streaming={false} />);
   });
-  await flush();
+  await until(() => parseCalls.length > 0);
   eq(parseCalls.length, 1, "stream completion requests exactly one final parse");
   eq(parseCalls[0], finalText, "the final parse receives the complete text");
   const tail = rootEl.querySelector(".md--stream-tail");
@@ -126,7 +137,7 @@ console.log("\nmarkdown streaming → worker final parse");
     respond?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  await flush();
+  await until(() => rootEl.textContent === "WORKER-PARSED-FINAL");
   ok(rootEl.querySelector(".md[data-markdown-blocks]"), "worker-parsed blocks swap in after completion");
   eq(rootEl.textContent, "WORKER-PARSED-FINAL", "the swapped content is the worker render");
   ok(!rootEl.querySelector(".md--stream-tail"), "the streaming tail unmounts after the swap");

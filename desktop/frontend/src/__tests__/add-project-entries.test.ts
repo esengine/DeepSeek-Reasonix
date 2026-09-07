@@ -24,7 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const treeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const addControlsSource = readFileSync(resolve(here, "../components/ProjectTreeAddControls.tsx"), "utf8");
 const hookSource = readFileSync(resolve(here, "../components/useProjectCreation.tsx"), "utf8");
-const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
 const locales = ["en", "zh", "zh-TW"].map((name) =>
   readFileSync(resolve(here, `../locales/${name}.ts`), "utf8"),
 );

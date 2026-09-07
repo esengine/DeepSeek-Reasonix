@@ -14,7 +14,7 @@ import {
   type TranscriptSelectionPoint,
 } from "./transcriptSelectionStore";
 import { mergeTranscriptSelectableRows } from "./transcriptSelectionText";
-import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
+import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptKernel";
 import { nativeTranscriptBottomTop } from "./transcriptScrollGeometry";
 
 const EDGE_SCROLL_ZONE_PX = 48;
@@ -104,7 +104,7 @@ export function useTranscriptSelectionRetention({
     if (!tracked && snapshot.mode === "none") return;
     // A pointerdown only opens a provisional browser selection. Releasing
     // manual mode here would cancel the reader's retained layout lease and let
-    // Virtuoso contract to a stale pre-wheel anchor on an ordinary click
+    // a range replacement contract to a stale pre-wheel anchor on an ordinary click
     // (#9703/#9711). Only a non-collapsed selection owns scroll state.
     const releaseScrollOwnership = tracked?.ownsScroll ?? snapshot.mode !== "none";
     lifecycleGenerationRef.current += 1;
@@ -172,7 +172,7 @@ export function useTranscriptSelectionRetention({
     const next = Math.max(0, Math.min(max, scroll.scrollTop + speed));
     if (next === scroll.scrollTop) {
       scheduleLogicalFocus();
-      // A transient Virtuoso extent can clamp the native scrollTop at a false
+      // A transient window extent can clamp the native scrollTop at a false
       // boundary before the range commit catches up. Keep one edge observer
       // alive for the active drag so a later extent/range rebound can resume
       // scrolling and refresh the logical focus without another pointermove.
@@ -213,7 +213,7 @@ export function useTranscriptSelectionRetention({
     return true;
   }, [claimScrollOwnership, publish, scheduleEdgeScroll, tabId]);
 
-  // Virtuoso can recycle the pointer-down row mid-drag. The browser then
+  // The window adapter can recycle the pointer-down row mid-drag. The browser then
   // either collapses the native Range or migrates its anchor into whatever
   // node replaced the row, so the Range can never again satisfy the cross-row
   // promotion conditions in onSelectionChange and the gesture would strand in
@@ -279,7 +279,7 @@ export function useTranscriptSelectionRetention({
         else promoteDeadNativeGesture();
         return;
       }
-      // Freeze the pointer-down endpoint before Virtuoso is allowed to recycle
+      // Freeze the pointer-down endpoint before the window adapter can recycle
       // its row. A browser Range can otherwise migrate its anchor into the DOM
       // node that replaced the original row during a long upward drag.
       const anchor = tracked.anchorPoint

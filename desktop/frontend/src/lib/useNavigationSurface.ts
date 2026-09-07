@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Item } from "./useController";
 import { recordFrontendDiagnostic } from "./frontendDiagnosticBridge";
 import {
   beginNavigationSurfaceState,
+  createNavigationSurfaceTicket,
   markNavigationTargetMasked,
+  matchesNavigationSurfaceTicket,
   settleNavigationSurfaceState,
+  type NavigationSurfaceTicket,
   type NavigationSurfaceState,
 } from "./navigationSurfaceTransition";
+import { useCommittedCommand } from "./useCommittedCommand";
 
 export type PreservedTranscriptSurface = {
   tabId?: string;
@@ -17,6 +21,7 @@ export type PreservedTranscriptSurface = {
 
 export function useNavigationSurface(target: {
   activeTabId?: string;
+  sessionKey: string;
   ready: boolean;
   backendActivationPending: boolean;
   hydrating: boolean;
@@ -36,18 +41,19 @@ export function useNavigationSurface(target: {
     !target.backendActivationPending && !target.hydrating && target.hydrateError,
   );
 
-  const begin = useCallback((nextIntent: number) => {
+  const begin = useCommittedCommand((nextIntent: number) => {
     recordFrontendDiagnostic("navigation", "navigation.begin", { intent: nextIntent, phase: "begin" });
     const rendered = renderedRef.current;
     flushSync(() => {
       setPreserved(rendered?.items.length ? rendered : null);
       setSurface(beginNavigationSurfaceState(nextIntent));
     });
-  }, []);
-  const maskTarget = useCallback((completedIntent: number) => {
+    renderedRef.current = null;
+  });
+  const maskTarget = useCommittedCommand((completedIntent: number) => {
     setSurface((current) => markNavigationTargetMasked(current, completedIntent));
-  }, []);
-  const settle = useCallback((completedIntent: number, outcome: "ready" | "degraded" | "failed") => {
+  });
+  const settle = useCommittedCommand((completedIntent: number, outcome: "ready" | "degraded" | "failed") => {
     if (outcome !== "failed") recordFrontendDiagnostic("navigation", "navigation.paint-ready", { intent: completedIntent, outcome });
     recordFrontendDiagnostic("navigation", "navigation.terminal", { intent: completedIntent, outcome });
     recordFrontendDiagnostic("navigation", "navigation.settle", {
@@ -56,10 +62,36 @@ export function useNavigationSurface(target: {
       outcome,
     });
     setSurface((current) => settleNavigationSurfaceState(current, completedIntent));
+    setPreserved(null);
+  });
+  const ticket = useMemo<NavigationSurfaceTicket | null>(() => {
+    if (!dataReady || intent === null || !target.activeTabId) return null;
+    return createNavigationSurfaceTicket(intent, target.activeTabId, target.sessionKey);
+  }, [dataReady, intent, target.activeTabId, target.sessionKey]);
+  const committedTicketRef = useRef<NavigationSurfaceTicket | null>(null);
+  useLayoutEffect(() => {
+    committedTicketRef.current = ticket;
+  }, [ticket]);
+  useLayoutEffect(() => () => {
+    committedTicketRef.current = null;
+    renderedRef.current = null;
   }, []);
-  const commitPaint = useCallback((completedIntent: number, outcome: "ready" | "degraded") => {
-    settle(completedIntent, outcome);
-  }, [settle]);
+  const commitPaint = useCommittedCommand((token: string, outcome: "ready" | "degraded") => {
+    const committedTicket = committedTicketRef.current;
+    if (!matchesNavigationSurfaceTicket(
+      committedTicket,
+      token,
+      surface?.intent ?? null,
+      target.activeTabId,
+      target.sessionKey,
+    )) return null;
+    committedTicketRef.current = null;
+    settle(committedTicket!.intent, outcome);
+    return committedTicket;
+  });
+  const commitRendered = useCommittedCommand((rendered: PreservedTranscriptSurface | null) => {
+    renderedRef.current = rendered;
+  });
 
   const dataReadyIntentRef = useRef<number | null>(null);
   useEffect(() => {
@@ -83,7 +115,8 @@ export function useNavigationSurface(target: {
     transitioning,
     dataReady,
     preserved,
-    renderedRef,
+    surfaceCommitToken: ticket?.token,
+    commitRendered,
     begin,
     maskTarget,
     commitPaint,

@@ -142,7 +142,7 @@ const warningTurn: Item[] = [
 
 // ── Phase 2: keep-expanded fold preference ────────────────────────────────────
 {
-  const harness = await createTranscriptHarness({ storage: { "reasonix-process-fold": "expanded" } });
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "expanded" });
   const container = harness.container;
   try {
     // Assistant content is model output addressed to the user — every message
@@ -206,15 +206,15 @@ const warningTurn: Item[] = [
       );
     }
 
-    // settings.processFold = expanded keeps completed folds open (#4233, #2278).
+    // Deep keeps completed process folds open (#4233, #2278).
     await render(harness, [
       { kind: "user", id: "u7", text: "ask" },
       { kind: "assistant", id: "a10", text: "answered", reasoning: "quick", streaming: false, workDurationMs: 3_000 },
     ]);
-    ok(container.querySelector(".turn-collapse--open"), "keep-expanded preference leaves the fold open");
+    ok(container.querySelector(".turn-collapse--open"), "deep experience leaves the fold open");
 
-    // Each reasoning segment starts as a one-line summary. Full Markdown only
-    // mounts for the selected virtual row after the user expands it (#6340).
+    // Deep starts each reasoning segment expanded; a manual collapse replaces
+    // the Markdown with its lightweight summary (#6340).
     await render(harness, [
       { kind: "user", id: "u-segment", text: "inspect" },
       { kind: "assistant", id: "a-segment", text: "", reasoning: "**first thought**\n\n- tail detail", streaming: false },
@@ -222,23 +222,24 @@ const warningTurn: Item[] = [
     {
       const segmentHeads = container.querySelectorAll("button.turn-collapse__reasoning-head");
       ok(segmentHeads.length === 1, "every reasoning segment gets its own toggle");
-      ok(segmentHeads[0]?.getAttribute("aria-expanded") === "false", "reasoning segments default to collapsed");
+      ok(segmentHeads[0]?.getAttribute("aria-expanded") === "true", "deep reasoning segments default to expanded");
+      ok(!container.querySelector(".reasoning-summary"), "deep reasoning skips the collapsed summary");
+      for (let i = 0; i < 20 && !container.querySelector(".turn-collapse__body .md strong"); i += 1) await harness.flush();
+      ok(container.querySelector(".turn-collapse__body .md strong")?.textContent === "first thought", "deep reasoning mounts full Markdown");
+
+      await act(async () => {
+        segmentHeads[0]?.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
+      });
+      await harness.flush();
+      ok(!container.querySelector(".turn-collapse__body .md"), "manual collapse unmounts reasoning Markdown");
       const summary = container.querySelector<HTMLButtonElement>(".reasoning-summary");
-      ok(summary?.textContent === "**first thought**", "collapsed reasoning renders a plain-text summary");
-      ok(!container.querySelector(".turn-collapse__body .md"), "collapsed reasoning mounts no Markdown");
+      ok(summary?.textContent === "**first thought**", "manual collapse renders a plain-text summary");
 
       await act(async () => {
         summary?.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
       });
-      for (let i = 0; i < 20 && !container.querySelector(".turn-collapse__body .md strong"); i += 1) await harness.flush();
-      ok(container.querySelector(".turn-collapse__body .md strong")?.textContent === "first thought", "clicking the summary mounts full Markdown");
-      ok(container.querySelector(".turn-collapse__body .md li")?.textContent === "tail detail", "expanded reasoning renders Markdown lists");
-
-      await act(async () => {
-        container.querySelector(".turn-collapse__reasoning-head")?.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
-      });
-      await harness.flush();
-      ok(!container.querySelector(".turn-collapse__body .md"), "clicking the segment head returns to the summary");
+      for (let i = 0; i < 20 && !container.querySelector(".turn-collapse__body .md li"); i += 1) await harness.flush();
+      ok(container.querySelector(".turn-collapse__body .md li")?.textContent === "tail detail", "clicking the summary restores expanded Markdown");
     }
   } finally {
     await harness.unmount();
@@ -425,9 +426,9 @@ const warningTurn: Item[] = [
       { kind: "user", id: "u-no-summary", text: "inspect" },
       { kind: "assistant", id: "a-no-summary", text: "", reasoning: "hidden preview", streaming: false },
     ]);
-    ok(!harness.container.querySelector(".reasoning-summary"), "disabling reasoning summaries hides inline previews");
-    ok(!harness.container.querySelector(".turn-collapse__body .md"), "disabled previews keep Markdown lazy");
-    ok(Boolean(harness.container.querySelector(".turn-collapse__reasoning-head")), "the reasoning toggle remains accessible without a summary");
+    ok(Boolean(harness.container.querySelector(".reasoning-summary")), "stale summary-off storage cannot hide the Standard preview");
+    ok(!harness.container.querySelector(".turn-collapse__body .md"), "Standard completed previews keep Markdown lazy");
+    ok(Boolean(harness.container.querySelector(".turn-collapse__reasoning-head")), "the Standard reasoning toggle remains accessible");
   } finally {
     await harness.unmount();
     await harness.close();

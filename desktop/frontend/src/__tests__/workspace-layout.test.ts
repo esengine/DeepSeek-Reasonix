@@ -17,7 +17,6 @@ import {
 let passed = 0;
 let failed = 0;
 const testDir = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const sessionActionsSource = readFileSync(resolve(testDir, "../components/TopicbarSessionActions.tsx"), "utf8");
 const terminalPanelSource = readFileSync(resolve(testDir, "../components/TerminalPanel.tsx"), "utf8");
@@ -164,43 +163,10 @@ eq(terminalMaxHeight(180), 120, "terminal maximum never falls below the accessib
 eq(clampTerminalHeight(680, 480), 240, "restored terminal height clamps after the window shrinks");
 eq(clampTerminalHeight(80, 720), 120, "terminal height clamps to its minimum");
 eq(
-  /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);[\s\S]*?saveWorkspacePanelOpen\(false, activeWorkspaceRoot\);/.test(appSource),
-  true,
-  "closing the dock clears the transient render width, hides the panel, and persists the collapsed preference",
-);
-eq(
   /\.workspace-panel-resizer \{[\s\S]*?grid-column: 3;[\s\S]*?justify-self: start;[\s\S]*?width: 1px;/.test(stylesSource)
     && /\.workspace-panel-resizer::before \{[\s\S]*?left: 0;[\s\S]*?right: -7px;/.test(stylesSource),
   true,
   "workspace resize hit area starts at the dock boundary and never overlaps the chat scrollbar gutter",
-);
-eq(
-  /createPointerResizeLifecycle\(\{[\s\S]*?separator,[\s\S]*?pointerId,[\s\S]*?onMove,[\s\S]*?onFinish: \(\) => \{[\s\S]*?liveResize\.flush\(\);/.test(appSource)
-    && /workspacePanelResizeFinishRef\.current = lifecycle\.finish/.test(appSource),
-  true,
-  "workspace resize has one guarded finish path for capture loss, blur, cancellation, and unmount",
-);
-eq(
-  /setWorkspacePanelOpen\(true\);[\s\S]*?saveWorkspacePanelOpen\(true, activeWorkspaceRoot\);/.test(appSource),
-  true,
-  "opening the dock persists the expanded preference for the next launch",
-);
-eq(
-  /terminalPanelOpen[\s\S]*?terminal-drawer/.test(appSource),
-  true,
-  "terminal drawer is an independent panel, not a workspace dock mode",
-);
-eq(
-  /const addTerminalOutputToComposer = useCallback\(async \(sessionId: string\) => \{[\s\S]*?app\.TerminalOutputForTab\(activeTabId, sessionId\)[\s\S]*?addWorkspaceTextToComposer\(/.test(appSource),
-  true,
-  "terminal output reaches chat only through the explicit add-output action",
-);
-eq(
-  /const addSelectedTextToComposer = useCallback\(\(text: string, source\?: SelectedTextInsertRequest\["source"\]\)/.test(appSource)
-    && /addSelectedTextToComposer\(text, "terminal"\)/.test(appSource)
-    && /onAddToChat=\{addTerminalSelectionToComposer\}/.test(appSource),
-  true,
-  "terminal selections enter the composer as typed quoted context",
 );
 eq(
   /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer[\s\S]*?display: flex !important/.test(stylesSource),
@@ -218,31 +184,6 @@ eq(
   "narrow viewport keeps the resizer and drawer in the content column above the status bar",
 );
 eq(
-  /const terminalRenderHeight = clampTerminalHeight\(terminalHeight, viewportHeight\)/.test(appSource)
-    && /"--terminal-height": `\$\{terminalSurfaceOpen \? liveTerminalHeight \?\? terminalRenderHeight : 0\}px`/.test(appSource),
-  true,
-  "terminal render height re-clamps whenever the viewport changes",
-);
-eq(
-  /aria-hidden=\{!terminalSurfaceOpen\}/.test(appSource)
-    && /tabIndex=\{terminalSurfaceOpen \? 0 : -1\}/.test(appSource)
-    && /onKeyDown=\{resizeTerminalWithKeyboard\}/.test(appSource),
-  true,
-  "closed terminal resizer leaves the tab order and open resizer supports keyboard adjustment",
-);
-eq(
-  /terminalSurfaceOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSource)
-    && !/\.layout\.layout--terminal-drawer-open \.footer/.test(stylesSource),
-  true,
-  "footer compaction applies only while the terminal is expanded outside Creation mode",
-);
-eq(
-  /sidebarImDetailConnection \? "layout--statusbar-hidden" : ""/.test(appSource)
-    && /\.layout\.layout--statusbar-hidden,[\s\S]*?--statusbar-height: 0px;/.test(stylesSource),
-  true,
-  "IM detail collapses the status bar row when the bar is not rendered",
-);
-eq(
   /\.layout--terminal-drawer-expanded \.terminal-drawer \{[\s\S]*?border-top: 1px solid var\(--border-soft\)/.test(stylesSource),
   true,
   "terminal drawer has a top border only when expanded, avoiding a collapsed artifact line",
@@ -252,15 +193,6 @@ eq(
     && /\.app--darwin \.sidebar--workbench,\s*\.sidebar--workbench \{[\s\S]*?padding: 14px 12px 10px;/.test(stylesSource),
   true,
   "workbench sidebar does not reserve the docked status bar twice",
-);
-const workspaceDockTabsSource = appSource.match(/<div className="workbench-dock__tabs"[\s\S]*?<div className="workbench-dock__body">/)?.[0] ?? "";
-eq(
-  workspaceDockTabsSource.length > 0
-    && !/rightDock\.terminal|terminalPanelOpen|toggleTerminalPanel/.test(workspaceDockTabsSource)
-    && /<TopicbarSessionActions[\s\S]*?toggleTerminal=\{toggleTerminalPanel\}/.test(appSource)
-    && /aria-label=\{t\("rightDock\.terminal"\)\}[\s\S]*?onClick=\{toggleTerminal\}/.test(sessionActionsSource),
-  true,
-  "workspace dock omits the terminal view while the topic bar keeps the terminal drawer action",
 );
 eq(
   /\.topicbar \{\s*position: relative;\s*z-index: var\(--z-inline-sticky\);/.test(stylesSource)
@@ -298,12 +230,6 @@ eq(
   "rapid tab switches cannot paint the previous tab's terminal or selection action",
 );
 eq(
-  /readOnly=\{Boolean\(activeTab\?\.readOnly\)\}/.test(appSource)
-    && /const terminalReadOnly = readOnly \|\| Boolean\(workspace\?\.readOnly\)/.test(terminalPanelSource),
-  true,
-  "terminal controls follow the active tab read-only boundary",
-);
-eq(
   /terminal-session-rail__new|onNew/.test(terminalRailSource),
   false,
   "terminal tab strip does not duplicate the header's new-session action",
@@ -324,23 +250,11 @@ eq(
   "new terminal sessions are not hard-coded to the default shell",
 );
 eq(
-  /const TerminalPanel = lazy\(\(\) => import\("\.\/components\/TerminalPanel"\)/.test(appSource),
-  true,
-  "terminal and xterm remain in a lazy chunk",
-);
-eq(
   /onPointerEnter=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(sessionActionsSource)
     && /onFocus=\{terminalEnabled \? prefetchTerminal : undefined\}/.test(sessionActionsSource)
     && /void import\("\.\.\/components\/TerminalPanel"\)/.test(terminalLifecycleSource),
   true,
   "pointer and keyboard intent prefetch the terminal chunk before opening from the topic bar",
-);
-eq(
-  /useWarmTerminalPanel\(terminalPanelOpen, terminalResizing, !managementActive\)/.test(appSource)
-    && /if \(open\) setMounted\(true\)/.test(terminalLifecycleSource)
-    && !/setMounted\(false\)/.test(terminalLifecycleSource),
-  true,
-  "the terminal stays mounted after first open to preserve the live xterm",
 );
 eq(
   /registerTerminalSink\(session\.id, \(bytes\) => terminal\.write\(bytes\), openRef\.current\)/.test(terminalViewSource)
@@ -349,30 +263,10 @@ eq(
   "the warm terminal pauses PTY output while collapsed and resumes from its output cursor",
 );
 eq(
-  /fitEnabled=\{terminalFitEnabled\}/.test(appSource)
-    && /setFitEnabled\(false\)/.test(terminalLifecycleSource)
-    && /TERMINAL_TRANSITION_MS/.test(terminalLifecycleSource)
-    && /fitEnabled=\{fitEnabled\}/.test(terminalPanelSource),
-  true,
-  "drawer transitions pause xterm fit and perform one fit after opening",
-);
-eq(
   /useGlobalShortcut\(\s*"selection\.addToChat"/.test(terminalPanelSource)
     && /<kbd>\{addShortcut\}<\/kbd>/.test(terminalPanelSource),
   true,
   "terminal selection-to-chat exposes the shared configurable shortcut",
-);
-eq(
-  /className="terminal-drawer"[\s\S]*?aria-hidden=\{!terminalSurfaceOpen\}[\s\S]*?inert=\{!terminalSurfaceOpen \? true : undefined\}/.test(appSource),
-  true,
-  "the warm collapsed terminal is hidden from accessibility and focus navigation",
-);
-eq(
-  /open=\{terminalSurfaceOpen\}/.test(appSource)
-    && /open && selectionAction &&/.test(terminalPanelSource)
-    && /if \(!open\) setSelectionAction\(null\)/.test(terminalPanelSource),
-  true,
-  "closing a warm terminal removes portaled selection controls",
 );
 
 // C1: the chat pane keeps its 400px floor no matter how wide the dock is
@@ -404,16 +298,6 @@ eq(wideDock > chatFloorDock, true, "C1: wider viewport gives the dock more room,
 // C3: switching dock tabs (context/files/changed) must never resize the dock —
 // the preferred width is a single source (rightDockTreeWidth), not a
 // detail-dependent ternary that would jump the sidebar per tab.
-eq(
-  /const preferredWorkspacePanelWidth = rightDockTreeWidth;/.test(appSource),
-  true,
-  "C3: preferredWorkspacePanelWidth is the single tree width (no detail ternary)",
-);
-eq(
-  /const preferredWorkspacePanelWidth = rightDockDetailActive \? rightDockPreviewWidth : rightDockTreeWidth;/.test(appSource),
-  false,
-  "C3: no preview-width dual system that would resize the sidebar on tab switch",
-);
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

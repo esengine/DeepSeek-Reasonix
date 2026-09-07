@@ -142,8 +142,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
 
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
 
+  useEffect(startTerminalEventBridge, []);
   useEffect(() => {
-    startTerminalEventBridge();
     const host = hostRef.current;
     if (!host) return;
     const terminal = new Terminal({

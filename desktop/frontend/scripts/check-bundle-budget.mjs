@@ -57,13 +57,11 @@ const localeChunks = readdirSync(resolve(distDir, "assets"))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
-// React Virtuoso replaces the transcript's custom measurement/anchor engine.
-// Its production runtime adds 16.9 KiB gzip (4.2%) over the 402 KiB baseline.
-// This exceptional overrun is locally attributable and trades ~1400 lines of
-// competing state machines for a maintained library. Native-tail finish helpers
+// The historical transcript windowing runtime added 16.9 KiB gzip (4.2%) over
+// the 402 KiB baseline. Native-tail finish helpers
 // then sat on the 423.5 KiB gate (Windows CI: 423.5 / 423.5); this 0.5 KiB
 // raise (0.12%) absorbs that leave-cancel / remasure-once code without
-// widening the original Virtuoso exception. The project-tree archive race
+// widening that historical exception. The project-tree archive race
 // guards add 611 bytes gzip over main-v2's 423.988 KiB startup path after the
 // blank-project flow landed; project-topic sort invalidation and request
 // ordering add another bounded 0.2 KiB. Retain both owner boundaries with a
@@ -189,24 +187,33 @@ console.log("\nbundle budgets");
 // drag add 0.3 KiB gzip; the merged path measures 463.102 KiB.
 // Absorbing content-preserving block-window prepends into the active reader
 // transaction adds 0.2 KiB gzip on top; the merged path measures 463.292 KiB,
-// 8 bytes under the next decimal. Retain one cross-platform decimal step.
-// The subagent outcome envelope, partial-state card, and history hydration add
-// 0.5 KiB gzip on the initial path. The model-capability resolver and its
-// read-only provider badges add a measured 0.2 KiB including gzip/toolchain
-// rounding. The integrated management shell, image capability controls, and
-// upstream updater refresh measure 465.4 KiB gzip (base: 464.7 KiB).
-// Keep the next decimal ceiling and leave feature editors lazy.
-// Durable protocol recovery controls and search-source status add 1.2 KiB
-// over the same-environment main-v2 build (465.4 -> 466.6 KiB gzip).
-// Keep one decimal of cross-platform headroom for this measured shell change.
-// Integrating main-v2 rich-link menus measures 466.905 KiB combined.
-// The AskCard session-draft wiring adds a bounded 30-byte gzip drift on the
-// initial route. The session-runtime ordering fence adds 56 bytes and
-// cross-platform zlib rounding reaches the same startup path; retain the
-// explicit budget rather than failing on a rounded 467.0 KiB display value.
-// The latest main-v2 session-runtime fence and exact prompt protocol measure
-// 468.2 KiB here; retain a 0.1 KiB ceiling for platform zlib rounding.
-const initialJSBudgetKiB = 468.3;
+// 8 bytes under the next decimal. The rebased release build rounds to the
+// boundary at 463.4 KiB. Replacing that stack with TranscriptKernel and the
+// calculation-only block window reduces the measured stable path to 426.0
+// KiB. The outcome envelope, recovery UI, and model-capability resolver from
+// current main-v2 are absorbed by the same reduced startup graph; retain the
+// existing bounded cross-platform metadata/toolchain allowance. Direct
+// topic-bar actions from the synced main-v2 add 0.186 KiB on the same
+// toolchain; retain only the next one-decimal ceiling on the reduced graph.
+// The App layering split (#9777) moves the App body into app-runtime owner
+// hooks and app-shell region builders; the bag interfaces reify property names
+// that local variables previously minified away. The module set and lazy
+// boundaries are sourcemap-identical to the pre-split graph. HEAD measured
+// 427.3-428.2 KiB (already 0.5-1.4 over the old gate from toolchain drift);
+// the split measures 440.3 KiB; retain only the next one-decimal ceiling.
+// main-v2 then added the subagent outcome envelope, partial-state card, and
+// history hydration (+0.5 KiB), the model-capability resolver with read-only
+// provider badges (+0.2 KiB), the integrated management shell with image
+// capability controls and the upstream updater refresh (465.4 KiB measured),
+// durable protocol recovery controls and search-source status (466.6 KiB),
+// rich-link menus (466.905 KiB), the AskCard session-draft wiring and the
+// session-runtime ordering fence (467.0 KiB), and the exact prompt protocol
+// (468.2 KiB measured on the pre-kernel graph). The merged graph combines the
+// kernel-reduced stack, the layering split, and that main-v2 feature chain;
+// it measures 441.0 KiB here — main-v2's features add only 0.7 KiB on the
+// reduced startup graph. Retain only the next one-decimal ceiling for
+// platform zlib rounding.
+const initialJSBudgetKiB = 441.1;
 assertBudget("initial JavaScript gzip", initialJSGzip, initialJSBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 // Render-blocking CSS is intentionally absent: styles.css loads deferred via
@@ -225,11 +232,12 @@ if (initialCSS.length > 0) {
 // the retained-transcript navigation allowance; keep the ratchet explicit.
 // The navigation mask's stable composer footprint and remote tab/surface
 // states bring the merged shell to roughly 115.7 KiB gzip.
-// The one-row model configuration list, responsive stacking, Automation's
-// shared title-safe shell, and the shared harness decision surface measure
-// 116.9 KiB gzip while reusing existing layout primitives. Retain a bounded
-// 0.1 KiB headroom ratchet.
-assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 117.0 * 1024);
+// The one-row model configuration list and responsive stacking measure
+// 116.3 KiB gzip while reusing the shared segmented-control styles.
+// The retained-recovery cleanup receipt and current main-v2 status copy move
+// the deferred shell to 116.4 KiB on the current toolchain (unchanged by the
+// #9777 App layering split); retain only the next one-decimal ceiling.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 116.5 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
@@ -272,28 +280,22 @@ for (const path of localeChunks) {
   // 60.757 KiB; retain only its exact one-decimal ceiling.
   // Session takeover adds ~20 locale keys per dialect (banners, dialog,
   // reclaim), while Sticky Context adds file-state and limit diagnostics. The
-  // merged stable chunks measure 60.395 KiB zh and 61.232 KiB zh-TW; retain
-  // only the next one-decimal ceiling for each dialect.
-  // The outcome card adds one short localized status label per dialect. CI's
-  // Windows zlib measured zh at 60.4 KiB exactly; capability-status copy adds
-  // a small 0.1 KiB ratchet, so retain the next decimal ceiling rather than
-  // dropping the unknown-state explanation.
-  // Image input mode, provenance and unknown-state guidance measure 60.724 KiB
-  // zh and 61.570 KiB zh-TW. Keep the next decimal ceiling per locale.
-  // Protocol recovery and source-availability copy measure 60.927 KiB zh
-  // and 61.789 KiB zh-TW (base: 60.8 / 61.6 rounded).
-  // Rich-link action copy on the current base brings these to
-  // 61.027/61.881 KiB; retain bounded cross-platform headroom.
-  // Recovery retry copy reaches the rounded 61.1 KiB boundary on Node/zlib
-  // toolchains; keep the next one-decimal ceiling for cross-platform CI.
-  const budget = name.startsWith("zh-TW-") ? 62.0 * 1024 : 61.2 * 1024;
+  // merged stable chunks measure 60.395 KiB zh and 61.232 KiB zh-TW; the
+  // canonical session-experience labels and the current main-v2 outcome status
+  // labels share the existing locale dictionaries. Current main-v2 adds the
+  // capability-status explanation; retain its measured 0.1 KiB while keeping
+  // the session-experience ratchet below the pre-kernel budget.
+  // Current main-v2 recovery and status copy on the current toolchain measures
+  // 60.9 KiB zh and 61.8 KiB zh-TW (identical before and after the #9777 App
+  // layering split); retain only the next one-decimal ceiling for each.
+  const budget = name.startsWith("zh-TW-") ? 61.9 * 1024 : 61.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
-// The maintained Virtuoso engine adds 49.1 KiB raw (2.2%) over the previous
-// 2268.7 KiB gate. Navigation remains inside the 2341 KiB production ceiling;
+// The historical transcript engine added 49.1 KiB raw (2.2%) over the previous
+// 2268.7 KiB gate. Navigation remained inside the 2341 KiB production ceiling;
 // its combined diagnostic wiring adds 2.2 KiB (0.094%) to the test channel.
 // DingTalk startup wiring moves current-base production from 2341.0 to 2343.6
 // KiB and test from 2346.2 to 2348.8 KiB; the pinned heading adds 0.5 KiB raw
@@ -374,21 +376,25 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // path measures 2470.932 KiB.
 // The reader-transaction offset absorption adds 0.8 KiB raw on top; the merged
 // path measures 2471.741 KiB. Controller-owned management dispositions and
-// optimistic management settlement add 0.6 KiB raw; retain the smallest
-// one-decimal ceiling with bounded headroom.
-// The outcome card and history hydration add 2.3 KiB raw on the initial path
-// (2474.0 KiB measured in CI). Keep this narrowly attributable ratchet rather
-// than removing persisted-result visibility or changing chunk ownership.
-// On the current main-v2 base, the combined measured path is 2474.6 KiB;
-// the model-capability helper and localized status copy add 0.9 KiB; retain
-// the smallest bounded cross-platform ceiling.
-// Retain the upstream updater ceiling and independent chunk gates.
-// Recovery controls add 3.6 KiB raw over the measured 2480.9 KiB base;
-// current payload is 2484.509 KiB. Retain only bounded toolchain headroom.
-// With the current-base rich-link menus: 2485.715 KiB raw.
-// The shared harness decision surface adds a bounded startup stylesheet
-// payload. The current base plus exact prompt identity and stale-card recovery
-// measure 2496.4 KiB locally; retain the smallest bounded ceiling.
-const rawInitialBudgetKiB = 2_496.5;
+// optimistic management settlement add 0.6 KiB raw. The rebased canonical
+// session-experience startup wiring and old transcript stack measured roughly
+// 2474 KiB; replacing it with the single-writer kernel measures below 2347.4
+// KiB. The model-capability helper and localized status copy from current
+// main-v2 add a measured 0.9 KiB to that reduced graph. Direct topic-bar
+// actions and the macOS dock styling add 0.946 KiB on the same-toolchain base;
+// retain only the next one-decimal ceiling on the reduced graph.
+// The #9777 App layering split reifies the composition interface names the
+// single App body previously minified away; the split graph measures 2378.6
+// KiB raw (2341.0 before the split). Retain only the next one-decimal
+// ceiling; gzip and largest-chunk budgets carry their own narrow ratchets.
+// main-v2's chain then adds the outcome card and history hydration (2474.0
+// KiB measured in CI), the model-capability helper and localized status copy
+// (+0.9 KiB), the upstream updater ceiling, recovery controls (2484.509 KiB),
+// rich-link menus (2485.715 KiB), and the shared harness decision surface
+// with exact prompt identity and stale-card recovery (2496.4 KiB measured on
+// the pre-kernel graph). The merged graph combines the kernel-reduced stack,
+// the layering split, and that main-v2 feature chain; it measures 2380.9 KiB
+// raw here — retain only the next one-decimal ceiling.
+const rawInitialBudgetKiB = 2_381.0;
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, rawInitialBudgetKiB * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

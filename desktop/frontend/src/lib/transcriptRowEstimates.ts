@@ -5,7 +5,7 @@
  * of glyph width. Full-width scripts (CJK, fullwidth punctuation, most
  * emoji) occupy two terminal columns, so a CJK-heavy paragraph wraps at
  * roughly half the character count — the old estimate undershot real row
- * heights by ~2x for Chinese content. Height estimates feed Virtuoso's
+ * heights by ~2x for Chinese content. Height estimates feed the block window's
  * initial size tree and every estimate-based scrollToIndex landing, so that
  * bias scaled with transcript length (#8657).
  *

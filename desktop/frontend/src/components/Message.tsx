@@ -11,7 +11,7 @@ import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
-import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { useWorkProcessPresentation } from "../lib/sessionExperience";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
 import { messageActionLabelKey, type MessageActionScope } from "../lib/messageActions";
@@ -794,14 +794,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   expandWhileStreaming?: boolean;
   creationMode?: boolean;
 }) {
-  const reasoningDisplayMode = useReasoningDisplayMode();
+  const presentation = useWorkProcessPresentation();
   const hasText = item.streaming || item.text.trim() !== "";
   const hasFootnotes = Boolean(item.searchSources?.length);
   const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
   const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
-  if (processOnly && (reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending")) return null;
-  const reasoningFallback = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending" ? null
-    : <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || reasoningDisplayMode === "expanded" || (item.streaming && (reasoningDisplayMode === "auto" || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
+  const reasoningFallback = <div className="reasoning reasoning--loading" data-expanded={defaultExpanded || presentation.keepExpandedAfterCompletion || (item.streaming && (presentation.showWhileRunning || expandWhileStreaming)) ? "" : undefined} aria-hidden />;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (

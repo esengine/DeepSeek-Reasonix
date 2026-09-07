@@ -131,8 +131,8 @@ export function TerminalPanel({
     open && Boolean(selectionAction),
   );
 
+  useEffect(startTerminalEventBridge, []);
   useEffect(() => {
-    startTerminalEventBridge();
     const previous = capabilityRef.current;
     const capabilityChanged = previous.tabId === tabId && previous.readOnly !== readOnly;
     capabilityRef.current = { tabId, readOnly };

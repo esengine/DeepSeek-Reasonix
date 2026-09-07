@@ -123,6 +123,10 @@ const handoff = attachNestedScrollHandoff({
     intents += 1;
     handedOffDeltas.push(deltaY);
   },
+  writeParentOffset: (top) => {
+    parent.scrollTop = top;
+    return true;
+  },
   latchHoldMs: 200,
   now: () => clock,
 });

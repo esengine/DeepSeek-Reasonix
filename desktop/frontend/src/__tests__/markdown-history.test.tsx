@@ -212,7 +212,7 @@ console.log("\nmarkdown history rendering");
   rootEl.scrollTop = 400;
   Object.defineProperty(rootEl, "scrollHeight", { configurable: true, value: 1_000 });
   Object.defineProperty(rootEl, "clientHeight", { configurable: true, value: 300 });
-  // The pending Virtuoso row sits inside the transcript viewport: the long answer
+  // The pending Transcript block sits inside the viewport: the long answer
   // keeps the stable fallback because the tail-window swap would remove the
   // blocks being read (#9570 keeps that protection; short answers and
   // off-screen rows commit immediately now).

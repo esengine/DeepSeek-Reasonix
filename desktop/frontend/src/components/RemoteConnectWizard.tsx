@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, FileText, Folder, Plus } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
+import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
 import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
 import { RemoteStatusChip } from "./RemoteHostsPage";
 import type { RemoteDirEntry, RemoteHostInput, RemoteHostView } from "../lib/types";
@@ -67,6 +67,7 @@ export function RemoteConnectWizard({
   onMerged?: (message: string) => void;
 }) {
   const t = useT();
+  const navigateRemote = useRemoteNavigationCommand();
   const hosts = useRemoteStore((s) => s.hosts);
   const statuses = useRemoteStore((s) => s.statuses);
   const setHosts = useRemoteStore((s) => s.setHosts);
@@ -339,8 +340,9 @@ export function RemoteConnectWizard({
       const canonical = project.merged ? project.workspace : target;
       if (project.merged) onMerged?.(t("remoteWizard.mergedProject", { path: canonical }));
       try {
-        await publishNavigationIntent("remote-wizard");
-        await app.OpenRemoteProjectTab(hostId, canonical, { newSession: true });
+        const outcome = await navigateRemote({ hostId, workspace: canonical }, { newSession: true });
+        if (outcome.status === "cancelled") return;
+        if (outcome.status === "failed") throw outcome.error;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         if (!project.merged) {

@@ -1,4 +1,6 @@
-import { isTranscriptContentShrink } from "./transcriptScrollArbiter";
+function isTranscriptContentShrink(delta: number): boolean {
+  return delta < -0.5;
+}
 
 export const TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX = 4;
 
@@ -17,8 +19,8 @@ type NativeTranscriptGeometry = {
 const nativeTranscriptTailResiduals = new WeakMap<object, number>();
 
 /** Remember a small, synchronous native clamp after repeated tail writes.
- * WebView2 can expose a stable Virtuoso scrollHeight whose last few pixels are
- * not reachable through scrollTop. A single no-op can instead be Virtuoso
+ * WebView2 can expose a stable scrollHeight whose last few pixels are not
+ * reachable through scrollTop. A single no-op can instead be a compositor
  * restoring a stale range, so require the same residual on stable geometry
  * before accepting it. Large gaps still use the LAST-item recovery path. */
 export function observeNativeTranscriptTailClamp(

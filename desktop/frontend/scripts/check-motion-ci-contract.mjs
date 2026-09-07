@@ -51,8 +51,8 @@ for (const required of [
 for (const required of [
   "bench:selection-table",
   "SELECTION REPAINT TARGET",
-  "clickIntervals = [400, 320, 180, 0]",
-  "maxTargetDelta <= 0.5",
+  "selection endpoint blocks remain resident by stable key",
+  "measurement changes cannot run structural corrections during selection",
 ]) {
   if (!transcriptSelectionBenchSource.includes(required)) {
     throw new Error(`motion-ci-contract: transcript selection browser gate must retain ${required}`);
@@ -147,9 +147,11 @@ if (!packageJSON.scripts?.["test:motion-browser"]?.includes("approval-animation.
 
 const transcriptScript = packageJSON.scripts?.["test:transcript"] ?? "";
 for (const required of [
-  "transcript-virtuoso-index.test.ts",
-  "transcript-reader-visual-guard-race.test.tsx",
-  "transcript-scroll-release.test.ts",
+  "transcript-kernel.test.ts",
+  "transcript-kernel-races.test.ts",
+  "transcript-timeline.test.ts",
+  "transcript-viewport.test.tsx",
+  "transcript-question-jump.test.ts",
   "nested-scroll-handoff.test.ts",
   "creation-transcript-scrollbar.test.ts",
   "markdown-table-virtual.test.tsx",
@@ -162,7 +164,6 @@ for (const required of [
   "transcript-selection-menu.test.tsx",
   "transcript-selection-rendering.test.ts",
   "transcript-store.test.ts",
-  "transcript-virtualization.test.tsx",
 ]) {
   if (!transcriptScript.includes(required)) {
     throw new Error(`motion-ci-contract: test:transcript must include ${required}`);
@@ -217,14 +218,14 @@ for (const required of ["transcript-selection.mjs", "transcript-scroll-stability
   }
 }
 for (const required of [
-  "PerformanceObserver",
-  "__reasonixScrollPerfProbe",
-  "REASONIX_TRANSCRIPT_MAX_FRAME_GAP_MS",
-  "REASONIX_TRANSCRIPT_MAX_LONG_TASK_MS",
-  "Array.from({ length: 10 }",
+  "bench:windowed-1000t",
+  "data-transcript-mounted-blocks",
+  "history prepend produces zero blank viewport frames",
+  "question jump performs exactly one accepted physical write",
+  "at most 40 completed blocks",
 ]) {
   if (!transcriptScrollBenchSource.includes(required)) {
-    throw new Error(`motion-ci-contract: transcript scroll browser gate must retain performance probe ${required}`);
+    throw new Error(`motion-ci-contract: transcript scroll browser gate must retain block-kernel assertion ${required}`);
   }
 }
 

@@ -8,7 +8,6 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
-import { activateGoalAndSubmitOnTab } from "../lib/goalSubmit";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
 import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
@@ -207,23 +206,15 @@ eq(controller?.activeTabId, "tab-a", "harness starts on tab A");
 const sourceTabId = "tab-a";
 let pending!: Promise<void>;
 await act(async () => {
-  pending = activateGoalAndSubmitOnTab({
-    tabId: sourceTabId,
-    displayText: "Cross-tab safe goal",
-    submitText: "/ui-ux-pro-max Cross-tab safe goal",
-    structured: {
-      display: "/ui-ux-pro-max Cross-tab safe goal",
-      input: "Cross-tab safe goal",
-      invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-    },
-    sendToTab: (tabId, goal, display, submit, structured) => {
-      if (!controller) throw new Error("controller missing");
-      return controller.sendToTab(tabId, display, submit, undefined, structured, {
-        goal,
-        collaborationMode: "normal",
-        toolApprovalMode: "ask",
-      });
-    },
+  if (!controller) throw new Error("controller missing");
+  pending = controller.sendToTab(sourceTabId, "Cross-tab safe goal", "/ui-ux-pro-max Cross-tab safe goal", undefined, {
+    display: "/ui-ux-pro-max Cross-tab safe goal",
+    input: "Cross-tab safe goal",
+    invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
+  }, {
+    goal: "Cross-tab safe goal",
+    collaborationMode: "normal",
+    toolApprovalMode: "ask",
   });
   await flushPromises();
 });
@@ -264,21 +255,14 @@ const failInvokeCalls: string[] = [];
 let activationFailed = false;
 await act(async () => {
   try {
-    await activateGoalAndSubmitOnTab({
-      tabId: "tab-a",
-      displayText: "Must not run skill",
-      submitText: "/ui-ux-pro-max Must not run skill",
-      structured: {
-        display: "/ui-ux-pro-max Must not run skill",
-        input: "Must not run skill",
-        invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
-      },
-      sendToTab: (tabId, goal, display, submit, structured) =>
-        controller!.sendToTab(tabId, display, submit, undefined, structured, {
-          goal,
-          collaborationMode: "normal",
-          toolApprovalMode: "ask",
-        }),
+    await controller!.sendToTab("tab-a", "Must not run skill", "/ui-ux-pro-max Must not run skill", undefined, {
+      display: "/ui-ux-pro-max Must not run skill",
+      input: "Must not run skill",
+      invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
+    }, {
+      goal: "Must not run skill",
+      collaborationMode: "normal",
+      toolApprovalMode: "ask",
     });
   } catch (error) {
     activationFailed = error instanceof Error && error.message.includes("workbench target changed");

@@ -2,8 +2,8 @@ import { CloudOff, Loader2, RotateCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useT } from "../lib/i18n";
 import { app } from "../lib/bridge";
-import { publishNavigationIntent } from "../lib/useNavigationIntentFence";
-import { Transcript } from "./Transcript";
+import { useRemoteNavigationCommand } from "../lib/remoteNavigationCommands";
+import { Transcript, type TranscriptProps } from "./Transcript";
 import { AskCard } from "./AskCard";
 import { ApprovalModal } from "./ApprovalModal";
 import { ExtensionFormDialog } from "./ExtensionFormDialog";
@@ -19,8 +19,11 @@ import type { TabMeta, WireApproval, WireAsk } from "../lib/types";
  * the approval/ask cards are remote-specific; the composer lives in the
  * app shell, shared with local tabs.
  */
-export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: RemoteSessionApi }) {
+export function RemoteSessionSurface({ tab, session, surfaceCommitToken, onSurfacePaintReady }: {
+  tab: TabMeta; session: RemoteSessionApi;
+} & Pick<TranscriptProps, "surfaceCommitToken" | "onSurfacePaintReady">) {
   const t = useT();
+  const navigateRemote = useRemoteNavigationCommand();
   const approval = session.transcript.approval as WireApproval | undefined;
   const ask = session.transcript.ask as WireAsk | undefined;
   const extensionForm = session.transcript.extensionForm;
@@ -50,8 +53,8 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
       // With no explicit target, the backend preserves the parked tab's
       // current named/fresh-session intent instead of silently starting over.
       runAction(async () => {
-        await publishNavigationIntent("remote-reconnect");
-        return app.OpenRemoteProjectTab(tab.remote!.hostId, tab.remote!.workspace, {});
+        const outcome = await navigateRemote(tab.remote!, {});
+        if (outcome.status === "failed") throw outcome.error;
       });
     };
     return (
@@ -107,6 +110,9 @@ export function RemoteSessionSurface({ tab, session }: { tab: TabMeta; session: 
         live={session.transcript.live}
         tabId={tab.id}
         revealSignal={session.surfaceGeneration}
+        hydrating={!session.hydrated}
+        surfaceCommitToken={surfaceCommitToken}
+        onSurfacePaintReady={onSurfacePaintReady}
         running={session.transcript.running}
         checkpoints={session.transcript.checkpoints}
         onPrompt={(prompt) => runAction(() => session.submit(prompt))}

@@ -5,7 +5,7 @@ import { useT } from "../lib/i18n";
 
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
-interface AppChromeProps {
+export interface AppChromeProps {
   platform: DesktopPlatform;
   browserPreviewChrome: boolean;
   workbenchChrome?: boolean;

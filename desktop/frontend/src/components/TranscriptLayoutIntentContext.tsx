@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { TranscriptScrollOwner } from "../lib/transcriptScrollArbiter";
+import type { TranscriptScrollOwner } from "../lib/transcriptKernel";
 
 const TranscriptLayoutIntentContext = createContext<() => void>(() => {});
 

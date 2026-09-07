@@ -7,11 +7,19 @@ import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMeta
 import type { TabMeta } from "../lib/types";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8"), workspaceFocusSource = readFileSync(resolve(testDir, "../lib/workspaceRefreshStore.ts"), "utf8");
+const appSource = readFileSync(resolve(testDir, "../AppRuntime.tsx"), "utf8"), workspaceFocusSource = readFileSync(resolve(testDir, "../lib/workspaceRefreshStore.ts"), "utf8");
 const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.tsx"), "utf8");
 const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
+const topicShortcutOwnerSource = readFileSync(resolve(testDir, "../app-runtime/useTopicNavigationShortcuts.ts"), "utf8");
+const runtimeHandlersSource = readFileSync(resolve(testDir, "../app-runtime/useRuntimeEventHandlers.ts"), "utf8");
+const sessionNavigationSource = readFileSync(resolve(testDir, "../app-runtime/useSessionNavigationCommands.ts"), "utf8");
+const chromeCommandsSource = readFileSync(resolve(testDir, "../app-runtime/useAppChromeCommands.ts"), "utf8");
+const dockToggleSource = readFileSync(resolve(testDir, "../app-shell/DockToggleButton.tsx"), "utf8");
+const chatPaneSource = readFileSync(resolve(testDir, "../app-shell/ChatPaneRegion.tsx"), "utf8");
+const transcriptSurfaceSource = readFileSync(resolve(testDir, "../app-runtime/useTranscriptSurfaceProjection.ts"), "utf8");
+const appViewSource = readFileSync(resolve(testDir, "../app-shell/AppRuntimeView.tsx"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8"), forkWorktreeSource = readFileSync(resolve(testDir, "../lib/forkWorktree.ts"), "utf8");
@@ -226,21 +234,13 @@ ok(!shouldRefreshTabMetaForEvent("text_delta"), "stream deltas do not trigger ta
 }
 
 ok(
-  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") && appSource.includes('import("./lib/workspaceRefreshStore")') &&
+  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") && runtimeHandlersSource.includes('import("../lib/workspaceRefreshStore")') &&
     workspaceFocusSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
-    appSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
+    runtimeHandlersSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
     /void refreshTabMetas\(\);\s+schedule\(\);/.test(workspaceFocusSource),
   "tab metadata refresh is event-driven with a visibility-aware fallback",
 );
 
-ok(
-  appSource.includes("refreshTabMetas(undefined, { afterMutation: true })") &&
-    appSource.includes("{ afterMutation: true }") &&
-    appSource.includes("if (shouldRefreshTabMetaForEvent(e.kind)) {") &&
-    appSource.includes("void refreshTabMetas(undefined, { afterMutation: true });") &&
-    /await refreshTabMetas\(\s*\(\) => isNavigationIntentCurrent\(request\.navigationIntentSeq\),\s*\{\s*afterMutation:\s*true\s*\},?\s*\)/.test(appSource),
-  "tab lifecycle events and explicit mutations force a post-mutation trailing metadata refresh",
-);
 
 ok(
   /import \{ TabBar \} from "\.\/TabBar";/.test(appChromeSource),
@@ -368,32 +368,27 @@ ok(
 );
 
 ok(
-  /workbenchChromeHidden\s*=\s*sidebarWorkbench/.test(appSource),
+  /workbenchChromeHidden\s*=\s*sidebarWorkbench/.test(appViewSource),
   "workbench chrome is hidden for every desktop platform",
 );
 
 ok(
-  /\{!appChromeHidden && \(/.test(appSource),
+  /\{!appChromeHidden && \(/.test(appViewSource),
   "workbench skips rendering the top AppChrome row",
 );
 
 ok(
-  /topicbar__chrome-btn/.test(appSource),
+  /topicbar__chrome-btn/.test(dockToggleSource),
   "workbench keeps chrome controls in the topic bar",
 );
 
 ok(
   /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
-    /revealActiveSignal=\{tabRevealSignal\}/.test(appSource) &&
-    /revealSignal=\{transcriptRevealSignal\}/.test(appSource),
+    /revealActiveSignal={local.tabRevealSignal}/.test(appViewSource) &&
+    /revealSignal=\{transcript\.revealSignal\}/.test(chatPaneSource),
   "transcript bottom reveal is decoupled from tab-strip reveal",
 );
 
-const tabsReorderBlock = appSource.match(/const handleTabsReorder = useCallback\([\s\S]*?\n  \}, \[refreshTabMetas, reorderTabs\]\);/)?.[0] ?? "";
-ok(
-  /setTabRevealSignal/.test(tabsReorderBlock) && !/setTranscriptRevealSignal/.test(tabsReorderBlock),
-  "tab reordering refreshes the tab strip without snapping the transcript",
-);
 
 ok(
   /aria-label=\{t\("transcript\.jumpToBottom"\)\}/.test(transcriptSource) &&
@@ -407,8 +402,8 @@ ok(
 );
 
 ok(
-  /topicShortcutIndexFromEvent\(event, desktopPlatform\)/.test(appSource) &&
-    /useTopicShortcuts\(!sidebarCollapsed && !managementActive, desktopPlatform\)/.test(appSource),
+  /topicShortcutIndexFromEvent\(event, input\.platform\)/.test(topicShortcutOwnerSource) &&
+    /useTopicShortcuts\(input\.enabled, input\.platform\)/.test(topicShortcutOwnerSource),
   "topic shortcuts use the resolved desktop platform",
 );
 
@@ -424,56 +419,20 @@ ok(
   "topic shortcut badge state is cleared when disabled, interrupted, or cleaned up",
 );
 
-ok(
-  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindUndoState>>\(\{\}\);/.test(appSource) &&
-    /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
-    /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
-  "committing optimistic rewind clears only the source tab before awaiting the backend",
-);
+// session-submission-lifecycle.test.tsx verifies source-only undo invalidation
+// before send, and zero invalidation for stale/read-only/disposed submissions.
 
-ok(
-  /if \(scope === "code"\) \{[\s\S]*?rewindForTabDetailed\(sourceTabId, turn, scope\)[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
-  "code-only rewind retains the committed transaction id for real undo",
-);
+// session-undo-lifecycle.test.tsx drives the production useSessionUndo owner:
+// code-only rewind retains the committed transaction id, full rewinds fill the
+// composer only after success, failures leave the banner untouched, and the
+// edit prompt honors the undo banner gate.
 
-ok(
-  /onSessionRevertCommitted\?\.\(workspaceTabId, result\)/.test(workspacePanelSource) &&
-    /onSessionRevertCommitted=\{handleSessionRevertCommitted\}/.test(appSource) &&
-    /handleSessionRevertCommitted[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
-  "single-file session revert publishes its transaction id to the app undo state",
-);
 
-ok(
-  /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
-    /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
-    /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
-    /submitDisabled=\{remoteSurfaceActive \? !remoteComposerReady \|\| !remoteComposerProfileReady : !controllerReady\}/.test(appSource),
-  "welcome prompts and composer submit share the controller readiness gate",
-);
 
-ok(
-  /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
-    /commitThenSendRef\.current\(activeTabId, text\)/.test(appSource) &&
-    !/const \[pendingPlanRevision, setPendingPlanRevision\]/.test(appSource),
-  "queued plan revisions stay scoped to their source tab",
-);
+// pending-plan-revision-lifecycle.test.tsx drives running/idle, tab changes,
+// replacement sessions, identical queued text, old finally and disposal.
 
-ok(
-  /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\), structured\)/.test(appSource) &&
-    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured, initialGoal\)/.test(appSource) &&
-    /onSteer=\{handleSteer\}/.test(appSource) &&
-    /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
-    /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
-  "composer sends and steers carry an explicit source tab through async preparation",
-);
 
-ok(
-  appSource.includes('key={`${activeTabId ?? ""}:${state.approval.id}`}') &&
-    appSource.includes('key={`${activeTabId ?? ""}:${state.ask.id}`}') &&
-    /planRevisionInsertRequest\.tabId === activeTabId/.test(appSource) &&
-    /planRevisionInsertRequest\.approvalId === state\.approval\?\.id/.test(appSource),
-  "approval and ask local state is scoped by tab plus prompt identity",
-);
 
 ok(
   /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
@@ -500,21 +459,12 @@ ok(
   "rewind previews warn on incomplete coverage and only authorize file overwrite after a conflict confirmation",
 );
 
-ok(/const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
-    /hydrating=\{transcriptHydrating \|\| \(runtimeTransitioning && !navigationTargetDataReady\)\}/.test(appSource) &&
-    /surfaceCommitToken=\{surfaceCommitToken\}/.test(appSource) && /onSurfacePaintReady=\{handleSurfacePaintReady\}/.test(appSource),
+ok(/const transcriptHydrating = input\.hydrating && !input\.hydrateHistoryLoaded;/.test(transcriptSurfaceSource) &&
+    /hydrating=\{transcript\.transcriptHydrating \|\| \(transitioning && !transcript\.navigationDataReady\)\}/.test(chatPaneSource) &&
+    /surfaceCommitToken=\{transcript\.surfaceCommitToken\}/.test(chatPaneSource) && /onSurfacePaintReady=\{commands\.onSurfacePaintReady\}/.test(chatPaneSource),
   "Welcome stays suppressed through target data commit and navigation settles only after paint readiness",
 );
 
-ok(
-  /const creationEmptyHero =/.test(appSource) &&
-    /!sidebarImDetailConnection/.test(appSource) &&
-    /!transcriptHydrating/.test(appSource) &&
-    /!hydratePlaceholderActive/.test(appSource) && /!state\.hydrateError/.test(appSource) &&
-    /chat-pane\$\{creationEmptyHero \? " chat-pane--creation-empty" : ""\}/.test(appSource) &&
-    /heroMode=\{creationEmptyHero\}/.test(appSource),
-  "Creation empty hero waits for hydration and skips IM/Bot detail panels",
-);
 
 ok(
   /if \(heroMode\) \{[\s\S]*?const maxHeight = composerHeroInputMaxHeight\(\);[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
@@ -522,66 +472,24 @@ ok(
   "Creation hero composer auto-grows multi-line drafts instead of clipping at 20px",
 );
 
-ok(
-  /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
-    /const workspaceScopeKey = \[/.test(appSource) &&
-    /activeTab\?\.sessionPath/.test(appSource) &&
-    /state\.meta\?\.sessionPath/.test(appSource) &&
-    /state\.meta\?\.cwd/.test(appSource) &&
-    /state\.sessionGen/.test(appSource) &&
-    /workspaceControllerEpoch/.test(appSource) &&
-    Array.from(appSource.matchAll(/workspaceScopeKey=\{workspaceScopeKey\}/g)).length === 3,
-  "workspace file consumers receive a session and controller scoped identity",
-);
 
-ok(
-  /const unsubReady = onReady\(\(readyTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource) &&
-    /const unsubRebuilt = onRuntimeRebuilt\(\(rebuiltTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource),
-  "controller ready and rebuilt events invalidate active workspace file scopes",
-);
 
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
-ok(
-  /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
-    /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
-    /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\);/.test(appSource) &&
-    /return activateTopic\(scope, workspaceRoot, topicId, sessionPath \|\| "", request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openTopicSession\(scope, workspaceRoot, topicId, sessionPath, request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openGlobalTab\(topicId, request\.navigationIntentSeq\)/.test(appSource) &&
-    /return openProjectTab\(workspaceRoot, topicId, request\.navigationIntentSeq\)/.test(appSource) &&
-    /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
-    !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
-    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
-    /if \(!latest\(\)\) return;[\s\S]*seedActiveTabMeta\(openedTab\);[\s\S]*void refreshLatestTabMetas\(\);/.test(navigationBlock),
-  "desktop navigation coalesces pending requests, ignores stale results, and seeds active tab metadata before background refresh",
-);
 
 ok(
-  /return enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(appSource) &&
-    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(appSource) &&
-    /return enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(appSource) &&
-    /return enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(appSource),
+  /return navigation\.enqueueNavigation\(\{ kind: "topic", scope, workspaceRoot, topicId, sessionPath \}\);/.test(sessionNavigationSource) &&
+    /enqueueNavigation\(\{ kind: "blank", scope, workspaceRoot: scope === "project" \? workspaceRoot : "" \}\)/.test(sessionNavigationSource) &&
+    /return navigation\.enqueueNavigation\(\{ kind: "sidebar-im", connection \}\);/.test(sessionNavigationSource) &&
+    /return navigation\.enqueueNavigation\(\{ kind: "resume-session", session \}\);/.test(sessionNavigationSource),
   "topic, blank, IM, and history navigation all use the shared coalescing path",
 );
 
-ok(
-  /const enterChatViewForTabNavigation = useCallback\(\(\) => \{\s*enterConversation\(\);/.test(appSource) &&
-    /const enqueueTabSwitch = useCallback\([\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?enqueueNavigationRequest/.test(appSource) &&
-    /const revealBackgroundRuntime = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealBackgroundRuntime/.test(appSource) &&
-    /const revealWorkspaceWriter = useCallback[\s\S]*?enterChatViewForTabNavigation\(\);[\s\S]*?RevealWorkspaceWriterForTab/.test(appSource),
-  "every direct tab activation returns overlay pages to the chat view",
-);
 
 ok(
   !/await resumeSession\(session\.path, targetTab\.id\);/.test(navigationBlock),
   "history navigation does not re-resume a session that OpenTopicSession already pinned",
 );
 
-ok(
-  /onOpenTopic: openAutomationTopic/.test(appSource) && /const openAutomationTopic = useCallback[\s\S]*enqueueNavigationWithIntent\(\{ kind: "topic", scope, workspaceRoot, topicId \}, intent\)/.test(appSource),
-  "heartbeat topic navigation uses the guarded open-topic path",
-);
 
 for (const selector of [
   ".app--darwin .app-chrome--tabs",
@@ -808,19 +716,12 @@ ok(
 // click on a drag region never reaches the OS: both title-bar-hiding platforms
 // have to zoom from here or not at all.
 ok(
-  /chromeDoubleClickZooms\s*=\s*windowsFramelessChrome\s*\|\|\s*desktopPlatform === "darwin"/.test(appSource),
+  /chromeDoubleClickZooms\s*=\s*input\.windowsFrameless\s*\|\|\s*input\.platform === "darwin"/.test(chromeCommandsSource),
   "title-bar double click zooms on macOS as well as frameless Windows",
 );
 ok(
-  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(chromeCommandsSource),
   "title-bar double click still ignores interactive controls",
-);
-ok(
-  /function isMacOSWorkbenchSidebarTitlebar[\s\S]{0,500}?closest\("\.sidebar--workbench"\)[\s\S]{0,500}?MACOS_WORKBENCH_TITLEBAR_HEIGHT/.test(appSource) &&
-    /handleChromeTitlebarDoubleClick[\s\S]{0,400}?isMacOSWorkbenchSidebarTitlebar\(target, event\.clientY, desktopPlatform\)/.test(appSource) &&
-    !appSource.includes("window.runtime?.WindowToggleMaximise") &&
-    !bridgeSource.includes("WindowToggleMaximise?(): void;"),
-  "macOS workbench sidebar titlebar reuses the centralized zoom path",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

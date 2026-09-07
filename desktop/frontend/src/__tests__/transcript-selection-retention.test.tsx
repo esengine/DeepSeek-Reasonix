@@ -5,7 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import type { TranscriptScrollMode } from "../lib/transcriptScrollArbiter";
+import type { TranscriptScrollMode } from "../lib/transcriptKernel";
 import { transcriptSelectionStore, type TranscriptSelectableRow } from "../lib/transcriptSelectionStore";
 
 type RetentionApi = ReturnType<typeof useTranscriptSelectionRetention>;
@@ -248,7 +248,7 @@ eq(transcriptSelectionStore.getSnapshot().mode, "none", "pointercancel clears se
 eq(api?.active, false, "pointercancel releases transcript selection state");
 eq(mode, "manual", "pointercancel releases selection scroll ownership");
 
-// Virtuoso recycling the pointer-down row collapses the native Range
+// Window recycling of the pointer-down row collapses the native Range
 // mid-drag. The frozen anchor plus the live pointer must still promote the
 // gesture to logical selection instead of stranding it in native mode.
 caretDocument.caretPositionFromPoint = (x) => x < 50

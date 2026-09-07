@@ -68,5 +68,71 @@ try {
   await harness.close();
 }
 
+const race = await createTranscriptHarness({ deterministic: true, viewportHeight: 200, rowHeight: 80 });
+try {
+  const calls: string[] = [];
+  const writes: unknown[] = [];
+  window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => { writes.push(write); };
+  const page = turns(8).slice(4);
+  const base = { questionNavigator: true, hasOlderHistory: true, historyStartTurn: 5, historyTotalTurns: 8 };
+  let finish!: (loaded: boolean) => void;
+  const pending = () => new Promise<boolean>((resolve) => { finish = resolve; });
+  const jumpHome = async () => {
+    await race.waitFor(() => Boolean(race.container.querySelector('[role="slider"]')), "question rail module");
+    await act(async () => race.container.querySelector('[role="slider"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
+    await race.flush();
+  };
+  await race.render(page, { ...base, geometrySessionKey: "A", onLoadOlderHistory: (turn: number) => { calls.push(`A:${turn}`); return pending(); } });
+  await race.settle();
+  await jumpHome();
+  ok(calls.join() === "A:1", "unloaded navigation requests its source session's target page");
+  await race.render(page.map((item) => ({ ...item, id: `B-${item.id}` })), {
+    ...base, geometrySessionKey: "B", onLoadOlderHistory: (turn: number) => { calls.push(`B:${turn}`); return false; },
+  });
+  await race.settle();
+  const before = writes.length;
+  await act(async () => { finish(false); });
+  await race.settle();
+  ok(!race.container.querySelector("[data-question-jump-mask]"), "A failure cannot leave B's navigation pending");
+  ok(calls.join() === "A:1" && writes.length === before, "A completion neither requests its turn in B nor writes B's viewport");
+
+  for (const gesture of ["wheel", "touchstart", "mousedown"] as const) {
+    await race.render(page, { ...base, geometrySessionKey: gesture,
+      onLoadOlderHistory: () => pending() });
+    await race.settle();
+    await jumpHome();
+    const scroller = race.scrollElement();
+    const count = writes.length;
+    await act(async () => {
+      scroller.dispatchEvent(gesture === "wheel" ? new WheelEvent("wheel", { deltaY: -40, bubbles: true })
+        : gesture === "mousedown" ? new MouseEvent("mousedown", { clientX: 799, bubbles: true })
+        : new Event("touchstart", { bubbles: true }));
+      finish(true);
+    });
+    await race.render(turns(8), { ...base, geometrySessionKey: gesture, hasOlderHistory: false });
+    await race.settle();
+    ok(writes.length === count && !race.container.querySelector("[data-question-jump-mask]"),
+      `${gesture} during paging accepts zero program writes after loaded target arrives`);
+  }
+  const painted: string[] = [];
+  const onSurfacePaintReady = (token: string) => { painted.push(token); };
+  const flushFrames = race.clock.flushFrames.bind(race.clock);
+  race.clock.flushFrames = () => {};
+  await race.render(turns(8), { geometrySessionKey: "paint-A", surfaceCommitToken: "paint-A", onSurfacePaintReady });
+  const oldFrames = [...race.clock.frames.values()];
+  const oldObservers = race.observers.map((observer) => observer.notify);
+  await race.render(turns(8), { geometrySessionKey: "paint-B", surfaceCommitToken: "paint-B", onSurfacePaintReady });
+  const beforeStale = writes.length;
+  await act(async () => { oldFrames.forEach((callback) => callback(0)); oldObservers.forEach((notify) => notify()); });
+  ok(!painted.includes("paint-A") && writes.length === beforeStale, "queued A paint and disconnected observers cannot commit A's surface or write B");
+  race.clock.flushFrames = flushFrames;
+  await race.settle();
+  ok(painted.join() === "paint-B", "only the correctly painted current generation confirms its surface token");
+} finally {
+  await race.unmount();
+  await race.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

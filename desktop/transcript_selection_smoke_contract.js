@@ -92,9 +92,9 @@
       () => {
         const target = selectionTarget();
         if (target) return target;
-        // The marker is in the fixture's final virtual row. WebView2 can
-        // publish the active topic before Virtuoso performs its initial tail
-        // landing, leaving that row unmounted indefinitely. Keep setup on the
+        // The marker is in the fixture's final projected block. WebView2 can
+        // publish the active topic before TranscriptKernel performs its first
+        // tail landing, leaving that block unmounted briefly. Keep setup on the
         // physical bottom until the final row exists; all compositor captures
         // still begin only after the target is centered and settled below.
         const transcript = document.querySelector(".transcript");

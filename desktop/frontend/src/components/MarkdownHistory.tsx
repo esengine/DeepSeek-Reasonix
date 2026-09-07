@@ -219,7 +219,7 @@ export const MarkdownHistory = memo(function MarkdownHistory({
         // 2. Longer answers outside the transcript viewport swap safely: any height
         //    change happens off-screen, and the reader scrolling up meets
         //    rendered blocks instead of the raw source.
-        //    Measure the real Virtuoso row, not the display:none marker: hidden
+        //    Measure the real Transcript block, not the display:none marker: hidden
         //    elements have an empty DOMRect and the app window is not the
         //    transcript's scroll viewport.
         if (scroller && !fallbackRowIntersectsTranscript(fallbackMarkerRef.current, scroller)) {

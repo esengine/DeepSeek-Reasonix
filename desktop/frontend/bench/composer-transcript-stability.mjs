@@ -59,7 +59,7 @@ async function waitForTail(page) {
         clientHeight: transcript.clientHeight,
         distance: transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight,
         mode: transcript.dataset.scrollMode,
-        jumpBottom: Boolean(document.querySelector(".transcript__jump-bottom")),
+        jumpBottom: Boolean(document.querySelector(".transcript__jump-bottom:not([hidden])")),
       } : null;
     });
     throw new Error(`composer fixture did not reach the physical tail (${JSON.stringify(state)})`, { cause: error });

@@ -274,6 +274,9 @@ const backendUnsupportedCustomProvider: ProviderView = {
   models: ["deepseek-v4-pro"],
   default: "deepseek-v4-pro",
   visionCapability: "unsupported",
+  modelCapabilities: [
+    { model: "deepseek-v4-pro", inputModalities: ["text"], state: "unsupported", source: "adapter" },
+  ],
 };
 
 const legacyChatURLProvider: ProviderView = {

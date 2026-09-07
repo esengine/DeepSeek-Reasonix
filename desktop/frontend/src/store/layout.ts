@@ -141,8 +141,10 @@ export function saveRightDockPreviewWidth(width: number): void {
 // rightDockMode selects what the right dock shows. workspacePanelOpen is
 // restored from localStorage (same pattern as sidebarCollapsed) so a collapsed
 // dock survives restart. maximized/preview stay session-local — they are view
-// layout, not a durable preference. (Resize drag flags, button-press animation
-// flags, measured footer height, and viewport width stay as useState in App.tsx.)
+// layout, not a durable preference. Transient geometry (drag flags, live drag
+// widths, the sidebar button-press flag) is session-local state on this store
+// so resize lifecycles and their consumers read one source of truth; measured
+// footer height and viewport width live in the windowChrome store.
 export type RightDockMode = "context" | "files" | "changed" | "remote";
 
 // terminalPanelOpen is independent from rightDockMode — the terminal is a
@@ -248,6 +250,12 @@ export type LayoutState = {
   rightDockMode: RightDockMode;
   terminalPanelOpen: boolean;
   terminalHeight: number;
+  sidebarTogglePressed: boolean;
+  sidebarResizing: boolean;
+  liveSidebarWidth: number | null;
+  workspacePanelResizing: boolean;
+  liveWorkspacePanelRenderWidth: number | null;
+  liveTerminalHeight: number | null;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setRightDockTreeWidth: (width: number) => void;
@@ -258,6 +266,12 @@ export type LayoutState = {
   setRightDockMode: Dispatch<SetStateAction<RightDockMode>>;
   setTerminalPanelOpen: Dispatch<SetStateAction<boolean>>;
   setTerminalHeight: (height: number) => void;
+  setSidebarTogglePressed: (pressed: boolean) => void;
+  setSidebarResizing: (resizing: boolean) => void;
+  setLiveSidebarWidth: (width: number | null) => void;
+  setWorkspacePanelResizing: (resizing: boolean) => void;
+  setLiveWorkspacePanelRenderWidth: (width: number | null) => void;
+  setLiveTerminalHeight: (height: number | null) => void;
 };
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -271,6 +285,12 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   rightDockMode: "context",
   terminalPanelOpen: loadTerminalPanelOpen(),
   terminalHeight: loadTerminalHeight(),
+  sidebarTogglePressed: false,
+  sidebarResizing: false,
+  liveSidebarWidth: null,
+  workspacePanelResizing: false,
+  liveWorkspacePanelRenderWidth: null,
+  liveTerminalHeight: null,
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setRightDockTreeWidth: (width) => set({ rightDockTreeWidth: width }),
@@ -281,6 +301,12 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setRightDockMode: (update) => set((s) => ({ rightDockMode: applySetState(s.rightDockMode, update) })),
   setTerminalPanelOpen: (update) => set((s) => ({ terminalPanelOpen: applySetState(s.terminalPanelOpen, update) })),
   setTerminalHeight: (height) => set({ terminalHeight: height }),
+  setSidebarTogglePressed: (pressed) => set({ sidebarTogglePressed: pressed }),
+  setSidebarResizing: (resizing) => set({ sidebarResizing: resizing }),
+  setLiveSidebarWidth: (width) => set({ liveSidebarWidth: width }),
+  setWorkspacePanelResizing: (resizing) => set({ workspacePanelResizing: resizing }),
+  setLiveWorkspacePanelRenderWidth: (width) => set({ liveWorkspacePanelRenderWidth: width }),
+  setLiveTerminalHeight: (height) => set({ liveTerminalHeight: height }),
 }));
 
 export function applyLayoutStyleDefaults(style: "classic" | "workbench" | "creation"): void {

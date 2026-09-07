@@ -128,13 +128,13 @@ for (const block of matchingBlocks(".transcript")) {
     const sides = paddingSides(shorthand[1]);
     ok(
       isZeroPad(sides.left) && isZeroPad(sides.right),
-      `Virtuoso scroller padding stays vertical-only (${shorthand[1].trim()})`,
+      `transcript scroller padding stays vertical-only (${shorthand[1].trim()})`,
     );
   }
   const padLeft = /(?:^|;)\s*padding-left\s*:\s*([^;]+)/.exec(block);
   const padRight = /(?:^|;)\s*padding-right\s*:\s*([^;]+)/.exec(block);
-  ok(isZeroPad(padLeft?.[1].trim()), "Virtuoso scroller does not set padding-left");
-  ok(isZeroPad(padRight?.[1].trim()), "Virtuoso scroller does not set padding-right");
+  ok(isZeroPad(padLeft?.[1].trim()), "transcript scroller does not set padding-left");
+  ok(isZeroPad(padRight?.[1].trim()), "transcript scroller does not set padding-right");
 }
 ok(hasDeclaration(".transcript", "--transcript-inline-pad", "32px"), "default transcript inline inset is 32px");
 ok(hasDeclaration(".transcript", "--transcript-inline-pad", "16px"), "narrow viewports tighten the transcript inline inset");

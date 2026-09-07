@@ -99,10 +99,15 @@ type smokeKeyboardInput struct {
 }
 
 type transcriptWheelState struct {
-	next       time.Time
-	sustained  int
-	finish     int
-	finishSent bool
+	next             time.Time
+	finishAt         time.Time
+	sustained        int
+	finish           int
+	finishBatch      int
+	tailStableChecks int
+	probeDue         bool
+	probePending     bool
+	finishSent       bool
 }
 
 type composerKeyboardState struct {
@@ -115,9 +120,11 @@ type composerKeyboardState struct {
 const (
 	sustainedWheelTicks = 2500
 	// Controller wheel messages can be coalesced while WebView2 commits a new
-	// Virtuoso range. Keep the finishing burst bounded, but leave enough native
-	// input to cross the final measured-row correction after stream growth.
-	finishWheelTicks = 64
+	// block range. Probe native geometry between bounded batches instead of
+	// assuming a fixed pixel budget can cross every platform-specific ledger.
+	finishWheelTicks = 240
+	finishWheelBatch = 8
+	finishWheelDelta = -1440
 	// The injected contract has its own 80 second startup watchdog. Keep the
 	// native host startup bound just above that, then grant a fresh interaction
 	// budget after the contract reports the controller target. The sustained
@@ -138,18 +145,53 @@ func (state *transcriptWheelState) advance(now time.Time) error {
 			// ordinary controller input can transfer to the physical tail.
 			state.next = now.Add(300 * time.Millisecond)
 		}
-	} else if state.sustained >= sustainedWheelTicks && state.finish < finishWheelTicks && !now.Before(state.next) {
-		if err := sendControllerWheelInput(-120); err != nil {
+	} else if state.sustained >= sustainedWheelTicks && state.finish < finishWheelTicks &&
+		!state.probeDue && !state.probePending && state.finishAt.IsZero() && !now.Before(state.next) {
+		if err := sendControllerWheelInput(finishWheelDelta); err != nil {
 			return err
 		}
 		state.finish++
+		state.finishBatch++
 		state.next = now.Add(50 * time.Millisecond)
+		if state.finishBatch == finishWheelBatch {
+			state.finishBatch = 0
+			state.probeDue = true
+		}
 	}
 	return nil
 }
 
+func (state *transcriptWheelState) shouldProbe(now time.Time) bool {
+	return state.sustained >= sustainedWheelTicks && state.probeDue && !state.probePending && !now.Before(state.next)
+}
+
+func (state *transcriptWheelState) markProbePending() {
+	state.probeDue = false
+	state.probePending = true
+}
+
+func (state *transcriptWheelState) observeTail(distance float64, mode string, now time.Time) {
+	state.probePending = false
+	if distance <= 4 && mode == "tail-follow" {
+		state.tailStableChecks++
+		if state.tailStableChecks >= 2 {
+			state.finishAt = now.Add(700 * time.Millisecond)
+			return
+		}
+		state.probeDue = true
+		state.next = now.Add(200 * time.Millisecond)
+		return
+	}
+	state.tailStableChecks = 0
+	if state.finish >= finishWheelTicks {
+		state.finishAt = now.Add(700 * time.Millisecond)
+		return
+	}
+	state.next = now
+}
+
 func (state *transcriptWheelState) shouldFinish(now time.Time) bool {
-	return state.finish >= finishWheelTicks && !state.finishSent && now.After(state.next.Add(700*time.Millisecond))
+	return !state.finishAt.IsZero() && !state.finishSent && !now.Before(state.finishAt)
 }
 
 func (state *composerKeyboardState) advance(now time.Time) error {
@@ -219,11 +261,11 @@ func transcriptSmokeTimeoutError(navigationCompleted bool, ready *smokeMessage, 
 		phase = "result"
 	}
 	return fmt.Errorf(
-		"WebView2 smoke timed out: phase=%s navigationCompleted=%t ready=%t composer=%t composerKeys=%d/12 composerFinishSent=%t sustained=%d/%d finish=%d/%d finishSent=%t",
+		"WebView2 smoke timed out: phase=%s navigationCompleted=%t ready=%t composer=%t composerKeys=%d/12 composerFinishSent=%t sustained=%d/%d finish=%d/%d tailStable=%d probePending=%t finishSent=%t",
 		phase, navigationCompleted, ready != nil,
 		composerState.active, composerState.index, composerState.finishSent,
 		wheelState.sustained, sustainedWheelTicks,
-		wheelState.finish, finishWheelTicks, wheelState.finishSent,
+		wheelState.finish, finishWheelTicks, wheelState.tailStableChecks, wheelState.probePending, wheelState.finishSent,
 	)
 }
 
@@ -246,6 +288,21 @@ func activateTranscriptWheel(message smokeMessage, ready *smokeMessage, deadline
 	setCursorPos.Call(uintptr(screenPoint.x), uintptr(screenPoint.y))
 	state.next = time.Now()
 	return &copy
+}
+
+func advanceTranscriptWheel(state *transcriptWheelState, now time.Time, chromium *edge.Chromium) error {
+	if err := state.advance(now); err != nil {
+		return err
+	}
+	if state.shouldProbe(now) {
+		state.markProbePending()
+		chromium.Eval("window.__reasonixNativeTranscriptSmoke.reportTail()")
+	}
+	if state.shouldFinish(now) {
+		state.finishSent = true
+		chromium.Eval("window.__reasonixNativeTranscriptSmoke.finish()")
+	}
+	return nil
 }
 
 func runTranscriptNativeSmoke(url, script string) (string, error) {
@@ -332,6 +389,8 @@ func runTranscriptNativeSmoke(url, script string) (string, error) {
 					}
 				case "ready":
 					ready = activateTranscriptWheel(message, ready, &deadline, hwnd, &wheelState)
+				case "tail-status":
+					wheelState.observeTail(message.Distance, message.Mode, time.Now())
 				case "result", "error":
 					result = raw
 				}
@@ -341,13 +400,8 @@ func runTranscriptNativeSmoke(url, script string) (string, error) {
 		}
 	messagesDrained:
 		if ready != nil {
-			now := time.Now()
-			if err := wheelState.advance(now); err != nil {
+			if err := advanceTranscriptWheel(&wheelState, time.Now(), chromium); err != nil {
 				return "", err
-			}
-			if wheelState.shouldFinish(now) {
-				wheelState.finishSent = true
-				chromium.Eval("window.__reasonixNativeTranscriptSmoke.finish()")
 			}
 		}
 		if ready == nil && composerState.active {

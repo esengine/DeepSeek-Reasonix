@@ -1,18 +1,14 @@
-import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { app } from "./bridge";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useCommittedCommand } from "./useCommittedCommand";
+import { executeRemoteSend, executeComposerRuntime } from "../app-runtime/remoteComposerOwner";
+import type { SessionResource, useSessionOperations } from "../app-runtime/useSessionOperations";
+import type { RemoteNavigationCommand } from "./remoteNavigationCommands";
 import { reconcileComposerProfile, type ComposerProfile, type ComposerProfilesByTab } from "./composerProfile";
 import type { GoalAction } from "./goalAction";
 import type { CollaborationMode, QualityFloor, RemoteTabRefView, ToolApprovalMode } from "./types";
-import { publishNavigationIntent } from "./useNavigationIntentFence";
 import type { RemoteSessionApi } from "./useRemoteSession";
 
 type RemoteProfile = RemoteSessionApi["composerProfile"];
-
-export async function openRemoteNewSession(remote: RemoteTabRefView, retryHydration: () => Promise<void>): Promise<void> {
-  await publishNavigationIntent("remote-new-session");
-  await app.OpenRemoteProjectTab(remote.hostId, remote.workspace, { newSession: true });
-  await retryHydration();
-}
 
 export function remoteRuntimeCommand(input: string):
   | { method: "setModel" | "setEffort"; value: string }
@@ -59,21 +55,19 @@ export function useRemoteComposerSend(
   send: (displayText: string, submitText?: string) => Promise<void>,
   applyGoal: (tabId: string, goal: string) => Promise<unknown>,
   requestClear: () => void,
+  ownership: { target: SessionResource; operations: ReturnType<typeof useSessionOperations>; navigateRemote: RemoteNavigationCommand },
 ) {
-  return useCallback(async (displayText: string, submitText = displayText): Promise<void> => {
+  const ports = { compact: session.compact, runManagementCommand: session.runManagementCommand,
+    setModel: session.setModel, setEffort: session.setEffort,
+    send, applyGoal, requestClear, newSession: ownership.navigateRemote };
+  return useCommittedCommand(async (displayText: string, submitText = displayText): Promise<void> => {
     const trimmed = (submitText || displayText).trim();
-    const command = remoteRuntimeCommand(trimmed);
-    if (command?.method === "clearSession") return requestClear();
-    if (command?.method === "newSession") {
-      if (!activeRemote) return;
-      return openRemoteNewSession(activeRemote, session.retryHydration);
-    }
-    if (command?.method === "compact") return session.compact(command.value);
-    if (command?.method === "runManagementCommand") return session.runManagementCommand(trimmed, command.rehydrate);
-    if (command?.method === "setModel" || command?.method === "setEffort") return session[command.method](command.value);
-    if (activeTabId && collaborationMode === "goal" && !goal.trim() && trimmed) await applyGoal(activeTabId, trimmed);
-    await send(displayText, submitText);
-  }, [activeRemote, activeTabId, applyGoal, collaborationMode, goal, requestClear, send, session]);
+    const outcome = await ownership.operations(ownership.target, "send", {
+      tabId: activeTabId ?? "", remote: activeRemote, display: displayText, submit: submitText, commandText: trimmed,
+      command: remoteRuntimeCommand(trimmed), activateGoal: collaborationMode === "goal" && !goal.trim() && Boolean(trimmed), ports,
+    }, executeRemoteSend);
+    if (outcome.status === "failed") throw outcome.error;
+  });
 }
 
 export function useRemoteComposerProfileSync(options: {
@@ -113,32 +107,27 @@ export function useRemoteComposerProfileSync(options: {
 }
 
 export function useRemoteComposerRuntimeActions(options: {
-  activeTabIdRef: MutableRefObject<string | undefined>;
+  target: SessionResource;
+  operations: ReturnType<typeof useSessionOperations>;
   remote: boolean;
   session: RemoteSessionApi;
   runGoalAction: (action: GoalAction) => void;
   pauseLocal: (tabId: string) => Promise<unknown>;
   resumeLocal: (tabId: string) => Promise<unknown>;
-  setLocalEffort: (level: string) => void;
+  setLocalEffort: (tabId: string, level: string) => Promise<void>;
   showError: (message: string) => void;
 }) {
-  const { activeTabIdRef, remote, session, runGoalAction, pauseLocal, resumeLocal, setLocalEffort, showError } = options;
-  const pauseGoal = useCallback(() => runGoalAction(async () => {
-    const tabId = activeTabIdRef.current;
-    if (!tabId) return;
-    await (remote ? session.pauseGoal() : pauseLocal(tabId));
-  }), [activeTabIdRef, pauseLocal, remote, runGoalAction, session]);
-  const resumeGoal = useCallback(() => runGoalAction(async () => {
-    const tabId = activeTabIdRef.current;
-    if (!tabId) return;
-    await (remote ? session.resumeGoal() : resumeLocal(tabId));
-  }), [activeTabIdRef, remote, resumeLocal, runGoalAction, session]);
-  const setEffort = useCallback((level: string) => {
-    if (!remote) {
-      setLocalEffort(level);
-      return;
-    }
-    void session.setEffort(level).catch((error) => showError(error instanceof Error ? error.message : String(error)));
-  }, [remote, session, setLocalEffort, showError]);
+  const { target, operations, remote, session, runGoalAction, pauseLocal, resumeLocal, setLocalEffort, showError } = options;
+  const ports = { pauseGoal: session.pauseGoal, resumeGoal: session.resumeGoal, setEffort: session.setEffort,
+    pauseLocal, resumeLocal, effortLocal: setLocalEffort };
+  const execute = useCommittedCommand(async (action: "pause" | "resume" | "effort", level?: string) => {
+    const outcome = await operations(target, action === "effort" ? "effort" : "goal-lifecycle",
+      { tabId: target.tabId, remote, action, level, ports }, executeComposerRuntime);
+    if (outcome.status === "failed") throw outcome.error;
+  });
+  const pauseGoal = useCommittedCommand(() => runGoalAction(() => execute("pause")));
+  const resumeGoal = useCommittedCommand(() => runGoalAction(() => execute("resume")));
+  const report = useCommittedCommand((error: unknown) => showError(error instanceof Error ? error.message : String(error)));
+  const setEffort = useCommittedCommand((level: string) => { void execute("effort", level).catch(report); });
   return { pauseGoal, resumeGoal, setEffort };
 }
