@@ -270,6 +270,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                         <span className="wsacts">
                           <button
                             className="wsadd"
+                            data-action="session.new"
                             data-busy={busy === host.name + ws.root ? "" : undefined}
                             disabled={!!busy}
                             title={t("在 {name} 下开一个新会话", { name: ws.name })}
@@ -289,6 +290,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                           {ws.booked ? (
                             <button
                               className="wsdel"
+                    data-action="remote-host.remove"
                               disabled={!!busy}
                               title={t("不再列出 {path}", { path: ws.root })}
                               aria-label={t("不再列出 {path}", { path: ws.root })}
@@ -310,6 +312,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                             const held = panes.find((rt) => rt.sessionPath === session.path);
                             return (
                               <div
+                                data-action="session.open"
                                 key={session.path}
                                 className="sessrow"
                                 role="treeitem"
@@ -346,6 +349,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                 })
               : panes.map((rt) => (
                   <div
+                    data-action="pane.activate"
                     key={rt.id}
                     className="sessrow"
                     role="treeitem"
@@ -364,6 +368,7 @@ function RemoteHostsView({ hub, hosts, runtimes, active, onOpen, onFocus, reload
                 be a different way to do the same thing. */}
             {!spaces.length && !folded && (
               <button
+                data-action="remote.open"
                 className="rmtopen"
                 data-busy={busy.startsWith(host.name) ? "" : undefined}
                 disabled={!!busy}

@@ -72,13 +72,14 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
             <span>{t("工作区根目录")}</span>
             <input
               value={root}
+                data-action-keydown="sandbox.workspace-root"
               placeholder={t("留空 = 会话所在的目录")}
               onChange={(e) => setRoot(e.target.value)}
               onBlur={() => root !== box.workspaceRoot && void save("root", { ...box, workspaceRoot: root })}
               onKeyDown={(e) => e.key === "Enter" && void save("root", { ...box, workspaceRoot: root })}
             />
           </label>
-          <button className="act" data-action="sandbox.add-write-root" data-value="browse" disabled={!!busy} onClick={() => void pick()}>
+          <button className="act" data-action="sandbox.workspace-root" data-value="browse" disabled={!!busy} onClick={() => void pick()}>
             {t("选文件夹")}
           </button>
         </div>
@@ -106,6 +107,7 @@ export function Sandbox({ port, onChanged }: { port: AgentPort; onChanged: () =>
           <div className="prule" data-add="">
             <input
               value={draft}
+                data-action-keydown="sandbox.add-write-root"
               placeholder={t("再开一个可写目录，例如 /tmp/scratch")}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {

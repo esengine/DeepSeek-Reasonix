@@ -101,6 +101,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
             <button onClick={() => setConfirm(null)}>{t("取消")}</button>
             <button
               data-danger=""
+              data-action="pane.close"
               autoFocus
               onClick={() => {
                 onClose(confirm.ids);
@@ -121,6 +122,7 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
         <div
           key={rt.id}
           className="ptab"
+          data-action-click="pane.activate"
           role="tab"
           tabIndex={rt.id === active ? 0 : -1}
           aria-selected={rt.id === active}
@@ -168,6 +170,8 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
           {rt.host && <span className="ptab-host">{rt.host}</span>}
           <button
             className="ptab-x"
+            data-action="pane.close"
+            data-value="one"
             title={t("关闭这个面板")}
             aria-label={t("关闭这个面板")}
             onClick={(ev) => {
@@ -200,17 +204,19 @@ export function PaneTabs({ tabs, active, showRoot, onFocus, onClose, onRename }:
           <button role="menuitem" onClick={() => { const id = menu.id; setMenu(null); setEditing(id); }}>
             {t("重命名")}
           </button>
-          <button role="menuitem" onClick={() => { const id = menu.id; setMenu(null); close([id]); }}>
+          <button role="menuitem" data-action="pane.close" data-value="one" onClick={() => { const id = menu.id; setMenu(null); close([id]); }}>
             {t("关闭")}
           </button>
           <button
+            data-action="pane.close"
+            data-value="others"
             role="menuitem"
             disabled={tabs.length < 2}
             onClick={() => { const id = menu.id; setMenu(null); close(others(id)); }}
           >
             关闭其他（{Math.max(tabs.length - 1, 0)}）
           </button>
-          <button role="menuitem" onClick={() => { setMenu(null); close(tabs.map((t) => t.rt.id)); }}>
+          <button role="menuitem" data-action="pane.close" data-value="all" onClick={() => { setMenu(null); close(tabs.map((t) => t.rt.id)); }}>
             全部关闭（{tabs.length}）
           </button>
         </div>

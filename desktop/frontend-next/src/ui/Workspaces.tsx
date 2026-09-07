@@ -243,6 +243,7 @@ function WorkspacesView({ hub, tree, runtimes, active, folded, reload, onFold, o
                     </span>
                     <span className="wsacts">
                       <button
+                        data-action="session.new"
                         className="wsadd"
                         data-busy={busy === "new:" + ws.root ? "" : undefined}
                         disabled={full || ws.missing}
@@ -296,6 +297,7 @@ function WorkspacesView({ hub, tree, runtimes, active, folded, reload, onFold, o
                     return (
                       <Fragment key={session.path}>
                       <div
+                        data-action="session.open"
                         className="sessrow"
                         role="treeitem"
                         aria-selected={on}
@@ -386,6 +388,7 @@ function WorkspacesView({ hub, tree, runtimes, active, folded, reload, onFold, o
                             />
                           ) : (
                             <div
+                              data-action="session.open"
                               key={copy.path}
                               className="sessrow sesscopy"
                               role="treeitem"
@@ -473,7 +476,7 @@ function Confirm({
       </div>
       <div className="wsconfirm-a">
         <button onClick={onCancel}>{t("取消")}</button>
-        <button autoFocus data-danger={danger ? "" : undefined} onClick={onGo}>
+        <button autoFocus data-action="workspace.remove" data-danger={danger ? "" : undefined} onClick={onGo}>
           {go}
         </button>
       </div>

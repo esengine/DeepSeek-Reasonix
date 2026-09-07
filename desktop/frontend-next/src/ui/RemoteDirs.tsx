@@ -164,7 +164,7 @@ export function RemoteDirs({ hub, host, start, onPick, onClose }: Props) {
 
         <div className="pickact">
           <button onClick={onClose}>{t("取消")}</button>
-          <button data-go="" disabled={!here || busy} onClick={() => onPick(here)}>
+          <button data-go="" disabled={!here || busy} data-action="remote.open" onClick={() => onPick(here)}>
             {t("就用这里")}
           </button>
         </div>

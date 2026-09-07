@@ -125,7 +125,7 @@ export function Task({ goal, ask, plan, rows, t0, running, blocked, elapsed, onT
             <span className="n">{t("回到活动最新")}</span>
             <span className="d">{t("跳回这一轮正在写的地方")}</span>
           </button>
-          <button onClick={onSummary}>
+          <button data-action="task.summarize-phase" onClick={onSummary}>
             <span className="n">{t("生成阶段总结")}</span>
             <span className="d">{t("汇总当前进度与潜在风险")}</span>
           </button>

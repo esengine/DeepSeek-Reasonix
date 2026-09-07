@@ -34,7 +34,7 @@ export function Mcp({ servers, onOpen }: { servers: McpEntry[]; onOpen: () => vo
       </div>
       <div className="srvs">
         {shown.map((s) => (
-          <button className="srvrow" key={s.name} onClick={onOpen}
+          <button className="srvrow" key={s.name} data-action="chrome.settings" onClick={onOpen}
             title={s.state === "pending" ? t("这个服务由仓库声明，到设置里决定是否允许它运行") : t("到设置的 MCP 面板里修复")}>
             <span className="hd">
               <i className="pip" data-s={s.state} />

@@ -65,6 +65,7 @@ export function Extensions({
                   <button
                     key={a.actionId}
                     className="btn"
+                  data-action="extensions.invoke"
                     onClick={() => onInvoke(`/${p.pluginId}:${a.actionId}`)}
                   >
                     {a.label || a.actionId}

@@ -179,7 +179,7 @@ export function Remotes({ hub, onError }: Props) {
             <div className="rmtconfirm" role="alertdialog">
               <span>{t("从列表移除「{name}」？远端什么都不会删。", { name: host.name })}</span>
               <button onClick={() => setConfirm("")}>{t("取消")}</button>
-              <button data-danger="" autoFocus onClick={() => void drop(host.name)}>
+              <button data-danger="" data-action="remotes.remove" data-target={host.name} autoFocus onClick={() => void drop(host.name)}>
                 {t("移除")}
               </button>
             </div>
@@ -197,6 +197,7 @@ export function Remotes({ hub, onError }: Props) {
           {candidates.map((alias) => (
             <button
               key={alias}
+              data-action="remotes.add"
               className="rmtcand"
               disabled={!!busy}
               title={t("按 ssh_config 里的设置加进来")}
@@ -332,7 +333,7 @@ export function Remotes({ hub, onError }: Props) {
             >
               {t("取消")}
             </button>
-            <button data-go="" disabled={!draft.name.trim() || !!busy} onClick={() => void save(draft)}>
+            <button data-go="" data-action={editing ? "remotes.save" : "remotes.add"} disabled={!draft.name.trim() || !!busy} onClick={() => void save(draft)}>
               {editing ? t("保存") : t("添加")}
             </button>
           </div>

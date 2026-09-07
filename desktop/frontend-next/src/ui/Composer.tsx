@@ -358,6 +358,7 @@ export function Composer({ port, status, running, focus, onSubmit, onChanged, on
           ›
         </span>
         <textarea
+          data-action-keydown="session.send"
           ref={box}
           rows={1}
           value={text}

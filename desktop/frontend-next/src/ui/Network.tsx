@@ -157,7 +157,7 @@ export function Network({ port }: { port: AgentPort }) {
         <button className="act" data-action="network.diagnose" disabled={!!busy} onClick={() => void diagnose()}>
           {t(busy === "test" ? "测试中…" : "测一下")}
         </button>
-        <button className="act" data-primary disabled={!!busy} onClick={() => void save()}>
+        <button className="act" data-action="network.save" data-primary disabled={!!busy} onClick={() => void save()}>
           {t(busy === "save" ? "保存中…" : "保存")}
         </button>
       </div>

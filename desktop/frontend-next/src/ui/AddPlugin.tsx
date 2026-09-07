@@ -102,7 +102,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
       <div className="addpkg" data-stage="done">
         <Outcome plan={done} />
         <div className="acts">
-          <button className="act" onClick={onClose}>
+          <button className="act" data-action="extensions.finish" onClick={onClose}>
             {t("完成")}
           </button>
         </div>
@@ -146,10 +146,20 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
         ))}
         <div className="acts">
           <span className="note">{t(updating ? "覆盖已装的那一份" : "装到「我的」，所有项目都能用")}</span>
-          <button className="act" onClick={() => (updating ? onClose() : setPlan(null))}>
+          <button
+            className="act"
+            data-action={updating ? "extensions.cancel" : "extensions.back"}
+            onClick={() => (updating ? onClose() : setPlan(null))}
+          >
             {t(updating ? "取消" : "返回")}
           </button>
-          <button className="act" data-primary disabled={busy} onClick={() => void install()}>
+          <button
+            className="act"
+            data-action={updating ? "extensions.update" : "extensions.install"}
+            data-primary
+            disabled={busy}
+            onClick={() => void install()}
+          >
             {t(busy ? (updating ? "更新中…" : "安装中…") : updating ? "更新" : "装上")}
           </button>
         </div>
@@ -168,7 +178,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
           <span className="why">{error || updating.source}</span>
         </div>
         <div className="acts">
-          <button className="act" onClick={onClose}>
+          <button className="act" data-action="extensions.cancel" onClick={onClose}>
             {t(error ? "关掉" : "取消")}
           </button>
         </div>
@@ -180,6 +190,7 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
     <div className="addpkg" data-stage="paste" ref={drop} data-over={over ? "" : undefined}>
       <textarea
         className="paste"
+        data-action-keydown="extensions.inspect"
         rows={3}
         autoFocus
         value={text}
@@ -194,10 +205,16 @@ export function AddPlugin({ port, onClose, onInstalled, updating }: Props) {
         <button className="act" onClick={() => void pick()}>
           {t("选文件夹")}
         </button>
-        <button className="act" onClick={onClose}>
+        <button className="act" data-action="extensions.cancel" onClick={onClose}>
           {t("取消")}
         </button>
-        <button className="act" data-primary disabled={!text.trim() || busy} onClick={() => void look()}>
+        <button
+          className="act"
+          data-action="extensions.inspect"
+          data-primary
+          disabled={!text.trim() || busy}
+          onClick={() => void look()}
+        >
           {t(busy ? "读取中…" : "看看是什么")}
         </button>
       </div>

@@ -8,7 +8,7 @@ import type { CapabilityScope } from "../port/port";
 // read identically in a project that simply inherited everything.
 export function Exception({ onClear, busy }: { onClear: () => void; busy: boolean }) {
   return (
-    <button className="exc" disabled={busy} title={t("恢复成跟随全局")} onClick={onClear}>
+    <button className="exc" data-action="capability.scope" disabled={busy} title={t("恢复成跟随全局")} onClick={onClear}>
       {t("仅本项目")}
     </button>
   );

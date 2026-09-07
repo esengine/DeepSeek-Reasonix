@@ -208,7 +208,7 @@ function Conn({
         <button className="sa lnk" data-keep onClick={() => setEditing((v) => !v)} disabled={busy !== ""}>
           {t(editing ? "收起" : "编辑")}
         </button>
-        <button className="sa lnk" data-keep onClick={check} disabled={busy !== ""}>
+        <button className="sa lnk" data-keep data-action="provider.probe" onClick={check} disabled={busy !== ""}>
           {t(checking ? "测试中…" : "测一下")}
         </button>
         {!entry.inUse && (

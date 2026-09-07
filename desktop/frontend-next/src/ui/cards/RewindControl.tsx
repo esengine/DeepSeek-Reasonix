@@ -133,7 +133,7 @@ export function RewindControl({
             <div className="menu rewindmenu" role="menu" ref={menu}>
               {stage.at === "menu" &&
                 SCOPES.filter((s) => cp.files > 0 || !s.files).map((s) => (
-                  <button className="mi" role="menuitem" key={s.value} onClick={() => pick(s.value)}>
+                  <button className="mi" role="menuitem" data-action="rewind.prepare" key={s.value} onClick={() => pick(s.value)}>
                     <span className="dot" />
                     <span className="tx">
                       <span className="lb">{s.label}</span>
@@ -171,7 +171,7 @@ export function RewindControl({
                     </span>
                   </div>
                   <div className="div" />
-                  <button className="mi" role="menuitem" onClick={() => commit(stage.plan)}>
+                  <button className="mi" role="menuitem" data-action="rewind.commit" onClick={() => commit(stage.plan)}>
                     <span className="dot" />
                     <span className="tx">
                       <span className="lb">{t("仍然还原剩下的")}</span>
@@ -195,7 +195,7 @@ export function RewindControl({
                     </span>
                   </div>
                   <div className="div" />
-                  <button className="mi" role="menuitem" onClick={() => undo(stage.tx)}>
+                  <button className="mi" role="menuitem" data-action="rewind.undo" onClick={() => undo(stage.tx)}>
                     <span className="dot" />
                     <span className="tx">
                       <span className="lb">{t("撤销这次还原")}</span>

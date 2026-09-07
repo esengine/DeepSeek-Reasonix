@@ -240,6 +240,7 @@ function Row({
       {open && (
         <div className="mover">
           <input
+                data-action="storage.move"
             ref={inputRef}
             value={target}
             spellCheck={false}

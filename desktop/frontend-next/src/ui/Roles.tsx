@@ -111,7 +111,7 @@ function Slot({
           defeat that clip for good. */}
       {open && (
         <div className="rpick" role="listbox" aria-label={t("{name}用哪个模型", { name })}>
-          <button role="option" aria-selected={!set} data-cur={!set ? "" : undefined} onClick={() => onPick("")}>
+          <button role="option" data-action="roles.model" aria-selected={!set} data-cur={!set ? "" : undefined} onClick={() => onPick("")}>
             {t("跟随主模型")}
           </button>
           <div className="sep" />
@@ -119,6 +119,7 @@ function Slot({
             <button
               key={m.ref}
               role="option"
+                    data-action="roles.model"
               aria-selected={m.ref === set}
               data-cur={m.ref === set ? "" : undefined}
               onClick={() => onPick(m.ref)}

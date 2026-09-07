@@ -158,6 +158,7 @@ export function Queue({ queue, onRead, onEdit, onMove, onCancel, onRetry, onRefr
               </span>
               {editing === it.id ? (
                 <textarea
+                    data-action-keydown="queue.edit"
                   ref={box}
                   className="qedit"
                   value={draft}

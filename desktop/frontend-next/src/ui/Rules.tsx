@@ -285,7 +285,7 @@ export function Rules({ port, onChanged }: { port: AgentPort; onChanged: () => v
                       <code>{row.pattern || t("整个工具")}</code>
                       {odd(g.tool, row.pattern) && <span className="says">{odd(g.tool, row.pattern)}</span>}
                     </span>
-                    <select value={row.level} disabled={!!busy} aria-label={t("{rule} 的处理方式", { rule: row.rule })}
+                    <select value={row.level} data-action="permissions.rule-level" disabled={!!busy} aria-label={t("{rule} 的处理方式", { rule: row.rule })}
                       onChange={(e) => move(row.rule, e.target.value as List)}>
                       {LEVELS.map(([id, label]) => (
                         <option key={id} value={id}>{t(label)}</option>
@@ -329,6 +329,7 @@ function AddRule({ busy, onAdd }: { busy: boolean; onAdd: (rule: string, level: 
         </select>
         <input
           value={pattern}
+              data-action-keydown="permissions.add-rule"
           placeholder={t(tool === "bash" ? "例如 git push:*　（留空 = 整个工具）" : "例如 *.env*　（留空 = 整个工具）")}
           disabled={busy}
           onChange={(e) => setPattern(e.target.value)}

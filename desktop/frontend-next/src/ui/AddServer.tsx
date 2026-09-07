@@ -83,6 +83,7 @@ export function AddServer({ port, canProject, onClose, onInstalled }: Props) {
         <>
           <textarea
             className="paste"
+            data-action-keydown="mcp.inspect"
             rows={4}
             autoFocus
             value={text}
@@ -97,7 +98,7 @@ export function AddServer({ port, canProject, onClose, onInstalled }: Props) {
             <button className="act" onClick={onClose}>
               {t("取消")}
             </button>
-            <button className="act" data-primary disabled={!text.trim() || busy} onClick={() => void parse()}>
+            <button className="act" data-action="mcp.inspect" data-primary disabled={!text.trim() || busy} onClick={() => void parse()}>
               {t(busy ? "读取中…" : "看看是什么")}
             </button>
           </div>
@@ -154,7 +155,7 @@ export function AddServer({ port, canProject, onClose, onInstalled }: Props) {
             <button className="act" onClick={() => setDraft(null)}>
               {t("返回")}
             </button>
-            <button className="act" data-primary disabled={busy} onClick={() => void install()}>
+            <button className="act" data-action="mcp.add" data-primary disabled={busy} onClick={() => void install()}>
               {t(busy ? "连接中…" : "接入")}
             </button>
           </div>

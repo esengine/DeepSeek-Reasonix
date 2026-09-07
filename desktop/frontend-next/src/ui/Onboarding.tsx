@@ -174,6 +174,7 @@ export function Onboarding({ port, setup, onDone }: Props) {
           </label>
           <input
             id="onb-key"
+              data-action-keydown="onboarding.connect"
             type="password"
             value={key}
             spellCheck={false}

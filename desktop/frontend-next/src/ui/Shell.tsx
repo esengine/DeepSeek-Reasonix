@@ -86,11 +86,11 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
           is not what you pick by anyway — it rides the 当前生效 row above and
           the note below, where it can be read rather than scanned. */}
       <div className="seg" data-text role="radiogroup" aria-label={t("命令交给谁执行")}>
-        <button role="radio" aria-checked={auto} disabled={!!busy} onClick={() => void save("auto", "auto", "")}>
+        <button role="radio" data-action="shell.executor" aria-checked={auto} disabled={!!busy} onClick={() => void save("auto", "auto", "")}>
           {t("自动")}
         </button>
         {options.map((o) => (
-          <button key={o.path} role="radio" aria-checked={picked(o)} disabled={!!busy}
+          <button key={o.path} role="radio" data-action="shell.executor" aria-checked={picked(o)} disabled={!!busy}
             onClick={() => void save(o.path, o.prefer, pin(o) ? o.path : "")}>
             {label(o)}
             {o.version && <i className="ver">{o.version}</i>}
@@ -135,11 +135,11 @@ export function Shell({ port, onChanged }: { port: AgentPort; onChanged?: () => 
         </div>
         <div className="acts">
           {s.path && (
-            <button className="act" disabled={!!busy} onClick={() => void save("clear", s.prefer, "")}>
+            <button className="act" data-action="shell.custom-path" disabled={!!busy} onClick={() => void save("clear", s.prefer, "")}>
               {t("取消指定")}
             </button>
           )}
-          <button className="act" data-primary disabled={!!busy || !custom.trim()}
+          <button className="act" data-action="shell.custom-path" data-primary disabled={!!busy || !custom.trim()}
             onClick={() => void save("custom", kindOf(custom), custom.trim())}>
             {t(busy === "custom" ? "验证中…" : "保存这个路径")}
           </button>

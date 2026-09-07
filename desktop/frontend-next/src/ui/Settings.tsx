@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { listenAction } from "./listen";
 import { useRuntimeReload } from "./RuntimeReload";
 import type { AccountState, AgentPort, Appearance as Look, ApprovalMode, CapabilityScope, McpEntry, ModelEntry, PluginPackage, Preset, RoleAssignments, SessionStatus, SkillEntry } from "../port/port";
 import { arrowTabs } from "./tablist";
@@ -183,9 +184,8 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
   }, []);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    const onKey = (e: Event) => (e as KeyboardEvent).key === "Escape" && onClose();
+    return listenAction(window, "keydown", { action: "settings.close", listener: onKey });
   }, [onClose]);
 
   useEffect(() => {
@@ -291,12 +291,13 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
       // Both ends of the press have to land on the veil. A drag that started
       // inside the sheet and let go outside is a selection, not a dismissal.
       onMouseUp={(e) => { if (veiled.current && e.target === e.currentTarget) onClose(); }}
+      data-action-mouseup="settings.close"
     >
       <div className="prefs-sheet" role="dialog" aria-modal="true" aria-label={t("设置")}>
       <div className="prefs-hd">
         <h2>{t("设置")}</h2>
         <p>{t("改动立刻生效；需要重建运行时的项目，在任务运行期间无法修改")}</p>
-        <button className="btn sm" onClick={onClose}>
+        <button className="btn sm" data-action="settings.close" onClick={onClose}>
           {t("关闭")} <span className="esc">Esc</span>
         </button>
       </div>
@@ -315,6 +316,7 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                 <div className="navsec">{t(group)}</div>
                 {rows.map(([id, name]) => (
                   <button key={id} id={`prefs-${id}`} role="tab" title={t(name)}
+                    data-action="settings.section" data-value={id}
                     aria-selected={at === id} onClick={() => setAt(id)}>
                     <svg viewBox="0 0 16 16" aria-hidden="true">{ICON[id]}</svg>
                     <span className="nm">{t(name)}</span>
@@ -388,7 +390,7 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                     <span className="lb">{t("拉一份隔离副本")}</span>
                     <span className="ds">{t("在 Git worktree 中创建独立副本，改动不会影响当前分支")}</span>
                   </span>
-                  <button className="act" disabled={!!busy} onClick={() => run("isolate", () => port.isolateWorkspace())}>
+                  <button className="act" data-action="workspace.isolate" disabled={!!busy} onClick={() => run("isolate", () => port.isolateWorkspace())}>
                     {t(busy === "isolate" ? "开着…" : "开一份")}
                   </button>
                 </div>
@@ -422,7 +424,8 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                 <Group title={t("推理强度")} hint={t("以下档位由当前模型的端点支持，auto 表示使用端点自身的默认值。")}>
                   <div className="seg" role="group" aria-label={t("推理强度")}>
                     {efforts.map((e) => (
-                      <button key={e} aria-pressed={(status?.effort || "auto") === e}
+                      <button key={e} data-action="reasoning.effort" data-value={e}
+                        aria-pressed={(status?.effort || "auto") === e}
                         onClick={() => run(e, () => port.setEffort(e))}>
                         {e}
                       </button>
@@ -457,7 +460,8 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                 <div className="seg" data-text data-danger={status?.toolApprovalMode === "yolo" ? "" : undefined}
                   role="radiogroup" aria-label={t("工具批准")}>
                   {APPROVALS.map(([id, name]) => (
-                    <button key={id} role="radio" aria-checked={status?.toolApprovalMode === id} disabled={!!busy}
+                    <button key={id} role="radio" data-action="tool-approval.mode" data-value={id}
+                      aria-checked={status?.toolApprovalMode === id} disabled={!!busy}
                       onClick={() => run(id, () => port.setApprovalMode(id))}>
                       {t(name)}
                     </button>
@@ -519,7 +523,7 @@ export function Settings({ hub, onError, port, status, theme, onTheme, contrast,
                 hint={t("一个包可以同时提供技能、命令、自动化钩子和外部服务。安装与导入是同一个操作：提供一个仓库地址，或本机的一个文件夹。")}
                 action={
                   addingPkg ? undefined : (
-                    <button className="act" onClick={() => setAddingPkg(true)}>
+                    <button className="act" data-action="extensions.add" onClick={() => setAddingPkg(true)}>
                       {t("添加")}
                     </button>
                   )

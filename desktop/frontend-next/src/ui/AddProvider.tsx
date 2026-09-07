@@ -119,7 +119,7 @@ export function AddProvider({
       </div>
 
       <div className="acts">
-        <button className="act" data-primary onClick={connect} disabled={busy || baseUrl.trim() === ""}>
+        <button className="act" data-action="provider.probe" data-primary onClick={connect} disabled={busy || baseUrl.trim() === ""}>
           {t(busy && !probe ? "连接中…" : "连一下试试")}
         </button>
         <button className="act" onClick={onCancel} disabled={busy}>
@@ -183,7 +183,7 @@ export function AddProvider({
           </div>
 
           <div className="acts">
-            <button className="act" data-primary onClick={save} disabled={busy || picked.length === 0 || name.trim() === ""}>
+            <button className="act" data-action="provider.add" data-primary onClick={save} disabled={busy || picked.length === 0 || name.trim() === ""}>
               {t(busy ? "保存中…" : "添加")}
             </button>
           </div>

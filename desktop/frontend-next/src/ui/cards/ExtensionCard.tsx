@@ -107,6 +107,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
                 <div className="extacts">
                   {ext.card.actions.map((a) => (
                     <button
+                      data-action="extensions.invoke"
                       key={a.actionId}
                       className="btn"
                       onClick={() => onInvoke?.(`/${ext.pluginId}:${a.actionId}`)}
@@ -128,6 +129,7 @@ export function ExtensionCard({ ext, onInvoke, onSubmit }: Props) {
               {!sent && (
                 <div className="extfoot">
                   <button
+                    data-action="extensions.submit"
                     className="btn"
                     data-primary
                     disabled={missing.length > 0}

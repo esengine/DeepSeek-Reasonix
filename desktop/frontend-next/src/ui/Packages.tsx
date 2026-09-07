@@ -81,7 +81,7 @@ function Package({
       {/* Only a package that recorded where it came from can be fetched again;
           one installed from a folder that has since moved cannot. */}
       {p.source && (
-        <button className="act ghost" disabled={!!busy || updating} onClick={onUpdate}>
+          <button className="act ghost" data-action="extensions.update" disabled={!!busy || updating} onClick={onUpdate}>
           {t("更新")}
         </button>
       )}
@@ -89,6 +89,7 @@ function Package({
           says what the archive is for rather than naming a format. */}
       <button
         className="act ghost"
+          data-action="extensions.export"
         disabled={!!busy}
         onClick={() =>
           void run("export", async () => {
@@ -102,6 +103,8 @@ function Package({
         {t("移除")}
       </button>
       <Switch
+          data-action="extensions.enabled"
+          data-target={p.name}
         on={p.enabled}
         busy={busy === "toggle"}
         label={`${t(p.enabled ? "关闭" : "启用")} ${p.name}`}
@@ -120,6 +123,8 @@ function Package({
       </button>
       <button
         className="act danger"
+            data-action="extensions.remove"
+            data-target={p.name}
         disabled={busy === "remove"}
         onClick={() =>
           void run("remove", async () => {

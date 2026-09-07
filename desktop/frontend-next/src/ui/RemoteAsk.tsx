@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { RemoteAsk as Ask } from "../port/remote";
+import { listenAction } from "./listen";
 
 interface Props {
   ask: Ask;
@@ -21,12 +22,13 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
 
   // Escape declines. It has to reach the link either way: a dialog dismissed
   // with no answer would leave the dial waiting for one until it times out.
+  // The same answer the button gives, so it says so: two entry points, one
+  // action, and nothing infers that from them both calling onAnswer.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onAnswer(ask.askId, false, "");
+    const onKey = (e: Event) => {
+      if ((e as KeyboardEvent).key === "Escape") onAnswer(ask.askId, false, "");
     };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    return listenAction(window, "keydown", { action: "remote-ask.answer", value: "decline", listener: onKey });
   }, [ask.askId, onAnswer]);
 
   return (
@@ -49,6 +51,7 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
             </p>
             <input
               ref={box}
+              data-action-keydown="remote-ask.answer"
               type="password"
               value={text}
               autoFocus
@@ -79,10 +82,15 @@ export function RemoteAsk({ ask, onAnswer }: Props) {
         <div className="askact">
           {/* The way out takes the focus on a fingerprint: Enter is a reflex,
               and accepting a key nobody read is the one thing this prevents. */}
-          <button autoFocus={!secret} onClick={() => onAnswer(ask.askId, false, "")}>
+          <button
+            data-action="remote-ask.answer"
+            data-value="decline"
+            autoFocus={!secret}
+            onClick={() => onAnswer(ask.askId, false, "")}
+          >
             {t("取消")}
           </button>
-          <button data-go="" onClick={() => onAnswer(ask.askId, true, text)}>
+          <button data-action="remote-ask.answer" data-value="accept" data-go="" onClick={() => onAnswer(ask.askId, true, text)}>
             {secret ? t("继续") : t("对得上，记住它")}
           </button>
         </div>

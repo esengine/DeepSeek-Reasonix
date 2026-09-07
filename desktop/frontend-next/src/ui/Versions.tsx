@@ -139,7 +139,7 @@ export function Versions({ port }: { port: Port }) {
           <span className="t">{t("已固定在 {v}，不会自动更新", { v: hub.pinned })}</span>
           <span className="why">
             {t("回退之后固定是有意的：否则下次更新会把你放回刚离开的那个版本。")}
-            <button className="lnk" onClick={() => pin("")} disabled={locked}>
+              <button className="lnk" data-action="versions.pin" onClick={() => pin("")} disabled={locked}>
               {t("恢复自动更新")}
             </button>
           </span>
@@ -150,7 +150,7 @@ export function Versions({ port }: { port: Port }) {
           <span className="t">固定的是 {hub.pinned}，但现在跑的是 {hub.current}</span>
           <span className="why">
             {t("这条固定已经不再描述现实，自动更新按未固定处理。")}
-            <button className="lnk" onClick={() => pin("")} disabled={locked}>
+              <button className="lnk" data-action="versions.pin" onClick={() => pin("")} disabled={locked}>
               {t("清除固定")}
             </button>
           </span>
@@ -194,13 +194,13 @@ export function Versions({ port }: { port: Port }) {
               <span className="sa">{say(progress)}</span>
             ) : (
               !v.current && (
-                <button className="sa lnk" onClick={() => goTo(v.version)} disabled={locked}>
+                  <button className="sa lnk" data-action="versions.activate" onClick={() => goTo(v.version)} disabled={locked}>
                   {t(v.older ? "回退到这个版本" : "安装这个版本")}
                 </button>
               )
             )}
             {v.current && !hub.pinned && (
-              <button className="sa lnk" onClick={() => pin(v.version)} disabled={locked}>
+                <button className="sa lnk" data-action="versions.pin" onClick={() => pin(v.version)} disabled={locked}>
                 {t("固定在这里")}
               </button>
             )}

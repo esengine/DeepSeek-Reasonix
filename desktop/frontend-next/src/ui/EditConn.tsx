@@ -206,10 +206,10 @@ function EditConn({
       )}
 
       <div className="acts">
-        <button className="act" data-primary onClick={save} disabled={busy !== "" || picked.length === 0 || extraBad}>
+        <button className="act" data-action="provider.save" data-primary onClick={save} disabled={busy !== "" || picked.length === 0 || extraBad}>
           {t(saving ? "保存中…" : "保存")}
         </button>
-        <button className="act" onClick={refetch} disabled={busy !== ""}
+        <button className="act" data-action="provider.probe" onClick={refetch} disabled={busy !== ""}
           title={t("重新向该端点获取模型列表，适用于端点新增或下架模型之后")}>
           {t("重新问一次有哪些模型")}
         </button>

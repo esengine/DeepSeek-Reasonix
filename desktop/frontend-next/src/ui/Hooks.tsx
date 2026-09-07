@@ -142,6 +142,8 @@ export function Hooks({ port, onChanged }: Props) {
             </div>
             <button
               className="sw"
+                data-action="hooks.recipe"
+                data-target={r.id}
               role="switch"
               aria-checked={has(r)}
               aria-label={t(r.title)}
@@ -220,7 +222,7 @@ function Expert({
                 />
               )}
               {meta?.blocking && <i className="warn">{t("能挡住 agent")}</i>}
-              <button className="act ghost" onClick={() => onSave(draft.filter((_, k) => k !== i))}>
+                <button className="act ghost" data-action="hooks.remove" onClick={() => onSave(draft.filter((_, k) => k !== i))}>
                 {t("删掉")}
               </button>
             </div>
@@ -236,7 +238,7 @@ function Expert({
               </div>
             ))}
             <div className="line">
-              <button className="act" disabled={busy === key} onClick={() => onTry(h, key)}>
+                <button className="act" data-action="hooks.run-once" disabled={busy === key} onClick={() => onTry(h, key)}>
                 {t(busy === key ? "运行中…" : "试跑一次")}
               </button>
               {/* The command really runs. Saying so is the difference between a
@@ -255,7 +257,7 @@ function Expert({
         >
           {t("加一条")}
         </button>
-        <button className="act" data-primary disabled={busy === "save"} onClick={() => onSave(draft)}>
+            <button className="act" data-action="hooks.save" data-primary disabled={busy === "save"} onClick={() => onSave(draft)}>
           {t(busy === "save" ? "保存中…" : "保存")}
         </button>
       </div>

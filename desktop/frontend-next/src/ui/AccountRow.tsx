@@ -10,7 +10,7 @@ export function AccountRow({ account, onOpen }: { account: AccountState | null; 
   const signedIn = !!account?.signedIn;
 
   return (
-    <button className="acctrow" onClick={onOpen} aria-label={t("账号")}>
+    <button className="acctrow" data-action="chrome.account" onClick={onOpen} aria-label={t("账号")}>
       <span className="ini" aria-hidden="true" data-off={signedIn ? undefined : ""}>
         {signedIn ? initial : "·"}
       </span>

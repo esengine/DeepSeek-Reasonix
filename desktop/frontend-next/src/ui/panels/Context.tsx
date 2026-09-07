@@ -221,6 +221,7 @@ function DeclareWindow({ port, onSet, was, onDone }: {
       <div className="r">
         <input
           autoFocus={was > 0}
+            data-action-keydown="context.window-tokens"
           inputMode="numeric"
           value={draft}
           disabled={busy}
@@ -232,7 +233,7 @@ function DeclareWindow({ port, onSet, was, onDone }: {
             if (e.key === "Escape") onDone();
           }}
         />
-        <button disabled={busy || !draft || Number(draft) === was} onClick={() => void commit()}>
+        <button data-action="context.window-tokens" disabled={busy || !draft || Number(draft) === was} onClick={() => void commit()}>
           {t("记下")}
         </button>
       </div>

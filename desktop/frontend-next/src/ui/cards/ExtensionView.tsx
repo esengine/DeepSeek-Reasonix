@@ -68,7 +68,7 @@ function Node({ n, onAction }: { n: ExtensionViewNode; onAction?: (id: string) =
       return <i className="pip" data-tone={n.tone} />;
     case "button":
       return (
-        <button className="act" onClick={() => n.actionId && onAction?.(n.actionId)}>
+        <button className="act" data-action="extensions.invoke" onClick={() => n.actionId && onAction?.(n.actionId)}>
           {n.label}
         </button>
       );

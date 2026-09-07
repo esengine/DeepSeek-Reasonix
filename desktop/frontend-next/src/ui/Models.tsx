@@ -154,6 +154,7 @@ export function Models({ models, current, busy, protocol, onPick }: Props) {
             <button
               key={m.ref}
               className="mrow"
+            data-action="model.select"
               data-on={m.ref === current ? "" : undefined}
               disabled={busy !== ""}
               onClick={() => onPick(m.ref)}

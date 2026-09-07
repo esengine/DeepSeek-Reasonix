@@ -652,7 +652,7 @@ function Hero({ onPick, needsProject, onOpen, onKeep }: HeroProps) {
       </div>
       {needsProject ? (
         <div className="herogo">
-          <button className="pick" onClick={onOpen}>
+          <button className="pick" data-action="workspace.add" onClick={onOpen}>
             {t("打开项目…")}
           </button>
           <button className="stay" onClick={onKeep}>
@@ -662,7 +662,7 @@ function Hero({ onPick, needsProject, onOpen, onKeep }: HeroProps) {
       ) : (
         <div className="qs">
           {SUGGESTIONS.map((s) => (
-            <button className="sug" key={s} onClick={() => onPick(t(s))}>
+            <button className="sug" data-action="session.send" key={s} onClick={() => onPick(t(s))}>
               {t(s)}
             </button>
           ))}

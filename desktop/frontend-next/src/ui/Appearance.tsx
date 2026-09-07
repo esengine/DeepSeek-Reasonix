@@ -253,7 +253,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                       : t("下次启动时不再出现，这次还在")}
                 </span>
               </span>
-              <Switch on={tray.icon} label={t("在托盘显示图标")} onClick={() => flipTray({ icon: !tray.icon })} />
+              <Switch data-action="tray.icon" on={tray.icon} label={t("在托盘显示图标")} onClick={() => flipTray({ icon: !tray.icon })} />
             </div>
             {/* The second switch only means anything while there is an icon,
                 so it is drawn as a branch of the first rather than as a rule
@@ -264,6 +264,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
                 <span className="ds">{t("关闭窗口不会中断会话和后台任务；从托盘菜单退出才会完全关闭程序")}</span>
               </span>
               <Switch
+                data-action="tray.close-to-tray"
                 on={tray.closeToTray}
                 busy={!tray.icon || !tray.live}
                 label={t("关掉窗口后继续在托盘里跑")}
@@ -347,7 +348,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         <div className="grp-hd">
           <h2>{t("壁纸")}</h2>
           {look.wallpaper && (
-            <button className="now nowbtn" onClick={dropPaper}>
+              <button className="now nowbtn" data-action="wallpaper.remove" onClick={dropPaper}>
               {t("移除")}
             </button>
           )}
@@ -356,6 +357,7 @@ export function Appearance({ port, theme, onTheme, contrast, onContrast, weight,
         <div className="grp-items">
           <input
             ref={file}
+              data-action="wallpaper.change"
             type="file"
             accept="image/png,image/jpeg,image/webp,image/avif,image/gif"
             hidden
@@ -628,7 +630,7 @@ function Swatch({
     : undefined;
 
   return (
-    <button className="pal" type="button" title={pack?.description || name} data-on={on ? "" : undefined} aria-pressed={on} onClick={onPick}>
+    <button className="pal" type="button" data-action="theme.activate" data-value={pack?.id ?? ""} title={pack?.description || name} data-on={on ? "" : undefined} aria-pressed={on} onClick={onPick}>
       <span className="pal-art" style={style}>
         <span className="pal-rail" />
         <span className="pal-body">

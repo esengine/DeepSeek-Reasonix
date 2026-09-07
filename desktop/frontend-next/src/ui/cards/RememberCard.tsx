@@ -36,7 +36,7 @@ export const RememberCard = memo(function RememberCard({
           {SCOPE[m.scope] ?? m.scope} · {ACTIVATION[m.activation] ?? m.activation}
         </span>
         {!forgotten && (
-          <button className="act" disabled={busy} onClick={forget}>
+          <button className="act" data-action="memory.forget" disabled={busy} onClick={forget}>
             {t(busy ? "忘掉中…" : "忘掉")}
           </button>
         )}

@@ -71,7 +71,7 @@ export function DiffView({ diff, path, onPrepare, onCommit }: Props) {
         ) : outcome === "kept" ? (
           <span className="ro">{t("保留了当前版本")}</span>
         ) : revertable && !plan ? (
-          <button className="dif-act" disabled={busy} onClick={() => void prepare()}>
+          <button className="dif-act" data-action="file-revert.prepare" disabled={busy} onClick={() => void prepare()}>
             {t(busy ? "…" : "还原这个文件")}
           </button>
         ) : (
@@ -85,10 +85,10 @@ export function DiffView({ diff, path, onPrepare, onCommit }: Props) {
             <>
               <div className="q">{t("这个文件在检查点之后又被改过了。")}</div>
               <div className="row">
-                <button className="dif-act" disabled={busy} onClick={() => void commit("overwrite_checkpoint")}>
+                <button className="dif-act" data-action="file-revert.commit" data-value="overwrite_checkpoint" disabled={busy} onClick={() => void commit("overwrite_checkpoint")}>
                   {t("用检查点的版本覆盖")}
                 </button>
-                <button className="dif-act ghost" disabled={busy} onClick={() => void commit("keep_current")}>
+                <button className="dif-act ghost" data-action="file-revert.commit" data-value="keep_current" disabled={busy} onClick={() => void commit("keep_current")}>
                   {t("保留现在的")}
                 </button>
                 <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("取消")}</button>
@@ -101,7 +101,7 @@ export function DiffView({ diff, path, onPrepare, onCommit }: Props) {
                   surgical undo and deliver a session-wide one. */}
               <div className="q">{t("把这个文件还原到本次会话开始时的样子 —— 会话里对它的其他改动也会一并撤销。")}</div>
               <div className="row">
-                <button className="dif-act" disabled={busy} onClick={() => void commit()}>
+                <button className="dif-act" data-action="file-revert.commit" disabled={busy} onClick={() => void commit()}>
                   {t(busy ? "正在还原…" : "还原")}
                 </button>
                 <button className="dif-act ghost" onClick={() => setPlan(null)}>{t("取消")}</button>

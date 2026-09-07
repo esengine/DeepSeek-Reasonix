@@ -42,6 +42,7 @@ export function SlottedView({
           <button
             key={slot.id}
             role="menuitemradio"
+            data-action="panel.move"
             aria-checked={here === slot.id}
             onClick={() => close(() => onMove(slot.id))}
           >
@@ -50,7 +51,7 @@ export function SlottedView({
         ))}
         {/* Clearing hands the choice back to the extension rather than
             hiding the surface: it is a different act from moving it. */}
-        <button role="menuitem" onClick={() => close(() => onMove(""))}>
+        <button role="menuitem" data-action="panel.delegate-placement" onClick={() => close(() => onMove(""))}>
           {t("交还给插件")}
         </button>
       </div>
