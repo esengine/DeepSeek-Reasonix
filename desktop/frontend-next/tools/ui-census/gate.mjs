@@ -22,6 +22,7 @@ import { formals } from "./flow.mjs";
 import { flat, isCall, productFiles, trees, walkStack } from "./source.mjs";
 import { ownerOf } from "./symbols.mjs";
 import { capabilityMutates } from "./types.mjs";
+import { byNode as continuations, rootProvenance } from "./promises.mjs";
 
 const membership = new Map(stateActions.rows.map((x) => [x.root, x.state]));
 const declaredIds = new Set(stateActions.actions.map((a) => a.id));
@@ -111,6 +112,14 @@ for (const [path, tree] of trees) {
   });
 }
 
+// A continuation is an execution edge into a callback, and this analyzer takes
+// one only where the receiver was proven to be a Promise by a declared return
+// type. Every other source above that is a continuation on something already
+// proven, so the bottom of the chain is the one place a new source could enter.
+// The day a member's spelling buys that edge again, this is what says so.
+const continuationWithoutProvenance = [...continuations.values()]
+  .filter((r) => !r.on || rootProvenance(r.on) !== "CERTIFIED_API_RETURN");
+
 // A projection with no source is a debt with nothing behind it: it would enter
 // the ranking as a mechanism of its own, which is the error the reduction
 // exists to prevent. An axis reaching an open effect setup must always be able
@@ -142,6 +151,9 @@ const INVARIANTS = [
   ["SCHEDULER_HIDES_A_WRITE", schedulerHidesAWrite.length,
     "a callback handed to a platform scheduler by name reaches a write the walk cannot see: " +
     schedulerHidesAWrite.map((f) => f.path + ":" + f.line).join(" ")],
+  ["PROMISE_CONTINUATION_WITHOUT_PROMISE_PROVENANCE", continuationWithoutProvenance.length,
+    "a .then/.catch/.finally the walk executes whose receiver no declared return type proves: " +
+    continuationWithoutProvenance.map((r) => r.edgeAt).join(" ")],
   ["PROJECTION_CAUSE_WITHOUT_SOURCE", danglingProjections, "an open cause that is a projection of another and cannot name it"],
   ["MIXED_ACTION_REWRITTEN", mixedKept ? 0 : 1, "a mixed action whose member verdict was rewritten by the join"],
 ];
@@ -158,7 +170,7 @@ const EXPECTED_BREAKS = {
     REFUSED_DECLARATION: [1, "fixture Z declares an action on a resize: refusing it is the case"],
     PROP_HEURISTIC_HIDES_A_WRITE: [1, "fixture H1 is the case: a called prop the spelling rule refuses, whose actual writes"],
     UNCERTIFIED_SOURCE: [1, "fixture E3 registers on a receiver nothing proves to be a DOM target: a hole is the honest answer, and refusing to guess is the case"],
-    UNDECLARED_MUTATION: [25, "the fixture corpus names actions only where identity is the subject"],
+    UNDECLARED_MUTATION: [29, "the fixture corpus names actions only where identity is the subject"],
   },
 };
 

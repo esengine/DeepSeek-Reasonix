@@ -10,7 +10,14 @@ import { mutating, unresolvedTransport } from "./sinks.mjs";
 import { byNode as registrations } from "./registrations.mjs";
 import { byCall as eventParamCalls } from "./event_params.mjs";
 import { byNode as schedulers } from "./schedulers.mjs";
+import { EDGE, byNode as continuations } from "./promises.mjs";
 import { effectivePropSource } from "./prop_sources.mjs";
+
+// Every trail element that means the work does not run in the execution that
+// reached it. One vocabulary: the continuation labels come from the fact that
+// builds them, so a role added there cannot be forgotten here.
+const DEFERRED = new RegExp("^(Scheduled|" + Object.values(EDGE).join("|") + ")\\(");
+const deferred = (trail) => trail.some((t) => DEFERRED.test(t));
 
 // Not by the spelling setX: the provenance is an import of useState from react
 // and the second slot of the array it destructures. What this proves is narrow
@@ -123,6 +130,28 @@ function classify(expr, path, comp, depth, seen, out, trail, skip) {
       }
       return;
     }
+    // A continuation on a value proven to be a Promise. Which member was
+    // written decides nothing: the receiver's proof is what earns the edge, and
+    // the fact refuses every receiver it cannot trace to a declared return
+    // type. What is earned is a deferred edge, because a handler that mutates
+    // when the request comes back is not one that mutates now.
+    const cont = continuations.get(n);
+    if (cont) {
+      out.scheduled.add(cont.edgeAt);
+      // Where the optionality is, the same as everywhere else: a chain entered
+      // through `p?.then(cb)` reaches whatever cb reaches, and the evidence has
+      // to say the continuation may be skipped at the hop that may skip it.
+      const via = callMode(n) === "OPTIONAL" ? ["MayCall(" + cont.edgeAt + ")"] : [];
+      for (const cb of cont.callbacks) {
+        // The two shapes a callback is written in. Anything else is a value
+        // this pass cannot open, and saying so is not the same as saying the
+        // continuation runs nothing.
+        if (isFn(cb.arg) || cb.arg.type === "Identifier") argBodies.push({ arg: cb.arg, node: cb.edge + "(" + cont.edgeAt + ")", via });
+        else out.open.push({ kind: "promise-callback-unresolved", at: trail.join(" -> ") + " :: ." + cont.member + "[" + cb.index + "]",
+          site: path + "#" + (comp ?? "?") + "#." + cont.member + "[" + cb.index + "]" });
+      }
+      return;
+    }
     if (n.callee.type === "MemberExpression" && n.callee.computed) out.open.push({ kind: "computed-dispatch", at: trail.join(" -> "),
       site: path + "#" + (comp ?? "?") + "#" + n.loc.start.line });
     reach(flat(n.callee), n);
@@ -186,9 +215,9 @@ function classify(expr, path, comp, depth, seen, out, trail, skip) {
         site: path + "#" + (comp ?? "?") + "#" + flat(n.callee) + "[" + i + "]" });
     });
   });
-  for (const { arg, node } of argBodies) {
+  for (const { arg, node, via } of argBodies) {
     if (trail.includes(node)) continue;
-    classify(arg, path, comp, depth + 1, seen, out, [...trail, node], skip);
+    classify(arg, path, comp, depth + 1, seen, out, [...trail, ...(via ?? []), node], skip);
   }
 
   for (const [name, how] of names) {
@@ -216,7 +245,7 @@ function classify(expr, path, comp, depth, seen, out, trail, skip) {
           out.mutates.add(member);
           // Which causal edge carried it. A mutation reached only through a
           // scheduled callback is not something this execution performs.
-          (trail.some((t) => t.startsWith("Scheduled(")) ? out.scheduledMutations : out.directMutations).add(member);
+          (deferred(trail) ? out.scheduledMutations : out.directMutations).add(member);
           out.trailOf ??= [...trail, edge(member)].join(" -> ");
           continue;
         }
@@ -236,7 +265,7 @@ function classify(expr, path, comp, depth, seen, out, trail, skip) {
       // The same causal edge the capability branch records. Leaving it off here
       // meant a mutation reached through an ordinary function was counted in
       // the verdict and absent from every count of how effects mutate.
-      (trail.some((t) => t.startsWith("Scheduled(")) ? out.scheduledMutations : out.directMutations).add(decided);
+      (deferred(trail) ? out.scheduledMutations : out.directMutations).add(decided);
       out.trailOf ??= [...trail, edge(decided)].join(" -> ");
       continue;
     }

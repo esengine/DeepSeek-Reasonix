@@ -625,9 +625,9 @@ if (process.env.PROBE === "transport" || process.env.PROBE === "endpoints") {
 if (process.env.PROBE === "b0") reportUnresolvedCauses();
 
 
-// Seal-B1e-0. Shadow only: the fact set is built and printed, and no verdict,
-// witness or open edge reads it. What a continuation runs is B1e-1, and
-// splitting them is what makes a moved verdict attributable to one of the two.
+// Seal-B1e. The fact under every continuation edge the classifier takes: which
+// values this tree proves are Promises, and which receivers it refuses. What is
+// refused is a measurement, not a verdict — the next cut is chosen from it.
 if (process.env.PROBE === "promises") {
   const rows = promiseSites.filter((s) => productFiles.has(s.path));
   const proven = rows.filter((s) => s.on);
@@ -637,7 +637,7 @@ if (process.env.PROBE === "promises") {
     return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   };
   const pad = (s) => (s + "                                   ").slice(0, 35);
-  console.log("\nPromise value provenance (shadow: nothing reads this yet)");
+  console.log("\nPromise value provenance");
   console.log("  continuation calls written        " + rows.length);
   console.log("  receiver proven a Promise         " + proven.length);
   for (const [k, n] of tally(proven, (s) => s.on.provenance)) console.log("    " + pad(k) + n);

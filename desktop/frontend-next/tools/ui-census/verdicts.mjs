@@ -39,7 +39,13 @@ const stateR2 = (() => {
         for (const src of c.sources) causes.set(src.source, src);
       }
     };
-    if (r.verdict === "MUTATION") { witness = "handler -> " + (r.trailOf ?? r.mutates.join("+")); family = "direct call"; }
+    if (r.verdict === "MUTATION") {
+      witness = "handler -> " + (r.trailOf ?? r.mutates.join("+"));
+      // Read from the edges the walk recorded, not assumed from the axis: a
+      // handler whose every write is behind a continuation or a timer performs
+      // none of them in the execution the person started.
+      family = r.directMutations.length ? "direct call" : "scheduled";
+    }
     for (const o of r.open ?? []) {
       open.set("direct: " + o.kind, (open.get("direct: " + o.kind) ?? 0) + 1);
       const src = sourceOf(o);

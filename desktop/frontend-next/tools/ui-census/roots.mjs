@@ -19,6 +19,11 @@ for (const r of roots) {
   r.mutates = [...out.mutates];
   r.stateWrites = [...out.stateWrites];
   r.scheduled = [...out.scheduled];
+  // Which causal edge carried each write. A handler that only chains a
+  // continuation or a timer mutates when that runs, not when it is pressed,
+  // and a family line that says "direct call" for it is a claim nothing made.
+  r.directMutations = [...out.directMutations];
+  r.scheduledMutations = [...out.scheduledMutations];
   r.trailOf = out.trailOf;
   r.open = out.open;
   r.actuals = [...(out.actuals ?? [])];

@@ -42,6 +42,11 @@
 //   S1-S7     which attribute provides a prop: JSX is last-write, absence is an
 //             answer, an unreadable spread to the right is not, and a
 //             conditional object is the boundary this pass does not cross
+//   PC1-PC9   a value is proven a Promise before `.then` on it means anything:
+//             a declared return type and the fixpoint above it are the two
+//             sources, an opaque call, an opaque binding, a binding typed
+//             Promise and a member off the object are not, and a proven
+//             continuation handed an unreadable callback is open, not clean
 //
 // Every report over this tree is frozen under tools/ui-census/golden; the
 // invariants it breaks on purpose are declared in tools/ui-census/gate.mjs.
@@ -61,6 +66,7 @@ import { M1, M2, M4, M5 } from "./memo";
 import { M3 } from "./memo2";
 import { H1 } from "./propname";
 import { S1, S2, S3, S4, S5, S6, S7 } from "./spread";
+import { PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8, PC9 } from "./promise";
 import * as transport from "./transport";
 void transport;
 import { W2 } from "./action2";
@@ -136,5 +142,14 @@ export const tree = (
     <S5 />
     <S6 />
     <S7 />
+    <PC1 />
+    <PC2 />
+    <PC3 />
+    <PC4 />
+    <PC5 />
+    <PC6 />
+    <PC7 />
+    <PC8 />
+    <PC9 />
   </div>
 );

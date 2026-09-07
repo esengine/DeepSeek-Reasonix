@@ -2,20 +2,20 @@ Raw mutation sinks                 9
   product-reachable                9
   non-product-reachable            0
   verb not statically readable     2
-Mutation-capable functions         44
+Mutation-capable functions         52
 
-Interaction sites (product only)    65
-  MUTATION                          14   (unnamed 8)
+Interaction sites (product only)    74
+  MUTATION                          18   (unnamed 12)
   READ_ONLY / LOCAL_UI              36
-  UNRESOLVED                        15
+  UNRESOLVED                        20
 
-Interaction roots (certified)      71
-  jsx-handler                      65
+Interaction roots (certified)      80
+  jsx-handler                      74
   command-chord                    1
   dom-event                        5
-  MUTATION                         19   (unnamed 11)
+  MUTATION                         23   (unnamed 15)
   READ_ONLY / LOCAL                36
-  UNRESOLVED                       16
+  UNRESOLVED                       21
     of which read-only only until the effect closure over their
     React state is checked   30
 
@@ -92,30 +92,32 @@ Cross-component dependency invalidation (condition-insensitive: an edge is may-r
     UNMAPPED    0
 
 Interaction root verdicts (join: direct, dependency, identity, lifecycle)
-  MUTATION      33   of 71
-  UNRESOLVED    22   of 71
-  READ_ONLY     16   of 71
+  MUTATION      37   of 80
+  UNRESOLVED    27   of 80
+  READ_ONLY     16   of 80
 
   MUTATION by causal family
     direct call           19
     cross-component prop  5
     mount                 4
+    scheduled             4
     dependency retrigger  3
     dependency cleanup    1
     unmount               1
 
   UNRESOLVED by open edge (a root can carry more than one)
-       8  direct: unknown-callee
+      13  direct: unknown-callee
+       5  direct: callee-unresolved
        5  dependency: setup open
        5  identity: setup open
        3  dependency: dep provenance
        3  identity: dep provenance
        3  direct: prop-spread-source-unresolved
        2  direct: prop-source
-       1  direct: callee-unresolved
        1  lifecycle: mount-open
        1  direct: callback-not-proven-executed
        1  direct: event-param-path-receiver-unproven
+       1  direct: promise-callback-unresolved
 
   the roots that were suspended on their state writes   30
     MUTATION    14
@@ -696,6 +698,102 @@ Interaction root verdicts (join: direct, dependency, identity, lifecycle)
       cells     -
       open      -
       causes    -
+  _fx/promise.tsx:25  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/promise.tsx:25 -> PromiseThen(_fx/promise.tsx:25) -> _fx/sink.ts#mutation
+      family    scheduled
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/promise.tsx#PC1#api.load
+        direct  unknown-callee  _fx/promise.tsx:25 :: api
+  _fx/promise.tsx:33  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/promise.tsx:33 -> PromiseCatch(_fx/promise.tsx:38) -> _fx/sink.ts#mutation
+      family    scheduled
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/promise.tsx#PC2#api.load
+        direct  unknown-callee  _fx/promise.tsx:33 :: api
+  _fx/promise.tsx:50  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/promise.tsx:50 -> PromiseCatch(_fx/promise.tsx:50) -> _fx/sink.ts#mutation
+      family    scheduled
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/promise.tsx#PC3#api.load
+        direct  unknown-callee  _fx/promise.tsx:50 :: api
+  _fx/promise.tsx:56  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callee-unresolved | direct: unknown-callee
+      causes    callee-unresolved:_fx/promise.tsx#PC4#?.then unknown-callee:_fx/promise.tsx#PC4#mystery
+        direct  callee-unresolved  _fx/promise.tsx:56 :: ?.then
+        direct  unknown-callee  _fx/promise.tsx:56 :: mystery
+  _fx/promise.tsx:62  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callee-unresolved | direct: unknown-callee
+      causes    callee-unresolved:_fx/promise.tsx#PC5#loading.then unknown-callee:_fx/promise.tsx#PC5#loading.then
+        direct  callee-unresolved  _fx/promise.tsx:62 :: loading.then
+        direct  unknown-callee  _fx/promise.tsx:62 :: loading
+  _fx/promise.tsx:69  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callee-unresolved | direct: unknown-callee
+      causes    callee-unresolved:_fx/promise.tsx#PC6#?.then unknown-callee:_fx/promise.tsx#PC6#api.hold
+        direct  callee-unresolved  _fx/promise.tsx:69 :: ?.then
+        direct  unknown-callee  _fx/promise.tsx:69 :: api
+  _fx/promise.tsx:75  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/promise.tsx:75 -> MayCall(_fx/promise.tsx:75) -> PromiseThen(_fx/promise.tsx:75) -> _fx/sink.ts#mutation
+      family    scheduled
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/promise.tsx#PC7#api.load
+        direct  unknown-callee  _fx/promise.tsx:75 :: api
+  _fx/promise.tsx:84  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callee-unresolved | direct: unknown-callee
+      causes    callee-unresolved:_fx/promise.tsx#PC8#then unknown-callee:_fx/promise.tsx#PC8#then
+        direct  callee-unresolved  _fx/promise.tsx:84 :: then
+        direct  unknown-callee  _fx/promise.tsx:84 :: then
+  _fx/promise.tsx:91  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: promise-callback-unresolved | direct: unknown-callee
+      causes    promise-callback-unresolved:_fx/promise.tsx#PC9#.then[0] unknown-callee:_fx/promise.tsx#PC9#api.load unknown-callee:_fx/promise.tsx#PC9#pickHandler
+        direct  promise-callback-unresolved  _fx/promise.tsx:91 :: .then[0]
+        direct  unknown-callee  _fx/promise.tsx:91 :: api
+        direct  unknown-callee  _fx/promise.tsx:91 :: pickHandler
   _fx/propname.tsx:13  UNRESOLVED
       action    -
       kind      jsx-handler
@@ -783,8 +881,8 @@ Interaction root verdicts (join: direct, dependency, identity, lifecycle)
         direct  prop-spread-source-unresolved  _fx/spread.tsx:67 :: onGo
 
 Interaction source universe
-  certified roots                  71
-    JSX handler attributes         65
+  certified roots                  80
+    JSX handler attributes         74
     DOM listeners                  5
     shortcut table entries         1
   stated non-user registrations    2
@@ -818,10 +916,10 @@ Mutation capabilities, by where they are driven from
   UNRESOLVED             0   (must be 0 to close the reverse direction)
 
 Action membership (identity is the product's; the analyzer never invents one)
-  certified roots                  71
+  certified roots                  80
     NAMED, declared at the source  11
     NAMED by forwarding            0   (a second authority, with no source material in this tree)
-    UNDECLARED                     60   (the product names no action here; not a proof that none exists)
+    UNDECLARED                     69   (the product names no action here; not a proof that none exists)
   declared actions                 6
     driven by more than one root   4
     by more than one input kind    2   (modality independence)
@@ -837,18 +935,18 @@ Action membership (identity is the product's; the analyzer never invents one)
 
 Membership against effect
                     NAMED   UNDECLARED
-  MUTATION              8          25
-  UNRESOLVED            0          22
+  MUTATION              8          29
+  UNRESOLVED            0          27
   READ_ONLY             3          13
 
-  inputs with no action identity that a Tier denominator waits on   47
-    proven to write                25
-    might yet be proven to write   22
+  inputs with no action identity that a Tier denominator waits on   56
+    proven to write                29
+    might yet be proven to write   27
     read-only, vocabulary only     13
 
   by source kind
-    proven to write                jsx-handler=22  dom-event=3
-    might yet be proven to write   dom-event=1  jsx-handler=21
+    proven to write                jsx-handler=26  dom-event=3
+    might yet be proven to write   dom-event=1  jsx-handler=26
 
   of those, DOM listeners not declared through listenAction   4
     MUTATION   _fx/cases.tsx:53  keydown on window
@@ -861,11 +959,11 @@ Declared actions, by what their roots prove
   POTENTIAL_TIER_A      0
   PROVEN_NON_MUTATING   1
   — a count over the 6 ids the product declares, not over its actions:
-    47 inputs that can or might write are still outside the action universe.
+    56 inputs that can or might write are still outside the action universe.
 
 Seal conditions for the action universe
-  OPEN  A  every proven-writing input has an identity               25 without one
-  OPEN  B  every input that might write has one                     22 without one
+  OPEN  A  every proven-writing input has an identity               29 without one
+  OPEN  B  every input that might write has one                     27 without one
   held  C  membership is never inferred from a shared handler       literal declarations only
   n/a   D  every registry action has a production root              no registry in this tree
   n/a   E  every rendered action id is in the registry              no registry in this tree
