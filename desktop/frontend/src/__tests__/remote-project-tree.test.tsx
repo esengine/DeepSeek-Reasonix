@@ -25,7 +25,8 @@ console.log("\nRemote project tree wiring");
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const remoteSource = readFileSync(resolve(here, "../components/ProjectTreeRemoteGroups.tsx"), "utf8");
-const appSource = readFileSync(resolve(here, "../AppRuntime.tsx"), "utf8");
+const compositionSource = readFileSync(resolve(here, "../app-runtime/useAppSessionComposition.ts"), "utf8");
+const todoSource = readFileSync(resolve(here, "../app-runtime/useTodoPanelCommands.ts"), "utf8");
 const paletteSource = readFileSync(resolve(here, "../app-runtime/usePaletteCommands.tsx"), "utf8");
 const exportSource = readFileSync(resolve(here, "../app-runtime/useSessionExportCommands.ts"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/remoteProjectBridge.ts"), "utf8");
@@ -115,13 +116,14 @@ ok(
   "remote tab metadata updates refresh the affected session group",
 );
 ok(
-  /remoteSurfaceActive \? remoteSession\.transcript\.items : state\.items/.test(appSource) &&
+  /remoteSurfaceActive \? remoteSession\.transcript\.items : state\.items/.test(compositionSource) &&
     /sessionItemsToMarkdown\(sessionTitle, Array\.from\(items\), live\)/.test(exportSource),
   "remote exports use the visible remote transcript",
 );
 ok(
-  /for \(let i = visibleRuntimeState\.items\.length - 1/.test(appSource) &&
-    /!remoteSurfaceActive && activeTabId && todoBatch/.test(appSource),
+  /items: visibleRuntimeState\.items/.test(compositionSource) &&
+    /for \(let i = items\.length - 1/.test(todoSource) &&
+    /!remote && activeTabId && todoBatch/.test(todoSource),
   "remote todo shelf projects the visible transcript without calling the local dismissal backend",
 );
 ok(
