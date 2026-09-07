@@ -28,7 +28,14 @@ const (
 	// Adjacent chunks share this many bytes near their boundary so a fact
 	// spanning the cut is not lost between digests.
 	extractChunkOverlapBytes = 16 << 10
-	minMergeInputTokens      = 400
+
+	// extractFragmentConcurrency bounds the parallel fragment summaries.
+	// Fragments are independent LLM calls; running a few concurrently cuts the
+	// wall time of a 2M-token fold from tens of minutes to minutes while
+	// staying under provider rate limits (same 3-4 in-flight budget the
+	// subagent dispatch discipline uses).
+	extractFragmentConcurrency = 4
+	minMergeInputTokens        = 400
 	// A chunked recovery owns the compaction lock and can issue multiple paid
 	// requests. Keep the exceptional path finite even when a provider repeatedly
 	// truncates a digest without making it smaller.
@@ -102,6 +109,7 @@ func extractMergeInstructionWithFocus(instructions string) string {
 
 type chunkedSummaryRun struct {
 	a     *Agent
+	mu    sync.Mutex
 	calls int
 	usage *provider.Usage
 }
@@ -111,6 +119,12 @@ func newChunkedSummaryRun(a *Agent) *chunkedSummaryRun {
 }
 
 func (r *chunkedSummaryRun) requireCalls(required int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requireCallsLocked(required)
+}
+
+func (r *chunkedSummaryRun) requireCallsLocked(required int) error {
 	if required < 0 {
 		return fmt.Errorf("invalid chunked summary call reservation (%d)", required)
 	}
@@ -124,12 +138,20 @@ func (r *chunkedSummaryRun) summarize(ctx context.Context, fold []provider.Messa
 	if err := ctx.Err(); err != nil {
 		return foldSummary{}, err
 	}
-	if err := r.requireCalls(1 + reserveAfter); err != nil {
+	// Parallel fragment workers share one run: reserve, count, and usage
+	// accounting must be atomic or the maxChunkedSummaryCalls budget can be
+	// races past and usage entries lost.
+	r.mu.Lock()
+	if err := r.requireCallsLocked(1 + reserveAfter); err != nil {
+		r.mu.Unlock()
 		return foldSummary{}, err
 	}
 	r.calls++
+	r.mu.Unlock()
 	res, err := r.a.foldToSummary(ctx, fold, instructions)
+	r.mu.Lock()
 	r.usage = mergeSamplingUsage(r.usage, res.Usage)
+	r.mu.Unlock()
 	return res, err
 }
 
@@ -278,19 +300,60 @@ func (a *Agent) summarizeExtractChunks(ctx context.Context, chunks [][]provider.
 		}
 		report(done, total)
 	}
-	parts := make([]string, 0, len(chunks))
 	mergeInstructions := extractMergeInstructionWithFocus(instructions)
-	for i, chunk := range chunks {
-		fragInstructions := extractFragmentInstruction(i+1, len(chunks), instructions)
-		reserveAfter := len(chunks) - i - 1
-		if len(chunks) > 1 {
-			reserveAfter++
+	parts := make([]string, len(chunks))
+	// Fragments are independent LLM calls: summarize them with a bounded
+	// worker pool so a 2M-token fold stops paying N × per-fragment latency
+	// serially. Results are written by index to keep the merge order stable
+	// (oldest first); the first fragment failure cancels its siblings and
+	// becomes the returned error. The shared run budget stays exact: each
+	// worker reserves under the run lock with the same worst-case reserveAfter
+	// the serial loop used.
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		var errMu sync.Mutex
+		var firstErr error
+		fail := func(i int, err error) {
+			errMu.Lock()
+			defer errMu.Unlock()
+			if firstErr == nil {
+				firstErr = fmt.Errorf("fragment %d/%d: %w", i+1, len(chunks), err)
+			}
+			cancel() // stop sibling fragments early
 		}
-		res, err := a.extractFragmentResilient(ctx, chunk, fragInstructions, mergeInstructions, advance, run, reserveAfter)
-		if err != nil {
-			return "", fmt.Errorf("fragment %d/%d: %w", i+1, len(chunks), err)
+		sem := make(chan struct{}, extractFragmentConcurrency)
+		var wg sync.WaitGroup
+		for i, chunk := range chunks {
+			wg.Add(1)
+			go func(i int, chunk []provider.Message) {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+					defer func() { <-sem }()
+				case <-ctx.Done():
+					return // a sibling already failed; firstErr is recorded
+				}
+				fragInstructions := extractFragmentInstruction(i+1, len(chunks), instructions)
+				// The serial loop reserved the whole future plan per fragment
+				// (remaining fragments + merge), which is meaningless once
+				// fragments run out of order: a late-starting worker would find
+				// its reserve already spent by finished siblings. Each fragment
+				// reserves only itself here; half-split recursion and every
+				// merge step still reserve their own calls, and the
+				// maxChunkedSummaryCalls budget keeps the worst case finite.
+				res, err := a.extractFragmentResilient(ctx, chunk, fragInstructions, mergeInstructions, advance, run, 0)
+				if err != nil {
+					fail(i, err)
+					return
+				}
+				parts[i] = res
+			}(i, chunk)
 		}
-		parts = append(parts, res)
+		wg.Wait()
+		if firstErr != nil {
+			return "", firstErr
+		}
 	}
 	text, err := a.mergeFragmentsWithRun(ctx, parts, mergeInstructions, run, 0)
 	if err != nil {
@@ -313,7 +376,13 @@ func (a *Agent) extractFragmentResilient(ctx context.Context, chunk []provider.M
 	if err == nil {
 		return strings.TrimSpace(res.Text), nil
 	}
-	retriable := errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, ErrCompactionRequired)
+	// A context-limit rejection means the fragment itself overflowed the
+	// summarizer window — halving it is exactly the fix (the same reasoning as
+	// output truncation: smaller fragments, smaller requests). Without this,
+	// one oversized fragment fails the whole chunked fold on small-window
+	// gateways even though its halves would fit.
+	retriable := errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, ErrCompactionRequired) ||
+		provider.AsContextLimitError(err) != nil
 	leftChunk, rightChunk, splittable := splitExtractFragment(chunk)
 	if !retriable || !splittable {
 		return "", err
@@ -365,7 +434,10 @@ func (a *Agent) mergeGroup(ctx context.Context, group []string, instructions str
 		return strings.TrimSpace(merged.Text), nil
 	}
 	mergeErr := err
-	retriable := errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, ErrCompactionRequired)
+	// Same reasoning as fragment half-splitting: a merge group that overflows
+	// the window shrinks into sub-groups that fit (depth-capped below).
+	retriable := errors.Is(err, errSummaryOutputTruncated) || errors.Is(err, ErrCompactionRequired) ||
+		provider.AsContextLimitError(err) != nil
 	if !retriable || len(group) < 2 {
 		return "", err
 	}
