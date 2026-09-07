@@ -20,9 +20,9 @@ const root = join(here, "..", "..");
 const entry = process.env.CENSUS_ENTRY ?? join(here, "main.mjs");
 
 const PROBES = ["effects", "verdicts", "oracle", "domroots", "apis", "state", "life", "cross",
-  "r2", "roots", "origin", "actions", "unnamed", "candidates", "transport", "endpoints"];
+  "r2", "roots", "origin", "actions", "unnamed", "candidates", "transport", "endpoints", "promises"];
 const SHOWS = ["unresolved", "sinks", "unnamed"];
-const FX_PROBES = ["state", "life", "cross", "r2", "roots", "effects", "transport", "endpoints", "b0"];
+const FX_PROBES = ["state", "life", "cross", "r2", "roots", "effects", "transport", "endpoints", "b0", "promises"];
 const FX = { CENSUS_SRC: "_fx", CENSUS_ROOTS: "_fx/main.tsx" };
 
 const fixtureOutputs = new Map(FX_PROBES.map((p) => ["fx-" + p + ".txt", { PROBE: p, SHOW: "", ...FX }]));

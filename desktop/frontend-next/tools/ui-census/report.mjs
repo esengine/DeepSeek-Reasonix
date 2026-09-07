@@ -14,6 +14,7 @@ import { capabilityMutates } from "./types.mjs";
 import { REGISTRY, stateActions } from "./actions.mjs";
 import { transport } from "./transport.mjs";
 import { NOT_A_MUTATION } from "./endpoints.mjs";
+import { maxDepth as promiseDepth, sites as promiseSites } from "./promises.mjs";
 import { conservation, denominatorSealed, membership, mixedKept, mutNoWitness,
   mutUnnamed, noVerdict, orphans, roNotClosed, strays, unrUnnamed } from "./gate.mjs";
 
@@ -622,3 +623,35 @@ if (process.env.PROBE === "transport" || process.env.PROBE === "endpoints") {
 // behind the roots that might write and have no action identity, so the next
 // cut is chosen by payoff rather than by which reason prints most often.
 if (process.env.PROBE === "b0") reportUnresolvedCauses();
+
+
+// Seal-B1e-0. Shadow only: the fact set is built and printed, and no verdict,
+// witness or open edge reads it. What a continuation runs is B1e-1, and
+// splitting them is what makes a moved verdict attributable to one of the two.
+if (process.env.PROBE === "promises") {
+  const rows = promiseSites.filter((s) => productFiles.has(s.path));
+  const proven = rows.filter((s) => s.on);
+  const tally = (list, of) => {
+    const m = new Map();
+    for (const x of list) m.set(of(x), (m.get(of(x)) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  };
+  const pad = (s) => (s + "                                   ").slice(0, 35);
+  console.log("\nPromise value provenance (shadow: nothing reads this yet)");
+  console.log("  continuation calls written        " + rows.length);
+  console.log("  receiver proven a Promise         " + proven.length);
+  for (const [k, n] of tally(proven, (s) => s.on.provenance)) console.log("    " + pad(k) + n);
+  console.log("    " + pad("deepest proof, receivers deep") + promiseDepth);
+  console.log("  receiver unproven                 " + (rows.length - proven.length));
+  for (const [k, n] of tally(rows.filter((s) => !s.on), (s) => s.shape)) console.log("    " + pad(k) + n);
+  console.log("\n  proven continuations by member");
+  for (const [k, n] of tally(proven, (s) => "." + s.member)) console.log("    " + pad(k) + n);
+  const cbs = proven.flatMap((s) => s.callbacks);
+  console.log("\n  callbacks they hand out           " + cbs.length);
+  for (const [k, n] of tally(cbs, (c) => (/^(Arrow)?Function(Expression|Declaration)$/.test(c.arg.type) ? "function literal"
+    : c.arg.type === "Identifier" ? "a name" : c.arg.type))) console.log("    " + pad(k) + n);
+  console.log("\n  every receiver this pass cannot prove");
+  for (const s of rows.filter((x) => !x.on).sort((a, b) => (a.path + a.line).localeCompare(b.path + b.line))) {
+    console.log("    " + pad(s.shape) + s.path + ":" + s.line + "  " + (s.comp ?? "?") + "  ." + s.member);
+  }
+}

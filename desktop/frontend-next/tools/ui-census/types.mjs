@@ -154,11 +154,18 @@ const kindOfType = (path, t) => {
   if (!imported || !trees.has(imported.file)) return "OTHER";
   return "UNPROVEN";
 };
+/** The type name the source states for a binding, or null where it states
+ *  none: nothing wrote one, two writings disagree, or what it wrote reduced to
+ *  a shape rather than a name. */
+const declaredType = (path, recv) => {
+  const t = bindingTypes.get(path)?.get(recv);
+  return !t || t === CONFLICT || t.startsWith("\u0000") ? null : t;
+};
+
 /** PORT, OTHER or UNPROVEN — what the source says the receiver is. */
 const receiverKind = (path, recv) => {
-  const t = bindingTypes.get(path)?.get(recv);
-  if (t === undefined || t === null || t === CONFLICT || t.startsWith("\u0000")) return "UNPROVEN";
-  return kindOfType(path, t);
+  const t = declaredType(path, recv);
+  return t === null ? "UNPROVEN" : kindOfType(path, t);
 };
 
 /** Whether a capability's implementation mutates, across the classes that
@@ -186,4 +193,4 @@ for (let moved = true; moved; ) {
   }
 }
 
-export { CONFLICT, PORT_TYPE, bindingTypeArgs, bindingTypes, capabilityMutates, kindOfType, receiverKind, shapeArgs, shapeArgsFor, shapeMembers, shapesOf, typeArgOf, typeNameOf, x_portName };
+export { CONFLICT, PORT_TYPE, bindingTypeArgs, bindingTypes, capabilityMutates, declaredType, kindOfType, receiverKind, shapeArgs, shapeArgsFor, shapeMembers, shapesOf, typeArgOf, typeNameOf, x_portName };

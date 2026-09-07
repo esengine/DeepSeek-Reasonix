@@ -1,0 +1,230 @@
+Raw mutation sinks                 9
+  product-reachable                9
+  non-product-reachable            0
+  verb not statically readable     2
+Mutation-capable functions         44
+
+Interaction sites (product only)    65
+  MUTATION                          14   (unnamed 8)
+  READ_ONLY / LOCAL_UI              36
+  UNRESOLVED                        15
+
+Interaction roots (certified)      71
+  jsx-handler                      65
+  command-chord                    1
+  dom-event                        5
+  MUTATION                         19   (unnamed 11)
+  READ_ONLY / LOCAL                36
+  UNRESOLVED                       16
+    of which read-only only until the effect closure over their
+    React state is checked   30
+
+DOM registrations not certified as user input  1
+  UNRESOLVED_RECEIVER      1
+
+State cells (product)              32
+  memo hooks that can carry one    4
+  retrigger at least one effect    15
+  MUTATION                         4
+  UNRESOLVED                       9
+  READ_ONLY                        19
+  useState not readable as a pair  0
+  effect/memo deps that are neither state nor memo here  8   (a prop or a module binding: another component's state, which this relation does not follow)
+
+  suspended roots, by what their state writes reach (preview, not applied)
+    MUTATION    4
+    UNRESOLVED  6
+    READ_ONLY   20
+    UNMAPPED    0
+
+Lifecycle presence reachability
+  components owning effects        37
+    a mount would mutate           17
+    an unmount would mutate        2
+    a mount is not readable        9
+    an unmount is not readable     0
+  dynamic keys on components in the danger set   1   (a new key is a new instance: unmount then mount)
+  render targets that are not a component body  2
+  components in the danger set whose presence is not readable  1
+
+  state cells that reach one, by lifecycle
+    MUTATION                       5
+    UNRESOLVED                     1
+
+  state cells, dependency and lifecycle together
+    MUTATION    9
+    UNRESOLVED  9
+    READ_ONLY   14
+
+  suspended roots, dependency and lifecycle together (still a candidate set:
+  cross-component prop dependencies are R1c and are not in this number)
+    MUTATION    9
+    UNRESOLVED  6
+    READ_ONLY   15
+    UNMAPPED    0
+
+Cross-component dependency invalidation (condition-insensitive: an edge is may-reach)
+  what the unfollowed dependencies were
+    FORMAL_PROP     8
+    MODULE_BINDING  0
+    OTHER           0
+  prop edges built
+    from the value          5
+    from identity, rebuilt every render  14
+    forwarded actual->formal 3
+    identity not readable    0
+    a name in it this pass cannot place  4
+    prop the child never destructures    4
+  state cells, dependency axis with props
+    MUTATION    9
+    UNRESOLVED  9
+    READ_ONLY   14
+
+  all three axes together
+    MUTATION    14
+    UNRESOLVED  9
+    READ_ONLY   9
+
+  suspended roots, all three axes
+    MUTATION    14
+    UNRESOLVED  6
+    READ_ONLY   10
+    UNMAPPED    0
+
+Interaction root verdicts (join: direct, dependency, identity, lifecycle)
+  MUTATION      33   of 71
+  UNRESOLVED    22   of 71
+  READ_ONLY     16   of 71
+
+  MUTATION by causal family
+    direct call           19
+    cross-component prop  5
+    mount                 4
+    dependency retrigger  3
+    dependency cleanup    1
+    unmount               1
+
+  UNRESOLVED by open edge (a root can carry more than one)
+       8  direct: unknown-callee
+       5  dependency: setup open
+       5  identity: setup open
+       3  dependency: dep provenance
+       3  identity: dep provenance
+       3  direct: prop-spread-source-unresolved
+       2  direct: prop-source
+       1  direct: callee-unresolved
+       1  lifecycle: mount-open
+       1  direct: callback-not-proven-executed
+       1  direct: event-param-path-receiver-unproven
+
+  the roots that were suspended on their state writes   30
+    MUTATION    14
+    UNRESOLVED  6
+    READ_ONLY   10
+
+  MUTATION verdicts carrying no witness   0   (must be 0)
+
+Interaction source universe
+  certified roots                  71
+    JSX handler attributes         65
+    DOM listeners                  5
+    shortcut table entries         1
+  stated non-user registrations    2
+    RUNTIME_EVENT                 1
+    REGISTRATION_WRAPPER          1
+  event registrations              15
+    ADD  REGISTRATION_WRAPPER       1
+    ADD  SHADOWED_CALLEE            1
+    ADD  UNRESOLVED_RECEIVER        1
+    ADD  proven:declared-wrapper    2
+    ADD  proven:implicit-global     1
+    ADD  proven:typed-receiver      3
+    REMOVE  UNRESOLVED_RECEIVER     1
+    REMOVE  proven:implicit-global  2
+    REMOVE  proven:typed-receiver   3
+  refused declarations             1   (must be 0: an action on a non-input, or one an element cannot place)
+    ACTION_ON_A_NON_INPUT  _fx/decl.tsx:30  RUNTIME_EVENT
+  UNCERTIFIED sources              1   (must be 0 to seal the denominator)
+    UNRESOLVED_RECEIVER  _fx/reg.tsx:35
+
+  certified roots with no effect verdict   0   (must be 0)
+  MUTATION with no positive witness        0   (must be 0)
+  READ_ONLY with a reachable open edge     0   (must be 0)
+
+  denominator NOT SEALED
+
+Mutation capabilities, by where they are driven from
+  USER_INTERACTION       0
+  HOST_LIFECYCLE         0
+  OFFSTAGE               0
+  UNRESOLVED             0   (must be 0 to close the reverse direction)
+
+Action membership (identity is the product's; the analyzer never invents one)
+  certified roots                  71
+    NAMED, declared at the source  11
+    NAMED by forwarding            0   (a second authority, with no source material in this tree)
+    UNDECLARED                     60   (the product names no action here; not a proof that none exists)
+  declared actions                 6
+    driven by more than one root   4
+    by more than one input kind    2   (modality independence)
+    by roots in more than one file 1   (location independence)
+
+  action effect, joined from its roots (a root verdict is never rewritten)
+    MUTATION    5
+    UNRESOLVED  0
+    READ_ONLY   1
+
+  actions whose roots do not agree  1   (no role taxonomy invented for them)
+    fx.remove                 MUTATION   _fx/action.tsx:38=READ_ONLY  _fx/action.tsx:43=READ_ONLY  _fx/action.tsx:46=MUTATION
+
+Membership against effect
+                    NAMED   UNDECLARED
+  MUTATION              8          25
+  UNRESOLVED            0          22
+  READ_ONLY             3          13
+
+  inputs with no action identity that a Tier denominator waits on   47
+    proven to write                25
+    might yet be proven to write   22
+    read-only, vocabulary only     13
+
+  by source kind
+    proven to write                jsx-handler=22  dom-event=3
+    might yet be proven to write   dom-event=1  jsx-handler=21
+
+  of those, DOM listeners not declared through listenAction   4
+    MUTATION   _fx/cases.tsx:53  keydown on window
+    MUTATION   _fx/life.tsx:67  click on window
+    MUTATION   _fx/reg.tsx:12  keydown on <global>
+    UNRESOLVED _fx/action.tsx:11  keydown on window
+
+Declared actions, by what their roots prove
+  PROVEN_TIER_A         5
+  POTENTIAL_TIER_A      0
+  PROVEN_NON_MUTATING   1
+  — a count over the 6 ids the product declares, not over its actions:
+    47 inputs that can or might write are still outside the action universe.
+
+Seal conditions for the action universe
+  OPEN  A  every proven-writing input has an identity               25 without one
+  OPEN  B  every input that might write has one                     22 without one
+  held  C  membership is never inferred from a shared handler       literal declarations only
+  n/a   D  every registry action has a production root              no registry in this tree
+  n/a   E  every rendered action id is in the registry              no registry in this tree
+  held  F  an action's effect is joined from its roots alone        registry kind never participates
+  held  G  identity survives a change of input kind and of place    held by fixtures V and W
+  held  H  a mixed action keeps each root's own verdict             held by fixture X and mcp.remove
+
+  Tier universe NOT frozen: A and B are what it waits on
+
+Promise value provenance (shadow: nothing reads this yet)
+  continuation calls written        0
+  receiver proven a Promise         0
+    deepest proof, receivers deep      0
+  receiver unproven                 0
+
+  proven continuations by member
+
+  callbacks they hand out           0
+
+  every receiver this pass cannot prove
