@@ -52,6 +52,20 @@ jobs:
       - name: test
         run: pnpm test
 
+      # What the UI census holds. The gate reads structure — which inputs reach
+      # a mutating endpoint, and which of those the product names an action for
+      # — so UNDECLARED_MUTATION == 0 is a fact about the tree, not a lint over
+      # how anything is spelled.
+      - name: census invariants
+        run: pnpm census > /dev/null
+
+      # And that the analyzer still judges the way it did. _fx is a corpus
+      # written to exercise the rules, so its reports move only when a judgement
+      # moves; the product's name every root by file and line and are stale the
+      # moment a button moves, which is why they are not frozen.
+      - name: census fixture reports have not drifted
+        run: pnpm census:verify
+
       # `build` runs tsc -b before vite, so this also proves the project
       # references resolve — typecheck alone uses --noEmit and does not.
       - name: build

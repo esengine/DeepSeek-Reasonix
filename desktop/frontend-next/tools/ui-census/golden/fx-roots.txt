@@ -1,0 +1,876 @@
+Raw mutation sinks                 9
+  product-reachable                9
+  non-product-reachable            0
+  verb not statically readable     2
+Mutation-capable functions         44
+
+Interaction sites (product only)    65
+  MUTATION                          14   (unnamed 8)
+  READ_ONLY / LOCAL_UI              36
+  UNRESOLVED                        15
+
+Interaction roots (certified)      71
+  jsx-handler                      65
+  command-chord                    1
+  dom-event                        5
+  MUTATION                         19   (unnamed 11)
+  READ_ONLY / LOCAL                36
+  UNRESOLVED                       16
+    of which read-only only until the effect closure over their
+    React state is checked   30
+
+DOM registrations not certified as user input  1
+  UNRESOLVED_RECEIVER      1
+
+State cells (product)              32
+  memo hooks that can carry one    4
+  retrigger at least one effect    15
+  MUTATION                         4
+  UNRESOLVED                       9
+  READ_ONLY                        19
+  useState not readable as a pair  0
+  effect/memo deps that are neither state nor memo here  8   (a prop or a module binding: another component's state, which this relation does not follow)
+
+  suspended roots, by what their state writes reach (preview, not applied)
+    MUTATION    4
+    UNRESOLVED  6
+    READ_ONLY   20
+    UNMAPPED    0
+
+Lifecycle presence reachability
+  components owning effects        37
+    a mount would mutate           17
+    an unmount would mutate        2
+    a mount is not readable        9
+    an unmount is not readable     0
+  dynamic keys on components in the danger set   1   (a new key is a new instance: unmount then mount)
+  render targets that are not a component body  2
+  components in the danger set whose presence is not readable  1
+
+  state cells that reach one, by lifecycle
+    MUTATION                       5
+    UNRESOLVED                     1
+
+  state cells, dependency and lifecycle together
+    MUTATION    9
+    UNRESOLVED  9
+    READ_ONLY   14
+
+  suspended roots, dependency and lifecycle together (still a candidate set:
+  cross-component prop dependencies are R1c and are not in this number)
+    MUTATION    9
+    UNRESOLVED  6
+    READ_ONLY   15
+    UNMAPPED    0
+
+Cross-component dependency invalidation (condition-insensitive: an edge is may-reach)
+  what the unfollowed dependencies were
+    FORMAL_PROP     8
+    MODULE_BINDING  0
+    OTHER           0
+  prop edges built
+    from the value          5
+    from identity, rebuilt every render  14
+    forwarded actual->formal 3
+    identity not readable    0
+    a name in it this pass cannot place  4
+    prop the child never destructures    4
+  state cells, dependency axis with props
+    MUTATION    9
+    UNRESOLVED  9
+    READ_ONLY   14
+
+  all three axes together
+    MUTATION    14
+    UNRESOLVED  9
+    READ_ONLY   9
+
+  suspended roots, all three axes
+    MUTATION    14
+    UNRESOLVED  6
+    READ_ONLY   10
+    UNMAPPED    0
+
+Interaction root verdicts (join: direct, dependency, identity, lifecycle)
+  MUTATION      33   of 71
+  UNRESOLVED    22   of 71
+  READ_ONLY     16   of 71
+
+  MUTATION by causal family
+    direct call           19
+    cross-component prop  5
+    mount                 4
+    dependency retrigger  3
+    dependency cleanup    1
+    unmount               1
+
+  UNRESOLVED by open edge (a root can carry more than one)
+       8  direct: unknown-callee
+       5  dependency: setup open
+       5  identity: setup open
+       3  dependency: dep provenance
+       3  identity: dep provenance
+       3  direct: prop-spread-source-unresolved
+       2  direct: prop-source
+       1  direct: callee-unresolved
+       1  lifecycle: mount-open
+       1  direct: callback-not-proven-executed
+       1  direct: event-param-path-receiver-unproven
+
+  the roots that were suspended on their state writes   30
+    MUTATION    14
+    UNRESOLVED  6
+    READ_ONLY   10
+
+  MUTATION verdicts carrying no witness   0   (must be 0)
+
+  _fx/action.tsx:9  MUTATION
+      action    fx.open
+      kind      command-chord
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/action.tsx:9 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/action.tsx:11  UNRESOLVED
+      action    -
+      kind      dom-event
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callee-unresolved
+      causes    callee-unresolved:_fx/action.tsx#V#table.find
+        direct  callee-unresolved  _fx/action.tsx:11 -> Local(_fx/action.tsx,onKey) :: table.find
+  _fx/action.tsx:15  MUTATION
+      action    fx.open
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/action.tsx:15 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/action.tsx:25  MUTATION
+      action    fx.close
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/action.tsx:25 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/action.tsx:38  READ_ONLY
+      action    fx.remove
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/action.tsx#X#confirming
+      open      -
+      causes    -
+  _fx/action.tsx:43  READ_ONLY
+      action    fx.remove
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/action.tsx#X#confirming
+      open      -
+      causes    -
+  _fx/action.tsx:46  MUTATION
+      action    fx.remove
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/action.tsx:46 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/action2.tsx:7  MUTATION
+      action    fx.close
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/action2.tsx:7 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/cases.tsx:10  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=MUTATION identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> dependency -> effect:_fx/cases.tsx:7 -> _fx/sink.ts#mutation
+      family    dependency retrigger
+      cells     _fx/cases.tsx#A#x
+      open      -
+      causes    -
+  _fx/cases.tsx:19  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cases.tsx#B#x
+      open      -
+      causes    -
+  _fx/cases.tsx:29  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=MUTATION identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> dependency -> effect:_fx/cases.tsx:26 -> _fx/sink.ts#mutation
+      family    dependency retrigger
+      cells     _fx/cases.tsx#C#x
+      open      -
+      causes    -
+  _fx/cases.tsx:42  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=MUTATION identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> dependency -> effect:_fx/cases.tsx:36 -> _fx/sink.ts#mutation
+      family    dependency cleanup
+      cells     _fx/cases.tsx#D#x
+      open      -
+      causes    -
+  _fx/cases.tsx:53  MUTATION
+      action    -
+      kind      dom-event
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/cases.tsx:53 -> _fx/cases.tsx#onKey
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/cases.tsx:56  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cases.tsx#E#x
+      open      -
+      causes    -
+  _fx/cases.tsx:68  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=MUTATION identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> dependency -> effect:_fx/cases.tsx:65 -> _fx/sink.ts#mutation
+      family    dependency retrigger
+      cells     _fx/cases.tsx#F#x
+      open      -
+      causes    -
+  _fx/cases.tsx:80  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cases.tsx#G#x
+      open      -
+      causes    -
+  _fx/cause.tsx:18  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cause.tsx#C1#n
+      open      dependency: dep provenance | dependency: setup open | identity: dep provenance | identity: setup open
+      causes    dep-provenance:unresolved-deps@effect:_fx/cause.tsx:15 unknown-callee:_fx/cause.tsx#C1#outside.one unknown-callee:_fx/cause.tsx#C1#outside.two
+  _fx/cause.tsx:33  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cause.tsx#C2#n
+      open      dependency: dep provenance | dependency: setup open | identity: dep provenance | identity: setup open
+      causes    dep-provenance:unresolved-deps@effect:_fx/cause.tsx:27 unknown-callee:_fx/cause.tsx#C2#outside.one unknown-callee:_fx/cause.tsx#C2#outside.two
+  _fx/cause.tsx:45  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cause.tsx#C3#n
+      open      dependency: setup open | identity: setup open
+      causes    unknown-callee:_fx/cause.tsx#C3#outside.one
+  _fx/cause.tsx:59  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cause.tsx#C4#n
+      open      dependency: dep provenance | dependency: setup open | identity: dep provenance | identity: setup open
+      causes    dep-provenance:unresolved-deps@effect:_fx/cause.tsx:56 unknown-callee:_fx/cause.tsx#C4#outside.one unknown-callee:_fx/cause.tsx#C4#outside.two
+  _fx/cause.tsx:72  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cause.tsx#C5#a _fx/cause.tsx#C5#b
+      open      dependency: setup open | identity: setup open
+      causes    unknown-callee:_fx/cause.tsx#C5#outside.one
+  _fx/cross.tsx:16  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> cross-component prop -> effect:_fx/cross.tsx:7 -> _fx/sink.ts#mutation
+      family    cross-component prop
+      cells     _fx/cross.tsx#N#x
+      open      -
+      causes    -
+  _fx/cross.tsx:37  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> cross-component prop -> effect:_fx/cross.tsx:25 -> _fx/sink.ts#mutation
+      family    cross-component prop
+      cells     _fx/cross.tsx#O#x
+      open      -
+      causes    -
+  _fx/cross.tsx:57  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> cross-component prop -> effect:_fx/cross.tsx:48 -> _fx/sink.ts#mutation
+      family    cross-component prop
+      cells     _fx/cross.tsx#P#x
+      open      -
+      causes    -
+  _fx/cross.tsx:76  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/cross.tsx#Q#x
+      open      -
+      causes    -
+  _fx/cross.tsx:95  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> cross-component prop -> effect:_fx/cross.tsx:85 -> _fx/sink.ts#mutation
+      family    cross-component prop
+      cells     _fx/cross.tsx#R#x
+      open      -
+      causes    -
+  _fx/decl.tsx:10  MUTATION
+      action    fx.dismiss
+      kind      dom-event
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/decl.tsx:10 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/decl.tsx:18  MUTATION
+      action    fx.dismiss
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/decl.tsx:18 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/join.tsx:23  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=UNRESOLVED identity=UNRESOLVED lifecycle=MUTATION
+      witness   write show -> _fx/join.tsx#J1Child mount-mutation via guard -> effect:_fx/join.tsx:11 -> _fx/sink.ts#mutation
+      family    mount
+      cells     _fx/join.tsx#J1#show
+      open      dependency: setup open | identity: setup open
+      causes    unknown-callee:_fx/join.tsx#J1#helper
+  _fx/join.tsx:41  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=UNRESOLVED
+      witness   -
+      family    -
+      cells     _fx/join.tsx#J2#show
+      open      lifecycle: mount-open
+      causes    unknown-callee:_fx/join.tsx#J2Child#helper
+  _fx/join.tsx:61  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/join.tsx#J3#show
+      open      -
+      causes    -
+  _fx/life.tsx:16  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=MUTATION
+      witness   write show -> _fx/life.tsx#MountChild mount-mutation via guard -> effect:_fx/life.tsx:7 -> _fx/sink.ts#mutation
+      family    mount
+      cells     _fx/life.tsx#H#show
+      open      -
+      causes    -
+  _fx/life.tsx:36  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/life.tsx#I#x
+      open      -
+      causes    -
+  _fx/life.tsx:54  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=MUTATION
+      witness   write show -> _fx/life.tsx#UnmountChild unmount-mutation via guard -> effect:_fx/life.tsx:45 -> _fx/sink.ts#mutation
+      family    unmount
+      cells     _fx/life.tsx#J#show
+      open      -
+      causes    -
+  _fx/life.tsx:67  MUTATION
+      action    -
+      kind      dom-event
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/life.tsx:67 -> _fx/life.tsx#onClick
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/life.tsx:76  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/life.tsx#L#show
+      open      -
+      causes    -
+  _fx/life.tsx:95  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=MUTATION
+      witness   write sel -> _fx/life.tsx#KeyChild mount-mutation via key -> effect:_fx/life.tsx:86 -> _fx/sink.ts#mutation
+      family    mount
+      cells     _fx/life.tsx#M#sel
+      open      -
+      causes    -
+  _fx/memo.tsx:9  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/memo.tsx:9 -> Formal(_fx/memo.tsx#DirectBody,onGo) -> Actual(_fx/memo.tsx:12,onGo) -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/memo.tsx:20  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/memo.tsx:20 -> Formal(_fx/memo.tsx#WrappedBody,onGo) -> Actual(_fx/memo.tsx:24,onGo) -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/memo.tsx:30  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/memo.tsx:30 -> Formal(_fx/memo.tsx#AView,onGo) -> Actual(_fx/memo.tsx:40,onGo) -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/memo.tsx:33  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/memo.tsx:52  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: prop-source
+      causes    prop-source:_fx/memo.tsx#ChainBody#onGo
+        direct  prop-source  _fx/memo.tsx:52 :: onGo
+  _fx/memo2.tsx:12  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: prop-source
+      causes    prop-source:_fx/memo2.tsx#ShadowBody#onGo
+        direct  prop-source  _fx/memo2.tsx:12 :: onGo
+  _fx/optional.tsx:24  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/optional.tsx:24 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/optional.tsx:27  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/optional.tsx:27 -> MayCall(_fx/optional.tsx:27,_fx/sink.ts#mutation)
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/optional.tsx:33  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/optional.tsx#O3#nope
+        direct  unknown-callee  _fx/optional.tsx:33 :: nope
+  _fx/optional.tsx:39  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/optional.tsx:39 -> ActualArg(_fx/optional.tsx:39,0) -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/optional.tsx#O4#cb
+        direct  unknown-callee  _fx/optional.tsx:39 -> Local(_fx/optional.tsx,invoke) :: cb
+  _fx/optional.tsx:42  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: callback-not-proven-executed
+      causes    callback-not-proven-executed:_fx/optional.tsx#O5#store[0]
+        direct  callback-not-proven-executed  _fx/optional.tsx:42 :: store[0]
+  _fx/optional.tsx:49  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/optional.tsx#O6#t1.go
+        direct  unknown-callee  _fx/optional.tsx:49 :: t1
+  _fx/optional.tsx:52  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/optional.tsx#O7#t2.go
+        direct  unknown-callee  _fx/optional.tsx:52 :: t2
+  _fx/optional.tsx:55  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/optional.tsx#O8#t3.go
+        direct  unknown-callee  _fx/optional.tsx:55 :: t3
+  _fx/owner.tsx:20  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=MUTATION lifecycle=READ_ONLY
+      witness   write x -> cross-component prop -> effect:_fx/owner.tsx:11 -> _fx/sink.ts#mutation
+      family    cross-component prop
+      cells     _fx/owner.tsx#S#x
+      open      -
+      causes    -
+  _fx/owner.tsx:38  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=MUTATION
+      witness   write show -> _fx/owner.tsx#TInner mount-mutation via guard -> effect:_fx/owner.tsx:29 -> _fx/sink.ts#mutation
+      family    mount
+      cells     _fx/owner.tsx#T#show
+      open      -
+      causes    -
+  _fx/owner.tsx:58  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     _fx/owner.tsx#U#x
+      open      -
+      causes    -
+  _fx/param.tsx:18  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/param.tsx:24  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/param.tsx#EP2#e.preventDefault
+        direct  unknown-callee  _fx/param.tsx:24 -> Local(_fx/param.tsx,helper) :: e
+  _fx/param.tsx:35  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/param.tsx#EP3#extra.preventDefault
+        direct  unknown-callee  _fx/param.tsx:35 -> Local(_fx/param.tsx,handler) :: extra
+  _fx/param.tsx:42  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/param.tsx:42 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      direct: event-param-member-unresolved
+      causes    event-param-member-unresolved:_fx/param.tsx#EP4#e.getModifierState
+        direct  event-param-member-unresolved  _fx/param.tsx:42 :: e.getModifierState
+  _fx/param.tsx:54  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/param.tsx#EP5#e.preventDefault
+        direct  unknown-callee  _fx/param.tsx:54 -> Local(_fx/param.tsx,inner) :: e
+  _fx/param.tsx:69  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: event-param-path-receiver-unproven
+      causes    event-param-path-receiver-unproven:_fx/param.tsx#EP6#e.currentTarget.blur
+        direct  event-param-path-receiver-unproven  _fx/param.tsx:69 :: e.currentTarget.blur
+  _fx/prim.tsx:10  MUTATION
+      action    fx.writes
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/prim.tsx:10 -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/prim.tsx:13  READ_ONLY
+      action    fx.reads
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/propname.tsx:13  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: unknown-callee
+      causes    unknown-callee:_fx/propname.tsx#Runner#go
+        direct  unknown-callee  _fx/propname.tsx:13 :: go
+  _fx/reg.tsx:12  MUTATION
+      action    -
+      kind      dom-event
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/reg.tsx:12 -> _fx/reg.tsx#onKey
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/spread.tsx:12  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/spread.tsx:22  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: prop-spread-source-unresolved
+      causes    prop-spread-source-unresolved:_fx/spread.tsx#S2#onGo
+        direct  prop-spread-source-unresolved  _fx/spread.tsx:22 :: onGo
+  _fx/spread.tsx:31  MUTATION
+      action    -
+      kind      jsx-handler
+      axes      direct=MUTATION dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   handler -> _fx/spread.tsx:31 -> MayCall(_fx/spread.tsx:31) -> Formal(_fx/spread.tsx#A3,onGo) -> Actual(_fx/spread.tsx:34,onGo) -> _fx/sink.ts#mutation
+      family    direct call
+      cells     -
+      open      -
+      causes    -
+  _fx/spread.tsx:39  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/spread.tsx:47  READ_ONLY
+      action    -
+      kind      jsx-handler
+      axes      direct=READ_ONLY dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      -
+      causes    -
+  _fx/spread.tsx:57  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: prop-spread-source-unresolved
+      causes    prop-spread-source-unresolved:_fx/spread.tsx#S6#onGo
+        direct  prop-spread-source-unresolved  _fx/spread.tsx:57 :: onGo
+  _fx/spread.tsx:67  UNRESOLVED
+      action    -
+      kind      jsx-handler
+      axes      direct=UNRESOLVED dependency=READ_ONLY identity=READ_ONLY lifecycle=READ_ONLY
+      witness   -
+      family    -
+      cells     -
+      open      direct: prop-spread-source-unresolved
+      causes    prop-spread-source-unresolved:_fx/spread.tsx#S7#onGo
+        direct  prop-spread-source-unresolved  _fx/spread.tsx:67 :: onGo
+
+Interaction source universe
+  certified roots                  71
+    JSX handler attributes         65
+    DOM listeners                  5
+    shortcut table entries         1
+  stated non-user registrations    2
+    RUNTIME_EVENT                 1
+    REGISTRATION_WRAPPER          1
+  event registrations              15
+    ADD  REGISTRATION_WRAPPER       1
+    ADD  SHADOWED_CALLEE            1
+    ADD  UNRESOLVED_RECEIVER        1
+    ADD  proven:declared-wrapper    2
+    ADD  proven:implicit-global     1
+    ADD  proven:typed-receiver      3
+    REMOVE  UNRESOLVED_RECEIVER     1
+    REMOVE  proven:implicit-global  2
+    REMOVE  proven:typed-receiver   3
+  refused declarations             1   (must be 0: an action on a non-input, or one an element cannot place)
+    ACTION_ON_A_NON_INPUT  _fx/decl.tsx:30  RUNTIME_EVENT
+  UNCERTIFIED sources              1   (must be 0 to seal the denominator)
+    UNRESOLVED_RECEIVER  _fx/reg.tsx:35
+
+  certified roots with no effect verdict   0   (must be 0)
+  MUTATION with no positive witness        0   (must be 0)
+  READ_ONLY with a reachable open edge     0   (must be 0)
+
+  denominator NOT SEALED
+
+Mutation capabilities, by where they are driven from
+  USER_INTERACTION       0
+  HOST_LIFECYCLE         0
+  OFFSTAGE               0
+  UNRESOLVED             0   (must be 0 to close the reverse direction)
+
+Action membership (identity is the product's; the analyzer never invents one)
+  certified roots                  71
+    NAMED, declared at the source  11
+    NAMED by forwarding            0   (a second authority, with no source material in this tree)
+    UNDECLARED                     60   (the product names no action here; not a proof that none exists)
+  declared actions                 6
+    driven by more than one root   4
+    by more than one input kind    2   (modality independence)
+    by roots in more than one file 1   (location independence)
+
+  action effect, joined from its roots (a root verdict is never rewritten)
+    MUTATION    5
+    UNRESOLVED  0
+    READ_ONLY   1
+
+  actions whose roots do not agree  1   (no role taxonomy invented for them)
+    fx.remove                 MUTATION   _fx/action.tsx:38=READ_ONLY  _fx/action.tsx:43=READ_ONLY  _fx/action.tsx:46=MUTATION
+
+Membership against effect
+                    NAMED   UNDECLARED
+  MUTATION              8          25
+  UNRESOLVED            0          22
+  READ_ONLY             3          13
+
+  inputs with no action identity that a Tier denominator waits on   47
+    proven to write                25
+    might yet be proven to write   22
+    read-only, vocabulary only     13
+
+  by source kind
+    proven to write                jsx-handler=22  dom-event=3
+    might yet be proven to write   dom-event=1  jsx-handler=21
+
+  of those, DOM listeners not declared through listenAction   4
+    MUTATION   _fx/cases.tsx:53  keydown on window
+    MUTATION   _fx/life.tsx:67  click on window
+    MUTATION   _fx/reg.tsx:12  keydown on <global>
+    UNRESOLVED _fx/action.tsx:11  keydown on window
+
+Declared actions, by what their roots prove
+  PROVEN_TIER_A         5
+  POTENTIAL_TIER_A      0
+  PROVEN_NON_MUTATING   1
+  — a count over the 6 ids the product declares, not over its actions:
+    47 inputs that can or might write are still outside the action universe.
+
+Seal conditions for the action universe
+  OPEN  A  every proven-writing input has an identity               25 without one
+  OPEN  B  every input that might write has one                     22 without one
+  held  C  membership is never inferred from a shared handler       literal declarations only
+  n/a   D  every registry action has a production root              no registry in this tree
+  n/a   E  every rendered action id is in the registry              no registry in this tree
+  held  F  an action's effect is joined from its roots alone        registry kind never participates
+  held  G  identity survives a change of input kind and of place    held by fixtures V and W
+  held  H  a mixed action keeps each root's own verdict             held by fixture X and mcp.remove
+
+  Tier universe NOT frozen: A and B are what it waits on

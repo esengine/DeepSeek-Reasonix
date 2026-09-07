@@ -7,7 +7,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "census": "node tools/ui-census/main.mjs",
+    "census:verify": "node tools/ui-census/verify.mjs"
   },
   "dependencies": {
     "katex": "^0.18.4",

@@ -1,0 +1,352 @@
+verdict	where	source	surface	label	data-target	data-value	ids its component already declares	class	capability behind it (review aid only)
+MUTATION	AccountRow.tsx:13	jsx/click	AccountRow	账号			-	NEW?	
+MUTATION	AddPlugin.tsx:105	jsx/click	AddPlugin				-	NEW?	
+MUTATION	AddPlugin.tsx:149	jsx/click	AddPlugin				-	NEW?	
+MUTATION	AddPlugin.tsx:152	jsx/click	AddPlugin				-	NEW?	install
+MUTATION	AddPlugin.tsx:171	jsx/click	AddPlugin				-	NEW?	
+MUTATION	AddPlugin.tsx:181	jsx/keydown	AddPlugin				-	NEW?	look
+MUTATION	AddPlugin.tsx:197	jsx/click	AddPlugin				-	NEW?	
+MUTATION	AddPlugin.tsx:200	jsx/click	AddPlugin				-	NEW?	look
+MUTATION	AddProvider.tsx:122	jsx/click	AddProvider				-	NEW?	connect
+MUTATION	AddProvider.tsx:186	jsx/click	AddProvider				-	NEW?	save
+MUTATION	AddServer.tsx:84	jsx/keydown	AddServer				-	NEW?	parse
+MUTATION	AddServer.tsx:100	jsx/click	AddServer				-	NEW?	parse
+MUTATION	AddServer.tsx:157	jsx/click	AddServer				-	NEW?	install
+MUTATION	App.tsx:693	jsx/click	App				chrome.settings inspector.toggle rail.toggle	REUSE?	open close
+MUTATION	Appearance.tsx:256	jsx/click	Appearance				-	NEW?	setTrayPrefs
+MUTATION	Appearance.tsx:266	jsx/click	Appearance				-	NEW?	setTrayPrefs
+MUTATION	Appearance.tsx:350	jsx/click	Appearance				-	NEW?	clearWallpaper
+MUTATION	Appearance.tsx:357	jsx/change	Appearance				-	NEW?	uploadWallpaper
+MUTATION	Appearance.tsx:631	jsx/click	Swatch				-	NEW?	activateTheme
+MUTATION	CapabilityScope.tsx:11	jsx/click	Exception	恢复成跟随全局			-	NEW?	clearMcpOverride clearSkillOverride
+MUTATION	Composer.tsx:360	jsx/keydown	Composer				plan.mode session.send session.stop	REUSE?	steer submit queueFollowup setPlanMode
+MUTATION	EditConn.tsx:209	jsx/click	EditConn				-	NEW?	save
+MUTATION	EditConn.tsx:212	jsx/click	EditConn	重新向该端点获取模型列表，适用于端点新增或下架模型之后			-	NEW?	refetch
+MUTATION	Hooks.tsx:143	jsx/click	Hooks				-	NEW?	toggleRecipe
+MUTATION	Hooks.tsx:223	jsx/click	Expert				-	NEW?	save
+MUTATION	Hooks.tsx:239	jsx/click	Expert				-	NEW?	tryOne
+MUTATION	Hooks.tsx:258	jsx/click	Expert				-	NEW?	save
+MUTATION	Models.tsx:154	jsx/click	Models				-	NEW?	setModel
+MUTATION	Network.tsx:160	jsx/click	Network				network.diagnose	REUSE?	save
+MUTATION	Onboarding.tsx:175	jsx/keydown	Onboarding				-	NEW?	start connect
+MUTATION	Packages.tsx:84	jsx/click	Package				-	NEW?	
+MUTATION	Packages.tsx:90	jsx/click	Package				-	NEW?	
+MUTATION	Packages.tsx:104	jsx/click	Package				-	NEW?	setPluginEnabled
+MUTATION	Packages.tsx:121	jsx/click	Package				-	NEW?	removePlugin
+MUTATION	Pane.tsx:709	jsx/submit	PaneView				-	NEW?	steer submit queueFollowup
+MUTATION	panels/Context.tsx:222	jsx/keydown	DeclareWindow	上下文窗口（tokens）			-	NEW?	commit
+MUTATION	panels/Context.tsx:235	jsx/click	DeclareWindow				-	NEW?	commit
+MUTATION	panels/Extensions.tsx:65	jsx/click	Extensions				-	NEW?	invokeExtensionAction
+MUTATION	PaneTabs.tsx:102	jsx/click	PaneTabs				-	NEW?	close
+MUTATION	PaneTabs.tsx:121	jsx/click	PaneTabs				-	NEW?	
+MUTATION	PaneTabs.tsx:169	jsx/click	PaneTabs	关闭这个面板			-	NEW?	close
+MUTATION	PaneTabs.tsx:203	jsx/click	PaneTabs				-	NEW?	close
+MUTATION	PaneTabs.tsx:206	jsx/click	PaneTabs				-	NEW?	close
+MUTATION	PaneTabs.tsx:213	jsx/click	PaneTabs				-	NEW?	close
+MUTATION	Providers.tsx:211	jsx/click	Conn				provider.protocol provider.remove provider.thinking provider.web-search	REUSE?	check
+MUTATION	Queue.tsx:160	jsx/keydown	Queue				queue.cancel queue.edit queue.move queue.pause queue.refresh queue.retry	REUSE?	editQueued
+MUTATION	RemoteAsk.tsx:52	jsx/keydown	RemoteAsk				remote-ask.answer	REUSE?	answerRemote
+MUTATION	RemoteHosts.tsx:290	jsx/click	RemoteHostsView	不再列出 {path}			-	NEW?	drop
+MUTATION	Remotes.tsx:182	jsx/click	Remotes				-	NEW?	drop
+MUTATION	Remotes.tsx:198	jsx/click	Remotes	按 ssh_config 里的设置加进来			-	NEW?	save
+MUTATION	Remotes.tsx:335	jsx/click	Remotes				-	NEW?	save
+MUTATION	Roles.tsx:114	jsx/click	Slot				-	NEW?	setRole
+MUTATION	Roles.tsx:119	jsx/click	Slot				-	NEW?	setRole
+MUTATION	Rules.tsx:288	jsx/change	Rules	{rule} 的处理方式			permissions.mode permissions.recipe permissions.remove-rule	REUSE?	move
+MUTATION	Rules.tsx:330	jsx/keydown	AddRule				permissions.add-rule	REUSE?	add
+MUTATION	Sandbox.tsx:73	jsx/keydown	Sandbox				sandbox.add-write-root sandbox.remove-write-root	REUSE?	save
+MUTATION	Sandbox.tsx:107	jsx/keydown	Sandbox				sandbox.add-write-root sandbox.remove-write-root	REUSE?	save
+MUTATION	Settings.tsx:187	dom-event/keydown	Settings	keydown			chrome.preset plan.mode	REUSE?	
+MUTATION	Settings.tsx:286	jsx/mouseup	Settings				chrome.preset plan.mode	REUSE?	
+MUTATION	Settings.tsx:299	jsx/click	Settings				chrome.preset plan.mode	REUSE?	
+MUTATION	Settings.tsx:317	jsx/click	Settings				chrome.preset plan.mode	REUSE?	
+MUTATION	Settings.tsx:391	jsx/click	Settings				chrome.preset plan.mode	REUSE?	isolateWorkspace
+MUTATION	Settings.tsx:425	jsx/click	Settings				chrome.preset plan.mode	REUSE?	setEffort
+MUTATION	Settings.tsx:460	jsx/click	Settings				chrome.preset plan.mode	REUSE?	setApprovalMode
+MUTATION	Settings.tsx:522	jsx/click	Settings				chrome.preset plan.mode	REUSE?	
+MUTATION	Shell.tsx:89	jsx/click	Shell				-	NEW?	save
+MUTATION	Shell.tsx:93	jsx/click	Shell				-	NEW?	save
+MUTATION	Shell.tsx:138	jsx/click	Shell				-	NEW?	save
+MUTATION	Shell.tsx:142	jsx/click	Shell				-	NEW?	save
+MUTATION	SlottedView.tsx:42	jsx/click	SlottedView				-	NEW?	assignSurface
+MUTATION	SlottedView.tsx:53	jsx/click	SlottedView				-	NEW?	assignSurface
+MUTATION	Storage.tsx:242	jsx/change	Row				storage.move	REUSE?	planStorageMove
+MUTATION	Task.tsx:128	jsx/click	Task				-	NEW?	steer submit queueFollowup
+MUTATION	Transcript.tsx:665	jsx/click	Hero				-	NEW?	steer submit queueFollowup
+MUTATION	Versions.tsx:142	jsx/click	Versions				-	NEW?	pin
+MUTATION	Versions.tsx:153	jsx/click	Versions				-	NEW?	pin
+MUTATION	Versions.tsx:197	jsx/click	Versions				-	NEW?	goTo
+MUTATION	Versions.tsx:203	jsx/click	Versions				-	NEW?	pin
+MUTATION	Workspaces.tsx:476	jsx/click	Confirm				-	NEW?	dropWorkspace dropSession
+UNRESOLVED	AddProvider.tsx:125	jsx/click	AddProvider				-	AMBIGUOUS	
+UNRESOLVED	AddServer.tsx:72	jsx/click	AddServer				-	AMBIGUOUS	
+UNRESOLVED	AddServer.tsx:97	jsx/click	AddServer				-	AMBIGUOUS	
+UNRESOLVED	App.tsx:408	dom-event/click	App	click			chrome.settings inspector.toggle rail.toggle	AMBIGUOUS	
+UNRESOLVED	App.tsx:449	dom-event/keydown	App	keydown			chrome.settings inspector.toggle rail.toggle	AMBIGUOUS	
+UNRESOLVED	App.tsx:701	jsx/click	App				chrome.settings inspector.toggle rail.toggle	AMBIGUOUS	
+UNRESOLVED	App.tsx:708	jsx/click	App	收起度量栏			chrome.settings inspector.toggle rail.toggle	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:227	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:287	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:295	jsx/change	Appearance	界面大小微调			-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:312	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:400	jsx/change	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:414	jsx/change	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:428	jsx/change	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:443	jsx/change	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:478	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:494	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:510	jsx/click	Appearance				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:573	jsx/change	FontPick				-	AMBIGUOUS	
+UNRESOLVED	Appearance.tsx:588	jsx/click	FontPick	回到默认字体			-	AMBIGUOUS	
+UNRESOLVED	CapabilityScope.tsx:94	jsx/click	ScopePicker				-	AMBIGUOUS	
+UNRESOLVED	cards/AskCard.tsx:96	jsx/click	AskCard				ask.answer	AMBIGUOUS	
+UNRESOLVED	cards/AskCard.tsx:113	jsx/click	AskCard				ask.answer	AMBIGUOUS	
+UNRESOLVED	cards/AskCard.tsx:126	jsx/change	AskCard				ask.answer	AMBIGUOUS	
+UNRESOLVED	cards/DiffView.tsx:74	jsx/click	DiffView				-	AMBIGUOUS	
+UNRESOLVED	cards/DiffView.tsx:88	jsx/click	DiffView				-	AMBIGUOUS	
+UNRESOLVED	cards/DiffView.tsx:91	jsx/click	DiffView				-	AMBIGUOUS	
+UNRESOLVED	cards/DiffView.tsx:104	jsx/click	DiffView				-	AMBIGUOUS	
+UNRESOLVED	cards/ExtensionCard.tsx:126	jsx/change	ExtensionCard				-	AMBIGUOUS	
+UNRESOLVED	cards/ExtensionCard.tsx:130	jsx/click	ExtensionCard				-	AMBIGUOUS	
+UNRESOLVED	cards/ExtensionCard.tsx:175	jsx/click	Field				-	AMBIGUOUS	
+UNRESOLVED	cards/ExtensionCard.tsx:202	jsx/click	Field				-	AMBIGUOUS	
+UNRESOLVED	cards/ExtensionCard.tsx:228	jsx/change	Field				-	AMBIGUOUS	
+UNRESOLVED	cards/RememberCard.tsx:39	jsx/click	RememberCard				-	AMBIGUOUS	
+UNRESOLVED	cards/RewindControl.tsx:116	jsx/click	RewindControl	把工作区和对话退回这条消息之前			-	AMBIGUOUS	
+UNRESOLVED	cards/RewindControl.tsx:136	jsx/click	RewindControl				-	AMBIGUOUS	
+UNRESOLVED	cards/RewindControl.tsx:174	jsx/click	RewindControl				-	AMBIGUOUS	
+UNRESOLVED	cards/RewindControl.tsx:181	jsx/click	RewindControl				-	AMBIGUOUS	
+UNRESOLVED	cards/RewindControl.tsx:198	jsx/click	RewindControl				-	AMBIGUOUS	
+UNRESOLVED	cards/ToolOutput.tsx:119	jsx/click	Peek				-	AMBIGUOUS	
+UNRESOLVED	cards/ToolOutput.tsx:326	jsx/click	Clip				-	AMBIGUOUS	
+UNRESOLVED	ChangePreview.tsx:56	dom-event/keydown	ChangePreview	keydown			-	AMBIGUOUS	
+UNRESOLVED	ChangePreview.tsx:64	jsx/mouseup	ChangePreview				-	AMBIGUOUS	
+UNRESOLVED	ChangePreview.tsx:72	jsx/click	ChangePreview				-	AMBIGUOUS	
+UNRESOLVED	Compaction.tsx:79	jsx/keydown	Compaction				-	AMBIGUOUS	
+UNRESOLVED	Completion.tsx:177	jsx/mousedown	CompletionMenu				-	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:321	jsx/click	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:333	jsx/click	Composer	移除			plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:360	jsx/change	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:360	jsx/keyup	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:360	jsx/click	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:360	jsx/paste	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	Composer.tsx:446	jsx/change	Composer				plan.mode session.send session.stop	AMBIGUOUS	
+UNRESOLVED	CopyButton.tsx:39	jsx/click	CopyButton	复制这段回答			-	AMBIGUOUS	
+UNRESOLVED	dismiss.ts:30	dom-event/mousedown	useDismiss	mousedown			-	AMBIGUOUS	
+UNRESOLVED	dismiss.ts:31	dom-event/keydown	useDismiss	keydown			-	AMBIGUOUS	
+UNRESOLVED	EditConn.tsx:149	jsx/change	EditConn				-	AMBIGUOUS	
+UNRESOLVED	EditConn.tsx:216	jsx/click	EditConn				-	AMBIGUOUS	
+UNRESOLVED	filedrop.ts:133	dom-event/dragover	install	dragover			-	AMBIGUOUS	
+UNRESOLVED	filedrop.ts:153	dom-event/drop	install	drop			-	AMBIGUOUS	
+UNRESOLVED	Graph.tsx:31	jsx/click	Node				-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:123	dom-event/pointerup	drag	pointerup			-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:124	dom-event/pointercancel	drag	pointercancel			-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:168	jsx/pointerdown	Gutter				-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:168	jsx/dblclick	Gutter				-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:168	jsx/keydown	Gutter				-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:187	jsx/pointerdown	Gutter	收起			-	AMBIGUOUS	
+UNRESOLVED	Gutter.tsx:187	jsx/click	Gutter	收起			-	AMBIGUOUS	
+UNRESOLVED	Hooks.tsx:207	jsx/change	Expert				-	AMBIGUOUS	
+UNRESOLVED	Hooks.tsx:215	jsx/change	Expert				-	AMBIGUOUS	
+UNRESOLVED	Hooks.tsx:227	jsx/change	Expert				-	AMBIGUOUS	
+UNRESOLVED	Menu.tsx:68	dom-event/mousedown	Picker	mousedown			-	AMBIGUOUS	
+UNRESOLVED	Menu.tsx:69	dom-event/keydown	Picker	keydown			-	AMBIGUOUS	
+UNRESOLVED	ModelChoice.tsx:62	jsx/keydown	ModelChoice	搜索或添加模型			-	AMBIGUOUS	
+UNRESOLVED	ModelChoice.tsx:81	jsx/click	ModelChoice	选用 {name}			-	AMBIGUOUS	
+UNRESOLVED	ModelChoice.tsx:87	jsx/click	ModelChoice	内核不给这个模型发图片，改这里不会有效果			-	AMBIGUOUS	
+UNRESOLVED	ModelChoice.tsx:112	jsx/click	ModelChoice				-	AMBIGUOUS	
+UNRESOLVED	Nav.tsx:41	jsx/click	btn				-	AMBIGUOUS	
+UNRESOLVED	Network.tsx:115	jsx/change	Network				network.diagnose	AMBIGUOUS	
+UNRESOLVED	Onboarding.tsx:136	jsx/click	Onboarding				-	AMBIGUOUS	
+UNRESOLVED	Onboarding.tsx:151	jsx/change	Onboarding				-	AMBIGUOUS	
+UNRESOLVED	Onboarding.tsx:170	jsx/click	Onboarding				-	AMBIGUOUS	
+UNRESOLVED	Onboarding.tsx:175	jsx/change	Onboarding				-	AMBIGUOUS	
+UNRESOLVED	Onboarding.tsx:190	jsx/click	Onboarding				-	AMBIGUOUS	
+UNRESOLVED	Overflow.tsx:77	dom-event/scroll	Overflow	scroll			-	AMBIGUOUS	
+UNRESOLVED	Overflow.tsx:79	dom-event/keydown	Overflow	keydown			-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:579	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:583	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:587	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:590	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:593	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:671	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:717	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	Pane.tsx:727	jsx/click	PaneView				-	AMBIGUOUS	
+UNRESOLVED	panels/Context.tsx:76	dom-event/scroll	Context	scroll			-	AMBIGUOUS	
+UNRESOLVED	panels/Context.tsx:222	jsx/change	DeclareWindow	上下文窗口（tokens）			-	AMBIGUOUS	
+UNRESOLVED	panels/Cost.tsx:75	jsx/click	WalletRows	重新读一次余额			-	AMBIGUOUS	
+UNRESOLVED	panels/Mcp.tsx:37	jsx/click	Mcp	pending			-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:57	dom-event/wheel	PaneTabs	wheel			-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:64	dom-event/click	PaneTabs	click			-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:65	dom-event/keydown	PaneTabs	keydown			-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:121	jsx/contextmenu	PaneTabs				-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:143	jsx/click	PaneTabs				-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:143	jsx/keydown	PaneTabs				-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:187	jsx/click	PaneTabs				-	AMBIGUOUS	
+UNRESOLVED	PaneTabs.tsx:200	jsx/click	PaneTabs				-	AMBIGUOUS	
+UNRESOLVED	Providers.tsx:129	jsx/click	Providers				-	AMBIGUOUS	
+UNRESOLVED	Rail.tsx:148	dom-event/keydown	Rail	keydown			-	AMBIGUOUS	
+UNRESOLVED	Rail.tsx:200	dom-event/pointerup	drag	pointerup			-	AMBIGUOUS	
+UNRESOLVED	Rail.tsx:208	jsx/click	Rail	你说过的话			-	AMBIGUOUS	
+UNRESOLVED	Rail.tsx:219	jsx/pointerdown	Rail				-	AMBIGUOUS	
+UNRESOLVED	Rail.tsx:221	jsx/click	Rail				-	AMBIGUOUS	
+UNRESOLVED	RemoteDirs.tsx:102	dom-event/keydown	RemoteDirs	keydown			-	AMBIGUOUS	
+UNRESOLVED	RemoteDirs.tsx:111	jsx/mouseup	RemoteDirs				-	AMBIGUOUS	
+UNRESOLVED	RemoteDirs.tsx:128	jsx/submit	RemoteDirs				-	AMBIGUOUS	
+UNRESOLVED	RemoteDirs.tsx:166	jsx/click	RemoteDirs				-	AMBIGUOUS	
+UNRESOLVED	RemoteDirs.tsx:167	jsx/click	RemoteDirs				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:205	jsx/click	RemoteHostsView				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:223	jsx/click	RemoteHostsView	在 {name} 上挑一个目录打开			-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:251	jsx/click	RemoteHostsView				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:271	jsx/click	RemoteHostsView	在 {name} 下开一个新会话			-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:312	jsx/click	RemoteHostsView				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:329	jsx/click	RemoteHostsView				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:348	jsx/click	RemoteHostsView				-	AMBIGUOUS	
+UNRESOLVED	RemoteHosts.tsx:366	jsx/click	RemoteHostsView	这台主机还没有设默认工作区			-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:124	jsx/change	field				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:141	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:155	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:164	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:181	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:231	jsx/change	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:250	jsx/click	Remotes	把 {path} 设成默认			-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:258	jsx/click	Remotes	不再列出 {path}			-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:268	jsx/change	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:268	jsx/keydown	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:274	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:278	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:293	jsx/change	Remotes	第一次连接要在那台机器上装一个 reasonix			-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:308	jsx/change	Remotes	远端会话用哪台机器上配置的 Provider 和 Key			-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:318	jsx/change	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:326	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Remotes.tsx:341	jsx/click	Remotes				-	AMBIGUOUS	
+UNRESOLVED	Roles.tsx:93	jsx/click	Slot				-	AMBIGUOUS	
+UNRESOLVED	Settings.tsx:557	jsx/click	Settings				chrome.preset plan.mode	AMBIGUOUS	
+UNRESOLVED	Task.tsx:95	jsx/click	Task				-	AMBIGUOUS	
+UNRESOLVED	Task.tsx:120	jsx/click	Task				-	AMBIGUOUS	
+UNRESOLVED	Task.tsx:124	jsx/click	Task				-	AMBIGUOUS	
+UNRESOLVED	Timeline.tsx:54	jsx/click	Member				-	AMBIGUOUS	
+UNRESOLVED	Timeline.tsx:132	jsx/click	Row				-	AMBIGUOUS	
+UNRESOLVED	Trajectory.tsx:76	jsx/click	Trajectory				-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:159	dom-event/selectionchange	Transcript	selectionchange			-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:204	dom-event/wheel	Transcript	wheel			-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:205	dom-event/keydown	Transcript	keydown			-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:208	dom-event/scroll	Transcript	scroll			-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:586	jsx/submit	Row				-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:655	jsx/click	Hero				-	AMBIGUOUS	
+UNRESOLVED	Transcript.tsx:658	jsx/click	Hero				-	AMBIGUOUS	
+UNRESOLVED	Usage.tsx:84	jsx/pointermove	Plot				-	AMBIGUOUS	
+UNRESOLVED	Usage.tsx:180	jsx/click	Usage				-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:50	dom-event/keydown	WorkspacesView	keydown			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:154	jsx/click	WorkspacesView	打开或新建项目…			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:186	jsx/submit	WorkspacesView				-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:220	jsx/click	WorkspacesView				-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:245	jsx/click	WorkspacesView	在 {name} 下开一个新会话			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:260	jsx/click	WorkspacesView	从列表移除			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:298	jsx/click	WorkspacesView				-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:309	jsx/click	WorkspacesView	重命名这个会话			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:309	jsx/keydown	WorkspacesView	重命名这个会话			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:335	jsx/click	WorkspacesView	这次对话被外部程序改写时留下的副本			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:352	jsx/click	WorkspacesView	重命名这个会话			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:363	jsx/click	WorkspacesView	删除这个会话			-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:388	jsx/click	WorkspacesView				-	AMBIGUOUS	
+UNRESOLVED	Workspaces.tsx:398	jsx/click	WorkspacesView	删除这个会话			-	AMBIGUOUS	
+READ_ONLY	Account.tsx:106	jsx/click	Account				account.sign-in account.sign-out	REUSE?	
+READ_ONLY	AddPlugin.tsx:181	jsx/change	AddPlugin				-	NEW?	
+READ_ONLY	AddPlugin.tsx:194	jsx/click	AddPlugin				-	NEW?	
+READ_ONLY	AddProvider.tsx:101	jsx/change	AddProvider				-	NEW?	
+READ_ONLY	AddProvider.tsx:110	jsx/change	AddProvider				-	NEW?	
+READ_ONLY	AddProvider.tsx:145	jsx/change	AddProvider				-	NEW?	
+READ_ONLY	AddProvider.tsx:149	jsx/change	AddProvider				-	NEW?	
+READ_ONLY	AddServer.tsx:84	jsx/change	AddServer				-	NEW?	
+READ_ONLY	AddServer.tsx:130	jsx/click	AddServer				-	NEW?	
+READ_ONLY	AddServer.tsx:133	jsx/click	AddServer				-	NEW?	
+READ_ONLY	AddServer.tsx:141	jsx/click	AddServer				-	NEW?	
+READ_ONLY	AddServer.tsx:154	jsx/click	AddServer				-	NEW?	
+READ_ONLY	Appearance.tsx:367	jsx/click	Appearance				-	NEW?	
+READ_ONLY	CapabilityScope.tsx:33	jsx/click	ScopeBar				-	NEW?	
+READ_ONLY	CapabilityScope.tsx:78	jsx/change	ScopePicker				-	NEW?	
+READ_ONLY	CapabilityScope.tsx:86	jsx/click	ScopePicker				-	NEW?	
+READ_ONLY	cards/AskCard.tsx:76	jsx/click	AskCard				ask.answer	REUSE?	
+READ_ONLY	cards/DiffView.tsx:94	jsx/click	DiffView				-	NEW?	
+READ_ONLY	cards/DiffView.tsx:107	jsx/click	DiffView				-	NEW?	
+READ_ONLY	cards/ExtensionCard.tsx:109	jsx/click	ExtensionCard				-	NEW?	
+READ_ONLY	cards/ExtensionView.tsx:71	jsx/click	Node				-	NEW?	
+READ_ONLY	cards/ReadsCard.tsx:104	jsx/click	ReadsCard				-	NEW?	
+READ_ONLY	cards/RewindControl.tsx:71	dom-event/scroll	RewindControl	scroll			-	NEW?	
+READ_ONLY	ChangePreview.tsx:64	jsx/mousedown	ChangePreview				-	NEW?	
+READ_ONLY	Chrome.tsx:85	jsx/dblclick	Chrome				chrome.account chrome.focus chrome.preset chrome.settings chrome.theme	REUSE?	
+READ_ONLY	Compaction.tsx:79	jsx/change	Compaction				-	NEW?	
+READ_ONLY	Composer.tsx:458	jsx/click	Composer	添加图片			plan.mode session.send session.stop	REUSE?	
+READ_ONLY	EditConn.tsx:111	jsx/change	EditConn				-	NEW?	
+READ_ONLY	EditConn.tsx:115	jsx/change	EditConn				-	NEW?	
+READ_ONLY	EditConn.tsx:140	jsx/click	EditConn				-	NEW?	
+READ_ONLY	EditConn.tsx:161	jsx/change	EditConn				-	NEW?	
+READ_ONLY	EditConn.tsx:174	jsx/change	EditConn				-	NEW?	
+READ_ONLY	EditConn.tsx:185	jsx/change	EditConn				-	NEW?	
+READ_ONLY	filedrop.ts:146	dom-event/dragleave	install	dragleave			-	NEW?	
+READ_ONLY	Graph.tsx:162	jsx/click	Detail				-	NEW?	
+READ_ONLY	Gutter.tsx:122	dom-event/pointermove	drag	pointermove			-	NEW?	
+READ_ONLY	Hooks.tsx:116	jsx/click	Hooks				-	NEW?	
+READ_ONLY	Hooks.tsx:157	jsx/click	Hooks				-	NEW?	
+READ_ONLY	Hooks.tsx:252	jsx/click	Expert				-	NEW?	
+READ_ONLY	Memory.tsx:127	jsx/click	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:145	jsx/change	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:149	jsx/change	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:153	jsx/change	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:157	jsx/change	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:166	jsx/click	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:176	jsx/click	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	Memory.tsx:184	jsx/click	Memory				memory.forget memory.save	REUSE?	
+READ_ONLY	ModelChoice.tsx:62	jsx/change	ModelChoice	搜索或添加模型			-	NEW?	
+READ_ONLY	ModelChoice.tsx:97	jsx/click	ModelChoice				-	NEW?	
+READ_ONLY	Models.tsx:127	jsx/change	Models	搜索模型			-	NEW?	
+READ_ONLY	Network.tsx:73	jsx/click	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:101	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:111	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:125	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:129	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:141	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Network.tsx:147	jsx/change	Network				network.diagnose	REUSE?	
+READ_ONLY	Onboarding.tsx:232	jsx/click	Onboarding				-	NEW?	
+READ_ONLY	Packages.tsx:101	jsx/click	Package				-	NEW?	
+READ_ONLY	Packages.tsx:118	jsx/click	Package				-	NEW?	
+READ_ONLY	Pane.tsx:578	jsx/keydown	PaneView				-	NEW?	
+READ_ONLY	panels/Context.tsx:121	jsx/click	Context	这个窗口是谁填的说不准 —— 点一下改成这个模型真正的上限			-	NEW?	
+READ_ONLY	panels/Files.tsx:98	jsx/click	Files				-	NEW?	
+READ_ONLY	PaneTabs.tsx:101	jsx/click	PaneTabs				-	NEW?	
+READ_ONLY	PaneTabs.tsx:119	jsx/keydown	PaneTabs	会话面板			-	NEW?	
+READ_ONLY	PaneTabs.tsx:121	jsx/dblclick	PaneTabs				-	NEW?	
+READ_ONLY	Providers.tsx:208	jsx/click	Conn				provider.protocol provider.remove provider.thinking provider.web-search	REUSE?	
+READ_ONLY	Queue.tsx:160	jsx/change	Queue				queue.cancel queue.edit queue.move queue.pause queue.refresh queue.retry	REUSE?	
+READ_ONLY	Rail.tsx:94	dom-event/scroll	Rail	scroll			-	NEW?	
+READ_ONLY	Rail.tsx:199	dom-event/pointermove	drag	pointermove			-	NEW?	
+READ_ONLY	RemoteAsk.tsx:52	jsx/change	RemoteAsk				remote-ask.answer	REUSE?	
+READ_ONLY	RemoteDirs.tsx:35	jsx/click	DirRows				-	NEW?	
+READ_ONLY	RemoteDirs.tsx:111	jsx/mousedown	RemoteDirs				-	NEW?	
+READ_ONLY	RemoteDirs.tsx:135	jsx/click	RemoteDirs	上一级			-	NEW?	
+READ_ONLY	RemoteDirs.tsx:147	jsx/change	RemoteDirs	那台机器上的路径			-	NEW?	
+READ_ONLY	Rules.tsx:260	jsx/change	Rules				permissions.mode permissions.recipe permissions.remove-rule	REUSE?	
+READ_ONLY	Rules.tsx:262	jsx/click	Rules				permissions.mode permissions.recipe permissions.remove-rule	REUSE?	
+READ_ONLY	Rules.tsx:272	jsx/click	Rules				permissions.mode permissions.recipe permissions.remove-rule	REUSE?	
+READ_ONLY	Rules.tsx:325	jsx/change	AddRule	工具			permissions.add-rule	REUSE?	
+READ_ONLY	Rules.tsx:330	jsx/change	AddRule				permissions.add-rule	REUSE?	
+READ_ONLY	Rules.tsx:337	jsx/change	AddRule	处理方式			permissions.add-rule	REUSE?	
+READ_ONLY	Sandbox.tsx:73	jsx/change	Sandbox				sandbox.add-write-root sandbox.remove-write-root	REUSE?	
+READ_ONLY	Sandbox.tsx:107	jsx/change	Sandbox				sandbox.add-write-root sandbox.remove-write-root	REUSE?	
+READ_ONLY	Settings.tsx:286	jsx/mousedown	Settings				chrome.preset plan.mode	REUSE?	
+READ_ONLY	Settings.tsx:307	jsx/keydown	Settings	设置分类			chrome.preset plan.mode	REUSE?	
+READ_ONLY	Shell.tsx:129	jsx/change	Shell				-	NEW?	
+READ_ONLY	SlottedView.tsx:28	jsx/click	SlottedView	移动 {id} 的界面			-	NEW?	
+READ_ONLY	Storage.tsx:236	jsx/click	Row				storage.move	REUSE?	
+READ_ONLY	Storage.tsx:251	jsx/click	Row				storage.move	REUSE?	
+READ_ONLY	Timeline.tsx:100	jsx/click	Row				-	NEW?	
+READ_ONLY	Transcript.tsx:206	dom-event/pointerdown	Transcript	pointerdown			-	NEW?	
+READ_ONLY	Transcript.tsx:207	dom-event/touchmove	Transcript	touchmove			-	NEW?	
+READ_ONLY	Welcome.tsx:52	dom-event/keydown	Welcome	keydown			-	NEW?	
+READ_ONLY	Welcome.tsx:53	dom-event/pointerdown	Welcome	pointerdown			-	NEW?	
+READ_ONLY	Workspaces.tsx:171	jsx/change	WorkspacesView	搜索会话 / 项目			-	NEW?	
+READ_ONLY	Workspaces.tsx:171	jsx/keydown	WorkspacesView	搜索会话 / 项目			-	NEW?	
+READ_ONLY	Workspaces.tsx:180	jsx/click	WorkspacesView	清空			-	NEW?	
+READ_ONLY	Workspaces.tsx:417	jsx/click	WorkspacesView				-	NEW?	
+READ_ONLY	Workspaces.tsx:475	jsx/click	Confirm				-	NEW?	
