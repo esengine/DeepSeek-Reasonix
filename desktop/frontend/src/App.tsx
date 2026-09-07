@@ -1055,6 +1055,7 @@ export default function App() {
     ensureBlankTab,
     ensureBlankSurface,
     commitSingleSurfaceNavigation,
+    hasLocalTranscriptForTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -3159,7 +3160,14 @@ export default function App() {
       // can wait behind an older tab switch. That immediately invalidates any
       // in-flight blank/topic completion from a previous user intent.
       const navigationIntentSeq = noteNavigationIntent();
-      beginNavigationSurface(navigationIntentSeq);
+      // When the target already holds a locally-rendered transcript, switching
+      // back renders instantly and needs no navigation-surface mask. Skip the
+      // mask so the cached conversation is visible immediately; backend
+      // activation + tab-metadata refresh still run in the background. This is
+      // the "instant switch-back" path taken when the session is resident.
+      const targetCached = hasLocalTranscriptForTab(tabId);
+      const masked = !targetCached;
+      if (masked) beginNavigationSurface(navigationIntentSeq);
       return enqueueNavigationRequest(
         { seqRef: tabSwitchSeqRef, runningRef: tabSwitchRunningRef, pendingRef: tabSwitchPendingRef },
         { tabId, optimisticTab, navigationIntentSeq },
@@ -3174,12 +3182,12 @@ export default function App() {
               { afterMutation: true },
             );
           } finally {
-            settleNavigationSurface(request.navigationIntentSeq);
+            if (masked) settleNavigationSurface(request.navigationIntentSeq);
           }
         },
       );
     },
-    [beginNavigationSurface, enterChatViewForTabNavigation, isNavigationIntentCurrent, noteNavigationIntent, refreshTabMetas, settleNavigationSurface, switchRemoteTab, switchTab],
+    [beginNavigationSurface, enterChatViewForTabNavigation, hasLocalTranscriptForTab, isNavigationIntentCurrent, noteNavigationIntent, refreshTabMetas, settleNavigationSurface, switchRemoteTab, switchTab],
   );
 
   const revealBackgroundRuntime = useCallback(async (tabId: string): Promise<void> => {
