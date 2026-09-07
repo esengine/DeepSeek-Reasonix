@@ -74,13 +74,18 @@ export function screeningBlockers(reasons) {
 
 // The gate blocks on persistent drift: the final checkpoint displaced from
 // the warmed baseline, or the tail still moving. Intermediate excursions are
-// kept as observations so they still get an offline explanation.
-function counterDriftReason(values) {
+// kept as observations so they still get an offline explanation. When the
+// bench ends with an explicit "settled" resting-state sample, that sample is
+// the authoritative tail and every earlier checkpoint is intermediate.
+function counterDriftReason(values, phases) {
   const baseline = values[0];
   const final = values.at(-1);
+  const settledTail = phases.at(-1) === "settled";
   if (final !== baseline) return "persistent";
-  const tail = values.slice(1).slice(-3);
-  if (tail.some((value) => value !== final)) return "persistent";
+  if (!settledTail) {
+    const tail = values.slice(1).slice(-3);
+    if (tail.some((value) => value !== final)) return "persistent";
+  }
   return values.some((value) => value !== baseline) ? "transient" : null;
 }
 
@@ -90,16 +95,17 @@ export function attributeRetention(samples, cohorts = retainedCohorts(samples)) 
   const nativeCountersValid = samples.every(({ dom }) =>
     [dom?.nodes, dom?.jsEventListeners].every(value => Number.isSafeInteger(value) && value >= 0));
   const released = samples.every((sample) => sample.lifecycle.activeOperations === 0);
+  const phases = samples.map((sample) => sample.phase);
   const reasons = [];
   if (retained) reasons.push("persistent-render-cohort");
   if (!nativeCountersValid) reasons.push("invalid-native-counters");
   if (nativeCountersValid) {
-    const nodeDrift = counterDriftReason(samples.map((sample) => sample.dom.nodes));
-    const listenerDrift = counterDriftReason(samples.map((sample) => sample.dom.jsEventListeners));
+    const nodeDrift = counterDriftReason(samples.map((sample) => sample.dom.nodes), phases);
+    const listenerDrift = counterDriftReason(samples.map((sample) => sample.dom.jsEventListeners), phases);
     if (nodeDrift === "persistent" || listenerDrift === "persistent") reasons.push("post-gc-dom-or-listener-drift");
     else if (nodeDrift === "transient" || listenerDrift === "transient") reasons.push(TRANSIENT_EXCURSION_REASON);
   }
-  const subscriptionDrift = counterDriftReason(samples.map((sample) => sample.lifecycle.activeSubscriptions));
+  const subscriptionDrift = counterDriftReason(samples.map((sample) => sample.lifecycle.activeSubscriptions), phases);
   if (subscriptionDrift === "persistent") reasons.push("subscription-population-drift");
   else if (subscriptionDrift === "transient") reasons.push(TRANSIENT_EXCURSION_REASON);
   if (!released) reasons.push("active-operations");

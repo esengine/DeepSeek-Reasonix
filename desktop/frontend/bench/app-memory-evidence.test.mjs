@@ -87,6 +87,22 @@ test("a displaced final tail remains a persistent blocker", () => {
   assert.ok(result.reasons.includes("post-gc-dom-or-listener-drift"));
   assert.deepEqual(screeningBlockers(result.reasons), ["post-gc-dom-or-listener-drift"]);
 });
+test("an explicit settled tail sample is the authoritative resting state", () => {
+  // Round 5 CI data: the blip can land on the final round checkpoint; the
+  // quiescent sample after it proves recovery, so this must not block.
+  const blipBeforeSettled = Array.from({ length: 21 }, (_, index) => ({
+    ...sample([1, index + 2], index * 32),
+    dom: { nodes: 6049, jsEventListeners: index === 20 ? 614 : 512 },
+  }));
+  blipBeforeSettled.push({ ...sample([1, 23], 512), phase: "settled", dom: { nodes: 6049, jsEventListeners: 512 } });
+  const recovered = attributeRetention(blipBeforeSettled);
+  assert.ok(recovered.reasons.includes(TRANSIENT_EXCURSION_REASON));
+  assert.deepEqual(screeningBlockers(recovered.reasons), []);
+  // A settled tail that stays displaced is still a persistent blocker.
+  const stuck = blipBeforeSettled.map((sample_) => ({ ...sample_ }));
+  stuck[21] = { ...stuck[21], dom: { nodes: 6049, jsEventListeners: 614 } };
+  assert.deepEqual(screeningBlockers(attributeRetention(stuck).reasons), ["post-gc-dom-or-listener-drift"]);
+});
 test("native objects are not automatically detached DOM", () => {
   const heap = { snapshot: { meta: {
     node_fields: ["type", "name", "id", "self_size", "detachedness"],

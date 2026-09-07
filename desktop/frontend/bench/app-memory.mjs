@@ -150,6 +150,15 @@ async function runProcess(index) {
       }
       snapshots.push(await heapSnapshot(cdp, `${index}-${phase}`));
     }
+    // The classifier blocks on a displaced final tail, so the tail must be
+    // measured at rest: mid-cleanup listener blips (614 vs the 512 baseline)
+    // resolve a few tasks after the last navigation. Settle, GC, and take the
+    // quiescent confirmation sample the verdict actually judges.
+    await settleFrames(page, 12);
+    const settled = { phase: "settled", roundTrips: MIXED_CYCLES, ...await forceGc(cdp, page) };
+    samples.push(settled);
+    writeFileSync(path.join(artifacts, `${index}-samples.json`), JSON.stringify(samples, null, 2));
+    process.stdout.write(`[app-memory] process=${index} phase=settled nodes=${settled.dom.nodes} listeners=${settled.dom.jsEventListeners} tokens=${settled.lifecycle.liveRenderTokens}\n`);
     return {
       process: index,
       browser: browser.version(),
@@ -178,7 +187,7 @@ try {
     const result = await runProcess(index);
     result.attribution = attributeRetention(result.samples, result.cohorts);
     report.processes.push(result);
-    process.stdout.write(`[app-memory] process ${index}: ${JSON.stringify({ checks: result.checks, metrics: result.metrics })}\n`);
+    process.stdout.write(`[app-memory] process ${index}: ${JSON.stringify({ checks: result.checks, attribution: result.attribution, metrics: result.metrics })}\n`);
   }
 } catch (error) {
   report.failure = error.message;
