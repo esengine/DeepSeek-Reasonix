@@ -52,12 +52,16 @@ homebrew_casks:
     commit_author:
       name: reasonix
       email: reasonix@deepseek.com
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
-          end
+    # Homebrew 6.x deprecates the `postflight` Ruby block that
+    # `hooks.post.install` emits. Use the declarative `postflight_steps`
+    # stanza instead; it runs the xattr command from the staged directory so
+    # no Homebrew-specific Ruby interpolation is needed.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "reasonix"], chdir: :staged_path
+        end
+      end
 
 release:
   prerelease: auto
