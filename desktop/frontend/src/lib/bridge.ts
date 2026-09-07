@@ -674,8 +674,8 @@ export interface AppBindings extends ToolRecoveryBindings, ModelSettingsBindings
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
-  SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
-  // SetBypass is the legacy desktop name for YOLO/full-access tool auto-approval
+  SetTrayLocale(locale: "en" | "zh" | "zh-TW" | "es"): Promise<void>;
+  // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
   SetBypass(on: boolean): Promise<void>;
@@ -5056,9 +5056,10 @@ function makeMockApp(): AppBindings {
     async CancelTaskForTab() { return { schema_version: 1, command: "cancel", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async RequeueTaskForTab() { return { schema_version: 1, command: "requeue", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async OpenTaskSessionForTab() { return { schema_version: 1, command: "open_session", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
-    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
+    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW" | "es") {},
     async SetAutoApproveTools(_on: boolean) {
       await this.SetToolApprovalMode("workspace-write");
+>>>>>>> 853f85cd0 (feat(desktop): ship the Spanish UI dictionary and wire the es locale)
     },
     async SetBypass(on: boolean) {
       await this.SetAutoApproveTools(on);

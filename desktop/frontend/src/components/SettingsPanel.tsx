@@ -881,9 +881,10 @@ const COMPACT_RATIO_PRESETS = [
 const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
-const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
+const LANGUAGE_PREFS: LangPref[] = ["", "zh", "es", "en"];
 const TOOL_APPROVAL_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
 const BOT_TOOL_APPROVAL_MODES = ["", "read-only", "workspace-write", "danger-full-access"] as const;
+>>>>>>> 853f85cd0 (feat(desktop): ship the Spanish UI dictionary and wire the es locale)
 const BOT_QUEUE_MODES = ["steer", "followup", "collect", "interrupt"] as const;
 const BOT_QUEUE_DROPS = ["summarize", "old", "new"] as const;
 const BOT_ROUTE_CHAT_TYPES = ["", "dm", "group", "guild", "direct", "thread"] as const;
@@ -1707,7 +1708,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               disabled={busy}
               onClick={() => setLanguage(pref)}
             >
-              {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+              {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : pref === "es" ? "Español" : "English"}
             </button>
           ))}
         </SettingsOptions>
