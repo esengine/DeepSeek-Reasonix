@@ -1162,7 +1162,7 @@ export default function App() {
         action: e.kind,
         status: e.err ? "error" : "ok",
       });
-      if (e.kind === "turn_done") {
+      if (e.kind === "turn_done" || e.kind === "compaction_done") {
         setDockRefreshKey((v) => v + 1);
       }
       if (shouldPlayAttentionChimeForEvent(e, attentionChimeEvents.current)) {
