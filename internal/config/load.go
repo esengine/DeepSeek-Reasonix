@@ -2234,8 +2234,13 @@ func legacyDeepSeekProviderWideProjection(entry *ProviderEntry) ProviderEntry {
 	out.BalanceURL = normalizedDeepSeekBalanceURL(out.BalanceURL)
 	out.ResponsesMode = strings.TrimSpace(out.ResponsesMode)
 	out.Thinking = strings.TrimSpace(out.Thinking)
-	out.Effort = strings.TrimSpace(out.Effort)
 	out.VisionDetail = strings.TrimSpace(out.VisionDetail)
+
+	// Effort is a per-provider selection, not a family contract: /effort
+	// writes the level to the resolved (possibly retargeted) canonical member,
+	// so comparing it here would flip the family non-canonicalizable after the
+	// first write and strand the stored level on the next restart (#8337).
+	out.Effort = ""
 
 	// These fields can be represented independently for every model in the
 	// canonical provider. They are compared by legacyDeepSeekModelFieldsCompatible.
