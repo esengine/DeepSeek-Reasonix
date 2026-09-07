@@ -304,7 +304,13 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	messages := provider.SanitizeToolPairing(provider.ModelMessages(req.Messages))
 	body := map[string]any{"model": c.model, "stream": true}
 
-	effort := strings.ToLower(strings.TrimSpace(c.effort))
+	// A per-request EffortOverride (e.g. summary/compaction forcing thinking
+	// off) wins over the client's configured effort; otherwise client effort
+	// reaches every request it builds (#9613).
+	effort := strings.ToLower(strings.TrimSpace(req.EffortOverride))
+	if effort == "" {
+		effort = strings.ToLower(strings.TrimSpace(c.effort))
+	}
 	if c.vendor == "deepseek" && (strings.EqualFold(strings.TrimSpace(c.model), "deepseek-v4-flash") || strings.EqualFold(strings.TrimSpace(c.model), "deepseek-v4-pro")) {
 		if effort == "medium" || effort == "xhigh" {
 			effort = "high"
