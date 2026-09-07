@@ -66,3 +66,19 @@ func TestDefaultDesktopMetricsOn(t *testing.T) {
 		t.Fatal("desktop metrics explicit false = true, want false")
 	}
 }
+
+func TestDefaultSkillsSuppressWarningsOff(t *testing.T) {
+	if got := Default().Skills.SuppressWarnings; got {
+		t.Fatalf("default [skills].suppress_warnings = %v, want false", got)
+	}
+}
+
+func TestDecodeSkillsSuppressWarnings(t *testing.T) {
+	var cfg Config
+	if _, err := decodeTOMLBytes([]byte("[skills]\nsuppress_warnings = true\n"), &cfg); err != nil {
+		t.Fatalf("decode [skills].suppress_warnings: %v", err)
+	}
+	if !cfg.Skills.SuppressWarnings {
+		t.Fatal("decoded [skills].suppress_warnings = false, want true")
+	}
+}

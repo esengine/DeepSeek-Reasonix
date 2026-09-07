@@ -104,6 +104,7 @@ offline = false  # set true when outbound network access is unavailable; prevent
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide skills until /skill enable <name>
+# suppress_warnings = true                 # quiet noisy third-party skill loading warnings (missing description)
 
 [permissions]
 mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny

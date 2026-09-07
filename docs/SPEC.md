@@ -1082,6 +1082,7 @@ prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shel
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
+# suppress_warnings = true                 # quiet noisy third-party skill loading warnings (missing description)
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny

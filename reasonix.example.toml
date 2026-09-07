@@ -162,6 +162,7 @@ stalled_warning_seconds = 900   # heads-up once per background job after this ma
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disable_implicit_invocation = true             # keep /skill explicit; hide skill discovery and tools from the model
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
+# suppress_warnings = true                  # quiet noisy third-party skill loading warnings (missing description)
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
 # PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in

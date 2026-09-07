@@ -2078,6 +2078,7 @@ func TestSaveToExistingProjectRemovesResetSkillOverrides(t *testing.T) {
 		{name: "disabled skills", key: "disabled_skills", set: func(c *Config) { c.Skills.DisabledSkills = []string{"review"} }, reset: func(c *Config) { c.Skills.DisabledSkills = nil }},
 		{name: "implicit invocation", key: "disable_implicit_invocation", set: func(c *Config) { c.Skills.DisableImplicitInvocation = true }, reset: func(c *Config) { c.Skills.DisableImplicitInvocation = false }},
 		{name: "max depth", key: "max_depth", set: func(c *Config) { c.Skills.MaxDepth = 2 }, reset: func(c *Config) { c.Skills.MaxDepth = 0 }},
+		{name: "suppress warnings", key: "suppress_warnings", set: func(c *Config) { c.Skills.SuppressWarnings = true }, reset: func(c *Config) { c.Skills.SuppressWarnings = false }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2106,7 +2107,7 @@ func TestSaveToExistingProjectRemovesResetSkillOverrides(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reload reset project config: %v", err)
 			}
-			if fresh.Skills.Paths != nil || fresh.Skills.ExcludedPaths != nil || fresh.Skills.DisabledSkills != nil || fresh.Skills.DisableImplicitInvocation || fresh.Skills.MaxDepth != 0 {
+			if fresh.Skills.Paths != nil || fresh.Skills.ExcludedPaths != nil || fresh.Skills.DisabledSkills != nil || fresh.Skills.DisableImplicitInvocation || fresh.Skills.MaxDepth != 0 || fresh.Skills.SuppressWarnings {
 				t.Fatalf("reloaded skills retained reset override: %+v", fresh.Skills)
 			}
 		})
@@ -2127,6 +2128,7 @@ func TestSaveToExistingProjectPreservesExplicitSkillDefaults(t *testing.T) {
 	cfg.Skills.DisabledSkills = nil
 	cfg.Skills.DisableImplicitInvocation = false
 	cfg.Skills.MaxDepth = 0
+	cfg.Skills.SuppressWarnings = false
 	for _, key := range projectSkillKeys {
 		if err := cfg.KeepProjectSkillKey(key); err != nil {
 			t.Fatalf("keep %s: %v", key, err)

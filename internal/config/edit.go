@@ -1685,7 +1685,7 @@ func projectSkillsKeysToRemove(body string, c *Config) bool {
 	return false
 }
 
-var projectSkillKeys = [...]string{"paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth"}
+var projectSkillKeys = [...]string{"paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth", "suppress_warnings"}
 
 func projectSkillKeyIsDefault(c *Config, key string) bool {
 	if c != nil && c.keepsProjectSkillKey(key) {
@@ -1702,6 +1702,8 @@ func projectSkillKeyIsDefault(c *Config, key string) bool {
 		return !c.Skills.DisableImplicitInvocation
 	case "max_depth":
 		return c.Skills.MaxDepth == 0
+	case "suppress_warnings":
+		return !c.Skills.SuppressWarnings
 	default:
 		return false
 	}

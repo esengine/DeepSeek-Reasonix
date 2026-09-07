@@ -94,7 +94,7 @@ type Config struct {
 func (c *Config) KeepProjectSkillKey(key string) error {
 	key = strings.TrimSpace(key)
 	switch key {
-	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth", "suppress_warnings":
 	default:
 		return fmt.Errorf("unknown project skill key %q", key)
 	}
@@ -1058,13 +1058,16 @@ func (c *Config) NetworkProxyMode() string {
 // hides named skills from the agent prompt, slash invocation, and skill tools
 // while keeping them manageable. DisableImplicitInvocation keeps skills
 // discoverable to the host for explicit /skill use and management, but hides
-// their index and model-facing invocation tools.
+// their index and model-facing invocation tools. SuppressWarnings quiets
+// noisy third-party skill loading warnings (missing description) without
+// changing which skills load or their index content.
 type SkillsConfig struct {
 	Paths                     []string `toml:"paths"`
 	ExcludedPaths             []string `toml:"excluded_paths"`
 	DisabledSkills            []string `toml:"disabled_skills"`
 	DisableImplicitInvocation bool     `toml:"disable_implicit_invocation"`
 	MaxDepth                  int      `toml:"max_depth"`
+	SuppressWarnings          bool     `toml:"suppress_warnings"`
 }
 
 // ImplicitSkillInvocationEnabled reports whether the model may discover and
@@ -1115,6 +1118,13 @@ func (c *Config) SkillMaxDepth() int {
 		return maxDepth
 	}
 	return c.Skills.MaxDepth
+}
+
+// SkillSuppressWarnings reports whether noisy third-party skill loading
+// warnings should be quieted at startup. The zero value keeps the historical
+// behavior for old configs.
+func (c *Config) SkillSuppressWarnings() bool {
+	return c != nil && c.Skills.SuppressWarnings
 }
 
 // DisabledSkillNames returns valid disabled skill identifiers, preserving the

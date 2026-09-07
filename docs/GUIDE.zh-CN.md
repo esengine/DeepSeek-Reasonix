@@ -99,6 +99,7 @@ offline = false  # 无出站网络时设为 true，避免 agent 无效重试网�
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
 # excluded_paths = ["~/.agents/skills"]         # 隐藏约定来源，不删除目录
 # disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
+# suppress_warnings = true                 # 隐藏第三方 skill 加载时的噪音警告（如缺少 description）
 
 [permissions]
 mode  = "ask"                                # 无规则命中时 writer 的兜底：ask|allow|deny
