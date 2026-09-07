@@ -2087,7 +2087,7 @@ func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 // slash invocation: the child keeps an isolated session, while the caller owns
 // stdout rendering and exit status. readOnly selects the preview-safe runner
 // used by `reasonix subagent try`.
-func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, readOnly bool) (string, error) {
+func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, readOnly bool, maxSteps ...int) (string, error) {
 	name = strings.TrimSpace(name)
 	task = strings.TrimSpace(task)
 	if name == "" {
@@ -2120,7 +2120,11 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 	ctx = agent.WithResponseLanguagePreference(ctx, c.responseLanguage)
 	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
 	ctx = agent.WithSubagentDepth(ctx, 0)
-	answer, err := runner(ctx, sk, task, skill.SubagentRunOptions{HostInitiated: true})
+	explicitMaxSteps := 0
+	if len(maxSteps) > 0 {
+		explicitMaxSteps = maxSteps[0]
+	}
+	answer, err := runner(ctx, sk, task, skill.SubagentRunOptions{HostInitiated: true, MaxSteps: explicitMaxSteps})
 	if err != nil {
 		return "", err
 	}

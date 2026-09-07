@@ -93,10 +93,10 @@ git diff | reasonix subagent run reviewer --max-steps 20
 reasonix subagent list [--dir PATH]
 reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH)
   [--scope project|global] [--model REF] [--effort LEVEL]
-  [--tools a,b] [--color NAME] [--dir PATH]
+  [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
 reasonix subagent edit <name> [--description TEXT]
   [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL]
-  [--tools a,b] [--color NAME] [--dir PATH]
+  [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
 reasonix subagent delete <name> --yes [--dir PATH]
 reasonix subagent try <name> [--model REF] [--max-steps N] [--dir PATH] <task>
 reasonix subagent run <name> [--model REF] [--max-steps N] [--dir PATH] <task>
@@ -105,7 +105,7 @@ reasonix subagent run <name> [--model REF] [--max-steps N] [--dir PATH] <task>
 `edit` 只修改命令行中显式提供的字段。用显式空值清除可选字段：
 
 ```bash
-reasonix subagent edit reviewer --model= --effort= --tools= --color=
+reasonix subagent edit reviewer --model= --effort= --tools= --color= --max-steps=
 ```
 
 省略工具列表或将其清空，表示 Profile 不额外添加工具白名单；runner 原有的工具可用性、权限、
@@ -129,13 +129,17 @@ model: deepseek-pro
 effort: high
 read-only: true
 allowed-tools: [read_file, grep, bash]
+max-steps: 20
 ---
 你是专注的代码评审员。检查指定改动，只返回可执行的问题，并按严重程度排序。
 ```
 
 `invocation: manual` 表示模型不会从固定 Skill 索引中自动发现该 Profile，但用户仍可显式
 调用。`allowed-tools` 是 Profile 级工具白名单，不能绕过权限系统。`read-only: true`
-强制使用只读工具 registry（剥离写入工具）；省略/`false` 保持旧版默认可写。
+强制使用只读工具 registry（剥离写入工具）；省略/`false` 保持旧版默认可写。`max-steps`
+限制隔离子智能体在收尾前最多执行的工具步数；省略/`0` 继承引擎默认预算（父智能体步数
+额度的一半，最少 5 步）。较大的上限可以让深度调查跑得更久，代价是消耗更多 token，也
+更容易出现子智能体空转——请有意提高。
 
 也可以手写更丰富的 `runAs: subagent` Skill，例如使用自定义 Skill path 或额外 frontmatter。
 这些 Profile 可以被列出和调用，但 Profile 编辑器会拒绝编辑或删除以下内容：

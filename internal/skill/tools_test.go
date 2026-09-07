@@ -545,6 +545,22 @@ func TestInstallSkill(t *testing.T) {
 	if sk.RunAs != RunSubagent || sk.Model != "deepseek-pro" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
 		t.Errorf("frontmatter not round-tripped: runAs=%s model=%q effort=%q tools=%v", sk.RunAs, sk.Model, sk.Effort, sk.AllowedTools)
 	}
+	// A zero cap is accepted by the schema and remains unset in frontmatter.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"uncapped","description":"default","body":"x","runAs":"subagent","maxSteps":0}`)); err != nil {
+		t.Fatalf("zero maxSteps should be accepted: %v", err)
+	}
+	if capped, ok := st.Read("uncapped"); !ok || capped.MaxSteps != 0 {
+		t.Fatalf("zero maxSteps should round-trip as unset: %+v, found=%v", capped, ok)
+	}
+	for _, raw := range []string{
+		`{"name":"bad-scope","description":"d","body":"b","scope":"other"}`,
+		`{"name":"bad-runas","description":"d","body":"b","runAs":"other"}`,
+	} {
+		if _, err := tl.Execute(context.Background(), json.RawMessage(raw)); err == nil {
+			t.Fatalf("invalid enum should be rejected: %s", raw)
+		}
+	}
 	// Refuses overwrite.
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"deploy","description":"again","body":"x"}`)); err == nil {
@@ -554,6 +570,81 @@ func TestInstallSkill(t *testing.T) {
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"x","description":"","body":"b"}`)); err == nil {
 		t.Error("install_skill should require a description")
+	}
+}
+
+// TestInstallSkillRejectsReservedNames proves install_skill cannot create
+// skills that collide with the shared slash command namespace — the same
+// protection the CLI and desktop profile editors enforce. Nothing may be
+// written for a rejected name.
+func TestInstallSkillRejectsReservedNames(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil)
+
+	for _, raw := range []string{
+		`{"name":"clear","description":"reserved verb","body":"b"}`,
+		`{"name":"model","description":"reserved verb","body":"b"}`,
+		`{"name":"mcp__server__prompt","description":"mcp namespace","body":"b"}`,
+	} {
+		if _, err := tl.Execute(context.Background(), json.RawMessage(raw)); err == nil {
+			t.Errorf("install_skill should reject %s", raw)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".reasonix", "skills"))
+	if err == nil && len(entries) > 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("rejected installs must not create files, found %v", names)
+	}
+}
+
+// TestInstallSkillRejectsStoreCollisions proves the fallback guard blocks a
+// name that already exists as an installed skill, even with different casing
+// where the platform folds it (config.SkillNameKey).
+func TestInstallSkillRejectsStoreCollisions(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil)
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"my-tool","description":"first","body":"b"}`)); err != nil {
+		t.Fatalf("seed install: %v", err)
+	}
+	// Same normalized key as the existing skill: rejected by the namespace
+	// guard before CreateWithContent gets a chance to check the file.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"MY-TOOL","description":"collision","body":"b"}`)); err == nil {
+		t.Fatal("install_skill should reject a normalized collision with an installed skill")
+	}
+}
+
+// TestInstallSkillUsesHostNameGuard proves the host-injected guard (custom
+// commands, MCP prompts) runs before anything is written.
+func TestInstallSkillUsesHostNameGuard(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	tl := NewInstallSkillTool(st, nil).(*installSkillTool)
+	tl.SetNameGuard(func(name string) error {
+		if name == "deploy-review" {
+			return errors.New("%q already exists in the slash command namespace")
+		}
+		return nil
+	})
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"deploy-review","description":"command collision","body":"b"}`)); err == nil {
+		t.Fatal("host name guard should reject command-colliding install")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".reasonix", "skills", "deploy-review")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected install must not create files, stat err=%v", err)
+	}
+	// A name the guard accepts still installs.
+	if _, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"name":"accepted","description":"ok","body":"b"}`)); err != nil {
+		t.Fatalf("guard-approved install should succeed: %v", err)
 	}
 }
 
@@ -659,6 +750,55 @@ func TestRenderSkillFileOmitsColorAndInvocationByDefault(t *testing.T) {
 		if strings.Contains(content, unwanted) {
 			t.Errorf("rendered content should omit %q when unset:\n%s", unwanted, content)
 		}
+	}
+}
+
+func TestRenderSkillFileEmitsMaxSteps(t *testing.T) {
+	// A positive cap on a subagent renders as max-steps and round-trips.
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "capped",
+		Description: "capped subagent",
+		Body:        "be thorough",
+		RunAs:       RunSubagent,
+		MaxSteps:    32,
+	})
+	if !strings.Contains(content, "max-steps: 32\n") {
+		t.Fatalf("rendered content missing max-steps: 32:\n%s", content)
+	}
+	if _, err := st.CreateWithContent("capped", ScopeGlobal, content); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	sk, ok := st.Read("capped")
+	if !ok {
+		t.Fatal("skill not readable after CreateWithContent")
+	}
+	if sk.MaxSteps != 32 {
+		t.Errorf("round-trip MaxSteps = %d, want 32", sk.MaxSteps)
+	}
+
+	// Zero/unset omits the key entirely so the engine default applies.
+	plain := RenderSkillFile(SkillFileOptions{
+		Name:        "plain",
+		Description: "no cap",
+		Body:        "b",
+		RunAs:       RunSubagent,
+	})
+	if strings.Contains(plain, "max-steps:") {
+		t.Errorf("rendered content should omit max-steps when unset:\n%s", plain)
+	}
+
+	// Inline skills ignore MaxSteps.
+	inline := RenderSkillFile(SkillFileOptions{
+		Name:        "inline",
+		Description: "inline",
+		Body:        "b",
+		RunAs:       RunInline,
+		MaxSteps:    10,
+	})
+	if strings.Contains(inline, "max-steps:") {
+		t.Errorf("inline render should not emit max-steps:\n%s", inline)
 	}
 }
 

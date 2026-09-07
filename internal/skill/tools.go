@@ -23,6 +23,9 @@ import (
 type SubagentRunOptions struct {
 	ContinueFrom string
 	ForkFrom     string
+	// MaxSteps is an explicit final cap for this child run. Zero leaves the
+	// profile/config/default budget resolution unchanged.
+	MaxSteps int
 	// HostInitiated marks an explicit controller entry point such as
 	// /<subagent-skill>. It may still carry a synthetic call context for nested
 	// UI events, but that ephemeral event ID must not be persisted as though it
@@ -46,8 +49,16 @@ type SubagentOutputError interface {
 type ProfileResolver func(sk Skill) *event.Profile
 
 // InstalledHook fires after install_skill writes a new file, so a host can
-// refresh UI (e.g. a skills sidebar) without a reload. nil is fine.
+// refresh its skill index. nil is fine.
 type InstalledHook func(name, path string, scope Scope)
+
+// NameGuard validates a candidate skill name against the host's shared slash
+// namespace — reserved verbs, custom commands, MCP prompts, and already
+// installed skills (see ValidateSubagentProfileName). Without a guard,
+// install_skill falls back to the store's own skill list, which still blocks
+// reserved verbs, mcp__ names, and same-store collisions but cannot see
+// host-side command registries.
+type NameGuard func(name string) error
 
 // run_skill
 
@@ -546,12 +557,18 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 type installSkillTool struct {
 	store       *Store
 	onInstalled InstalledHook
+	nameGuard   NameGuard
 }
 
 // NewInstallSkillTool builds the skill-authoring tool. onInstalled may be nil.
+// Hosts that own additional slash-namespace occupants (custom commands, MCP
+// prompts) should attach a NameGuard via SetNameGuard.
 func NewInstallSkillTool(store *Store, onInstalled InstalledHook) tool.Tool {
 	return &installSkillTool{store: store, onInstalled: onInstalled}
 }
+
+// SetNameGuard installs the shared slash-namespace validator for install_skill.
+func (t *installSkillTool) SetNameGuard(guard NameGuard) { t.nameGuard = guard }
 
 func (*installSkillTool) Name() string   { return "install_skill" }
 func (*installSkillTool) ReadOnly() bool { return false }
@@ -575,10 +592,32 @@ func (*installSkillTool) Schema() json.RawMessage {
   "runAs":{"type":"string","enum":["inline","subagent"],"description":"inline (default) folds the body into the parent turn; subagent spawns an isolated child loop returning only its final answer (use for context-heavy work)."},
   "model":{"type":"string","description":"Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise."},
   "effort":{"type":"string","description":"Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise."},
-  "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."}
+  "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."},
+  "maxSteps":{"type":"integer","minimum":0,"description":"Optional step cap for runAs=subagent — how many tool-execution steps the child may take before being asked to wrap up. Omitted/0 inherits the engine's default budget. Ignored for inline."}
 },
 "required":["name","description","body"]
 }`)
+}
+
+// checkNameNamespace refuses names that would collide with the shared slash
+// command namespace before any file is written. The host guard (when set)
+// sees custom commands and MCP prompts; the fallback still enforces reserved
+// verbs, mcp__ names, and collisions with installed skills.
+func (t *installSkillTool) checkNameNamespace(name string) error {
+	if t.nameGuard != nil {
+		if err := t.nameGuard(name); err != nil {
+			return fmt.Errorf("install_skill: %w", err)
+		}
+		return nil
+	}
+	occupied := make([]string, 0, 8)
+	for _, sk := range t.store.List() {
+		occupied = append(occupied, sk.Name, sk.SlashName())
+	}
+	if err := ValidateSubagentProfileName(name, occupied); err != nil {
+		return fmt.Errorf("install_skill: %w", err)
+	}
+	return nil
 }
 
 func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
@@ -591,6 +630,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		Model        string   `json:"model"`
 		Effort       string   `json:"effort"`
 		AllowedTools []string `json:"allowedTools"`
+		MaxSteps     int      `json:"maxSteps"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -608,25 +648,37 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 	}
 
 	scope := ScopeGlobal
-	switch strings.TrimSpace(p.Scope) {
+	switch rawScope := strings.TrimSpace(p.Scope); rawScope {
+	case "":
+		if t.store.HasProjectScope() {
+			scope = ScopeProject
+		}
 	case "global":
 		scope = ScopeGlobal
 	case "project":
 		scope = ScopeProject
 	default:
-		if t.store.HasProjectScope() {
-			scope = ScopeProject
-		}
+		return "", fmt.Errorf("install_skill: unsupported scope %q; use 'project' or 'global'", p.Scope)
 	}
 	if scope == ScopeProject && !t.store.HasProjectScope() {
 		return "", fmt.Errorf("install_skill: scope='project' requires a workspace — use scope='global'")
 	}
 
 	runAs := RunInline
-	if strings.TrimSpace(p.RunAs) == "subagent" {
+	switch rawRunAs := strings.TrimSpace(p.RunAs); rawRunAs {
+	case "":
+		// inline is the backwards-compatible default.
+	case "inline":
+		runAs = RunInline
+	case "subagent":
 		runAs = RunSubagent
+	default:
+		return "", fmt.Errorf("install_skill: unsupported runAs %q; use 'inline' or 'subagent'", p.RunAs)
 	}
 
+	if err := t.checkNameNamespace(name); err != nil {
+		return "", err
+	}
 	content := RenderSkillFile(SkillFileOptions{
 		Name:         name,
 		Description:  desc,
@@ -635,6 +687,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		Model:        strings.TrimSpace(p.Model),
 		Effort:       strings.TrimSpace(p.Effort),
 		AllowedTools: p.AllowedTools,
+		MaxSteps:     p.MaxSteps,
 	})
 	path, err := t.store.CreateWithContent(name, scope, content)
 	if err != nil {
@@ -666,6 +719,10 @@ type SkillFileOptions struct {
 	Model        string // subagent-only; ignored when RunAs != RunSubagent
 	Effort       string // subagent-only; ignored when RunAs != RunSubagent
 	AllowedTools []string
+	// MaxSteps caps a subagent child's tool-execution steps (frontmatter
+	// `max-steps:`). Subagent-only; <= 0 omits it so the engine default budget
+	// applies.
+	MaxSteps int
 	// ReadOnly, when true, emits frontmatter read-only: true so the profile
 	// runs against the read-only registry. Omitted/false keeps the legacy
 	// writable default for older profiles.
@@ -691,6 +748,7 @@ type skillFileFrontmatter struct {
 	RunAs        string   `yaml:"runAs,omitempty"`
 	Model        string   `yaml:"model,omitempty"`
 	Effort       string   `yaml:"effort,omitempty"`
+	MaxSteps     int      `yaml:"max-steps,omitempty"`
 	ReadOnly     *bool    `yaml:"read-only,omitempty"`
 	AllowedTools []string `yaml:"allowed-tools,omitempty,flow"`
 }
@@ -711,6 +769,9 @@ func RenderSkillFile(opts SkillFileOptions) string {
 		fm.RunAs = string(RunSubagent)
 		fm.Model = strings.TrimSpace(opts.Model)
 		fm.Effort = strings.TrimSpace(opts.Effort)
+		if opts.MaxSteps > 0 {
+			fm.MaxSteps = opts.MaxSteps
+		}
 		if opts.ReadOnly {
 			v := true
 			fm.ReadOnly = &v

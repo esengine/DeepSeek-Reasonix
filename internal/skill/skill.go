@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/config"
@@ -83,6 +84,10 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// MaxSteps, when > 0, caps how many tool-execution steps a runAs=subagent
+	// child may take (frontmatter `max-steps:`). Zero (the default) inherits the
+	// engine's automatic budget (half the parent's step allowance, minimum 5).
+	MaxSteps int
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
 	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
@@ -885,6 +890,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
+		MaxSteps:     parseMaxSteps(fm[skillFrontmatterMaxSteps]),
 		ReadOnly:     parseBoolFrontmatter(fm[skillFrontmatterReadOnly]),
 		Triggers:     parseCSVFrontmatter(fm[skillFrontmatterTriggers]),
 		NegativeTriggers: parseCSVFrontmatter(
@@ -949,6 +955,7 @@ const (
 	skillFrontmatterAllowedTools     = "allowed-tools"
 	skillFrontmatterModel            = "model"
 	skillFrontmatterEffort           = "effort"
+	skillFrontmatterMaxSteps         = "max-steps"
 	skillFrontmatterReadOnly         = "read-only"
 	skillFrontmatterTriggers         = "triggers"
 	skillFrontmatterNegativeTriggers = "negative-triggers"
@@ -970,6 +977,7 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterAllowedTools,
 	skillFrontmatterModel,
 	skillFrontmatterEffort,
+	skillFrontmatterMaxSteps,
 	skillFrontmatterReadOnly,
 	skillFrontmatterTriggers,
 	skillFrontmatterNegativeTriggers,
@@ -1340,6 +1348,18 @@ func parseCost(raw string) string {
 	default:
 		return ""
 	}
+}
+
+// parseMaxSteps maps frontmatter to a positive sub-agent step cap. Values that
+// are absent, non-numeric, or <= 0 resolve to 0 (meaning "unset" — inherit the
+// engine's default budget), so an author can also explicitly write 0 to clear a
+// previously set cap.
+func parseMaxSteps(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // parseInvocation maps frontmatter to an invocation mode. Anything other than

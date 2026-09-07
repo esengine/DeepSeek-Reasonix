@@ -4494,3 +4494,31 @@ func TestBuildKeepsSourceConnectorAndSkillToolsDespiteSafeModeEnv(t *testing.T) 
 		}
 	}
 }
+
+func TestSubagentMaxSteps(t *testing.T) {
+	base := skill.Skill{Name: "explore"}
+	cfgWith := func(m map[string]int) *config.Config {
+		return &config.Config{Agent: config.AgentConfig{SubagentMaxSteps: m}}
+	}
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		sk   skill.Skill
+		want int
+	}{
+		{name: "nil config", cfg: nil, sk: base, want: 0},
+		{name: "no override", cfg: cfgWith(nil), sk: base, want: 0},
+		{name: "exact name", cfg: cfgWith(map[string]int{"explore": 8}), sk: base, want: 8},
+		{name: "zero value ignored", cfg: cfgWith(map[string]int{"explore": 0}), sk: base, want: 0},
+		{name: "alias resolved", cfg: cfgWith(map[string]int{"security_review": 12}), sk: skill.Skill{Name: "security-review"}, want: 12},
+		{name: "unrelated name", cfg: cfgWith(map[string]int{"research": 4}), sk: base, want: 0},
+		{name: "other profile wins", cfg: cfgWith(map[string]int{"explore": 8, "research": 4}), sk: base, want: 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := subagentMaxSteps(tt.cfg, tt.sk); got != tt.want {
+				t.Fatalf("subagentMaxSteps(cfg, %q) = %d, want %d", tt.sk.Name, got, tt.want)
+			}
+		})
+	}
+}

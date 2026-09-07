@@ -1229,10 +1229,25 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		case "review", "security-review", "security_review":
 			agent.AttachReviewReportTool(subReg)
 		}
-		steps := maxSteps
-		if steps > 0 {
-			if steps /= 2; steps < 5 {
-				steps = 5
+		steps := runOpts.MaxSteps
+		if steps <= 0 {
+			steps = sk.MaxSteps
+		}
+		if steps <= 0 {
+			// Built-in profiles have no frontmatter to carry a `max-steps:`
+			// line, so a per-name config override (subagent_max_steps) is the
+			// desktop UI's way to cap their steps. Custom frontmatter above
+			// already took precedence.
+			steps = subagentMaxSteps(cfg, sk)
+		}
+		if steps <= 0 {
+			// No per-skill cap: inherit the engine default budget (half the
+			// parent's step allowance, minimum 5) as before.
+			steps = maxSteps
+			if steps > 0 {
+				if steps /= 2; steps < 5 {
+					steps = 5
+				}
 			}
 		}
 		// Custom and named built-in profiles fully control their system prompt
@@ -1353,10 +1368,25 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			}
 		}
 		defer run.Release()
-		steps := maxSteps
-		if steps > 0 {
-			if steps /= 2; steps < 5 {
-				steps = 5
+		steps := runOpts.MaxSteps
+		if steps <= 0 {
+			steps = sk.MaxSteps
+		}
+		if steps <= 0 {
+			// Built-in profiles have no frontmatter to carry a `max-steps:`
+			// line, so a per-name config override (subagent_max_steps) is the
+			// desktop UI's way to cap their steps. Custom frontmatter above
+			// already took precedence.
+			steps = subagentMaxSteps(cfg, sk)
+		}
+		if steps <= 0 {
+			// No per-skill cap: inherit the engine default budget (half the
+			// parent's step allowance, minimum 5) as before.
+			steps = maxSteps
+			if steps > 0 {
+				if steps /= 2; steps < 5 {
+					steps = 5
+				}
 			}
 		}
 		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, subagentSkillOptions)
@@ -1524,7 +1554,23 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		addReadOnlySkillTools()
 		reg.Add(skill.NewRunSkillTool(skillStore, gateSubagentArm(opts.Ablation, skillRunner), skillProfile))
 		reg.Add(skill.NewReadSkillTool(skillStore))
-		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
+		// install_skill writes through the same shared slash namespace as the
+		// CLI/desktop profile editors; give it the identical validation so the
+		// model cannot install reserved verbs or command-colliding names.
+		installer := skill.NewInstallSkillTool(skillStore, nil)
+		if ig, ok := installer.(interface{ SetNameGuard(skill.NameGuard) }); ok {
+			ig.SetNameGuard(func(name string) error {
+				occupied := make([]string, 0, 2*len(skills)+len(cmds))
+				for _, sk := range skillStore.List() {
+					occupied = append(occupied, sk.Name, sk.SlashName())
+				}
+				for _, cmd := range cmds {
+					occupied = append(occupied, cmd.Name)
+				}
+				return skill.ValidateSubagentProfileName(name, occupied)
+			})
+		}
+		reg.Add(installer)
 		for _, t := range builtinSubagentTools(opts.Ablation, skillStore, skillRunner, skillProfile) {
 			reg.Add(t)
 		}
@@ -2236,6 +2282,24 @@ func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Agent.SubagentEffort)
+}
+
+// subagentMaxSteps returns the per-name step-cap override for a subagent skill,
+// if one is configured (config.toml [agent] subagent_max_steps). Built-in
+// profiles have no frontmatter file to carry a `max-steps:` line, so this map
+// is how the desktop UI caps their steps; it is intentionally lower priority
+// than a custom profile's own frontmatter max-steps, which the callers check
+// before falling back here.
+func subagentMaxSteps(cfg *config.Config, sk skill.Skill) int {
+	if cfg == nil {
+		return 0
+	}
+	for _, key := range SubagentModelKeys(sk.Name) {
+		if n := cfg.Agent.SubagentMaxSteps[key]; n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // SubagentModelKeys returns the cfg.Agent.SubagentModels/SubagentEfforts map

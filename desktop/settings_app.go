@@ -2297,6 +2297,14 @@ func deleteSubagentOverrideAliases(overrides map[string]string, name string) {
 	}
 }
 
+// deleteSubagentOverrideAliasesInt is the integer counterpart of
+// deleteSubagentOverrideAliases for cfg.Agent.SubagentMaxSteps.
+func deleteSubagentOverrideAliasesInt(overrides map[string]int, name string) {
+	for _, key := range boot.SubagentModelKeys(name) {
+		delete(overrides, key)
+	}
+}
+
 // SetSubagentProfileModel sets (or clears) a per-name model override for a
 // subagent — the only way to influence a built-in subagent's model in the
 // Subagents settings page, since built-ins have no editable frontmatter file
@@ -2364,6 +2372,35 @@ func (a *App) SetSubagentProfileEffort(name, level string) error {
 		}
 		deleteSubagentOverrideAliases(c.Agent.SubagentEfforts, name)
 		c.Agent.SubagentEfforts[name] = effort
+		return nil
+	})
+}
+
+// SetSubagentProfileMaxSteps sets (or clears, with 0) a per-name step-cap
+// override for a subagent — the only way to cap a built-in subagent's steps in
+// the Subagents settings page, since built-ins have no editable frontmatter
+// file to carry a `max-steps:` line. Writes into cfg.Agent.SubagentMaxSteps,
+// the same map internal/boot's subagentMaxSteps reads at dispatch time. Set
+// and clear both sweep the underscore/hyphen alias keys so a legacy alias
+// entry can neither shadow the new value nor survive a clear.
+func (a *App) SetSubagentProfileMaxSteps(name string, n int) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if n < 0 {
+		return fmt.Errorf("max steps must be non-negative")
+	}
+	return a.applyConfigChange(func(c *config.Config) error {
+		if n == 0 {
+			deleteSubagentOverrideAliasesInt(c.Agent.SubagentMaxSteps, name)
+			return nil
+		}
+		if c.Agent.SubagentMaxSteps == nil {
+			c.Agent.SubagentMaxSteps = map[string]int{}
+		}
+		deleteSubagentOverrideAliasesInt(c.Agent.SubagentMaxSteps, name)
+		c.Agent.SubagentMaxSteps[name] = n
 		return nil
 	})
 }

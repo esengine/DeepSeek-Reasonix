@@ -1305,6 +1305,13 @@ type AgentConfig struct {
 	SubagentModels      map[string]string `toml:"subagent_models"`
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
+	// SubagentMaxSteps is an optional per-skill cap on how many tool-execution
+	// steps a runAs=subagent profile's child may take (frontmatter `max-steps:`
+	// for custom profiles; this map is the only way to cap built-in profiles,
+	// which have no editable frontmatter file). 0/omitted inherits the engine
+	// default budget. Takes precedence over the global budget but never over a
+	// profile's own frontmatter max-steps.
+	SubagentMaxSteps map[string]int `toml:"subagent_max_steps"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
 	// TaskCostBudget lands a task on one summary once it spends this much.
 	TaskCostBudget float64 `toml:"task_cost_budget"`

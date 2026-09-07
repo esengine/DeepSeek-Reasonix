@@ -7102,6 +7102,10 @@ type SkillView struct {
 	Model        string   `json:"model,omitempty"`
 	Effort       string   `json:"effort,omitempty"`
 	AllowedTools []string `json:"allowedTools,omitempty"`
+	// MaxSteps mirrors frontmatter max-steps for runAs=subagent skills (0 =
+	// unset, inherits the engine default). The subagent profile editor reads it
+	// back so an existing cap survives an edit.
+	MaxSteps int `json:"maxSteps,omitempty"`
 	// ReadOnly mirrors frontmatter read-only; omitted/false keeps the legacy
 	// writable default for older profiles.
 	ReadOnly bool   `json:"readOnly,omitempty"`
@@ -7120,6 +7124,12 @@ type SkillView struct {
 	// built-ins have no editable frontmatter file to carry Model/Effort.
 	ConfiguredModel  string `json:"configuredModel,omitempty"`
 	ConfiguredEffort string `json:"configuredEffort,omitempty"`
+	// ConfiguredMaxSteps is the per-name step-cap override from
+	// cfg.Agent.SubagentMaxSteps (internal/boot's subagentMaxSteps reads the
+	// same map at dispatch time). >0 means the built-in subagent's steps are
+	// capped; 0/omitted inherits the engine default. Built-ins have no
+	// frontmatter file, so this is the only way the desktop UI caps them.
+	ConfiguredMaxSteps int `json:"configuredMaxSteps,omitempty"`
 }
 
 type SkillRootSkillView struct {
@@ -7559,6 +7569,7 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 
 	disabled := map[string]bool{}
 	var configuredModels, configuredEfforts map[string]string
+	var configuredMaxSteps map[string]int
 	if cfg, err := config.LoadForRootReadOnly(workspaceRoot); err == nil {
 		out.AllowImplicitInvocation = cfg.ImplicitSkillInvocationEnabled()
 		for _, name := range cfg.Skills.DisabledSkills {
@@ -7568,6 +7579,7 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 		}
 		configuredModels = cfg.Agent.SubagentModels
 		configuredEfforts = cfg.Agent.SubagentEfforts
+		configuredMaxSteps = cfg.Agent.SubagentMaxSteps
 	}
 	out.SkillRoots = a.cachedSkillRootsView(workspaceRoot)
 	for _, s := range ctrl.AllSkills() {
@@ -7579,12 +7591,14 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 			Model:            s.Model,
 			Effort:           s.Effort,
 			AllowedTools:     append([]string{}, s.AllowedTools...),
+			MaxSteps:         s.MaxSteps,
 			ReadOnly:         s.ReadOnly,
 			Color:            s.Color,
 			Invocation:       "/" + s.SlashName(),
 			InvocationMode:   s.Invocation,
 			ConfiguredModel:  subagentOverrideFor(configuredModels, s.Name),
 			ConfiguredEffort: subagentOverrideFor(configuredEfforts, s.Name),
+			ConfiguredMaxSteps: subagentOverrideForInt(configuredMaxSteps, s.Name),
 		}
 		// Body feeds only the Subagents editor's prompt prefill. Inline skills
 		// fold references/ into Body at load time (hundreds of KB for a rich
@@ -7624,6 +7638,18 @@ func subagentOverrideFor(overrides map[string]string, name string) string {
 		}
 	}
 	return ""
+}
+
+// subagentOverrideForInt is the integer counterpart of subagentOverrideFor for
+// cfg.Agent.SubagentMaxSteps: it returns the first positive override for name
+// across the same underscore/hyphen alias key set dispatch reads.
+func subagentOverrideForInt(overrides map[string]int, name string) int {
+	for _, key := range boot.SubagentModelKeys(name) {
+		if n := overrides[key]; n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // AvailableSubagentTools lists the tool names a subagent profile's

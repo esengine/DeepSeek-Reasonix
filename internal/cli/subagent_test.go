@@ -86,6 +86,65 @@ func TestSubagentProfileCLIManageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSubagentProfileCLIMaxStepsRoundTrip(t *testing.T) {
+	isolateCLIConfigHome(t)
+	project := t.TempDir()
+	original, _ := os.Getwd()
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(original) })
+
+	if rc := subagentCommand([]string{
+		"create", "digger", "--description", "deep dig", "--prompt", "go deep",
+		"--max-steps", "32",
+	}); rc != 0 {
+		t.Fatalf("create rc = %d", rc)
+	}
+	store := newCLISubagentStore()
+	sk, ok := store.Read("digger")
+	if !ok {
+		t.Fatal("created profile was not discovered")
+	}
+	if sk.MaxSteps != 32 {
+		t.Fatalf("created MaxSteps = %d, want 32", sk.MaxSteps)
+	}
+
+	if rc := subagentCommand([]string{"edit", "digger", "--max-steps", "16"}); rc != 0 {
+		t.Fatalf("edit rc = %d", rc)
+	}
+	sk, _ = store.Read("digger")
+	if sk.MaxSteps != 16 {
+		t.Fatalf("edited MaxSteps = %d, want 16", sk.MaxSteps)
+	}
+
+	// An explicit empty value clears the cap back to the engine default.
+	if rc := subagentCommand([]string{"edit", "digger", "--max-steps="}); rc != 0 {
+		t.Fatalf("clear rc = %d", rc)
+	}
+	sk, _ = store.Read("digger")
+	if sk.MaxSteps != 0 {
+		t.Fatalf("cleared MaxSteps = %d, want 0 (unset)", sk.MaxSteps)
+	}
+}
+
+func TestParseCLIMaxSteps(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    int
+		wantErr bool
+	}{
+		{"", 0, false}, {"0", 0, false}, {"1", 1, false}, {" 20 ", 20, false}, {"999", 999, false},
+		{"-3", 0, true}, {"abc", 0, true}, {"1.5", 0, true},
+	}
+	for _, tc := range cases {
+		got, err := parseCLIMaxSteps(tc.raw)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("parseCLIMaxSteps(%q) = %d, %v; want %d, error=%v", tc.raw, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
 func TestSubagentListIncludesQualifiedPluginAgents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
@@ -205,6 +264,24 @@ func TestSubagentProfileCLIRejectsReservedAndCustomCommandNames(t *testing.T) {
 		if !strings.Contains(errOut, "slash command namespace") {
 			t.Fatalf("create %q output = %q", name, errOut)
 		}
+	}
+}
+
+func TestSubagentProfileCLIEditBuiltinMaxStepsOverride(t *testing.T) {
+	isolateCLIConfigHome(t)
+	if rc := subagentCommand([]string{"edit", "review", "--max-steps", "20"}); rc != 0 {
+		t.Fatalf("builtin max-steps edit rc = %d", rc)
+	}
+	loaded := config.LoadForEdit(config.UserConfigPath())
+	if got := loaded.Agent.SubagentMaxSteps["review"]; got != 20 {
+		t.Fatalf("review max-steps override = %d, want 20", got)
+	}
+	if rc := subagentCommand([]string{"edit", "review", "--max-steps=0"}); rc != 0 {
+		t.Fatalf("builtin max-steps clear rc = %d", rc)
+	}
+	loaded = config.LoadForEdit(config.UserConfigPath())
+	if got := loaded.Agent.SubagentMaxSteps["review"]; got != 0 {
+		t.Fatalf("review max-steps clear = %d, want 0", got)
 	}
 }
 
