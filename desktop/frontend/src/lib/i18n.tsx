@@ -18,7 +18,6 @@ export type Locale = "en" | "zh" | "zh-TW" | "es";
 export type { DictKey };
 // LangPref is the stored preference: "" means auto-detect from the OS.
 export type LangPref = "" | "en" | "zh" | "zh-TW" | "es";
-export const LANGUAGE_PREFS: LangPref[] = ["", "en", "zh", "es"];
 
 type Dict = Record<DictKey, string>;
 
