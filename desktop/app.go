@@ -31,6 +31,7 @@ import (
 
 	"reasonix/desktop/internal/instanceidentity"
 	"reasonix/internal/agent"
+	"reasonix/internal/servepool"
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
 	"reasonix/internal/botruntime"
@@ -355,6 +356,9 @@ type App struct {
 	// window releases only its registration, while the remote Serve and the SSH
 	// connection keep running. The child deliberately skips local runtimes.
 	remoteWindows          *remoteWindowRegistry
+	servePool              *servepool.Manager
+	gatewaySrv             *http.Server
+	gatewayAddr            string
 	remoteWindowLifecycles remoteWindowLifecycleRegistry
 	remoteWindowOpener     func(remoteWindowLaunch) error // test-only injection
 	// Remote project tabs are in-app surfaces bound to a remote workspace.
@@ -470,6 +474,9 @@ func NewApp() *App {
 	a.webView2Recovery = newWebView2RecoveryCoordinator(a)
 	a.desktopShell.linuxRecovery = newLinuxWebKitRecoveryCoordinator(a)
 	a.desktopShell.coordinator = newDesktopShellCoordinator(a)
+	a.servePool = nil
+	a.gatewayAddr = ""
+	a.gatewaySrv = nil
 	a.workspaceHub = newWorkspaceChangeHub(a)
 	a.terminals = newTerminalManager(a)
 	a.botBridge = a.newBotBridge()
@@ -511,6 +518,8 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	installSystemQuitHook()
+	a.startServePool(ctx)
+	a.startTray()
 	a.enableDeferredRebuildRetry()
 	a.startHistoryIndexMigration()
 	a.goSafe("repairDesktopIconIntegration", func() {
