@@ -639,7 +639,7 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
-  SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
+  SetTrayLocale(locale: "en" | "zh" | "zh-TW" | "es"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -4933,7 +4933,7 @@ function makeMockApp(): AppBindings {
           settings.statusBarItems = normalizeStatusBarItems(items);
         },
         async SetDesktopLanguage(lang: string) {
-          settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
+          settings.desktopLanguage = lang === "en" || lang === "zh" || lang === "zh-TW" || lang === "es" ? lang : "";
         },
         async SetDesktopCurrency(currency: string) {
           settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";
@@ -5099,7 +5099,7 @@ function makeMockApp(): AppBindings {
     async SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto" | "expanded") { if (!(["hidden", "summary", "auto", "expanded"] as string[]).includes(mode)) throw new Error("invalid reasoning display mode"); settings.reasoningDisplayMode = mode; settings.reasoningDisplayModeExplicit = true; },
         async SetExpandThinking(on: boolean) { settings.reasoningDisplayMode = on ? "auto" : "summary"; settings.reasoningDisplayModeExplicit = true; },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
-          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
+          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" || language === "es" ? language : "";
           if (!settings.desktopTheme && !settings.desktopThemeStyle) {
             settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
             settings.desktopThemeStyle = style;
@@ -5149,7 +5149,7 @@ function makeMockApp(): AppBindings {
     async CancelTaskForTab() { return { schema_version: 1, command: "cancel", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async RequeueTaskForTab() { return { schema_version: 1, command: "requeue", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async OpenTaskSessionForTab() { return { schema_version: 1, command: "open_session", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
-    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
+    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW" | "es") {},
     async SetAutoApproveTools(on: boolean) {
       await this.SetToolApprovalMode(on ? "yolo" : "ask");
     },
