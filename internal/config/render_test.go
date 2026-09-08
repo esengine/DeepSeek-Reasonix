@@ -775,6 +775,26 @@ func TestNotificationsDefaultsKeepEventSwitchesEnabled(t *testing.T) {
 	}
 }
 
+func TestSubagentMaxStepsConfigRoundTrip(t *testing.T) {
+	cfg := Default()
+	cfg.Agent.SubagentMaxSteps = map[string]int{"review": 20, "security_review": 32}
+	user := RenderTOMLForScope(cfg, RenderScopeUser)
+	if !strings.Contains(user, `subagent_max_steps = { "review" = 20, "security_review" = 32 }`) {
+		t.Fatalf("user render omitted subagent_max_steps:\n%s", user)
+	}
+	var decoded Config
+	if _, err := toml.Decode(user, &decoded); err != nil {
+		t.Fatalf("decode user render: %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Agent.SubagentMaxSteps, cfg.Agent.SubagentMaxSteps) {
+		t.Fatalf("subagent max steps did not round-trip: got=%v want=%v", decoded.Agent.SubagentMaxSteps, cfg.Agent.SubagentMaxSteps)
+	}
+	project := RenderTOMLForScope(cfg, RenderScopeProject)
+	if strings.Contains(project, "subagent_max_steps") {
+		t.Fatalf("project render should omit user-global subagent max steps:\n%s", project)
+	}
+}
+
 func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c := Default()
 	c.Language = "zh"

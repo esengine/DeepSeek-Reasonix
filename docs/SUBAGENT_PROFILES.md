@@ -105,10 +105,10 @@ does not implicitly interpret `/<profile>` syntax.
 reasonix subagent list [--dir PATH]
 reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH)
   [--scope project|global] [--model REF] [--effort LEVEL]
-  [--tools a,b] [--color NAME] [--dir PATH]
+  [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
 reasonix subagent edit <name> [--description TEXT]
   [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL]
-  [--tools a,b] [--color NAME] [--dir PATH]
+  [--tools a,b] [--color NAME] [--max-steps N] [--dir PATH]
 reasonix subagent delete <name> --yes [--dir PATH]
 reasonix subagent try <name> [--model REF] [--max-steps N] [--dir PATH] <task>
 reasonix subagent run <name> [--model REF] [--max-steps N] [--dir PATH] <task>
@@ -144,6 +144,7 @@ model: deepseek-pro
 effort: high
 read-only: true
 allowed-tools: [read_file, grep, bash]
+max-steps: 20
 ---
 You are a focused code reviewer. Inspect the requested changes and return only
 actionable findings, ordered by severity.
@@ -153,7 +154,11 @@ actionable findings, ordered by severity.
 `session-context` Skills catalog; users can still invoke the profile explicitly. `allowed-tools` is a
 profile-level allowlist, not a way to bypass permissions. `read-only: true`
 forces the read-only tool registry (writer tools stripped); omitted/`false`
-keeps the legacy writable default.
+keeps the legacy writable default. `max-steps` caps how many tool-execution
+steps the isolated child may take before wrapping up; omitted/`0` inherits the
+engine's default budget (half the parent's step allowance, minimum 5). A larger
+cap lets a deep investigation run longer, at the cost of more tokens and a
+higher chance of the child spinning without progress — raise it deliberately.
 
 You may hand-author richer `runAs: subagent` Skills, including custom Skill
 paths and extra frontmatter. They can be listed and invoked, but the profile

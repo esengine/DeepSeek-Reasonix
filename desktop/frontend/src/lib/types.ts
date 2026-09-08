@@ -1308,6 +1308,7 @@ export interface SkillView {
   model?: string;
   effort?: string;
   allowedTools?: string[];
+  maxSteps?: number;
   readOnly?: boolean;
   color?: string;
   invocation?: string;
@@ -1315,6 +1316,7 @@ export interface SkillView {
   body?: string;
   configuredModel?: string;
   configuredEffort?: string;
+  configuredMaxSteps?: number;
 }
 export interface SkillRootSkillView {
   name: string;
@@ -1360,6 +1362,7 @@ export interface SubagentProfileInput {
   model?: string;
   effort?: string;
   allowedTools?: string[];
+  maxSteps?: number;
   readOnly?: boolean;
   scope?: "project" | "global";
 }

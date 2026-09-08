@@ -16,6 +16,11 @@ import { Tooltip } from "./Tooltip";
 
 const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
+// Step caps above this threshold trigger an inline (non-blocking) warning that
+// the subagent may spin without progress and burn tokens; the value is still
+// accepted so advanced users keep full control.
+const MAX_STEPS_WARNING_THRESHOLD = 50;
+
 function subagentScopeLabel(scope: string, t: ReturnType<typeof useT>): string {
   switch (scope) {
     case "builtin":
@@ -227,9 +232,11 @@ export function SubagentsSettingsPage({ s, onUseInChat }: { s: SettingsView; onU
                     busy={busy}
                     onSetModel={(ref) => void mutate(() => app.SetSubagentProfileModel(sk.name, ref))}
                     onSetEffort={(level) => void mutate(() => app.SetSubagentProfileEffort(sk.name, level))}
+                    onSetMaxSteps={(n) => void mutate(() => app.SetSubagentProfileMaxSteps(sk.name, n))}
                     onReset={() => void mutate(async () => {
                       if (sk.configuredModel) await app.SetSubagentProfileModel(sk.name, "");
                       if (sk.configuredEffort) await app.SetSubagentProfileEffort(sk.name, "");
+                      if (sk.configuredMaxSteps) await app.SetSubagentProfileMaxSteps(sk.name, 0);
                     })}
                     onUseInChat={onUseInChat}
                   />
@@ -352,6 +359,7 @@ function BuiltinSubagentRow({
   busy,
   onSetModel,
   onSetEffort,
+  onSetMaxSteps,
   onReset,
   onUseInChat,
 }: {
@@ -360,6 +368,7 @@ function BuiltinSubagentRow({
   busy: boolean;
   onSetModel: (ref: string) => void;
   onSetEffort: (level: string) => void;
+  onSetMaxSteps: (n: number) => void;
   onReset: () => void;
   onUseInChat: (command: string) => void;
 }) {
@@ -367,7 +376,19 @@ function BuiltinSubagentRow({
   const toolsLabel = toolsSummaryLabel(skill.allowedTools, t);
   const inheritedModel = shortModelRef(toRef(s.subagentModel || s.defaultModel, s)) || t("common.auto");
   const inheritedEffort = s.subagentEffort || t("common.auto");
-  const overridden = Boolean(skill.configuredModel || skill.configuredEffort);
+  const overridden = Boolean(skill.configuredModel || skill.configuredEffort || skill.configuredMaxSteps);
+  const [maxStepsInput, setMaxStepsInput] = useState(String(skill.configuredMaxSteps ?? 0));
+  useEffect(() => {
+    setMaxStepsInput(String(skill.configuredMaxSteps ?? 0));
+  }, [skill.configuredMaxSteps]);
+  const configuredSteps = skill.configuredMaxSteps ?? 0;
+  const commitMaxSteps = () => {
+    const raw = maxStepsInput.trim();
+    const n = raw === "" ? 0 : Number(raw);
+    const clamped = Number.isInteger(n) && n >= 0 ? n : 0;
+    setMaxStepsInput(String(clamped));
+    if (clamped !== configuredSteps) onSetMaxSteps(clamped);
+  };
   return (
     <div className="cap-skill-card subagents-builtin-card">
       <div className="cap-skill-card__top">
@@ -409,6 +430,41 @@ function BuiltinSubagentRow({
             ariaLabel={`${skill.name}: ${t("subagents.effort")}`}
             onPick={onSetEffort}
           />
+        </div>
+        <div className="subagents-builtin-overrides__field">
+          <span className="subagents-builtin-overrides__field-label">{t("subagents.maxSteps")}</span>
+          <input
+            className="mem-input subagents-maxsteps-input"
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            placeholder={t("subagents.maxStepsPlaceholder")}
+            aria-label={`${skill.name}: ${t("subagents.maxSteps")}`}
+            value={maxStepsInput}
+            disabled={busy}
+            onChange={(e) => setMaxStepsInput(e.target.value)}
+            onBlur={commitMaxSteps}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+          />
+          {configuredSteps > 0 && (
+            <span className="subagents-builtin-overrides__effective">
+              {t("subagents.effectiveValue", { value: String(configuredSteps) })}
+            </span>
+          )}
+          {configuredSteps > MAX_STEPS_WARNING_THRESHOLD && (
+            <div
+              className="subagents-field-error subagents-maxsteps-warning"
+              role="note"
+              style={{ color: "#B45309", background: "rgba(250,173,20,0.12)", border: "1px solid rgba(250,173,20,0.45)", borderRadius: "8px", padding: "8px 10px", marginTop: "6px" }}
+            >
+              {t("subagents.maxStepsWarning", { n: configuredSteps })}
+            </div>
+          )}
         </div>
         <div className="subagents-builtin-overrides__status">
           {overridden ? (
@@ -456,6 +512,7 @@ function CustomSubagentRow({
             <span className="cap-skill-card__badges">
               <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{subagentScopeLabel(skill.scope, t)}</span>
               {skill.model && <span className="cap-skill-badge">{skill.model}</span>}
+              {skill.maxSteps ? <span className="cap-skill-badge">{t("subagents.maxStepsBadge", { n: skill.maxSteps })}</span> : null}
               <Tooltip label={(skill.allowedTools ?? []).join(", ") || t("subagents.allTools")}>
                 <span className="cap-skill-badge">{toolsLabel}</span>
               </Tooltip>
@@ -582,6 +639,7 @@ function SubagentProfileForm({
   const [color, setColor] = useState<ProjectColorKey>((editingSkill?.color as ProjectColorKey) ?? "");
   const [model, setModel] = useState(editingSkill?.model ?? "");
   const [effort, setEffort] = useState(editingSkill?.effort ?? "");
+  const [maxSteps, setMaxSteps] = useState(editingSkill?.maxSteps ?? 0);
   const [toolMode, setToolMode] = useState<"all" | "custom">(
     editingSkill?.allowedTools && editingSkill.allowedTools.length > 0 ? "custom" : "all",
   );
@@ -616,6 +674,7 @@ function SubagentProfileForm({
     model,
     effort,
     allowedTools: toolMode === "custom" ? Array.from(selectedTools) : [],
+    maxSteps,
     readOnly,
     scope,
   });
@@ -677,6 +736,37 @@ function SubagentProfileForm({
           </option>
         ))}
       </select>
+
+      <label className="set-label">{t("subagents.maxSteps")}</label>
+      <input
+        className="mem-input"
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        placeholder={t("subagents.maxStepsPlaceholder")}
+        value={maxSteps === 0 ? "" : String(maxSteps)}
+        disabled={busy}
+        onChange={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === "") {
+            setMaxSteps(0);
+            return;
+          }
+          const n = Number(raw);
+          if (Number.isInteger(n) && n >= 0) setMaxSteps(n);
+        }}
+      />
+      <div className="set-hint">{t("subagents.maxStepsHint")}</div>
+      {maxSteps > MAX_STEPS_WARNING_THRESHOLD && (
+        <div
+          className="subagents-field-error subagents-maxsteps-warning"
+          role="note"
+          style={{ color: "#B45309", background: "rgba(250,173,20,0.12)", border: "1px solid rgba(250,173,20,0.45)", borderRadius: "8px", padding: "8px 10px", marginTop: "6px" }}
+        >
+          {t("subagents.maxStepsWarning", { n: maxSteps })}
+        </div>
+      )}
 
       <label className="set-label">{t("subagents.description")}</label>
       <input

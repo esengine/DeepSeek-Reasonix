@@ -990,6 +990,56 @@ func TestColorFrontmatterParses(t *testing.T) {
 	}
 }
 
+func TestMaxStepsFrontmatterParses(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/deep-dig.md", "---\ndescription: a deep dig\nrunAs: subagent\nmax-steps: 32\n---\nbody")
+	sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("deep-dig")
+	if !ok {
+		t.Fatal("skill not loaded")
+	}
+	if sk.MaxSteps != 32 {
+		t.Fatalf("MaxSteps = %d, want 32", sk.MaxSteps)
+	}
+}
+
+func TestMaxStepsFrontmatterDefaultsAndInvalid(t *testing.T) {
+	cases := map[string]string{
+		"absent":    "---\ndescription: d\n---\nbody",
+		"zero":      "---\ndescription: d\nmax-steps: 0\n---\nbody",
+		"negative":  "---\ndescription: d\nmax-steps: -3\n---\nbody",
+		"nonnumeric": "---\ndescription: d\nmax-steps: abc\n---\nbody",
+		"fraction":  "---\ndescription: d\nmax-steps: 12.5\n---\nbody",
+	}
+	for label, content := range cases {
+		t.Run(label, func(t *testing.T) {
+			home := t.TempDir()
+			writeSkill(t, home, ".reasonix/skills/stepcap.md", content)
+			sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("stepcap")
+			if !ok {
+				t.Fatal("skill not loaded")
+			}
+			if sk.MaxSteps != 0 {
+				t.Errorf("MaxSteps = %d, want 0 (unset)", sk.MaxSteps)
+			}
+		})
+	}
+}
+
+func TestParseMaxSteps(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int
+	}{
+		{"", 0}, {"0", 0}, {"-1", 0}, {"abc", 0}, {"12.5", 0},
+		{"1", 1}, {"5", 5}, {" 32 ", 32}, {"999", 999},
+	}
+	for _, tc := range cases {
+		if got := parseMaxSteps(tc.raw); got != tc.want {
+			t.Errorf("parseMaxSteps(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
 func TestInvocationDefaultsToAutoForExistingSkills(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/plain.md", "---\ndescription: no invocation field\n---\nbody")
