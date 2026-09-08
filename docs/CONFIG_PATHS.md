@@ -228,10 +228,14 @@ Runtime configuration is resolved in this order:
 ```text
 command-line flags
 > project ./reasonix.toml
+> project .reasonix/reasonix.toml (fallback when the root file is absent)
 > global <Reasonix home>/config.toml
 > compatible legacy global config
 > built-in defaults
 ```
+
+When both project files exist, `./reasonix.toml` wins. New project configs
+are still created at `./reasonix.toml` unless a nested file is already in use.
 
 Writes always target the new global path:
 

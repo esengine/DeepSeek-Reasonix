@@ -639,15 +639,36 @@ func SourcePath() string {
 	return SourcePathForRoot(".")
 }
 
+// projectTOMLPath returns the project-level reasonix.toml to load for root.
+// Prefer <root>/reasonix.toml when present; otherwise fall back to
+// <root>/.reasonix/reasonix.toml so teams can keep project settings out of the
+// repository root (#6007). When neither exists, return the conventional root
+// path so first-time writers still create ./reasonix.toml.
+func projectTOMLPath(root string) string {
+	root = resolveRoot(root)
+	primary := "reasonix.toml"
+	if root != "." {
+		primary = filepath.Join(root, "reasonix.toml")
+	}
+	if info, err := os.Stat(primary); err == nil && !info.IsDir() {
+		return primary
+	}
+	nested := filepath.Join(".reasonix", "reasonix.toml")
+	if root != "." {
+		nested = filepath.Join(root, ".reasonix", "reasonix.toml")
+	}
+	if info, err := os.Stat(nested); err == nil && !info.IsDir() {
+		return nested
+	}
+	return primary
+}
+
 // SourcePathForRoot returns the highest-priority config file that exists under
 // root, or "" if none. Equivalent to SourcePath() when root is ".".
 func SourcePathForRoot(root string) string {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
-	if _, err := os.Stat(projectTOML); err == nil {
+	projectTOML := projectTOMLPath(root)
+	if info, err := os.Stat(projectTOML); err == nil && !info.IsDir() {
 		return projectTOML
 	}
 	if uc := userConfigLoadPath(); uc != "" {

@@ -181,10 +181,13 @@ Linux 的 `$XDG_CACHE_HOME/reasonix` 或 `~/.cache/reasonix`、Windows 的
 ```text
 命令行参数
 > 项目 ./reasonix.toml
+> 项目 .reasonix/reasonix.toml（根文件不存在时的备选）
 > 全局 <Reasonix home>/config.toml
 > 兼容读取的旧全局配置
 > 内置默认值
 ```
+
+两个项目文件同时存在时，以 `./reasonix.toml` 为准。新建项目配置仍写入 `./reasonix.toml`，除非已经在使用嵌套路径。
 
 写配置时始终写入新的全局路径：
 
