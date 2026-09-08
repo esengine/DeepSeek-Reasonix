@@ -1066,6 +1066,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			QuoteContext:        quoteCtx,
 			ParentRegistry:      reg,
 			MaxSteps:            maxSteps,
+			ReviewMaxSteps:      cfg.Agent.ReviewMaxSteps,
 			ContextWindow:       entry.ContextWindow,
 			RecentKeep:          cfg.Agent.RecentKeep,
 			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
@@ -1244,7 +1245,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		if sysPrompt == "" {
 			sysPrompt = agent.DefaultReadOnlyTaskSystemPrompt
 		}
-		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, subagentSkillOptions)
+		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, cfg.Agent.ReviewMaxSteps, subagentSkillOptions)
 		usageModelRef, _ := subagentIdentity(modelRef, effortRef)
 		runOptions.ModelRef = usageModelRef
 		// Review gates consume typed, host-verifiable reports so a review
@@ -1362,7 +1363,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				steps = 5
 			}
 		}
-		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, subagentSkillOptions)
+		task, runOptions := reviewSubagentSkillOptions(sctx, sk.Name, task, steps, price, ctxWin, childDepth, cfg.Agent.ReviewMaxSteps, subagentSkillOptions)
 		runOptions.WriteRoots = childWriteRoots
 		usageModelRef, _ := subagentIdentity(modelRef, effortRef)
 		runOptions.ModelRef = usageModelRef

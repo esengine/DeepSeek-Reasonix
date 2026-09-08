@@ -48,10 +48,11 @@ func reviewSubagentSkillOptions(
 	steps int,
 	price *provider.Pricing,
 	ctxWin, childDepth int,
+	reviewMaxSteps int,
 	factory func(context.Context, int, *provider.Pricing, int, int) agent.Options,
 ) (string, agent.Options) {
 	reviewTokens := 0
-	if reviewTask, reviewSteps, tokens, ok := agent.PrepareReviewSubagentContext(ctx, profile, task); ok {
+	if reviewTask, reviewSteps, tokens, ok := agent.PrepareReviewSubagentContext(ctx, profile, task, reviewMaxSteps); ok {
 		task, steps, reviewTokens = reviewTask, reviewSteps, tokens
 	}
 	opts := factory(ctx, steps, price, ctxWin, childDepth)

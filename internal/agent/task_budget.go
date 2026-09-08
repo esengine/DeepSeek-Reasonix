@@ -22,7 +22,7 @@ func (t *TaskTool) childMaxStepsForContext(_ context.Context, requested int) int
 }
 
 func (t *TaskTool) childMaxStepsForSpec(ctx context.Context, spec *ProfileExecSpec) (context.Context, int) {
-	applyReviewBudget(spec)
+	applyReviewBudget(spec, t.reviewMaxSteps)
 	fillChildFacts(ctx, spec)
 	if spec == nil {
 		return ctx, t.childMaxStepsForContext(ctx, 0)

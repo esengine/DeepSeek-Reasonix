@@ -49,14 +49,18 @@ func ctxHasFacts(ctx ContextRequest) bool {
 		len(ctx.FileAnchors) > 0 || strings.TrimSpace(ctx.OutputFormat) != ""
 }
 
-func applyReviewBudget(spec *ProfileExecSpec) {
+func applyReviewBudget(spec *ProfileExecSpec, reviewMaxSteps int) {
 	if spec == nil {
 		return
 	}
 	switch strings.TrimSpace(spec.Worker.Profile) {
 	case "review", "security-review", "security_review", "team-architect":
 		if spec.Sched.MaxSteps <= 0 {
-			spec.Sched.MaxSteps = defaultReviewMaxSteps
+			if reviewMaxSteps > 0 {
+				spec.Sched.MaxSteps = reviewMaxSteps
+			} else {
+				spec.Sched.MaxSteps = defaultReviewMaxSteps
+			}
 		}
 		if spec.Sched.MaxOutputTokens <= 0 {
 			spec.Sched.MaxOutputTokens = defaultReviewOutputTokens
@@ -70,12 +74,14 @@ func applyReviewBudget(spec *ProfileExecSpec) {
 // PrepareReviewSubagentContext applies the same bounded review contract used
 // by task/profile delegation to built-in skill runners. The returned boolean
 // is false for non-review profiles so their existing budgets remain unchanged.
-func PrepareReviewSubagentContext(ctx context.Context, profile, objective string) (prompt string, maxSteps, maxOutputTokens int, ok bool) {
+// reviewMaxSteps > 0 overrides the built-in review step cap (see
+// [agent].review_max_steps); an explicit spec max_steps still wins.
+func PrepareReviewSubagentContext(ctx context.Context, profile, objective string, reviewMaxSteps int) (prompt string, maxSteps, maxOutputTokens int, ok bool) {
 	spec := ProfileExecSpec{
 		Task:   TaskSpec{Objective: objective},
 		Worker: WorkerSpec{Profile: profile},
 	}
-	applyReviewBudget(&spec)
+	applyReviewBudget(&spec, reviewMaxSteps)
 	if spec.Sched.MaxSteps == 0 && spec.Sched.MaxOutputTokens == 0 {
 		return objective, 0, 0, false
 	}

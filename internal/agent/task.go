@@ -249,6 +249,7 @@ type TaskTool struct {
 	quoteContext                  *event.QuoteContext
 	parentReg                     *tool.Registry
 	maxSteps                      int
+	reviewMaxSteps                int
 	contextWindow                 int
 	compactRatio                  float64
 	recentKeep                    int
@@ -301,6 +302,9 @@ type TaskToolOptions struct {
 	QuoteContext                          *event.QuoteContext
 	ParentRegistry                        *tool.Registry
 	MaxSteps                              int
+	// ReviewMaxSteps overrides the built-in step cap for review-family
+	// sub-agents (see [agent].review_max_steps). 0 keeps the built-in default.
+	ReviewMaxSteps                        int
 	ContextWindow                         int
 	RecentKeep                            int
 	SoftCompactRatio                      float64
@@ -331,6 +335,7 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		quoteContext:     opts.QuoteContext,
 		parentReg:        opts.ParentRegistry,
 		maxSteps:         opts.MaxSteps,
+		reviewMaxSteps:   opts.ReviewMaxSteps,
 		contextWindow:    opts.ContextWindow,
 		recentKeep:       opts.RecentKeep,
 		compactRatio:     opts.CompactRatio,
