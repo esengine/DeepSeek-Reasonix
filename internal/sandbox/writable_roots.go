@@ -75,6 +75,32 @@ func (s *WritableRootSet) ClearSession() {
 	s.mu.Unlock()
 }
 
+// RemoveSessionRoot removes one path from the session grant set (canonical /
+// path-within comparison). It is a no-op when the root is not present.
+func (s *WritableRootSet) RemoveSessionRoot(dir string) {
+	if s == nil || strings.TrimSpace(dir) == "" {
+		return
+	}
+	target := canonicalDir(dir)
+	if target == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.session[:0]
+	changed := false
+	for _, root := range s.session {
+		if canonicalDir(root) == target {
+			changed = true
+			continue
+		}
+		out = append(out, root)
+	}
+	if changed {
+		s.session = CollapseWriteRoots(out)
+	}
+}
+
 // SessionRoots returns a copy of the session-approved directories.
 func (s *WritableRootSet) SessionRoots() []string {
 	if s == nil {

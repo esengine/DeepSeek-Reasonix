@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -159,4 +160,48 @@ func containsRoot(roots []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestWritableRootSetRemoveSessionRoot(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	c := t.TempDir()
+	set := NewWritableRootSet([]string{t.TempDir()})
+	set.GrantVerifiedSession([]string{a, b, c})
+
+	roots := set.SessionRoots()
+	if len(roots) != 3 {
+		t.Fatalf("SessionRoots = %d items, want 3", len(roots))
+	}
+
+	// Remove the middle one; only b should remain.
+	set.RemoveSessionRoot(b)
+	roots = set.SessionRoots()
+	if containsRoot(roots, b) {
+		t.Fatal("b should be removed from session roots")
+	}
+	if !containsRoot(roots, a) || !containsRoot(roots, c) {
+		t.Fatalf("a/c should remain, got %v", roots)
+	}
+
+	// Removing a non-present path is a no-op.
+	set.RemoveSessionRoot(t.TempDir())
+	if len(set.SessionRoots()) != 2 {
+		t.Fatalf("no-op removal changed count: %v", set.SessionRoots())
+	}
+
+	// Case-insensitive removal (Windows/Darwin fold).
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		upper := filepath.Join(a, "..", strings.ToUpper(filepath.Base(a)))
+		set.RemoveSessionRoot(upper)
+		if containsRoot(set.SessionRoots(), a) {
+			t.Fatalf("case-folded removal should drop a, got %v", set.SessionRoots())
+		}
+	}
+
+	// ClearSession still clears everything.
+	set.ClearSession()
+	if len(set.SessionRoots()) != 0 {
+		t.Fatalf("ClearSession should empty session roots")
+	}
 }
