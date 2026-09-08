@@ -45,6 +45,7 @@ func (multiEdit) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "path":{"type":"string","description":"File path"},
+  "expected":{"type":"string","description":"Field not shown in schema; see shared optimistic-write baseline."},
   "edits":{
     "type":"array",
     "minItems":1,
@@ -72,8 +73,9 @@ func (m multiEdit) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDec
 
 func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path  string     `json:"path"`
-		Edits []editStep `json:"edits"`
+		Path     string     `json:"path"`
+		Edits    []editStep `json:"edits"`
+		Expected string     `json:"expected"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -86,6 +88,9 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
 	if err := confineWrite(ctx, effectiveWriteRoots(ctx, m.rootSet, m.roots), m.guard, m.managed, p.Path); err != nil {
+		return "", err
+	}
+	if err := checkOptimisticExpected(ctx, m.overlay, p.Path, p.Expected, "multi_edit"); err != nil {
 		return "", err
 	}
 

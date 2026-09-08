@@ -59,7 +59,8 @@ func (notebookEdit) Schema() json.RawMessage {
 			"cell_id": {"type": "string", "description": "Target the cell by its id instead of cell_number (replace/delete)."},
 			"new_source": {"type": "string", "description": "The cell's new source text (replace/insert)."},
 			"cell_type": {"type": "string", "enum": ["code", "markdown"], "description": "Cell type for insert (and optional retype on replace)."},
-			"edit_mode": {"type": "string", "enum": ["replace", "insert", "delete"], "description": "replace (default), insert, or delete."}
+			"edit_mode": {"type": "string", "enum": ["replace", "insert", "delete"], "description": "replace (default), insert, or delete."},
+			"expected": {"type": "string", "description": "Optional baseline: the file's exact current content as the caller believes it is. When supplied, the write is refused with a stale-content error unless the on-disk content still matches."}
 		},
 		"required": ["path"]
 	}`)
@@ -72,6 +73,7 @@ type notebookArgs struct {
 	NewSource  string `json:"new_source"`
 	CellType   string `json:"cell_type"`
 	EditMode   string `json:"edit_mode"`
+	Expected   string `json:"expected"`
 }
 
 // notebook is the minimal .ipynb shape we touch. Unknown top-level keys
@@ -89,6 +91,9 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
 	if err := confineWrite(ctx, effectiveWriteRoots(ctx, n.rootSet, n.roots), n.guard, n.managed, a.Path); err != nil {
+		return "", err
+	}
+	if err := checkOptimisticExpected(ctx, n.overlay, a.Path, a.Expected, "notebook_edit"); err != nil {
 		return "", err
 	}
 	src, err := readEditSource(ctx, n.overlay, a.Path)

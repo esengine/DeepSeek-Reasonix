@@ -42,7 +42,7 @@ func (writeFile) Description() string {
 }
 
 func (writeFile) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Full content to write"}},"required":["path","content"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"Full content to write"},` + expectedContentSchemaField() + `},"required":["path","content"]}`)
 }
 
 func (writeFile) ReadOnly() bool { return false }
@@ -53,8 +53,9 @@ func (w writeFile) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDec
 
 func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
+		Path     string `json:"path"`
+		Content  string `json:"content"`
+		Expected string `json:"expected"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -64,6 +65,9 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 	p.Path = resolveIn(w.workDir, p.Path)
 	if err := confineWrite(ctx, effectiveWriteRoots(ctx, w.rootSet, w.roots), w.guard, w.managed, p.Path); err != nil {
+		return "", err
+	}
+	if err := checkOptimisticExpected(ctx, w.overlay, p.Path, p.Expected, "write_file"); err != nil {
 		return "", err
 	}
 	// Preserve the existing file's encoding (GBK/UTF-16/BOM) on overwrite instead

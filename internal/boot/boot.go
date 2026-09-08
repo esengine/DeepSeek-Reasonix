@@ -1675,6 +1675,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
 		WriteWorkspaceRoot:           root,
+		OptimisticWrite:              cfg.Sandbox.OptimisticWrite,
 		SessionTemp:                  sessionTemp,
 		WriteRoots:                   writeRootSet,
 		HomeDir:                      userHomeDir(),

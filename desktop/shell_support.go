@@ -68,6 +68,7 @@ type SandboxView struct {
 	Network                bool                    `json:"network"`
 	WorkspaceRoot          string                  `json:"workspaceRoot"`
 	AllowWrite             []string                `json:"allowWrite"`
+	OptimisticWrite        bool                    `json:"optimisticWrite"`
 	EffectiveWorkspaceRoot string                  `json:"effectiveWorkspaceRoot"`
 	EffectiveWriteRoots    []string                `json:"effectiveWriteRoots"`
 	Shell                  string                  `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
@@ -158,6 +159,7 @@ func (a *App) sandboxViewFor(cfg *config.Config, ctrl control.SessionAPI, writeR
 	return SandboxView{
 		Bash: cfg.BashMode(), Network: cfg.Sandbox.Network,
 		WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+		OptimisticWrite: cfg.Sandbox.OptimisticWrite,
 		EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 		Shell: shell, EffectiveShell: sandboxEffectiveShellView(bound),
 		ResolvedShell:       sandboxEffectiveShellView(resolved),
