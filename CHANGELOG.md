@@ -44,6 +44,9 @@ branch.
 
 ### Fixed
 
+- **Desktop workbench search:** keep an active session search editable after
+  switching from creation layout, so users can clear the filter (#9952).
+
 - **Relay image input:** ID-only or invalid model metadata now stays unknown.
   Both Desktop model editors expose per-model Auto / On / Off overrides, with
   official protocol limits retained. A separate V2 discovery cache rejects stale
