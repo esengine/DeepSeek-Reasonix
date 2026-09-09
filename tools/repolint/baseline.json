@@ -3,14 +3,14 @@
     "banner": 13,
     "commented-code": 0,
     "complexity": 1864,
-    "essay": 1927,
-    "file-size": 99697,
-    "function-size": 8073,
+    "essay": 1928,
+    "file-size": 99665,
+    "function-size": 8072,
     "layering": 1,
     "marker": 0,
     "narrative": 63,
     "struct-state": 104,
-    "test-file-size": 64208
+    "test-file-size": 64170
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -518,9 +518,9 @@
     },
     "internal/boot/boot.go": {
       "complexity": 257,
-      "essay": 78,
-      "file-size": 2021,
-      "function-size": 1711,
+      "essay": 79,
+      "file-size": 2022,
+      "function-size": 1712,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -640,15 +640,15 @@
     "internal/cli/chat_tui.go": {
       "complexity": 279,
       "essay": 80,
-      "file-size": 4186,
-      "function-size": 1103
+      "file-size": 4153,
+      "function-size": 1101
     },
     "internal/cli/chat_tui_paste.go": {
       "essay": 6
     },
     "internal/cli/chat_tui_test.go": {
       "essay": 7,
-      "test-file-size": 3571
+      "test-file-size": 3533
     },
     "internal/cli/cli.go": {
       "complexity": 88,
